@@ -1,0 +1,7 @@
+{
+  "extends": "@my-tuums/tsconfig/node.json",
+  "compilerOptions": {
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}
