@@ -14,9 +14,12 @@
     }
   },
   "scripts": {
-    "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:generate": "dotenv -e ../../.env -- drizzle-kit generate",
+    "db:migrate": "dotenv -e ../../.env -- drizzle-kit migrate",
+    "db:push": "dotenv -e ../../.env -- drizzle-kit push",
+    "db:studio": "dotenv -e ../../.env -- drizzle-kit studio",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "drizzle-orm": "^0.44.2",
@@ -24,7 +27,9 @@
   },
   "devDependencies": {
     "@my-tuums/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
+    "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.5",
-    "typescript": "^5.8.3"
+    "typescript": "catalog:"
   }
 }

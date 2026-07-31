@@ -1,0 +1,47 @@
+// @ts-check
+import js from "@eslint/js";
+import tseslint from "typescript-eslint";
+
+export default tseslint.config(
+  {
+    ignores: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/.turbo/**",
+      "apps/web/src/paraglide/**",
+      "packages/db/drizzle/**",
+    ],
+  },
+  js.configs.recommended,
+  ...tseslint.configs.recommendedTypeChecked,
+  {
+    languageOptions: {
+      parserOptions: {
+        // "Project service" — one program per tsconfig.json, discovered
+        // automatically for every file under this monorepo. No explicit
+        // `project` array needed (see typescript-eslint's monorepo docs).
+        projectService: {
+          // Config/build files that sit outside any tsconfig's `include`
+          // (e.g. apps/web/tsconfig.json only includes "src") still get
+          // linted with type information, using the nearest tsconfig as a
+          // stand-in rather than being skipped or crashing the run.
+          allowDefaultProject: [
+            "eslint.config.mjs",
+            "packages/db/drizzle.config.ts",
+            "packages/api/vitest.config.ts",
+            "apps/server/tsup.config.ts",
+          ],
+        },
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      // These three are the point of turning typed linting on at all —
+      // Step 3 fixed a floating-promise bug in apps/server/src/index.ts by
+      // hand; these make sure it can't come back unnoticed.
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": "error",
+      "@typescript-eslint/require-await": "error",
+    },
+  },
+);

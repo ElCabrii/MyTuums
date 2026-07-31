@@ -5,3 +5,9 @@ packages:
 onlyBuiltDependencies:
   - '@swc/core'
   - esbuild
+
+catalog:
+  zod: ^4.4.3
+  typescript: ^5.8.3
+  '@types/node': ^22.20.1
+

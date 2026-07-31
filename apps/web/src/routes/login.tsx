@@ -18,7 +18,7 @@ function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (session?.user) {
-    navigate({ to: "/profile" });
+    void navigate({ to: "/profile" });
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -52,7 +52,7 @@ function LoginPage() {
       if (res.error) {
         setError(res.error.message || "Invalid credentials. Please try again.");
       } else {
-        navigate({ to: "/profile" });
+        void navigate({ to: "/profile" });
       }
     } catch (err: unknown) {
       console.error("Login error:", err);
@@ -85,7 +85,7 @@ function LoginPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           <div className="space-y-2">
             <label
               htmlFor="identifier"

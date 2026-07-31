@@ -1,18 +1,14 @@
-import { os } from "@orpc/server";
-import { z } from "zod";
+import { protectedProcedure } from "./procedures.js";
 
-const base = os.$context<{ db?: unknown }>();
-
-export const appRouter = base.router({
-  healthCheck: base
-    .input(z.void())
-    .output(z.object({ status: z.string(), timestamp: z.string() }))
-    .handler(async () => {
-      return {
-        status: "ok",
-        timestamp: new Date().toISOString(),
-      };
-    }),
-});
+// Liveness/readiness is served over plain HTTP at GET /health (see
+// apps/server/src/index.ts) so orchestrators (Docker, k8s) that can't speak
+// oRPC can probe it directly, and so it can check the DB without paying for
+// oRPC request matching. There is deliberately no RPC-level health check —
+// two health checks with different shapes was one too many.
+export const appRouter = {
+  me: protectedProcedure.handler(({ context }) => {
+    return context.user;
+  }),
+};
 
 export type AppRouter = typeof appRouter;

@@ -2,16 +2,24 @@
   "name": "my-tuums",
   "private": true,
   "packageManager": "pnpm@10.12.1",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "db:generate": "turbo run db:generate",
     "db:push": "turbo run db:push"
   },
   "devDependencies": {
-    "turbo": "^2.10.7"
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "turbo": "^2.10.7",
+    "typescript-eslint": "^8.65.0"
   }
 }

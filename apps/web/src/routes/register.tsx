@@ -21,7 +21,7 @@ function RegisterPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (session?.user) {
-    navigate({ to: "/profile" });
+    void navigate({ to: "/profile" });
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -42,7 +42,7 @@ function RegisterPage() {
       return;
     }
 
-    if (!/^[a-zA-Z0-0_-]+$/.test(cleanUsername)) {
+    if (!/^[a-zA-Z0-9_-]+$/.test(cleanUsername)) {
       setError("Username can only contain letters, numbers, underscores, and hyphens.");
       return;
     }
@@ -80,7 +80,7 @@ function RegisterPage() {
       if (res.error) {
         setError(res.error.message || "Registration failed. Please check your details.");
       } else {
-        navigate({ to: "/profile" });
+        void navigate({ to: "/profile" });
       }
     } catch (err: unknown) {
       console.error("Registration error:", err);
@@ -113,7 +113,7 @@ function RegisterPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label
