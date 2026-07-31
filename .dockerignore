@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/.turbo
+**/.git
+**/.vscode
+**/*.log
+.env
+.env.*.local
+.env.local

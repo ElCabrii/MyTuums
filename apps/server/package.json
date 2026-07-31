@@ -3,21 +3,30 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc"
+    "dev": "dotenv -e ../../.env -- tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "dotenv -e ../../.env -- node dist/index.js",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@my-tuums/api": "workspace:*",
+    "@my-tuums/auth": "workspace:*",
     "@my-tuums/db": "workspace:*",
     "@orpc/server": "^1.5.0",
     "better-auth": "^1.2.9",
-    "zod": "^3.25.67"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@my-tuums/tsconfig": "workspace:*",
-    "@types/node": "^22.15.0",
+    "@types/node": "catalog:",
+    "dotenv-cli": "^11.0.0",
+    "tsup": "^8.5.1",
     "tsx": "^4.19.0",
-    "typescript": "^5.8.3"
+    "typescript": "catalog:"
   }
 }
