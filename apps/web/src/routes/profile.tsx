@@ -32,7 +32,7 @@ function ProfilePage() {
     setIsSigningOut(true);
     try {
       await authClient.signOut();
-      navigate({ to: "/login" });
+      void navigate({ to: "/login" });
     } catch (err) {
       console.error("Failed to sign out:", err);
     } finally {
@@ -86,10 +86,7 @@ function ProfilePage() {
     );
   }
 
-  const user = session.user as typeof session.user & {
-    username?: string;
-    displayUsername?: string;
-  };
+  const user = session.user;
 
   const usernameDisplay = user.username || user.displayUsername || "user";
   const initials = user.name
@@ -163,7 +160,7 @@ function ProfilePage() {
           <div className="shrink-0 w-full sm:w-auto">
             <Button
               variant="outline"
-              onClick={handleSignOut}
+              onClick={() => void handleSignOut()}
               disabled={isSigningOut}
               className="w-full sm:w-auto gap-2 border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
             >
