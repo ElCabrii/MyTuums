@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Turbo
+.turbo/
+
+# Build outputs
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Paraglide (generated)
+apps/web/src/paraglide/
+
+# TanStack Router (generated)
+apps/web/src/routeTree.gen.ts

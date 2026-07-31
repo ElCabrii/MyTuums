@@ -1,0 +1,20 @@
+{
+  "name": "@my-tuums/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@orpc/server": "^1.5.0",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@my-tuums/tsconfig": "workspace:*",
+    "typescript": "^5.8.3"
+  }
+}
