@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
@@ -31,13 +32,15 @@
   "devDependencies": {
     "@inlang/paraglide-js": "^2.0.13",
     "@my-tuums/tsconfig": "workspace:*",
+    "@orpc/server": "^1.5.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/router-plugin": "^1.120.6",
+    "@types/node": "catalog:",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react-swc": "^4.3.0",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5.8.3",
+    "typescript": "catalog:",
     "vite": "^6.3.5"
   }
 }
