@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { authClient, useSession } from "@/lib/auth-client";
+import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LogIn, AlertCircle, Loader2, User, Lock } from "lucide-react";
@@ -17,8 +18,19 @@ function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Sending someone to their own profile needs their handle, and the handle
+  // only exists once we have a user — so both redirects below fall back to
+  // the home feed rather than building a `/@undefined` URL.
+  const goToProfile = (handle: string | null) => {
+    if (handle) {
+      void navigate({ to: "/@{$username}", params: { username: handle } });
+    } else {
+      void navigate({ to: "/" });
+    }
+  };
+
   if (session?.user) {
-    void navigate({ to: "/profile" });
+    goToProfile(handleOf(session.user));
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -52,7 +64,7 @@ function LoginPage() {
       if (res.error) {
         setError(res.error.message || "Invalid credentials. Please try again.");
       } else {
-        void navigate({ to: "/profile" });
+        goToProfile(handleOf(res.data?.user) ?? (isEmail ? null : identifier.trim()));
       }
     } catch (err: unknown) {
       console.error("Login error:", err);
