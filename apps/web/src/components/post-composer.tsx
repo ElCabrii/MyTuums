@@ -1,30 +1,16 @@
-import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useAtomValue } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { AlertCircle, Loader2, Send } from "lucide-react";
 import { POST_MAX_LENGTH } from "@my-tuums/api/constants";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { composerDraftAtom, createPostAtom } from "@/atoms/composer";
 import { viewerAtom } from "@/atoms/session";
-import { orpc } from "@/lib/orpc";
 import { initialsOf } from "@/lib/user";
 
 export function PostComposer() {
   const user = useAtomValue(viewerAtom);
-  const queryClient = useQueryClient();
-  const [content, setContent] = useState("");
-
-  const createPost = useMutation(
-    orpc.post.create.mutationOptions({
-      onSuccess: async () => {
-        setContent("");
-        // A new post belongs at the top of every feed it qualifies for, and
-        // its position depends on server ordering — refetch rather than
-        // guess where to splice it in.
-        await queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
-      },
-    })
-  );
+  const [content, setContent] = useAtom(composerDraftAtom);
+  const createPost = useAtomValue(createPostAtom);
 
   if (!user) return null;
 
