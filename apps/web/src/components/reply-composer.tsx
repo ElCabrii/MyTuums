@@ -1,7 +1,9 @@
+import { Link } from "@tanstack/react-router";
 import { useAtom, useAtomValue } from "jotai";
 import { ComposerForm } from "@/components/composer-form";
 import { createReplyAtomFamily, replyDraftAtomFamily } from "@/atoms/reply-composer";
 import { viewerAtom } from "@/atoms/session";
+import { m } from "@/paraglide/messages.js";
 
 export function ReplyComposer({
   parentId,
@@ -28,15 +30,22 @@ export function ReplyComposer({
       isPending={createReply.isPending}
       errorMessage={
         createReply.isError
-          ? createReply.error.message || "Could not publish your reply. Please try again."
+          ? createReply.error.message || m.reply_publish_error()
           : null
       }
-      placeholder="Post your reply..."
-      submitLabel="Reply"
+      placeholder={m.reply_placeholder()}
+      submitLabel={m.reply_action()}
       header={
         replyingTo ? (
           <p className="text-xs text-muted-foreground">
-            Replying to <span className="text-primary">@{replyingTo}</span>
+            {m.reply_replying_to()}{" "}
+            <Link
+              to="/@{$username}"
+              params={{ username: replyingTo }}
+              className="text-primary hover:underline font-medium"
+            >
+              @{replyingTo}
+            </Link>
           </p>
         ) : undefined
       }

@@ -8,6 +8,7 @@ import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-c
 import { isSignedInAtom } from "@/atoms/session";
 import { homeFeedScopeAtom, postFeedAtom } from "@/atoms/post-feed";
 import { feedScopeAtom } from "@/lib/feed-scope";
+import { m } from "@/paraglide/messages.js";
 
 export function HomePage() {
   const setFeedScope = useSetAtom(feedScopeAtom);
@@ -20,24 +21,24 @@ export function HomePage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-4">
       <div className="flex items-baseline justify-between gap-3 pb-2 border-b border-border">
-        <h1 className="text-lg font-bold tracking-tight">Home</h1>
+        <h1 className="text-lg font-bold tracking-tight">{m.feed_title()}</h1>
         {signedIn ? (
-          <SegmentedControl label="Feed">
+          <SegmentedControl label={m.feed_label()}>
             <SegmentedControlItem
               active={scope === "global"}
               onClick={() => setFeedScope("global")}
             >
-              For you
+              {m.feed_for_you()}
             </SegmentedControlItem>
             <SegmentedControlItem
               active={scope === "following"}
               onClick={() => setFeedScope("following")}
             >
-              Following
+              {m.feed_following()}
             </SegmentedControlItem>
           </SegmentedControl>
         ) : (
-          <span className="text-xs text-muted-foreground">Latest from everyone</span>
+          <span className="text-xs text-muted-foreground">{m.feed_global_subtitle()}</span>
         )}
       </div>
 
@@ -45,15 +46,15 @@ export function HomePage() {
         <PostComposer />
       ) : (
         <div className="rounded-xl border border-border bg-card p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">Log in to post and like.</p>
+          <p className="text-sm text-muted-foreground">{m.feed_signed_out_cta()}</p>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/login" className="gap-1.5" />}>
               <LogIn className="h-4 w-4" />
-              <span>Log in</span>
+              <span>{m.auth_log_in()}</span>
             </Button>
             <Button size="sm" nativeButton={false} render={<Link to="/register" className="gap-1.5" />}>
               <UserPlus className="h-4 w-4" />
-              <span>Register</span>
+              <span>{m.auth_register()}</span>
             </Button>
           </div>
         </div>
@@ -74,15 +75,13 @@ export function HomePage() {
         <PostFeed
           feedAtom={postFeedAtom({ feed: scope })}
           emptyMessage={
-            scope === "following"
-              ? "Nothing here yet — you're not following anyone who's posted."
-              : "No posts yet. Be the first to post something."
+            scope === "following" ? m.feed_empty_following() : m.feed_empty()
           }
           emptyAction={
             scope === "following" ? (
               <Button size="sm" nativeButton={false} render={<Link to="/discover" className="gap-1.5" />}>
                 <Compass className="h-4 w-4" />
-                <span>Find people to follow</span>
+                <span>{m.feed_find_people()}</span>
               </Button>
             ) : undefined
           }

@@ -12,6 +12,8 @@ import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
 import { UserX, Mail, Calendar, LogOut, Loader2, AlertCircle, Settings } from "lucide-react";
+import { m } from "@/paraglide/messages.js";
+import { getLocale } from "@/paraglide/runtime.js";
 
 const routeApi = getRouteApi("/@{$username}");
 
@@ -59,19 +61,19 @@ export function ProfileLayout() {
     return notFound ? (
       <ProfileMessage icon={UserX} title={`@${username}`}>
         <p className="text-muted-foreground text-sm mb-6">
-          There's nobody here. This handle isn't taken.
+          {m.profile_not_found()}
         </p>
         <Button nativeButton={false} render={<Link to="/" className="w-full justify-center" />}>
-          Back to home
+          {m.common_back_to_home()}
         </Button>
       </ProfileMessage>
     ) : (
-      <ProfileMessage icon={AlertCircle} title="Couldn't load this profile">
+      <ProfileMessage icon={AlertCircle} title={m.profile_load_error()}>
         <p className="text-muted-foreground text-sm mb-6">
-          {profileQuery.error.message || "Something went wrong."}
+          {profileQuery.error.message || m.common_something_went_wrong()}
         </p>
         <Button variant="outline" onClick={() => void profileQuery.refetch()} className="w-full">
-          Try again
+          {m.common_try_again()}
         </Button>
       </ProfileMessage>
     );
@@ -102,7 +104,7 @@ export function ProfileLayout() {
             <div className="flex gap-2.5 mb-2">
               <Button variant="outline" size="sm" className="gap-2 rounded-full border-muted-foreground/30">
                 <Settings className="h-4 w-4" />
-                <span>Edit Profile</span>
+                <span>{m.profile_edit()}</span>
               </Button>
               <Button
                 variant="destructive"
@@ -112,7 +114,7 @@ export function ProfileLayout() {
                 className="gap-2 rounded-full"
               >
                 {isSigningOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-                <span>Sign out</span>
+                <span>{m.auth_sign_out()}</span>
               </Button>
             </div>
           ) : (
@@ -149,7 +151,7 @@ export function ProfileLayout() {
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5">
               <Calendar className="h-3.5 w-3.5" />
-              <span>Joined {formatJoinDate(profile.createdAt)}</span>
+              <span>{m.profile_joined({ date: formatJoinDate(profile.createdAt, getLocale()) })}</span>
             </div>
             {/* Email is the caller's own, out of the session — `byUsername` is
                 a public endpoint and deliberately never returns it. */}

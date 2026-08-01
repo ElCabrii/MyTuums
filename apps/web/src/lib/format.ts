@@ -8,13 +8,12 @@ const DIVISIONS: { amount: number; unit: Intl.RelativeTimeFormatUnit }[] = [
   { amount: Number.POSITIVE_INFINITY, unit: "year" },
 ];
 
-const relativeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-
 /** "just now", "3 minutes ago", "2 days ago" — for post timestamps. */
-export function formatRelativeTime(date: Date): string {
+export function formatRelativeTime(date: Date, locale?: string, justNow = "just now"): string {
+  const relativeFormatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   let duration = (date.getTime() - Date.now()) / 1000;
 
-  if (Math.abs(duration) < 30) return "just now";
+  if (Math.abs(duration) < 30) return justNow;
 
   for (const { amount, unit } of DIVISIONS) {
     if (Math.abs(duration) < amount) {
@@ -23,29 +22,25 @@ export function formatRelativeTime(date: Date): string {
     duration /= amount;
   }
 
-  return date.toLocaleDateString();
+  return date.toLocaleDateString(locale);
 }
-
-const joinDateFormatter = new Intl.DateTimeFormat(undefined, {
-  month: "long",
-  year: "numeric",
-});
 
 /** "Joined August 2026" — month precision is all a profile needs. */
-export function formatJoinDate(date: Date): string {
-  return joinDateFormatter.format(date);
+export function formatJoinDate(date: Date, locale?: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    month: "long",
+    year: "numeric",
+  }).format(date);
 }
-
-const compactNumberFormatter = new Intl.NumberFormat(undefined, {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
 
 /**
  * "42", "1.2K", "3.4M" — for follower counts, which are read at a glance
  * rather than audited. Compact notation already leaves 0-999 alone, so there
  * is no threshold to special-case.
  */
-export function formatCount(value: number): string {
-  return compactNumberFormatter.format(value);
+export function formatCount(value: number, locale?: string): string {
+  return new Intl.NumberFormat(locale, {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
 }

@@ -4,6 +4,7 @@ import { UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toggleFollowAtomFamily } from "@/atoms/follow";
 import { viewerIdAtom } from "@/atoms/session";
+import { m } from "@/paraglide/messages.js";
 
 export function FollowButton({
   userId,
@@ -34,10 +35,10 @@ export function FollowButton({
         size="sm"
         nativeButton={false}
         className={className}
-        render={<Link to="/login" title="Log in to follow people" className="gap-1.5 rounded-full" />}
+        render={<Link to="/login" title={m.follow_signed_out()} className="gap-1.5 rounded-full" />}
       >
         <UserPlus className="h-4 w-4" />
-        <span>Follow</span>
+        <span>{m.follow_action()}</span>
       </Button>
     );
   }
@@ -53,13 +54,13 @@ export function FollowButton({
       size="sm"
       onClick={toggleFollow}
       aria-pressed
-      aria-label="Unfollow"
+      aria-label={m.follow_unfollow()}
       className={`group gap-1.5 rounded-full hover:border-destructive/40 hover:text-destructive ${className ?? ""}`}
     >
       {/* Pure CSS label swap — the button already has a mutation queue, and
           adding hover state to it in React invites the two disagreeing. */}
-      <span className="group-hover:hidden">Following</span>
-      <span className="hidden group-hover:inline">Unfollow</span>
+      <span className="group-hover:hidden">{m.follow_following()}</span>
+      <span className="hidden group-hover:inline">{m.follow_unfollow()}</span>
     </Button>
   ) : (
     <Button
@@ -67,11 +68,11 @@ export function FollowButton({
       size="sm"
       onClick={toggleFollow}
       aria-pressed={false}
-      aria-label="Follow"
+      aria-label={m.follow_action()}
       className={`gap-1.5 rounded-full ${className ?? ""}`}
     >
       <UserPlus className="h-4 w-4" />
-      <span>Follow</span>
+      <span>{m.follow_action()}</span>
     </Button>
   );
 }

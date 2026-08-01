@@ -12,6 +12,7 @@ import { isSignedInAtom } from "@/atoms/session";
 import { postFeedAtom } from "@/atoms/post-feed";
 import { threadAtomFamily } from "@/atoms/thread";
 import { handleOf } from "@/lib/user";
+import { m } from "@/paraglide/messages.js";
 
 const routeApi = getRouteApi("/post/$postId");
 
@@ -41,21 +42,21 @@ export function ThreadPage() {
       threadQuery.error.status < 500;
 
     return unreachable ? (
-      <ProfileMessage icon={FileQuestion} title="Post not found">
+      <ProfileMessage icon={FileQuestion} title={m.post_not_found()}>
         <p className="text-sm text-muted-foreground mb-4">
-          This post may have been deleted, or the link may be wrong.
+          {m.post_not_found_hint()}
         </p>
         <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/" />}>
-          Back to home
+          {m.common_back_to_home()}
         </Button>
       </ProfileMessage>
     ) : (
-      <ProfileMessage icon={AlertCircle} title="Could not load this post">
+      <ProfileMessage icon={AlertCircle} title={m.post_load_error()}>
         <p className="text-sm text-muted-foreground mb-4">
-          {threadQuery.error.message || "Something went wrong."}
+          {threadQuery.error.message || m.common_something_went_wrong()}
         </p>
         <Button variant="outline" size="sm" onClick={() => void threadQuery.refetch()}>
-          Try again
+          {m.common_try_again()}
         </Button>
       </ProfileMessage>
     );
@@ -71,11 +72,11 @@ export function ThreadPage() {
           variant="ghost"
           size="icon"
           nativeButton={false}
-          render={<Link to="/" aria-label="Back to home" />}
+          render={<Link to="/" aria-label={m.common_back_to_home()} />}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <h1 className="text-lg font-bold tracking-tight">Post</h1>
+        <h1 className="text-lg font-bold tracking-tight">{m.post_title()}</h1>
       </div>
 
       {ancestors.length > 0 && (
@@ -84,13 +85,12 @@ export function ThreadPage() {
             <p className="px-1 pb-2 text-xs text-muted-foreground flex items-center gap-1.5">
               <MoreHorizontal className="h-4 w-4" />
               <span>
-                This conversation continues above the {THREAD_ANCESTOR_MAX} replies shown.
+                {m.thread_truncated({ count: String(THREAD_ANCESTOR_MAX) })}
               </span>
             </p>
           )}
-          {/* The left rule is what makes the chain read as one conversation
-              rather than a stack of unrelated cards. */}
-          <div className="border-l-2 border-border pl-3 ml-5 space-y-0 divide-y divide-border/60">
+          {/* Twitter style connecting line for ancestors */}
+          <div className="space-y-0 border-l-2 border-border/80 pl-4 ml-6 my-1 divide-y divide-border/40">
             {ancestors.map((ancestor) => (
               <PostCard key={ancestor.id} post={ancestor} variant="ancestor" />
             ))}
@@ -100,32 +100,35 @@ export function ThreadPage() {
 
       <PostCard post={post} variant="focused" />
 
-      {signedIn ? (
-        <ReplyComposer parentId={post.id} replyingTo={authorHandle} />
-      ) : (
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">Log in to reply.</p>
-          <Button size="sm" nativeButton={false} render={<Link to="/login" />}>
-            Log in
-          </Button>
+      {/* Twitter-style reply section header & composer */}
+      <div className="pt-4 space-y-4 border-t border-border/60">
+        <div className="flex items-center gap-2 pb-1">
+          <h2 className="text-sm font-semibold text-foreground">
+            {post.replyCount === 1
+              ? m.reply_count_one({ count: String(post.replyCount) })
+              : m.reply_count_many({ count: String(post.replyCount) })}
+          </h2>
         </div>
-      )}
 
-      <div className="flex items-center gap-2 pt-2 pb-2 border-b border-border">
-        <h2 className="text-sm font-bold text-foreground">
-          {post.replyCount === 1 ? "1 reply" : `${String(post.replyCount)} replies`}
-        </h2>
+        {signedIn ? (
+          <ReplyComposer parentId={post.id} replyingTo={authorHandle} />
+        ) : (
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">{m.reply_signed_out()}.</p>
+            <Button size="sm" nativeButton={false} render={<Link to="/login" />}>
+              {m.auth_log_in()}
+            </Button>
+          </div>
+        )}
+
+        {/* Reply feed container */}
+        <div className="pt-2 divide-y divide-border/50">
+          <PostFeed
+            feedAtom={postFeedAtom({ feed: "global", parentId: post.id })}
+            emptyMessage={m.reply_empty()}
+          />
+        </div>
       </div>
-
-      {/*
-        The reply list is `post.list` scoped by parent, not a bespoke query —
-        see the `parentId` input in packages/api/src/posts.ts for why. It
-        means these cards share the same cache the optimistic like sweeps.
-      */}
-      <PostFeed
-        feedAtom={postFeedAtom({ feed: "global", parentId: post.id })}
-        emptyMessage="No replies yet. Be the first to reply."
-      />
     </div>
   );
 }

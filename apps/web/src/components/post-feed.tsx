@@ -3,6 +3,7 @@ import { AlertCircle, Loader2, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PostCard } from "@/components/post-card";
 import type { postFeedAtom } from "@/atoms/post-feed";
+import { m } from "@/paraglide/messages.js";
 
 export function PostFeed({
   feedAtom,
@@ -33,9 +34,9 @@ export function PostFeed({
       >
         <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
         <div className="space-y-2">
-          <p>{feed.error.message || "Could not load posts."}</p>
+          <p>{feed.error.message || m.feed_load_error()}</p>
           <Button variant="outline" size="sm" onClick={() => void feed.refetch()}>
-            Try again
+            {m.common_try_again()}
           </Button>
         </div>
       </div>
@@ -70,7 +71,7 @@ export function PostFeed({
             className="gap-2 rounded-full"
           >
             {feed.isFetchingNextPage && <Loader2 className="h-4 w-4 animate-spin" />}
-            <span>Load more</span>
+            <span>{m.common_load_more()}</span>
           </Button>
         </div>
       )}

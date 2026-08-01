@@ -2,6 +2,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { ComposerForm } from "@/components/composer-form";
 import { composerDraftAtom, createPostAtom } from "@/atoms/composer";
 import { viewerAtom } from "@/atoms/session";
+import { m } from "@/paraglide/messages.js";
 
 export function PostComposer() {
   const user = useAtomValue(viewerAtom);
@@ -21,11 +22,11 @@ export function PostComposer() {
       isPending={createPost.isPending}
       errorMessage={
         createPost.isError
-          ? createPost.error.message || "Could not publish your post. Please try again."
+          ? createPost.error.message || m.post_publish_error()
           : null
       }
-      placeholder="Share a gaming update, clip, or tournament result..."
-      submitLabel="Post"
+      placeholder={m.post_placeholder()}
+      submitLabel={m.post_action()}
     />
   );
 }
