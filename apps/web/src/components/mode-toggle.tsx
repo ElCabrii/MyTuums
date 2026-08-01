@@ -1,4 +1,5 @@
 import { Moon, Sun, Monitor } from "lucide-react";
+import { useSetAtom } from "jotai";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -6,10 +7,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useTheme } from "@/components/theme-provider";
+import { themeAtom } from "@/atoms/theme";
 
 export function ModeToggle() {
-  const { setTheme } = useTheme();
+  // Write-only: this control never needs to know the current theme (the
+  // icons react to the `dark` class directly via `dark:` variants), so
+  // `useSetAtom` is used deliberately instead of `useAtom` — subscribing
+  // here would re-render the toggle on every theme change for no reason.
+  const setTheme = useSetAtom(themeAtom);
 
   return (
     <DropdownMenu>
