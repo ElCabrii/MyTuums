@@ -153,7 +153,7 @@ function RegisterPage() {
                 <Input
                   id="username"
                   type="text"
-                  placeholder="gamer_pro"
+                  placeholder="johndoe69"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="pl-10 h-10 bg-background/50"
@@ -175,7 +175,7 @@ function RegisterPage() {
                 <Input
                   id="name"
                   type="text"
-                  placeholder="Alex Rivers"
+                  placeholder="John Doe"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="pl-10 h-10 bg-background/50"
@@ -198,7 +198,7 @@ function RegisterPage() {
               <Input
                 id="email"
                 type="email"
-                placeholder="alex@example.com"
+                placeholder="johndoe@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="pl-10 h-10 bg-background/50"
@@ -221,7 +221,7 @@ function RegisterPage() {
                 <Input
                   id="password"
                   type="password"
-                  placeholder="••••••••"
+                  placeholder=""
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-10 h-10 bg-background/50"
@@ -243,7 +243,7 @@ function RegisterPage() {
                 <Input
                   id="confirmPassword"
                   type="password"
-                  placeholder="••••••••"
+                  placeholder=""
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="pl-10 h-10 bg-background/50"

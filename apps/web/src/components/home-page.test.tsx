@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Provider, createStore } from "jotai";
 import type { ReactNode } from "react";
+import { feedScopeAtom, type FeedScope } from "@/lib/feed-scope";
 
-// Tests for src/routes/index.tsx — specifically how the Following|Global
-// scope is resolved, which depends on three inputs at once (the search param,
+// Tests for ./home-page.tsx — specifically how the Following|Global scope is
+// resolved, which depends on three inputs at once (the remembered choice,
 // whether there's a session, and whether the session has loaded yet).
 
 const { clientMock } = vi.hoisted(() => ({
@@ -31,16 +34,7 @@ vi.mock("@/lib/auth-client", () => ({
   authClient: { signOut: vi.fn() },
 }));
 
-const { searchMock } = vi.hoisted(() => {
-  const searchMock: { current: { feed?: "following" | "global" } } = { current: {} };
-  return { searchMock };
-});
-
 vi.mock("@tanstack/react-router", () => ({
-  createFileRoute: () => (options: { component: () => ReactNode }) => ({
-    ...options,
-    useSearch: () => searchMock.current,
-  }),
   Link: ({ to, children, ...rest }: { to: string; children: ReactNode }) => (
     <a href={to} {...rest}>
       {children}
@@ -48,18 +42,30 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 
-const { HomePage } = await import("./index");
+const { HomePage } = await import("./home-page");
 
-function renderHome() {
+/**
+ * A fresh Jotai store per render, so a scope set (or clicked) in one test can't
+ * leak into the next. `feedScopeAtom` reads `localStorage` when the store
+ * initialises it, which is why that is cleared in `beforeEach` too.
+ */
+function renderHome({ scope }: { scope?: FeedScope } = {}) {
+  const store = createStore();
+  if (scope) store.set(feedScopeAtom, scope);
+
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
 
   render(
     <QueryClientProvider client={queryClient}>
-      <HomePage />
+      <Provider store={store}>
+        <HomePage />
+      </Provider>
     </QueryClientProvider>,
   );
+
+  return store;
 }
 
 /** The input object the feed query was issued with. */
@@ -69,18 +75,21 @@ beforeEach(() => {
   vi.clearAllMocks();
   sessionMock.current = null;
   sessionMock.pending = false;
-  searchMock.current = {};
+  // `window.` is not optional: Node >= 22 defines its own bare `localStorage`
+  // global, which vitest leaves in place over jsdom's and which is undefined
+  // unless the process was started with --localstorage-file.
+  window.localStorage.clear();
   clientMock.post.list.mockResolvedValue({ items: [], nextCursor: null });
 });
 
 describe("home feed scope", () => {
-  it("defaults a signed-in visitor to the Following feed", async () => {
+  it("defaults a signed-in visitor to the For you (global) feed", async () => {
     sessionMock.current = { user: { id: "viewer-1", name: "Viewer", image: null } };
 
     renderHome();
     await screen.findByRole("heading", { name: "Home" });
 
-    expect(feedInput()).toMatchObject({ feed: "following" });
+    expect(feedInput()).not.toHaveProperty("feed");
   });
 
   it("shows a signed-out visitor the global feed", async () => {
@@ -93,20 +102,28 @@ describe("home feed scope", () => {
     expect(feedInput()).not.toHaveProperty("feed");
   });
 
-  it("ignores ?feed=following for a signed-out visitor", async () => {
-    // The server would reject it, so honouring the param would render an
+  it("ignores a remembered Following choice for a signed-out visitor", async () => {
+    // The server would reject it, so honouring the stored scope would render an
     // error card instead of a usable page.
-    searchMock.current = { feed: "following" };
-
-    renderHome();
+    renderHome({ scope: "following" });
     await screen.findByRole("heading", { name: "Home" });
 
     expect(feedInput()).not.toHaveProperty("feed");
   });
 
-  it("honours ?feed=global for a signed-in visitor", async () => {
+  it("honours a remembered Following choice for a signed-in visitor", async () => {
     sessionMock.current = { user: { id: "viewer-1", name: "Viewer", image: null } };
-    searchMock.current = { feed: "global" };
+
+    renderHome({ scope: "following" });
+    await screen.findByRole("heading", { name: "Home" });
+
+    expect(feedInput()).toMatchObject({ feed: "following" });
+  });
+
+  it("falls back to the global feed when the stored value is garbage", async () => {
+    // localStorage is user-editable and outlives deploys.
+    window.localStorage.setItem("my-tuums.feed-scope", JSON.stringify("nonsense"));
+    sessionMock.current = { user: { id: "viewer-1", name: "Viewer", image: null } };
 
     renderHome();
     await screen.findByRole("heading", { name: "Home" });
@@ -138,17 +155,43 @@ describe("home feed scope", () => {
     renderHome();
     await screen.findByRole("heading", { name: "Home" });
 
-    expect(screen.getByRole("button", { name: /^following$/i })).toHaveAttribute(
-      "aria-current",
-      "page",
+    expect(screen.getByRole("button", { name: /^for you$/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
-    expect(screen.getByRole("button", { name: /^global$/i })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: /^following$/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("switches the feed on click and remembers the choice", async () => {
+    const user = userEvent.setup();
+    sessionMock.current = { user: { id: "viewer-1", name: "Viewer", image: null } };
+
+    const store = renderHome();
+    await screen.findByRole("heading", { name: "Home" });
+
+    await user.click(screen.getByRole("button", { name: /^following$/i }));
+
+    expect(screen.getByRole("button", { name: /^following$/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(clientMock.post.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ feed: "following" }),
+      expect.anything(),
+    );
+    // Persisted, not just held in the store — the point of dropping the URL
+    // param was that the choice survives a reload.
+    expect(store.get(feedScopeAtom)).toBe("following");
+    expect(window.localStorage.getItem("my-tuums.feed-scope")).toBe(JSON.stringify("following"));
   });
 
   it("points people at /discover when the Following feed is empty", async () => {
     sessionMock.current = { user: { id: "viewer-1", name: "Viewer", image: null } };
 
-    renderHome();
+    renderHome({ scope: "following" });
 
     expect(await screen.findByText(/you're not following anyone who's posted/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /find people to follow/i })).toHaveAttribute(

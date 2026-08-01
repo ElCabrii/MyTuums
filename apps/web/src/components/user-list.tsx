@@ -45,7 +45,8 @@ function UserRow({ user }: { user: UserSummary }) {
 }
 
 /**
- * A paginated list of people — the followers and following pages.
+ * A paginated list of people — the body of the follower and following dialogs
+ * opened from a profile's counts (./follow-list-dialog.tsx).
  *
  * Structurally a mirror of ./post-feed.tsx: the same conditional-spread input,
  * the same "Load more" button rather than an intersection observer, and the

@@ -1,14 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ORPCError } from "@orpc/client";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 
-// Tests for src/routes/@{$username}.tsx (the layout) and
-// src/routes/@{$username}.index.tsx (the Posts tab). Neither test file can be
-// named after its route — the TanStack Router plugin would pick it up — though
-// `routeFileIgnorePattern` in vite.config.ts now also guards that.
+// Tests for ./profile-layout.tsx (the layout) and ./profile-posts.tsx (the
+// Posts tab).
 
 const { clientMock } = vi.hoisted(() => ({
   clientMock: {
@@ -46,17 +44,15 @@ vi.mock("@/lib/auth-client", () => ({
   authClient: { signOut: signOutMock },
 }));
 
-const { paramsMock, pathnameMock } = vi.hoisted(() => ({
+const { paramsMock } = vi.hoisted(() => ({
   paramsMock: { current: { username: "alexmercer" } },
-  pathnameMock: { current: "/@alexmercer" },
 }));
 
 vi.mock("@tanstack/react-router", () => ({
-  // `createFileRoute(path)(options)` — the second call is where the component
-  // lands. Handing back `useParams` alongside it is enough for the route
-  // module's own `Route.useParams()` to work.
-  createFileRoute: () => (options: { component: () => ReactNode }) => ({
-    ...options,
+  // Both the layout and the Posts tab call `getRouteApi(id).useParams()` with
+  // their own route id; the mock ignores the id, same as the real Route
+  // registry does per-file, since both read from the same param set here.
+  getRouteApi: () => ({
     useParams: () => paramsMock.current,
   }),
   Link: ({ to, children, ...rest }: { to: string; children: ReactNode }) => (
@@ -65,14 +61,13 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useNavigate: () => vi.fn(),
-  useLocation: () => ({ pathname: pathnameMock.current }),
   // The layout's children are exercised by rendering them alongside it below,
   // so the outlet itself only needs to not blow up.
   Outlet: () => null,
 }));
 
-const { ProfileLayout } = await import("./@{$username}");
-const { ProfilePosts } = await import("./@{$username}.index");
+const { ProfileLayout } = await import("./profile-layout");
+const { ProfilePosts } = await import("./profile-posts");
 
 const PROFILE = {
   id: "author-1",
@@ -83,6 +78,17 @@ const PROFILE = {
   createdAt: new Date(2026, 7, 15),
   followerCount: 1234,
   followingCount: 42,
+  viewerIsFollowing: false,
+};
+
+const FOLLOWER = {
+  id: "follower-1",
+  name: "Sam Vega",
+  username: "samvega",
+  displayUsername: "SamVega",
+  image: null,
+  createdAt: new Date(2026, 6, 1),
+  followedAt: new Date(2026, 7, 20),
   viewerIsFollowing: false,
 };
 
@@ -108,10 +114,11 @@ function renderProfile() {
 beforeEach(() => {
   vi.clearAllMocks();
   paramsMock.current = { username: "alexmercer" };
-  pathnameMock.current = "/@alexmercer";
   sessionMock.current = null;
   clientMock.post.list.mockResolvedValue({ items: [], nextCursor: null });
   clientMock.user.byUsername.mockResolvedValue(PROFILE);
+  clientMock.user.followers.mockResolvedValue({ items: [FOLLOWER], nextCursor: null });
+  clientMock.user.following.mockResolvedValue({ items: [], nextCursor: null });
   clientMock.user.follow.mockResolvedValue({
     userId: "author-1",
     followerCount: 1235,
@@ -230,17 +237,12 @@ describe("profile page", () => {
 });
 
 describe("profile follow graph", () => {
-  it("shows follower and following counts, compacted, linking to each list", async () => {
+  it("shows follower and following counts, compacted, as list buttons", async () => {
     renderProfile();
     await screen.findByRole("heading", { name: "Alex Mercer" });
 
-    const followers = screen.getByRole("link", { name: /followers/i });
-    const following = screen.getByRole("link", { name: /following/i });
-
-    expect(followers).toHaveTextContent("1.2K");
-    expect(following).toHaveTextContent("42");
-    expect(followers).toHaveAttribute("href", "/@{$username}/followers");
-    expect(following).toHaveAttribute("href", "/@{$username}/following");
+    expect(screen.getByRole("button", { name: /followers/i })).toHaveTextContent("1.2K");
+    expect(screen.getByRole("button", { name: /following/i })).toHaveTextContent("42");
   });
 
   it("singularises a lone follower", async () => {
@@ -249,7 +251,7 @@ describe("profile follow graph", () => {
     renderProfile();
     await screen.findByRole("heading", { name: "Alex Mercer" });
 
-    expect(screen.getByRole("link", { name: /1 follower$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /1 follower$/i })).toBeInTheDocument();
   });
 
   it("offers a Follow button on someone else's profile", async () => {
@@ -291,7 +293,7 @@ describe("profile follow graph", () => {
     await user.click(screen.getByRole("button", { name: /^follow$/i }));
 
     expect(screen.getByRole("button", { name: /^unfollow$/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /followers/i })).toHaveTextContent("1.2K");
+    expect(screen.getByRole("button", { name: /followers/i })).toHaveTextContent("1.2K");
     expect(clientMock.user.follow).toHaveBeenCalledWith({ userId: "author-1" }, expect.anything());
   });
 
@@ -307,16 +309,59 @@ describe("profile follow graph", () => {
     expect(await screen.findByRole("button", { name: /^follow$/i })).toBeInTheDocument();
   });
 
-  it("marks the active profile tab", async () => {
-    pathnameMock.current = "/@alexmercer/followers";
+});
 
+describe("profile follow lists", () => {
+  it("opens the followers list in a dialog", async () => {
+    const { user } = renderProfile();
+    await screen.findByRole("heading", { name: "Alex Mercer" });
+
+    await user.click(screen.getByRole("button", { name: /followers/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Followers" })).toBeInTheDocument();
+    expect(await within(dialog).findByText("Sam Vega")).toBeInTheDocument();
+    expect(clientMock.user.followers).toHaveBeenCalledWith(
+      expect.objectContaining({ username: "alexmercer" }),
+      expect.anything(),
+    );
+    expect(clientMock.user.following).not.toHaveBeenCalled();
+  });
+
+  it("opens the following list from the other count", async () => {
+    const { user } = renderProfile();
+    await screen.findByRole("heading", { name: "Alex Mercer" });
+
+    await user.click(screen.getByRole("button", { name: /following/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Following" })).toBeInTheDocument();
+    expect(await within(dialog).findByText(/isn't following anyone yet/i)).toBeInTheDocument();
+    expect(clientMock.user.followers).not.toHaveBeenCalled();
+  });
+
+  // The lists are mounted by the dialog, so a profile visit shouldn't be
+  // paying for two of them up front.
+  it("does not fetch either list until one is opened", async () => {
     renderProfile();
     await screen.findByRole("heading", { name: "Alex Mercer" });
 
-    const followersTab = screen.getByRole("button", { name: /^followers$/i });
-    expect(followersTab).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(clientMock.user.followers).not.toHaveBeenCalled();
+    expect(clientMock.user.following).not.toHaveBeenCalled();
+  });
 
-    // ...and the sibling tabs are not marked.
-    expect(screen.getByRole("button", { name: /^posts$/i })).not.toHaveAttribute("aria-current");
+  it("closes the dialog again", async () => {
+    const { user } = renderProfile();
+    await screen.findByRole("heading", { name: "Alex Mercer" });
+
+    await user.click(screen.getByRole("button", { name: /followers/i }));
+    await screen.findByRole("dialog");
+
+    await user.click(screen.getByRole("button", { name: /^close$/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
   });
 });
