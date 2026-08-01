@@ -1,26 +1,18 @@
 import { Link } from "@tanstack/react-router";
+import { useAtomValue } from "jotai";
 import { MessageSquare, Bell, LogIn, Compass, Home, Search, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ModeToggle } from "@/components/mode-toggle";
-import { useSession } from "@/lib/auth-client";
-import { handleOf } from "@/lib/user";
+import { viewerAtom, viewerHandleAtom, viewerInitialsAtom } from "@/atoms/session";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 export function Header() {
-  const { data: session } = useSession();
-  const user = session?.user;
-  const handle = handleOf(user);
+  const user = useAtomValue(viewerAtom);
+  const handle = useAtomValue(viewerHandleAtom);
+  const initials = useAtomValue(viewerInitialsAtom);
 
   const nameDisplay = user?.name || user?.displayUsername || user?.username || "Profile";
-  const initials = user?.name
-    ? user.name
-        .split(" ")
-        .map((n: string) => n[0])
-        .join("")
-        .toUpperCase()
-        .slice(0, 2)
-    : "U";
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">

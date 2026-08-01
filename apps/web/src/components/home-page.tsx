@@ -1,17 +1,17 @@
 import { Link } from "@tanstack/react-router";
-import { useAtom } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { Compass, LogIn, Loader2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PostComposer } from "@/components/post-composer";
 import { PostFeed } from "@/components/post-feed";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
-import { useSession } from "@/lib/auth-client";
+import { isSignedInAtom, sessionPendingAtom } from "@/atoms/session";
 import { feedScopeAtom, type FeedScope } from "@/lib/feed-scope";
 
 export function HomePage() {
   const [feedScope, setFeedScope] = useAtom(feedScopeAtom);
-  const { data: session, isPending: isSessionPending } = useSession();
-  const signedIn = Boolean(session?.user);
+  const signedIn = useAtomValue(isSignedInAtom);
+  const isSessionPending = useAtomValue(sessionPendingAtom);
 
   // Signed out is always For you (global): the server rejects an anonymous
   // Following request, so honouring a stored "following" here would render an
@@ -62,7 +62,7 @@ export function HomePage() {
       )}
 
       {/*
-        `useSession` starts pending with `data: null`, so rendering the feed
+        `sessionAtom` starts pending with `data: null`, so rendering the feed
         straight away would mount the *global* one, fire a request, then flip
         to Following a tick later and fire a second. The spinner is the same
         one PostFeed shows while loading, so this costs no visible state.

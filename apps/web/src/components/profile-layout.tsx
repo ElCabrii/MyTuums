@@ -1,7 +1,9 @@
 import { getRouteApi, Link, Outlet, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAtomValue } from "jotai";
 import { ORPCError } from "@orpc/client";
-import { authClient, useSession } from "@/lib/auth-client";
+import { authClient } from "@/lib/auth-client";
+import { viewerAtom } from "@/atoms/session";
 import { formatJoinDate } from "@/lib/format";
 import { orpc, retryUnlessClientError } from "@/lib/orpc";
 import { handleOf, initialsOf } from "@/lib/user";
@@ -25,7 +27,7 @@ export function ProfileLayout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { username } = routeApi.useParams();
-  const { data: session } = useSession();
+  const viewer = useAtomValue(viewerAtom);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
   const profileQuery = useQuery({
@@ -84,7 +86,7 @@ export function ProfileLayout() {
   }
 
   const profile = profileQuery.data;
-  const isOwnProfile = session?.user.id === profile.id;
+  const isOwnProfile = viewer?.id === profile.id;
   const handle = profile.displayUsername || handleOf(profile) || username;
   const displayName = profile.name || handle;
   const initials = initialsOf(displayName);
@@ -159,10 +161,10 @@ export function ProfileLayout() {
             </div>
             {/* Email is the caller's own, out of the session — `byUsername` is
                 a public endpoint and deliberately never returns it. */}
-            {isOwnProfile && session?.user.email && (
+            {isOwnProfile && viewer?.email && (
               <div className="flex items-center gap-1.5">
                 <Mail className="h-3.5 w-3.5" />
-                <span>{session.user.email}</span>
+                <span>{viewer.email}</span>
               </div>
             )}
           </div>

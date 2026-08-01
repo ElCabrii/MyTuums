@@ -1,6 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { authClient, useSession } from "@/lib/auth-client";
+import { useAtomValue } from "jotai";
+import { authClient } from "@/lib/auth-client";
+import { isSignedInAtom, viewerHandleAtom } from "@/atoms/session";
 import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +14,6 @@ export const Route = createFileRoute("/register")({
 
 function RegisterPage() {
   const navigate = useNavigate();
-  const { data: session } = useSession();
   const [username, setUsername] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -33,8 +34,8 @@ function RegisterPage() {
   // visitor has to happen in an effect, not during render, or React reports
   // "Cannot update a component while rendering a different component" when
   // `navigate()` updates the router mid-render.
-  const isAuthenticated = Boolean(session?.user);
-  const sessionHandle = session?.user ? handleOf(session.user) : null;
+  const isAuthenticated = useAtomValue(isSignedInAtom);
+  const sessionHandle = useAtomValue(viewerHandleAtom);
 
   useEffect(() => {
     if (!isAuthenticated) return;

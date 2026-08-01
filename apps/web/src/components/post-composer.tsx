@@ -1,15 +1,16 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAtomValue } from "jotai";
 import { AlertCircle, Loader2, Send } from "lucide-react";
 import { POST_MAX_LENGTH } from "@my-tuums/api/constants";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { useSession } from "@/lib/auth-client";
+import { viewerAtom } from "@/atoms/session";
 import { orpc } from "@/lib/orpc";
 import { initialsOf } from "@/lib/user";
 
 export function PostComposer() {
-  const { data: session } = useSession();
+  const user = useAtomValue(viewerAtom);
   const queryClient = useQueryClient();
   const [content, setContent] = useState("");
 
@@ -25,7 +26,6 @@ export function PostComposer() {
     })
   );
 
-  const user = session?.user;
   if (!user) return null;
 
   const trimmed = content.trim();

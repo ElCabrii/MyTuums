@@ -1,9 +1,10 @@
 import { useRef } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAtomValue } from "jotai";
 import { Heart } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useSession } from "@/lib/auth-client";
+import { isSignedInAtom } from "@/atoms/session";
 import { formatRelativeTime } from "@/lib/format";
 import { orpc, type Post } from "@/lib/orpc";
 import { readCachedPost, restoreFeeds, snapshotFeeds, updatePostEverywhere } from "@/lib/post-cache";
@@ -90,10 +91,8 @@ function useToggleLike(postId: string) {
 }
 
 export function PostCard({ post }: { post: Post }) {
-  const { data: session } = useSession();
+  const isSignedIn = useAtomValue(isSignedInAtom);
   const toggleLike = useToggleLike(post.id);
-
-  const isSignedIn = Boolean(session?.user);
   const authorHandle = handleOf(post.author);
   const authorName = post.author.name || authorHandle || "Unknown";
 

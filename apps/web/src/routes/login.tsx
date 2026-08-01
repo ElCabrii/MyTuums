@@ -1,6 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { authClient, useSession } from "@/lib/auth-client";
+import { useAtomValue } from "jotai";
+import { authClient } from "@/lib/auth-client";
+import { isSignedInAtom, viewerHandleAtom } from "@/atoms/session";
 import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +14,6 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   const navigate = useNavigate();
-  const { data: session } = useSession();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -40,8 +41,8 @@ function LoginPage() {
   //
   // `replace` rather than push: without it, back-navigating to /login just
   // redirects forward again and the back button is dead.
-  const isAuthenticated = Boolean(session?.user);
-  const sessionHandle = session?.user ? handleOf(session.user) : null;
+  const isAuthenticated = useAtomValue(isSignedInAtom);
+  const sessionHandle = useAtomValue(viewerHandleAtom);
 
   useEffect(() => {
     if (!isAuthenticated) return;

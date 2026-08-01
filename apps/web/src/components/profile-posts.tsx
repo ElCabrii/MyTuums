@@ -1,7 +1,8 @@
 import { getRouteApi } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useAtomValue } from "jotai";
 import { MessageSquare } from "lucide-react";
-import { useSession } from "@/lib/auth-client";
+import { viewerIdAtom } from "@/atoms/session";
 import { orpc, retryUnlessClientError } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
 import { PostComposer } from "@/components/post-composer";
@@ -15,7 +16,7 @@ const routeApi = getRouteApi("/@{$username}/");
  */
 export function ProfilePosts() {
   const { username } = routeApi.useParams();
-  const { data: session } = useSession();
+  const viewerId = useAtomValue(viewerIdAtom);
 
   // The same query the layout already ran, with an identical key — TanStack
   // dedupes it, so this reads the cache rather than issuing a second request.
@@ -29,7 +30,7 @@ export function ProfilePosts() {
   const profile = profileQuery.data;
   if (!profile) return null;
 
-  const isOwnProfile = session?.user.id === profile.id;
+  const isOwnProfile = viewerId === profile.id;
   const handle = handleOf(profile) ?? username;
 
   return (

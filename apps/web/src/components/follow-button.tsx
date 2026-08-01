@@ -1,9 +1,10 @@
 import { useRef } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAtomValue } from "jotai";
 import { UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useSession } from "@/lib/auth-client";
+import { viewerIdAtom } from "@/atoms/session";
 import {
   patchFollowState,
   readCachedIsFollowing,
@@ -110,8 +111,7 @@ export function FollowButton({
   isFollowing: boolean;
   className?: string;
 }) {
-  const { data: session } = useSession();
-  const viewerId = session?.user.id;
+  const viewerId = useAtomValue(viewerIdAtom);
   const toggleFollow = useToggleFollow(userId, viewerId);
 
   // Following yourself is a BAD_REQUEST server-side and forbidden by a CHECK
@@ -119,7 +119,7 @@ export function FollowButton({
   // your own row. Callers guard too; this is the backstop.
   if (viewerId === userId) return null;
 
-  if (!session?.user) {
+  if (!viewerId) {
     // Signed out, the server would reject the follow — send people to log in
     // rather than let them click into a 401, matching the like affordance in
     // ./post-card.tsx.

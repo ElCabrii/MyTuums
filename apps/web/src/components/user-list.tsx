@@ -1,11 +1,12 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { useAtomValue } from "jotai";
 import { AlertCircle, Loader2, Users } from "lucide-react";
 import { FOLLOW_PAGE_SIZE } from "@my-tuums/api/constants";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { FollowButton } from "@/components/follow-button";
-import { useSession } from "@/lib/auth-client";
+import { isSignedInAtom } from "@/atoms/session";
 import { orpc, type UserSummary } from "@/lib/orpc";
 import { handleOf, initialsOf } from "@/lib/user";
 
@@ -63,7 +64,7 @@ export function UserList({
   direction: "followers" | "following";
   emptyMessage: string;
 }) {
-  const { data: session } = useSession();
+  const isSignedIn = useAtomValue(isSignedInAtom);
 
   const procedure = direction === "followers" ? orpc.user.followers : orpc.user.following;
 
@@ -138,7 +139,7 @@ export function UserList({
 
       {/* Referenced so the signed-out case is obvious to a reader: the rows
           render a login link rather than a live follow toggle. */}
-      {!session?.user && (
+      {!isSignedIn && (
         <p className="pt-1 text-center text-xs text-muted-foreground">
           <Link to="/login" className="hover:underline">
             Log in
