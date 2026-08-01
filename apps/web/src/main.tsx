@@ -2,8 +2,10 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ThemeProvider } from "@/components/theme-provider";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { Provider } from "jotai";
+import { queryClient } from "@/lib/query-client";
+import { store } from "@/lib/store";
 import { routeTree } from "./routeTree.gen";
 
 // Create the router
@@ -16,15 +18,12 @@ declare module "@tanstack/react-router" {
   }
 }
 
-// Create a query client
-const queryClient = new QueryClient();
-
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ThemeProvider defaultTheme="system" storageKey="mytuums-ui-theme">
+    <Provider store={store}>
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
       </QueryClientProvider>
-    </ThemeProvider>
+    </Provider>
   </React.StrictMode>,
 );

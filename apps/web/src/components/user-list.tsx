@@ -1,12 +1,12 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { useAtomValue } from "jotai";
 import { AlertCircle, Loader2, Users } from "lucide-react";
-import { FOLLOW_PAGE_SIZE } from "@my-tuums/api/constants";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { FollowButton } from "@/components/follow-button";
-import { useSession } from "@/lib/auth-client";
-import { orpc, type UserSummary } from "@/lib/orpc";
+import { isSignedInAtom } from "@/atoms/session";
+import { userListAtom, type FollowDirection } from "@/atoms/user-list";
+import { type UserSummary } from "@/lib/orpc";
 import { handleOf, initialsOf } from "@/lib/user";
 
 function UserRow({ user }: { user: UserSummary }) {
@@ -45,7 +45,8 @@ function UserRow({ user }: { user: UserSummary }) {
 }
 
 /**
- * A paginated list of people — the followers and following pages.
+ * A paginated list of people — the body of the follower and following dialogs
+ * opened from a profile's counts (./follow-list-dialog.tsx).
  *
  * Structurally a mirror of ./post-feed.tsx: the same conditional-spread input,
  * the same "Load more" button rather than an intersection observer, and the
@@ -59,24 +60,11 @@ export function UserList({
 }: {
   username: string;
   /** "followers" = people following them; "following" = people they follow. */
-  direction: "followers" | "following";
+  direction: FollowDirection;
   emptyMessage: string;
 }) {
-  const { data: session } = useSession();
-
-  const procedure = direction === "followers" ? orpc.user.followers : orpc.user.following;
-
-  const list = useInfiniteQuery(
-    procedure.infiniteOptions({
-      input: (cursor: string | undefined) => ({
-        username,
-        limit: FOLLOW_PAGE_SIZE,
-        ...(cursor ? { cursor } : {}),
-      }),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    }),
-  );
+  const isSignedIn = useAtomValue(isSignedInAtom);
+  const list = useAtomValue(userListAtom(username, direction));
 
   if (list.isPending) {
     return (
@@ -137,7 +125,7 @@ export function UserList({
 
       {/* Referenced so the signed-out case is obvious to a reader: the rows
           render a login link rather than a live follow toggle. */}
-      {!session?.user && (
+      {!isSignedIn && (
         <p className="pt-1 text-center text-xs text-muted-foreground">
           <Link to="/login" className="hover:underline">
             Log in
