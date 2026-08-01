@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useAtom } from "jotai";
 import {
   Dialog,
   DialogContent,
@@ -8,6 +8,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { UserList } from "@/components/user-list";
+import { followListDialogAtom, type FollowDirection } from "@/atoms/user-list";
 import { formatCount } from "@/lib/format";
 
 /**
@@ -29,25 +30,30 @@ export function FollowListDialog({
   /** Display handle, for the copy. May differ from `username` in casing. */
   handle: string;
   /** "followers" = people following them; "following" = people they follow. */
-  direction: "followers" | "following";
+  direction: FollowDirection;
   count: number;
 }) {
-  const [open, setOpen] = useState(false);
+  const [openDialog, setOpenDialog] = useAtom(followListDialogAtom);
 
-  // Rows in the list link to other profiles, and that navigation happens
-  // underneath an open dialog: on another handle this same dialog would stay
-  // up and quietly reload with *that* person's list. Closing on a param change
-  // keeps the dialog tied to the profile it was opened from.
-  useEffect(() => {
-    setOpen(false);
-  }, [username]);
+  // Derived rather than stored, which is what lets the effect this used to
+  // need disappear. Rows in the list link to other profiles, and that
+  // navigation happens *underneath* an open dialog — previously the dialog
+  // stayed up and quietly reloaded with that person's list, so a `useEffect`
+  // force-closed it whenever `username` changed. Now a different handle just
+  // makes this comparison false, with no state left over to correct.
+  const open = openDialog?.username === username && openDialog.direction === direction;
 
   const isFollowers = direction === "followers";
   const title = isFollowers ? "Followers" : "Following";
   const label = isFollowers && count === 1 ? "Follower" : title;
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpenDialog(next ? { username, direction } : null);
+      }}
+    >
       <DialogTrigger className="rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         <span className="font-bold text-foreground">{formatCount(count)}</span>{" "}
         <span className="text-muted-foreground">{label}</span>

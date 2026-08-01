@@ -1,13 +1,12 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { AlertCircle, Loader2, Users } from "lucide-react";
-import { FOLLOW_PAGE_SIZE } from "@my-tuums/api/constants";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { FollowButton } from "@/components/follow-button";
 import { isSignedInAtom } from "@/atoms/session";
-import { orpc, type UserSummary } from "@/lib/orpc";
+import { userListAtom, type FollowDirection } from "@/atoms/user-list";
+import { type UserSummary } from "@/lib/orpc";
 import { handleOf, initialsOf } from "@/lib/user";
 
 function UserRow({ user }: { user: UserSummary }) {
@@ -61,24 +60,11 @@ export function UserList({
 }: {
   username: string;
   /** "followers" = people following them; "following" = people they follow. */
-  direction: "followers" | "following";
+  direction: FollowDirection;
   emptyMessage: string;
 }) {
   const isSignedIn = useAtomValue(isSignedInAtom);
-
-  const procedure = direction === "followers" ? orpc.user.followers : orpc.user.following;
-
-  const list = useInfiniteQuery(
-    procedure.infiniteOptions({
-      input: (cursor: string | undefined) => ({
-        username,
-        limit: FOLLOW_PAGE_SIZE,
-        ...(cursor ? { cursor } : {}),
-      }),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    }),
-  );
+  const list = useAtomValue(userListAtom(username, direction));
 
   if (list.isPending) {
     return (

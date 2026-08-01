@@ -1,0 +1,91 @@
+import { atom } from "jotai";
+import { atomFamily } from "jotai-family";
+import { atomWithInfiniteQuery } from "jotai-tanstack-query";
+import { FOLLOW_PAGE_SIZE } from "@my-tuums/api/constants";
+import { orpc } from "@/lib/orpc";
+
+/** "followers" = people following them; "following" = people they follow. */
+export type FollowDirection = "followers" | "following";
+
+/**
+ * The family key. Direction goes FIRST deliberately: it is a two-value union,
+ * so it is always the prefix and `decode` can split on the first ":" and stay
+ * total no matter what a handle contains. Handles are `[a-zA-Z0-9_-]` today
+ * (the BetterAuth username plugin enforces it), but the key shouldn't silently
+ * depend on a rule enforced three packages away.
+ *
+ * A primitive string rather than a `{ username, direction }` object, for the
+ * same reason as `profileAtomFamily` and `postFeedFamily`: an object param
+ * forces an `areEqual` comparator, and passing one switches `atomFamily` from
+ * a `Map` lookup to a linear scan over every param it has ever created, on
+ * every read.
+ */
+export const encode = (username: string, direction: FollowDirection): string =>
+  `${direction}:${username}`;
+
+export const decode = (key: string): { username: string; direction: FollowDirection } => {
+  const separator = key.indexOf(":");
+  return {
+    direction: key.slice(0, separator) as FollowDirection,
+    username: key.slice(separator + 1),
+  };
+};
+
+/**
+ * One infinite-query atom per (direction, handle) pair.
+ *
+ * Deliberately no `setShouldRemove`, matching `profileAtomFamily` and
+ * `postFeedFamily`: it is evaluated lazily at read time and cannot know
+ * whether an atom is currently mounted, so it can hand two reads of identical
+ * params two different atoms and discard an in-progress "Load more"
+ * scroll-through. Cleanup happens at sign-out instead, where nothing is
+ * mounted to split.
+ */
+const userListFamily = atomFamily((key: string) =>
+  atomWithInfiniteQuery(() => {
+    const { username, direction } = decode(key);
+    const procedure = direction === "followers" ? orpc.user.followers : orpc.user.following;
+
+    return procedure.infiniteOptions({
+      // Kept byte-identical to what `UserList` passed before this migration.
+      // oRPC embeds the whole input object in the query key, and
+      // `lib/follow-cache.ts` sweeps the `orpc.user.followers.key()` /
+      // `orpc.user.following.key()` prefixes to patch follow state
+      // optimistically — changing the shape here would fork every cache entry
+      // and those sweeps would silently stop matching.
+      input: (cursor: string | undefined) => ({
+        username,
+        limit: FOLLOW_PAGE_SIZE,
+        ...(cursor ? { cursor } : {}),
+      }),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    });
+  }),
+);
+
+export const userListAtom = (username: string, direction: FollowDirection) =>
+  userListFamily(encode(username, direction));
+
+/**
+ * Which follower/following dialog is open, app-wide — at most one.
+ *
+ * This replaces a `useState(false)` per dialog plus a `useEffect` that
+ * force-closed it whenever the `username` prop changed. That effect existed
+ * because rows inside the list link to other profiles, and that navigation
+ * happens *underneath* the open dialog: without it, the dialog stayed up and
+ * quietly reloaded with the new person's list.
+ *
+ * Holding the identity of the open dialog rather than a per-instance boolean
+ * removes the need to reconcile at all. Each `FollowListDialog` derives its
+ * own `open` by comparing this value against its own props, so navigating to
+ * another handle makes that comparison false on its own — there is no state
+ * to correct after the fact, and therefore no effect.
+ *
+ * `direction` is part of the identity because a profile renders two of these
+ * side by side; keying on `username` alone would open both at once.
+ */
+export const followListDialogAtom = atom<{
+  username: string;
+  direction: FollowDirection;
+} | null>(null);
