@@ -15,6 +15,13 @@
       "when": 1785543202552,
       "tag": "0001_sticky_synch",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785544784346,
+      "tag": "0002_cold_blur",
+      "breakpoints": true
     }
   ]
 }
