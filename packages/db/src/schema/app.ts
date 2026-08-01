@@ -2,7 +2,16 @@
 // that regenerating the BetterAuth schema (`db:generate`, see auth.ts header)
 // never clobbers app-owned tables.
 import { relations, sql } from "drizzle-orm";
-import { pgTable, text, uuid, timestamp, index, primaryKey, check } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  uuid,
+  timestamp,
+  index,
+  primaryKey,
+  check,
+  type AnyPgColumn,
+} from "drizzle-orm/pg-core";
 import { user } from "./auth.js";
 
 // Table names are singular to match the BetterAuth-generated tables in
@@ -16,6 +25,20 @@ export const post = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
+    // Null for a top-level post, set for a reply. A self-reference needs the
+    // explicit `AnyPgColumn` return type: without it the callback's inferred
+    // type refers to `post` while `post` is still being defined, and tsc gives
+    // up with "implicitly has type 'any' because it does not have a type
+    // annotation and is referenced directly or indirectly in its own
+    // initializer".
+    //
+    // `onDelete: "cascade"` is correct *because* there is no delete-post
+    // procedure yet, so the only way a parent disappears today is its author
+    // being deleted — which is already cascading the whole subtree away. Once
+    // posts can be deleted individually this has to become a tombstone
+    // instead, or deleting one post silently takes an unrelated conversation
+    // with it.
+    parentId: uuid("parent_id").references((): AnyPgColumn => post.id, { onDelete: "cascade" }),
     // `withTimezone` is not cosmetic. On a bare `timestamp` (no time zone),
     // Postgres resolves `now()` to the *database session's* local wall clock,
     // while Drizzle's `mapFromDriverValue` reads the column back by appending
@@ -37,11 +60,23 @@ export const post = pgTable(
       .notNull(),
   },
   (t) => [
-    // Both indexes are ordered to match the keyset pagination in
-    // packages/api/src/router.ts: newest first, with `id` breaking ties
+    // All three indexes are ordered to match the keyset pagination in
+    // packages/api/src/posts.ts: newest first, with `id` breaking ties
     // between posts sharing a timestamp so the cursor is a total order.
-    index("post_created_idx").on(t.createdAt.desc(), t.id.desc()),
+    //
+    // Partial, because the home timelines (global and Following) are
+    // top-level only — `post.list` filters `parent_id is null` unless it was
+    // asked for replies. Excluding replies from the index keeps it the size
+    // of the thing it actually serves, and lets Postgres use it for exactly
+    // the queries whose predicate implies the same restriction.
+    index("post_created_idx")
+      .on(t.createdAt.desc(), t.id.desc())
+      .where(sql`${t.parentId} is null`),
+    // Deliberately NOT partial, unlike the one above: a profile feed passes
+    // `includeReplies`, so this index has to cover replies too.
     index("post_author_created_idx").on(t.authorId, t.createdAt.desc(), t.id.desc()),
+    // The reply list under a single post.
+    index("post_parent_created_idx").on(t.parentId, t.createdAt.desc(), t.id.desc()),
   ],
 );
 
@@ -125,6 +160,16 @@ export const follow = pgTable(
 export const postRelations = relations(post, ({ one, many }) => ({
   author: one(user, { fields: [post.authorId], references: [user.id] }),
   likes: many(postLike),
+  // Named for the direction they point, like followRelations below: `parent`
+  // is the post being replied to, `replies` the posts replying to this one.
+  // Both sides need the same `relationName` for Drizzle to pair them up as
+  // one self-relation rather than two unrelated ones.
+  parent: one(post, {
+    fields: [post.parentId],
+    references: [post.id],
+    relationName: "replies",
+  }),
+  replies: many(post, { relationName: "replies" }),
 }));
 
 export const postLikeRelations = relations(postLike, ({ one }) => ({

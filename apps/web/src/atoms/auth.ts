@@ -6,6 +6,8 @@ import { clearPostFeedFamily } from "@/atoms/post-feed";
 import { clearUserListFamily } from "@/atoms/user-list";
 import { clearLikeFamilies } from "@/atoms/like";
 import { clearFollowFamilies } from "@/atoms/follow";
+import { clearThreadFamily } from "@/atoms/thread";
+import { clearReplyFamilies } from "@/atoms/reply-composer";
 
 /** Set by `signInAtom`/`signUpAtom`/`signOutAtom`; the form's `role="alert"` reads this. */
 export const authErrorAtom = atom<string | null>(null);
@@ -112,6 +114,10 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
     clearFamily(profileAtomFamily);
     clearPostFeedFamily();
     clearUserListFamily();
+    clearThreadFamily();
+    // Reply drafts are per-post and in-memory; they belong to the person who
+    // typed them, not to the browser.
+    clearReplyFamilies();
     // The like/follow families hold per-entity intent as well as mutation
     // atoms, and intent is viewer-relative — a stale `true` would make the
     // next viewer's first response look superseded and be dropped.

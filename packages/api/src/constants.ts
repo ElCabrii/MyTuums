@@ -14,3 +14,16 @@ export const POST_PAGE_SIZE_MAX = 50;
 /** Default and maximum page sizes for `user.followers` / `user.following`. */
 export const FOLLOW_PAGE_SIZE = 20;
 export const FOLLOW_PAGE_SIZE_MAX = 50;
+
+/**
+ * How far up a reply chain `post.thread` will walk to build the ancestor
+ * context above the focused post.
+ *
+ * It is a recursion depth limit first and a UI decision second: the CTE that
+ * collects ancestors follows `parent_id` upward, and while the schema makes a
+ * cycle impossible (a post's parent must already exist when it is inserted),
+ * an unbounded recursive CTE is not something to leave pointed at
+ * user-controlled data. The web app uses the same number to decide when to
+ * tell the reader the conversation continues above what they can see.
+ */
+export const THREAD_ANCESTOR_MAX = 20;

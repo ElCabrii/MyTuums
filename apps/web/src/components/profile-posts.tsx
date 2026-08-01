@@ -41,8 +41,14 @@ export function ProfilePosts() {
 
       {isOwnProfile && <PostComposer />}
 
+      {/*
+        `includeReplies` is what makes a profile the person's whole activity
+        rather than only their top-level posts — the home timelines stay
+        top-level, this doesn't. See the input's doc comment in
+        packages/api/src/posts.ts.
+      */}
       <PostFeed
-        feedAtom={postFeedAtom({ authorId: profile.id, feed: "global" })}
+        feedAtom={postFeedAtom({ authorId: profile.id, feed: "global", includeReplies: true })}
         emptyMessage={
           isOwnProfile
             ? "You haven't posted anything yet."
