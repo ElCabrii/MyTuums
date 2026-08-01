@@ -1,9 +1,17 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { useAtomValue } from "jotai";
-import { authClient } from "@/lib/auth-client";
-import { isSignedInAtom, viewerHandleAtom } from "@/atoms/session";
-import { handleOf } from "@/lib/user";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { authErrorAtom, authPendingAtom, signUpAtom } from "@/atoms/auth";
+import {
+  registerConfirmPasswordAtom,
+  registerEmailAtom,
+  registerNameAtom,
+  registerPasswordAtom,
+  registerUsernameAtom,
+  registerValidationAtom,
+  resetRegisterFormAtom,
+} from "@/atoms/auth-form";
+import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserPlus, AlertCircle, Loader2, User, Mail, Lock, AtSign } from "lucide-react";
@@ -13,108 +21,36 @@ export const Route = createFileRoute("/register")({
 });
 
 function RegisterPage() {
-  const navigate = useNavigate();
-  const [username, setUsername] = useState("");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  useRedirectWhenSignedIn();
 
-  const goToProfile = (handle: string | null) => {
-    if (handle) {
-      void navigate({ to: "/@{$username}", params: { username: handle } });
-    } else {
-      void navigate({ to: "/" });
-    }
-  };
+  const [username, setUsername] = useAtom(registerUsernameAtom);
+  const [name, setName] = useAtom(registerNameAtom);
+  const [email, setEmail] = useAtom(registerEmailAtom);
+  const [password, setPassword] = useAtom(registerPasswordAtom);
+  const [confirmPassword, setConfirmPassword] = useAtom(registerConfirmPasswordAtom);
+  const validationError = useAtomValue(registerValidationAtom);
+  const [error, setError] = useAtom(authErrorAtom);
+  const isSubmitting = useAtomValue(authPendingAtom);
+  const signUp = useSetAtom(signUpAtom);
 
-  // See the matching effect in ./login.tsx — redirecting an already-signed-in
-  // visitor has to happen in an effect, not during render, or React reports
-  // "Cannot update a component while rendering a different component" when
-  // `navigate()` updates the router mid-render.
-  const isAuthenticated = useAtomValue(isSignedInAtom);
-  const sessionHandle = useAtomValue(viewerHandleAtom);
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    if (sessionHandle) {
-      void navigate({
-        to: "/@{$username}",
-        params: { username: sessionHandle },
-        replace: true,
-      });
-    } else {
-      void navigate({ to: "/", replace: true });
-    }
-  }, [isAuthenticated, sessionHandle, navigate]);
+  // See auth-form.ts: resetting on unmount is what bounds these atoms'
+  // lifetime to this page instead of a nested Provider (which would break
+  // useRedirectWhenSignedIn's session read above).
+  const resetForm = useSetAtom(resetRegisterFormAtom);
+  useEffect(() => resetForm, [resetForm]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
 
-    const cleanUsername = username.trim();
-    const cleanName = name.trim();
-    const cleanEmail = email.trim();
-
-    if (!cleanUsername) {
-      setError("Username is required.");
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
-    if (cleanUsername.length < 3 || cleanUsername.length > 20) {
-      setError("Username must be between 3 and 20 characters long.");
-      return;
-    }
-
-    if (!/^[a-zA-Z0-9_-]+$/.test(cleanUsername)) {
-      setError("Username can only contain letters, numbers, underscores, and hyphens.");
-      return;
-    }
-
-    if (!cleanName) {
-      setError("Display Name is required.");
-      return;
-    }
-
-    if (!cleanEmail || !cleanEmail.includes("@")) {
-      setError("Please enter a valid email address.");
-      return;
-    }
-
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters long.");
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    try {
-      const res = await authClient.signUp.email({
-        email: cleanEmail,
-        password,
-        name: cleanName,
-        username: cleanUsername,
-      });
-
-      if (res.error) {
-        setError(res.error.message || "Registration failed. Please check your details.");
-      } else {
-        goToProfile(handleOf(res.data?.user) ?? cleanUsername);
-      }
-    } catch (err: unknown) {
-      console.error("Registration error:", err);
-      setError("An unexpected error occurred. Please try again.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    // No navigate here — success flows through the session updating, which
+    // useRedirectWhenSignedIn picks up. Calling it here too was the old
+    // double-navigation bug.
+    await signUp({ username, name, email, password });
   };
 
   return (

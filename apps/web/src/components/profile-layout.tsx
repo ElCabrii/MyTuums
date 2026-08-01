@@ -1,8 +1,7 @@
 import { getRouteApi, Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { ORPCError } from "@orpc/client";
-import { authClient } from "@/lib/auth-client";
+import { authPendingAtom, signOutAtom } from "@/atoms/auth";
 import { viewerAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
 import { formatJoinDate } from "@/lib/format";
@@ -13,7 +12,6 @@ import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
 import { UserX, Mail, Calendar, LogOut, Loader2, AlertCircle, Settings } from "lucide-react";
-import { useState } from "react";
 
 const routeApi = getRouteApi("/@{$username}");
 
@@ -25,27 +23,24 @@ const routeApi = getRouteApi("/@{$username}");
  */
 export function ProfileLayout() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { username } = routeApi.useParams();
   const viewer = useAtomValue(viewerAtom);
-  const [isSigningOut, setIsSigningOut] = useState(false);
+  const isSigningOut = useAtomValue(authPendingAtom);
+  const signOut = useSetAtom(signOutAtom);
 
   const profileQuery = useAtomValue(profileAtomFamily(username));
 
   const handleSignOut = async () => {
-    setIsSigningOut(true);
     try {
-      await authClient.signOut();
-      // Cached profiles and feeds carry viewer-dependent fields
-      // (`viewerIsFollowing`, `viewerHasLiked`) but their query keys contain
-      // no viewer identity, so without this the next visitor on this browser
-      // sees the previous session's follow state until each query refetches.
-      queryClient.clear();
+      // signOutAtom (atoms/auth.ts) owns the sign-out call, the
+      // QueryClient.clear(), and sweeping the profile/feed/user-list
+      // families — see its comment for why clearing those matters here:
+      // viewer-dependent fields like `viewerIsFollowing` live behind query
+      // keys with no viewer identity in them.
+      await signOut();
       void navigate({ to: "/login" });
     } catch (err) {
       console.error("Failed to sign out", err);
-    } finally {
-      setIsSigningOut(false);
     }
   };
 

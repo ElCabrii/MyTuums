@@ -1,9 +1,14 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { useAtomValue } from "jotai";
-import { authClient } from "@/lib/auth-client";
-import { isSignedInAtom, viewerHandleAtom } from "@/atoms/session";
-import { handleOf } from "@/lib/user";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { authErrorAtom, authPendingAtom, signInAtom } from "@/atoms/auth";
+import {
+  loginIdentifierAtom,
+  loginPasswordAtom,
+  loginValidationAtom,
+  resetLoginFormAtom,
+} from "@/atoms/auth-form";
+import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LogIn, AlertCircle, Loader2, User, Lock } from "lucide-react";
@@ -13,90 +18,30 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
-  const navigate = useNavigate();
-  const [identifier, setIdentifier] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  useRedirectWhenSignedIn();
 
-  // Sending someone to their own profile needs their handle, and the handle
-  // only exists once we have a user — so both redirects below fall back to
-  // the home feed rather than building a `/@undefined` URL.
-  const goToProfile = (handle: string | null) => {
-    if (handle) {
-      void navigate({ to: "/@{$username}", params: { username: handle } });
-    } else {
-      void navigate({ to: "/" });
-    }
-  };
+  const [identifier, setIdentifier] = useAtom(loginIdentifierAtom);
+  const [password, setPassword] = useAtom(loginPasswordAtom);
+  const validationError = useAtomValue(loginValidationAtom);
+  const [error, setError] = useAtom(authErrorAtom);
+  const isSubmitting = useAtomValue(authPendingAtom);
+  const signIn = useSetAtom(signInAtom);
 
-  // Someone who already has a session has no business on the login form, so
-  // bounce them to their profile. This has to run in an effect rather than
-  // during render: `navigate()` updates the router's Transitioner, and doing
-  // that while this component is still rendering is exactly the "Cannot
-  // update a component while rendering a different component" warning React
-  // emits. Depending on primitives (not the session object, whose identity
-  // can change between renders) keeps the effect from re-firing on every
-  // render while the redirect is in flight.
-  //
-  // `replace` rather than push: without it, back-navigating to /login just
-  // redirects forward again and the back button is dead.
-  const isAuthenticated = useAtomValue(isSignedInAtom);
-  const sessionHandle = useAtomValue(viewerHandleAtom);
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    if (sessionHandle) {
-      void navigate({
-        to: "/@{$username}",
-        params: { username: sessionHandle },
-        replace: true,
-      });
-    } else {
-      void navigate({ to: "/", replace: true });
-    }
-  }, [isAuthenticated, sessionHandle, navigate]);
+  // See auth-form.ts: resetting on unmount is what bounds these atoms'
+  // lifetime to this page instead of a nested Provider (which would break
+  // useRedirectWhenSignedIn's session read above).
+  const resetForm = useSetAtom(resetLoginFormAtom);
+  useEffect(() => resetForm, [resetForm]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
 
-    if (!identifier.trim()) {
-      setError("Please enter your username or email address.");
-      return;
-    }
-    if (!password) {
-      setError("Please enter your password.");
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
-    setIsSubmitting(true);
-
-    try {
-      const isEmail = identifier.includes("@");
-      
-      const res = isEmail
-        ? await authClient.signIn.email({
-            email: identifier.trim(),
-            password,
-          })
-        : await authClient.signIn.username({
-            username: identifier.trim(),
-            password,
-          });
-
-      if (res.error) {
-        setError(res.error.message || "Invalid credentials. Please try again.");
-      } else {
-        goToProfile(handleOf(res.data?.user) ?? (isEmail ? null : identifier.trim()));
-      }
-    } catch (err: unknown) {
-      console.error("Login error:", err);
-      setError("An unexpected error occurred. Please try again.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    await signIn({ identifier, password });
   };
 
   return (
