@@ -1,3 +1,4 @@
+import { postRouter } from "./posts.js";
 import { protectedProcedure } from "./procedures.js";
 
 // Liveness/readiness is served over plain HTTP at GET /health (see
@@ -9,6 +10,7 @@ export const appRouter = {
   me: protectedProcedure.handler(({ context }) => {
     return context.user;
   }),
+  post: postRouter,
 };
 
 export type AppRouter = typeof appRouter;

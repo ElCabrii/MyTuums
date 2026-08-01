@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./constants": {
+      "types": "./src/constants.ts",
+      "default": "./src/constants.ts"
     }
   },
   "scripts": {
@@ -18,13 +22,13 @@
     "@my-tuums/auth": "workspace:*",
     "@my-tuums/db": "workspace:*",
     "@orpc/server": "^1.5.0",
+    "drizzle-orm": "^0.44.7",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@my-tuums/tsconfig": "workspace:*",
     "@types/node": "catalog:",
     "dotenv-cli": "^11.0.0",
-    "drizzle-orm": "^0.44.7",
     "typescript": "catalog:",
     "vitest": "^4.1.10"
   }
