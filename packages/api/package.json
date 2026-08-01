@@ -15,8 +15,7 @@
   },
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "dotenv -e ../../.env -- vitest run"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@my-tuums/auth": "workspace:*",
@@ -28,8 +27,6 @@
   "devDependencies": {
     "@my-tuums/tsconfig": "workspace:*",
     "@types/node": "catalog:",
-    "dotenv-cli": "^11.0.0",
-    "typescript": "catalog:",
-    "vitest": "^4.1.10"
+    "typescript": "catalog:"
   }
 }

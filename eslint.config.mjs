@@ -28,7 +28,6 @@ export default tseslint.config(
           allowDefaultProject: [
             "eslint.config.mjs",
             "packages/db/drizzle.config.ts",
-            "packages/api/vitest.config.ts",
             "apps/server/tsup.config.ts",
           ],
         },

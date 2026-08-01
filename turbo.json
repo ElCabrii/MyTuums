@@ -11,9 +11,6 @@
     },
     "lint": {},
     "typecheck": {},
-    "test": {
-      "cache": false
-    },
     "db:generate": {
       "cache": false
     },
