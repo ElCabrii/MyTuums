@@ -1,18 +1,18 @@
 import { useRef } from "react";
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth-client";
-import { orpc, type Profile, type UserListPage } from "@/lib/orpc";
-
-type CachedQueries<T> = [readonly unknown[], T | undefined][];
-
-interface FollowResult {
-  userId: string;
-  followerCount: number;
-  viewerIsFollowing: boolean;
-}
+import {
+  patchFollowState,
+  readCachedIsFollowing,
+  reconcileFollow,
+  restoreFollowCaches,
+  snapshotFollowCaches,
+  type FollowResult,
+} from "@/lib/follow-cache";
+import { orpc } from "@/lib/orpc";
 
 /**
  * The same shape as `useToggleLike` in ./post-card.tsx — scoped mutations so
@@ -20,110 +20,27 @@ interface FollowResult {
  * for a superseded click is dropped rather than flickered through, and a
  * snapshot/rollback around an optimistic edit.
  *
- * It differs in *which* caches it has to sweep. A person's follow state is
- * cached in three shapes at once: their profile (a flat object), and any
- * follower/following list they appear in (paginated). All three are patched
- * locally. The Following *feed* is the fourth, and the one that can't be
- * patched — see the invalidation in `onSettled`.
+ * It differs in *which* caches it has to sweep — see `../lib/follow-cache.ts`.
+ * A person's follow state is cached in three shapes at once: their profile
+ * (a flat object), and any follower/following list they appear in
+ * (paginated). All three are patched locally by `patchFollowState`. The
+ * Following *feed* is the fourth, and the one that can't be patched — see the
+ * invalidation in `onSettled` below.
  */
 function useToggleFollow(userId: string, viewerId: string | undefined) {
   const queryClient = useQueryClient();
-
   const profilesKey = orpc.user.byUsername.key();
-  const followersKey = orpc.user.followers.key();
-  const followingKey = orpc.user.following.key();
 
+  // The state the *last* click asked for. Because the two mutations are
+  // serialised, responses for superseded clicks still arrive — this is what
+  // lets `reconcile` tell "the server confirming what the user currently
+  // wants" apart from "the server confirming a click that's already been
+  // undone", and drop the latter instead of flickering through it.
   const intent = useRef<boolean | null>(null);
 
-  /**
-   * Current state, read from whichever cache happens to hold this person
-   * rather than from a prop: a prop is a render-time snapshot, so a burst of
-   * clicks would all see the same starting value and resolve the same way.
-   */
-  const cachedIsFollowing = (): boolean => {
-    const fromProfile = queryClient
-      .getQueriesData<Profile>({ queryKey: profilesKey })
-      .find(([, data]) => data?.id === userId)?.[1];
-
-    if (fromProfile) return fromProfile.viewerIsFollowing;
-
-    const fromList = [followersKey, followingKey]
-      .flatMap((key) =>
-        queryClient.getQueriesData<InfiniteData<UserListPage>>({ queryKey: key }),
-      )
-      .flatMap(([, data]) => data?.pages ?? [])
-      .flatMap((page) => page.items)
-      .find((item) => item.id === userId);
-
-    return fromList?.viewerIsFollowing ?? false;
-  };
-
-  const patchProfiles = (following: boolean) => {
-    queryClient.setQueriesData<Profile>({ queryKey: profilesKey }, (cached) => {
-      if (!cached) return cached;
-
-      if (cached.id === userId) {
-        return {
-          ...cached,
-          viewerIsFollowing: following,
-          followerCount: Math.max(0, cached.followerCount + (following ? 1 : -1)),
-        };
-      }
-
-      // The viewer's own profile, if it happens to be cached from an earlier
-      // visit — their *following* count moved, not their follower count.
-      if (viewerId && cached.id === viewerId) {
-        return {
-          ...cached,
-          followingCount: Math.max(0, cached.followingCount + (following ? 1 : -1)),
-        };
-      }
-
-      return cached;
-    });
-  };
-
-  const patchLists = (following: boolean) => {
-    for (const key of [followersKey, followingKey]) {
-      queryClient.setQueriesData<InfiniteData<UserListPage>>({ queryKey: key }, (cached) =>
-        cached
-          ? {
-              ...cached,
-              pages: cached.pages.map((page) => ({
-                ...page,
-                items: page.items.map((item) =>
-                  item.id === userId ? { ...item, viewerIsFollowing: following } : item,
-                ),
-              })),
-            }
-          : cached,
-      );
-    }
-  };
-
-  const rollback = (
-    profiles: CachedQueries<Profile>,
-    lists: CachedQueries<InfiniteData<UserListPage>>,
-  ) => {
-    for (const [key, data] of [...profiles, ...lists]) {
-      queryClient.setQueryData(key, data);
-    }
-  };
-
-  // `follow`/`unfollow` return the authoritative count, so success reconciles
-  // from the response instead of refetching every visible profile.
   const reconcile = (result: FollowResult) => {
     if (intent.current !== null && result.viewerIsFollowing !== intent.current) return;
-
-    queryClient.setQueriesData<Profile>({ queryKey: profilesKey }, (cached) =>
-      cached && cached.id === result.userId
-        ? {
-            ...cached,
-            viewerIsFollowing: result.viewerIsFollowing,
-            followerCount: result.followerCount,
-          }
-        : cached,
-    );
+    reconcileFollow(queryClient, result);
   };
 
   // Following someone changes *which posts belong in the Following feed*, and
@@ -147,27 +64,37 @@ function useToggleFollow(userId: string, viewerId: string | undefined) {
   });
 
   return () => {
-    const following = !cachedIsFollowing();
+    // Read the current state from the cache rather than the `isFollowing`
+    // prop: the prop is a render-time snapshot, so a burst of clicks would
+    // all see the same starting value and resolve the same way.
+    const following = !readCachedIsFollowing(queryClient, userId);
     intent.current = following;
 
     void queryClient.cancelQueries({ queryKey: profilesKey });
-    const profiles = queryClient.getQueriesData<Profile>({ queryKey: profilesKey });
-    const lists = [followersKey, followingKey].flatMap((key) =>
-      queryClient.getQueriesData<InfiniteData<UserListPage>>({ queryKey: key }),
-    );
+    const snapshot = snapshotFollowCaches(queryClient);
 
-    // Applied here rather than in `onMutate`, which for a scoped mutation
-    // doesn't run until the queue reaches it — the click has to show up
-    // immediately, not one round trip later.
-    patchProfiles(following);
-    patchLists(following);
+    // Applied here rather than in `onMutate`: inside this synchronous block,
+    // `cancelQueries` + snapshot + patch + intent-set execute atomically —
+    // there is no `await` boundary where an interleaved dispatch (another
+    // click, a background refetch) could land between them and observe a
+    // half-updated cache.
+    patchFollowState(queryClient, { userId, viewerId, following });
 
+    // Rollback below is a *per-call* callback (`mutate(vars, { onError })`),
+    // which query-core stores on the mutation's observer and only fires when
+    // `hasListeners()` is true (mutationObserver.ts ~line 164) — unlike the
+    // `mutationOptions({ onSuccess, onSettled })` above, which lands on
+    // `mutation.options` and always fires regardless of what's still mounted.
+    // That asymmetry means a rapid follow→unfollow→follow can detach the
+    // observer from an earlier click's still-pending mutation, silently
+    // dropping that click's rollback. Pre-existing behaviour, not introduced
+    // by this extraction.
     const mutation = following ? follow : unfollow;
     mutation.mutate(
       { userId },
       {
         onError: () => {
-          rollback(profiles, lists);
+          restoreFollowCaches(queryClient, snapshot);
         },
       },
     );
