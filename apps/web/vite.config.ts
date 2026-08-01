@@ -11,6 +11,13 @@ export default defineConfig({
     tanstackRouter({
       target: "react",
       autoCodeSplitting: true,
+      // Route components are tested from files sitting next to them in
+      // src/routes/, and the generator otherwise treats every .tsx under that
+      // directory as a route — it warns about each one and, worse, the naming
+      // workaround for it (calling the profile test `profile.test.tsx` rather
+      // than `@{$username}.test.tsx`) is invisible tribal knowledge. This
+      // makes co-locating route tests explicitly safe.
+      routeFileIgnorePattern: "\\.test\\.",
     }),
     react(),
     paraglideVitePlugin({

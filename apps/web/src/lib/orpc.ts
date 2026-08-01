@@ -1,4 +1,4 @@
-import { createORPCClient } from "@orpc/client";
+import { createORPCClient, ORPCError } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import type { RouterClient } from "@orpc/server";
@@ -21,3 +21,21 @@ export const orpc = createTanstackQueryUtils(client);
 
 export type PostListPage = Awaited<ReturnType<typeof client.post.list>>;
 export type Post = PostListPage["items"][number];
+
+export type UserListPage = Awaited<ReturnType<typeof client.user.followers>>;
+export type UserSummary = UserListPage["items"][number];
+export type Profile = Awaited<ReturnType<typeof client.user.byUsername>>;
+
+/**
+ * A handle that doesn't exist won't start existing on the second attempt, and
+ * neither will one the server rejected as malformed — only retry the failures
+ * that might actually be transient.
+ *
+ * Lives here rather than inline now that the profile route and both follower
+ * list routes need the same rule.
+ */
+export function retryUnlessClientError(failureCount: number, error: unknown): boolean {
+  return (
+    !(error instanceof ORPCError && error.status >= 400 && error.status < 500) && failureCount < 2
+  );
+}

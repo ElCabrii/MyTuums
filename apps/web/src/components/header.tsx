@@ -24,12 +24,17 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="w-full flex h-16 items-center justify-between gap-4 px-4 sm:px-8">
-        {/* Left Section: Logo & Nav Links */}
-        <div className="flex items-center gap-6 shrink-0">
-          <Link to="/" className="flex items-center gap-2 font-bold text-xl tracking-tight text-primary">
-            <img src="/mytuums.svg" alt="MyTuums Logo" className="h-7 w-auto" />
-            <span>MyTuums</span>
+      <div className="w-full flex h-16 items-center justify-between gap-2 sm:gap-4 px-4 sm:px-8">
+        {/* Left Section: Logo & Nav Links.
+            `min-w-0` (rather than `shrink-0`) is what keeps the header from
+            overflowing the viewport on narrow screens: the right-hand actions
+            are the ones that must stay reachable, so the brand is the part
+            that yields, truncating its wordmark as a last resort instead of
+            pushing sign-in off-screen and making the page scroll sideways. */}
+        <div className="flex items-center gap-6 min-w-0">
+          <Link to="/" className="flex items-center gap-2 font-bold text-xl tracking-tight text-primary min-w-0">
+            <img src="/mytuums.svg" alt="MyTuums Logo" className="h-7 w-auto shrink-0" />
+            <span className="truncate">MyTuums</span>
           </Link>
           <nav className="hidden md:flex items-center gap-1">
             <Button variant="ghost" nativeButton={false} render={<Link to="/" className="flex items-center gap-2" />}>
@@ -43,8 +48,13 @@ export function Header() {
           </nav>
         </div>
 
-        {/* Center Section: Search Bar */}
-        <div className="flex-1 max-w-md mx-2 sm:mx-4">
+        {/* Center Section: Search Bar. Held back until `lg`: between `md` and
+            `lg` the Home/Discover nav has already appeared, and squeezing the
+            search in alongside it collapsed the input to a stub and forced the
+            brand wordmark to truncate. `min-w-0` lets it shrink once shown (a
+            `flex-1` item defaults to `min-width: auto`, so without it the
+            input's intrinsic width becomes a hard floor). */}
+        <div className="hidden lg:block flex-1 min-w-0 max-w-md mx-2 sm:mx-4">
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
@@ -56,11 +66,23 @@ export function Header() {
         </div>
 
         {/* Right Section: Messages, Notifications, Theme Toggle, Auth / Profile */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          <Button variant="ghost" size="icon" title="Messages" aria-label="Messages">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Messages"
+            aria-label="Messages"
+            className="hidden sm:inline-flex"
+          >
             <MessageSquare className="h-5 w-5" />
           </Button>
-          <Button variant="ghost" size="icon" title="Notifications" aria-label="Notifications">
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Notifications"
+            aria-label="Notifications"
+            className="hidden sm:inline-flex"
+          >
             <Bell className="h-5 w-5" />
           </Button>
           
@@ -84,14 +106,17 @@ export function Header() {
               </span>
             </Link>
           ) : (
-            <div className="flex items-center gap-2 ml-1 sm:ml-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 sm:ml-2">
               <Button
                 variant="ghost"
                 size="sm"
                 nativeButton={false}
                 render={<Link to="/login" className="gap-1.5" />}
               >
-                <LogIn className="h-4 w-4" />
+                {/* Label-only on phones: the icons are decorative here, and
+                    dropping them is what buys the brand wordmark enough room
+                    to render untruncated at 375px. */}
+                <LogIn className="hidden sm:block h-4 w-4" />
                 <span>Log in</span>
               </Button>
               <Button
@@ -100,7 +125,7 @@ export function Header() {
                 nativeButton={false}
                 render={<Link to="/register" className="gap-1.5" />}
               >
-                <UserPlus className="h-4 w-4" />
+                <UserPlus className="hidden sm:block h-4 w-4" />
                 <span>Register</span>
               </Button>
             </div>
