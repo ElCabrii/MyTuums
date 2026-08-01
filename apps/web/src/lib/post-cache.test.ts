@@ -11,8 +11,8 @@ import {
 // These helpers are pure `(QueryClient, args) => …` functions, so they are
 // exercised against a bare client — no React, no rendering, no session. That
 // is deliberate: the component suites that used to cover this behaviour were
-// removed ahead of the Jotai migration (see ../../TESTS-TO-REWRITE.md), and
-// this is the layer where the optimistic-update logic actually lives.
+// removed ahead of the Jotai migration, and this is the layer where the
+// optimistic-update logic actually lives.
 
 function makePost(overrides: Partial<Post> = {}): Post {
   return {
