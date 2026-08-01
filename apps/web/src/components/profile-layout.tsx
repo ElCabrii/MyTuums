@@ -1,11 +1,11 @@
 import { getRouteApi, Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAtomValue } from "jotai";
 import { ORPCError } from "@orpc/client";
 import { authClient } from "@/lib/auth-client";
 import { viewerAtom } from "@/atoms/session";
+import { profileAtomFamily } from "@/atoms/profile";
 import { formatJoinDate } from "@/lib/format";
-import { orpc, retryUnlessClientError } from "@/lib/orpc";
 import { handleOf, initialsOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -30,10 +30,7 @@ export function ProfileLayout() {
   const viewer = useAtomValue(viewerAtom);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
-  const profileQuery = useQuery({
-    ...orpc.user.byUsername.queryOptions({ input: { username } }),
-    retry: retryUnlessClientError,
-  });
+  const profileQuery = useAtomValue(profileAtomFamily(username));
 
   const handleSignOut = async () => {
     setIsSigningOut(true);

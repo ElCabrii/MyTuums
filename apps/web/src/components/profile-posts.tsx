@@ -1,9 +1,8 @@
 import { getRouteApi } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import { useAtomValue } from "jotai";
 import { MessageSquare } from "lucide-react";
 import { viewerIdAtom } from "@/atoms/session";
-import { orpc, retryUnlessClientError } from "@/lib/orpc";
+import { profileAtomFamily } from "@/atoms/profile";
 import { handleOf } from "@/lib/user";
 import { PostComposer } from "@/components/post-composer";
 import { PostFeed } from "@/components/post-feed";
@@ -18,14 +17,13 @@ export function ProfilePosts() {
   const { username } = routeApi.useParams();
   const viewerId = useAtomValue(viewerIdAtom);
 
-  // The same query the layout already ran, with an identical key — TanStack
-  // dedupes it, so this reads the cache rather than issuing a second request.
-  // Fetching it here keeps the component self-contained and matches the
-  // codebase's "fetch in the component" convention.
-  const profileQuery = useQuery({
-    ...orpc.user.byUsername.queryOptions({ input: { username } }),
-    retry: retryUnlessClientError,
-  });
+  // The layout route reads `profileAtomFamily(username)` too. Dedup is no
+  // longer an incidental side effect of two components building the same
+  // query key — both read the exact same atom, so there is structurally one
+  // observer for this handle, not two that happen to agree. Fetching it here
+  // keeps the component self-contained and matches the codebase's "fetch in
+  // the component" convention.
+  const profileQuery = useAtomValue(profileAtomFamily(username));
 
   const profile = profileQuery.data;
   if (!profile) return null;
