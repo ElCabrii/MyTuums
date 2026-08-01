@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { atomWithReset, RESET } from "jotai/utils";
+import { authErrorAtom } from "@/atoms/auth";
 import { validateLogin, validateRegister } from "@/lib/auth-validation";
 
 export const loginIdentifierAtom = atomWithReset("");
@@ -26,10 +27,17 @@ export const registerConfirmPasswordAtom = atomWithReset("");
  *   useEffect(() => reset, [reset]);
  * — returning the setter itself as the effect's cleanup, so it runs once,
  * on unmount, with no dependency on anything else.
+ *
+ * `authErrorAtom` is cleared alongside the fields. It lives in `atoms/auth.ts`
+ * because the action atoms write it, but it is just as page-scoped as the
+ * fields are: leaving it set means navigating away from a failed sign-in and
+ * back renders the old error above an empty form. The import is safe —
+ * `atoms/auth.ts` does not import this module, so the dependency runs one way.
  */
 export const resetLoginFormAtom = atom(null, (_get, set) => {
   set(loginIdentifierAtom, RESET);
   set(loginPasswordAtom, RESET);
+  set(authErrorAtom, null);
 });
 
 export const resetRegisterFormAtom = atom(null, (_get, set) => {
@@ -38,6 +46,7 @@ export const resetRegisterFormAtom = atom(null, (_get, set) => {
   set(registerEmailAtom, RESET);
   set(registerPasswordAtom, RESET);
   set(registerConfirmPasswordAtom, RESET);
+  set(authErrorAtom, null);
 });
 
 /** First validation error for the current field values, or `null`. */
