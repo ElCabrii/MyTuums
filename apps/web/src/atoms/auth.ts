@@ -4,6 +4,8 @@ import { authClient } from "@/lib/auth-client";
 import { profileAtomFamily } from "@/atoms/profile";
 import { clearPostFeedFamily } from "@/atoms/post-feed";
 import { clearUserListFamily } from "@/atoms/user-list";
+import { clearLikeFamilies } from "@/atoms/like";
+import { clearFollowFamilies } from "@/atoms/follow";
 
 /** Set by `signInAtom`/`signUpAtom`/`signOutAtom`; the form's `role="alert"` reads this. */
 export const authErrorAtom = atom<string | null>(null);
@@ -110,6 +112,11 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
     clearFamily(profileAtomFamily);
     clearPostFeedFamily();
     clearUserListFamily();
+    // The like/follow families hold per-entity intent as well as mutation
+    // atoms, and intent is viewer-relative — a stale `true` would make the
+    // next viewer's first response look superseded and be dropped.
+    clearLikeFamilies();
+    clearFollowFamilies();
   } finally {
     set(authPendingAtom, false);
   }
