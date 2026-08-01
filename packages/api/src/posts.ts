@@ -4,7 +4,8 @@ import type { Database } from "@my-tuums/db";
 import { post, postLike, user } from "@my-tuums/db/schema";
 import { z } from "zod";
 import { POST_MAX_LENGTH, POST_PAGE_SIZE, POST_PAGE_SIZE_MAX } from "./constants.js";
-import { protectedProcedure, publicProcedure } from "./procedures.js";
+import { protectedProcedure, publicProcedure, rateLimit } from "./procedures.js";
+import { RATE_LIMITS } from "./rate-limit.js";
 
 /**
  * Opaque pagination cursor. Feeds are keyset-paginated on
@@ -91,6 +92,7 @@ async function countLikes(db: Database, postId: string): Promise<number> {
 
 export const postRouter = {
   create: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.write))
     .input(
       z.object({
         // Trim first so a body of only whitespace fails `min(1)` rather than
@@ -123,6 +125,7 @@ export const postRouter = {
     }),
 
   list: publicProcedure
+    .use(rateLimit(RATE_LIMITS.read))
     .input(
       z.object({
         cursor: z.string().optional(),
@@ -176,6 +179,7 @@ export const postRouter = {
   // can't be safely retried. These two state the intended end state, so
   // repeating either is a no-op and matches the optimistic UI update.
   like: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.like))
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
       const [target] = await context.db
@@ -203,6 +207,7 @@ export const postRouter = {
     }),
 
   unlike: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.like))
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
       const [target] = await context.db

@@ -2,7 +2,8 @@ import { ORPCError } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { user } from "@my-tuums/db/schema";
 import { z } from "zod";
-import { publicProcedure } from "./procedures.js";
+import { publicProcedure, rateLimit } from "./procedures.js";
+import { RATE_LIMITS } from "./rate-limit.js";
 
 /**
  * The public shape of a user — deliberately not `select()`-all.
@@ -24,6 +25,7 @@ const publicUserColumns = {
 
 export const userRouter = {
   byUsername: publicProcedure
+    .use(rateLimit(RATE_LIMITS.read))
     .input(
       z.object({
         // Bounds match the BetterAuth username plugin's own rules (see
