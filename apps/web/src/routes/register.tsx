@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { authClient, useSession } from "@/lib/auth-client";
 import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
@@ -29,9 +29,26 @@ function RegisterPage() {
     }
   };
 
-  if (session?.user) {
-    goToProfile(handleOf(session.user));
-  }
+  // See the matching effect in ./login.tsx — redirecting an already-signed-in
+  // visitor has to happen in an effect, not during render, or React reports
+  // "Cannot update a component while rendering a different component" when
+  // `navigate()` updates the router mid-render.
+  const isAuthenticated = Boolean(session?.user);
+  const sessionHandle = session?.user ? handleOf(session.user) : null;
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    if (sessionHandle) {
+      void navigate({
+        to: "/@{$username}",
+        params: { username: sessionHandle },
+        replace: true,
+      });
+    } else {
+      void navigate({ to: "/", replace: true });
+    }
+  }, [isAuthenticated, sessionHandle, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

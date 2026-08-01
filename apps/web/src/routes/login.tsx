@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { authClient, useSession } from "@/lib/auth-client";
 import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
@@ -29,9 +29,33 @@ function LoginPage() {
     }
   };
 
-  if (session?.user) {
-    goToProfile(handleOf(session.user));
-  }
+  // Someone who already has a session has no business on the login form, so
+  // bounce them to their profile. This has to run in an effect rather than
+  // during render: `navigate()` updates the router's Transitioner, and doing
+  // that while this component is still rendering is exactly the "Cannot
+  // update a component while rendering a different component" warning React
+  // emits. Depending on primitives (not the session object, whose identity
+  // can change between renders) keeps the effect from re-firing on every
+  // render while the redirect is in flight.
+  //
+  // `replace` rather than push: without it, back-navigating to /login just
+  // redirects forward again and the back button is dead.
+  const isAuthenticated = Boolean(session?.user);
+  const sessionHandle = session?.user ? handleOf(session.user) : null;
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    if (sessionHandle) {
+      void navigate({
+        to: "/@{$username}",
+        params: { username: sessionHandle },
+        replace: true,
+      });
+    } else {
+      void navigate({ to: "/", replace: true });
+    }
+  }, [isAuthenticated, sessionHandle, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
