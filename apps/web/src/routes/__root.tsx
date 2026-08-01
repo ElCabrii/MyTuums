@@ -3,6 +3,7 @@ import { useAtomValue } from "jotai";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { themeClassEffect } from "@/atoms/theme";
+import { localeDocumentEffect } from "@/atoms/locale";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -13,6 +14,7 @@ function RootLayout() {
   // src/atoms/theme.ts. `atomEffect` atoms resolve to `void`; the value is
   // never used, only the subscription its `useAtomValue` establishes.
   useAtomValue(themeClassEffect);
+  useAtomValue(localeDocumentEffect);
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground antialiased">

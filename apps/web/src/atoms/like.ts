@@ -5,10 +5,10 @@ import { store } from "@/lib/store";
 import { orpc } from "@/lib/orpc";
 import {
   readCachedPost,
-  restoreFeeds,
-  snapshotFeeds,
+  restorePosts,
+  snapshotPosts,
   updatePostEverywhere,
-  type CachedFeeds,
+  type PostSnapshot,
 } from "@/lib/post-cache";
 
 /**
@@ -30,7 +30,7 @@ const intentFamily = atomFamily<string, PrimitiveAtom<boolean | null>>(() =>
 );
 
 interface LikeContext {
-  snapshot: CachedFeeds;
+  snapshot: PostSnapshot;
 }
 
 interface LikeResult {
@@ -93,8 +93,12 @@ function toggleMutationAtom(postId: string, direction: "like" | "unlike") {
       // cancel + snapshot + patch stay one atomic block with no boundary for
       // an interleaved dispatch to land in.
       onMutate: (): LikeContext => {
+        // Both caches hold this post (see lib/post-cache.ts), so both need
+        // cancelling — an in-flight thread refetch landing after the patch
+        // would overwrite it with the pre-click server state.
         void queryClient.cancelQueries({ queryKey: orpc.post.list.key() });
-        const snapshot = snapshotFeeds(queryClient);
+        void queryClient.cancelQueries({ queryKey: orpc.post.thread.key() });
+        const snapshot = snapshotPosts(queryClient);
 
         updatePostEverywhere(queryClient, postId, (post) =>
           post.viewerHasLiked === liked
@@ -122,7 +126,7 @@ function toggleMutationAtom(postId: string, direction: "like" | "unlike") {
       },
 
       onError: (_error: Error, _variables: LikeVariables, context: LikeContext | undefined) => {
-        if (context) restoreFeeds(queryClient, context.snapshot);
+        if (context) restorePosts(queryClient, context.snapshot);
       },
     };
   });

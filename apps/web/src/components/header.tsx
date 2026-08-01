@@ -6,13 +6,14 @@ import { Input } from "@/components/ui/input";
 import { ModeToggle } from "@/components/mode-toggle";
 import { viewerAtom, viewerHandleAtom, viewerInitialsAtom } from "@/atoms/session";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { m } from "@/paraglide/messages.js";
 
 export function Header() {
   const user = useAtomValue(viewerAtom);
   const handle = useAtomValue(viewerHandleAtom);
   const initials = useAtomValue(viewerInitialsAtom);
 
-  const nameDisplay = user?.name || user?.displayUsername || user?.username || "Profile";
+  const nameDisplay = user?.name || user?.displayUsername || user?.username || m.nav_profile();
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -25,17 +26,17 @@ export function Header() {
             pushing sign-in off-screen and making the page scroll sideways. */}
         <div className="flex items-center gap-6 min-w-0">
           <Link to="/" className="flex items-center gap-2 font-bold text-xl tracking-tight text-primary min-w-0">
-            <img src="/mytuums.svg" alt="MyTuums Logo" className="h-7 w-auto shrink-0" />
+            <img src="/mytuums.svg" alt={m.app_logo_alt()} className="h-7 w-auto shrink-0" />
             <span className="truncate">MyTuums</span>
           </Link>
           <nav className="hidden md:flex items-center gap-1">
             <Button variant="ghost" nativeButton={false} render={<Link to="/" className="flex items-center gap-2" />}>
               <Home className="h-4 w-4" />
-              <span>Home</span>
+              <span>{m.nav_home()}</span>
             </Button>
             <Button variant="ghost" nativeButton={false} render={<Link to="/discover" className="flex items-center gap-2" />}>
               <Compass className="h-4 w-4" />
-              <span>Discover</span>
+              <span>{m.nav_discover()}</span>
             </Button>
           </nav>
         </div>
@@ -51,7 +52,7 @@ export function Header() {
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               type="search"
-              placeholder="Search games, clips, or players..."
+              placeholder={m.nav_search_placeholder()}
               className="w-full pl-9 bg-muted/50 focus-visible:bg-background"
             />
           </div>
@@ -62,8 +63,8 @@ export function Header() {
           <Button
             variant="ghost"
             size="icon"
-            title="Messages"
-            aria-label="Messages"
+            title={m.nav_messages()}
+            aria-label={m.nav_messages()}
             className="hidden sm:inline-flex"
           >
             <MessageSquare className="h-5 w-5" />
@@ -71,8 +72,8 @@ export function Header() {
           <Button
             variant="ghost"
             size="icon"
-            title="Notifications"
-            aria-label="Notifications"
+            title={m.nav_notifications()}
+            aria-label={m.nav_notifications()}
             className="hidden sm:inline-flex"
           >
             <Bell className="h-5 w-5" />
@@ -85,10 +86,10 @@ export function Header() {
               to="/@{$username}"
               params={{ username: handle }}
               className="flex items-center gap-2.5 p-1 rounded-full hover:bg-muted/60 transition-colors ml-1"
-              title={`View profile for ${nameDisplay}`}
+              title={m.user_view_profile({ name: nameDisplay })}
             >
               <Avatar className="h-8 w-8 border border-primary/20">
-                <AvatarImage src={user.image || undefined} alt={user.name || "User avatar"} />
+                <AvatarImage src={user.image || undefined} alt={user.name || m.user_avatar_alt()} />
                 <AvatarFallback className="text-xs font-bold bg-primary text-primary-foreground">
                   {initials}
                 </AvatarFallback>
@@ -109,7 +110,7 @@ export function Header() {
                     dropping them is what buys the brand wordmark enough room
                     to render untruncated at 375px. */}
                 <LogIn className="hidden sm:block h-4 w-4" />
-                <span>Log in</span>
+                <span>{m.auth_log_in()}</span>
               </Button>
               <Button
                 variant="default"
@@ -118,7 +119,7 @@ export function Header() {
                 render={<Link to="/register" className="gap-1.5" />}
               >
                 <UserPlus className="hidden sm:block h-4 w-4" />
-                <span>Register</span>
+                <span>{m.auth_register()}</span>
               </Button>
             </div>
           )}

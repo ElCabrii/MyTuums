@@ -9,9 +9,11 @@ import {
   resetLoginFormAtom,
 } from "@/atoms/auth-form";
 import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";
+import { localizeAuthError } from "@/lib/auth-error-message";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LogIn, AlertCircle, Loader2, User, Lock } from "lucide-react";
+import { m } from "@/paraglide/messages.js";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -48,9 +50,9 @@ function LoginPage() {
     <div className="container max-w-md mx-auto px-4 py-12">
       <div className="rounded-3xl border border-border/50 bg-card/60 backdrop-blur-xl p-6 sm:p-8 shadow-2xl space-y-6">
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold tracking-tight">Welcome Back</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{m.auth_login_title()}</h1>
           <p className="text-sm text-muted-foreground">
-            Log in to your MyTuums account using your username or email
+            {m.auth_login_subtitle()}
           </p>
         </div>
 
@@ -61,8 +63,8 @@ function LoginPage() {
           >
             <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
             <div>
-              <p className="font-medium">Sign in failed</p>
-              <p className="text-destructive/90 text-xs mt-0.5">{error}</p>
+              <p className="font-medium">{m.auth_login_failed()}</p>
+              <p className="text-destructive/90 text-xs mt-0.5">{localizeAuthError(error)}</p>
             </div>
           </div>
         )}
@@ -73,14 +75,14 @@ function LoginPage() {
               htmlFor="identifier"
               className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
             >
-              Username or Email
+              {m.auth_field_identifier()}
             </label>
             <div className="relative">
               <User className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
               <Input
                 id="identifier"
                 type="text"
-                placeholder="john_doe or john@example.com"
+                placeholder={m.auth_field_identifier_placeholder()}
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 className="pl-10 h-10 bg-background/50"
@@ -96,7 +98,7 @@ function LoginPage() {
                 htmlFor="password"
                 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
               >
-                Password
+                {m.auth_field_password()}
               </label>
             </div>
             <div className="relative">
@@ -122,24 +124,24 @@ function LoginPage() {
             {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Signing in...</span>
+                <span>{m.auth_signing_in()}</span>
               </>
             ) : (
               <>
                 <LogIn className="h-4 w-4" />
-                <span>Log In</span>
+                <span>{m.auth_log_in()}</span>
               </>
             )}
           </Button>
         </form>
 
         <div className="text-center text-xs text-muted-foreground pt-2 border-t border-border/40">
-          Don't have an account?{" "}
+          {m.auth_dont_have_account()}{" "}
           <Link
             to="/register"
             className="font-medium text-primary hover:underline"
           >
-            Register here
+            {m.auth_register_link()}
           </Link>
         </div>
       </div>

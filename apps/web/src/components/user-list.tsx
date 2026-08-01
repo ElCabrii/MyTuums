@@ -8,10 +8,11 @@ import { isSignedInAtom } from "@/atoms/session";
 import { userListAtom, type FollowDirection } from "@/atoms/user-list";
 import { type UserSummary } from "@/lib/orpc";
 import { handleOf, initialsOf } from "@/lib/user";
+import { m } from "@/paraglide/messages.js";
 
 function UserRow({ user }: { user: UserSummary }) {
   const handle = handleOf(user);
-  const displayName = user.name || handle || "Unknown";
+  const displayName = user.name || handle || m.user_unknown();
 
   return (
     <div className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card shadow-sm hover:border-primary/30 transition-colors">
@@ -82,9 +83,9 @@ export function UserList({
       >
         <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
         <div className="space-y-2">
-          <p>{list.error.message || "Could not load this list."}</p>
+          <p>{list.error.message || m.follow_list_load_error()}</p>
           <Button variant="outline" size="sm" onClick={() => void list.refetch()}>
-            Try again
+            {m.common_try_again()}
           </Button>
         </div>
       </div>
@@ -118,7 +119,7 @@ export function UserList({
             className="gap-2 rounded-full"
           >
             {list.isFetchingNextPage && <Loader2 className="h-4 w-4 animate-spin" />}
-            <span>Load more</span>
+            <span>{m.common_load_more()}</span>
           </Button>
         </div>
       )}
@@ -128,9 +129,9 @@ export function UserList({
       {!isSignedIn && (
         <p className="pt-1 text-center text-xs text-muted-foreground">
           <Link to="/login" className="hover:underline">
-            Log in
+            {m.auth_log_in()}
           </Link>{" "}
-          to follow people from here.
+          {m.follow_signed_out_suffix()}
         </p>
       )}
     </div>

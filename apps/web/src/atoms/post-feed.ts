@@ -11,6 +11,10 @@ export type PostFeedParams = {
   authorId?: string;
   /** "following" requires a signed-in viewer; the server rejects it otherwise. */
   feed: FeedScope;
+  /** Set to list one post's direct replies — the thread page's reply list. */
+  parentId?: string;
+  /** Replies are excluded unless this is set; a profile feed opts in. */
+  includeReplies?: boolean;
 };
 
 /**
@@ -23,16 +27,26 @@ export type PostFeedParams = {
  * one hash lookup.
  *
  * `authorId` is a database id, not a validated slug, so it could in
- * principle contain "|" — `decode` below splits on the FIRST delimiter only
- * so the round trip stays total instead of silently truncating one.
+ * principle contain "|". It is therefore kept LAST and `decode` consumes only
+ * the three leading delimiters, treating everything after them as the id —
+ * so the round trip stays total instead of silently truncating one. The three
+ * fields ahead of it are all constrained (an enum, a flag, a uuid) and cannot
+ * contain a delimiter.
  */
-export const encode = (p: PostFeedParams): string => `${p.feed}|${p.authorId ?? ""}`;
+export const encode = (p: PostFeedParams): string =>
+  `${p.feed}|${p.includeReplies ? "r" : ""}|${p.parentId ?? ""}|${p.authorId ?? ""}`;
 
 export const decode = (key: string): PostFeedParams => {
-  const separator = key.indexOf("|");
-  const feed = key.slice(0, separator) as FeedScope;
-  const authorId = key.slice(separator + 1);
-  return authorId ? { feed, authorId } : { feed };
+  const [feed = "", replies = "", parentId = ""] = key.split("|", 3);
+  // Everything past the third delimiter, however many more it contains.
+  const authorId = key.slice(feed.length + replies.length + parentId.length + 3);
+
+  return {
+    feed: feed as FeedScope,
+    ...(authorId ? { authorId } : {}),
+    ...(parentId ? { parentId } : {}),
+    ...(replies === "r" ? { includeReplies: true } : {}),
+  };
 };
 
 /**
@@ -50,11 +64,20 @@ export const decode = (key: string): PostFeedParams => {
  */
 const postFeedFamily = atomFamily((key: string) =>
   atomWithInfiniteQuery(() => {
-    const { authorId, feed: scope } = decode(key);
+    const { authorId, feed: scope, parentId, includeReplies } = decode(key);
     return orpc.post.list.infiniteOptions({
       input: (cursor: string | undefined) => ({
         limit: POST_PAGE_SIZE,
         ...(authorId ? { authorId } : {}),
+        // Conditional for the same reason as every other input here: oRPC
+        // embeds the whole object in the query key, so unconditionally
+        // sending `parentId: undefined` / `includeReplies: false` gives the
+        // home timeline a different key than the one it has always used. The
+        // prefix sweeps in `lib/post-cache.ts` would still match both, which
+        // is the trap — nothing errors, the feed is simply cached twice and
+        // the copy a patch lands on need not be the copy on screen.
+        ...(parentId ? { parentId } : {}),
+        ...(includeReplies ? { includeReplies } : {}),
         // Conditional spread, like `authorId` above: keeps `feed` out of the
         // query key for the global timeline, so the cache entries the
         // `orpc.post.list.key()` prefix sweeps in `lib/post-cache.ts` depend

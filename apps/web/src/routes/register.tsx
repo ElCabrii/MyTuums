@@ -12,9 +12,11 @@ import {
   resetRegisterFormAtom,
 } from "@/atoms/auth-form";
 import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";
+import { localizeAuthError } from "@/lib/auth-error-message";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserPlus, AlertCircle, Loader2, User, Mail, Lock, AtSign } from "lucide-react";
+import { m } from "@/paraglide/messages.js";
 
 export const Route = createFileRoute("/register")({
   component: RegisterPage,
@@ -57,9 +59,9 @@ function RegisterPage() {
     <div className="container max-w-lg mx-auto px-4 py-12">
       <div className="rounded-3xl border border-border/50 bg-card/60 backdrop-blur-xl p-6 sm:p-8 shadow-2xl space-y-6">
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold tracking-tight">Create an Account</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{m.auth_register_title()}</h1>
           <p className="text-sm text-muted-foreground">
-            Join MyTuums with a unique username and password
+            {m.auth_register_subtitle()}
           </p>
         </div>
 
@@ -70,8 +72,8 @@ function RegisterPage() {
           >
             <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
             <div>
-              <p className="font-medium">Registration Error</p>
-              <p className="text-destructive/90 text-xs mt-0.5">{error}</p>
+              <p className="font-medium">{m.auth_register_failed()}</p>
+              <p className="text-destructive/90 text-xs mt-0.5">{localizeAuthError(error)}</p>
             </div>
           </div>
         )}
@@ -83,14 +85,14 @@ function RegisterPage() {
                 htmlFor="username"
                 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
               >
-                Username
+                {m.auth_field_username()}
               </label>
               <div className="relative">
                 <AtSign className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="username"
                   type="text"
-                  placeholder="johndoe69"
+                  placeholder={m.auth_field_username_placeholder()}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="pl-10 h-10 bg-background/50"
@@ -105,14 +107,14 @@ function RegisterPage() {
                 htmlFor="name"
                 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
               >
-                Display Name
+                {m.auth_field_display_name()}
               </label>
               <div className="relative">
                 <User className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="name"
                   type="text"
-                  placeholder="John Doe"
+                  placeholder={m.auth_field_display_name_placeholder()}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="pl-10 h-10 bg-background/50"
@@ -128,14 +130,14 @@ function RegisterPage() {
               htmlFor="email"
               className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
             >
-              Email Address
+              {m.auth_field_email()}
             </label>
             <div className="relative">
               <Mail className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
               <Input
                 id="email"
                 type="email"
-                placeholder="johndoe@example.com"
+                placeholder={m.auth_field_email_placeholder()}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="pl-10 h-10 bg-background/50"
@@ -151,7 +153,7 @@ function RegisterPage() {
                 htmlFor="password"
                 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
               >
-                Password
+                {m.auth_field_password()}
               </label>
               <div className="relative">
                 <Lock className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
@@ -173,7 +175,7 @@ function RegisterPage() {
                 htmlFor="confirmPassword"
                 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
               >
-                Confirm Password
+                {m.auth_field_confirm_password()}
               </label>
               <div className="relative">
                 <Lock className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
@@ -199,24 +201,24 @@ function RegisterPage() {
             {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Creating account...</span>
+                <span>{m.auth_creating_account()}</span>
               </>
             ) : (
               <>
                 <UserPlus className="h-4 w-4" />
-                <span>Register</span>
+                <span>{m.auth_register()}</span>
               </>
             )}
           </Button>
         </form>
 
         <div className="text-center text-xs text-muted-foreground pt-2 border-t border-border/40">
-          Already have an account?{" "}
+          {m.auth_already_have_account()}{" "}
           <Link
             to="/login"
             className="font-medium text-primary hover:underline"
           >
-            Log in here
+            {m.auth_login_link()}
           </Link>
         </div>
       </div>

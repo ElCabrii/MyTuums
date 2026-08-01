@@ -12,10 +12,9 @@ const isTheme = (value: unknown): value is Theme =>
 
 /**
  * `matchMedia` doesn't exist outside a browser, and importing this module —
- * e.g. for a unit test that only cares about `themeAtom` — must not throw
- * just because nothing touched the DOM yet. `src/test/setup.ts` shims it for
- * jsdom, but every read still goes through this rather than the bare global
- * so the module stays importable anywhere that shim is absent.
+ * from tooling, or anywhere that only cares about `themeAtom` — must not
+ * throw just because nothing touched the DOM yet. Every read goes through
+ * this rather than the bare global so the module stays importable anywhere.
  */
 const matchDarkScheme = (): MediaQueryList | undefined =>
   typeof window !== "undefined" && typeof window.matchMedia === "function"

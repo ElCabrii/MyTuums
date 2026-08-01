@@ -10,6 +10,8 @@ import {
 import { UserList } from "@/components/user-list";
 import { followListDialogAtom, type FollowDirection } from "@/atoms/user-list";
 import { formatCount } from "@/lib/format";
+import { m } from "@/paraglide/messages.js";
+import { getLocale } from "@/paraglide/runtime.js";
 
 /**
  * A follower/following count on a profile, which opens the matching list in a
@@ -44,8 +46,8 @@ export function FollowListDialog({
   const open = openDialog?.username === username && openDialog.direction === direction;
 
   const isFollowers = direction === "followers";
-  const title = isFollowers ? "Followers" : "Following";
-  const label = isFollowers && count === 1 ? "Follower" : title;
+  const title = isFollowers ? m.follow_followers() : m.follow_following();
+  const label = isFollowers && count === 1 ? m.follow_follower() : title;
 
   return (
     <Dialog
@@ -55,7 +57,7 @@ export function FollowListDialog({
       }}
     >
       <DialogTrigger className="rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-        <span className="font-bold text-foreground">{formatCount(count)}</span>{" "}
+         <span className="font-bold text-foreground">{formatCount(count, getLocale())}</span>{" "}
         <span className="text-muted-foreground">{label}</span>
       </DialogTrigger>
 
@@ -63,7 +65,7 @@ export function FollowListDialog({
         <DialogHeader className="pb-4">
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            {isFollowers ? `People following @${handle}` : `People @${handle} follows`}
+            {isFollowers ? m.follow_list_followers_title({ handle }) : m.follow_list_following_title({ handle })}
           </DialogDescription>
         </DialogHeader>
 
@@ -75,8 +77,8 @@ export function FollowListDialog({
             direction={direction}
             emptyMessage={
               isFollowers
-                ? `@${handle} doesn't have any followers yet.`
-                : `@${handle} isn't following anyone yet.`
+                ? m.follow_list_followers_empty({ handle })
+                : m.follow_list_following_empty({ handle })
             }
           />
         </div>

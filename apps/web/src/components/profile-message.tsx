@@ -1,10 +1,10 @@
 import type { UserX } from "lucide-react";
 
 /**
- * The centred card used for a profile that can't be shown — an unclaimed
- * handle, or a request that failed. Hoisted out of routes/@{$username}.tsx so
- * the follower and following routes render byte-identical states rather than
- * near-misses.
+ * The centred card used when a page's subject can't be shown — an unclaimed
+ * handle, a missing post, or a request that failed. Hoisted out of
+ * routes/@{$username}.tsx so every such state is byte-identical rather than a
+ * near-miss; `profile-layout.tsx` and `thread-page.tsx` both render it.
  */
 export function ProfileMessage({
   icon: Icon,

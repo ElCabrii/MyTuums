@@ -21,6 +21,7 @@ export const orpc = createTanstackQueryUtils(client);
 
 export type PostListPage = Awaited<ReturnType<typeof client.post.list>>;
 export type Post = PostListPage["items"][number];
+export type Thread = Awaited<ReturnType<typeof client.post.thread>>;
 
 export type UserListPage = Awaited<ReturnType<typeof client.user.followers>>;
 export type UserSummary = UserListPage["items"][number];

@@ -6,6 +6,9 @@ import { clearPostFeedFamily } from "@/atoms/post-feed";
 import { clearUserListFamily } from "@/atoms/user-list";
 import { clearLikeFamilies } from "@/atoms/like";
 import { clearFollowFamilies } from "@/atoms/follow";
+import { clearThreadFamily } from "@/atoms/thread";
+import { clearReplyFamilies } from "@/atoms/reply-composer";
+import { m } from "@/paraglide/messages.js";
 
 /** Set by `signInAtom`/`signUpAtom`/`signOutAtom`; the form's `role="alert"` reads this. */
 export const authErrorAtom = atom<string | null>(null);
@@ -39,13 +42,13 @@ export const signInAtom = atom(
         : await authClient.signIn.username({ username: identifier.trim(), password });
 
       if (res.error) {
-        set(authErrorAtom, res.error.message || "Invalid credentials. Please try again.");
+        set(authErrorAtom, res.error.message || m.common_something_went_wrong());
         return false;
       }
       return true;
     } catch (err) {
       console.error("Login error:", err);
-      set(authErrorAtom, "An unexpected error occurred. Please try again.");
+      set(authErrorAtom, m.common_something_went_wrong());
       return false;
     } finally {
       set(authPendingAtom, false);
@@ -70,13 +73,13 @@ export const signUpAtom = atom(
       });
 
       if (res.error) {
-        set(authErrorAtom, res.error.message || "Registration failed. Please check your details.");
+        set(authErrorAtom, res.error.message || m.common_something_went_wrong());
         return false;
       }
       return true;
     } catch (err) {
       console.error("Registration error:", err);
-      set(authErrorAtom, "An unexpected error occurred. Please try again.");
+      set(authErrorAtom, m.common_something_went_wrong());
       return false;
     } finally {
       set(authPendingAtom, false);
@@ -112,6 +115,10 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
     clearFamily(profileAtomFamily);
     clearPostFeedFamily();
     clearUserListFamily();
+    clearThreadFamily();
+    // Reply drafts are per-post and in-memory; they belong to the person who
+    // typed them, not to the browser.
+    clearReplyFamilies();
     // The like/follow families hold per-entity intent as well as mutation
     // atoms, and intent is viewer-relative — a stale `true` would make the
     // next viewer's first response look superseded and be dropped.
