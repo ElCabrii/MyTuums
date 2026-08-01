@@ -10,3 +10,7 @@ export const POST_MAX_LENGTH = 500;
 /** Default and maximum page sizes for `post.list`. */
 export const POST_PAGE_SIZE = 20;
 export const POST_PAGE_SIZE_MAX = 50;
+
+/** Default and maximum page sizes for `user.followers` / `user.following`. */
+export const FOLLOW_PAGE_SIZE = 20;
+export const FOLLOW_PAGE_SIZE_MAX = 50;

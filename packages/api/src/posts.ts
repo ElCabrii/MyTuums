@@ -1,49 +1,19 @@
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
-import { post, postLike, user } from "@my-tuums/db/schema";
+import { follow, post, postLike, user } from "@my-tuums/db/schema";
 import { z } from "zod";
 import { POST_MAX_LENGTH, POST_PAGE_SIZE, POST_PAGE_SIZE_MAX } from "./constants.js";
+import { createCursorCodec } from "./cursor.js";
 import { protectedProcedure, publicProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 
 /**
- * Opaque pagination cursor. Feeds are keyset-paginated on
- * `(created_at, id) DESC` rather than OFFSET: with OFFSET, a post created
- * while someone is scrolling shifts every later row down by one and the
- * reader sees a duplicate. `id` is in the key only to break ties between
- * posts sharing a timestamp, so the ordering is total and no row can be
- * skipped or repeated.
- *
- * It's encoded rather than exposed as `{ createdAt, id }` so callers treat it
- * as opaque and we stay free to change the key later.
+ * Feeds are keyset-paginated on `(post.created_at, post.id) DESC`; see
+ * ./cursor.ts for why, and for the encoding. `post.id` is a uuid, so a cursor
+ * minted here won't validate anywhere else.
  */
-const cursorPayloadSchema = z.object({
-  createdAt: z.iso.datetime(),
-  id: z.uuid(),
-});
-
-function encodeCursor(createdAt: Date, id: string): string {
-  return Buffer.from(JSON.stringify({ createdAt: createdAt.toISOString(), id })).toString(
-    "base64url",
-  );
-}
-
-function decodeCursor(raw: string): { createdAt: Date; id: string } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
-  } catch {
-    throw new ORPCError("BAD_REQUEST", { message: "Malformed pagination cursor." });
-  }
-
-  const result = cursorPayloadSchema.safeParse(parsed);
-  if (!result.success) {
-    throw new ORPCError("BAD_REQUEST", { message: "Malformed pagination cursor." });
-  }
-
-  return { createdAt: new Date(result.data.createdAt), id: result.data.id };
-}
+const postCursor = createCursorCodec(z.uuid());
 
 /**
  * Like counts are derived on read rather than denormalised onto a
@@ -130,16 +100,53 @@ export const postRouter = {
       z.object({
         cursor: z.string().optional(),
         limit: z.number().int().min(1).max(POST_PAGE_SIZE_MAX).default(POST_PAGE_SIZE),
-        /** Omit for the global feed; set to scope the feed to one author. */
+        /**
+         * Omit for the global feed; set to scope the feed to one author.
+         * Composes with `feed` as AND — "posts by X, if I follow X" — which is
+         * coherent if degenerate. The UI never sends both.
+         */
         authorId: z.string().optional(),
+        /**
+         * An enum rather than a boolean because this axis will grow (a ranked
+         * "for you", lists), and each new value should be a widening here
+         * rather than another orthogonal flag with undefined interactions.
+         */
+        feed: z.enum(["global", "following"]).default("global"),
       }),
     )
     .handler(async ({ input, context }) => {
       const viewerId = context.session?.user.id;
-      const cursor = input.cursor ? decodeCursor(input.cursor) : undefined;
+
+      // This stays a `publicProcedure` because the global feed *is* the
+      // signed-out home page; promoting the whole procedure would break it.
+      if (input.feed === "following" && !viewerId) {
+        throw new ORPCError("UNAUTHORIZED", { message: "Sign in to see your Following feed." });
+      }
+
+      const cursor = input.cursor ? postCursor.decode(input.cursor) : undefined;
 
       const filters = [
         input.authorId ? eq(post.authorId, input.authorId) : undefined,
+        // A semi-join rather than an INNER JOIN on `follow`: EXISTS cannot
+        // duplicate a post row, whereas a join relies on the follow primary
+        // key to avoid fanning out — true today, but a weaker statement of
+        // intent. It also composes as one more entry in this array.
+        //
+        // Your own posts are included unconditionally. The composer sits
+        // directly above this feed on the home page, and a post that appears
+        // to vanish on submit reads as a bug.
+        //
+        // This walks post_created_idx newest-first and probes the follow
+        // primary key per candidate. If it ever shows up slow — the bad case
+        // is following very few people relative to global post volume — the
+        // rewrite is `author_id = any(array(select following_id ...))`, which
+        // follow_follower_created_idx already covers.
+        input.feed === "following" && viewerId
+          ? sql`(${post.authorId} = ${viewerId} or exists (
+              select 1 from ${follow}
+              where ${follow.followingId} = ${post.authorId} and ${follow.followerId} = ${viewerId}
+            ))`
+          : undefined,
         // Row-value comparison: strictly "older than the cursor" under the
         // same (created_at DESC, id DESC) ordering `post_created_idx`
         // provides, so Postgres can seek straight to the cursor position.
@@ -169,7 +176,7 @@ export const postRouter = {
 
       return {
         items,
-        nextCursor: hasMore && last ? encodeCursor(last.createdAt, last.id) : null,
+        nextCursor: hasMore && last ? postCursor.encode(last.createdAt, last.id) : null,
       };
     }),
 

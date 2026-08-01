@@ -35,3 +35,17 @@ const joinDateFormatter = new Intl.DateTimeFormat(undefined, {
 export function formatJoinDate(date: Date): string {
   return joinDateFormatter.format(date);
 }
+
+const compactNumberFormatter = new Intl.NumberFormat(undefined, {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+/**
+ * "42", "1.2K", "3.4M" — for follower counts, which are read at a glance
+ * rather than audited. Compact notation already leaves 0-999 alone, so there
+ * is no threshold to special-case.
+ */
+export function formatCount(value: number): string {
+  return compactNumberFormatter.format(value);
+}

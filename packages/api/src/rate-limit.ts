@@ -121,6 +121,15 @@ export const RATE_LIMITS = {
   read: { name: "read", limit: 300, windowMs: MINUTE },
   /** Likes. A human can't out-click this; a script can. */
   like: { name: "like", limit: 120, windowMs: MINUTE },
+  /**
+   * Follows and unfollows. The same single indexed insert a like costs, so by
+   * cost alone it would share the `like` budget — but `name` is what
+   * namespaces the counter, and mass-following is a spam vector in a way
+   * mass-liking isn't. A separate bucket means someone burning this one
+   * can't also lock themselves out of liking. 60 is high enough that
+   * following a full screen of suggestions never trips it.
+   */
+  follow: { name: "follow", limit: 60, windowMs: MINUTE },
   /** Publishing. Deliberately tight — this is the one that writes rows. */
   write: { name: "write", limit: 15, windowMs: MINUTE },
 } as const satisfies Record<string, RateLimitPolicy>;

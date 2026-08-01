@@ -7,17 +7,28 @@ import { orpc } from "@/lib/orpc";
 
 export function PostFeed({
   authorId,
+  feed: scope = "global",
   emptyMessage,
+  emptyAction,
 }: {
   /** Omit for the global timeline; set to scope the feed to one author. */
   authorId?: string;
+  /** "following" requires a signed-in viewer; the server rejects it otherwise. */
+  feed?: "global" | "following";
   emptyMessage: string;
+  /** Rendered under `emptyMessage` — e.g. a "find people to follow" CTA. */
+  emptyAction?: React.ReactNode;
 }) {
   const feed = useInfiniteQuery(
     orpc.post.list.infiniteOptions({
       input: (cursor: string | undefined) => ({
         limit: POST_PAGE_SIZE,
         ...(authorId ? { authorId } : {}),
+        // Conditional-spread like `authorId`: it keeps `feed` out of the query
+        // key for the global timeline, so the existing home and profile caches
+        // are unchanged and the server's own `.default("global")` stays the
+        // single source of that default.
+        ...(scope === "following" ? { feed: scope } : {}),
         ...(cursor ? { cursor } : {}),
       }),
       initialPageParam: undefined as string | undefined,
@@ -57,6 +68,7 @@ export function PostFeed({
       <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center">
         <MessageSquare className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
         <p className="text-sm text-muted-foreground">{emptyMessage}</p>
+        {emptyAction && <div className="mt-4 flex justify-center">{emptyAction}</div>}
       </div>
     );
   }

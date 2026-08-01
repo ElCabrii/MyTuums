@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { formatJoinDate, formatRelativeTime } from "./format";
+import { formatCount, formatJoinDate, formatRelativeTime } from "./format";
 
 const NOW = new Date("2026-08-01T12:00:00Z");
 
@@ -50,5 +50,19 @@ describe("formatJoinDate", () => {
     // Constructed in local time so the assertion doesn't hinge on the
     // machine's offset pushing the date into a neighbouring month.
     expect(formatJoinDate(new Date(2026, 7, 15))).toBe("August 2026");
+  });
+});
+
+describe("formatCount", () => {
+  it("leaves counts below a thousand alone", () => {
+    expect(formatCount(0)).toBe("0");
+    expect(formatCount(1)).toBe("1");
+    expect(formatCount(999)).toBe("999");
+  });
+
+  it("compacts thousands and millions to one decimal", () => {
+    expect(formatCount(1_000)).toBe("1K");
+    expect(formatCount(1_234)).toBe("1.2K");
+    expect(formatCount(3_400_000)).toBe("3.4M");
   });
 });

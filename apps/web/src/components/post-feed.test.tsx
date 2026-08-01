@@ -141,6 +141,49 @@ describe("PostFeed", () => {
     expect(await screen.findByText("No posts yet.")).toBeInTheDocument();
   });
 
+  it("renders an emptyAction alongside the empty message", async () => {
+    clientMock.post.list.mockResolvedValue({ items: [], nextCursor: null });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PostFeed emptyMessage="No posts yet." emptyAction={<a href="/discover">Find people</a>} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("No posts yet.");
+    expect(screen.getByRole("link", { name: "Find people" })).toBeInTheDocument();
+  });
+
+  // The conditional spread is invisible in the rendered output but decides the
+  // query key: keeping `feed` out of the global timeline's input is what makes
+  // its cache identical to what it was before the Following feed existed.
+  it("omits feed entirely for the global timeline", async () => {
+    await renderFeed();
+
+    expect(clientMock.post.list).toHaveBeenCalledWith(
+      expect.not.objectContaining({ feed: expect.anything() as unknown }),
+      expect.anything(),
+    );
+  });
+
+  it("sends feed: following when scoped to the follow graph", async () => {
+    clientMock.post.list.mockResolvedValue({ items: [], nextCursor: null });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PostFeed feed="following" emptyMessage="No posts yet." />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("No posts yet.");
+    expect(clientMock.post.list).toHaveBeenCalledWith(
+      expect.objectContaining({ feed: "following" }),
+      expect.anything(),
+    );
+  });
+
   it("surfaces a failed load with a retry", async () => {
     clientMock.post.list.mockRejectedValue(new Error("network is down"));
 
