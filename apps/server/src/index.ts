@@ -1,4 +1,5 @@
 import { env } from "./env.js";
+import { resolveClientIp } from "./client-ip.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { RPCHandler } from "@orpc/server/node";
 import { CORSPlugin } from "@orpc/server/plugins";
@@ -65,7 +66,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     if (req.url?.startsWith("/rpc")) {
-      const context = await createContext({ headers: fromNodeHeaders(req.headers) });
+      const context = await createContext({
+        headers: fromNodeHeaders(req.headers),
+        clientIp: resolveClientIp(req, env.TRUST_PROXY),
+      });
 
       const { matched } = await handler.handle(req, res, {
         prefix: "/rpc",

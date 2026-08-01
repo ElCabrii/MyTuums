@@ -27,3 +27,6 @@ apps/web/src/paraglide/
 
 # TanStack Router (generated)
 apps/web/src/routeTree.gen.ts
+
+# TanStack build scratch
+apps/web/.tanstack/

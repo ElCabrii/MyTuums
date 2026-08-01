@@ -4,18 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ModeToggle } from "@/components/mode-toggle";
 import { useSession } from "@/lib/auth-client";
+import { handleOf } from "@/lib/user";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 export function Header() {
   const { data: session } = useSession();
-  const user = session?.user
-    ? (session.user as typeof session.user & {
-        username?: string;
-        displayUsername?: string;
-      })
-    : undefined;
+  const user = session?.user;
+  const handle = handleOf(user);
 
-  const usernameDisplay = user?.username || user?.displayUsername || user?.name || "Profile";
+  const nameDisplay = user?.name || user?.displayUsername || user?.username || "Profile";
   const initials = user?.name
     ? user.name
         .split(" ")
@@ -69,20 +66,21 @@ export function Header() {
           
           <ModeToggle />
 
-          {user ? (
+          {user && handle ? (
             <Link
-              to="/profile"
+              to="/@{$username}"
+              params={{ username: handle }}
               className="flex items-center gap-2.5 p-1 rounded-full hover:bg-muted/60 transition-colors ml-1"
-              title={`View profile for ${usernameDisplay}`}
+              title={`View profile for ${nameDisplay}`}
             >
               <Avatar className="h-8 w-8 border border-primary/20">
                 <AvatarImage src={user.image || undefined} alt={user.name || "User avatar"} />
-                <AvatarFallback className="text-xs font-semibold bg-primary/10 text-primary">
+                <AvatarFallback className="text-xs font-bold bg-primary text-primary-foreground">
                   {initials}
                 </AvatarFallback>
               </Avatar>
-              <span className="hidden sm:inline text-xs font-medium pr-1 text-foreground max-w-[100px] truncate">
-                {usernameDisplay}
+              <span className="hidden sm:inline text-sm font-medium pr-1 text-foreground max-w-[140px] truncate">
+                {nameDisplay}
               </span>
             </Link>
           ) : (

@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { authClient, useSession } from "@/lib/auth-client";
+import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserPlus, AlertCircle, Loader2, User, Mail, Lock, AtSign } from "lucide-react";
@@ -20,8 +21,16 @@ function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const goToProfile = (handle: string | null) => {
+    if (handle) {
+      void navigate({ to: "/@{$username}", params: { username: handle } });
+    } else {
+      void navigate({ to: "/" });
+    }
+  };
+
   if (session?.user) {
-    void navigate({ to: "/profile" });
+    goToProfile(handleOf(session.user));
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -80,7 +89,7 @@ function RegisterPage() {
       if (res.error) {
         setError(res.error.message || "Registration failed. Please check your details.");
       } else {
-        void navigate({ to: "/profile" });
+        goToProfile(handleOf(res.data?.user) ?? cleanUsername);
       }
     } catch (err: unknown) {
       console.error("Registration error:", err);

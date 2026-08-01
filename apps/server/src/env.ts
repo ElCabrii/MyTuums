@@ -9,6 +9,14 @@ const envSchema = z.object({
   WEB_ORIGIN: z.string().default("http://localhost:5173"),
   PORT: z.coerce.number().default(3001),
   HOST: z.string().default("127.0.0.1"),
+  // Off by default: see the header of ./client-ip.ts for why trusting
+  // X-Forwarded-For unconditionally would defeat the rate limiter rather
+  // than help it. Turn this on only when a reverse proxy you control sets
+  // the header.
+  TRUST_PROXY: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),

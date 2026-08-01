@@ -44,4 +44,19 @@ export default tseslint.config(
       "@typescript-eslint/require-await": "error",
     },
   },
+  {
+    // Plain Node build scripts, run by `node` and never bundled or imported
+    // by the app. There's no tsconfig that covers them, so type-aware linting
+    // has nothing to work from — it reports every import as `error` typed
+    // rather than finding anything real. Syntax and correctness rules still
+    // apply.
+    files: ["**/scripts/**/*.mjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+      },
+    },
+  },
 );
