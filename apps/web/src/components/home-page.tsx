@@ -1,23 +1,21 @@
 import { Link } from "@tanstack/react-router";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { Compass, LogIn, Loader2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PostComposer } from "@/components/post-composer";
 import { PostFeed } from "@/components/post-feed";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
-import { isSignedInAtom, sessionPendingAtom } from "@/atoms/session";
-import { feedScopeAtom, type FeedScope } from "@/lib/feed-scope";
+import { isSignedInAtom } from "@/atoms/session";
+import { homeFeedScopeAtom, postFeedAtom } from "@/atoms/post-feed";
+import { feedScopeAtom } from "@/lib/feed-scope";
 
 export function HomePage() {
-  const [feedScope, setFeedScope] = useAtom(feedScopeAtom);
+  const setFeedScope = useSetAtom(feedScopeAtom);
   const signedIn = useAtomValue(isSignedInAtom);
-  const isSessionPending = useAtomValue(sessionPendingAtom);
-
-  // Signed out is always For you (global): the server rejects an anonymous
-  // Following request, so honouring a stored "following" here would render an
-  // error card instead of a usable page. The stored choice is overridden rather
-  // than cleared, so it comes back when the visitor signs in.
-  const scope: FeedScope = signedIn ? feedScope : "global";
+  // `null` while the session is pending; see the comment on
+  // `homeFeedScopeAtom` in atoms/post-feed.ts for why that guard now lives
+  // in the atom rather than here.
+  const scope = useAtomValue(homeFeedScopeAtom);
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-4">
@@ -62,18 +60,19 @@ export function HomePage() {
       )}
 
       {/*
-        `sessionAtom` starts pending with `data: null`, so rendering the feed
-        straight away would mount the *global* one, fire a request, then flip
-        to Following a tick later and fire a second. The spinner is the same
-        one PostFeed shows while loading, so this costs no visible state.
+        `scope` is null exactly while the session is pending — see
+        `homeFeedScopeAtom`. Rendering the feed straight away would mount the
+        *global* one, fire a request, then flip to Following a tick later and
+        fire a second. This is the same spinner PostFeed shows while loading,
+        so it costs no visible state.
       */}
-      {isSessionPending ? (
+      {scope === null ? (
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : (
         <PostFeed
-          feed={scope}
+          feedAtom={postFeedAtom({ feed: scope })}
           emptyMessage={
             scope === "following"
               ? "Nothing here yet — you're not following anyone who's posted."

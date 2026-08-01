@@ -3,6 +3,7 @@ import { useAtomValue } from "jotai";
 import { MessageSquare } from "lucide-react";
 import { viewerIdAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
+import { postFeedAtom } from "@/atoms/post-feed";
 import { handleOf } from "@/lib/user";
 import { PostComposer } from "@/components/post-composer";
 import { PostFeed } from "@/components/post-feed";
@@ -41,7 +42,7 @@ export function ProfilePosts() {
       {isOwnProfile && <PostComposer />}
 
       <PostFeed
-        authorId={profile.id}
+        feedAtom={postFeedAtom({ authorId: profile.id, feed: "global" })}
         emptyMessage={
           isOwnProfile
             ? "You haven't posted anything yet."

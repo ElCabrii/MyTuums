@@ -1,40 +1,21 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useAtomValue } from "jotai";
 import { AlertCircle, Loader2, MessageSquare } from "lucide-react";
-import { POST_PAGE_SIZE } from "@my-tuums/api/constants";
 import { Button } from "@/components/ui/button";
 import { PostCard } from "@/components/post-card";
-import { orpc } from "@/lib/orpc";
+import type { postFeedAtom } from "@/atoms/post-feed";
 
 export function PostFeed({
-  authorId,
-  feed: scope = "global",
+  feedAtom,
   emptyMessage,
   emptyAction,
 }: {
-  /** Omit for the global timeline; set to scope the feed to one author. */
-  authorId?: string;
-  /** "following" requires a signed-in viewer; the server rejects it otherwise. */
-  feed?: "global" | "following";
+  /** The feed atom to read — parameterisation (scope, author) lives entirely in atom-land; see `atoms/post-feed.ts`. */
+  feedAtom: ReturnType<typeof postFeedAtom>;
   emptyMessage: string;
   /** Rendered under `emptyMessage` — e.g. a "find people to follow" CTA. */
   emptyAction?: React.ReactNode;
 }) {
-  const feed = useInfiniteQuery(
-    orpc.post.list.infiniteOptions({
-      input: (cursor: string | undefined) => ({
-        limit: POST_PAGE_SIZE,
-        ...(authorId ? { authorId } : {}),
-        // Conditional-spread like `authorId`: it keeps `feed` out of the query
-        // key for the global timeline, so the existing home and profile caches
-        // are unchanged and the server's own `.default("global")` stays the
-        // single source of that default.
-        ...(scope === "following" ? { feed: scope } : {}),
-        ...(cursor ? { cursor } : {}),
-      }),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    })
-  );
+  const feed = useAtomValue(feedAtom);
 
   if (feed.isPending) {
     return (
