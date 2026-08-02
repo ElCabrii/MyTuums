@@ -10,7 +10,7 @@ import {
 } from "@/atoms/auth-form";
 import { useOneTap } from "@/hooks/use-one-tap";
 import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";
-import { localizeAuthError } from "@/lib/auth-error-message";
+import { localizeAuthError, localizeOAuthError } from "@/lib/auth-error-message";
 import { SignInOptions } from "@/components/sign-in-options";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,20 @@ import { m } from "@/paraglide/messages.js";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
+  /**
+   * The one search param in the app, and the exception proves the rule
+   * CLAUDE.md states: view state belongs in an atom because a URL nobody can
+   * link to is the cost. This isn't view state — it is a result handed back by
+   * an *external* redirect (BetterAuth's OAuth callback appends
+   * `?error=<code>` to `errorCallbackURL`), and a query param is the only
+   * channel a cross-origin redirect has. Nothing in the app ever navigates
+   * here with it deliberately.
+   *
+   * Narrowed to a string rather than trusted: this arrives from outside, so
+   * anything else is dropped instead of being rendered.
+   */
+  validateSearch: (search: Record<string, unknown>): { error?: string } =>
+    typeof search.error === "string" ? { error: search.error } : {},
 });
 
 function LoginPage() {
@@ -39,6 +53,19 @@ function LoginPage() {
   // useRedirectWhenSignedIn's session read above).
   const resetForm = useSetAtom(resetLoginFormAtom);
   useEffect(() => resetForm, [resetForm]);
+
+  /**
+   * Surfaces a failed OAuth round trip in the same banner as every other auth
+   * error, rather than leaving the person on a form that silently looks fine.
+   *
+   * Feeding `authErrorAtom` instead of rendering separately is what keeps
+   * there to one error surface: submitting the password form afterwards
+   * clears this the same way it clears any other message.
+   */
+  const { error: oauthError } = Route.useSearch();
+  useEffect(() => {
+    if (oauthError) setError(localizeOAuthError(oauthError));
+  }, [oauthError, setError]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

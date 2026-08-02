@@ -67,6 +67,13 @@
   "auth_continue_with": "Continue with {provider}",
   "auth_continue_with_passkey": "Continue with a passkey",
   "auth_last_used": "Last used",
+  "auth_oauth_account_not_linked": "An account with this email address already exists. Sign in with your password, then connect this provider from your account settings.",
+  "auth_oauth_already_linked": "That account is already connected to a different MyTuums user.",
+  "auth_oauth_no_email": "That provider didn't share an email address, which we need to create your account.",
+  "auth_oauth_email_mismatch": "That account uses a different email address than the one on your MyTuums account.",
+  "auth_oauth_signup_disabled": "New accounts from this provider aren't accepted right now.",
+  "auth_oauth_expired": "That sign-in request expired. Please try again.",
+  "auth_oauth_failed": "That sign-in didn't complete. Please try again.",
 
   "validation_username_required": "Username is required.",
   "validation_username_length": "Username must be between 3 and 20 characters long.",

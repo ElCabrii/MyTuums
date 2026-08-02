@@ -67,6 +67,13 @@
   "auth_continue_with": "Continuer avec {provider}",
   "auth_continue_with_passkey": "Continuer avec une clé d'accès",
   "auth_last_used": "Dernière méthode utilisée",
+  "auth_oauth_account_not_linked": "Un compte existe déjà avec cette adresse e-mail. Connectez-vous avec votre mot de passe, puis liez ce service depuis les paramètres de votre compte.",
+  "auth_oauth_already_linked": "Ce compte est déjà lié à un autre utilisateur MyTuums.",
+  "auth_oauth_no_email": "Ce service n'a pas transmis d'adresse e-mail, qui nous est nécessaire pour créer votre compte.",
+  "auth_oauth_email_mismatch": "Ce compte utilise une adresse e-mail différente de celle de votre compte MyTuums.",
+  "auth_oauth_signup_disabled": "Les nouveaux comptes via ce service ne sont pas acceptés pour le moment.",
+  "auth_oauth_expired": "Cette demande de connexion a expiré. Veuillez réessayer.",
+  "auth_oauth_failed": "Cette connexion n'a pas abouti. Veuillez réessayer.",
 
   "validation_username_required": "Le nom d'utilisateur est requis.",
   "validation_username_length": "Le nom d'utilisateur doit comporter entre 3 et 20 caractères.",
