@@ -46,7 +46,14 @@ export const linkProviderAtom = atom(
     set(authErrorAtom, null);
     set(authPendingAtom, true);
     try {
-      const res = await authClient.linkSocial({ provider, callbackURL: "/settings/account" });
+      // Absolute for the same reason as `signInWithProviderAtom` — BetterAuth
+      // redirects to this verbatim from its own origin, so a relative path
+      // lands on the API server rather than the web app whenever the two are
+      // not same-origin (which they are not in dev).
+      const res = await authClient.linkSocial({
+        provider,
+        callbackURL: `${window.location.origin}/settings/account`,
+      });
       if (res.error) {
         set(authErrorAtom, res.error.message || m.common_something_went_wrong());
       }

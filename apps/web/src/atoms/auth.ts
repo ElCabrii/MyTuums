@@ -129,6 +129,16 @@ export const signInAtom = atom(
  * has no handle to build a profile URL from; `useRequireHandle` then moves it
  * to `/welcome`. `errorCallbackURL` brings a refused or cancelled consent back
  * to the form, where `authErrorAtom` can say so, instead of a bare error page.
+ *
+ * **Both must be absolute.** BetterAuth echoes these back as the `Location` of
+ * the redirect its *own* server issues at the end of `/api/auth/callback/:id`,
+ * so a relative `"/"` resolves against the API origin rather than the web
+ * app's. Same-origin in production that is invisible; in dev, where the web
+ * app is on :5173 and the API on :3001, it drops you on the API server —
+ * which serves no HTML and answers "Not found". `window.location.origin` is
+ * the web origin in both cases, and matches the `trustedOrigins` allowlist in
+ * packages/auth (BetterAuth rejects a redirect target outside it, so this
+ * cannot become an open redirect).
  */
 export const signInWithProviderAtom = atom(
   null,
@@ -138,8 +148,8 @@ export const signInWithProviderAtom = atom(
     try {
       const res = await authClient.signIn.social({
         provider,
-        callbackURL: "/",
-        errorCallbackURL: "/login",
+        callbackURL: `${window.location.origin}/`,
+        errorCallbackURL: `${window.location.origin}/login`,
       });
       if (res.error) {
         set(authErrorAtom, res.error.message || m.common_something_went_wrong());

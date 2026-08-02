@@ -1,8 +1,14 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { Fingerprint } from "lucide-react";
-import { authPendingAtom, signInWithPasskeyAtom, signInWithProviderAtom } from "@/atoms/auth";
-import { authClient, socialProviders } from "@/lib/auth-client";
-import { Button } from "@/components/ui/button";
+import {
+  authPendingAtom,
+  signInWithPasskeyAtom,
+  signInWithProviderAtom,
+} from "@/atoms/auth";
+import { authClient, socialProviders, type SocialProviderId } from "@/lib/auth-client";
+import { DiscordIcon } from "@/components/icons/discord-icon";
+import { GoogleIcon } from "@/components/icons/google-icon";
+import { TwitchIcon } from "@/components/icons/twitch-icon";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -53,31 +59,22 @@ export function SignInOptions() {
 
       <div className="space-y-2">
         {socialProviders.map((provider) => (
-          <Button
+          <ProviderButton
             key={provider.id}
-            type="button"
-            variant="outline"
-            className="w-full h-10 rounded-2xl justify-center gap-2"
+            providerId={provider.id}
+            label={provider.label}
             disabled={isBusy}
+            lastUsed={lastUsed === provider.id}
             onClick={() => void signInWithProvider(provider.id)}
-          >
-            <span>{m.auth_continue_with({ provider: provider.label })}</span>
-            {lastUsed === provider.id && <LastUsedBadge />}
-          </Button>
+          />
         ))}
 
         {supportsPasskeys && (
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full h-10 rounded-2xl justify-center gap-2"
-            disabled={isBusy}
-            onClick={() => void signInWithPasskey()}
-          >
-            <Fingerprint className="h-4 w-4" />
+          <NeutralButton disabled={isBusy} onClick={() => void signInWithPasskey()}>
+            <Fingerprint className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span>{m.auth_continue_with_passkey()}</span>
             {lastUsed === "passkey" && <LastUsedBadge />}
-          </Button>
+          </NeutralButton>
         )}
       </div>
     </div>
@@ -87,12 +84,94 @@ export function SignInOptions() {
 /**
  * Not `aria-label`ed as "last used" on the button itself: the text is already
  * in the accessible name via its content, so a label would replace the
- * provider name rather than add to it.
+ * provider name rather than add to it. One style now that every button in
+ * this list shares the same neutral chrome — see `NeutralButton`.
  */
 function LastUsedBadge() {
   return (
     <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
       {m.auth_last_used()}
     </span>
+  );
+}
+
+/**
+ * The shared chrome for every button in this list — Google's neutral
+ * treatment (https://developers.google.com/identity/branding-guidelines),
+ * reused for Discord, Twitch and the passkey option too, rather than one
+ * button per row in a different brand color.
+ *
+ * Google's spec is the only one of the three that mandates a button design at
+ * all: exact colors, a non-recolorable logo, and light/dark variants. Discord
+ * and Twitch's guidelines cover the *mark* only ("do not edit, distort,
+ * recolor, or reconfigure" it outside the variants they publish) — they don't
+ * prescribe a button background, so nothing here is out of policy by not
+ * using their brand color as a fill. A row of Google-grey/Discord-blurple/
+ * Twitch-purple buttons also reads like three unrelated products bolted
+ * together rather than one sign-in list; matching Google's chrome and letting
+ * each icon carry its own brand color is the calmer result, and is exactly
+ * the "colored icon on a neutral surface" pattern most production apps use.
+ */
+function NeutralButton({
+  disabled,
+  onClick,
+  children,
+}: {
+  disabled: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex h-10 w-full items-center justify-center gap-2.5 rounded-2xl border pl-3 pr-3 text-sm font-medium
+        border-[#747775] bg-white text-[#1F1F1F] hover:bg-[#F8F9FA]
+        dark:border-[#8E918F] dark:bg-[#131314] dark:text-[#E3E3E3] dark:hover:bg-[#1E1F20]
+        disabled:pointer-events-none disabled:opacity-60"
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * The icon each provider owns, at a fixed brand color regardless of theme.
+ *
+ * Google's "G" is excluded — its guidelines forbid changing its color, so it
+ * keeps its own hardcoded multi-color paths (`GoogleIcon`) rather than going
+ * through `currentColor` here. Discord's Blurple and Twitch's Purple are both
+ * saturated enough to read clearly against both the white and near-black
+ * neutral surfaces `NeutralButton` uses, which is why one fixed shade works
+ * for both themes instead of swapping to a lighter variant in dark mode.
+ */
+function ProviderIcon({ providerId }: { providerId: SocialProviderId }) {
+  if (providerId === "google") return <GoogleIcon className="h-5 w-5 shrink-0" />;
+  if (providerId === "discord") {
+    return <DiscordIcon className="h-4 w-4 shrink-0" style={{ color: "#5865F2" }} />;
+  }
+  return <TwitchIcon className="h-4 w-4 shrink-0" style={{ color: "#9146FF" }} />;
+}
+
+function ProviderButton({
+  providerId,
+  label,
+  disabled,
+  lastUsed,
+  onClick,
+}: {
+  providerId: SocialProviderId;
+  label: string;
+  disabled: boolean;
+  lastUsed: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <NeutralButton disabled={disabled} onClick={onClick}>
+      <ProviderIcon providerId={providerId} />
+      <span>{m.auth_continue_with({ provider: label })}</span>
+      {lastUsed && <LastUsedBadge />}
+    </NeutralButton>
   );
 }

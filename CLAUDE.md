@@ -13,6 +13,23 @@ pnpm dev                  # all dev servers: web on :5173, server on :3001
 pnpm build | lint | typecheck
 ```
 
+**Do not run `pnpm docker:up` and `pnpm dev` at the same time.** Both put a
+server on :3001 — the container binds `0.0.0.0`/`[::]` and the host process
+binds `127.0.0.1` — so neither fails to start and everything *looks* fine.
+What actually happens is that requests split between the two: the web app's
+Vite proxy resolves `localhost` to `127.0.0.1` and reaches the host process,
+while the browser following an OAuth redirect can resolve to `::1` and reach
+the container. The container is also whatever image was last built, so it can
+be running older code entirely.
+
+The symptom is an OAuth sign-in dying at
+`http://localhost:3001/login?error=state_mismatch` with "Not found": one
+server wrote the state, the other read the callback and never saw it, then
+redirected to its own origin — which serves no HTML. Nothing in that error
+points at the port conflict. Use `docker compose up -d postgres` for the
+database alone alongside `pnpm dev`; the full `docker:up` is for running the
+stack *instead of* the dev servers.
+
 Scoping to one workspace uses pnpm filters:
 
 ```bash

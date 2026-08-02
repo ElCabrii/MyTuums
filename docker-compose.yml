@@ -44,6 +44,23 @@ services:
       # deliberately overridden to 0.0.0.0 here.
       HOST: 0.0.0.0
       NODE_ENV: production
+      # Optional, and passed through rather than defaulted so the container
+      # behaves exactly like a host-side `pnpm dev` reading the same .env.
+      # `:-` yields an empty string when unset, which packages/auth/src/env.ts
+      # treats as absent — so an unconfigured provider is simply not
+      # registered rather than half-registered. Without these the container
+      # silently has NO social providers, and an OAuth callback that reaches
+      # it fails with `state_mismatch` (see the port-conflict note in
+      # CLAUDE.md).
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID:-}
+      TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      PASSKEY_RP_ID: ${PASSKEY_RP_ID:-}
     ports:
       - "3001:3001"
 

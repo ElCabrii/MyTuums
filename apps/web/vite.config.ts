@@ -11,6 +11,14 @@ import path from "node:path";
 const rpcTarget = process.env.RPC_TARGET ?? "http://localhost:3001";
 
 export default defineConfig({
+  // Vite only loads .env files from its own project root by default, which is
+  // apps/web — not the monorepo root where the real .env lives (every other
+  // process here reads that one via `dotenv -e ../../.env`, e.g.
+  // packages/db's scripts). Without this, VITE_GOOGLE_CLIENT_ID and
+  // VITE_SOCIAL_PROVIDERS are invisible to import.meta.env, so no OAuth
+  // buttons and no One Tap ever render, with nothing in the console to say
+  // why - the code has no missing dependency, it just never saw the values.
+  envDir: path.resolve(__dirname, "../.."),
   plugins: [
     tailwindcss(),
     tanstackRouter({
