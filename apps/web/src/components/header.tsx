@@ -81,12 +81,21 @@ export function Header() {
           
           <ModeToggle />
 
-          {user && handle ? (
+          {/* Branches on `user` alone, NOT `user && handle`.
+              An OAuth sign-up has no handle until it claims one at /welcome,
+              and the old condition sent that perfectly valid session down the
+              else-branch — rendering "Log in" and "Register" to somebody who
+              was already signed in. The avatar points at /welcome in that
+              window instead, which is also where `useRequireHandle` is sending
+              them, so the header agrees with the redirect rather than
+              contradicting it. */}
+          {user ? (
             <Link
-              to="/@{$username}"
-              params={{ username: handle }}
+              {...(handle
+                ? ({ to: "/@{$username}", params: { username: handle } } as const)
+                : ({ to: "/welcome" } as const))}
               className="flex items-center gap-2.5 p-1 rounded-full hover:bg-muted/60 transition-colors ml-1"
-              title={m.user_view_profile({ name: nameDisplay })}
+              title={handle ? m.user_view_profile({ name: nameDisplay }) : m.welcome_finish_setup()}
             >
               <Avatar className="h-8 w-8 border border-primary/20">
                 <AvatarImage src={user.image || undefined} alt={user.name || m.user_avatar_alt()} />

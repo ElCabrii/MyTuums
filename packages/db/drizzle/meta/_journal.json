@@ -43,6 +43,13 @@
       "when": 1785612013967,
       "tag": "0005_natural_mystique",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785676714181,
+      "tag": "0006_numerous_madelyne_pryor",
+      "breakpoints": true
     }
   ]
 }

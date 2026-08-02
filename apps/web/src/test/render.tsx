@@ -110,15 +110,59 @@ vi.mock("@/lib/auth-client", () => ({
       return () => sessionListeners.delete(listener);
     },
   },
-  // Nothing under test in src/components imports these directly (they only
-  // reach `sessionStore` through src/atoms/session.ts), but they're stubbed
-  // so an incidental transitive import of the real module's other exports
-  // doesn't crash instead of just going unused.
-  authClient: {},
+  /**
+   * The full client surface the auth atoms reach for.
+   *
+   * This used to be `{}`, which was fine while only `atoms/session.ts` went
+   * through this module — it reads `sessionStore` and nothing else. The auth
+   * hardening changed that: `atoms/auth.ts`, `atoms/two-factor.ts`,
+   * `atoms/passkey.ts`, `atoms/handle-claim.ts` and `atoms/linked-accounts.ts`
+   * all call `authClient.*` namespaces directly, and an empty object turns any
+   * component that renders one of them into a "cannot read properties of
+   * undefined" at call time rather than a readable failure.
+   *
+   * Every stub resolves `{ data, error }` rather than rejecting, matching how
+   * BetterAuth's client actually reports failure. A test that cares overrides
+   * the specific one with `vi.mocked(...).mockResolvedValue(...)`.
+   */
+  authClient: {
+    signIn: {
+      email: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+      username: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+      social: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+      passkey: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    },
+    signUp: { email: vi.fn(() => Promise.resolve({ data: {}, error: null })) },
+    signOut: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    updateUser: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    listAccounts: vi.fn(() => Promise.resolve({ data: [], error: null })),
+    linkSocial: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    unlinkAccount: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    twoFactor: {
+      enable: vi.fn(() => Promise.resolve({ data: { totpURI: "", backupCodes: [] }, error: null })),
+      disable: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+      verifyTotp: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+      verifyOtp: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+      verifyBackupCode: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+      sendOtp: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    },
+    passkey: {
+      addPasskey: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+      listUserPasskeys: vi.fn(() => Promise.resolve({ data: [], error: null })),
+      updatePasskey: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+      deletePasskey: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    },
+    getLastUsedLoginMethod: vi.fn(() => null),
+  },
   useSession: () => currentSession,
   signIn: vi.fn(),
   signUp: vi.fn(),
   signOut: vi.fn(),
+  // Read at module scope by `lib/one-tap.ts` and by `sign-in-options.tsx`;
+  // off by default so component tests don't render provider buttons unless
+  // they mean to.
+  shouldOfferOneTap: false,
+  socialProviders: [],
 }));
 
 /**

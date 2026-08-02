@@ -13,6 +13,7 @@ import {
 } from "@/atoms/auth-form";
 import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";
 import { localizeAuthError } from "@/lib/auth-error-message";
+import { SignInOptions } from "@/components/sign-in-options";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserPlus, AlertCircle, Loader2, User, Mail, Lock, AtSign } from "lucide-react";
@@ -211,6 +212,8 @@ function RegisterPage() {
             )}
           </Button>
         </form>
+
+        <SignInOptions />
 
         <div className="text-center text-xs text-muted-foreground pt-2 border-t border-border/40">
           {m.auth_already_have_account()}{" "}

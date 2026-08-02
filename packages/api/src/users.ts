@@ -17,6 +17,12 @@ import { RATE_LIMITS } from "./rate-limit.js";
  * every user's email address to any unauthenticated caller. Same for
  * `emailVerified` and `updatedAt`, which are nobody else's business.
  *
+ * The auth hardening pass added two more columns that must stay out for a
+ * sharper reason than privacy: `twoFactorEnabled` and `lastLoginMethod` are
+ * reconnaissance. The first tells an attacker which accounts a stolen password
+ * would be enough for on its own; the second tells them which provider to
+ * phish. Neither is profile data, and a `select()`-all here would publish both.
+ *
  * The follower lists below spread this too, so they inherit the same property
  * rather than growing their own projection that could drift from it.
  */

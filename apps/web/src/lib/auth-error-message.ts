@@ -11,6 +11,7 @@ const validationMessages: Record<string, () => string> = {
   "Passwords do not match.": () => m.validation_password_mismatch(),
   "Please enter your username or email address.": () => m.validation_identifier_required(),
   "Please enter your password.": () => m.validation_password_required(),
+  "Please enter your verification code.": () => m.validation_code_required(),
 };
 
 /** Translates the known client-side validation messages without hiding server errors. */

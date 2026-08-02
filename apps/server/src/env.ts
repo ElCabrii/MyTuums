@@ -20,7 +20,53 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),
-});
+
+  // Everything below is optional, and `packages/auth/src/env.ts` reads it
+  // again independently (that package has to work when imported by the
+  // BetterAuth CLI, with no server around). This schema is not the source of
+  // those values — it is the loud check that a *half*-filled pair gets caught
+  // at boot, which is the failure the `.superRefine` below exists for.
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  DISCORD_CLIENT_ID: z.string().optional(),
+  DISCORD_CLIENT_SECRET: z.string().optional(),
+  TWITCH_CLIENT_ID: z.string().optional(),
+  TWITCH_CLIENT_SECRET: z.string().optional(),
+
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
+
+  // Defaults to WEB_ORIGIN's hostname in packages/auth. Only set this when the
+  // browser origin and the intended WebAuthn Relying Party differ.
+  PASSKEY_RP_ID: z.string().optional(),
+
+  // Escape hatch for the Playwright suite, which drives every sign-in from one
+  // IP. See the comment on `authRateLimitEnabled` in packages/auth/src/env.ts.
+  AUTH_RATE_LIMIT: z.enum(["true", "false"]).optional(),
+})
+  /**
+   * A provider configured with only half its credentials is the failure worth
+   * catching here. `packages/auth/src/social.ts` registers a provider only when
+   * both halves are present, so an id without a secret doesn't error — the
+   * provider just silently isn't there, its button never renders, and nothing
+   * anywhere says why. Ten minutes of confusion, or one line at boot.
+   */
+  .superRefine((env, ctx) => {
+    for (const provider of ["GOOGLE", "DISCORD", "TWITCH"] as const) {
+      const id = env[`${provider}_CLIENT_ID`];
+      const secret = env[`${provider}_CLIENT_SECRET`];
+      if (!id === !secret) continue;
+
+      const missing = id ? `${provider}_CLIENT_SECRET` : `${provider}_CLIENT_ID`;
+      ctx.addIssue({
+        code: "custom",
+        path: [missing],
+        message: `is required because ${
+          id ? `${provider}_CLIENT_ID` : `${provider}_CLIENT_SECRET`
+        } is set — a provider missing either half is not registered at all`,
+      });
+    }
+  });
 
 export type Env = z.infer<typeof envSchema>;
 

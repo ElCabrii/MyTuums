@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { validateLogin, validateRegister, type RegisterFields } from "@/lib/auth-validation";
+import {
+  validateLogin,
+  validateRegister,
+  validateTwoFactorCode,
+  validateUsername,
+  type RegisterFields,
+} from "@/lib/auth-validation";
 
 /** A fully valid baseline so each test only has to override the field(s) it cares about. */
 const validFields: RegisterFields = {
@@ -201,5 +207,69 @@ describe("validateLogin", () => {
     expect(validateLogin({ identifier: "alice", password: "" })).toBe(
       "Please enter your password.",
     );
+  });
+});
+
+/**
+ * `validateUsername` was extracted from `validateRegister` so `/welcome` can
+ * enforce the same handle rules a social sign-up never went through. The
+ * property worth locking down is that the two agree — if they ever diverge,
+ * one form accepts a handle the other rejects and both look broken.
+ */
+describe("validateUsername", () => {
+  it("accepts a valid handle", () => {
+    expect(validateUsername("alice")).toBeNull();
+  });
+
+  it("trims before measuring, so padding can't smuggle a short handle through", () => {
+    expect(validateUsername("  ab  ")).toBe("Username must be between 3 and 20 characters long.");
+    expect(validateUsername("  alice  ")).toBeNull();
+  });
+
+  it.each([
+    ["", "Username is required."],
+    ["   ", "Username is required."],
+    ["ab", "Username must be between 3 and 20 characters long."],
+    ["a".repeat(21), "Username must be between 3 and 20 characters long."],
+    ["alice!", "Username can only contain letters, numbers, underscores, and hyphens."],
+    ["ali ce", "Username can only contain letters, numbers, underscores, and hyphens."],
+    ["ali.ce", "Username can only contain letters, numbers, underscores, and hyphens."],
+  ])("rejects %j", (username, expected) => {
+    expect(validateUsername(username)).toBe(expected);
+  });
+
+  it.each([["abc"], ["a".repeat(20)]])("accepts the boundary length %j", (username) => {
+    expect(validateUsername(username)).toBeNull();
+  });
+
+  it("agrees with validateRegister on every handle — the two must not drift", () => {
+    const handles = ["", "  ", "ab", "abc", "a".repeat(20), "a".repeat(21), "ok_-1", "bad!"];
+
+    for (const username of handles) {
+      const standalone = validateUsername(username);
+      const throughRegister = validateRegister({ ...validFields, username });
+
+      // `validateRegister` only continues past the handle once it is valid, so
+      // a null here means the later rules took over — which for `validFields`
+      // also means null.
+      expect(throughRegister).toBe(standalone);
+    }
+  });
+});
+
+describe("validateTwoFactorCode", () => {
+  it("accepts anything non-empty", () => {
+    expect(validateTwoFactorCode("123456")).toBeNull();
+    // Backup codes are not digits, and the same box accepts them.
+    expect(validateTwoFactorCode("ABCD-EFGH")).toBeNull();
+  });
+
+  it.each([[""], ["   "]])("rejects %j", (code) => {
+    expect(validateTwoFactorCode(code)).toBe("Please enter your verification code.");
+  });
+
+  it("does not guess at length — a client-side format rule would reject codes the server accepts", () => {
+    expect(validateTwoFactorCode("1")).toBeNull();
+    expect(validateTwoFactorCode("12345678901234567890")).toBeNull();
   });
 });

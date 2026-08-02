@@ -42,7 +42,12 @@ export function useRedirectWhenSignedIn(): void {
     if (handle) {
       void navigate({ to: "/@{$username}", params: { username: handle }, replace: true });
     } else {
-      void navigate({ to: "/", replace: true });
+      // No handle means an OAuth sign-up that never chose one — there is no
+      // profile URL to send them to. `/welcome` rather than `/` because home
+      // would immediately bounce them here anyway via `useRequireHandle`, and
+      // routing through the intermediate page just adds a visible flash of a
+      // feed they cannot yet participate in.
+      void navigate({ to: "/welcome", replace: true });
     }
   }, [isSignedIn, handle, navigate]);
 }

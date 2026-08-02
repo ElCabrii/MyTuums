@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing.ts",
+      "default": "./src/testing.ts"
     }
   },
   "scripts": {
@@ -14,8 +18,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@better-auth/i18n": "1.6.25",
+    "@better-auth/passkey": "1.6.25",
     "@my-tuums/db": "workspace:*",
-    "better-auth": "^1.2.9"
+    "better-auth": "^1.2.9",
+    "resend": "^6.18.1"
   },
   "devDependencies": {
     "@my-tuums/tsconfig": "workspace:*",

@@ -38,3 +38,21 @@ export const viewerHandleAtom = atom((get) => handleOf(get(viewerAtom)));
 export const viewerInitialsAtom = atom((get) => initialsOf(get(viewerAtom)?.name));
 
 export const sessionPendingAtom = atom((get) => get(sessionAtom).isPending);
+
+/**
+ * A signed-in account that has no handle yet — the state an OAuth sign-up
+ * lands in, and the one this app cannot render.
+ *
+ * The `username` plugin leaves `user.username` null on social sign-up and
+ * offers no way to generate one, but every profile URL, follow list and
+ * `user.byUsername` lookup keys on that column. Such an account has no profile
+ * page, cannot be followed, and used to fall through `header.tsx`'s
+ * `user && handle` branch into rendering "Log in"/"Register" *while signed in*.
+ *
+ * So it is treated as an incomplete sign-up rather than a valid state:
+ * `use-require-handle.ts` sends these sessions to `/welcome` until they claim
+ * one. Reading it as a derived atom rather than re-deriving `!handle` at each
+ * call site is what keeps the header, the redirect and the gate from
+ * disagreeing about what "incomplete" means.
+ */
+export const needsHandleAtom = atom((get) => get(isSignedInAtom) && !get(viewerHandleAtom));

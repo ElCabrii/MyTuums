@@ -38,6 +38,13 @@ const stackEnv = {
   HOST: "127.0.0.1",
   NODE_ENV: "development",
   TRUST_PROXY: "false",
+  // Every request in this suite comes from 127.0.0.1, so to BetterAuth's rate
+  // limiter the whole run looks like one client brute-forcing sign-in — the
+  // exact shape `customRules` in packages/auth/src/index.ts exists to stop. The
+  // limits stay on everywhere else, including `pnpm dev`; the API project's
+  // rate-limit spec covers the app's own /rpc limiter, which is unrelated and
+  // still enforced here.
+  AUTH_RATE_LIMIT: "false",
 };
 
 export const E2E = {

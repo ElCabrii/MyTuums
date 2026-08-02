@@ -114,27 +114,24 @@ test.describe("logout", () => {
 
     await page.getByRole("button", { name: "Sign out" }).click();
 
-    // NOT asserting a landing URL of /login here — see the note below. The
-    // one thing reliably true regardless of that race is that the header
-    // eventually reflects a signed-out viewer, so that's what this checks.
+    // This URL assertion is the regression test for a race that used to make
+    // it impossible.
     //
-    // BUG (found while writing this suite, not fixed — app source is out of
-    // scope for this suite): `profile-layout.tsx`'s handleSignOut awaits
-    // `signOutAtom` and then calls `navigate({ to: "/login" })`. But
-    // `signOutAtom` only awaits BetterAuth's `authClient.signOut()`, i.e. the
-    // `/sign-out` network call — it does NOT wait for the session nanostore
-    // to actually go null. BetterAuth updates that store via a SEPARATE,
-    // unawaited `/get-session` refetch triggered off the same sign-out
-    // signal (see `getSessionAtom` in
-    // node_modules/better-auth/dist/client/session-atom.mjs). In practice
-    // that refetch consistently loses the race against the synchronous
-    // `navigate()` call: `/login` mounts while `isSignedInAtom` is still
-    // (stale-)true, `useRedirectWhenSignedIn` fires on that stale read, and
-    // it bounces straight back to `/@alice` — reproduced deterministically
-    // across repeated runs, not a one-off flake. The fix would live in
-    // `atoms/auth.ts`'s `signOutAtom` (wait for the store to actually
-    // reflect signed-out before resolving) but that's app source, out of
-    // scope here.
+    // `signOutAtom` awaited only BetterAuth's `/sign-out` call, which does NOT
+    // wait for the session nanostore to empty — BetterAuth refreshes that
+    // through a separate, unawaited `/get-session` (see `getSessionAtom` in
+    // better-auth's client/session-atom.mjs). That refetch reliably lost the
+    // race against the `navigate({ to: "/login" })` right after it, so /login
+    // mounted while `isSignedInAtom` was still stale-true,
+    // `useRedirectWhenSignedIn` read the stale value, and bounced straight
+    // back to /@alice. It reproduced deterministically, so this spec used to
+    // assert only the header.
+    //
+    // `signOutAtom` now awaits `waitForSignedOut()` (apps/web/src/lib/
+    // session-sync.ts) before resolving. If that await is ever removed, this
+    // line fails rather than the behaviour silently regressing.
+    await expect(page).toHaveURL(/\/login$/);
+
     await expect(
       page.getByRole("banner").getByRole("button", { name: "Log in" }),
     ).toBeVisible();

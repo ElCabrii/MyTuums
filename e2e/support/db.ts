@@ -90,6 +90,28 @@ export async function createUser(input: CreateUserInput): Promise<CreatedUser> {
   return body.user;
 }
 
+/**
+ * Nulls out a user's handle, reproducing what an OAuth sign-up leaves behind.
+ *
+ * The `username` plugin does not populate `user.username` on social sign-up and
+ * offers no way to generate one, so a Google/Discord/Twitch account lands in
+ * exactly this state — and this app keys every profile URL, follow list and
+ * `user.byUsername` lookup on that column. A real OAuth round trip cannot run
+ * in this suite (it would need Google's consent screen and live credentials),
+ * so the state is produced directly. That is honest: what `/welcome` guards
+ * against is the *column being null*, not the provider that made it so.
+ *
+ * `displayUsername` goes too — `handleOf` falls back to it, so leaving it set
+ * would produce a session the gate correctly considers complete.
+ */
+export async function clearUsername(userId: string): Promise<void> {
+  assertTestDatabase();
+  const db = await getDb();
+  const { user } = await schemaModulePromise;
+
+  await db.update(user).set({ username: null, displayUsername: null }).where(eq(user.id, userId));
+}
+
 export interface SeededPost {
   id: string;
   content: string;
@@ -201,7 +223,8 @@ export async function truncateAll(): Promise<void> {
     truncate table
       ${schema.postLike}, ${schema.follow}, ${schema.post},
       ${schema.session}, ${schema.account}, ${schema.verification},
-      ${schema.rateLimit}, ${schema.user}
+      ${schema.rateLimit}, ${schema.twoFactor}, ${schema.passkey},
+      ${schema.user}
     cascade
   `);
 }

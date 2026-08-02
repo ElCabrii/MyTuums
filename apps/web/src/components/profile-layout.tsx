@@ -102,9 +102,19 @@ export function ProfileLayout() {
 
           {isOwnProfile ? (
             <div className="flex gap-2.5 mb-2">
-              <Button variant="outline" size="sm" className="gap-2 rounded-full border-muted-foreground/30">
+              {/* Was a dead button — now the way into /settings/account, where
+                  two-factor and passkeys live. It stays the only entry point on
+                  purpose: the header has no account menu, and adding one is a
+                  navigation change rather than an auth change. */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 rounded-full border-muted-foreground/30"
+                nativeButton={false}
+                render={<Link to="/settings/account" />}
+              >
                 <Settings className="h-4 w-4" />
-                <span>{m.profile_edit()}</span>
+                <span>{m.profile_settings()}</span>
               </Button>
               <Button
                 variant="destructive"

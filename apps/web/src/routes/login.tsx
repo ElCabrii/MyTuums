@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { authErrorAtom, authPendingAtom, signInAtom } from "@/atoms/auth";
@@ -8,8 +8,10 @@ import {
   loginValidationAtom,
   resetLoginFormAtom,
 } from "@/atoms/auth-form";
+import { useOneTap } from "@/hooks/use-one-tap";
 import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";
 import { localizeAuthError } from "@/lib/auth-error-message";
+import { SignInOptions } from "@/components/sign-in-options";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LogIn, AlertCircle, Loader2, User, Lock } from "lucide-react";
@@ -21,7 +23,10 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   useRedirectWhenSignedIn();
+  // No-op unless VITE_GOOGLE_CLIENT_ID is set — see lib/one-tap.ts.
+  useOneTap();
 
+  const navigate = useNavigate();
   const [identifier, setIdentifier] = useAtom(loginIdentifierAtom);
   const [password, setPassword] = useAtom(loginPasswordAtom);
   const validationError = useAtomValue(loginValidationAtom);
@@ -43,7 +48,16 @@ function LoginPage() {
       return;
     }
 
-    await signIn({ identifier, password });
+    const outcome = await signIn({ identifier, password });
+
+    // A correct password on a 2FA account produces no session — BetterAuth
+    // issues a challenge instead — so `useRedirectWhenSignedIn` above will
+    // never fire and this is the only thing that moves the person forward.
+    // Signing in normally still redirects through that effect, not here, which
+    // is what keeps the two paths from racing each other.
+    if (outcome.status === "two-factor") {
+      void navigate({ to: "/two-factor" });
+    }
   };
 
   return (
@@ -86,7 +100,9 @@ function LoginPage() {
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 className="pl-10 h-10 bg-background/50"
-                autoComplete="username"
+                // The `webauthn` token must come last, and enables the
+                // browser's conditional-UI passkey suggestion in this field.
+                autoComplete="username webauthn"
                 required
               />
             </div>
@@ -134,6 +150,8 @@ function LoginPage() {
             )}
           </Button>
         </form>
+
+        <SignInOptions />
 
         <div className="text-center text-xs text-muted-foreground pt-2 border-t border-border/40">
           {m.auth_dont_have_account()}{" "}

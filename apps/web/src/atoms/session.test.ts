@@ -31,6 +31,7 @@ vi.mock("@/lib/auth-client", () => ({
 
 import {
   isSignedInAtom,
+  needsHandleAtom,
   sessionAtom,
   sessionPendingAtom,
   viewerAtom,
@@ -136,5 +137,52 @@ describe("derived session atoms", () => {
     // Prefers the normalised `username`, same rule as `handleOf` itself.
     expect(store.get(viewerHandleAtom)).toBe("alexmercer");
     expect(store.get(viewerInitialsAtom)).toBe("AM");
+  });
+});
+
+/**
+ * `needsHandleAtom` is what stands between an OAuth sign-up and a broken app:
+ * `user.username` is null on social sign-up and every profile URL, follow list
+ * and `user.byUsername` lookup is keyed on it. `useRequireHandle` and
+ * `header.tsx` both read this one atom so they cannot disagree about which
+ * sessions are incomplete.
+ */
+describe("needsHandleAtom", () => {
+  it("is false when signed out — a visitor has no handle to claim", () => {
+    const store = createStore();
+    setSession(store, signedOut);
+    expect(store.get(needsHandleAtom)).toBe(false);
+  });
+
+  it("is false for a signed-in user who already has a handle", () => {
+    const store = createStore();
+    setSession(store, signedIn);
+    expect(store.get(needsHandleAtom)).toBe(false);
+  });
+
+  it("is true for a signed-in user whose username is null — the OAuth sign-up state", () => {
+    const store = createStore();
+    setSession(store, {
+      data: { user: { id: "u2", username: null, displayUsername: null, name: "Grace Hopper" } },
+      isPending: false,
+    });
+    expect(store.get(needsHandleAtom)).toBe(true);
+  });
+
+  it("falls back to displayUsername before declaring a handle missing", () => {
+    const store = createStore();
+    setSession(store, {
+      data: { user: { id: "u3", username: null, displayUsername: "Grace", name: "Grace Hopper" } },
+      isPending: false,
+    });
+    // `handleOf` accepts either column, so this session is complete enough to
+    // build a profile URL from and must not be sent to /welcome.
+    expect(store.get(needsHandleAtom)).toBe(false);
+  });
+
+  it("is false while the session is still pending, so nothing redirects on first paint", () => {
+    const store = createStore();
+    setSession(store, { data: null, isPending: true });
+    expect(store.get(needsHandleAtom)).toBe(false);
   });
 });
