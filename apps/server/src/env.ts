@@ -22,24 +22,38 @@ const envSchema = z.object({
     .default("development"),
 });
 
-const parsed = envSchema.safeParse(process.env);
+export type Env = z.infer<typeof envSchema>;
 
-if (!parsed.success) {
-  const flattened = z.flattenError(parsed.error).fieldErrors;
-  const lines = Object.entries(flattened).map(([key, messages]) => {
-    return `  - ${key}: ${(messages ?? []).join(", ")}`;
-  });
+/**
+ * Validates `source` against the schema and returns it, or throws a
+ * human-readable `Error` listing every violated field.
+ *
+ * Deliberately does not touch `process.exit` — that used to happen right
+ * here at module scope, which meant *importing* this file could kill the
+ * process, and nothing that imports it (a future unit test included) could
+ * observe an invalid environment without dying too. The one caller that
+ * actually wants "bad env means the process should not start" is the real
+ * entrypoint, `src/index.ts`; it catches this and exits deliberately, with
+ * the exit call visibly next to the reason for it.
+ */
+export function parseEnv(source: NodeJS.ProcessEnv): Env {
+  const parsed = envSchema.safeParse(source);
 
-  console.error(
-    [
-      "Invalid or missing environment variables:",
-      ...lines,
-      "",
-      "Check your .env file (see .env.example) and try again.",
-    ].join("\n"),
-  );
+  if (!parsed.success) {
+    const flattened = z.flattenError(parsed.error).fieldErrors;
+    const lines = Object.entries(flattened).map(([key, messages]) => {
+      return `  - ${key}: ${(messages ?? []).join(", ")}`;
+    });
 
-  process.exit(1);
+    throw new Error(
+      [
+        "Invalid or missing environment variables:",
+        ...lines,
+        "",
+        "Check your .env file (see .env.example) and try again.",
+      ].join("\n"),
+    );
+  }
+
+  return parsed.data;
 }
-
-export const env = Object.freeze(parsed.data);

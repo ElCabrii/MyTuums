@@ -1,0 +1,203 @@
+import { describe, expect, it } from "vitest";
+import { QueryClient, type InfiniteData } from "@tanstack/react-query";
+import { orpc, type Post, type PostListPage, type Thread } from "@/lib/orpc";
+import {
+  readCachedPost,
+  restorePosts,
+  snapshotPosts,
+  updatePostEverywhere,
+} from "@/lib/post-cache";
+
+function makePost(overrides: Partial<Post> & { id: string }): Post {
+  return {
+    content: "hello",
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    parentId: null,
+    author: {
+      id: "author-1",
+      name: "Author",
+      username: "author",
+      displayUsername: "Author",
+      image: null,
+    },
+    likeCount: 0,
+    replyCount: 0,
+    viewerHasLiked: false,
+    ...overrides,
+  };
+}
+
+function feedPage(posts: Post[]): InfiniteData<PostListPage> {
+  return {
+    pages: [{ items: posts, nextCursor: null }],
+    pageParams: [undefined],
+  };
+}
+
+describe("post-cache", () => {
+  describe("updatePostEverywhere", () => {
+    it("patches a post cached in three different feed entries at once", () => {
+      const queryClient = new QueryClient();
+      const target = makePost({ id: "multi-1", likeCount: 3, viewerHasLiked: false });
+      const other = makePost({ id: "other-1" });
+
+      // Home timeline: the global feed passes no `feed` input key at all.
+      const homeKey = orpc.post.list.key({ input: { limit: 20 } });
+      // The post's author's own profile feed.
+      const authorFeedKey = orpc.post.list.key({
+        input: { limit: 20, authorId: "author-1", includeReplies: true },
+      });
+      // The reply list under whatever this post replies to.
+      const replyListKey = orpc.post.list.key({ input: { limit: 20, parentId: "parent-1" } });
+      // An unrelated feed entry that must stay untouched.
+      const unrelatedKey = orpc.post.list.key({ input: { limit: 20, authorId: "someone-else" } });
+
+      queryClient.setQueryData(homeKey, feedPage([target]));
+      queryClient.setQueryData(authorFeedKey, feedPage([target]));
+      queryClient.setQueryData(replyListKey, feedPage([other, target]));
+      queryClient.setQueryData(unrelatedKey, feedPage([other]));
+
+      updatePostEverywhere(queryClient, "multi-1", (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+        viewerHasLiked: true,
+      }));
+
+      for (const key of [homeKey, authorFeedKey, replyListKey]) {
+        const data = queryClient.getQueryData<InfiniteData<PostListPage>>(key);
+        const patched = data?.pages[0]?.items.find((p) => p.id === "multi-1");
+        expect(patched?.likeCount).toBe(4);
+        expect(patched?.viewerHasLiked).toBe(true);
+      }
+
+      // The reply list's other item, and the unrelated feed, must be untouched.
+      const replyListData = queryClient.getQueryData<InfiniteData<PostListPage>>(replyListKey);
+      expect(replyListData?.pages[0]?.items.find((p) => p.id === "other-1")?.likeCount).toBe(0);
+      const unrelatedData = queryClient.getQueryData<InfiniteData<PostListPage>>(unrelatedKey);
+      expect(unrelatedData?.pages[0]?.items[0]?.likeCount).toBe(0);
+    });
+
+    it("patches the same post inside a post.thread entry as both data.post and an ancestor", () => {
+      const queryClient = new QueryClient();
+      const shared = makePost({ id: "shared-1", likeCount: 1, viewerHasLiked: false });
+      const reply = makePost({ id: "reply-1", likeCount: 0, parentId: "shared-1" });
+
+      // Thread A: "shared-1" is the focused post.
+      const focusedThreadKey = orpc.post.thread.key({ input: { postId: "shared-1" } });
+      queryClient.setQueryData<Thread>(focusedThreadKey, {
+        post: shared,
+        ancestors: [],
+        truncated: false,
+      });
+
+      // Thread B: "shared-1" shows up as an ancestor of a different focused post.
+      const replyThreadKey = orpc.post.thread.key({ input: { postId: "reply-1" } });
+      queryClient.setQueryData<Thread>(replyThreadKey, {
+        post: reply,
+        ancestors: [shared],
+        truncated: false,
+      });
+
+      updatePostEverywhere(queryClient, "shared-1", (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+        viewerHasLiked: true,
+      }));
+
+      const focused = queryClient.getQueryData<Thread>(focusedThreadKey);
+      expect(focused?.post.likeCount).toBe(2);
+      expect(focused?.post.viewerHasLiked).toBe(true);
+
+      const withAncestor = queryClient.getQueryData<Thread>(replyThreadKey);
+      expect(withAncestor?.ancestors[0]?.likeCount).toBe(2);
+      expect(withAncestor?.ancestors[0]?.viewerHasLiked).toBe(true);
+      // The focused post of thread B is a different id and must be untouched.
+      expect(withAncestor?.post.likeCount).toBe(0);
+    });
+  });
+
+  describe("readCachedPost", () => {
+    // Opening `/post/<id>` cold seeds only `post.thread`, not any `post.list`
+    // entry — the post isn't in the home feed, a profile feed, or a reply
+    // list. If `readCachedPost` only checked feeds, the like button on that
+    // page would find nothing to optimistically patch and would just sit
+    // there doing nothing until a refetch happened to land.
+    it("finds a post that exists only in a thread cache and in no feed", () => {
+      const queryClient = new QueryClient();
+      const post = makePost({ id: "cold-1" });
+      const key = orpc.post.thread.key({ input: { postId: "cold-1" } });
+      queryClient.setQueryData<Thread>(key, { post, ancestors: [], truncated: false });
+
+      expect(readCachedPost(queryClient, "cold-1")).toEqual(post);
+    });
+
+    it("returns undefined for an id that isn't cached anywhere", () => {
+      const queryClient = new QueryClient();
+      queryClient.setQueryData(
+        orpc.post.list.key({ input: { limit: 20 } }),
+        feedPage([makePost({ id: "known-1" })]),
+      );
+
+      expect(readCachedPost(queryClient, "unknown-id")).toBeUndefined();
+    });
+
+    it("tolerates a registered query whose data is still undefined", () => {
+      const queryClient = new QueryClient();
+      // A query can be registered in the cache (e.g. mid-fetch) before it has
+      // any data. `getQueriesData` then returns `[key, undefined]`, and every
+      // reader here has to survive that rather than throwing on `data.pages`.
+      queryClient.getQueryCache().build(queryClient, {
+        queryKey: orpc.post.list.key({ input: { limit: 20 } }),
+      });
+      queryClient.getQueryCache().build(queryClient, {
+        queryKey: orpc.post.thread.key({ input: { postId: "pending-1" } }),
+      });
+
+      expect(() => readCachedPost(queryClient, "pending-1")).not.toThrow();
+      expect(readCachedPost(queryClient, "pending-1")).toBeUndefined();
+    });
+  });
+
+  describe("snapshot / restore round trip", () => {
+    it("restorePosts undoes an updatePostEverywhere edit", () => {
+      const queryClient = new QueryClient();
+      const post = makePost({ id: "round-trip-1", likeCount: 5, viewerHasLiked: false });
+      const feedKey = orpc.post.list.key({ input: { limit: 20 } });
+      const threadKey = orpc.post.thread.key({ input: { postId: "round-trip-1" } });
+
+      queryClient.setQueryData(feedKey, feedPage([post]));
+      queryClient.setQueryData<Thread>(threadKey, { post, ancestors: [], truncated: false });
+
+      const before = {
+        feed: queryClient.getQueryData(feedKey),
+        thread: queryClient.getQueryData(threadKey),
+      };
+
+      const snapshot = snapshotPosts(queryClient);
+      updatePostEverywhere(queryClient, "round-trip-1", (p) => ({
+        ...p,
+        likeCount: p.likeCount + 1,
+        viewerHasLiked: true,
+      }));
+
+      // Sanity: the mutation actually changed something before restoring.
+      expect(queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items[0]?.likeCount).toBe(6);
+
+      restorePosts(queryClient, snapshot);
+
+      expect(queryClient.getQueryData(feedKey)).toEqual(before.feed);
+      expect(queryClient.getQueryData(threadKey)).toEqual(before.thread);
+    });
+
+    it("handles empty caches without throwing", () => {
+      const queryClient = new QueryClient();
+
+      expect(() => {
+        const snapshot = snapshotPosts(queryClient);
+        updatePostEverywhere(queryClient, "nothing-cached", (p) => p);
+        restorePosts(queryClient, snapshot);
+        readCachedPost(queryClient, "nothing-cached");
+      }).not.toThrow();
+    });
+  });
+});

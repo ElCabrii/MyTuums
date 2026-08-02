@@ -1,0 +1,139 @@
+import { describe, expect, it } from "vitest";
+import { createRateLimiter, RATE_LIMITS, type RateLimitPolicy } from "./rate-limit.js";
+
+function policy(overrides: Partial<RateLimitPolicy> = {}): RateLimitPolicy {
+  return { name: "t", limit: 3, windowMs: 1000, ...overrides };
+}
+
+describe("createRateLimiter", () => {
+  it("allows exactly `limit` requests per window and denies the next", () => {
+    // No clock movement needed: everything here happens inside one window.
+    const limiter = createRateLimiter({ now: () => 0 });
+    const p = policy({ limit: 3 });
+
+    expect(limiter.consume("k", p).allowed).toBe(true);
+    expect(limiter.consume("k", p).allowed).toBe(true);
+    expect(limiter.consume("k", p).allowed).toBe(true);
+    expect(limiter.consume("k", p).allowed).toBe(false);
+  });
+
+  it("remaining counts down and clamps at 0 instead of going negative", () => {
+    const limiter = createRateLimiter({ now: () => 0 });
+    const p = policy({ limit: 2 });
+
+    expect(limiter.consume("k", p).remaining).toBe(1);
+    expect(limiter.consume("k", p).remaining).toBe(0);
+    // Both denied calls below must still read 0, not -1/-2 — a caller
+    // surfacing this as "requests left" would otherwise print nonsense.
+    expect(limiter.consume("k", p).remaining).toBe(0);
+    expect(limiter.consume("k", p).remaining).toBe(0);
+  });
+
+  it("retryAfterSeconds is 0 while allowed and floors at 1 right at the reset boundary", () => {
+    let clock = 0;
+    const limiter = createRateLimiter({ now: () => clock });
+    const p = policy({ limit: 1 });
+
+    const first = limiter.consume("k", p); // resetAt = 1000
+    expect(first.allowed).toBe(true);
+    expect(first.retryAfterSeconds).toBe(0);
+
+    clock = 999; // 1ms before rollover — the raw (resetAt-at)/1000 is tiny
+    const second = limiter.consume("k", p);
+    expect(second.allowed).toBe(false);
+    expect(second.retryAfterSeconds).toBe(1);
+  });
+
+  it("gives distinct keys independent buckets", () => {
+    const limiter = createRateLimiter({ now: () => 0 });
+    const p = policy({ limit: 1 });
+
+    expect(limiter.consume("a", p).allowed).toBe(true);
+    expect(limiter.consume("a", p).allowed).toBe(false);
+    expect(limiter.consume("b", p).allowed).toBe(true);
+  });
+
+  it("allows again once the window rolls over", () => {
+    let clock = 0;
+    const limiter = createRateLimiter({ now: () => clock });
+    const p = policy({ limit: 1 });
+
+    expect(limiter.consume("k", p).allowed).toBe(true);
+    expect(limiter.consume("k", p).allowed).toBe(false);
+
+    clock += 1000;
+    expect(limiter.consume("k", p).allowed).toBe(true);
+  });
+
+  it("permits a 2x burst across a window boundary — documented trade-off, not a bug", () => {
+    // rate-limit.ts: "the failure mode of a fixed window is that a caller
+    // can burst up to 2x the limit across a window boundary ... irrelevant
+    // [for this use case] ... costs one map lookup instead of per-key
+    // timers." This pins that trade-off down as intended behaviour.
+    let clock = 0;
+    const limiter = createRateLimiter({ now: () => clock });
+    const p = policy({ limit: 3 });
+
+    // Consume the whole budget of window N, with the last two calls landing
+    // right at its boundary (clock = 999, resetAt = 1000).
+    const first = limiter.consume("k", p);
+    clock = 999;
+    const second = limiter.consume("k", p);
+    const third = limiter.consume("k", p);
+    expect([first, second, third].every((r) => r.allowed)).toBe(true);
+
+    // Window rolls over here — only ~1ms of real time has passed.
+    clock = 1000;
+    const windowNPlus1 = [limiter.consume("k", p), limiter.consume("k", p), limiter.consume("k", p)];
+    expect(windowNPlus1.every((r) => r.allowed)).toBe(true);
+    // 2 * limit (6) requests allowed across the boundary.
+  });
+
+  describe("sweep", () => {
+    it("is lazy: an expired key survives until a full map needs to insert a new one", () => {
+      let clock = 0;
+      const limiter = createRateLimiter({ now: () => clock, maxKeys: 2 });
+      const p = policy({ limit: 5 });
+
+      limiter.consume("a", p); // size 1, resetAt 1000
+      limiter.consume("b", p); // size check happens BEFORE this insert (size
+      // was 1, not >= maxKeys 2), so no sweep here
+      expect(limiter.size).toBe(2);
+
+      clock = 2000; // both "a" and "b" are now well past resetAt
+      // Nothing has called consume() since, so nothing has swept — an
+      // expired key is not the same as an absent one until something looks.
+      expect(limiter.size).toBe(2);
+
+      limiter.consume("c", p); // new key, map is full (size 2 >= maxKeys 2)
+      // -> sweep(2000) runs first, drops a and b
+      expect(limiter.size).toBe(1);
+    });
+  });
+
+  it("clear() empties the map", () => {
+    const limiter = createRateLimiter({ now: () => 0 });
+    limiter.consume("a", policy());
+    limiter.consume("b", policy());
+    expect(limiter.size).toBe(2);
+
+    limiter.clear();
+    expect(limiter.size).toBe(0);
+  });
+});
+
+describe("RATE_LIMITS", () => {
+  it("defines four tiers with distinct names", () => {
+    const policies = Object.values(RATE_LIMITS);
+    expect(policies).toHaveLength(4);
+    expect(new Set(policies.map((p) => p.name)).size).toBe(4);
+  });
+
+  it("keeps follow and like on separate counters even though they cost the same", () => {
+    // Both are a single indexed insert, so by cost alone they could share a
+    // tier. `name` is what namespaces the counter (rate-limit.ts), and the
+    // split exists specifically so someone burning through the follow
+    // budget with mass-follow spam can't also get locked out of liking.
+    expect(RATE_LIMITS.follow.name).not.toBe(RATE_LIMITS.like.name);
+  });
+});

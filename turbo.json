@@ -11,6 +11,12 @@
     },
     "lint": {},
     "typecheck": {},
+    "test": {
+      "cache": false
+    },
+    "test:unit": {
+      "cache": false
+    },
     "db:generate": {
       "cache": false
     },

@@ -20,6 +20,13 @@
  * "bound the damage one client can do"; neither is fine if these limits ever
  * become a billing or abuse boundary, at which point this wants to move to
  * Postgres or Redis behind the same `consume` interface.
+ *
+ * This module is a pure factory — it does not instantiate a limiter of its
+ * own. `context.ts` owns the one instance production procedures share
+ * (created once, threaded onto every `Context` via `createContext`), and
+ * `testing/harness.ts` owns a separate one scoped to the test run. Neither
+ * has to import the other's, which is what makes a test's rate-limit state
+ * fully independent of anything the request layer does.
  */
 
 export interface RateLimitPolicy {
@@ -105,9 +112,6 @@ export function createRateLimiter(
     },
   };
 }
-
-/** The limiter the procedures in this package share. */
-export const rateLimiter = createRateLimiter();
 
 const MINUTE = 60_000;
 

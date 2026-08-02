@@ -1,0 +1,130 @@
+import path from "node:path";
+import { defineConfig, devices } from "@playwright/test";
+import { resolveTestDatabaseUrl } from "@my-tuums/db/testing";
+
+/**
+ * The E2E stack runs on its OWN ports, beside the dev stack rather than
+ * instead of it.
+ *
+ * `pnpm dev` and `docker compose up` both occupy 3001 and 5173, and the point
+ * of a suite you can run mid-session is that it does not ask you to stop
+ * working first. The server moves to 3101 and the web app to 5273; the web
+ * app's Vite proxy is pointed at the former through `RPC_TARGET` (see
+ * `apps/web/vite.config.ts`).
+ */
+const SERVER_PORT = 3101;
+const WEB_PORT = 5273;
+
+const serverUrl = `http://localhost:${String(SERVER_PORT)}`;
+const webUrl = `http://localhost:${String(WEB_PORT)}`;
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+
+/**
+ * Both processes get the test database and matching origins.
+ *
+ * `WEB_ORIGIN` has to be the *browser's* origin, not the server's: it feeds
+ * both the oRPC CORS allowlist and BetterAuth's `trustedOrigins`, and Vite's
+ * `changeOrigin` rewrites `Host` but leaves `Origin` alone — so requests
+ * proxied from 5273 still announce themselves as 5273.
+ */
+const stackEnv = {
+  DATABASE_URL: resolveTestDatabaseUrl(),
+  BETTER_AUTH_SECRET:
+    process.env.BETTER_AUTH_SECRET ?? "playwright-e2e-secret-at-least-32-characters",
+  BETTER_AUTH_URL: serverUrl,
+  WEB_ORIGIN: webUrl,
+  PORT: String(SERVER_PORT),
+  HOST: "127.0.0.1",
+  NODE_ENV: "development",
+  TRUST_PROXY: "false",
+};
+
+export const E2E = {
+  serverUrl,
+  webUrl,
+  storageStateFor: (name: string) => path.join(import.meta.dirname, ".auth", `${name}.json`),
+} as const;
+
+export default defineConfig({
+  testDir: "./tests",
+  outputDir: "./test-results",
+  fullyParallel: false,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+
+  // One worker. Every spec shares a single Postgres and a single in-process
+  // rate limiter on the server, so parallel workers would both contend for
+  // fixtures and burn one another's rate-limit budget — a 429 surfacing as a
+  // failed assertion three specs away from the cause.
+  workers: 1,
+
+  reporter: process.env.CI
+    ? [["github"], ["html", { open: "never" }]]
+    : [["list"], ["html", { open: "never" }]],
+
+  use: {
+    baseURL: webUrl,
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+    video: "retain-on-failure",
+  },
+
+  // Runs once, before the servers: migrates and empties the test database.
+  globalSetup: "./global-setup.ts",
+
+  projects: [
+    // Signs up the fixture accounts through the real auth endpoint and saves
+    // their cookies. Doing this once via HTTP rather than driving the register
+    // form in every spec is most of the suite's speed.
+    { name: "setup", testMatch: /.*\.setup\.ts/ },
+
+    // Transport-level contract: health, CORS, 404s, the oRPC error envelope,
+    // rate limiting. Hits the server directly — no browser, no auth state, so
+    // it does not wait on `setup`.
+    {
+      name: "api",
+      testMatch: /tests\/api\/.*\.spec\.ts/,
+      use: { baseURL: serverUrl },
+    },
+
+    // The browser journeys. Signed in as Alice by default; the signed-out
+    // specs override `storageState` per-describe.
+    {
+      name: "chromium",
+      testMatch: /tests\/specs\/.*\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: E2E.storageStateFor("alice"),
+      },
+      dependencies: ["setup"],
+    },
+  ],
+
+  webServer: [
+    {
+      command: "pnpm --filter @my-tuums/server exec tsx src/index.ts",
+      cwd: repoRoot,
+      url: `${serverUrl}/health`,
+      env: stackEnv,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+    {
+      // `vite dev`, not `vite preview`: `server.proxy` does not apply to
+      // preview (that needs its own `preview.proxy` block), and dev generates
+      // `routeTree.gen.ts` and `src/paraglide/**` — both git-ignored — as a
+      // side effect, so a clean checkout needs no separate build step.
+      command: `pnpm --filter @my-tuums/web exec vite --port ${String(WEB_PORT)} --strictPort`,
+      cwd: repoRoot,
+      url: webUrl,
+      env: { RPC_TARGET: serverUrl },
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  ],
+});

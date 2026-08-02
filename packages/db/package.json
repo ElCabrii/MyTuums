@@ -11,6 +11,10 @@
     "./schema": {
       "types": "./src/schema/index.ts",
       "default": "./src/schema/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing.ts",
+      "default": "./src/testing.ts"
     }
   },
   "scripts": {
@@ -19,6 +23,7 @@
     "db:migrate": "dotenv -e ../../.env -- drizzle-kit migrate",
     "db:push": "dotenv -e ../../.env -- drizzle-kit push",
     "db:studio": "dotenv -e ../../.env -- drizzle-kit studio",
+    "db:test:setup": "dotenv -e ../../.env -- tsx scripts/setup-test-db.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
@@ -31,6 +36,7 @@
     "@types/node": "catalog:",
     "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.5",
+    "tsx": "^4.19.0",
     "typescript": "catalog:"
   }
 }

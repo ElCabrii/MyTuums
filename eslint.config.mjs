@@ -10,6 +10,8 @@ export default tseslint.config(
       "**/.turbo/**",
       "apps/web/src/paraglide/**",
       "packages/db/drizzle/**",
+      "e2e/test-results/**",
+      "e2e/playwright-report/**",
     ],
   },
   js.configs.recommended,
@@ -29,6 +31,11 @@ export default tseslint.config(
             "eslint.config.mjs",
             "packages/db/drizzle.config.ts",
             "apps/server/tsup.config.ts",
+            // `apps/server/tsconfig.json` sets `rootDir: "src"`, so this one
+            // cannot join its `include` the way the other vitest configs join
+            // theirs. It is object literals only, so the weaker inferred
+            // typing has nothing unsafe to trip over.
+            "apps/server/vitest.config.ts",
           ],
         },
         tsconfigRootDir: import.meta.dirname,
