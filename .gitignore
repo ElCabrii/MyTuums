@@ -31,3 +31,10 @@ apps/web/src/routeTree.gen.ts
 
 # TanStack build scratch
 apps/web/.tanstack/
+
+# Playwright
+e2e/.auth/
+e2e/test-results/
+e2e/playwright-report/
+e2e/blob-report/
+playwright/.cache/

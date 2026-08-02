@@ -11,7 +11,9 @@
     "build": "tsup",
     "start": "dotenv -e ../../.env -- node dist/index.js",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:unit": "vitest run"
   },
   "dependencies": {
     "@my-tuums/api": "workspace:*",
@@ -27,6 +29,7 @@
     "dotenv-cli": "^11.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "^4.1.10"
   }
 }

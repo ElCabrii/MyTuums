@@ -5,6 +5,11 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import path from "node:path";
 
+// Where /rpc and /api/auth are proxied in dev. Overridable so the E2E suite
+// can point the web app at its own server on a different port and run beside
+// a live `pnpm dev` (or the docker container) instead of fighting it for 3001.
+const rpcTarget = process.env.RPC_TARGET ?? "http://localhost:3001";
+
 export default defineConfig({
   plugins: [
     tailwindcss(),
@@ -27,11 +32,11 @@ export default defineConfig({
   server: {
     proxy: {
       "/rpc": {
-        target: "http://localhost:3001",
+        target: rpcTarget,
         changeOrigin: true,
       },
       "/api/auth": {
-        target: "http://localhost:3001",
+        target: rpcTarget,
         changeOrigin: true,
       },
     },

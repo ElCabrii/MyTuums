@@ -1,6 +1,10 @@
 packages:
   - apps/*
   - packages/*
+  # End-to-end suite. Its own workspace package so it can depend on
+  # @my-tuums/db and @my-tuums/auth for fixture seeding without pulling
+  # Playwright into the root manifest.
+  - e2e
 
 onlyBuiltDependencies:
   - '@swc/core'

@@ -1,0 +1,84 @@
+import { test, expect } from "@playwright/test";
+
+// This project's baseURL is the server (E2E.serverUrl) — see the `api`
+// project in playwright.config.ts.
+
+test.describe("oRPC contract", () => {
+  test("an unauthenticated call to a protected procedure returns the UNAUTHORIZED envelope", async ({
+    request,
+  }) => {
+    const response = await request.post("/rpc/post/create", {
+      data: { json: { content: "should never be created" } },
+    });
+
+    expect(response.status()).toBe(401);
+    const body = (await response.json()) as { json: { code: string; status: number } };
+    expect(body.json.code).toBe("UNAUTHORIZED");
+    expect(body.json.status).toBe(401);
+  });
+
+  test("a malformed body is rejected cleanly rather than 500ing", async ({ request }) => {
+    // Against a PUBLIC procedure deliberately, not post/create: a protected
+    // one would 401 before ever attempting to parse the body (auth runs
+    // ahead of input validation — see the test above), which would prove
+    // nothing about malformed-body handling itself.
+    //
+    // The body has to go over the wire as raw bytes, not Playwright's `data`
+    // string handling: passing a plain string still gets JSON-encoded when a
+    // `Content-Type: application/json` header is present (turning it into a
+    // syntactically valid JSON *string value*, which parses fine and defeats
+    // the point). A `Buffer` is sent as-is.
+    const response = await request.post("/rpc/post/list", {
+      headers: { "Content-Type": "application/json" },
+      data: Buffer.from("not json at all {"),
+    });
+
+    expect(response.status()).toBe(400);
+    const body = (await response.json()) as { json: { code: string } };
+    expect(body.json.code).toBe("BAD_REQUEST");
+  });
+
+  // Last in the file, and under its own throwaway identity: the rate limiter
+  // is an in-process singleton shared by every caller that hits this server
+  // (packages/api/src/rate-limit.ts), including the browser specs proxied
+  // through Vite to the same process. Bursting under alice's or bob's
+  // identity would leave their `write` bucket part-spent for whatever
+  // browser spec runs next; a freshly signed-up user isolates the damage to
+  // this test alone.
+  test("hammering a write-tier procedure past its budget returns 429 with a retry hint", async ({
+    request,
+  }) => {
+    const username = `rl${Date.now().toString(36)}`;
+    const signUp = await request.post("/api/auth/sign-up/email", {
+      data: {
+        email: `${username}@example.test`,
+        password: "rate-limit-probe-password",
+        name: "Rate Limit Probe",
+        username,
+      },
+    });
+    expect(signUp.ok(), await signUp.text()).toBe(true);
+
+    // RATE_LIMITS.write is 15/minute. 20 attempts is enough headroom to
+    // guarantee a 429 without hammering much past the budget.
+    let retryAfterSeconds: unknown;
+
+    for (let i = 0; i < 20; i += 1) {
+      const response = await request.post("/rpc/post/create", {
+        data: { json: { content: `rate limit probe ${String(i)}` } },
+      });
+
+      if (response.status() === 429) {
+        const body = (await response.json()) as {
+          json: { code: string; data?: { retryAfterSeconds?: unknown } };
+        };
+        expect(body.json.code).toBe("TOO_MANY_REQUESTS");
+        retryAfterSeconds = body.json.data?.retryAfterSeconds;
+        break;
+      }
+    }
+
+    expect(typeof retryAfterSeconds).toBe("number");
+    expect(retryAfterSeconds as number).toBeGreaterThan(0);
+  });
+});

@@ -1,6 +1,6 @@
 import { ORPCError, os } from "@orpc/server";
 import type { Context } from "./context.js";
-import { rateLimiter, type RateLimitPolicy } from "./rate-limit.js";
+import type { RateLimitPolicy } from "./rate-limit.js";
 
 const base = os.$context<Context>();
 
@@ -16,6 +16,11 @@ const base = os.$context<Context>();
  *
  * Applied per procedure rather than globally so the budget can match what the
  * call actually costs; see RATE_LIMITS in ./rate-limit.ts.
+ *
+ * Consumes from `context.rateLimiter` rather than a module-level import —
+ * deliberately: this middleware has no opinion on which instance that is or
+ * how many callers share it, only that `Context` always carries one. See the
+ * doc comment on `Context.rateLimiter` in ./context.ts.
  */
 export function rateLimit(policy: RateLimitPolicy) {
   return base.middleware(({ context, next }) => {
@@ -23,7 +28,7 @@ export function rateLimit(policy: RateLimitPolicy) {
       ? `user:${context.session.user.id}`
       : `ip:${context.clientIp ?? "unknown"}`;
 
-    const result = rateLimiter.consume(`${policy.name}:${identity}`, policy);
+    const result = context.rateLimiter.consume(`${policy.name}:${identity}`, policy);
 
     if (!result.allowed) {
       throw new ORPCError("TOO_MANY_REQUESTS", {

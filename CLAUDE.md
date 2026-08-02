@@ -23,7 +23,30 @@ pnpm --filter @my-tuums/db db:push
 
 ### Tests
 
-**There is no test suite.** The Vitest setups in `apps/web` and `packages/api` were removed along with every `*.test.ts` — `lint` and `typecheck` are the whole automated check. Don't add a `test` script, a `vitest.config.ts` or a `*.test.ts` back without being asked to.
+Three layers, each runnable on its own. Vitest for unit and integration, Playwright for E2E.
+
+```bash
+pnpm db:test:setup   # once: creates and migrates mytuums_test
+pnpm test            # everything Vitest runs (unit + integration)
+pnpm test:unit       # pure logic + jsdom. NO database required
+pnpm test:integration # oRPC procedures against real Postgres + real BetterAuth
+pnpm test:e2e        # Playwright, full stack in a browser
+pnpm test:e2e:ui     # same, in Playwright's UI mode
+```
+
+**Unit and integration are split by filename, not by directory**: `*.test.ts` is the `unit` Vitest project, `*.int.test.ts` is `integration`. `packages/api/vitest.config.ts` declares both, and only the integration project gets a `DATABASE_URL` — so a unit test that quietly starts needing a database fails instead of passing by accident. Keep that property: **do not import `@my-tuums/db`, `@my-tuums/auth`, `context.ts`, `router.ts`, `posts.ts` or `users.ts` from a `*.test.ts`**, because they evaluate `DATABASE_URL` at module scope and throw.
+
+**Everything database-backed runs against `mytuums_test`, never the dev database.** `DATABASE_URL_TEST` overrides it; unset, it is *derived* from `DATABASE_URL` by suffixing the database name with `_test`, so a fresh clone needs no extra variable. `assertTestDatabase()` in `@my-tuums/db/testing` guards every destructive helper and refuses to run unless the name ends in `_test` — `packages/db/src/index.ts` reads the URL once at module load and hands out a process-wide singleton, so by the time a helper holds a `db` there is nothing left to inspect but the environment that produced it.
+
+`packages/api/src/rate-limit.ts` is a pure factory (`createRateLimiter`) with no singleton — the rate limiter lives on `Context.rateLimiter` instead, and `procedures.ts`'s `rateLimit()` middleware reads it from there. Production gets exactly one shared instance for the server's lifetime via `context.ts`'s `defaultRateLimiter`. Tests never see that instance at all: `testing/harness.ts` owns its own, and registers a `beforeEach` that swaps it for a fresh one before every test — automatically, for every file that imports the harness, with no boilerplate needed in the test files themselves. This is what makes exhausting a budget in one test (a thread deep enough to exercise `THREAD_ANCESTOR_MAX` alone exceeds the 15/min `write` budget) leave the next test's budget untouched. `contextFor(user, clientIp?, rateLimiter?)`'s third argument lets a test share one limiter across several calls on purpose — `procedures.int.test.ts` relies on this to test exhaustion itself. The integration project also sets `fileParallelism: false`: every file still shares one Postgres and one truncate helper, independent of rate limiting.
+
+**`apps/web` tests need `src/paraglide/**` compiled first**, because `vitest.config.ts` deliberately omits the Paraglide and TanStack Router plugins (both rewrite `src/` on startup, underneath a running test process). The `test` script runs `pnpm paraglide` first, so this is only a trap if you invoke `vitest` directly. `src/test/setup.ts` shims `localStorage` (Node 22's undefined global shadows jsdom's working one) and `matchMedia` (jsdom has none, and `atoms/theme.ts` subscribes through it).
+
+**Component tests use a top-level `<Provider store={freshStore}>` per test.** That is not a contradiction of "don't scope atoms with a nested `<Provider>`" below — that rule is about nesting one *inside the app's* tree, where reads resolve against an empty store. A per-test store is what stops optimistic like/follow state leaking between tests. `src/test/render.tsx` builds it, hydrates `queryClientAtom` the way `lib/store.ts` does, and mounts a **stub** memory router rather than depending on the generated `routeTree.gen.ts`.
+
+**E2E runs on its own ports — server :3101, web :5273** — so `pnpm test:e2e` works beside a live `pnpm dev` or the docker container instead of fighting them for :3001. That is what `RPC_TARGET` in `apps/web/vite.config.ts` exists for; it defaults to :3001 and dev behaviour is unchanged.
+
+**There are no `data-testid` attributes anywhere, on purpose.** E2E and component selectors come from roles, accessible names, labels and placeholders — `role="alert"` on the error banners, `aria-pressed` + `aria-label` on the like button, `aria-label` on the reply link, `htmlFor`/`id` pairs on the auth fields. Adding testids would be a step backwards from affordances that already have to be correct for screen readers.
 
 ### Database
 

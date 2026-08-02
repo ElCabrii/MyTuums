@@ -1,6 +1,7 @@
-import { env } from "./env.js";
+import { parseEnv } from "./env.js";
 import { resolveClientIp } from "./client-ip.js";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createRequestHandler } from "./request-handler.js";
+import { createServer } from "node:http";
 import { RPCHandler } from "@orpc/server/node";
 import { CORSPlugin } from "@orpc/server/plugins";
 import { onError } from "@orpc/server";
@@ -8,6 +9,18 @@ import { appRouter, createContext } from "@my-tuums/api";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "@my-tuums/auth";
 import { closeDb, pingDb } from "@my-tuums/db";
+
+// The one place `parseEnv`'s throw becomes `process.exit(1)`. Importing
+// `./env.js` elsewhere — a future test, a script — can now inspect or expect
+// that throw without also killing whatever imported it; only this, the real
+// entrypoint, treats "invalid environment" as fatal.
+let env;
+try {
+  env = parseEnv(process.env);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
+}
 
 const PORT = env.PORT;
 
@@ -29,72 +42,33 @@ const handler = new RPCHandler(appRouter, {
   ],
 });
 
+// The routing decision tree itself lives in request-handler.ts, unit-tested
+// there against stand-ins for these three dependencies. This is the only
+// place they become real: a live DB ping, BetterAuth's actual node handler,
+// and a real oRPC context resolved per request.
+const handleRequest = createRequestHandler({
+  pingDb,
+  authNodeHandler,
+  handleRpc: async (req, res) => {
+    const context = await createContext({
+      headers: fromNodeHeaders(req.headers),
+      clientIp: resolveClientIp(req, env.TRUST_PROXY),
+    });
+
+    return handler.handle(req, res, { prefix: "/rpc", context });
+  },
+});
+
 // `createServer`'s callback type is `(req, res) => void`; passing an async
 // function directly is exactly the "misused promise" shape Step 3's crash
 // fix was about (`@typescript-eslint/no-misused-promises` now flags it).
 // Keep the listener itself synchronous and explicitly `void` the async
-// work — the try/catch below still converts every failure into a response,
-// and the `unhandledRejection` handler further down is the backstop if
-// something ever escapes it anyway.
+// work — `handleRequest`'s own try/catch still converts every failure into a
+// response, and the `unhandledRejection` handler further down is the
+// backstop if something ever escapes it anyway.
 const server = createServer((req, res) => {
   void handleRequest(req, res);
 });
-
-async function handleRequest(req: IncomingMessage, res: ServerResponse) {
-  try {
-    // Health endpoint checked first, above /rpc and /api/auth, so probes
-    // don't pay for oRPC route matching or a session lookup. It actually
-    // exercises the DB connection (SELECT 1) rather than returning a
-    // hardcoded 200 — a probe that's green while Postgres is down is worse
-    // than no probe at all.
-    if (req.url === "/health") {
-      try {
-        await pingDb();
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "ok" }));
-      } catch (error) {
-        console.error("Health check failed: database unreachable:", error);
-        res.writeHead(503, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "error", reason: "database unreachable" }));
-      }
-      return;
-    }
-
-    // Handle BetterAuth endpoints
-    if (req.url?.startsWith("/api/auth")) {
-      return await authNodeHandler(req, res);
-    }
-
-    if (req.url?.startsWith("/rpc")) {
-      const context = await createContext({
-        headers: fromNodeHeaders(req.headers),
-        clientIp: resolveClientIp(req, env.TRUST_PROXY),
-      });
-
-      const { matched } = await handler.handle(req, res, {
-        prefix: "/rpc",
-        context,
-      });
-
-      if (matched) return;
-    }
-
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("Not found");
-  } catch (error) {
-    console.error(`Unhandled error while handling ${req.method ?? "?"} ${req.url ?? "?"}:`, error);
-
-    if (res.headersSent) {
-      // Response already started; we cannot send a fresh status/body.
-      // Destroy the socket rather than risk a second, malformed write.
-      res.destroy();
-      return;
-    }
-
-    res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Internal Server Error" }));
-  }
-}
 
 /**
  * Drains the Postgres pool and force-exits. Split out from `shutdown` so it
