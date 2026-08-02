@@ -30,17 +30,31 @@ import { orpc, type Post, type PostListPage, type UserListPage, type UserSummary
 /**
  * `retry: false` so a seeded error state (see `seedInfiniteError` below)
  * surfaces immediately instead of a test waiting out retry backoff.
- * `refetchOnMount: false` so a query that already has data or an error
- * seeded via `queryClient.setQueryData` / `fetchInfiniteQuery` stays exactly
- * as seeded when a component mounts and observes it, instead of firing a
- * real (network-dependent, unmockable-without-a-lot-of-effort) background
- * refetch the instant it renders.
+ * `refetchOnMount: false` so a query that already has data seeded via
+ * `queryClient.setQueryData` stays exactly as seeded when a component mounts
+ * and observes it, instead of firing a real (network-dependent,
+ * unmockable-without-a-lot-of-effort) background refetch the instant it
+ * renders.
+ *
+ * `retryOnMount: false` is the one that actually matters for a SEEDED ERROR
+ * specifically, and is easy to miss: `refetchOnMount` only governs refetching
+ * a query that has previously *succeeded* (`dataUpdatedAt > 0`). A query
+ * that has only ever errored has `dataUpdatedAt === 0`, and TanStack Query's
+ * own mount-fetch decision treats that case as "never actually got data yet"
+ * — it fetches on mount REGARDLESS of `refetchOnMount`, unless
+ * `retryOnMount` says not to. Without this, `PostFeed`'s/`UserList`'s
+ * observer mounting against a query `seedInfiniteError` already drove to
+ * "error" immediately fires one more real (and here, doomed) network fetch,
+ * landing back on "error" but with a generic "fetch failed" message instead
+ * of the one that was seeded — confirmed by instrumenting the actual `Query`
+ * instance: neither `.reset()` nor `.setState()` fired, only `.fetch()`.
  */
 export function createTestQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
+        retryOnMount: false,
         refetchOnMount: false,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
@@ -374,9 +388,25 @@ export function seedInfiniteLoading(queryClient: QueryClient, queryKey: QueryKey
   });
 }
 
-/** Drives an infinite query at `queryKey` into an error state, without a network call. */
-export function seedInfiniteError(queryClient: QueryClient, queryKey: QueryKey, message = "Something went wrong"): void {
-  void queryClient
+/**
+ * Drives an infinite query at `queryKey` into an error state, without a
+ * network call. Callers MUST `await` this — unlike `seedInfiniteLoading`
+ * (whose query-core status is set the instant the fetch starts, and which
+ * can't be awaited to completion anyway, since it never settles),
+ * `fetchInfiniteQuery` here only finishes writing `status: "error"` into the
+ * cache once its rejection has propagated through query-core's retry
+ * machinery. A caller that renders right after calling this without
+ * awaiting it is racing that write: fast enough locally that it reliably
+ * wins, not guaranteed on every CI runner — this is exactly the race that
+ * intermittently failed `post-feed.test.tsx` and `user-list.test.tsx` in CI
+ * while passing every time in local runs.
+ */
+export async function seedInfiniteError(
+  queryClient: QueryClient,
+  queryKey: QueryKey,
+  message = "Something went wrong",
+): Promise<void> {
+  await queryClient
     .fetchInfiniteQuery({
       queryKey,
       queryFn: () => Promise.reject(new Error(message)),

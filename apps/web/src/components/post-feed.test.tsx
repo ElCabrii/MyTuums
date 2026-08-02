@@ -35,13 +35,20 @@ describe("PostFeed", () => {
 
   it("shows a retryable error when the feed fails to load", async () => {
     const queryClient = createTestQueryClient();
-    seedInfiniteError(queryClient, postListQueryKey(), "Could not load posts.");
+    await seedInfiniteError(queryClient, postListQueryKey(), "Could not load posts.");
 
     await renderWithProviders(<PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />, {
       queryClient,
     });
 
-    const alert = screen.getByRole("alert");
+    // `findByRole`, not `getByRole`: `atomWithInfiniteQuery`'s value only
+    // reflects the query observer's CURRENT result once its subscription has
+    // been set up post-mount, one render pass after the one `render()`
+    // itself flushes — a synchronous `getByRole` right after render was
+    // still occasionally catching that first, pending-state render, even
+    // with the cache already seeded to "error" before mount. `findByRole`
+    // polls until the DOM actually shows it.
+    const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Could not load posts.");
     expect(screen.getByRole("button", { name: m.common_try_again() })).toBeInTheDocument();
   });

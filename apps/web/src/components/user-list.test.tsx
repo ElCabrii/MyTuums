@@ -28,14 +28,19 @@ describe("UserList", () => {
 
   it("shows a retryable error when the list fails to load", async () => {
     const queryClient = createTestQueryClient();
-    seedInfiniteError(queryClient, userListQueryKey("alexmercer", "followers"), "Could not load followers.");
+    await seedInfiniteError(queryClient, userListQueryKey("alexmercer", "followers"), "Could not load followers.");
 
     await renderWithProviders(
       <UserList username="alexmercer" direction="followers" emptyMessage="No followers yet." />,
       { queryClient },
     );
 
-    const alert = screen.getByRole("alert");
+    // `findByRole`, not `getByRole` — see the matching comment in
+    // post-feed.test.tsx: the query observer's error result only reaches
+    // this component's atom one render pass after `render()` itself
+    // flushes, so a synchronous read right after render can still catch the
+    // prior, pending-state render even with the cache already seeded.
+    const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Could not load followers.");
     expect(screen.getByRole("button", { name: m.common_try_again() })).toBeInTheDocument();
   });
