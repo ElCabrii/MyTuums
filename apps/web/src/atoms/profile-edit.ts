@@ -4,7 +4,7 @@ import { queryClientAtom } from "jotai-tanstack-query";
 import { BIO_MAX_LENGTH, type ImageKind } from "@my-tuums/api/constants";
 import { authClient } from "@/lib/auth-client";
 import { client, orpc } from "@/lib/orpc";
-import { downscaleImage, ImageError } from "@/lib/media";
+import { createDisplayVariant, ImageError } from "@/lib/media";
 import { refreshSession } from "@/lib/session-sync";
 import { validateBio, validateDisplayName } from "@/lib/auth-validation";
 import { authErrorAtom, authPendingAtom } from "@/atoms/auth";
@@ -132,12 +132,16 @@ export const saveProfileAtom = atom(null, async (get, set): Promise<boolean> => 
 });
 
 /**
- * Downscales and uploads one image slot.
+ * Makes the display variant and uploads one image slot — the original file
+ * untouched, the variant alongside it (see `lib/media.ts` for why the upload
+ * carries both).
  *
  * The upload procedure writes the user row itself, past Better Auth, so the
  * session the client holds is stale the moment this resolves — hence
  * `refreshSession()` rather than the `waitFor*` helpers, which only outlast a
- * refetch something else already started.
+ * refetch something else already started. The refresh is also what brings the
+ * new `imageOriginal`/`bannerImageOriginal` into the session for the future
+ * crop editor.
  */
 export const uploadImageAtom = atom(
   null,
@@ -145,8 +149,8 @@ export const uploadImageAtom = atom(
     set(authErrorAtom, null);
     set(imageUploadingAtom, kind);
     try {
-      const encoded = await downscaleImage(file, kind);
-      await client.user.uploadImage({ kind, file: encoded });
+      const display = await createDisplayVariant(file, kind);
+      await client.user.uploadImage({ kind, original: file, display });
 
       await refreshSession();
       set(invalidateOwnProfileAtom);

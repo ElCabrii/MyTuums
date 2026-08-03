@@ -64,6 +64,13 @@
       "when": 1785704989639,
       "tag": "0008_amazing_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785760161311,
+      "tag": "0009_solid_cobalt_man",
+      "breakpoints": true
     }
   ]
 }

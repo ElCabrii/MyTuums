@@ -16,16 +16,26 @@ import { randomUUID } from "node:crypto";
 import {
   ALLOWED_IMAGE_TYPES,
   IMAGE_LIMITS,
+  MAX_IMAGE_MEGAPIXELS,
   MEDIA_URL_PREFIX,
   type AllowedImageType,
   type ImageKind,
 } from "./constants.js";
+import { imageDimensions } from "./dimensions.js";
 
 /** Where each slot's objects live. The kind is the key's first segment. */
 const KEY_PREFIX: Record<ImageKind, string> = {
   avatar: "avatars",
   banner: "banners",
 };
+
+/**
+ * Which of the two objects an upload slot carries. The display object is what
+ * feeds and profiles render; the original is the user's untouched file, kept
+ * for a future crop/reposition editor. The two share a uuid and differ only in
+ * the `.orig` infix, so the pair is obvious in the bucket.
+ */
+export type ImageVariant = "original" | "display";
 
 const EXTENSION: Record<AllowedImageType, string> = {
   "image/webp": "webp",
@@ -94,7 +104,7 @@ export interface ImageAcceptance {
 }
 
 /**
- * Whether these bytes may be stored for this slot.
+ * Whether these bytes may be stored for this slot and variant.
  *
  * Returns a reason rather than throwing so the caller owns the error surface —
  * the procedure turns it into an `ORPCError` whose message the web app's
@@ -104,16 +114,23 @@ export interface ImageAcceptance {
  * The size check runs before the signature check purely so a hostile 50 MB
  * upload is rejected on a cheap comparison. Both run regardless of what the
  * client claims.
+ *
+ * The dimension rule differs by variant because the two objects are served to
+ * different audiences: an original is bounded by megapixels (a 20 MP flat
+ * colour PNG is ~200 KB but a decompression bomb for whoever visits the
+ * profile), while a display object must fit the slot's exact bounds, since it
+ * is what lands in every feed.
  */
 export function acceptImage(
   bytes: Uint8Array,
   declaredType: string,
   kind: ImageKind,
+  variant: ImageVariant,
 ): ImageAcceptance {
   if (!isAllowedImageType(declaredType)) return { ok: false, reason: "type" };
-  if (bytes.byteLength === 0 || bytes.byteLength > IMAGE_LIMITS[kind].maxBytes) {
-    return { ok: false, reason: "size" };
-  }
+
+  const cap = variant === "original" ? IMAGE_LIMITS[kind].maxOriginalBytes : IMAGE_LIMITS[kind].maxDisplayBytes;
+  if (bytes.byteLength === 0 || bytes.byteLength > cap) return { ok: false, reason: "size" };
 
   const sniffed = sniffImageType(bytes);
   // A mismatch between the declared and actual type is a rejection, not a
@@ -122,20 +139,50 @@ export function acceptImage(
   // exactly the case this check exists to catch.
   if (!sniffed || sniffed !== declaredType) return { ok: false, reason: "content" };
 
+  const dimensions = imageDimensions(bytes, sniffed);
+  // A type that sniffs right but has no parseable header is not an image we
+  // can size — and an unsized image is one we will not serve.
+  if (!dimensions) return { ok: false, reason: "content" };
+
+  if (variant === "original") {
+    if (dimensions.width * dimensions.height > MAX_IMAGE_MEGAPIXELS * 1_000_000) {
+      return { ok: false, reason: "size" };
+    }
+  } else {
+    const { maxWidth, maxHeight } = IMAGE_LIMITS[kind];
+    if (dimensions.width > maxWidth || dimensions.height > maxHeight) {
+      return { ok: false, reason: "size" };
+    }
+  }
+
   return { ok: true, type: sniffed };
 }
 
 /**
- * A fresh, unguessable key for one upload.
+ * A fresh, unguessable key for one upload object.
  *
  * The owner's id is in the path so objects are attributable and so the E2E
  * suite can delete a user's uploads by prefix — but it is never the *authority*
  * on who may write there. That is the session, checked in the procedure. A
  * uuid rather than the original filename because filenames are caller-supplied
  * and would let one upload overwrite another.
+ *
+ * The `id` parameter is what pairs the two objects of one upload: the
+ * procedure mints ONE uuid and passes it to both calls, so the display and
+ * original keys differ only in the `.orig` infix — `.../<uuid>.webp` and
+ * `.../<uuid>.orig.jpg` — which is what lets a future reaper pair them and a
+ * human read the bucket. Defaulted here so single-object callers (tests,
+ * fixtures) keep working.
  */
-export function imageObjectKey(kind: ImageKind, userId: string, type: AllowedImageType): string {
-  return `${KEY_PREFIX[kind]}/${userId}/${randomUUID()}.${EXTENSION[type]}`;
+export function imageObjectKey(
+  kind: ImageKind,
+  userId: string,
+  type: AllowedImageType,
+  variant: ImageVariant,
+  id: string = randomUUID(),
+): string {
+  const infix = variant === "original" ? ".orig" : "";
+  return `${KEY_PREFIX[kind]}/${userId}/${id}${infix}.${EXTENSION[type]}`;
 }
 
 /** The stored column value for an object key, e.g. `/media/avatars/<id>/<uuid>.webp`. */
@@ -164,7 +211,14 @@ export function objectKeyFromMediaPath(value: string | null | undefined): string
  * `/media/` reaches the S3 client directly, so `..`, a leading slash, an
  * encoded separator or a stray query would all be the caller's to choose
  * without it. Anchored and explicit rather than a blocklist.
+ *
+ * The uuid is the grouped form, matching `randomUUID()`'s output — the old
+ * `[a-f0-9-]{36}` also matched 36 hyphens, which is not a shape this app
+ * writes. The optional `.orig` infix is the original's key (see
+ * `imageObjectKey`).
  */
 export function isSafeObjectKey(key: string): boolean {
-  return /^(avatars|banners)\/[A-Za-z0-9_-]+\/[a-f0-9-]{36}\.(webp|png|jpg)$/.test(key);
+  return /^(avatars|banners)\/[A-Za-z0-9_-]+\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?:\.orig)?\.(webp|png|jpg)$/.test(
+    key,
+  );
 }
