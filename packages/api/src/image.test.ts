@@ -16,14 +16,31 @@ import {
  * only from `./image.js` and `./constants.js`.
  */
 
-/** Real leading bytes for each format, padded out to a plausible body. */
-const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Array<number>(32).fill(0)]);
-const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...new Array<number>(32).fill(0)]);
+/**
+ * Real leading bytes for each format, INCLUDING a parseable dimension header
+ * (256x128 PNG, 400x300 JPEG, 512x256 WebP) — `acceptImage` reads dimensions
+ * now, so a positive case needs them. Built byte-by-byte, not hand-padded,
+ * so an offset shift fails loudly.
+ */
+const PNG = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x01, 0x00, // width: 256
+  0x00, 0x00, 0x00, 0x80, // height: 128
+]);
+const JPEG = new Uint8Array([
+  0xff, 0xd8,
+  0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+  0xff, 0xc0, 0x00, 0x11, 0x08, // SOF0
+  0x01, 0x2c, // height: 300
+  0x01, 0x90, // width: 400
+]);
 const WEBP = new Uint8Array([
-  0x52, 0x49, 0x46, 0x46, // "RIFF"
-  0x00, 0x00, 0x00, 0x00, // length, skipped by the sniffer
-  0x57, 0x45, 0x42, 0x50, // "WEBP"
-  ...new Array<number>(32).fill(0),
+  0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+  0x56, 0x50, 0x38, 0x20, 0x00, 0x00, 0x00, 0x00, // "VP8 "
+  0x9d, 0x01, 0x2a,
+  0x00, 0x02, // width: 512
+  0x00, 0x01, // height: 256
 ]);
 
 describe("sniffImageType", () => {
@@ -53,18 +70,18 @@ describe("sniffImageType", () => {
 
 describe("acceptImage", () => {
   it("accepts a well-formed image and reports the sniffed type", () => {
-    expect(acceptImage(PNG, "image/png", "avatar")).toEqual({ ok: true, type: "image/png" });
+    expect(acceptImage(PNG, "image/png", "avatar", "display")).toEqual({ ok: true, type: "image/png" });
   });
 
   it("rejects a type that is not on the allowlist", () => {
-    expect(acceptImage(PNG, "image/svg+xml", "avatar")).toMatchObject({ ok: false, reason: "type" });
-    expect(acceptImage(PNG, "text/html", "avatar")).toMatchObject({ ok: false, reason: "type" });
+    expect(acceptImage(PNG, "image/svg+xml", "avatar", "display")).toMatchObject({ ok: false, reason: "type" });
+    expect(acceptImage(PNG, "text/html", "avatar", "display")).toMatchObject({ ok: false, reason: "type" });
   });
 
   it("rejects bytes whose content disagrees with the declared type", () => {
     // The whole point of sniffing: `image/png` is what the caller says, PNG is
     // not what the bytes are. Rejected rather than silently stored as JPEG.
-    expect(acceptImage(JPEG, "image/png", "avatar")).toMatchObject({
+    expect(acceptImage(JPEG, "image/png", "avatar", "display")).toMatchObject({
       ok: false,
       reason: "content",
     });
@@ -72,51 +89,112 @@ describe("acceptImage", () => {
 
   it("rejects an SVG payload even when it declares an allowed type", () => {
     const svg = new TextEncoder().encode("<svg onload=alert(1)>");
-    expect(acceptImage(svg, "image/png", "avatar")).toMatchObject({
+    expect(acceptImage(svg, "image/png", "avatar", "display")).toMatchObject({
       ok: false,
       reason: "content",
     });
   });
 
   it("rejects an empty body", () => {
-    expect(acceptImage(new Uint8Array([]), "image/png", "avatar")).toMatchObject({
+    expect(acceptImage(new Uint8Array([]), "image/png", "avatar", "display")).toMatchObject({
       ok: false,
       reason: "size",
     });
   });
 
-  it("enforces the per-slot byte cap, which differs between avatar and banner", () => {
-    const overAvatar = new Uint8Array(IMAGE_LIMITS.avatar.maxBytes + 1);
+  it("rejects a signature-only header, whose dimensions cannot be read", () => {
+    // The PNG magic with no IHDR after it: sniffs as PNG, but no parseable
+    // dimensions — and an unsized image is one we will not serve.
+    const truncated = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expect(acceptImage(truncated, "image/png", "avatar", "display")).toMatchObject({
+      ok: false,
+      reason: "content",
+    });
+  });
+
+  it("enforces the per-slot display byte cap, which differs between avatar and banner", () => {
+    const overAvatar = new Uint8Array(IMAGE_LIMITS.avatar.maxDisplayBytes + 1);
     overAvatar.set(PNG.slice(0, 8));
 
-    expect(acceptImage(overAvatar, "image/png", "avatar")).toMatchObject({
+    expect(acceptImage(overAvatar, "image/png", "avatar", "display")).toMatchObject({
       ok: false,
       reason: "size",
     });
     // The same payload is under the banner's larger cap, so it passes there —
     // the caps are per slot, not one global number.
-    expect(acceptImage(overAvatar, "image/png", "banner")).toMatchObject({ ok: true });
+    expect(acceptImage(overAvatar, "image/png", "banner", "display")).toMatchObject({ ok: true });
   });
+
+  it("rejects a display object beyond the slot's pixel bounds", () => {
+    // The display object is what lands in every feed; a hostile client can
+    // name a 600px-wide image "the avatar's display object" and expect it to
+    // ride along. The bound is what stops it.
+    const wide = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+      0x56, 0x50, 0x38, 0x20, 0x00, 0x00, 0x00, 0x00, // "VP8 "
+      0x9d, 0x01, 0x2a,
+      0x58, 0x02, // width: 600
+      0x2c, 0x01, // height: 300
+    ]);
+
+    expect(acceptImage(wide, "image/webp", "avatar", "display")).toMatchObject({
+      ok: false,
+      reason: "size",
+    });
+    // Same bytes are fine as the ORIGINAL, whose rule is megapixels, not
+    // display bounds.
+    expect(acceptImage(wide, "image/webp", "avatar", "original")).toMatchObject({ ok: true });
+  });
+
+  it("rejects an original beyond the megapixel ceiling, even when its bytes are tiny", () => {
+    // The byte cap does not bound pixels: a 20000x20000 flat-colour PNG is
+    // ~200 KB and 400 MP. Build a PNG header declaring exactly that.
+    const bomb = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+      0x4e, 0x20, 0x00, 0x00, // width: 20000
+      0x4e, 0x20, 0x00, 0x00, // height: 20000
+    ]);
+    expect(bomb.byteLength).toBeLessThan(IMAGE_LIMITS.avatar.maxOriginalBytes);
+
+    expect(acceptImage(bomb, "image/png", "avatar", "original")).toMatchObject({
+      ok: false,
+      reason: "size",
+    });
+  });
+
 });
 
 describe("object keys", () => {
   it("puts the owner id in the path and a fresh uuid in the filename", () => {
-    const a = imageObjectKey("avatar", "user-1", "image/webp");
-    const b = imageObjectKey("avatar", "user-1", "image/webp");
+    const a = imageObjectKey("avatar", "user-1", "image/webp", "display");
+    const b = imageObjectKey("avatar", "user-1", "image/webp", "display");
 
-    expect(a).toMatch(/^avatars\/user-1\/[a-f0-9-]{36}\.webp$/);
+    expect(a).toMatch(/^avatars\/user-1\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.webp$/);
     // Never derived from the upload's filename, so one upload cannot overwrite
     // another — including someone else's.
     expect(a).not.toBe(b);
   });
 
   it("maps each kind to its own prefix and each type to its extension", () => {
-    expect(imageObjectKey("banner", "u", "image/jpeg")).toMatch(/^banners\/u\/.*\.jpg$/);
-    expect(imageObjectKey("avatar", "u", "image/png")).toMatch(/^avatars\/u\/.*\.png$/);
+    expect(imageObjectKey("banner", "u", "image/jpeg", "display")).toMatch(/^banners\/u\/.*\.jpg$/);
+    expect(imageObjectKey("avatar", "u", "image/png", "display")).toMatch(/^avatars\/u\/.*\.png$/);
+  });
+
+  it("pairs display and original on the caller-supplied id, differing only in the infix", () => {
+    // The PROCEDURE mints one uuid and passes it to both calls; the infix is
+    // what tells the two apart. That pairing is what lets a future reaper
+    // match them and a human read the bucket.
+    const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const display = imageObjectKey("avatar", "user-1", "image/webp", "display", id);
+    const original = imageObjectKey("avatar", "user-1", "image/jpeg", "original", id);
+
+    expect(display).toBe(`avatars/user-1/${id}.webp`);
+    expect(original).toBe(`avatars/user-1/${id}.orig.jpg`);
   });
 
   it("round-trips a key through the stored /media path", () => {
-    const key = imageObjectKey("avatar", "user-1", "image/webp");
+    const key = imageObjectKey("avatar", "user-1", "image/webp", "display");
     expect(objectKeyFromMediaPath(mediaPathFor(key))).toBe(key);
   });
 
@@ -133,6 +211,11 @@ describe("isSafeObjectKey", () => {
     expect(isSafeObjectKey("banners/user-1/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jpg")).toBe(true);
   });
 
+  it("accepts the .orig infix, the original's key shape", () => {
+    expect(isSafeObjectKey("avatars/user-1/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.orig.jpg")).toBe(true);
+    expect(isSafeObjectKey("banners/user-1/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.orig.webp")).toBe(true);
+  });
+
   it("rejects traversal, absolute paths and foreign prefixes", () => {
     // This is the guard on the /media route, where the segment after the prefix
     // reaches the S3 client directly.
@@ -145,5 +228,12 @@ describe("isSafeObjectKey", () => {
   it("rejects an extension outside the allowlist", () => {
     expect(isSafeObjectKey("avatars/u/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.svg")).toBe(false);
     expect(isSafeObjectKey("avatars/u/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.html")).toBe(false);
+  });
+
+  it("rejects a uuid that is not the grouped shape this app writes", () => {
+    // The old `[a-f0-9-]{36}` also matched 36 hyphens; the shape must be the
+    // grouped uuid `randomUUID()` actually produces.
+    expect(isSafeObjectKey("avatars/u/------------------------------------.webp")).toBe(false);
+    expect(isSafeObjectKey("avatars/u/aaaaaaaaaaaabbbbccccdddd.orig.png")).toBe(false);
   });
 });

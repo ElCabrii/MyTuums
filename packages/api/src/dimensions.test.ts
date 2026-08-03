@@ -1,0 +1,96 @@
+import { describe, expect, it } from "vitest";
+import { imageDimensions } from "./dimensions.js";
+
+/**
+ * Hand-crafted headers, not real files: the parser reads only the leading
+ * bytes, so a synthetic header IS the file, as far as it is concerned. Each
+ * fixture is built byte-by-byte so a shift in an offset fails loudly rather
+ * than silently parsing a different field.
+ */
+
+describe("imageDimensions", () => {
+  it("parses PNG width and height from the IHDR chunk", () => {
+    // Signature, then IHDR: length (0x0D), name, then width=256, height=128.
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+      0x00, 0x00, 0x01, 0x00, // width: 256
+      0x00, 0x00, 0x00, 0x80, // height: 128
+    ]);
+
+    expect(imageDimensions(png, "image/png")).toEqual({ width: 256, height: 128 });
+  });
+
+  it("skips JPEG segments and reads the first SOF", () => {
+    // SOI, an APP0 segment of 16 bytes, then SOF0 with height=300, width=400.
+    const jpeg = new Uint8Array([
+      0xff, 0xd8, // SOI
+      0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, // APP0
+      0xff, 0xc0, 0x00, 0x11, 0x08, // SOF0, length 17, precision 8
+      0x01, 0x2c, // height: 300
+      0x01, 0x90, // width: 400
+    ]);
+
+    expect(imageDimensions(jpeg, "image/jpeg")).toEqual({ width: 400, height: 300 });
+  });
+
+  it("returns null for a JPEG that reaches the scan without an SOF", () => {
+    const jpeg = new Uint8Array([
+      0xff, 0xd8,
+      0xff, 0xda, 0x00, 0x08, // SOS straight away
+    ]);
+
+    expect(imageDimensions(jpeg, "image/jpeg")).toBeNull();
+  });
+
+  it("parses lossy WebP (VP8) dimensions as 14-bit little-endian", () => {
+    // "RIFF" + size + "WEBP", then a "VP8 " chunk: tag, width=512, height=256.
+    const webp = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+      0x56, 0x50, 0x38, 0x20, 0x00, 0x00, 0x00, 0x00,
+      0x9d, 0x01, 0x2a,
+      0x00, 0x02, // width: 512
+      0x00, 0x01, // height: 256
+    ]);
+
+    expect(imageDimensions(webp, "image/webp")).toEqual({ width: 512, height: 256 });
+  });
+
+  it("parses lossless WebP (VP8L) dimensions from the packed word", () => {
+    // VP8L packs width-1 in bits 0-13, height-1 in bits 14-27, little-endian.
+    // width=257 -> 0x100; height=129 -> 0x80 << 14.
+    const webp = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+      0x56, 0x50, 0x38, 0x4c, 0x00, 0x00, 0x00, 0x00,
+      0x2f,
+      0x00, 0x01, 0x20, 0x00, // 0x00200100 -> width 257, height 129
+    ]);
+
+    expect(imageDimensions(webp, "image/webp")).toEqual({ width: 257, height: 129 });
+  });
+
+  it("parses extended WebP (VP8X) dimensions as 24-bit little-endian", () => {
+    // VP8X: flags byte, then width-1 and height-1 as 24-bit LE.
+    // width=1000 -> 0x3E7 + 1; height=2000 -> 0x7CF + 1.
+    const webp = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+      0x56, 0x50, 0x38, 0x58, 0x00, 0x00, 0x00, 0x00,
+      0x00,
+      0xe7, 0x03, 0x00, // width - 1
+      0xcf, 0x07, 0x00, // height - 1
+    ]);
+
+    expect(imageDimensions(webp, "image/webp")).toEqual({ width: 1000, height: 2000 });
+  });
+
+  it("returns null for an unknown type, a short header, or a garbled chunk", () => {
+    expect(imageDimensions(new Uint8Array(64), "image/svg+xml")).toBeNull();
+    expect(imageDimensions(new Uint8Array(8), "image/png")).toBeNull();
+    // A WebP container whose first chunk is not one of the three image chunks.
+    const webp = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+      0x58, 0x58, 0x58, 0x58, 0x00, 0x00, 0x00, 0x00, ...new Array<number>(32).fill(0),
+    ]);
+    expect(imageDimensions(webp, "image/webp")).toBeNull();
+  });
+});

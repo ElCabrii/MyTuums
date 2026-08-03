@@ -52,17 +52,22 @@ export interface Storage {
 }
 
 /**
- * The full surface the factory actually provides, `removeByPrefix` included.
+ * The full surface the factory actually provides, cleanup included.
  *
- * Deliberately NOT what `Context.storage` is typed as. `removeByPrefix` deletes
- * every object under a prefix — pointed at production, that destroys every
- * avatar — and a procedure should not even be able to name it. It exists for
- * one caller, the E2E suite's cleanup, and only that caller imports the
+ * Deliberately NOT what `Context.storage` is typed as. These delete or list
+ * everything under a prefix — pointed at production, that destroys every
+ * avatar — and a procedure should not even be able to name them. They exist
+ * for two callers, the E2E suite's cleanup and the reconcile script
+ * (`packages/api/scripts/reconcile-media.mjs`), and only those import the
  * destructive factory — the same instinct that makes `@my-tuums/auth/testing`
  * a separate instance rather than a conditional spread. The warning that used
  * to live in prose on the interface now lives in the type.
  */
 export interface DestructiveStorage extends Storage {
+  /** Every object key under a prefix. Used by the reconcile script. */
+  listByPrefix(prefix: string): Promise<string[]>;
+  /** Deletes specific keys in batches. Used by the reconcile script. */
+  removeMany(keys: string[]): Promise<number>;
   /** Deletes every object under a prefix. Used by the E2E suite's cleanup. */
   removeByPrefix(prefix: string): Promise<number>;
 }
@@ -114,9 +119,11 @@ export function createStorage(
 }
 
 /**
- * The E2E-only factory. Same client, one extra method: `removeByPrefix`, which
- * `e2e/support/db.ts`'s cleanup needs to reset the dev/CI bucket between runs.
- * Nothing else should ever import this.
+ * The cleanup-only factory: the same client plus the `DestructiveStorage`
+ * surface — listing, batched deletion and `removeByPrefix`, which
+ * `e2e/support/db.ts`'s cleanup and the reconcile script
+ * (`packages/api/scripts/reconcile-media.mjs`) need. Nothing else should ever
+ * import this.
  */
 export function createDestructiveStorage(
   config: StorageConfig,
@@ -161,11 +168,11 @@ function createStorageImpl(config: StorageConfig, now: () => number): Destructiv
       await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
     },
 
-    async removeByPrefix(prefix) {
-      let removed = 0;
+    async listByPrefix(prefix) {
+      const keys: string[] = [];
       let continuationToken: string | undefined;
 
-      // ListObjectsV2 pages at 1000 keys; a test run that uploaded more than
+      // ListObjectsV2 pages at 1000 keys; a cleanup that uploaded more than
       // that would silently leave the rest behind without this loop.
       do {
         const listed = await client.send(
@@ -176,24 +183,36 @@ function createStorageImpl(config: StorageConfig, now: () => number): Destructiv
           }),
         );
 
-        const keys = (listed.Contents ?? [])
-          .map((object) => object.Key)
-          .filter((key): key is string => typeof key === "string");
-
-        if (keys.length > 0) {
-          await client.send(
-            new DeleteObjectsCommand({
-              Bucket: config.bucket,
-              Delete: { Objects: keys.map((Key) => ({ Key })) },
-            }),
-          );
-          removed += keys.length;
+        for (const object of listed.Contents ?? []) {
+          if (object.Key) keys.push(object.Key);
         }
 
         continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
       } while (continuationToken);
 
+      return keys;
+    },
+
+    async removeMany(keys) {
+      let removed = 0;
+
+      // DeleteObjects takes at most 1000 keys per call.
+      for (let i = 0; i < keys.length; i += 1000) {
+        const batch = keys.slice(i, i + 1000);
+        await client.send(
+          new DeleteObjectsCommand({
+            Bucket: config.bucket,
+            Delete: { Objects: batch.map((Key) => ({ Key })) },
+          }),
+        );
+        removed += batch.length;
+      }
+
       return removed;
+    },
+
+    async removeByPrefix(prefix) {
+      return this.removeMany(await this.listByPrefix(prefix));
     },
 
     signedGetUrl(key, expiresInSeconds = DEFAULT_SIGNED_URL_TTL) {

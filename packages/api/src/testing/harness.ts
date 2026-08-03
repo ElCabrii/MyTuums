@@ -96,6 +96,13 @@ export const testStorage: DestructiveStorage = {
     testStorageObjects.delete(key);
     return Promise.resolve();
   },
+  listByPrefix(prefix) {
+    return Promise.resolve([...testStorageObjects.keys()].filter((key) => key.startsWith(prefix)));
+  },
+  removeMany(keys) {
+    for (const key of keys) testStorageObjects.delete(key);
+    return Promise.resolve(keys.length);
+  },
   removeByPrefix(prefix) {
     let removed = 0;
     for (const key of [...testStorageObjects.keys()]) {

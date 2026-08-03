@@ -15,6 +15,10 @@
     "./storage": {
       "types": "./src/storage.ts",
       "default": "./src/storage.ts"
+    },
+    "./dimensions": {
+      "types": "./src/dimensions.ts",
+      "default": "./src/dimensions.ts"
     }
   },
   "scripts": {
@@ -22,7 +26,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration"
+    "test:integration": "vitest run --project integration",
+    "reconcile:media": "dotenv -e ../../.env -- tsx scripts/reconcile-media.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1101.0",
@@ -38,6 +43,8 @@
     "@my-tuums/tsconfig": "workspace:*",
     "@types/node": "catalog:",
     "dotenv": "^17.2.3",
+    "dotenv-cli": "^11.0.0",
+    "tsx": "4.23.1",
     "typescript": "catalog:",
     "vitest": "^4.1.10"
   }

@@ -1,11 +1,13 @@
 import {
   ALLOWED_IMAGE_TYPES,
   IMAGE_LIMITS,
+  MAX_IMAGE_MEGAPIXELS,
   type ImageKind,
 } from "@my-tuums/api/constants";
+import { imageDimensions } from "@my-tuums/api/dimensions";
 
 /**
- * Turning a file someone picked into something worth uploading.
+ * Turning a file someone picked into the two objects one upload carries.
  *
  * Everything here runs in the browser, on purpose. Re-encoding server-side
  * would mean `sharp` and its platform-specific native binary in the server
@@ -14,7 +16,12 @@ import {
  * is genuinely raster bytes the browser itself produced. A renamed HTML file or
  * a script-bearing SVG cannot survive the round trip.
  *
- * None of that is trusted by the server, which sniffs the magic bytes of
+ * The ORIGINAL is uploaded untouched — that is the product requirement: a user
+ * should be able to refit their picture later without having lost pixels. It is
+ * the display variant this module produces: a small WebP that feeds, headers
+ * and profiles render, so megabytes of original never travel down a timeline.
+ *
+ * None of this is trusted by the server, which sniffs the magic bytes of
  * whatever actually arrives (`packages/api/src/image.ts`). This is the
  * cooperative path, not the security boundary.
  */
@@ -31,21 +38,28 @@ export class ImageError extends Error {
   }
 }
 
+function isAllowedType(type: string): boolean {
+  return (ALLOWED_IMAGE_TYPES as readonly string[]).includes(type);
+}
+
 /**
- * How large a file we are willing to *read* before downscaling.
- *
- * Separate from, and much larger than, the per-slot upload caps: the point of
- * downscaling is that a 12 MP phone photo becomes an acceptable avatar, so
- * rejecting it at its original size would defeat the feature. This bound exists
- * only so `createImageBitmap` is never handed something that would exhaust
- * memory before it can be shrunk.
+ * The first `max` bytes of a file, or `null` when the platform cannot read
+ * them (some engines lack `File.prototype.arrayBuffer`, and a sliced blob even
+ * more so — FileReader is the one path every engine implements).
  */
-const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
+function readFirstBytes(file: File, max: number): Promise<Uint8Array | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+    reader.onerror = () => resolve(null);
+    reader.readAsArrayBuffer(file.slice(0, max));
+  });
+}
 
 /**
  * Re-encodes `file` to a WebP (or a PNG on a browser without WebP encode
- * support) no larger than the slot's bounds, preserving aspect ratio and never
- * scaling up.
+ * support) no larger than the slot's display bounds, preserving aspect ratio
+ * and never scaling up.
  *
  * WebP because it is in `ALLOWED_IMAGE_TYPES`, is markedly smaller than PNG for
  * photographs, and is supported by every browser this app targets. `cover`-style
@@ -53,11 +67,27 @@ const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
  * frame with `object-cover`, so cropping at encode time would permanently
  * discard pixels the display already hides.
  */
-export async function downscaleImage(file: File, kind: ImageKind): Promise<File> {
-  if (!(ALLOWED_IMAGE_TYPES as readonly string[]).includes(file.type)) {
-    throw new ImageError("type");
+export async function createDisplayVariant(file: File, kind: ImageKind): Promise<File> {
+  if (!isAllowedType(file.type)) throw new ImageError("type");
+  // The original's cap, not the display's: this is what we are willing to
+  // *read* before shrinking, and it is also the cap the original object is
+  // checked against server-side, so a file that passes here cannot be rejected
+  // on bytes later.
+  if (file.size === 0 || file.size > IMAGE_LIMITS[kind].maxOriginalBytes) {
+    throw new ImageError("size");
   }
-  if (file.size > MAX_SOURCE_BYTES) throw new ImageError("size");
+
+  // Megapixel pre-check on header bytes, before any decode: a 400 MP
+  // flat-colour PNG is ~200 KB and decodes to a gigabyte of pixels. The server
+  // enforces the same ceiling on the original; rejecting here saves the
+  // browser from paying for the decode. A file whose header is unparseable
+  // (a JPEG with a huge EXIF block pushes the SOF past the first 64 bytes)
+  // simply skips the pre-check — the server still holds the line.
+  const header = await readFirstBytes(file, 64);
+  const headerDims = header ? imageDimensions(header, file.type) : null;
+  if (headerDims && headerDims.width * headerDims.height > MAX_IMAGE_MEGAPIXELS * 1_000_000) {
+    throw new ImageError("size");
+  }
 
   const bitmap = await decode(file);
 
@@ -65,6 +95,13 @@ export async function downscaleImage(file: File, kind: ImageKind): Promise<File>
     const { maxWidth, maxHeight } = IMAGE_LIMITS[kind];
     // `min(..., 1)` is what stops a small image being blown up to the bounds,
     // which would add bytes and lose sharpness to gain nothing.
+    //
+    // The bitmap's dims, not the header's: `imageOrientation: "from-image"`
+    // makes the decode already upright, so these are the display dims — which
+    // is also what the canvas output's header will say, keeping the server's
+    // display-bound check consistent with what actually renders. A rotated
+    // phone photo is 3000x1000 in its header and 1000x3000 upright here; sizing
+    // against the header would distort it.
     const scale = Math.min(maxWidth / bitmap.width, maxHeight / bitmap.height, 1);
     const width = Math.max(1, Math.round(bitmap.width * scale));
     const height = Math.max(1, Math.round(bitmap.height * scale));
@@ -78,7 +115,7 @@ export async function downscaleImage(file: File, kind: ImageKind): Promise<File>
     context.drawImage(bitmap, 0, 0, width, height);
 
     const blob = await toBlob(canvas);
-    if (blob.size > IMAGE_LIMITS[kind].maxBytes) throw new ImageError("size");
+    if (blob.size > IMAGE_LIMITS[kind].maxDisplayBytes) throw new ImageError("size");
 
     // `canvas.toBlob` falls back to `image/png` when WebP encode is
     // unsupported — silently, with no error — so the type must be read off the
@@ -90,7 +127,7 @@ export async function downscaleImage(file: File, kind: ImageKind): Promise<File>
     const type = blob.type;
     if (type !== "image/webp" && type !== "image/png") throw new ImageError("decode");
     const extension = type === "image/webp" ? "webp" : "png";
-    return new File([blob], `${kind}.${extension}`, { type });
+    return new File([blob], `${kind}-display.${extension}`, { type });
   } finally {
     // Bitmaps hold decoded pixel data outside the JS heap; without this an
     // avatar preview loop would retain every image the user auditioned.
@@ -100,7 +137,12 @@ export async function downscaleImage(file: File, kind: ImageKind): Promise<File>
 
 async function decode(file: File): Promise<ImageBitmap> {
   try {
-    return await createImageBitmap(file);
+    // `imageOrientation` passed explicitly rather than left to the default:
+    // the spec's default changed from "none" to "from-image" mid-flight and
+    // browsers moved at different times. Implicit, a portrait phone photo
+    // renders sideways on some browsers — and, worse, would disagree with the
+    // untouched original, which an `<img>` always renders upright.
+    return await createImageBitmap(file, { imageOrientation: "from-image" });
   } catch {
     // A file that claims to be an image and cannot be decoded is the exact
     // case the type check above cannot catch, since `File.type` comes from the

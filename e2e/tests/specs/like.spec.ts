@@ -1,6 +1,6 @@
 import { test, expect } from "../../support/fixtures";
 import { ALICE } from "../../support/users";
-import { likeButtonFor, postCardWithText, signedOutLikeLinkFor } from "../../support/post-card";
+import { likeButtonFor } from "../../support/post-card";
 
 /**
  * The most valuable spec in the suite (see the task brief): it proves the
@@ -107,19 +107,15 @@ test.describe("liking a post", () => {
     await expect(profileLike).toHaveAttribute("aria-pressed", "true");
   });
 
-  test("signed out, the heart is a link to /login", async ({ signedOutPage, db }) => {
-    const aliceId = await db.getUserId(ALICE.username);
-    const [seeded] = await db.seedPosts(aliceId, 1, {
-      content: () => `Signed-out like target ${Date.now().toString()}`,
-    });
-    if (!seeded) throw new Error("seedPosts returned no row");
-
+  test("signed out, the site gate holds a visitor at /login", async ({ signedOutPage }) => {
+    // The site is private (use-require-signed-in.ts): a signed-out visitor to
+    // "/" is redirected to /login, so the feed — and its signed-out like
+    // controls — never render. This test used to assert on that feed (the
+    // heart links to /login); the gate made it unreachable, and the assertion
+    // raced the redirect it was trying to observe. Pinning the gate instead
+    // asserts the behaviour that actually ships.
     await signedOutPage.goto("/");
-    const heart = signedOutLikeLinkFor(signedOutPage, seeded.content);
-    await expect(heart).toHaveAttribute("href", "/login");
 
-    // Sanity check the scoping actually landed on the right card, not some
-    // unrelated link that happens to share the title.
-    await expect(postCardWithText(signedOutPage, seeded.content)).toContainText(seeded.content);
+    await expect(signedOutPage).toHaveURL(/\/login/, { timeout: 10_000 });
   });
 });

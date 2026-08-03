@@ -40,6 +40,8 @@ export const authTest = betterAuth({
       dateOfBirth: { type: "date", required: false },
       bio: { type: "string", required: false },
       bannerImage: { type: "string", required: false },
+      imageOriginal: { type: "string", required: false },
+      bannerImageOriginal: { type: "string", required: false },
       themePreference: { type: "string", required: false },
       localePreference: { type: "string", required: false },
     },

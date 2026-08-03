@@ -112,6 +112,19 @@ export const auth = betterAuth({
       bio: { type: "string", required: false },
       bannerImage: { type: "string", required: false },
 
+      // The untouched original of each upload, kept beside the display form
+      // so a future crop/reposition editor has every pixel the user picked
+      // (the display form is the browser-made WebP the feeds render).
+      //
+      // `input: false` — deliberately not client-writable, unlike every other
+      // field here. The upload procedure is the ONLY legitimate writer, and it
+      // writes through Drizzle, which bypasses hooks entirely; a client write
+      // reaching this field is illegitimate by construction, so Better Auth
+      // should not even accept it as input. `returned` stays default-true so
+      // the session carries them to the settings page.
+      imageOriginal: { type: "string", required: false, input: false },
+      bannerImageOriginal: { type: "string", required: false, input: false },
+
       // Stored *defaults* for theme and language, not the live values. The
       // header and footer switchers still write to localStorage and the
       // PARAGLIDE_LOCALE cookie, which win on the device that set them; these

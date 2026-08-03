@@ -33,6 +33,8 @@ export const user = pgTable("user", {
   dateOfBirth: timestamp("date_of_birth", { withTimezone: true }),
   bio: text("bio"),
   bannerImage: text("banner_image"),
+  imageOriginal: text("image_original"),
+  bannerImageOriginal: text("banner_image_original"),
   themePreference: text("theme_preference"),
   localePreference: text("locale_preference"),
 });

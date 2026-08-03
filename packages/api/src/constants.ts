@@ -66,30 +66,61 @@ export type ImageKind = (typeof IMAGE_KINDS)[number];
 /**
  * Per-slot upload limits.
  *
- * The byte caps are the server's rule and are checked against the actual
- * payload, not a declared length. They are generous relative to what the client
- * actually sends — `downscaleImage` re-encodes an avatar to at most 512x512
- * WebP, which lands well under 200 KB — because the cap exists to bound a
- * hostile upload, not to second-guess a legitimate one.
+ * Every slot stores TWO objects (see `packages/api/src/users.ts`):
+ *
+ * - the **original** — the user's file, untouched. The byte cap is what
+ *   bounds a hostile upload; a generous cap is fine because the megapixel
+ *   rule below bounds the real cost (pixels, not bytes).
+ * - the **display** object — the browser-made WebP the feeds render, so
+ *   megabytes of original never travel down a timeline. Its byte cap and its
+ *   `maxWidth`/`maxHeight` are checked against the actual payload, never a
+ *   declared length: with the client re-encode gone from the mandatory path,
+ *   these are what stop a hostile "display" object being an unbounded image.
  */
 export const IMAGE_LIMITS = {
-  avatar: { maxBytes: 2 * 1024 * 1024, maxWidth: 512, maxHeight: 512 },
-  banner: { maxBytes: 4 * 1024 * 1024, maxWidth: 1500, maxHeight: 500 },
-} as const satisfies Record<ImageKind, { maxBytes: number; maxWidth: number; maxHeight: number }>;
+  avatar: {
+    maxOriginalBytes: 5 * 1024 * 1024,
+    maxDisplayBytes: 1024 * 1024,
+    maxWidth: 512,
+    maxHeight: 512,
+  },
+  banner: {
+    maxOriginalBytes: 8 * 1024 * 1024,
+    maxDisplayBytes: 2 * 1024 * 1024,
+    maxWidth: 1500,
+    maxHeight: 500,
+  },
+} as const satisfies Record<
+  ImageKind,
+  { maxOriginalBytes: number; maxDisplayBytes: number; maxWidth: number; maxHeight: number }
+>;
+
+/**
+ * The largest original, in pixels, this app will store.
+ *
+ * The byte cap does not bound this: a 20000x20000 flat-colour PNG is ~200 KB
+ * and 400 megapixels, and originals are served back from a public `/media/`
+ * path — unbounded, one is a decompression bomb aimed at whoever visits the
+ * profile. Checked against header bytes, so it costs nothing to enforce.
+ */
+export const MAX_IMAGE_MEGAPIXELS = 50;
 
 /**
  * The largest request body the RPC endpoint will accept.
  *
  * Derived from the image caps rather than written as a literal, so raising a
  * slot's limit can never silently leave the ceiling behind. The headroom above
- * the largest slot cap covers the multipart framing oRPC's file encoding adds
- * around the payload (boundaries and part headers).
+ * the largest byte cap covers the multipart framing oRPC's file encoding adds
+ * around the payload (boundaries and part headers) — and an upload carries
+ * two objects, so the ceiling must clear the bigger of the two caps, not the
+ * slot total.
  *
  * Enforced in `apps/server/src/request-handler.ts`, which is the one chokepoint
  * that runs before oRPC buffers a body in memory.
  */
 export const RPC_MAX_BODY_BYTES =
-  Math.max(...Object.values(IMAGE_LIMITS).map((slot) => slot.maxBytes)) + 1024 * 1024;
+  Math.max(...Object.values(IMAGE_LIMITS).flatMap((slot) => [slot.maxOriginalBytes, slot.maxDisplayBytes])) +
+  1024 * 1024;
 
 /**
  * The URL prefix under which uploaded images are served, and the marker that

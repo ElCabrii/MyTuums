@@ -84,6 +84,20 @@ function assertOneOf(value: unknown, allowed: readonly string[], message: string
 }
 
 /**
+ * The original-image columns are the one place "no client writes, ever" is the
+ * rule. They are declared `input: false` in the auth config so Better Auth
+ * rejects them as input outright; this is the second line for anything that
+ * bypasses that — the hook sees *every* user write, and any non-blank value
+ * here is illegitimate by construction, because the only legitimate writer is
+ * the upload procedure, which writes through Drizzle and skips these hooks.
+ */
+function assertNoClientOriginalImageWrite(value: unknown): void {
+  if (!isBlank(value)) {
+    throw new APIError("BAD_REQUEST", { message: MANAGED_IMAGE_MESSAGE });
+  }
+}
+
+/**
  * The rule Better Auth runs before a user row is created or updated, beside
  * `validateDateOfBirthHook`.
  *
@@ -103,6 +117,8 @@ export function validateProfileFieldsHook(
     bio?: unknown;
     image?: unknown;
     bannerImage?: unknown;
+    imageOriginal?: unknown;
+    bannerImageOriginal?: unknown;
     themePreference?: unknown;
     localePreference?: unknown;
   },
@@ -115,6 +131,9 @@ export function validateProfileFieldsHook(
 
   assertProviderImage(user.image);
   assertProviderImage(user.bannerImage);
+  // No legitimate client write ever touches these — see the helper's comment.
+  assertNoClientOriginalImageWrite(user.imageOriginal);
+  assertNoClientOriginalImageWrite(user.bannerImageOriginal);
 
   assertOneOf(user.themePreference, THEME_PREFERENCES, THEME_PREFERENCE_INVALID_MESSAGE);
   assertOneOf(user.localePreference, LOCALE_PREFERENCES, LOCALE_PREFERENCE_INVALID_MESSAGE);

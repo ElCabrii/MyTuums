@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
@@ -169,58 +170,80 @@ function requireStorage(context: { storage: Storage | null }): Storage {
 }
 
 /**
- * Points one image slot at a new value and hands back what it held before.
+ * Points one image slot's two columns (display + original) at new values and
+ * hands back what they held before.
  *
  * In a transaction with `SELECT ... FOR UPDATE`, which is not ceremony. The
- * previous value cannot come from `RETURNING` — that reports the row *after*
- * the update — so it has to be read first, and two bare statements would race:
- * two uploads landing together could both read the same old key, both delete
- * it, and leave the object the loser stored orphaned while the winner's row
- * points at a key that was never removed. The row lock makes the read-then-write
- * one step, which is exactly what "replace" means here.
+ * previous values cannot come from `RETURNING` — that reports the row *after*
+ * the update — so they have to be read first, and two bare statements would
+ * race: two uploads landing together could both read the same old keys, both
+ * delete them, and leave the objects the loser stored orphaned while the
+ * winner's row points at keys that were never removed. The row lock makes the
+ * read-then-write one step, which is exactly what "replace" means here.
  */
-async function setImageColumn(
+async function setImageColumns(
   db: Database,
   userId: string,
   kind: ImageKind,
-  value: string | null,
-): Promise<string | null> {
+  values: { display: string | null; original: string | null },
+): Promise<{ display: string | null; original: string | null }> {
   return db.transaction(async (tx) => {
     const [current] = await tx
-      .select({ image: user.image, bannerImage: user.bannerImage })
+      .select({
+        image: user.image,
+        bannerImage: user.bannerImage,
+        imageOriginal: user.imageOriginal,
+        bannerImageOriginal: user.bannerImageOriginal,
+      })
       .from(user)
       .where(eq(user.id, userId))
       .for("update")
       .limit(1);
 
-    if (!current) return null;
+    if (!current) return { display: null, original: null };
 
     await tx
       .update(user)
-      .set(kind === "avatar" ? { image: value } : { bannerImage: value })
+      .set(
+        kind === "avatar"
+          ? { image: values.display, imageOriginal: values.original }
+          : { bannerImage: values.display, bannerImageOriginal: values.original },
+      )
       .where(eq(user.id, userId));
 
-    return kind === "avatar" ? current.image : current.bannerImage;
+    return kind === "avatar"
+      ? { display: current.image, original: current.imageOriginal }
+      : { display: current.bannerImage, original: current.bannerImageOriginal };
   });
 }
 
 /**
- * Deletes the object a stored path pointed at, when it was one of ours.
+ * Deletes the objects behind stored paths, when they were ours.
  *
  * An OAuth provider's absolute avatar URL is not ours to delete, and
  * `objectKeyFromMediaPath` returns `null` for it. A failure here is swallowed
  * on purpose: the user's profile is already correct, and turning a successful
  * upload into an error because a stale object could not be reaped would be the
  * wrong trade.
+ *
+ * The cost of that trade is that objects leak on the paths where the row write
+ * fails after the objects are stored, or where this delete errors. Nothing
+ * reconciles them on the request path; `packages/api/scripts/reconcile-media.mjs`
+ * is the reaper, and its existence is part of why swallowing here is safe.
  */
-async function discardPrevious(storage: Storage, previous: string | null): Promise<void> {
-  const key = objectKeyFromMediaPath(previous);
-  if (!key) return;
+async function discardPrevious(
+  storage: Storage,
+  previous: { display: string | null; original: string | null },
+): Promise<void> {
+  for (const value of [previous.display, previous.original]) {
+    const key = objectKeyFromMediaPath(value);
+    if (!key) continue;
 
-  try {
-    await storage.remove(key);
-  } catch (error) {
-    console.error("Failed to delete replaced image object", key, error);
+    try {
+      await storage.remove(key);
+    } catch (error) {
+      console.error("Failed to delete replaced image object", key, error);
+    }
   }
 }
 
@@ -250,51 +273,81 @@ export const userRouter = {
   /**
    * Replaces the caller's avatar or banner.
    *
-   * The bytes come through oRPC as a real `File` — its RPC protocol serialises
-   * one as multipart automatically, so this needs no base64 hop and no
-   * hand-rolled body parsing on the server.
+   * One upload carries TWO objects: the untouched original and the small
+   * display object feeds render (see ./image.ts for why the two exist and how
+   * they are bounded). Both bytes come through oRPC as real `File`s — its RPC
+   * protocol serialises them as multipart automatically, so this needs no
+   * base64 hop and no hand-rolled body parsing on the server.
    *
    * The row is written with Drizzle rather than through `auth.api.updateUser`,
    * and that is deliberate: `packages/auth/src/profile.ts` refuses any
    * hook-visible write of a `/media/` path precisely so that a client cannot
    * set one directly. Drizzle bypasses Better Auth's hooks, which makes this
-   * procedure the single writer of that column — and the session, not the key,
-   * is what decides whose row is touched.
+   * procedure the single writer of these columns — and the session, not the
+   * key, is what decides whose row is touched.
    */
   uploadImage: protectedProcedure
     .use(rateLimit(RATE_LIMITS.upload))
-    .input(z.object({ kind: z.enum(IMAGE_KINDS), file: z.file() }))
+    .input(z.object({ kind: z.enum(IMAGE_KINDS), original: z.file(), display: z.file() }))
     .handler(async ({ input, context }) => {
       const storage = requireStorage(context);
 
-      const bytes = new Uint8Array(await input.file.arrayBuffer());
-      const verdict = acceptImage(bytes, input.file.type, input.kind);
-      if (!verdict.ok || !verdict.type) {
-        throw new ORPCError("BAD_REQUEST", { message: IMAGE_REJECTIONS[verdict.reason ?? "type"] });
+      // Neither file is trusted to be what the client says it is, and the two
+      // are checked against different rules: the display object must fit the
+      // slot's display bounds because it is what every feed renders, while the
+      // original is bounded by megapixels because it is served from a public
+      // path. See ./image.ts.
+      const originalBytes = new Uint8Array(await input.original.arrayBuffer());
+      const originalVerdict = acceptImage(originalBytes, input.original.type, input.kind, "original");
+      if (!originalVerdict.ok || !originalVerdict.type) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: IMAGE_REJECTIONS[originalVerdict.reason ?? "type"],
+        });
       }
 
-      const key = imageObjectKey(input.kind, context.user.id, verdict.type);
-      await storage.put(key, bytes, verdict.type);
+      const displayBytes = new Uint8Array(await input.display.arrayBuffer());
+      const displayVerdict = acceptImage(displayBytes, input.display.type, input.kind, "display");
+      if (!displayVerdict.ok || !displayVerdict.type) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: IMAGE_REJECTIONS[displayVerdict.reason ?? "type"],
+        });
+      }
 
-      const path = mediaPathFor(key);
-      const previous = await setImageColumn(context.db, context.user.id, input.kind, path);
+      // One uuid for both objects, so the pair is obvious in the bucket —
+      // `<uuid>.webp` and `<uuid>.orig.jpg` (see imageObjectKey).
+      const id = randomUUID();
+      const displayKey = imageObjectKey(input.kind, context.user.id, displayVerdict.type, "display", id);
+      const originalKey = imageObjectKey(input.kind, context.user.id, originalVerdict.type, "original", id);
 
-      // After the row points at the new object, never before: if this throws,
-      // the profile still renders correctly and all that leaks is one orphaned
-      // object. Deleting first would risk a blank avatar on a failed update.
+      await storage.put(displayKey, displayBytes, displayVerdict.type);
+      await storage.put(originalKey, originalBytes, originalVerdict.type);
+
+      const path = mediaPathFor(displayKey);
+      const originalPath = mediaPathFor(originalKey);
+      const previous = await setImageColumns(context.db, context.user.id, input.kind, {
+        display: path,
+        original: originalPath,
+      });
+
+      // After the row points at the new objects, never before: if this throws,
+      // the profile still renders correctly and all that leaks is orphaned
+      // objects. Deleting first would risk a blank avatar on a failed update.
       await discardPrevious(storage, previous);
 
-      return { kind: input.kind, url: path };
+      return { kind: input.kind, url: path, originalUrl: originalPath };
     }),
 
-  /** Clears one image slot and deletes the object behind it, if it was ours. */
+  /** Clears one image slot and deletes both objects behind it, if they were ours. */
   removeImage: protectedProcedure
     .use(rateLimit(RATE_LIMITS.upload))
     .input(z.object({ kind: z.enum(IMAGE_KINDS) }))
     .handler(async ({ input, context }) => {
       const storage = requireStorage(context);
 
-      const previous = await setImageColumn(context.db, context.user.id, input.kind, null);
+      const previous = await setImageColumns(context.db, context.user.id, input.kind, {
+        display: null,
+        original: null,
+      });
       await discardPrevious(storage, previous);
 
       return { kind: input.kind, url: null };
