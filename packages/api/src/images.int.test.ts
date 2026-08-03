@@ -4,7 +4,7 @@ import { user } from "@my-tuums/db/schema";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";
-import { IMAGE_LIMITS, MAX_IMAGE_MEGAPIXELS } from "./constants.js";
+import { MAX_IMAGE_MEGAPIXELS } from "./constants.js";
 import {
   contextFor,
   createTestUser,
@@ -50,8 +50,8 @@ function pngWithDimensions(width: number, height: number): Uint8Array {
 }
 
 /** A file whose bytes really are a PNG, which is what the server sniffs for. */
-function pngFile(name = "avatar.png", extraBytes = 64): File {
-  const bytes = new Uint8Array(PNG_BODY.length + extraBytes);
+function pngFile(name = "avatar.png"): File {
+  const bytes = new Uint8Array(PNG_BODY.length + 64);
   bytes.set(PNG_BODY);
   return new File([bytes], name, { type: "image/png" });
 }
@@ -190,19 +190,15 @@ describe("user.uploadImage", () => {
     ).rejects.toThrow(/format isn't supported/);
   });
 
-  it("rejects a display payload over the slot's byte cap", async () => {
-    const alice = await createTestUser();
-    const oversized = pngFile("big.png", IMAGE_LIMITS.avatar.maxDisplayBytes);
-
-    await expect(
-      call(
-        appRouter.user.uploadImage,
-        uploadInput("avatar", { display: oversized }),
-        { context: contextFor(alice) },
-      ),
-    ).rejects.toThrow(/too large/);
-  });
-
+  // The three size-class rules — the per-slot byte cap, the display pixel
+  // bounds and the megapixel ceiling — all live in `acceptImage` and are
+  // covered there, including the discriminating cases this layer cannot see
+  // (avatar's cap rejecting what banner's accepts; the same bytes passing as an
+  // original but not as a display). What the procedure adds is only that a
+  // `size` verdict becomes `/too large/` and writes nothing, and it has exactly
+  // two call sites — so one display case and one original case is the whole of
+  // it. A third would re-assert the same `IMAGE_REJECTIONS.size` lookup at the
+  // cost of another Postgres round trip.
   it("rejects a display object beyond the slot's pixel bounds", async () => {
     // The display object is what lands in every feed; a hostile client naming
     // a 600px-wide image "the avatar's display object" must be refused.
