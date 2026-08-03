@@ -2,48 +2,38 @@ import { describe, expect, it } from "vitest";
 import { handleOf, initialsOf } from "@/lib/user";
 
 describe("handleOf", () => {
-  it("prefers the normalised username over displayUsername so links stay stable across casing", () => {
-    expect(handleOf({ username: "alexmercer", displayUsername: "AlexMercer" })).toBe(
-      "alexmercer",
-    );
-  });
+  it("prefers the normalised username, falls back to displayUsername, else null", () => {
+    const cases = [
+      // Links stay stable across casing because the normalised column wins.
+      [{ username: "alexmercer", displayUsername: "AlexMercer" }, "alexmercer"],
+      [{ username: null, displayUsername: "AlexMercer" }, "AlexMercer"],
+      [{ displayUsername: "AlexMercer" }, "AlexMercer"],
+      [null, null],
+      [undefined, null],
+      [{}, null],
+    ] as const;
 
-  it("falls back to displayUsername when username is absent", () => {
-    expect(handleOf({ username: null, displayUsername: "AlexMercer" })).toBe("AlexMercer");
-    expect(handleOf({ displayUsername: "AlexMercer" })).toBe("AlexMercer");
-  });
-
-  it("returns null for null/undefined/empty user", () => {
-    expect(handleOf(null)).toBeNull();
-    expect(handleOf(undefined)).toBeNull();
-    expect(handleOf({})).toBeNull();
+    expect(cases.map(([user]) => handleOf(user))).toEqual(cases.map(([, expected]) => expected));
   });
 });
 
 describe("initialsOf", () => {
-  it("returns two uppercased initials for two words", () => {
-    expect(initialsOf("alex mercer")).toBe("AM");
-  });
+  it("takes up to two uppercased initials, and falls back to U", () => {
+    const cases = [
+      ["alex mercer", "AM"],
+      ["alex", "A"],
+      // Capped at two, however many words there are.
+      ["alex jordan mercer", "AJ"],
+      // Extra whitespace between and around words collapses.
+      ["  alex    mercer  ", "AM"],
+      [null, "U"],
+      [undefined, "U"],
+      ["", "U"],
+      ["   ", "U"],
+    ] as const;
 
-  it("returns one initial for a single word", () => {
-    expect(initialsOf("alex")).toBe("A");
-  });
-
-  it("caps at two initials for more than two words", () => {
-    expect(initialsOf("alex jordan mercer")).toBe("AJ");
-  });
-
-  it("collapses extra whitespace between words", () => {
-    expect(initialsOf("  alex    mercer  ")).toBe("AM");
-  });
-
-  it("returns U for null/undefined/empty", () => {
-    expect(initialsOf(null)).toBe("U");
-    expect(initialsOf(undefined)).toBe("U");
-    expect(initialsOf("")).toBe("U");
-  });
-
-  it("returns U for a name of only whitespace", () => {
-    expect(initialsOf("   ")).toBe("U");
+    expect(cases.map(([name]) => [name, initialsOf(name)])).toEqual(
+      cases.map(([name, expected]) => [name, expected]),
+    );
   });
 });

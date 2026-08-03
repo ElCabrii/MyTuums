@@ -44,27 +44,25 @@ const WEBP = new Uint8Array([
 ]);
 
 describe("sniffImageType", () => {
-  it("identifies each allowed format from its leading bytes", () => {
-    expect(sniffImageType(PNG)).toBe("image/png");
-    expect(sniffImageType(JPEG)).toBe("image/jpeg");
-    expect(sniffImageType(WEBP)).toBe("image/webp");
-  });
+  it("identifies the allowed formats and nothing else", () => {
+    const utf8 = (s: string) => new TextEncoder().encode(s);
+    const cases = [
+      ["png", PNG, "image/png"],
+      ["jpeg", JPEG, "image/jpeg"],
+      ["webp", WEBP, "image/webp"],
+      // A document that can carry script is not an image, however it is labelled.
+      ["svg", utf8('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>'), null],
+      ["html", utf8("<!doctype html><script>"), null],
+      // A four-byte RIFF prefix is the start of a WebP but carries none of the
+      // bytes that identify one; the length guard is what stops this reading
+      // undefined and comparing it.
+      ["truncated riff", new Uint8Array([0x52, 0x49, 0x46, 0x46]), null],
+      ["empty", new Uint8Array([]), null],
+    ] as const;
 
-  it("returns null for an SVG, which is a document that can carry script", () => {
-    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>');
-    expect(sniffImageType(svg)).toBeNull();
-  });
-
-  it("returns null for HTML dressed up as an image", () => {
-    expect(sniffImageType(new TextEncoder().encode("<!doctype html><script>"))).toBeNull();
-  });
-
-  it("does not read past the end of a truncated header", () => {
-    // A four-byte RIFF prefix is the start of a WebP but carries none of the
-    // bytes that identify one; the length guard is what stops this reading
-    // undefined and comparing it.
-    expect(sniffImageType(new Uint8Array([0x52, 0x49, 0x46, 0x46]))).toBeNull();
-    expect(sniffImageType(new Uint8Array([]))).toBeNull();
+    expect(cases.map(([label, bytes]) => [label, sniffImageType(bytes)])).toEqual(
+      cases.map(([label, , expected]) => [label, expected]),
+    );
   });
 });
 
@@ -205,35 +203,41 @@ describe("object keys", () => {
   });
 });
 
+/**
+ * This is the guard on the /media route, where the segment after the prefix
+ * reaches the S3 client directly — so the table is the allowlist, read as one.
+ */
 describe("isSafeObjectKey", () => {
-  it("accepts only the shape this app writes", () => {
-    expect(isSafeObjectKey("avatars/user-1/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.webp")).toBe(true);
-    expect(isSafeObjectKey("banners/user-1/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jpg")).toBe(true);
+  const UUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+  function expectKeys(cases: readonly (readonly [string, boolean])[]): void {
+    expect(cases.map(([key]) => [key, isSafeObjectKey(key)])).toEqual(
+      cases.map(([key, expected]) => [key, expected]),
+    );
+  }
+
+  it("accepts the display and original shapes this app writes, under either prefix", () => {
+    expectKeys([
+      [`avatars/user-1/${UUID}.webp`, true],
+      [`banners/user-1/${UUID}.jpg`, true],
+      // The `.orig` infix is the original's key shape.
+      [`avatars/user-1/${UUID}.orig.jpg`, true],
+      [`banners/user-1/${UUID}.orig.webp`, true],
+    ]);
   });
 
-  it("accepts the .orig infix, the original's key shape", () => {
-    expect(isSafeObjectKey("avatars/user-1/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.orig.jpg")).toBe(true);
-    expect(isSafeObjectKey("banners/user-1/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.orig.webp")).toBe(true);
-  });
-
-  it("rejects traversal, absolute paths and foreign prefixes", () => {
-    // This is the guard on the /media route, where the segment after the prefix
-    // reaches the S3 client directly.
-    expect(isSafeObjectKey("avatars/../../etc/passwd")).toBe(false);
-    expect(isSafeObjectKey("../secrets/key.webp")).toBe(false);
-    expect(isSafeObjectKey("/avatars/u/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.webp")).toBe(false);
-    expect(isSafeObjectKey("backups/u/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.webp")).toBe(false);
-  });
-
-  it("rejects an extension outside the allowlist", () => {
-    expect(isSafeObjectKey("avatars/u/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.svg")).toBe(false);
-    expect(isSafeObjectKey("avatars/u/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.html")).toBe(false);
-  });
-
-  it("rejects a uuid that is not the grouped shape this app writes", () => {
-    // The old `[a-f0-9-]{36}` also matched 36 hyphens; the shape must be the
-    // grouped uuid `randomUUID()` actually produces.
-    expect(isSafeObjectKey("avatars/u/------------------------------------.webp")).toBe(false);
-    expect(isSafeObjectKey("avatars/u/aaaaaaaaaaaabbbbccccdddd.orig.png")).toBe(false);
+  it("rejects traversal, foreign prefixes, bad extensions and malformed uuids", () => {
+    expectKeys([
+      ["avatars/../../etc/passwd", false],
+      ["../secrets/key.webp", false],
+      [`/avatars/u/${UUID}.webp`, false],
+      [`backups/u/${UUID}.webp`, false],
+      [`avatars/u/${UUID}.svg`, false],
+      [`avatars/u/${UUID}.html`, false],
+      // The old `[a-f0-9-]{36}` also matched 36 hyphens; the shape must be the
+      // grouped uuid `randomUUID()` actually produces.
+      ["avatars/u/------------------------------------.webp", false],
+      ["avatars/u/aaaaaaaaaaaabbbbccccdddd.orig.png", false],
+    ]);
   });
 });

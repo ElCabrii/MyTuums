@@ -12,7 +12,7 @@ import {
   type RegisterFields,
 } from "@/lib/auth-validation";
 
-/** A fully valid baseline so each test only has to override the field(s) it cares about. */
+/** A fully valid baseline so each case only has to override the field(s) it cares about. */
 const validFields: RegisterFields = {
   username: "alice",
   name: "Alice",
@@ -21,6 +21,20 @@ const validFields: RegisterFields = {
   confirmPassword: "password1",
   dateOfBirth: "1995-01-01",
 };
+
+// The exact strings the rules return. Named here so a table reads as the rule
+// it encodes rather than as a wall of repeated sentences — and still asserted
+// independently of the source, since these are the test's own copies.
+const USERNAME_REQUIRED = "Username is required.";
+const USERNAME_LENGTH = "Username must be between 3 and 20 characters long.";
+const USERNAME_CHARS = "Username can only contain letters, numbers, underscores, and hyphens.";
+const NAME_REQUIRED = "Display Name is required.";
+const EMAIL_INVALID = "Please enter a valid email address.";
+const PASSWORD_LENGTH = "Password must be at least 8 characters long.";
+const PASSWORD_MISMATCH = "Passwords do not match.";
+const DOB_REQUIRED = "Date of Birth is required.";
+const DOB_INVALID = "Please enter a valid date of birth.";
+const DOB_AGE = "You must be at least 15 years old to create an account.";
 
 /** "YYYY-MM-DD" in UTC for the given date. */
 function iso(d: Date): string {
@@ -32,7 +46,8 @@ function iso(d: Date): string {
 
 /**
  * A date `years` ago (in UTC), nudged by `offsetDays` — used for the 15-year
- * boundary, which the rule computes against its own UTC "today".
+ * boundary, which the rule computes against its own UTC "today". Relative so
+ * the assertions can't quietly stop being true as the calendar moves.
  */
 function yearsAgo(years: number, offsetDays = 0): string {
   const d = new Date();
@@ -41,323 +56,231 @@ function yearsAgo(years: number, offsetDays = 0): string {
   return iso(d);
 }
 
+/**
+ * Asserts a whole table in one shot. Comparing mapped arrays rather than
+ * looping bare `expect`s means one failing row reports every row at once, with
+ * the offending input visible in the diff instead of just the expected message
+ * — which is what makes it reasonable to group a rule's boundaries into a
+ * single test instead of one test per example.
+ */
+function expectTable<T>(
+  cases: readonly (readonly [T, string | null])[],
+  run: (input: T) => string | null,
+): void {
+  expect(cases.map(([input]) => [input, run(input)])).toEqual(
+    cases.map(([input, expected]) => [input, expected]),
+  );
+}
+
 describe("validateRegister", () => {
   it("returns null when every rule passes", () => {
     expect(validateRegister(validFields)).toBeNull();
   });
 
-  it("rejects an empty username", () => {
-    expect(validateRegister({ ...validFields, username: "" })).toBe("Username is required.");
-  });
-
-  it("rejects a username under 3 characters", () => {
-    expect(validateRegister({ ...validFields, username: "ab" })).toBe(
-      "Username must be between 3 and 20 characters long.",
+  it("enforces the username rules: required, 3-20 characters, and the charset", () => {
+    expectTable(
+      [
+        ["", USERNAME_REQUIRED],
+        ["ab", USERNAME_LENGTH],
+        ["a".repeat(21), USERNAME_LENGTH],
+        // Both bounds are inclusive.
+        ["abc", null],
+        ["a".repeat(20), null],
+        ["a.b", USERNAME_CHARS],
+        ["a b", USERNAME_CHARS],
+        ["a@b", USERNAME_CHARS],
+      ] as const,
+      (username) => validateRegister({ ...validFields, username }),
     );
   });
 
-  it("rejects a username over 20 characters", () => {
-    expect(validateRegister({ ...validFields, username: "a".repeat(21) })).toBe(
-      "Username must be between 3 and 20 characters long.",
+  it("requires a display name", () => {
+    expect(validateRegister({ ...validFields, name: "" })).toBe(NAME_REQUIRED);
+  });
+
+  it("requires an email with an @", () => {
+    expect(validateRegister({ ...validFields, email: "not-an-email" })).toBe(EMAIL_INVALID);
+  });
+
+  it("enforces the 8-character password minimum and the confirmation match", () => {
+    expectTable(
+      [
+        [["short12", "short12"], PASSWORD_LENGTH],
+        // The minimum is inclusive.
+        [["eightch1", "eightch1"], null],
+        [["password1", "password2"], PASSWORD_MISMATCH],
+      ] as const,
+      ([password, confirmPassword]) =>
+        validateRegister({ ...validFields, password, confirmPassword }),
     );
   });
 
-  it("accepts a username of exactly 3 characters", () => {
-    expect(validateRegister({ ...validFields, username: "abc" })).toBeNull();
-  });
-
-  it("accepts a username of exactly 20 characters", () => {
-    expect(validateRegister({ ...validFields, username: "a".repeat(20) })).toBeNull();
-  });
-
-  it.each([["a.b"], ["a b"], ["a@b"]])(
-    "rejects a username containing an invalid character (%s)",
-    (username) => {
-      expect(validateRegister({ ...validFields, username })).toBe(
-        "Username can only contain letters, numbers, underscores, and hyphens.",
-      );
-    },
-  );
-
-  it("rejects an empty display name", () => {
-    expect(validateRegister({ ...validFields, name: "" })).toBe("Display Name is required.");
-  });
-
-  it("rejects an email without an @", () => {
-    expect(validateRegister({ ...validFields, email: "not-an-email" })).toBe(
-      "Please enter a valid email address.",
+  it("requires a date of birth and enforces the 15-year floor at the boundary", () => {
+    expectTable(
+      [
+        ["", DOB_REQUIRED],
+        // One day short of 15 fails; exactly 15 and older pass.
+        [yearsAgo(15, 1), DOB_AGE],
+        [yearsAgo(15), null],
+        [yearsAgo(15, -1), null],
+      ] as const,
+      (dateOfBirth) => validateRegister({ ...validFields, dateOfBirth }),
     );
-  });
-
-  it("rejects a password under 8 characters", () => {
-    expect(
-      validateRegister({ ...validFields, password: "short12", confirmPassword: "short12" }),
-    ).toBe("Password must be at least 8 characters long.");
-  });
-
-  it("accepts a password of exactly 8 characters", () => {
-    expect(
-      validateRegister({ ...validFields, password: "eightch1", confirmPassword: "eightch1" }),
-    ).toBeNull();
-  });
-
-  it("rejects mismatched passwords", () => {
-    expect(validateRegister({ ...validFields, password: "password1", confirmPassword: "password2" })).toBe(
-      "Passwords do not match.",
-    );
-  });
-
-  it("rejects a missing date of birth", () => {
-    expect(validateRegister({ ...validFields, dateOfBirth: "" })).toBe(
-      "Date of Birth is required.",
-    );
-  });
-
-  it("rejects an under-15 date of birth", () => {
-    expect(validateRegister({ ...validFields, dateOfBirth: yearsAgo(15, 1) })).toBe(
-      "You must be at least 15 years old to create an account.",
-    );
-  });
-
-  it("accepts a date of birth of exactly 15 years ago", () => {
-    expect(validateRegister({ ...validFields, dateOfBirth: yearsAgo(15) })).toBeNull();
-  });
-
-  it("accepts a date of birth older than 15", () => {
-    expect(validateRegister({ ...validFields, dateOfBirth: yearsAgo(15, -1) })).toBeNull();
   });
 
   // Rule order is the point: a submission violating several rules at once must
   // surface the FIRST one a person would see fixed in the real form, not just
-  // any true violation.
-  describe("rule order — first violation wins even when several rules fail at once", () => {
-    it("empty username beats every other violation", () => {
-      expect(
-        validateRegister({
-          username: "",
-          name: "",
-          email: "bad",
-          password: "1",
-          confirmPassword: "2",
-          dateOfBirth: "",
-        }),
-      ).toBe("Username is required.");
-    });
-
-    it("username length beats username characters, name, and email", () => {
-      expect(
-        validateRegister({
-          username: "a!", // too short AND invalid characters
-          name: "",
-          email: "bad",
-          password: "1",
-          confirmPassword: "2",
-          dateOfBirth: "",
-        }),
-      ).toBe("Username must be between 3 and 20 characters long.");
-    });
-
-    it("username characters beats name and email once length passes", () => {
-      expect(
-        validateRegister({
-          username: "has space", // right length, wrong characters
-          name: "",
-          email: "bad",
-          password: "1",
-          confirmPassword: "2",
-          dateOfBirth: "",
-        }),
-      ).toBe("Username can only contain letters, numbers, underscores, and hyphens.");
-    });
-
-    it("display name beats email and password once the username passes", () => {
-      expect(
-        validateRegister({
-          username: "alice",
-          name: "",
-          email: "bad",
-          password: "1",
-          confirmPassword: "2",
-          dateOfBirth: "",
-        }),
-      ).toBe("Display Name is required.");
-    });
-
-    it("email beats password length and mismatch once name passes", () => {
-      expect(
-        validateRegister({
-          username: "alice",
-          name: "Alice",
-          email: "bad",
-          password: "1",
-          confirmPassword: "2",
-          dateOfBirth: "",
-        }),
-      ).toBe("Please enter a valid email address.");
-    });
-
-    it("password length beats password mismatch once email passes", () => {
-      expect(
-        validateRegister({
+  // any true violation. Each row loosens exactly one field relative to the row
+  // above it, so the table reads as the precedence chain itself.
+  it("surfaces the first violation when several rules fail at once", () => {
+    const cases: readonly (readonly [string, RegisterFields, string])[] = [
+      [
+        "empty username beats everything",
+        { username: "", name: "", email: "bad", password: "1", confirmPassword: "2", dateOfBirth: "" },
+        USERNAME_REQUIRED,
+      ],
+      [
+        "username length beats charset, name and email",
+        // Too short AND invalid characters.
+        { username: "a!", name: "", email: "bad", password: "1", confirmPassword: "2", dateOfBirth: "" },
+        USERNAME_LENGTH,
+      ],
+      [
+        "username charset beats name and email",
+        // Right length, wrong characters.
+        { username: "has space", name: "", email: "bad", password: "1", confirmPassword: "2", dateOfBirth: "" },
+        USERNAME_CHARS,
+      ],
+      [
+        "display name beats email and password",
+        { username: "alice", name: "", email: "bad", password: "1", confirmPassword: "2", dateOfBirth: "" },
+        NAME_REQUIRED,
+      ],
+      [
+        "email beats password length and mismatch",
+        { username: "alice", name: "Alice", email: "bad", password: "1", confirmPassword: "2", dateOfBirth: "" },
+        EMAIL_INVALID,
+      ],
+      [
+        "password length beats password mismatch",
+        {
           username: "alice",
           name: "Alice",
           email: "alice@example.com",
           password: "short",
           confirmPassword: "different",
           dateOfBirth: "",
-        }),
-      ).toBe("Password must be at least 8 characters long.");
-    });
-
-    it("password mismatch beats an under-15 date of birth once password length passes", () => {
-      expect(
-        validateRegister({
+        },
+        PASSWORD_LENGTH,
+      ],
+      [
+        "password mismatch beats an under-15 date of birth",
+        {
           username: "alice",
           name: "Alice",
           email: "alice@example.com",
           password: "password1",
           confirmPassword: "password2",
           dateOfBirth: yearsAgo(15, 1),
-        }),
-      ).toBe("Passwords do not match.");
-    });
+        },
+        PASSWORD_MISMATCH,
+      ],
+    ];
+
+    expect(cases.map(([label, fields]) => [label, validateRegister(fields)])).toEqual(
+      cases.map(([label, , expected]) => [label, expected]),
+    );
   });
 
-  describe("trimming — username/name/email trimmed, password is not", () => {
-    it("trims surrounding whitespace off the username before validating it", () => {
-      expect(validateRegister({ ...validFields, username: "  alice  " })).toBeNull();
-    });
+  it("trims username, name and email before validating — but never the password", () => {
+    expect(validateRegister({ ...validFields, username: "  alice  " })).toBeNull();
+    expect(validateRegister({ ...validFields, name: "  Alice  " })).toBeNull();
+    expect(validateRegister({ ...validFields, email: "  alice@example.com  " })).toBeNull();
 
-    it("trims surrounding whitespace off the name before validating it", () => {
-      expect(validateRegister({ ...validFields, name: "  Alice  " })).toBeNull();
-    });
+    // 8 spaces is a legitimate length-8 password...
+    const eightSpaces = "        ";
+    expect(eightSpaces).toHaveLength(8);
+    expect(
+      validateRegister({ ...validFields, password: eightSpaces, confirmPassword: eightSpaces }),
+    ).toBeNull();
 
-    it("trims surrounding whitespace off the email before validating it", () => {
-      expect(validateRegister({ ...validFields, email: "  alice@example.com  " })).toBeNull();
-    });
-
-    it("does NOT trim the password — 8 spaces is accepted as a length-8 password", () => {
-      const eightSpaces = "        ";
-      expect(eightSpaces).toHaveLength(8);
-      expect(
-        validateRegister({ ...validFields, password: eightSpaces, confirmPassword: eightSpaces }),
-      ).toBeNull();
-    });
-
-    it("does NOT trim the password for the mismatch check — a trailing space makes it a different password", () => {
-      expect(
-        validateRegister({
-          ...validFields,
-          password: "password1",
-          confirmPassword: "password1 ",
-        }),
-      ).toBe("Passwords do not match.");
-    });
+    // ...and a trailing space makes it a different password, not the same one.
+    expect(
+      validateRegister({ ...validFields, password: "password1", confirmPassword: "password1 " }),
+    ).toBe(PASSWORD_MISMATCH);
   });
 });
 
 describe("validateLogin", () => {
-  it("returns null when both fields are present", () => {
+  it("requires both fields, and names the one that is missing", () => {
     expect(validateLogin({ identifier: "alice", password: "whatever" })).toBeNull();
-  });
-
-  it("rejects a whitespace-only identifier", () => {
     expect(validateLogin({ identifier: "   ", password: "whatever" })).toBe(
       "Please enter your username or email address.",
     );
-  });
-
-  it("rejects an empty password", () => {
-    expect(validateLogin({ identifier: "alice", password: "" })).toBe(
-      "Please enter your password.",
-    );
+    expect(validateLogin({ identifier: "alice", password: "" })).toBe("Please enter your password.");
   });
 });
 
 /**
  * `validateEmail` was extracted from `validateRegister` so `/forgot-password`
  * can enforce the same email rule a sign-up goes through — same drift-guard as
- * `validateUsername` above.
+ * `validateUsername` below.
  */
 describe("validateEmail", () => {
-  it("accepts an address with an @", () => {
-    expect(validateEmail("alice@example.com")).toBeNull();
-  });
-
-  it("trims surrounding whitespace before checking", () => {
-    expect(validateEmail("  alice@example.com  ")).toBeNull();
-  });
-
-  it.each([[""], ["   "]])("rejects %j as invalid", (raw) => {
-    expect(validateEmail(raw)).toBe("Please enter a valid email address.");
-  });
-
-  it.each([["not-an-email"], ["no-at-sign.example"]])(
-    "rejects the malformed address %j",
-    (raw) => {
-      expect(validateEmail(raw)).toBe("Please enter a valid email address.");
-    },
-  );
-
-  // The rule is deliberately shallow — presence and an `@` — so "a@b@c"
-  // passes here exactly as it passes the server-side shape check's register
-  // path; the server's zod schema is the real validator.
-  it("does not guess at shape beyond the @ — a stricter client rule would reject addresses the server accepts", () => {
-    expect(validateEmail("a@b@c")).toBeNull();
+  it("requires presence and an @, trimming first", () => {
+    expectTable(
+      [
+        ["alice@example.com", null],
+        ["  alice@example.com  ", null],
+        ["", EMAIL_INVALID],
+        ["   ", EMAIL_INVALID],
+        ["not-an-email", EMAIL_INVALID],
+        ["no-at-sign.example", EMAIL_INVALID],
+        // The rule is deliberately shallow — presence and an `@` — so "a@b@c"
+        // passes here exactly as it passes the register path. A stricter client
+        // rule would reject addresses the server's zod schema accepts, and that
+        // schema is the real validator.
+        ["a@b@c", null],
+      ] as const,
+      validateEmail,
+    );
   });
 
   it("agrees with validateRegister on every address — the two must not drift", () => {
     const emails = ["", "  ", "not-an-email", "a@b@c", "alice@example.com", " alice@example.com "];
 
-    for (const email of emails) {
-      expect(validateRegister({ ...validFields, email })).toBe(validateEmail(email));
-    }
+    expect(emails.map((email) => [email, validateRegister({ ...validFields, email })])).toEqual(
+      emails.map((email) => [email, validateEmail(email)]),
+    );
   });
 });
 
 describe("validateResetPassword", () => {
-  it("returns null when the pair matches and is long enough", () => {
-    expect(
-      validateResetPassword({ newPassword: "password1", confirmPassword: "password1" }),
-    ).toBeNull();
+  it("enforces the 8-character minimum and the match, length first", () => {
+    expectTable(
+      [
+        [["password1", "password1"], null],
+        [["short12", "short12"], PASSWORD_LENGTH],
+        // The minimum is inclusive.
+        [["eightch1", "eightch1"], null],
+        [["password1", "password2"], PASSWORD_MISMATCH],
+        // Length beats mismatch — the rule a person would fix first surfaces first.
+        [["short", "different"], PASSWORD_LENGTH],
+      ] as const,
+      ([newPassword, confirmPassword]) =>
+        validateResetPassword({ newPassword, confirmPassword }),
+    );
   });
 
-  it("rejects a password under 8 characters", () => {
-    expect(
-      validateResetPassword({ newPassword: "short12", confirmPassword: "short12" }),
-    ).toBe("Password must be at least 8 characters long.");
-  });
-
-  it("accepts a password of exactly 8 characters", () => {
-    expect(
-      validateResetPassword({ newPassword: "eightch1", confirmPassword: "eightch1" }),
-    ).toBeNull();
-  });
-
-  it("rejects mismatched passwords", () => {
-    expect(
-      validateResetPassword({ newPassword: "password1", confirmPassword: "password2" }),
-    ).toBe("Passwords do not match.");
-  });
-
-  it("length beats mismatch — the rule a person would fix first surfaces first", () => {
-    expect(
-      validateResetPassword({ newPassword: "short", confirmPassword: "different" }),
-    ).toBe("Password must be at least 8 characters long.");
-  });
-
-  it("does NOT trim the password — 8 spaces is accepted as a length-8 password", () => {
+  it("never trims the password, for either the length or the match check", () => {
     const eightSpaces = "        ";
     expect(eightSpaces).toHaveLength(8);
     expect(
       validateResetPassword({ newPassword: eightSpaces, confirmPassword: eightSpaces }),
     ).toBeNull();
-  });
-
-  it("does NOT trim the password for the mismatch check — a trailing space makes it a different password", () => {
     expect(
       validateResetPassword({ newPassword: "password1", confirmPassword: "password1 " }),
-    ).toBe("Passwords do not match.");
+    ).toBe(PASSWORD_MISMATCH);
   });
 });
 
@@ -368,128 +291,118 @@ describe("validateResetPassword", () => {
  * one form accepts a handle the other rejects and both look broken.
  */
 describe("validateUsername", () => {
-  it("accepts a valid handle", () => {
-    expect(validateUsername("alice")).toBeNull();
-  });
-
-  it("trims before measuring, so padding can't smuggle a short handle through", () => {
-    expect(validateUsername("  ab  ")).toBe("Username must be between 3 and 20 characters long.");
-    expect(validateUsername("  alice  ")).toBeNull();
-  });
-
-  it.each([
-    ["", "Username is required."],
-    ["   ", "Username is required."],
-    ["ab", "Username must be between 3 and 20 characters long."],
-    ["a".repeat(21), "Username must be between 3 and 20 characters long."],
-    ["alice!", "Username can only contain letters, numbers, underscores, and hyphens."],
-    ["ali ce", "Username can only contain letters, numbers, underscores, and hyphens."],
-    ["ali.ce", "Username can only contain letters, numbers, underscores, and hyphens."],
-  ])("rejects %j", (username, expected) => {
-    expect(validateUsername(username)).toBe(expected);
-  });
-
-  it.each([["abc"], ["a".repeat(20)]])("accepts the boundary length %j", (username) => {
-    expect(validateUsername(username)).toBeNull();
+  it("enforces required, the 3-20 bound and the charset, trimming first", () => {
+    expectTable(
+      [
+        ["alice", null],
+        ["", USERNAME_REQUIRED],
+        ["   ", USERNAME_REQUIRED],
+        ["ab", USERNAME_LENGTH],
+        ["a".repeat(21), USERNAME_LENGTH],
+        // Both bounds are inclusive.
+        ["abc", null],
+        ["a".repeat(20), null],
+        // Trimmed before measuring, so padding can't smuggle a short handle through.
+        ["  ab  ", USERNAME_LENGTH],
+        ["  alice  ", null],
+        ["alice!", USERNAME_CHARS],
+        ["ali ce", USERNAME_CHARS],
+        ["ali.ce", USERNAME_CHARS],
+      ] as const,
+      validateUsername,
+    );
   });
 
   it("agrees with validateRegister on every handle — the two must not drift", () => {
     const handles = ["", "  ", "ab", "abc", "a".repeat(20), "a".repeat(21), "ok_-1", "bad!"];
 
-    for (const username of handles) {
-      const standalone = validateUsername(username);
-      const throughRegister = validateRegister({ ...validFields, username });
-
-      // `validateRegister` only continues past the handle once it is valid, so
-      // a null here means the later rules took over — which for `validFields`
-      // also means null.
-      expect(throughRegister).toBe(standalone);
-    }
+    // `validateRegister` only continues past the handle once it is valid, so a
+    // null here means the later rules took over — which for `validFields` also
+    // means null.
+    expect(
+      handles.map((username) => [username, validateRegister({ ...validFields, username })]),
+    ).toEqual(handles.map((username) => [username, validateUsername(username)]));
   });
 });
 
 describe("validateTwoFactorCode", () => {
-  it("accepts anything non-empty", () => {
-    expect(validateTwoFactorCode("123456")).toBeNull();
-    // Backup codes are not digits, and the same box accepts them.
-    expect(validateTwoFactorCode("ABCD-EFGH")).toBeNull();
-  });
-
-  it.each([[""], ["   "]])("rejects %j", (code) => {
-    expect(validateTwoFactorCode(code)).toBe("Please enter your verification code.");
-  });
-
-  it("does not guess at length — a client-side format rule would reject codes the server accepts", () => {
-    expect(validateTwoFactorCode("1")).toBeNull();
-    expect(validateTwoFactorCode("12345678901234567890")).toBeNull();
+  it("requires presence and nothing more — no length or format guess", () => {
+    expectTable(
+      [
+        ["123456", null],
+        // Backup codes are not digits, and the same box accepts them.
+        ["ABCD-EFGH", null],
+        ["", "Please enter your verification code."],
+        ["   ", "Please enter your verification code."],
+        // A client-side format rule would reject codes the server accepts.
+        ["1", null],
+        ["12345678901234567890", null],
+      ] as const,
+      validateTwoFactorCode,
+    );
   });
 });
 
 describe("validateDateOfBirth", () => {
-  it("accepts a date of birth older than 15", () => {
-    expect(validateDateOfBirth("1995-01-01")).toBeNull();
-  });
-
-  it("accepts a date of birth exactly 15 years ago", () => {
-    expect(validateDateOfBirth(yearsAgo(15))).toBeNull();
-  });
-
-  it("rejects a date of birth 15 years ago minus one day", () => {
-    expect(validateDateOfBirth(yearsAgo(15, 1))).toBe(
-      "You must be at least 15 years old to create an account.",
+  it("requires a well-formed YYYY-MM-DD date", () => {
+    expectTable(
+      [
+        ["1995-01-01", null],
+        ["  1995-01-01  ", null],
+        ["", DOB_REQUIRED],
+        ["   ", DOB_REQUIRED],
+        ["not-a-date", DOB_INVALID],
+        ["1995/01/01", DOB_INVALID],
+        ["01-01-1995", DOB_INVALID],
+        ["1995-1-1", DOB_INVALID],
+        ["19950101", DOB_INVALID],
+      ] as const,
+      validateDateOfBirth,
     );
   });
 
-  it("rejects a future date of birth", () => {
-    expect(validateDateOfBirth(yearsAgo(-1))).toBe(
-      "You must be at least 15 years old to create an account.",
+  it("rejects calendar-impossible dates, which Date would roll over silently", () => {
+    expectTable(
+      [
+        ["1995-02-30", DOB_INVALID],
+        ["2025-13-01", DOB_INVALID],
+        ["2025-00-10", DOB_INVALID],
+        // A real leap day is not impossible.
+        ["1996-02-29", null],
+      ] as const,
+      validateDateOfBirth,
     );
   });
 
-  it("trims surrounding whitespace before checking", () => {
-    expect(validateDateOfBirth("  1995-01-01  ")).toBeNull();
-  });
-
-  it.each([[""], ["   "]])("rejects %j as required", (raw) => {
-    expect(validateDateOfBirth(raw)).toBe("Date of Birth is required.");
-  });
-
-  it.each([
-    ["not-a-date"],
-    ["1995/01/01"],
-    ["01-01-1995"],
-    ["1995-1-1"],
-    ["19950101"],
-  ])("rejects the malformed date %j", (raw) => {
-    expect(validateDateOfBirth(raw)).toBe("Please enter a valid date of birth.");
-  });
-
-  it.each([["1995-02-30"], ["2025-13-01"], ["2025-00-10"]])(
-    "rejects the calendar-impossible date %j (Date would roll it over silently)",
-    (raw) => {
-      expect(validateDateOfBirth(raw)).toBe("Please enter a valid date of birth.");
-    },
-  );
-
-  it("accepts a leap-day date of birth", () => {
-    expect(validateDateOfBirth("1996-02-29")).toBeNull();
+  it("enforces the 15-year floor at the boundary, and rejects the future", () => {
+    expectTable(
+      [
+        ["1995-01-01", null],
+        [yearsAgo(15), null],
+        [yearsAgo(15, 1), DOB_AGE],
+        [yearsAgo(-1), DOB_AGE],
+      ] as const,
+      validateDateOfBirth,
+    );
   });
 });
 
 describe("date-of-birth wire formats", () => {
-  it("pins a date to UTC midnight for the wire", () => {
+  it("round-trips YYYY-MM-DD through UTC midnight", () => {
     expect(dateOfBirthToIso("1995-01-01")).toBe("1995-01-01T00:00:00.000Z");
-  });
-
-  it("reads a Date back as YYYY-MM-DD through UTC parts", () => {
     expect(dateOfBirthInputValue(new Date("1995-01-01T00:00:00.000Z"))).toBe("1995-01-01");
-  });
-
-  it("reads an ISO string back as YYYY-MM-DD", () => {
     expect(dateOfBirthInputValue("1995-01-01T00:00:00.000Z")).toBe("1995-01-01");
   });
 
-  it.each([[null], [undefined], [""], ["garbage"]])("yields '' for %j", (value) => {
-    expect(dateOfBirthInputValue(value as never)).toBe("");
+  it("yields '' for anything unparseable", () => {
+    expectTable(
+      [
+        [null, ""],
+        [undefined, ""],
+        ["", ""],
+        ["garbage", ""],
+      ] as const,
+      (value) => dateOfBirthInputValue(value as never),
+    );
   });
 });
