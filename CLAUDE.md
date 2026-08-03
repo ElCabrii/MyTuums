@@ -96,6 +96,51 @@ pnpm --filter @my-tuums/db db:generate:auth # regenerate the BetterAuth schema (
 
 `DATABASE_URL` in `.env` must use `localhost` — it is for host-side processes. The `server` container gets its own value pointing at the `postgres` service name, set in `docker-compose.yml`.
 
+## Working on this repo
+
+**`main` is protected and cannot be pushed to directly** — by anyone, including
+repository admins (`enforce_admins` is on). Every change lands through a pull
+request whose five CI jobs must pass first:
+
+| Job | What it guards |
+|---|---|
+| Lint & typecheck | `pnpm build` first, because `routeTree.gen.ts` and `src/paraglide/**` are generated and git-ignored — `typecheck` cannot resolve a new route or message key until a build has run once |
+| Unit tests | Must pass with **no database reachable at all**; that is what keeps the unit/integration split honest rather than incidental |
+| Integration tests | Real Postgres, real Better Auth, plus `db:check` for migration drift |
+| E2E tests | Playwright against the full stack, including avatar/banner uploads against a real Storage Bucket |
+| Docker image builds | The image itself — see below |
+
+```bash
+git switch -c feat/my-change
+# ... work, commit ...
+git push -u origin feat/my-change
+gh pr create --fill
+# checks run; merge when green
+```
+
+`strict` is on, so a PR must also be up to date with `main` before it can
+merge. Rebase or merge `main` in if GitHub says the branch is behind.
+
+**The Docker job exists because a green `pnpm build` is not enough.** It builds
+`apps/server/Dockerfile` and asserts things nothing else can: that both `VITE_*`
+build args actually reach the web bundle, and that `migrate.js` and
+`packages/db/drizzle` shipped in the image. Two production breakages got past a
+fully green CI before it existed — a missing `ARG` that shipped a bundle with no
+OAuth buttons (Vite inlines `VITE_*` at build time, so the image starts cleanly
+and the buttons are simply absent), and a static-file rule that 404'd the whole
+site. Neither is reachable without building the image.
+
+**Deploys are automatic from `main`.** Railway builds the image, runs
+`node apps/server/dist/migrate.js` as a pre-deploy step, waits for `/health`,
+then takes traffic. A failed migration aborts the deploy and leaves the previous
+version serving. Nothing is deployed by hand.
+
+**The E2E suite uses three separate buckets and they must stay separate**:
+`mytuums-media` (production), `mytuums-media-dev` (local), `mytuums-media-ci`
+(CI). `truncateAll()` in `e2e/support/db.ts` deletes objects **by prefix**, so
+pointing two runners at one bucket lets them delete each other's objects
+mid-test — and pointing any of them at production would delete real avatars.
+
 ## Architecture
 
 Monorepo: `apps/{web,server}` + `packages/{api,auth,db,tsconfig}`. The internal packages are **source-only** — their `exports` point directly at `.ts` files, nothing is pre-compiled.
