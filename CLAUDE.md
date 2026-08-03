@@ -75,6 +75,17 @@ pnpm test:e2e:ui     # same, in Playwright's UI mode
 
 All `db:*` scripts live in `packages/db` and load the root `.env`.
 
+**In production, migrations run themselves.** `apps/server/src/migrate.ts` is a
+second tsup entry point (`dist/migrate.js`) wired to Railway's *pre-deploy*
+command, so a deploy that changes the schema migrates before the new version
+takes traffic — and a failed migration aborts the deploy rather than leaving
+code running against a schema it doesn't match. It uses `drizzle-orm`'s
+migrator, not `drizzle-kit`: the two share the same
+`drizzle.__drizzle_migrations` bookkeeping, but only `drizzle-orm` is a
+production dependency. The runtime image therefore ships the generated
+`packages/db/drizzle` SQL and no CLI. Pre-deploy, not on boot: N replicas
+starting at once would race the same DDL.
+
 ```bash
 pnpm --filter @my-tuums/db db:push          # sync schema to DB (dev)
 pnpm --filter @my-tuums/db db:generate      # emit a migration into packages/db/drizzle

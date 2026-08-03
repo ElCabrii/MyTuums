@@ -58,6 +58,12 @@ COPY --from=pruner /app/out/json/ .
 RUN pnpm install --prod --frozen-lockfile
 COPY --from=builder /app/apps/server/dist ./apps/server/dist
 COPY --from=builder /app/apps/web/dist ./apps/web/dist
+# The generated SQL, for the pre-deploy migration step (apps/server/src/
+# migrate.ts). Only the `drizzle/` output is needed — `drizzle-kit` itself is a
+# dev dependency and deliberately does NOT ship: `drizzle-orm`, which is already
+# a production dependency, applies the same files against the same bookkeeping
+# table.
+COPY --from=builder /app/packages/db/drizzle ./packages/db/drizzle
 # Where ./src/static-files.ts looks. Absolute, because the process's working
 # directory is not something this image should depend on.
 ENV WEB_DIST=/app/apps/web/dist

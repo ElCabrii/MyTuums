@@ -1,7 +1,10 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  // Two entry points: the server, and the pre-deploy migration runner (see
+  // src/migrate.ts). Both are bundled the same way so the runtime image needs
+  // no dev dependencies to migrate.
+  entry: ["src/index.ts", "src/migrate.ts"],
   format: ["esm"],
   platform: "node",
   target: "node22",
