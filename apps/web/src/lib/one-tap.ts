@@ -2,6 +2,7 @@ import { createAuthClient } from "better-auth/client";
 import { oneTapClient } from "better-auth/client/plugins";
 import type { BetterAuthClientPlugin } from "better-auth";
 import { shouldOfferOneTap } from "@/lib/auth-client";
+import { sanitizeRedirect } from "@/lib/redirect";
 
 /**
  * Google One Tap, quarantined into its own auth client.
@@ -57,8 +58,15 @@ interface OneTapCapableClient {
 export function promptOneTap(): void {
   if (!shouldOfferOneTap) return;
 
+  // Same `?redirect=` param `signInWithProviderAtom` reads — One Tap's
+  // success is a hard navigation to this URL, so the destination the signed-in
+  // gate recorded survives a One Tap sign-in too.
+  const redirect = sanitizeRedirect(
+    new URLSearchParams(window.location.search).get("redirect"),
+  );
+
   void (oneTapAuthClient as unknown as OneTapCapableClient)
-    .oneTap({ callbackURL: "/" })
+    .oneTap({ callbackURL: redirect ?? "/" })
     .catch((error: unknown) => {
       console.debug("Google One Tap unavailable:", error);
     });

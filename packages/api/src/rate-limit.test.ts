@@ -123,10 +123,20 @@ describe("createRateLimiter", () => {
 });
 
 describe("RATE_LIMITS", () => {
-  it("defines four tiers with distinct names", () => {
+  it("defines five tiers with distinct names", () => {
     const policies = Object.values(RATE_LIMITS);
-    expect(policies).toHaveLength(4);
-    expect(new Set(policies.map((p) => p.name)).size).toBe(4);
+    expect(policies).toHaveLength(5);
+    // Distinct names are the whole mechanism: `name` namespaces the counter, so
+    // two tiers sharing one would silently share a budget.
+    expect(new Set(policies.map((p) => p.name)).size).toBe(5);
+  });
+
+  it("gives uploads the tightest budget, and its own counter", () => {
+    // An upload costs megabytes of request body and a round trip to object
+    // storage, against a single indexed insert for everything else — and
+    // exhausting it must not take the composer down too.
+    expect(RATE_LIMITS.upload.limit).toBeLessThan(RATE_LIMITS.write.limit);
+    expect(RATE_LIMITS.upload.name).not.toBe(RATE_LIMITS.write.name);
   });
 
   it("keeps follow and like on separate counters even though they cost the same", () => {

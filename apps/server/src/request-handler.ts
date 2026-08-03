@@ -13,6 +13,50 @@ export interface RequestHandlerDeps {
    * a `/rpc`-prefixed request was matched.
    */
   handleRpc: (req: IncomingMessage, res: ServerResponse) => Promise<{ matched: boolean }>;
+  /**
+   * Turns a `/media/<key>` object key into a URL to redirect the browser to,
+   * or `null` when it should 404.
+   *
+   * Injected rather than imported for the same reason the three above are:
+   * this module's job is the routing decision, and a unit test of it should
+   * not need object storage, credentials or a network. The real implementation
+   * is `createMediaResolver` in `@my-tuums/api`.
+   */
+  resolveMediaUrl: (key: string) => Promise<string | null>;
+  /**
+   * Serves the built web app, when this deployment bundles it.
+   *
+   * Last in the chain and injected like the rest: in dev it is `noStaticFiles`
+   * (Vite serves the app and proxies here), and in production it is a handler
+   * over `WEB_DIST`. Reporting `{ served: false }` rather than writing a 404
+   * itself keeps the 404 in one place.
+   */
+  serveStatic: (req: IncomingMessage, res: ServerResponse) => Promise<{ served: boolean }>;
+}
+
+const MEDIA_PREFIX = "/media/";
+
+/**
+ * The path of a request, without the query string.
+ *
+ * `req.url` is a raw target, so it carries `?...` and is percent-encoded. The
+ * base is a throwaway — only `pathname` is read — and `decodeURIComponent` is
+ * what turns `%2F` and friends back into the characters the key validator
+ * actually needs to see, rather than letting an encoded separator slip past a
+ * check performed on the encoded form.
+ */
+function mediaKeyOf(rawUrl: string): string | null {
+  let pathname: string;
+  try {
+    pathname = decodeURIComponent(new URL(rawUrl, "http://media.invalid").pathname);
+  } catch {
+    // A malformed percent-escape throws; that is a bad request, not a key.
+    return null;
+  }
+
+  if (!pathname.startsWith(MEDIA_PREFIX)) return null;
+  const key = pathname.slice(MEDIA_PREFIX.length);
+  return key.length > 0 ? key : null;
 }
 
 /**
@@ -59,6 +103,46 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         const { matched } = await deps.handleRpc(req, res);
         if (matched) return;
       }
+
+      if (req.url?.startsWith(MEDIA_PREFIX)) {
+        // Reads only. These URLs sit in `<img src>` all over the app, and a
+        // write verb reaching object storage through them is not something to
+        // leave to the bucket's own permissions to refuse.
+        if (req.method !== "GET" && req.method !== "HEAD") {
+          res.writeHead(405, { "Content-Type": "text/plain", Allow: "GET, HEAD" });
+          res.end("Method not allowed");
+          return;
+        }
+
+        const key = mediaKeyOf(req.url);
+        const url = key ? await deps.resolveMediaUrl(key) : null;
+
+        if (!url) {
+          res.writeHead(404, { "Content-Type": "text/plain" });
+          res.end("Not found");
+          return;
+        }
+
+        // A redirect rather than a proxy: the bytes go straight from the
+        // bucket to the browser, which costs no service egress and never holds
+        // an image in this process's memory.
+        //
+        // The cache is private and short. Private because the URL it points at
+        // is a bearer credential — a shared cache handing it to another viewer
+        // would be handing out access. Short because that URL expires, and the
+        // redirect must not outlive it (see MEDIA_URL_TTL_SECONDS).
+        res.writeHead(302, {
+          Location: url,
+          "Cache-Control": "private, max-age=300",
+        });
+        res.end();
+        return;
+      }
+
+      // After every API prefix, so a route this server owns can never be
+      // shadowed by a file that happens to share its name.
+      const { served } = await deps.serveStatic(req, res);
+      if (served) return;
 
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not found");

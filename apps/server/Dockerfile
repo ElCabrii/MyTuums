@@ -10,9 +10,15 @@
 # dependencies (better-auth, @orpc/server, drizzle-orm, postgres, zod, ...)
 # stay external and are installed normally in the `runner` stage below.
 #
+# The image also carries the BUILT WEB APP and serves it from the same origin
+# as the API (see apps/server/src/static-files.ts). That is a requirement, not
+# a packaging preference: apps/web/src/lib/orpc.ts resolves /rpc against
+# window.location.origin, and uploaded avatars are stored as relative /media/
+# paths — split the two across origins and RPC and every image break together.
+#
 # Build context is the monorepo root (see docker-compose.yml:
 # `build.context: .`), because `turbo prune` needs the whole workspace to
-# compute the pruned subset for @my-tuums/server.
+# compute the pruned subset.
 
 FROM node:22-alpine AS base
 RUN corepack enable
@@ -21,7 +27,8 @@ RUN corepack enable
 FROM base AS pruner
 WORKDIR /app
 COPY . .
-RUN npx -y turbo@^2 prune @my-tuums/server --docker
+# Both workspaces, since this image builds and ships both halves.
+RUN npx -y turbo@^2 prune @my-tuums/server @my-tuums/web --docker
 
 # ---- Install full (dev+prod) deps and build the pruned subset ----
 FROM base AS builder
@@ -30,6 +37,18 @@ COPY --from=pruner /app/out/json/ .
 RUN pnpm install --frozen-lockfile
 COPY --from=pruner /app/out/full/ .
 RUN pnpm --filter @my-tuums/server run build
+# `vite build` runs the Paraglide and TanStack Router plugins, so the compiled
+# messages and the route tree are generated here rather than committed.
+#
+# Vite bakes every `import.meta.env.VITE_*` into the bundle AT BUILD TIME, and
+# Railway only makes service variables visible to a Docker build when the
+# Dockerfile declares them with ARG in the stage that needs them — so these two
+# are the app's only VITE_* reads (grep `import.meta.env.VITE_` in apps/web/src)
+# and they must be listed here or the OAuth buttons and One Tap silently never
+# render in production while working fine in dev.
+ARG VITE_SOCIAL_PROVIDERS
+ARG VITE_GOOGLE_CLIENT_ID
+RUN pnpm --filter @my-tuums/web run build
 
 # ---- Production image: prod-only deps + the pre-built bundle ----
 FROM base AS runner
@@ -38,6 +57,10 @@ ENV NODE_ENV=production
 COPY --from=pruner /app/out/json/ .
 RUN pnpm install --prod --frozen-lockfile
 COPY --from=builder /app/apps/server/dist ./apps/server/dist
+COPY --from=builder /app/apps/web/dist ./apps/web/dist
+# Where ./src/static-files.ts looks. Absolute, because the process's working
+# directory is not something this image should depend on.
+ENV WEB_DIST=/app/apps/web/dist
 
 # Not running as root in the final image.
 RUN addgroup -S mytuums && adduser -S mytuums -G mytuums

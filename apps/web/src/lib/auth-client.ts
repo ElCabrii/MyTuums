@@ -75,9 +75,39 @@ export const { useSession, signIn, signUp, signOut } = authClient;
  * `useSession`'s return rather than hand-written, so a BetterAuth upgrade
  * that changes the session shape surfaces as a type error here instead of
  * silently drifting.
+ *
+ * The intersection is the one hand-written piece, and it exists because
+ * better-auth 1.6.25's client types never surface `user.additionalFields`:
+ * `InferUserFromClient` reads plugin schemas only, so every field the server
+ * declares in `packages/auth/src/index.ts` arrives here untyped. They are typed
+ * once, at this boundary, rather than cast at each of the dozen call sites that
+ * read them.
+ *
+ * `dateOfBirth` is what the 15+ gate reads; at runtime the session store
+ * carries it as an ISO string (JSON round trip) or a Date (in-process), so both
+ * are covered. The rest are the editable profile and the stored theme/language
+ * defaults — all nullable, because an account that has never set one has none,
+ * which is exactly the state `atoms/theme.ts` and `atoms/locale.ts` fall back
+ * from.
+ *
+ * These are deliberately typed loosely as `string | null` rather than as the
+ * `Theme`/`Locale` unions: the values come off the wire, and the atoms that
+ * consume them already sanitise on read for precisely that reason.
  */
+type SessionWithDeclaredFields = ReturnType<typeof useSession> & {
+  data: {
+    user: {
+      dateOfBirth: Date | string | null;
+      bio: string | null;
+      bannerImage: string | null;
+      themePreference: string | null;
+      localePreference: string | null;
+    };
+  } | null;
+};
+
 export const sessionStore = authClient.$store.atoms.session as WritableAtom<
-  ReturnType<typeof useSession>
+  SessionWithDeclaredFields
 >;
 
 /** Providers this app knows how to render, in display order. */

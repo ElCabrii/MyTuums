@@ -4,14 +4,13 @@ import { MessageSquare, Bell, LogIn, Compass, Home, Search, UserPlus } from "luc
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ModeToggle } from "@/components/mode-toggle";
-import { viewerAtom, viewerHandleAtom, viewerInitialsAtom } from "@/atoms/session";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { viewerAtom, viewerHandleAtom } from "@/atoms/session";
+import { UserAvatar } from "@/components/user-avatar";
 import { m } from "@/paraglide/messages.js";
 
 export function Header() {
   const user = useAtomValue(viewerAtom);
   const handle = useAtomValue(viewerHandleAtom);
-  const initials = useAtomValue(viewerInitialsAtom);
 
   const nameDisplay = user?.name || user?.displayUsername || user?.username || m.nav_profile();
 
@@ -97,12 +96,12 @@ export function Header() {
               className="flex items-center gap-2.5 p-1 rounded-full hover:bg-muted/60 transition-colors ml-1"
               title={handle ? m.user_view_profile({ name: nameDisplay }) : m.welcome_finish_setup()}
             >
-              <Avatar className="h-8 w-8 border border-primary/20">
-                <AvatarImage src={user.image || undefined} alt={user.name || m.user_avatar_alt()} />
-                <AvatarFallback className="text-xs font-bold bg-primary text-primary-foreground">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
+              <UserAvatar
+                user={user}
+                alt={user.name || m.user_avatar_alt()}
+                className="h-8 w-8 border border-primary/20"
+                fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
+              />
               <span className="hidden sm:inline text-sm font-medium pr-1 text-foreground max-w-[140px] truncate">
                 {nameDisplay}
               </span>

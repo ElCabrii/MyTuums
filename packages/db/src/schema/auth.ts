@@ -30,6 +30,11 @@ export const user = pgTable("user", {
   displayUsername: text("display_username"),
   twoFactorEnabled: boolean("two_factor_enabled").default(false),
   lastLoginMethod: text("last_login_method"),
+  dateOfBirth: timestamp("date_of_birth", { withTimezone: true }),
+  bio: text("bio"),
+  bannerImage: text("banner_image"),
+  themePreference: text("theme_preference"),
+  localePreference: text("locale_preference"),
 });
 
 export const session = pgTable(

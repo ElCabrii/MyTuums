@@ -1,12 +1,12 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Heart, MessageCircle } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/user-avatar";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { isSignedInAtom } from "@/atoms/session";
 import { formatRelativeTime } from "@/lib/format";
 import { type Post } from "@/lib/orpc";
-import { handleOf, initialsOf } from "@/lib/user";
+import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 import { getLocale } from "@/paraglide/runtime.js";
 
@@ -73,12 +73,12 @@ export function PostCard({
 
   const timestamp = formatRelativeTime(post.createdAt, getLocale(), m.post_just_now());
   const authorAvatar = (
-    <Avatar className="h-10 w-10 bg-background">
-      <AvatarImage src={post.author.image || undefined} alt={authorName} />
-      <AvatarFallback className="bg-primary text-primary-foreground font-bold text-xs">
-        {initialsOf(authorName)}
-      </AvatarFallback>
-    </Avatar>
+    <UserAvatar
+      user={post.author}
+      alt={authorName}
+      className="h-10 w-10 bg-background"
+      fallbackClassName="bg-primary text-primary-foreground font-bold text-xs"
+    />
   );
 
   return (

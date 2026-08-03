@@ -45,7 +45,53 @@ const stackEnv = {
   // rate-limit spec covers the app's own /rpc limiter, which is unrelated and
   // still enforced here.
   AUTH_RATE_LIMIT: "false",
+  /**
+   * No real email, ever, from this suite.
+   *
+   * `webServer.env` is MERGED over `process.env`, and the `e2e` script loads
+   * the repo `.env` — so a developer with a real `RESEND_API_KEY` had every
+   * single sign-up in this suite firing a live Resend call, because
+   * `emailVerification.sendOnSignUp` is on. That is wrong three ways: it spends
+   * a real quota on fixtures (which exhausts it — Resend then 429s and the
+   * server logs a wall of failed background tasks), it mails addresses nobody
+   * owns, and each send is a network round trip that slows sign-up enough to
+   * race the 3s session-store wait in `claimWelcomeFieldsAtom`. That last one
+   * is how it surfaced: unrelated /welcome specs failing intermittently, in
+   * proportion to how many accounts the specs before them had created.
+   *
+   * Blanked rather than deleted because merging cannot remove a key.
+   * `optionalEnv` in packages/auth/src/env.ts treats "" as absent, so
+   * `sendEmail` falls back to logging the message — which the E2E stack wants
+   * anyway, since that console line is where a verification or reset link is
+   * read from without a mailbox.
+   */
+  RESEND_API_KEY: "",
+  // Object storage, forwarded from the ambient environment so avatar and
+  // banner uploads work in the browser the same way they do in dev.
+  //
+  // All-or-nothing, because `apps/server/src/env.ts` refuses to boot on a
+  // *partial* group: a machine with no bucket configured gets a server with
+  // uploads reporting NOT_IMPLEMENTED and every other spec unaffected, rather
+  // than a stack that will not start. The bucket must be the dev one —
+  // `truncateAll()` deletes its objects by prefix after every run.
+  ...s3Env(),
 };
+
+function s3Env(): Record<string, string> {
+  const required = [
+    "S3_ENDPOINT",
+    "S3_BUCKET",
+    "S3_ACCESS_KEY_ID",
+    "S3_SECRET_ACCESS_KEY",
+  ] as const;
+
+  if (required.some((key) => !process.env[key])) return {};
+
+  return {
+    ...Object.fromEntries(required.map((key) => [key, process.env[key] ?? ""])),
+    S3_REGION: process.env.S3_REGION ?? "auto",
+  };
+}
 
 export const E2E = {
   serverUrl,

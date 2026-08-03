@@ -20,6 +20,15 @@ import { m } from "@/paraglide/messages.js";
 
 export const Route = createFileRoute("/two-factor")({
   component: TwoFactorPage,
+  /**
+   * The `redirect` param lands here from `/login` when the person was in the
+   * middle of a sign-in that needed a second factor — see login.tsx. After the
+   * challenge succeeds and a real session appears, `useRedirectWhenSignedIn`
+   * reads it back and finishes the trip to the page the gate had sent them
+   * from. Direct hits have no param and behave as before.
+   */
+  validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
+    typeof search.redirect === "string" ? { redirect: search.redirect } : {},
 });
 
 /**
@@ -32,9 +41,10 @@ export const Route = createFileRoute("/two-factor")({
  * real session is issued.
  */
 function TwoFactorPage() {
+  const { redirect: redirectFromSearch } = Route.useSearch();
   // The session only exists after a correct code, so this fires exactly once,
   // on success — the same effect that ends a normal sign-in.
-  useRedirectWhenSignedIn();
+  useRedirectWhenSignedIn(redirectFromSearch);
 
   const availableMethods = useAtomValue(twoFactorMethodsAtom);
   const method = useAtomValue(selectedTwoFactorMethodAtom);

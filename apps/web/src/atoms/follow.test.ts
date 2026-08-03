@@ -26,6 +26,8 @@ function makeProfile(overrides: Partial<Profile> & { id: string; username: strin
     name: overrides.username,
     displayUsername: overrides.username,
     image: null,
+    bio: null,
+    bannerImage: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     followerCount: 0,
     followingCount: 0,

@@ -1,6 +1,7 @@
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import { atomEffect } from "jotai-effect";
+import { viewerAtom } from "@/atoms/session";
 
 export type Theme = "dark" | "light" | "system";
 
@@ -22,36 +23,59 @@ const matchDarkScheme = (): MediaQueryList | undefined =>
     : undefined;
 
 /**
- * The raw persisted value. Typed `unknown` on purpose, same as
- * `feedScopeAtom` in `feed-scope.ts`: `localStorage` is user-editable and
- * outlives deploys, so nothing read back out of it is trustworthy —
- * `themeAtom` below is the only sanctioned way in. The key is kept identical
- * to the old `ThemeProvider`'s `storageKey` prop so existing users don't
- * lose their preference across this migration.
+ * The raw persisted value — this device's own choice, or `null` if it has
+ * never made one.
+ *
+ * Typed `unknown` on purpose, same as `feedScopeAtom` in `feed-scope.ts`:
+ * `localStorage` is user-editable and outlives deploys, so nothing read back
+ * out of it is trustworthy — `themeAtom` below is the only sanctioned way in.
+ * The key is kept identical to the old `ThemeProvider`'s `storageKey` prop so
+ * existing users don't lose their preference across this migration.
+ *
+ * The default is `null` rather than `"system"`, and that distinction is the
+ * whole mechanism behind the stored account preference: `"system"` is a real
+ * choice someone can make, so defaulting to it made "I picked system here"
+ * indistinguishable from "I have never touched this on this device" — and the
+ * account's preference could then never apply anywhere, because every device
+ * would look like it had already chosen.
  *
  * `getOnInit` matters for the same reason it does in `feed-scope.ts`:
- * without it the atom yields `"system"` on the very first read and the
+ * without it the atom yields the default on the very first read and the
  * stored value only afterwards, which would paint the wrong theme for one
  * frame — a visible flash that then flips — instead of the right one
  * immediately. The app is a client-rendered SPA, so there is no hydration
  * pass for that first read to mismatch against.
  */
-const storedThemeAtom = atomWithStorage<unknown>(STORAGE_KEY, "system", undefined, {
+const storedThemeAtom = atomWithStorage<unknown>(STORAGE_KEY, null, undefined, {
   getOnInit: true,
 });
 
 /**
- * The theme the viewer picked. Reads collapse anything unrecognised — a
- * hand-edited key, a value written by a future version of the app — to
- * `"system"` rather than letting it reach `themeClassEffect`, where an
+ * The theme in force: this device's choice, else the account's stored default,
+ * else follow the OS.
+ *
+ * That order is the rule the whole feature rests on — the header's toggle is an
+ * override for the device you are sitting at, and `/settings/account` sets the
+ * default a device that has never been told anything falls back to. So a new
+ * browser honours the preference, and flipping the toggle there beats it
+ * immediately and permanently, without writing back to the account.
+ *
+ * Reads collapse anything unrecognised — a hand-edited key, a value from a
+ * future version of the app, a `themePreference` off the wire — to the next
+ * source rather than letting it reach `themeClassEffect`, where an
  * unrecognised string would still pass through to `classList.add` and apply
- * neither `light` nor `dark`. Writes are typed, so only the three real
- * values are ever stored.
+ * neither `light` nor `dark`. Writes are typed, so only the three real values
+ * are ever stored.
  */
 export const themeAtom = atom(
   (get): Theme => {
     const stored = get(storedThemeAtom);
-    return isTheme(stored) ? stored : "system";
+    if (isTheme(stored)) return stored;
+
+    const preferred = get(viewerAtom)?.themePreference;
+    if (isTheme(preferred)) return preferred;
+
+    return "system";
   },
   (_get, set, next: Theme) => {
     set(storedThemeAtom, next);

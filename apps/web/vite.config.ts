@@ -47,6 +47,19 @@ export default defineConfig({
         target: rpcTarget,
         changeOrigin: true,
       },
+      // Uploaded avatars and banners. The server answers these with a 302 to a
+      // presigned bucket URL, so the proxy must NOT follow the redirect —
+      // `autoRedirect` is off by default, and the browser has to be the one
+      // that follows it or the bytes would be pulled through this dev server.
+      //
+      // In production there is no proxy: the web app and the API are one
+      // origin, which is the same assumption `src/lib/orpc.ts` already makes
+      // by resolving `/rpc` against `window.location.origin`. That is what
+      // lets a stored `/media/...` path work unchanged in both places.
+      "/media": {
+        target: rpcTarget,
+        changeOrigin: true,
+      },
     },
   },
 });

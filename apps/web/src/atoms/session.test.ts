@@ -31,18 +31,34 @@ vi.mock("@/lib/auth-client", () => ({
 
 import {
   isSignedInAtom,
+  needsCompletionAtom,
+  needsDobAtom,
   needsHandleAtom,
   sessionAtom,
   sessionPendingAtom,
   viewerAtom,
+  viewerDateOfBirthAtom,
   viewerHandleAtom,
   viewerIdAtom,
-  viewerInitialsAtom,
 } from "@/atoms/session";
 
 const signedIn = {
   data: {
     user: { id: "u1", username: "alexmercer", displayUsername: "AlexMercer", name: "Alex Mercer" },
+  },
+  isPending: false,
+};
+// The fixture above has no date of birth — the completeness atoms below
+// deliberately distinguish it from a session that declares one.
+const signedInWithDob = {
+  data: {
+    user: {
+      id: "u1",
+      username: "alexmercer",
+      displayUsername: "AlexMercer",
+      name: "Alex Mercer",
+      dateOfBirth: new Date("1995-01-01T00:00:00.000Z"),
+    },
   },
   isPending: false,
 };
@@ -131,12 +147,11 @@ describe("derived session atoms", () => {
     expect(store.get(viewerIdAtom)).toBe("u1");
   });
 
-  it("viewerHandleAtom / viewerInitialsAtom derive from the shared lib/user.ts helpers", () => {
+  it("viewerHandleAtom derives from the shared lib/user.ts helper", () => {
     const store = createStore();
     setSession(store, signedIn);
     // Prefers the normalised `username`, same rule as `handleOf` itself.
     expect(store.get(viewerHandleAtom)).toBe("alexmercer");
-    expect(store.get(viewerInitialsAtom)).toBe("AM");
   });
 });
 
@@ -184,5 +199,51 @@ describe("needsHandleAtom", () => {
     const store = createStore();
     setSession(store, { data: null, isPending: true });
     expect(store.get(needsHandleAtom)).toBe(false);
+  });
+});
+
+/**
+ * The 15+ rule's client half: `needsDobAtom` is what stands between a session
+ * that never declared a date of birth and the /welcome gate — a social
+ * sign-up and any account that predates the rule. Together with
+ * `needsHandleAtom` it defines `needsCompletionAtom`, the single "incomplete
+ * sign-up" signal `use-require-handle.ts` gates on.
+ */
+describe("needsDobAtom / needsCompletionAtom", () => {
+  it("is false when signed out — a visitor has no date of birth to declare", () => {
+    const store = createStore();
+    setSession(store, signedOut);
+    expect(store.get(needsDobAtom)).toBe(false);
+    expect(store.get(needsCompletionAtom)).toBe(false);
+  });
+
+  it("is true for a signed-in user who has never declared a date of birth", () => {
+    const store = createStore();
+    setSession(store, signedIn);
+    expect(store.get(viewerDateOfBirthAtom)).toBeNull();
+    expect(store.get(needsDobAtom)).toBe(true);
+  });
+
+  it("is false once the session carries a date of birth", () => {
+    const store = createStore();
+    setSession(store, signedInWithDob);
+    expect(store.get(needsDobAtom)).toBe(false);
+  });
+
+  it("is false while the session is still pending, so nothing redirects on first paint", () => {
+    const store = createStore();
+    setSession(store, { data: null, isPending: true });
+    expect(store.get(needsDobAtom)).toBe(false);
+  });
+
+  it("needsCompletionAtom is the union of the two completeness halves", () => {
+    const store = createStore();
+    // Handle present, DOB missing — the account that predates the 15+ rule.
+    setSession(store, signedIn);
+    expect(store.get(needsHandleAtom)).toBe(false);
+    expect(store.get(needsCompletionAtom)).toBe(true);
+
+    setSession(store, signedInWithDob);
+    expect(store.get(needsCompletionAtom)).toBe(false);
   });
 });

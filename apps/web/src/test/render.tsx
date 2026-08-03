@@ -79,6 +79,19 @@ export interface TestSessionUser {
   username?: string | null;
   displayUsername?: string | null;
   image?: string | null;
+  /** A Date, as the session store reports it. Omit it to simulate a session that never declared one. */
+  dateOfBirth?: Date | null;
+  bio?: string | null;
+  bannerImage?: string | null;
+  /**
+   * The account's stored defaults. Null in the default fixture, which is the
+   * "never chose" state `atoms/theme.ts` and `atoms/locale.ts` fall back from —
+   * pass one to exercise the fallback actually applying.
+   */
+  themePreference?: string | null;
+  localePreference?: string | null;
+  /** Read by `/settings/account`'s two-factor section to decide on/off. */
+  twoFactorEnabled?: boolean | null;
 }
 
 interface TestSessionValue {
@@ -98,7 +111,14 @@ interface TestSessionValue {
  * Mocking `sessionStore` itself is the only lever that actually reaches the
  * atom, so this is a module mock, not a store write.
  */
-let currentSession: TestSessionValue = { data: null, isPending: false, error: null };
+// Starts PENDING, matching BetterAuth's real session store's cold-start value
+// (`session-atom.mjs` seeds `{ data: null, isPending: true }`). This is what
+// makes the signed-in gate's cold-load guard testable: the atom's initial
+// value — captured at module import — is what the first render sees, and if it
+// read "resolved signed-out" here, a signed-in/pending test would redirect
+// before the immediate-fire subscription below delivers the real value. The
+// same trap is documented in `session.test.ts`.
+let currentSession: TestSessionValue = { data: null, isPending: true, error: null };
 const sessionListeners = new Set<(value: TestSessionValue) => void>();
 
 vi.mock("@/lib/auth-client", () => ({
@@ -134,7 +154,20 @@ vi.mock("@/lib/auth-client", () => ({
     },
     signUp: { email: vi.fn(() => Promise.resolve({ data: {}, error: null })) },
     signOut: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    requestPasswordReset: vi.fn(() =>
+      Promise.resolve({ data: { status: true }, error: null }),
+    ),
+    resetPassword: vi.fn(() => Promise.resolve({ data: { status: true }, error: null })),
     updateUser: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    // `/settings/account`'s password section. Like every other namespace here,
+    // its absence would be a "cannot read properties of undefined" at click
+    // time rather than a type error.
+    changePassword: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    // `lib/session-sync.ts`'s `refreshSession()` flips this signal after an
+    // image upload — the upload writes the user row past Better Auth, so the
+    // store has nothing else to tell it anything changed. `getSession` alone
+    // would NOT do it (see the comment there).
+    $store: { notify: vi.fn() },
     listAccounts: vi.fn(() => Promise.resolve({ data: [], error: null })),
     linkSocial: vi.fn(() => Promise.resolve({ data: {}, error: null })),
     unlinkAccount: vi.fn(() => Promise.resolve({ data: {}, error: null })),
@@ -198,12 +231,31 @@ function signedInSession(user: Partial<TestSessionUser> = {}): TestSessionValue 
         username: "alexmercer",
         displayUsername: "AlexMercer",
         image: null,
+        // The editable profile and the stored preferences, all unset — the
+        // state a fresh account is in, and the one the theme/locale fallbacks
+        // in atoms/theme.ts and atoms/locale.ts are written against. A test
+        // that wants a stored preference passes it through `signedInAs`.
+        bio: null,
+        bannerImage: null,
+        themePreference: null,
+        localePreference: null,
+        // A complete sign-up by default — the state components assume when
+        // they render a generic signed-in viewer. Omit it (or set username
+        // null) to build an incomplete session on purpose.
+        dateOfBirth: new Date("1995-01-01T00:00:00.000Z"),
         ...user,
       },
     },
     isPending: false,
     error: null,
   };
+}
+
+function pendingSession(): TestSessionValue {
+  // The cold-load state: BetterAuth's first /get-session still in flight.
+  // `sessionPendingAtom` reads true and `isSignedInAtom` reads false — the
+  // exact combination the signed-in gate must not redirect on.
+  return { data: null, isPending: true, error: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -241,8 +293,17 @@ function createTestRouteTree(ui: ReactNode) {
     stubRoute("/"),
     stubRoute("/login"),
     stubRoute("/register"),
+    // Signed-in-gate exemptions like the legal pages below — tests for the
+    // gate need them reachable without a redirect.
+    stubRoute("/forgot-password"),
+    stubRoute("/reset-password"),
     stubRoute("/discover"),
     stubRoute("/post/$postId"),
+    // The legal pages are signed-in-gate exemptions — tests for the gate
+    // need them reachable without a redirect.
+    stubRoute("/privacy"),
+    stubRoute("/terms"),
+    stubRoute("/mentions-legales"),
     // Literal-prefix syntax — kept byte-identical to src/routes/@{$username}.tsx.
     stubRoute("/@{$username}"),
   ]);
@@ -271,6 +332,11 @@ export interface RenderWithProvidersOptions {
    * An object: signed in as a viewer with these fields.
    */
   signedInAs?: boolean | Partial<TestSessionUser>;
+  /**
+   * `true`: the cold-load state — session in flight, reads as signed out for
+   * one tick. The signed-in gate must NOT redirect on this.
+   */
+  sessionPending?: boolean;
 }
 
 export interface RenderWithProvidersResult extends RenderResult {
@@ -288,6 +354,7 @@ export async function renderWithProviders(
     queryClient = createTestQueryClient(),
     initialPath = "/",
     signedInAs = false,
+    sessionPending = false,
   } = options;
 
   // Mirrors src/lib/store.ts: queryClientAtom must be hydrated before
@@ -296,7 +363,11 @@ export async function renderWithProviders(
   store.set(queryClientAtom, queryClient);
 
   setTestSession(
-    signedInAs === false ? signedOutSession() : signedInSession(signedInAs === true ? {} : signedInAs),
+    sessionPending
+      ? pendingSession()
+      : signedInAs === false
+        ? signedOutSession()
+        : signedInSession(signedInAs === true ? {} : signedInAs),
   );
 
   const router = buildTestRouter(ui, initialPath);
@@ -358,6 +429,8 @@ export function makeUserSummary(overrides: Partial<UserSummary> = {}): UserSumma
     username: "jamierivera",
     displayUsername: "JamieRivera",
     image: null,
+    bio: null,
+    bannerImage: null,
     createdAt: new Date(),
     followedAt: new Date(),
     viewerIsFollowing: false,

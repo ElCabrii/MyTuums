@@ -1,4 +1,4 @@
-import { sessionStore } from "@/lib/auth-client";
+import { authClient, sessionStore } from "@/lib/auth-client";
 
 type SessionValue = ReturnType<typeof sessionStore.get>;
 
@@ -62,3 +62,50 @@ export const waitForSignedOut = (): Promise<void> => waitForSession((value) => !
 /** The signed-in user now carries a handle — used after claiming one at `/welcome`. */
 export const waitForHandle = (): Promise<void> =>
   waitForSession((value) => Boolean(value.data?.user.username));
+
+/**
+ * The signed-in user is now a complete sign-up: handle *and* date of birth.
+ * Used after the `/welcome` claim, which can set either or both in one
+ * `updateUser` call.
+ */
+export const waitForCompletion = (): Promise<void> =>
+  waitForSession(
+    (value) => Boolean(value.data?.user.username) && Boolean(value.data?.user.dateOfBirth),
+  );
+
+/**
+ * Forces the session store to refetch, and waits for it to carry the result.
+ *
+ * The `waitFor*` helpers above all wait out a refetch something else already
+ * started — `updateUser` fires one itself, and they just outlast it. This has
+ * nothing to outlast: `user.uploadImage` writes the row with Drizzle, straight
+ * past Better Auth, so the client has no idea anything changed.
+ *
+ * **`authClient.getSession()` is not enough, and that is not obvious.** It does
+ * fetch, and it does resolve with fresh data — but it does not touch the
+ * nanostore, so `sessionAtom` and everything derived from it stay exactly as
+ * stale as before. The store is only refetched when `$sessionSignal` flips, and
+ * the client flips it for a fixed list of paths (`/update-user`, `/sign-in/*`,
+ * `/change-password`, …) that `/get-session` is deliberately not on — see
+ * `atomListeners` in better-auth's `client/config.mjs`. Calling `getSession`
+ * and waiting for the store to change therefore waits forever, which showed up
+ * as an avatar that uploaded successfully and never appeared.
+ *
+ * So this notifies the signal instead. `session-refresh.mjs` listens on it and
+ * calls the store's own `fetchSession`, which is the code path that actually
+ * writes the atom.
+ */
+export async function refreshSession(): Promise<void> {
+  const before = sessionStore.get().data;
+
+  authClient.$store.notify("$sessionSignal");
+
+  // Object *identity*, not any particular field, so this stays correct whatever
+  // the caller changed — and it is exact rather than approximate: the store
+  // holds one parsed response object, so an unchanged store yields the very
+  // reference captured above and the predicate is false, while any refetch
+  // yields a freshly parsed one and it is true. Comparing a field like
+  // `updatedAt` would instead be comparing two Dates, where equal instants are
+  // still distinct objects.
+  await waitForSession((value) => value.data !== before);
+}

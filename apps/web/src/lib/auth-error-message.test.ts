@@ -16,6 +16,9 @@ describe("localizeAuthError", () => {
     ["Passwords do not match.", m.validation_password_mismatch],
     ["Please enter your username or email address.", m.validation_identifier_required],
     ["Please enter your password.", m.validation_password_required],
+    ["Date of Birth is required.", m.validation_dob_required],
+    ["Please enter a valid date of birth.", m.validation_dob_invalid],
+    ["You must be at least 15 years old to create an account.", m.validation_dob_age],
   ];
 
   it.each(knownMessages)("translates %s", (raw, expected) => {

@@ -12,6 +12,27 @@ const validationMessages: Record<string, () => string> = {
   "Please enter your username or email address.": () => m.validation_identifier_required(),
   "Please enter your password.": () => m.validation_password_required(),
   "Please enter your verification code.": () => m.validation_code_required(),
+  // The date-of-birth strings, shared byte-for-byte with the server rule in
+  // packages/auth/src/dob.ts — the hook throws these verbatim, so a
+  // server-rejected claim lands here instead of rendering raw.
+  "Date of Birth is required.": () => m.validation_dob_required(),
+  "Please enter a valid date of birth.": () => m.validation_dob_invalid(),
+  "You must be at least 15 years old to create an account.": () => m.validation_dob_age(),
+  // Shared byte-for-byte with `BIO_TOO_LONG_MESSAGE` in
+  // packages/auth/src/profile.ts, which is where the rule is actually enforced
+  // — bios are written through `updateUser`, so the database hook is the
+  // authority and the client check is a courtesy anyone can skip.
+  "Your bio must be 160 characters or fewer.": () => m.validation_bio_length(),
+  "Please choose a valid theme.": () => m.validation_preference_invalid(),
+  "Please choose a valid language.": () => m.validation_preference_invalid(),
+  "Profile images are set by uploading a file.": () => m.validation_image_managed(),
+  // The upload procedure's rejections (packages/api/src/users.ts). The client
+  // produces the same three strings from its own pre-checks in
+  // `atoms/profile-edit.ts`, so both sides land on one entry each.
+  "That image is too large.": () => m.validation_image_too_large(),
+  "That image format isn't supported. Use a PNG, JPEG or WebP.": () =>
+    m.validation_image_type(),
+  "That file doesn't look like an image.": () => m.validation_image_unreadable(),
 };
 
 /** Translates the known client-side validation messages without hiding server errors. */

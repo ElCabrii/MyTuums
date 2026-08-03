@@ -1,8 +1,7 @@
 import { AlertCircle, Loader2, Send } from "lucide-react";
 import { POST_MAX_LENGTH } from "@my-tuums/api/constants";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
-import { initialsOf } from "@/lib/user";
 
 /**
  * The composer chrome — avatar, textarea, remaining-character counter, error
@@ -57,12 +56,11 @@ export function ComposerForm({
       {header}
 
       <div className="flex gap-3">
-        <Avatar className="h-10 w-10 bg-background">
-          <AvatarImage src={author.image || undefined} alt={author.name} />
-          <AvatarFallback className="bg-primary text-primary-foreground font-bold text-xs">
-            {initialsOf(author.name)}
-          </AvatarFallback>
-        </Avatar>
+        <UserAvatar
+          user={author}
+          className="h-10 w-10 bg-background"
+          fallbackClassName="bg-primary text-primary-foreground font-bold text-xs"
+        />
         <textarea
           rows={rows}
           placeholder={placeholder}

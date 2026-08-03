@@ -1,13 +1,13 @@
 import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { AlertCircle, Loader2, Users } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { FollowButton } from "@/components/follow-button";
 import { isSignedInAtom } from "@/atoms/session";
 import { userListAtom, type FollowDirection } from "@/atoms/user-list";
 import { type UserSummary } from "@/lib/orpc";
-import { handleOf, initialsOf } from "@/lib/user";
+import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
 function UserRow({ user }: { user: UserSummary }) {
@@ -16,12 +16,12 @@ function UserRow({ user }: { user: UserSummary }) {
 
   return (
     <div className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card shadow-sm hover:border-primary/30 transition-colors">
-      <Avatar className="h-11 w-11 bg-background shrink-0">
-        <AvatarImage src={user.image || undefined} alt={displayName} />
-        <AvatarFallback className="bg-primary text-primary-foreground font-bold text-xs">
-          {initialsOf(displayName)}
-        </AvatarFallback>
-      </Avatar>
+      <UserAvatar
+        user={user}
+        alt={displayName}
+        className="h-11 w-11 bg-background shrink-0"
+        fallbackClassName="bg-primary text-primary-foreground font-bold text-xs"
+      />
 
       <div className="flex-1 min-w-0">
         {handle ? (

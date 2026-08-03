@@ -1,5 +1,5 @@
 import { test, expect } from "../../support/fixtures";
-import { ALICE } from "../../support/users";
+import { ALICE, dateOfBirthUnder15 } from "../../support/users";
 
 // The chromium project's default storageState is alice's — override it for
 // this whole file so every test starts genuinely signed out, matching what
@@ -7,7 +7,7 @@ import { ALICE } from "../../support/users";
 test.use({ storageState: { cookies: [], origins: [] } });
 
 test.describe("registration", () => {
-  test("registering a fresh account signs the user in and redirects off /register", async ({
+  test("registering a fresh account signs the user in and offers two-factor before the profile", async ({
     page,
   }) => {
     const username = `e2enew${Date.now().toString(36)}`;
@@ -20,14 +20,27 @@ test.describe("registration", () => {
     // `exact` to avoid a strict-mode ambiguity between the two labels.
     await page.getByLabel("Password", { exact: true }).fill("a-fresh-password-1");
     await page.getByLabel("Confirm Password").fill("a-fresh-password-1");
+    // The 15+ rule is part of a valid registration — an under-15 date is
+    // rejected below.
+    await page.getByLabel("Date of Birth").fill("1995-01-01");
     // Scoped to <main>: the header nav renders its own "Register" button
     // (signed out) with the identical accessible name, so an unscoped query
     // matches two elements.
     await page.getByRole("main").getByRole("button", { name: "Register" }).click();
 
     // useRedirectWhenSignedIn is the entire post-signup redirect — signUpAtom
-    // deliberately doesn't navigate itself (see atoms/auth.ts) — so this also
-    // proves the session actually took.
+    // deliberately doesn't navigate itself (see atoms/auth.ts) — so reaching
+    // /welcome at all proves the session actually took.
+    //
+    // /welcome rather than the profile because a fresh sign-up is offered
+    // two-factor once, on the way past: `signUpAtom` raises
+    // `offerTwoFactorAtom` and the redirect effect honours it (atoms/
+    // onboarding.ts). It is an offer, not a gate — declining is a real answer,
+    // and taking it is what lands them on their profile.
+    await expect(page).toHaveURL(/\/welcome$/);
+    await expect(page.getByRole("heading", { name: "Secure your account" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Skip for now" }).click();
     await expect(page).toHaveURL(new RegExp(`/@${username}$`));
   });
 
@@ -48,6 +61,9 @@ test.describe("registration", () => {
     await page.getByLabel("Email Address").fill("someone@example.test");
     await page.getByLabel("Password", { exact: true }).fill("123");
     await page.getByLabel("Confirm Password").fill("456");
+    // A valid date of birth keeps native `required` from blocking submission
+    // — the point of this test is the ordering of the *handler's* rules.
+    await page.getByLabel("Date of Birth").fill("1995-01-01");
     // Scoped to <main>: the header nav renders its own "Register" button
     // (signed out) with the identical accessible name, so an unscoped query
     // matches two elements.
@@ -57,6 +73,26 @@ test.describe("registration", () => {
     await expect(alert).toContainText("Username must be between 3 and 20 characters long.");
     await expect(alert).not.toContainText("Password must be at least 8");
     await expect(alert).not.toContainText("Passwords do not match");
+  });
+
+  test("an under-15 date of birth is rejected with the age rule and no account is created", async ({
+    page,
+  }) => {
+    const username = `e2eminor${Date.now().toString(36)}`;
+
+    await page.goto("/register");
+    await page.getByLabel("Username").fill(username);
+    await page.getByLabel("Display Name").fill("Minor Fixture");
+    await page.getByLabel("Email Address").fill(`${username}@example.test`);
+    await page.getByLabel("Password", { exact: true }).fill("a-fresh-password-1");
+    await page.getByLabel("Confirm Password").fill("a-fresh-password-1");
+    await page.getByLabel("Date of Birth").fill(dateOfBirthUnder15());
+    await page.getByRole("main").getByRole("button", { name: "Register" }).click();
+
+    await expect(page.getByRole("alert")).toContainText(
+      "You must be at least 15 years old to create an account.",
+    );
+    await expect(page).toHaveURL(/\/register$/);
   });
 });
 
@@ -130,10 +166,53 @@ test.describe("logout", () => {
     // `signOutAtom` now awaits `waitForSignedOut()` (apps/web/src/lib/
     // session-sync.ts) before resolving. If that await is ever removed, this
     // line fails rather than the behaviour silently regressing.
-    await expect(page).toHaveURL(/\/login$/);
+    //
+    // The trailing `(?redirect=...)?` is the signed-in gate (use-require-
+    // signed-in.ts) racing the app's own navigate: both end up at /login, but
+    // the gate preserves the profile URL it was standing on — which is the
+    // intended behaviour, not a bug.
+    await expect(page).toHaveURL(/\/login(\?redirect=.*)?$/);
 
     await expect(
       page.getByRole("banner").getByRole("button", { name: "Log in" }),
     ).toBeVisible();
+  });
+});
+
+test.describe("signed-in gate", () => {
+  test("sends a signed-out visitor to /login with the destination, and back after signing in", async ({
+    page,
+  }) => {
+    await page.goto("/discover");
+
+    // The gate preserves where the visitor was headed, so the trip there
+    // survives the sign-in.
+    await expect(page).toHaveURL(/\/login\?redirect=/);
+
+    await page.getByLabel("Username or Email").fill(ALICE.username);
+    await page.getByLabel("Password").fill(ALICE.password);
+    await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
+
+    await expect(page).toHaveURL(/\/discover$/);
+  });
+
+  test("a deep profile link survives the round trip too", async ({ page }) => {
+    await page.goto("/@alice");
+
+    await expect(page).toHaveURL(/\/login\?redirect=/);
+
+    await page.getByLabel("Username or Email").fill(ALICE.username);
+    await page.getByLabel("Password").fill(ALICE.password);
+    await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
+
+    await expect(page).toHaveURL(/\/@alice$/);
+  });
+
+  test("leaves the legal pages readable while signed out", async ({ page }) => {
+    await page.goto("/privacy");
+    await expect(page).toHaveURL(/\/privacy$/);
+
+    await page.goto("/terms");
+    await expect(page).toHaveURL(/\/terms$/);
   });
 });

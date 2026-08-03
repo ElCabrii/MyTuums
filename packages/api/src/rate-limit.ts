@@ -136,4 +136,15 @@ export const RATE_LIMITS = {
   follow: { name: "follow", limit: 60, windowMs: MINUTE },
   /** Publishing. Deliberately tight — this is the one that writes rows. */
   write: { name: "write", limit: 15, windowMs: MINUTE },
+  /**
+   * Avatar and banner uploads. The tightest budget here, because it is the
+   * only call that costs megabytes of request body and a round trip to object
+   * storage rather than a single indexed insert — and because nobody legitimately
+   * changes their avatar ten times a minute.
+   *
+   * Its own namespace, like `follow`, so someone burning it cannot also lock
+   * themselves out of posting: an upload is a `write` by cost, but exhausting a
+   * shared budget with one large retry loop would take the composer down with it.
+   */
+  upload: { name: "upload", limit: 10, windowMs: MINUTE },
 } as const satisfies Record<string, RateLimitPolicy>;

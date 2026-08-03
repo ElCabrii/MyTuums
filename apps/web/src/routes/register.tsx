@@ -4,6 +4,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { authErrorAtom, authPendingAtom, signUpAtom } from "@/atoms/auth";
 import {
   registerConfirmPasswordAtom,
+  registerDateOfBirthAtom,
   registerEmailAtom,
   registerNameAtom,
   registerPasswordAtom,
@@ -16,21 +17,32 @@ import { localizeAuthError } from "@/lib/auth-error-message";
 import { SignInOptions } from "@/components/sign-in-options";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { UserPlus, AlertCircle, Loader2, User, Mail, Lock, AtSign } from "lucide-react";
+import { UserPlus, AlertCircle, Loader2, User, Mail, Lock, AtSign, Calendar } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 
 export const Route = createFileRoute("/register")({
   component: RegisterPage,
+  /**
+   * The `redirect` param is the one the signed-in gate set on `/login`
+   * (`use-require-signed-in.ts`) and that the "Register here" link carried
+   * here — see login.tsx for the rationale. Narrowed to a string: it arrives
+   * in the URL, and it is sanitized again in `lib/redirect.ts` before any
+   * navigation honours it.
+   */
+  validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
+    typeof search.redirect === "string" ? { redirect: search.redirect } : {},
 });
 
 function RegisterPage() {
-  useRedirectWhenSignedIn();
+  const { redirect: redirectFromSearch } = Route.useSearch();
+  useRedirectWhenSignedIn(redirectFromSearch);
 
   const [username, setUsername] = useAtom(registerUsernameAtom);
   const [name, setName] = useAtom(registerNameAtom);
   const [email, setEmail] = useAtom(registerEmailAtom);
   const [password, setPassword] = useAtom(registerPasswordAtom);
   const [confirmPassword, setConfirmPassword] = useAtom(registerConfirmPasswordAtom);
+  const [dateOfBirth, setDateOfBirth] = useAtom(registerDateOfBirthAtom);
   const validationError = useAtomValue(registerValidationAtom);
   const [error, setError] = useAtom(authErrorAtom);
   const isSubmitting = useAtomValue(authPendingAtom);
@@ -53,7 +65,7 @@ function RegisterPage() {
     // No navigate here — success flows through the session updating, which
     // useRedirectWhenSignedIn picks up. Calling it here too was the old
     // double-navigation bug.
-    await signUp({ username, name, email, password });
+    await signUp({ username, name, email, password, dateOfBirth });
   };
 
   return (
@@ -194,6 +206,27 @@ function RegisterPage() {
             </div>
           </div>
 
+          <div className="space-y-2">
+            <label
+              htmlFor="dateOfBirth"
+              className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              {m.auth_field_date_of_birth()}
+            </label>
+            <div className="relative">
+              <Calendar className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="dateOfBirth"
+                type="date"
+                value={dateOfBirth}
+                onChange={(e) => setDateOfBirth(e.target.value)}
+                className="pl-10 h-10 bg-background/50"
+                autoComplete="bday"
+                required
+              />
+            </div>
+          </div>
+
           <Button
             type="submit"
             className="w-full h-11 text-base font-medium rounded-2xl gap-2 mt-2"
@@ -219,6 +252,7 @@ function RegisterPage() {
           {m.auth_already_have_account()}{" "}
           <Link
             to="/login"
+            search={redirectFromSearch ? { redirect: redirectFromSearch } : {}}
             className="font-medium text-primary hover:underline"
           >
             {m.auth_login_link()}

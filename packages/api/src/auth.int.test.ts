@@ -10,11 +10,11 @@
 import { randomUUID } from "node:crypto";
 import { base32 } from "@better-auth/utils/base32";
 import { createOTP } from "@better-auth/utils/otp";
-import { eq } from "drizzle-orm";
+import { desc, eq, like } from "drizzle-orm";
 import { auth } from "@my-tuums/auth";
 import { authTest, testHelpers } from "@my-tuums/auth/testing";
 import { closeDb, db } from "@my-tuums/db";
-import { passkey, twoFactor, user } from "@my-tuums/db/schema";
+import { passkey, twoFactor, user, verification } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { truncateAll } from "./testing/harness.js";
 
@@ -61,18 +61,42 @@ class CookieJar {
 }
 
 /** Signs up through the real instance and returns a jar carrying the session. */
-async function signUp(overrides: { username?: string; email?: string; password?: string } = {}) {
+async function signUp(
+  overrides: { username?: string; email?: string; password?: string; dateOfBirth?: Date } = {},
+) {
   const uuid = randomUUID();
   const email = overrides.email ?? `vitest+${uuid}@example.com`;
   const username = overrides.username ?? `vitest${uuid.replace(/-/g, "").slice(0, 8)}`;
 
   const result = await auth.api.signUpEmail({
-    body: { email, password: overrides.password ?? PASSWORD, name: "Vitest User", username },
+    body: {
+      email,
+      password: overrides.password ?? PASSWORD,
+      name: "Vitest User",
+      username,
+      // Omitted unless a test says otherwise — the wire format the web app
+      // sends (`dateOfBirthToIso` in apps/web/src/lib/auth-validation.ts).
+      ...(overrides.dateOfBirth ? { dateOfBirth: overrides.dateOfBirth } : {}),
+    },
     returnHeaders: true,
   });
 
   const jar = new CookieJar().absorb(result.headers);
   return { email, username, jar, headers: jar.headers };
+}
+
+/**
+ * A Date `years` ago, nudged by `offsetDays` — the DOB boundary cases (15y
+ * exactly, 15y minus a day) are relative so the suite keeps asserting the
+ * same thing as the calendar moves. A Date, because that is what the
+ * additionalFields `date` type accepts at the typed `auth.api` boundary;
+ * BetterAuth serializes it to the ISO form the web app sends.
+ */
+function dob(years: number, offsetDays = 0): Date {
+  const d = new Date();
+  d.setUTCFullYear(d.getUTCFullYear() - years);
+  d.setUTCDate(d.getUTCDate() + offsetDays);
+  return d;
 }
 
 /** Enrols and confirms 2FA, returning the backup codes and a jar with the rotated session. */
@@ -253,6 +277,99 @@ describe("handles", () => {
   });
 });
 
+/**
+ * The 15+ rule, server-side. The hook in packages/auth/src/dob.ts runs on
+ * every user-creation path — email/password AND OAuth — and the property
+ * that keeps OAuth working is that it only rejects a *present* declaration:
+ * a user who simply never provides one passes, and the web app holds them at
+ * /welcome until they do. The message is asserted as the literal the client's
+ * render-boundary lookup translates (lib/auth-error-message.ts), the same
+ * contract as the i18n tests below.
+ */
+describe("date of birth requirement", () => {
+  it("accepts a date of birth older than 15 and reports it on the session user", async () => {
+    // The sign-up *response* deliberately doesn't echo the declaration back
+    // (the row it creates does), so the assertion reads the session store —
+    // the shape the web app's `session.user.dateOfBirth` comes from.
+    const { headers } = await signUp({ dateOfBirth: dob(15, -1) });
+
+    const session = await auth.api.getSession({ headers });
+    expect(session?.user.dateOfBirth).toBeDefined();
+  });
+
+  it("accepts a date of birth exactly 15 years ago — the boundary", async () => {
+    await expect(signUp({ dateOfBirth: dob(15) })).resolves.toBeDefined();
+  });
+
+  it("rejects a date of birth 15 years ago minus one day, and creates no row", async () => {
+    const email = `vitest+${randomUUID()}@example.com`;
+    const result = await auth.api
+      .signUpEmail({
+        body: {
+          email,
+          password: PASSWORD,
+          name: "Vitest User",
+          username: `vitest${randomUUID().replace(/-/g, "").slice(0, 8)}`,
+          dateOfBirth: dob(15, 1),
+        },
+      })
+      .catch((error: unknown) => error);
+
+    expect(String(result)).toContain(
+      "You must be at least 15 years old to create an account.",
+    );
+
+    const rows = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("accepts a sign-up with no date of birth at all — the OAuth-path regression guard", async () => {
+    // OAuth sign-ups arrive with no DOB, and the hook runs on their creation
+    // path too; if it ever starts rejecting absence, every social sign-up
+    // breaks. This pins that property.
+    const { headers } = await signUp();
+
+    const session = await auth.api.getSession({ headers });
+    expect(session?.user.dateOfBirth).toBeFalsy();
+  });
+
+  it("rejects an impossible date rather than storing it", async () => {
+    // Cast past the typed `Date` boundary on purpose: the raw-string form is
+    // the wire format the web app actually sends (a Date cannot even represent
+    // February 30 — it rolls over), and the hook must reject it before
+    // `new Date()` silently stores March 2.
+    const impossibleDate = "1995-02-30T00:00:00.000Z" as unknown as Date;
+    const result = await auth.api
+      .signUpEmail({
+        body: {
+          email: `vitest+${randomUUID()}@example.com`,
+          password: PASSWORD,
+          name: "Vitest User",
+          username: `vitest${randomUUID().replace(/-/g, "").slice(0, 8)}`,
+          dateOfBirth: impossibleDate,
+        },
+      })
+      .catch((error: unknown) => error);
+
+    expect(String(result)).toContain("Please enter a valid date of birth.");
+  });
+
+  it("enforces the same rule on updateUser — the /welcome claim path", async () => {
+    const { headers } = await signUp();
+
+    await expect(
+      auth.api.updateUser({ body: { dateOfBirth: dob(15, 1) }, headers }),
+    ).rejects.toThrow("You must be at least 15 years old to create an account.");
+
+    await expect(
+      auth.api.updateUser({ body: { dateOfBirth: dob(30) }, headers }),
+    ).resolves.toBeDefined();
+
+    const session = await auth.api.getSession({ headers });
+    expect(session?.user.dateOfBirth).toBeDefined();
+  });
+});
+
 describe("i18n plugin", () => {
   it("translates an error message when the Paraglide locale cookie says French", async () => {
     const { email } = await signUp();
@@ -306,5 +423,199 @@ describe("passkeys", () => {
     // and is in `truncateAll`'s list so rows cannot leak between tests.
     const rows = await db.select().from(passkey);
     expect(rows).toEqual([]);
+  });
+});
+
+/**
+ * The password-reset surface, against the production instance — the same
+ * reasoning as the rest of this file: the flow's security properties (single
+ * use, expiry, session revocation, anti-enumeration) live in the
+ * configuration that ships, not in a test-only one.
+ *
+ * One asymmetry is worth knowing: `auth.api.*` calls bypass the router's
+ * `onRequest` hook that hosts BetterAuth's rate limiter (verified against the
+ * installed 1.6.25 source and empirically), so the rate-limit assertion is the
+ * only test here that goes through `auth.handler` — the real HTTP path the
+ * server routes every request down. Everything else mints its token by
+ * inserting a `verification` row directly, which is the same shape the
+ * endpoint writes (identifier `reset-password:<token>`, value = user id).
+ */
+describe("password reset", () => {
+  const NEW_PASSWORD = "vitest-Newer-Pass!";
+
+  async function userIdFor(email: string): Promise<string> {
+    const [row] = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
+    if (!row) throw new Error(`no user row for ${email}`);
+    return row.id;
+  }
+
+  /**
+   * Goes through the real endpoint, then reads the token it wrote — the
+   * identifier's `reset-password:` suffix. The prefix filter is not optional:
+   * sign-up's `emailVerification.sendOnSignUp` writes verification rows too,
+   * and without it this would hand back the sign-up token.
+   */
+  async function requestResetToken(email: string): Promise<string> {
+    const res = await auth.api.requestPasswordReset({ body: { email } });
+    expect(res.status).toBe(true);
+
+    const [row] = await db
+      .select({ identifier: verification.identifier })
+      .from(verification)
+      .where(like(verification.identifier, "reset-password:%"))
+      .orderBy(desc(verification.createdAt))
+      .limit(1);
+    expect(row?.identifier).toBeDefined();
+    return row.identifier.replace("reset-password:", "");
+  }
+
+  /** Writes the token the endpoint would have, without spending the rate-limit budget. */
+  async function insertResetToken(userId: string, expiresInMs = 60_000): Promise<string> {
+    const token = randomUUID();
+    await db.insert(verification).values({
+      id: randomUUID(),
+      identifier: `reset-password:${token}`,
+      value: userId,
+      expiresAt: new Date(Date.now() + expiresInMs),
+    });
+    return token;
+  }
+
+  async function resetRowCount(): Promise<number> {
+    const rows = await db
+      .select({ id: verification.id })
+      .from(verification)
+      .where(like(verification.identifier, "reset-password:%"));
+    return rows.length;
+  }
+
+  it("resets the password and signs in with the new one", async () => {
+    const { email } = await signUp();
+    const token = await requestResetToken(email); // rate-limit call 1
+
+    await expect(
+      auth.api.resetPassword({ body: { newPassword: NEW_PASSWORD, token } }),
+    ).resolves.toMatchObject({ status: true });
+
+    // Single-use: the row is consumed, not left behind.
+    await expect(
+      db
+        .select({ id: verification.id })
+        .from(verification)
+        .where(eq(verification.identifier, `reset-password:${token}`)),
+    ).resolves.toEqual([]);
+
+    await expect(
+      auth.api.signInEmail({ body: { email, password: NEW_PASSWORD } }),
+    ).resolves.toBeDefined();
+    await expect(
+      auth.api.signInEmail({ body: { email, password: PASSWORD } }),
+    ).rejects.toThrow();
+  });
+
+  it("consumes a reset token so a second reset with it fails", async () => {
+    const { email } = await signUp();
+    const token = await requestResetToken(email); // rate-limit call 2
+
+    await expect(
+      auth.api.resetPassword({ body: { newPassword: NEW_PASSWORD, token } }),
+    ).resolves.toMatchObject({ status: true });
+
+    // A replayable reset token is just a password that never expires.
+    await expect(
+      auth.api.resetPassword({ body: { newPassword: "another-Pass-1", token } }),
+    ).rejects.toThrow();
+  });
+
+  it("rejects a breached password — and consumes the token in the process", async () => {
+    const { email } = await signUp();
+    const userId = await userIdFor(email);
+    const token = await insertResetToken(userId);
+
+    // `password123` is certainly in Have I Been Pwned; the plugin hooks the
+    // reset route like it does sign-up (see the "password policy" describe).
+    await expect(
+      auth.api.resetPassword({ body: { newPassword: "password123", token } }),
+    ).rejects.toThrow();
+
+    // The token is gone anyway: consumption happens before the breach check,
+    // so an attacker cannot probe the breach corpus with one token repeatedly.
+    await expect(
+      db
+        .select({ id: verification.id })
+        .from(verification)
+        .where(eq(verification.identifier, `reset-password:${token}`)),
+    ).resolves.toEqual([]);
+  });
+
+  it("does not reveal whether an email exists", async () => {
+    const before = await resetRowCount();
+
+    const res = await auth.api.requestPasswordReset({
+      body: { email: `nobody+${randomUUID()}@example.com` },
+    }); // rate-limit call 3 — the budget is now full
+
+    expect(res.status).toBe(true);
+    expect(res.message).toContain("check your email");
+
+    // The endpoint simulates the write for unknown emails; nothing lands.
+    await expect(resetRowCount()).resolves.toBe(before);
+  });
+
+  it("rejects an expired token", async () => {
+    const { email } = await signUp();
+    const userId = await userIdFor(email);
+    const token = await insertResetToken(userId, -1000);
+
+    await expect(
+      auth.api.resetPassword({ body: { newPassword: NEW_PASSWORD, token } }),
+    ).rejects.toThrow();
+  });
+
+  it("rejects a garbage token", async () => {
+    await expect(
+      auth.api.resetPassword({ body: { newPassword: NEW_PASSWORD, token: "not-a-real-token" } }),
+    ).rejects.toThrow();
+  });
+
+  it("revokes every session on reset", async () => {
+    const { jar } = await signUp();
+    const sessionBefore = await auth.api.getSession({ headers: jar.headers });
+    expect(sessionBefore).not.toBeNull();
+
+    const userId = (sessionBefore as { user: { id: string } }).user.id;
+    const token = await insertResetToken(userId);
+
+    await expect(
+      auth.api.resetPassword({ body: { newPassword: NEW_PASSWORD, token } }),
+    ).resolves.toMatchObject({ status: true });
+
+    // `revokeSessionsOnPasswordReset` — the session that existed before the
+    // reset no longer authenticates, even though its cookie is intact.
+    await expect(auth.api.getSession({ headers: jar.headers })).resolves.toBeNull();
+  });
+
+  it("rate-limits the request-password-reset endpoint", async () => {
+    // `auth.api.*` bypasses the rate limiter (see the describe header), so
+    // this assertion drives the real HTTP path: three allowed requests, then
+    // the fourth is refused. The rule is `{window: 300, max: 3}`, and without
+    // a client IP all four calls share one bucket.
+    const call = () =>
+      auth.handler(
+        new Request("http://localhost:3001/api/auth/request-password-reset", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email: `rate-limit+${randomUUID()}@example.com` }),
+        }),
+      );
+
+    for (let i = 0; i < 3; i++) {
+      await expect(call()).resolves.toMatchObject({ status: 200 });
+    }
+    const blocked = await call();
+    expect(blocked.status).toBe(429);
+    await expect(blocked.json()).resolves.toMatchObject({
+      message: "Too many requests. Please try again later.",
+    });
   });
 });

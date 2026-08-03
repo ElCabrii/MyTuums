@@ -60,6 +60,11 @@ export function PrivacyPolicyFr() {
             <td>Affiché sur votre profil et vos publications</td>
           </tr>
           <tr>
+            <td>Date de naissance</td>
+            <td>Fournie à l'inscription</td>
+            <td>Respect de l'exigence d'âge de 15 ans (voir section 10)</td>
+          </tr>
+          <tr>
             <td>Mot de passe</td>
             <td>Fourni à l'inscription</td>
             <td>
@@ -107,8 +112,8 @@ export function PrivacyPolicyFr() {
       <p>
         <strong>Contenu public par défaut :</strong> comme sur la plupart des réseaux sociaux, vos
         publications, réponses, « j'aime » et abonnements sont visibles par les autres
-        utilisateurs (et, pour le fil global, potentiellement par les visiteurs non connectés).
-        Ne publiez pas d'information que vous ne souhaitez pas rendre publique.
+        utilisateurs — le Service requiert un compte pour être consulté. Ne publiez pas
+        d'information que vous ne souhaitez pas rendre publique.
       </p>
 
       <h2>3. Finalités et bases légales (article 6 du RGPD)</h2>
@@ -269,10 +274,12 @@ export function PrivacyPolicyFr() {
       <h2>10. Mineurs</h2>
       <p>
         Le Service est réservé aux personnes âgées de 15 ans ou plus (âge du consentement
-        numérique en France, en application de l'article 8 du RGPD tel que transposé). Nous ne
-        collectons pas sciemment de données concernant des personnes de moins de 15 ans. Si vous
-        pensez qu'un compte a été créé par un mineur de moins de 15 ans, signalez-le à
-        contact@mytuums.com ; il sera supprimé.
+        numérique en France, en application de l'article 8 du RGPD tel que transposé). La
+        création d'un compte requiert de déclarer une date de naissance, que le Service vérifie
+        par rapport à ce seuil ; il ne procède à aucune vérification indépendante de l'âge ou de
+        l'identité. Nous ne collectons pas sciemment de données concernant des personnes de moins
+        de 15 ans. Si vous pensez qu'un compte a été créé par un mineur de moins de 15 ans,
+        signalez-le à contact@mytuums.com ; il sera supprimé.
       </p>
 
       <h2>11. Cessation du Service</h2>

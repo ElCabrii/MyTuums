@@ -20,23 +20,31 @@ import { m } from "@/paraglide/messages.js";
 export const Route = createFileRoute("/login")({
   component: LoginPage,
   /**
-   * The one search param in the app, and the exception proves the rule
-   * CLAUDE.md states: view state belongs in an atom because a URL nobody can
-   * link to is the cost. This isn't view state — it is a result handed back by
-   * an *external* redirect (BetterAuth's OAuth callback appends
-   * `?error=<code>` to `errorCallbackURL`), and a query param is the only
-   * channel a cross-origin redirect has. Nothing in the app ever navigates
-   * here with it deliberately.
+   * Two search params, and together they prove the rule CLAUDE.md states:
+   * view state belongs in an atom because a URL nobody can link to is the
+   * cost. Neither of these is view state — each arrives from *outside*.
    *
-   * Narrowed to a string rather than trusted: this arrives from outside, so
-   * anything else is dropped instead of being rendered.
+   * `error` is handed back by an external redirect (BetterAuth's OAuth
+   * callback appends `?error=<code>` to `errorCallbackURL`); `redirect` is
+   * written by the site's own signed-in gate (`use-require-signed-in.ts`)
+   * but read back from `window.location`, and it round-trips through the
+   * provider during OAuth. A query param is the only channel either has, so
+   * the exception stands.
+   *
+   * Both are narrowed to a string rather than trusted: they arrive from
+   * outside, so anything else is dropped instead of being rendered — and
+   * `redirect` is sanitized again in `lib/redirect.ts` before any navigation
+   * honours it.
    */
-  validateSearch: (search: Record<string, unknown>): { error?: string } =>
-    typeof search.error === "string" ? { error: search.error } : {},
+  validateSearch: (search: Record<string, unknown>): { error?: string; redirect?: string } => ({
+    ...(typeof search.error === "string" ? { error: search.error } : {}),
+    ...(typeof search.redirect === "string" ? { redirect: search.redirect } : {}),
+  }),
 });
 
 function LoginPage() {
-  useRedirectWhenSignedIn();
+  const { redirect: redirectFromSearch } = Route.useSearch();
+  useRedirectWhenSignedIn(redirectFromSearch);
   // No-op unless VITE_GOOGLE_CLIENT_ID is set — see lib/one-tap.ts.
   useOneTap();
 
@@ -83,7 +91,13 @@ function LoginPage() {
     // Signing in normally still redirects through that effect, not here, which
     // is what keeps the two paths from racing each other.
     if (outcome.status === "two-factor") {
-      void navigate({ to: "/two-factor" });
+      // The redirect param rides along so that after the challenge, when the
+      // session finally appears, useRedirectWhenSignedIn (reading /two-factor's
+      // own search) still knows where the person was heading.
+      void navigate({
+        to: "/two-factor",
+        ...(redirectFromSearch ? { search: { redirect: redirectFromSearch } } : {}),
+      });
     }
   };
 
@@ -143,6 +157,12 @@ function LoginPage() {
               >
                 {m.auth_field_password()}
               </label>
+              <Link
+                to="/forgot-password"
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                {m.auth_forgot_password_link()}
+              </Link>
             </div>
             <div className="relative">
               <Lock className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
@@ -184,6 +204,7 @@ function LoginPage() {
           {m.auth_dont_have_account()}{" "}
           <Link
             to="/register"
+            search={redirectFromSearch ? { redirect: redirectFromSearch } : {}}
             className="font-medium text-primary hover:underline"
           >
             {m.auth_register_link()}

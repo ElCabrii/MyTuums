@@ -3,10 +3,23 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import { follow, user } from "@my-tuums/db/schema";
 import { z } from "zod";
-import { FOLLOW_PAGE_SIZE, FOLLOW_PAGE_SIZE_MAX } from "./constants.js";
+import {
+  FOLLOW_PAGE_SIZE,
+  FOLLOW_PAGE_SIZE_MAX,
+  IMAGE_KINDS,
+  type ImageKind,
+} from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
+import {
+  acceptImage,
+  imageObjectKey,
+  mediaPathFor,
+  objectKeyFromMediaPath,
+  type ImageRejection,
+} from "./image.js";
 import { protectedProcedure, publicProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
+import type { Storage } from "./storage.js";
 
 /**
  * The public shape of a user — deliberately not `select()`-all.
@@ -23,6 +36,15 @@ import { RATE_LIMITS } from "./rate-limit.js";
  * would be enough for on its own; the second tells them which provider to
  * phish. Neither is profile data, and a `select()`-all here would publish both.
  *
+ * `themePreference` and `localePreference` stay out on the same principle,
+ * one step milder: they are settings, not profile. Nobody visiting a profile
+ * needs to know which theme its owner prefers, and publishing them would make
+ * the list mean "every column we happened to add" rather than "what a profile
+ * page renders".
+ *
+ * `bio` and `bannerImage` ARE in, because they are exactly that — the things a
+ * profile page renders for a visitor.
+ *
  * The follower lists below spread this too, so they inherit the same property
  * rather than growing their own projection that could drift from it.
  */
@@ -32,6 +54,8 @@ const publicUserColumns = {
   username: user.username,
   displayUsername: user.displayUsername,
   image: user.image,
+  bio: user.bio,
+  bannerImage: user.bannerImage,
   createdAt: user.createdAt,
 };
 
@@ -107,6 +131,99 @@ async function requireUserIdByUsername(db: Database, username: string): Promise<
   return found.id;
 }
 
+/**
+ * The messages an upload can be refused with.
+ *
+ * English literals, matching the arrangement `packages/auth/src/dob.ts`
+ * established: the web app's `localizeAuthError` maps the ones it recognises to
+ * translated copy at the render boundary and passes anything else through, so
+ * these must stay byte-identical with the entries in
+ * `apps/web/src/lib/auth-error-message.ts`.
+ *
+ * "content" deliberately does not explain *how* the bytes disagreed with the
+ * declared type. A caller probing what the sniffer accepts learns nothing from
+ * it, and a legitimate user is served by the same advice either way.
+ */
+const IMAGE_REJECTIONS: Record<ImageRejection, string> = {
+  type: "That image format isn't supported. Use a PNG, JPEG or WebP.",
+  size: "That image is too large.",
+  content: "That file doesn't look like an image.",
+};
+
+/**
+ * Narrows `context.storage` at the one boundary that needs a bucket.
+ *
+ * A deployment with no `S3_*` group is a supported configuration (see
+ * `context.ts`), so this is a runtime state to report rather than an invariant
+ * to assert. `NOT_IMPLEMENTED` rather than `INTERNAL_SERVER_ERROR` because
+ * nothing is broken — the feature simply isn't configured here, and saying so
+ * is more useful than a 500 that looks like a bug.
+ */
+function requireStorage(context: { storage: Storage | null }): Storage {
+  if (!context.storage) {
+    throw new ORPCError("NOT_IMPLEMENTED", {
+      message: "Image uploads aren't configured on this server.",
+    });
+  }
+  return context.storage;
+}
+
+/**
+ * Points one image slot at a new value and hands back what it held before.
+ *
+ * In a transaction with `SELECT ... FOR UPDATE`, which is not ceremony. The
+ * previous value cannot come from `RETURNING` — that reports the row *after*
+ * the update — so it has to be read first, and two bare statements would race:
+ * two uploads landing together could both read the same old key, both delete
+ * it, and leave the object the loser stored orphaned while the winner's row
+ * points at a key that was never removed. The row lock makes the read-then-write
+ * one step, which is exactly what "replace" means here.
+ */
+async function setImageColumn(
+  db: Database,
+  userId: string,
+  kind: ImageKind,
+  value: string | null,
+): Promise<string | null> {
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({ image: user.image, bannerImage: user.bannerImage })
+      .from(user)
+      .where(eq(user.id, userId))
+      .for("update")
+      .limit(1);
+
+    if (!current) return null;
+
+    await tx
+      .update(user)
+      .set(kind === "avatar" ? { image: value } : { bannerImage: value })
+      .where(eq(user.id, userId));
+
+    return kind === "avatar" ? current.image : current.bannerImage;
+  });
+}
+
+/**
+ * Deletes the object a stored path pointed at, when it was one of ours.
+ *
+ * An OAuth provider's absolute avatar URL is not ours to delete, and
+ * `objectKeyFromMediaPath` returns `null` for it. A failure here is swallowed
+ * on purpose: the user's profile is already correct, and turning a successful
+ * upload into an error because a stale object could not be reaped would be the
+ * wrong trade.
+ */
+async function discardPrevious(storage: Storage, previous: string | null): Promise<void> {
+  const key = objectKeyFromMediaPath(previous);
+  if (!key) return;
+
+  try {
+    await storage.remove(key);
+  } catch (error) {
+    console.error("Failed to delete replaced image object", key, error);
+  }
+}
+
 export const userRouter = {
   byUsername: publicProcedure
     .use(rateLimit(RATE_LIMITS.read))
@@ -128,6 +245,59 @@ export const userRouter = {
       }
 
       return found;
+    }),
+
+  /**
+   * Replaces the caller's avatar or banner.
+   *
+   * The bytes come through oRPC as a real `File` — its RPC protocol serialises
+   * one as multipart automatically, so this needs no base64 hop and no
+   * hand-rolled body parsing on the server.
+   *
+   * The row is written with Drizzle rather than through `auth.api.updateUser`,
+   * and that is deliberate: `packages/auth/src/profile.ts` refuses any
+   * hook-visible write of a `/media/` path precisely so that a client cannot
+   * set one directly. Drizzle bypasses Better Auth's hooks, which makes this
+   * procedure the single writer of that column — and the session, not the key,
+   * is what decides whose row is touched.
+   */
+  uploadImage: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.upload))
+    .input(z.object({ kind: z.enum(IMAGE_KINDS), file: z.file() }))
+    .handler(async ({ input, context }) => {
+      const storage = requireStorage(context);
+
+      const bytes = new Uint8Array(await input.file.arrayBuffer());
+      const verdict = acceptImage(bytes, input.file.type, input.kind);
+      if (!verdict.ok || !verdict.type) {
+        throw new ORPCError("BAD_REQUEST", { message: IMAGE_REJECTIONS[verdict.reason ?? "type"] });
+      }
+
+      const key = imageObjectKey(input.kind, context.user.id, verdict.type);
+      await storage.put(key, bytes, verdict.type);
+
+      const path = mediaPathFor(key);
+      const previous = await setImageColumn(context.db, context.user.id, input.kind, path);
+
+      // After the row points at the new object, never before: if this throws,
+      // the profile still renders correctly and all that leaks is one orphaned
+      // object. Deleting first would risk a blank avatar on a failed update.
+      await discardPrevious(storage, previous);
+
+      return { kind: input.kind, url: path };
+    }),
+
+  /** Clears one image slot and deletes the object behind it, if it was ours. */
+  removeImage: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.upload))
+    .input(z.object({ kind: z.enum(IMAGE_KINDS) }))
+    .handler(async ({ input, context }) => {
+      const storage = requireStorage(context);
+
+      const previous = await setImageColumn(context.db, context.user.id, input.kind, null);
+      await discardPrevious(storage, previous);
+
+      return { kind: input.kind, url: null };
     }),
 
   // `follow` and `unfollow` are separate, idempotent procedures rather than

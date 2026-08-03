@@ -56,6 +56,11 @@ export function PrivacyPolicyEn() {
             <td>Shown on your profile and posts</td>
           </tr>
           <tr>
+            <td>Date of birth</td>
+            <td>Provided at sign-up</td>
+            <td>Enforcing the 15+ age requirement (see Section 10)</td>
+          </tr>
+          <tr>
             <td>Password</td>
             <td>Provided at sign-up</td>
             <td>
@@ -101,8 +106,8 @@ export function PrivacyPolicyEn() {
       </p>
       <p>
         <strong>Public by default:</strong> as on most social apps, your posts, replies, likes,
-        and follows are visible to other users (and, for the global feed, potentially to
-        signed-out visitors). Don't post anything you don't want to be public.
+        and follows are visible to other users — the Service requires an account to be viewed.
+        Don't post anything you don't want to be public.
       </p>
 
       <h2>3. Purposes and legal bases (GDPR Article 6)</h2>
@@ -240,9 +245,11 @@ export function PrivacyPolicyEn() {
       <h2>10. Minors</h2>
       <p>
         The Service is for people aged 15 and older (the digital age of consent in France under
-        GDPR Art. 8 as locally implemented). We do not knowingly collect data from anyone under
-        15. If you believe an account belongs to someone under 15, report it to
-        contact@mytuums.com and it will be removed.
+        GDPR Art. 8 as locally implemented). Creating an account requires declaring a date of
+        birth, which the Service checks against this threshold; it does not independently verify
+        age or identity. We do not knowingly collect data from anyone under 15. If you believe an
+        account belongs to someone under 15, report it to contact@mytuums.com and it will be
+        removed.
       </p>
 
       <h2>11. Discontinuation of the Service</h2>

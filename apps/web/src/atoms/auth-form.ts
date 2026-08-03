@@ -1,7 +1,17 @@
 import { atom } from "jotai";
 import { atomWithReset, RESET } from "jotai/utils";
-import { authErrorAtom } from "@/atoms/auth";
-import { validateLogin, validateRegister } from "@/lib/auth-validation";
+import {
+  authErrorAtom,
+  forgotPasswordSentAtom,
+  resetPasswordDoneAtom,
+  resetPasswordInvalidAtom,
+} from "@/atoms/auth";
+import {
+  validateEmail,
+  validateLogin,
+  validateRegister,
+  validateResetPassword,
+} from "@/lib/auth-validation";
 
 export const loginIdentifierAtom = atomWithReset("");
 export const loginPasswordAtom = atomWithReset("");
@@ -11,6 +21,12 @@ export const registerNameAtom = atomWithReset("");
 export const registerEmailAtom = atomWithReset("");
 export const registerPasswordAtom = atomWithReset("");
 export const registerConfirmPasswordAtom = atomWithReset("");
+export const registerDateOfBirthAtom = atomWithReset("");
+
+export const forgotPasswordEmailAtom = atomWithReset("");
+
+export const resetPasswordNewAtom = atomWithReset("");
+export const resetPasswordConfirmAtom = atomWithReset("");
 
 /**
  * These atoms are module-scoped, not component-scoped, so their lifetime
@@ -46,7 +62,22 @@ export const resetRegisterFormAtom = atom(null, (_get, set) => {
   set(registerEmailAtom, RESET);
   set(registerPasswordAtom, RESET);
   set(registerConfirmPasswordAtom, RESET);
+  set(registerDateOfBirthAtom, RESET);
   set(authErrorAtom, null);
+});
+
+export const resetForgotPasswordFormAtom = atom(null, (_get, set) => {
+  set(forgotPasswordEmailAtom, RESET);
+  set(authErrorAtom, null);
+  set(forgotPasswordSentAtom, false);
+});
+
+export const resetResetPasswordFormAtom = atom(null, (_get, set) => {
+  set(resetPasswordNewAtom, RESET);
+  set(resetPasswordConfirmAtom, RESET);
+  set(authErrorAtom, null);
+  set(resetPasswordDoneAtom, false);
+  set(resetPasswordInvalidAtom, false);
 });
 
 /** First validation error for the current field values, or `null`. */
@@ -65,5 +96,19 @@ export const registerValidationAtom = atom((get) =>
     email: get(registerEmailAtom),
     password: get(registerPasswordAtom),
     confirmPassword: get(registerConfirmPasswordAtom),
+    dateOfBirth: get(registerDateOfBirthAtom),
+  }),
+);
+
+/** First validation error for the current field values, or `null`. */
+export const forgotPasswordValidationAtom = atom((get) =>
+  validateEmail(get(forgotPasswordEmailAtom)),
+);
+
+/** First validation error for the current field values, or `null`. */
+export const resetPasswordValidationAtom = atom((get) =>
+  validateResetPassword({
+    newPassword: get(resetPasswordNewAtom),
+    confirmPassword: get(resetPasswordConfirmAtom),
   }),
 );

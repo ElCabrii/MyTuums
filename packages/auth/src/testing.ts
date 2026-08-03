@@ -29,6 +29,22 @@ export const authTest = betterAuth({
   database: drizzleAdapter(db, { provider: "pg" }),
   emailAndPassword: { enabled: true },
 
+  // Same additionalFields as production (./index.ts), for the same reason
+  // `username()` is in the plugin list below: the user table has the columns
+  // and the adapter needs to know about them. No databaseHooks here on purpose
+  // — fixture creation must be able to mint rows the production rules would
+  // reject (an under-15 date of birth, an over-long bio) when that is exactly
+  // what a test needs to hold.
+  user: {
+    additionalFields: {
+      dateOfBirth: { type: "date", required: false },
+      bio: { type: "string", required: false },
+      bannerImage: { type: "string", required: false },
+      themePreference: { type: "string", required: false },
+      localePreference: { type: "string", required: false },
+    },
+  },
+
   /**
    * Deliberately a much smaller plugin list than production's.
    *

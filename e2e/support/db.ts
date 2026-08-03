@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, desc, eq, like, sql } from "drizzle-orm";
 import { assertTestDatabase, databaseNameOf, resolveTestDatabaseUrl } from "@my-tuums/db/testing";
 import { E2E } from "../playwright.config";
 
@@ -54,6 +54,8 @@ export interface CreateUserInput {
   name: string;
   email: string;
   password: string;
+  /** "YYYY-MM-DD" — the web form sends the ISO form, the server stores the date. */
+  dateOfBirth: string;
 }
 
 export interface CreatedUser {
@@ -77,7 +79,12 @@ export async function createUser(input: CreateUserInput): Promise<CreatedUser> {
       // actually trusts (WEB_ORIGIN in playwright.config.ts's `stackEnv`).
       Origin: E2E.webUrl,
     },
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      ...input,
+      // The ISO form the web form sends (dateOfBirthToIso in the web app) —
+      // same contract, so the server stores the same instant either way.
+      dateOfBirth: `${input.dateOfBirth}T00:00:00.000Z`,
+    }),
   });
 
   if (!response.ok) {
@@ -112,6 +119,21 @@ export async function clearUsername(userId: string): Promise<void> {
   await db.update(user).set({ username: null, displayUsername: null }).where(eq(user.id, userId));
 }
 
+/**
+ * Nulls out a user's date of birth, reproducing the state of an account that
+ * predates the 15+ rule (or a social sign-up that skipped it) — the state the
+ * /welcome gate holds at the page until a declaration is made. Same shape as
+ * `clearUsername`: the gate guards the *column being null*, not how it got
+ * that way.
+ */
+export async function clearDateOfBirth(userId: string): Promise<void> {
+  assertTestDatabase();
+  const db = await getDb();
+  const { user } = await schemaModulePromise;
+
+  await db.update(user).set({ dateOfBirth: null }).where(eq(user.id, userId));
+}
+
 export interface SeededPost {
   id: string;
   content: string;
@@ -140,6 +162,33 @@ export async function getUserId(username: string): Promise<string> {
 
   if (!found) throw new Error(`getUserId: no user with username "${username}".`);
   return found.id;
+}
+
+/**
+ * Reads the newest password-reset token minted for a user — the identifier's
+ * `reset-password:` suffix, the same shape the endpoint writes (value = user
+ * id). The prefix filter is not optional: sign-up's verification email writes
+ * `verification` rows too.
+ *
+ * The E2E stack runs as `development` with no `RESEND_API_KEY`, so the
+ * `[auth:email]` console line in the server's stdout carries the same reset
+ * URL — but server output is not programmatically readable from a spec, and
+ * the DB is.
+ */
+export async function passwordResetTokenFor(userId: string): Promise<string> {
+  assertTestDatabase();
+  const db = await getDb();
+  const { verification } = await schemaModulePromise;
+
+  const [row] = await db
+    .select({ identifier: verification.identifier })
+    .from(verification)
+    .where(and(like(verification.identifier, "reset-password:%"), eq(verification.value, userId)))
+    .orderBy(desc(verification.createdAt))
+    .limit(1);
+
+  if (!row) throw new Error(`passwordResetTokenFor: no reset token for user "${userId}".`);
+  return row.identifier.replace("reset-password:", "");
 }
 
 /**
@@ -227,4 +276,42 @@ export async function truncateAll(): Promise<void> {
       ${schema.user}
     cascade
   `);
+
+  await purgeUploadedImages();
+}
+
+/**
+ * Deletes every object the suite uploaded to the Storage Bucket.
+ *
+ * Unlike every other cleanup here, this reaches outside Postgres — objects live
+ * in a bucket and a `truncate` cannot touch them, so without this each E2E run
+ * leaves its avatars behind permanently and the bill grows one test run at a
+ * time.
+ *
+ * Deliberately best-effort: an unreachable bucket, or a run with no `S3_*`
+ * group configured at all, must not fail a suite whose subject was the
+ * database. The upload specs are skipped in that configuration anyway (the
+ * procedure reports NOT_IMPLEMENTED), so there is nothing to clean.
+ *
+ * **This is why the E2E bucket must not be the production one.** It deletes by
+ * prefix, unconditionally — pointed at production it would delete real users'
+ * avatars. See the warning in `.env.example`.
+ */
+async function purgeUploadedImages(): Promise<void> {
+  if (!process.env.S3_ENDPOINT || !process.env.S3_BUCKET) return;
+
+  try {
+    const { createStorage } = await import("@my-tuums/api/storage");
+    const storage = createStorage({
+      endpoint: process.env.S3_ENDPOINT,
+      bucket: process.env.S3_BUCKET,
+      accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "",
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "",
+      region: process.env.S3_REGION,
+    });
+
+    await Promise.all([storage.removeByPrefix("avatars/"), storage.removeByPrefix("banners/")]);
+  } catch (error) {
+    console.warn("Could not purge uploaded test images from the bucket:", error);
+  }
 }

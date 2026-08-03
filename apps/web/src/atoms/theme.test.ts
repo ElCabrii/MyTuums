@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
+import { sessionAtom } from "@/atoms/session";
 import { resolvedThemeAtom, themeAtom, themeClassEffect } from "@/atoms/theme";
 
 const STORAGE_KEY = "mytuums-ui-theme";
@@ -106,6 +107,62 @@ describe("onMount subscription", () => {
     expect(seen).toContain("dark");
 
     unsub();
+  });
+});
+
+/**
+ * The account's stored default sits between "this device chose" and "follow the
+ * OS". That order is the whole feature: the header toggle overrides on the
+ * device you are sitting at, and `/settings/account` sets what a device that has
+ * never been told anything falls back to.
+ */
+describe("account theme preference", () => {
+  function withPreference(themePreference: string | null) {
+    const store = createStore();
+    // `as never`: the store's value type is the full nanostore session shape
+    // (isRefetching, refetch, ...) and a fixture has no business rebuilding it —
+    // only the two fields `themeAtom` reads matter here.
+    store.set(sessionAtom, {
+      data: { user: { id: "u1", name: "Alex Mercer", themePreference } },
+      isPending: false,
+    } as never);
+    return store;
+  }
+
+  it("applies on a device that has never chosen", () => {
+    installMatchMedia(false);
+    expect(withPreference("dark").get(themeAtom)).toBe("dark");
+  });
+
+  it("loses to this device's own choice", () => {
+    installMatchMedia(false);
+    const store = withPreference("dark");
+    store.set(themeAtom, "light");
+    expect(store.get(themeAtom)).toBe("light");
+  });
+
+  it("loses to a stored 'system', which is a real choice and not an absence", () => {
+    // This is precisely why `storedThemeAtom` defaults to null rather than
+    // "system": with "system" as the default, "I picked system here" and "I
+    // have never touched this" would be the same value, and the account
+    // preference could never apply on any device.
+    installMatchMedia(false);
+    const store = withPreference("dark");
+    store.set(themeAtom, "system");
+    expect(store.get(themeAtom)).toBe("system");
+    expect(store.get(resolvedThemeAtom)).toBe("light");
+  });
+
+  it("is ignored when unrecognised — it arrives off the wire", () => {
+    installMatchMedia(false);
+    expect(withPreference("chartreuse").get(themeAtom)).toBe("system");
+  });
+
+  it("leaves a signed-out visitor on 'system'", () => {
+    installMatchMedia(false);
+    const store = createStore();
+    store.set(sessionAtom, { data: null, isPending: false } as never);
+    expect(store.get(themeAtom)).toBe("system");
   });
 });
 

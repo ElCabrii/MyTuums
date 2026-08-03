@@ -42,6 +42,12 @@ function deps(overrides: Partial<RequestHandlerDeps> = {}): RequestHandlerDeps {
     pingDb: vi.fn().mockResolvedValue(undefined),
     authNodeHandler: vi.fn().mockResolvedValue(undefined),
     handleRpc: vi.fn().mockResolvedValue({ matched: true }),
+    // Defaults to "no such object", which is also what an unconfigured bucket
+    // produces — the tests that care about a hit override it.
+    resolveMediaUrl: vi.fn().mockResolvedValue(null),
+    // Defaults to "this deployment serves no static files", which is exactly
+    // what `pnpm dev` does — Vite serves the app and proxies here.
+    serveStatic: vi.fn().mockResolvedValue({ served: false }),
     ...overrides,
   };
 }
@@ -117,6 +123,67 @@ describe("createRequestHandler", () => {
 
     expect(calls.statusCode).toBe(404);
     expect(calls.body).toBe("Not found");
+  });
+
+  it("redirects a /media hit to the presigned URL, cached privately and briefly", async () => {
+    const { res, calls } = resStub();
+    const resolveMediaUrl = vi.fn().mockResolvedValue("https://bucket.example/signed?sig=abc");
+    const handle = createRequestHandler(deps({ resolveMediaUrl }));
+
+    await handle(reqStub("/media/avatars/user-1/abc.webp"), res);
+
+    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/user-1/abc.webp");
+    expect(calls.statusCode).toBe(302);
+    expect(calls.headers).toMatchObject({
+      Location: "https://bucket.example/signed?sig=abc",
+      // Private, because the presigned URL it points at is a bearer credential:
+      // a shared cache handing this to another viewer would hand out access.
+      "Cache-Control": "private, max-age=300",
+    });
+  });
+
+  it("strips the query string before resolving a media key", async () => {
+    const { res } = resStub();
+    const resolveMediaUrl = vi.fn().mockResolvedValue("https://bucket.example/signed");
+    const handle = createRequestHandler(deps({ resolveMediaUrl }));
+
+    await handle(reqStub("/media/avatars/user-1/abc.webp?v=2"), res);
+
+    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/user-1/abc.webp");
+  });
+
+  it("decodes percent-escapes so an encoded separator cannot slip past the key check", async () => {
+    const { res } = resStub();
+    const resolveMediaUrl = vi.fn().mockResolvedValue(null);
+    const handle = createRequestHandler(deps({ resolveMediaUrl }));
+
+    await handle(reqStub("/media/avatars%2F..%2Fsecret.webp"), res);
+
+    // The resolver must see the decoded form — that is what `isSafeObjectKey`
+    // is written against. Checking the encoded string would let `%2F` through.
+    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/../secret.webp");
+  });
+
+  it("responds 404 when the resolver rejects the key or no bucket is configured", async () => {
+    const { res, calls } = resStub();
+    const handle = createRequestHandler(deps());
+
+    await handle(reqStub("/media/avatars/../../etc/passwd"), res);
+
+    expect(calls.statusCode).toBe(404);
+    expect(calls.body).toBe("Not found");
+  });
+
+  it("refuses a write verb on /media rather than letting it reach object storage", async () => {
+    const { res, calls } = resStub();
+    const resolveMediaUrl = vi.fn().mockResolvedValue("https://bucket.example/signed");
+    const handle = createRequestHandler(deps({ resolveMediaUrl }));
+
+    await handle(reqStub("/media/avatars/user-1/abc.webp", "DELETE"), res);
+
+    expect(calls.statusCode).toBe(405);
+    expect(calls.headers).toMatchObject({ Allow: "GET, HEAD" });
+    expect(resolveMediaUrl).not.toHaveBeenCalled();
   });
 
   it("responds 404 with text/plain for any other path", async () => {

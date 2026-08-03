@@ -34,17 +34,19 @@ export function TermsOfServiceFr() {
       <p>
         Vous devez avoir au moins <strong>15 ans</strong> pour créer un compte, cet âge
         correspondant à l'âge du consentement numérique en France (article 8 du RGPD tel que
-        transposé). En créant un compte, vous déclarez avoir au moins 15 ans. Le Service ne
-        procède à aucune vérification d'âge technique ; cette déclaration engage votre
-        responsabilité.
+        transposé). La création d'un compte requiert de fournir votre date de naissance. Le
+        Service vérifie qu'elle est cohérente avec l'âge de 15 ans, mais n'identifie pas
+        l'utilisateur et ne procède à aucune vérification d'âge indépendante ; l'exactitude de
+        la date fournie relève de votre responsabilité.
       </p>
 
       <h2>3. Compte</h2>
       <p>
         Vous êtes responsable de la confidentialité de votre mot de passe et de toute activité
         effectuée depuis votre compte. Prévenez-nous sans délai à contact@mytuums.com en cas
-        d'usage non autorisé de votre compte. Les informations fournies à l'inscription (e-mail,
-        nom d'utilisateur, nom affiché) doivent être exactes et à jour.
+        d'usage non autorisé de votre compte. Les informations fournies à l'inscription
+        (e-mail, nom d'utilisateur, nom affiché, date de naissance) doivent être exactes et à
+        jour.
       </p>
 
       <h2>4. Contenu publié par les utilisateurs</h2>
@@ -52,8 +54,8 @@ export function TermsOfServiceFr() {
         Vous restez propriétaire de tout contenu que vous publiez (publications, réponses). En
         le publiant, vous nous accordez une licence non exclusive, gratuite et mondiale pour
         héberger, stocker, afficher et distribuer ce contenu dans le cadre du fonctionnement du
-        Service — c'est-à-dire pour le rendre visible aux autres utilisateurs et, pour le fil
-        global, aux visiteurs non connectés. Cette licence prend fin lorsque vous supprimez le
+        Service — c'est-à-dire pour le rendre visible aux autres utilisateurs (le Service
+        requiert un compte pour être consulté). Cette licence prend fin lorsque vous supprimez le
         contenu ou votre compte, sous réserve des copies techniques résiduelles évoquées dans la{" "}
         <Link to="/privacy">Politique de confidentialité</Link>.
       </p>

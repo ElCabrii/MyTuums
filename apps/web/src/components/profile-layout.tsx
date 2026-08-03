@@ -5,9 +5,9 @@ import { authPendingAtom, signOutAtom } from "@/atoms/auth";
 import { viewerAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
 import { formatJoinDate } from "@/lib/format";
-import { handleOf, initialsOf } from "@/lib/user";
+import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/user-avatar";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
@@ -83,22 +83,31 @@ export function ProfileLayout() {
   const isOwnProfile = viewer?.id === profile.id;
   const handle = profile.displayUsername || handleOf(profile) || username;
   const displayName = profile.name || handle;
-  const initials = initialsOf(displayName);
 
   return (
     <div className="min-h-screen bg-background pb-12">
-      {/* Banner */}
-      <div className="w-full h-48 sm:h-64 relative bg-muted border-b border-border overflow-hidden" />
+      {/* The plain `bg-muted` plate is the fallback, not a placeholder: most
+          profiles have no banner, and it is what the avatar's negative margin
+          and the border below are laid out against either way. */}
+      <div className="w-full h-48 sm:h-64 relative bg-muted border-b border-border overflow-hidden">
+        {profile.bannerImage && (
+          <img
+            src={profile.bannerImage}
+            alt={m.profile_banner_alt({ name: displayName })}
+            className="h-full w-full object-cover"
+          />
+        )}
+      </div>
 
       <div className="max-w-[1500px] mx-auto px-4 sm:px-8">
         {/* Avatar & Action buttons */}
         <div className="relative flex justify-between items-end -mt-16 sm:-mt-20 mb-4">
-          <Avatar className="h-28 w-28 sm:h-36 sm:w-36 border-4 border-background shadow-xl ring-2 ring-primary/20 bg-background">
-            <AvatarImage src={profile.image || undefined} alt={displayName} />
-            <AvatarFallback className="text-2xl sm:text-3xl font-bold bg-primary text-primary-foreground">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
+          <UserAvatar
+            user={profile}
+            alt={displayName}
+            className="h-28 w-28 sm:h-36 sm:w-36 border-4 border-background shadow-xl ring-2 ring-primary/20 bg-background"
+            fallbackClassName="text-2xl sm:text-3xl font-bold bg-primary text-primary-foreground"
+          />
 
           {isOwnProfile ? (
             <div className="flex gap-2.5 mb-2">
@@ -142,6 +151,14 @@ export function ProfileLayout() {
             </div>
             <p className="text-muted-foreground text-sm font-medium">@{handle}</p>
           </div>
+
+          {/* `whitespace-pre-line` so a bio typed with line breaks keeps them.
+              The field is plain text and is rendered as such — no markdown, no
+              linkification — which is what keeps it free of any escaping
+              question. */}
+          {profile.bio && (
+            <p className="text-sm leading-relaxed whitespace-pre-line max-w-2xl">{profile.bio}</p>
+          )}
 
           <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
             <FollowListDialog

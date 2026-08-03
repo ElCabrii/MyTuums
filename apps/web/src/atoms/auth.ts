@@ -2,20 +2,37 @@ import { atom } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { authClient, type SocialProviderId } from "@/lib/auth-client";
 import { waitForSignedOut } from "@/lib/session-sync";
+import { dateOfBirthToIso } from "@/lib/auth-validation";
+import { sanitizeRedirect } from "@/lib/redirect";
 import { profileAtomFamily } from "@/atoms/profile";
 import { clearPostFeedFamily } from "@/atoms/post-feed";
 import { clearUserListFamily } from "@/atoms/user-list";
 import { clearLikeFamilies } from "@/atoms/like";
 import { clearFollowFamilies } from "@/atoms/follow";
 import { clearThreadFamily } from "@/atoms/thread";
+import { offerTwoFactorAtom } from "@/atoms/onboarding";
 import { clearReplyFamilies } from "@/atoms/reply-composer";
 import { m } from "@/paraglide/messages.js";
 
-/** Set by `signInAtom`/`signUpAtom`/`signOutAtom`; the form's `role="alert"` reads this. */
+/** Set by `signInAtom`/`signUpAtom`/`signOutAtom`/`requestPasswordResetAtom`/`resetPasswordAtom`; the form's `role="alert"` reads this. */
 export const authErrorAtom = atom<string | null>(null);
 
 /** True while a sign-in, sign-up, or sign-out request is in flight. */
 export const authPendingAtom = atom(false);
+
+/**
+ * True once a reset email has been sent; `/forgot-password` swaps to the
+ * "check your email" panel on it. A plain flag rather than a string so the
+ * route never shows anything but the generic message — see
+ * `requestPasswordResetAtom` below.
+ */
+export const forgotPasswordSentAtom = atom(false);
+
+/** True once a password reset succeeded; `/reset-password` shows the success panel on it. */
+export const resetPasswordDoneAtom = atom(false);
+
+/** True when the server rejected the reset token; `/reset-password` swaps to the invalid-link panel on it. */
+export const resetPasswordInvalidAtom = atom(false);
 
 /**
  * Both `signInAtom` and `signUpAtom` deliberately don't navigate on
@@ -146,10 +163,21 @@ export const signInWithProviderAtom = atom(
     set(authErrorAtom, null);
     set(authPendingAtom, true);
     try {
+      // The `?redirect=` param set by the signed-in gate, read here rather
+      // than imported: an atom that imported the router would cycle through
+      // main.tsx, and `window.location.search` is exactly what the provider
+      // round trip will see. It travels as the callback target so the person
+      // lands where they were headed — and as part of `errorCallbackURL` so a
+      // refused consent comes back to the form with the destination intact.
+      const redirect = sanitizeRedirect(
+        new URLSearchParams(window.location.search).get("redirect"),
+      );
       const res = await authClient.signIn.social({
         provider,
-        callbackURL: `${window.location.origin}/`,
-        errorCallbackURL: `${window.location.origin}/login`,
+        callbackURL: `${window.location.origin}${redirect ?? "/"}`,
+        errorCallbackURL: `${window.location.origin}/login${
+          redirect ? `?redirect=${encodeURIComponent(redirect)}` : ""
+        }`,
       });
       if (res.error) {
         set(authErrorAtom, res.error.message || m.common_something_went_wrong());
@@ -195,7 +223,14 @@ export const signInWithPasskeyAtom = atom(null, async (_get, set): Promise<boole
   }
 });
 
-type SignUpArgs = { username: string; name: string; email: string; password: string };
+type SignUpArgs = {
+  username: string;
+  name: string;
+  email: string;
+  password: string;
+  /** "YYYY-MM-DD" from the form; converted to the UTC-midnight wire format here. */
+  dateOfBirth: string;
+};
 
 /** Trims username/name/email the same way `lib/auth-validation.ts` checks them; the password is sent as typed. */
 export const signUpAtom = atom(
@@ -209,12 +244,24 @@ export const signUpAtom = atom(
         password: fields.password,
         name: fields.name.trim(),
         username: fields.username.trim(),
+        // The server accepts this field (see user.additionalFields in
+        // packages/auth/src/index.ts); better-auth 1.6.25's client types just
+        // don't surface it on the sign-up body, so the spread carries it past
+        // the type boundary — see lib/auth-client.ts's sessionStore cast.
+        ...({ dateOfBirth: dateOfBirthToIso(fields.dateOfBirth) } as Record<string, string>),
       });
 
       if (res.error) {
         set(authErrorAtom, res.error.message || m.common_something_went_wrong());
         return false;
       }
+
+      // Raised here rather than in the route because this is the one path that
+      // produces an account with a password, which `twoFactor.enable` requires
+      // — a social sign-up never runs this atom and so never sees the offer.
+      // `useRedirectWhenSignedIn` reads the flag and routes accordingly; this
+      // still does not navigate. See atoms/onboarding.ts.
+      set(offerTwoFactorAtom, true);
       return true;
     } catch (err) {
       console.error("Registration error:", err);
@@ -272,8 +319,100 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
     // challenge's methods would otherwise still be on screen for whoever signs
     // in next on this browser.
     set(twoFactorMethodsAtom, []);
+    // A sign-up offer that was never answered belongs to that sign-up, not to
+    // whoever signs in next on this browser.
+    set(offerTwoFactorAtom, false);
     set(authErrorAtom, null);
   } finally {
     set(authPendingAtom, false);
   }
 });
+
+/**
+ * Requests a password-reset email for an address.
+ *
+ * Returns `true` only for transport-level success. The server answers
+ * `{status: true}` for unknown emails too — deliberately, so an attacker
+ * cannot tell which addresses have accounts — so the route shows the generic
+ * "check your email" panel regardless of this boolean; the two differ only
+ * when the request itself failed (rate limited, network).
+ *
+ * `redirectTo` must be absolute: BetterAuth validates the token on its own
+ * origin and then resolves the callback against its own baseURL, so a relative
+ * "/reset-password" would bounce the browser to the API server — which serves
+ * no HTML. Same reasoning as `signInWithProviderAtom` above; the web origin
+ * also matches `trustedOrigins`, so this cannot become an open redirect.
+ */
+export const requestPasswordResetAtom = atom(
+  null,
+  async (_get, set, email: string): Promise<boolean> => {
+    set(authErrorAtom, null);
+    set(authPendingAtom, true);
+    try {
+      const res = await authClient.requestPasswordReset({
+        email: email.trim(),
+        redirectTo: new URL("/reset-password", window.location.origin).href,
+      });
+      if (res.error) {
+        set(authErrorAtom, res.error.message || m.common_something_went_wrong());
+        return false;
+      }
+      set(forgotPasswordSentAtom, true);
+      return true;
+    } catch (err) {
+      console.error("Password reset request error:", err);
+      set(authErrorAtom, m.common_something_went_wrong());
+      return false;
+    } finally {
+      set(authPendingAtom, false);
+    }
+  },
+);
+
+export type ResetPasswordOutcome =
+  | { status: "success" }
+  | { status: "invalid-token" }
+  | { status: "failed" };
+
+/**
+ * Resets the password with a single-use token.
+ *
+ * `"invalid-token"` is detected by error *code*, never by message: the i18n
+ * plugin may have translated the message into French by the time it arrives
+ * here. The route renders the invalid-link panel on that outcome — no banner,
+ * because the panel already explains the link failed. Any other failure
+ * surfaces in the form's `role="alert"` like a sign-in error.
+ */
+export const resetPasswordAtom = atom(
+  null,
+  async (
+    _get,
+    set,
+    args: { token: string; newPassword: string },
+  ): Promise<ResetPasswordOutcome> => {
+    set(authErrorAtom, null);
+    set(authPendingAtom, true);
+    try {
+      const res = await authClient.resetPassword({
+        token: args.token,
+        newPassword: args.newPassword,
+      });
+      if (res.error) {
+        if (errorCodeOf(res.error) === "INVALID_TOKEN") {
+          set(resetPasswordInvalidAtom, true);
+          return { status: "invalid-token" };
+        }
+        set(authErrorAtom, res.error.message || m.common_something_went_wrong());
+        return { status: "failed" };
+      }
+      set(resetPasswordDoneAtom, true);
+      return { status: "success" };
+    } catch (err) {
+      console.error("Password reset error:", err);
+      set(authErrorAtom, m.common_something_went_wrong());
+      return { status: "failed" };
+    } finally {
+      set(authPendingAtom, false);
+    }
+  },
+);

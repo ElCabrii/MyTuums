@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  dateOfBirthInputValue,
+  dateOfBirthToIso,
+  validateDateOfBirth,
+  validateEmail,
   validateLogin,
   validateRegister,
+  validateResetPassword,
   validateTwoFactorCode,
   validateUsername,
   type RegisterFields,
@@ -14,7 +19,27 @@ const validFields: RegisterFields = {
   email: "alice@example.com",
   password: "password1",
   confirmPassword: "password1",
+  dateOfBirth: "1995-01-01",
 };
+
+/** "YYYY-MM-DD" in UTC for the given date. */
+function iso(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * A date `years` ago (in UTC), nudged by `offsetDays` — used for the 15-year
+ * boundary, which the rule computes against its own UTC "today".
+ */
+function yearsAgo(years: number, offsetDays = 0): string {
+  const d = new Date();
+  d.setUTCFullYear(d.getUTCFullYear() - years);
+  d.setUTCDate(d.getUTCDate() + offsetDays);
+  return iso(d);
+}
 
 describe("validateRegister", () => {
   it("returns null when every rule passes", () => {
@@ -82,6 +107,26 @@ describe("validateRegister", () => {
     );
   });
 
+  it("rejects a missing date of birth", () => {
+    expect(validateRegister({ ...validFields, dateOfBirth: "" })).toBe(
+      "Date of Birth is required.",
+    );
+  });
+
+  it("rejects an under-15 date of birth", () => {
+    expect(validateRegister({ ...validFields, dateOfBirth: yearsAgo(15, 1) })).toBe(
+      "You must be at least 15 years old to create an account.",
+    );
+  });
+
+  it("accepts a date of birth of exactly 15 years ago", () => {
+    expect(validateRegister({ ...validFields, dateOfBirth: yearsAgo(15) })).toBeNull();
+  });
+
+  it("accepts a date of birth older than 15", () => {
+    expect(validateRegister({ ...validFields, dateOfBirth: yearsAgo(15, -1) })).toBeNull();
+  });
+
   // Rule order is the point: a submission violating several rules at once must
   // surface the FIRST one a person would see fixed in the real form, not just
   // any true violation.
@@ -94,6 +139,7 @@ describe("validateRegister", () => {
           email: "bad",
           password: "1",
           confirmPassword: "2",
+          dateOfBirth: "",
         }),
       ).toBe("Username is required.");
     });
@@ -106,6 +152,7 @@ describe("validateRegister", () => {
           email: "bad",
           password: "1",
           confirmPassword: "2",
+          dateOfBirth: "",
         }),
       ).toBe("Username must be between 3 and 20 characters long.");
     });
@@ -118,6 +165,7 @@ describe("validateRegister", () => {
           email: "bad",
           password: "1",
           confirmPassword: "2",
+          dateOfBirth: "",
         }),
       ).toBe("Username can only contain letters, numbers, underscores, and hyphens.");
     });
@@ -130,6 +178,7 @@ describe("validateRegister", () => {
           email: "bad",
           password: "1",
           confirmPassword: "2",
+          dateOfBirth: "",
         }),
       ).toBe("Display Name is required.");
     });
@@ -142,6 +191,7 @@ describe("validateRegister", () => {
           email: "bad",
           password: "1",
           confirmPassword: "2",
+          dateOfBirth: "",
         }),
       ).toBe("Please enter a valid email address.");
     });
@@ -154,8 +204,22 @@ describe("validateRegister", () => {
           email: "alice@example.com",
           password: "short",
           confirmPassword: "different",
+          dateOfBirth: "",
         }),
       ).toBe("Password must be at least 8 characters long.");
+    });
+
+    it("password mismatch beats an under-15 date of birth once password length passes", () => {
+      expect(
+        validateRegister({
+          username: "alice",
+          name: "Alice",
+          email: "alice@example.com",
+          password: "password1",
+          confirmPassword: "password2",
+          dateOfBirth: yearsAgo(15, 1),
+        }),
+      ).toBe("Passwords do not match.");
     });
   });
 
@@ -207,6 +271,93 @@ describe("validateLogin", () => {
     expect(validateLogin({ identifier: "alice", password: "" })).toBe(
       "Please enter your password.",
     );
+  });
+});
+
+/**
+ * `validateEmail` was extracted from `validateRegister` so `/forgot-password`
+ * can enforce the same email rule a sign-up goes through — same drift-guard as
+ * `validateUsername` above.
+ */
+describe("validateEmail", () => {
+  it("accepts an address with an @", () => {
+    expect(validateEmail("alice@example.com")).toBeNull();
+  });
+
+  it("trims surrounding whitespace before checking", () => {
+    expect(validateEmail("  alice@example.com  ")).toBeNull();
+  });
+
+  it.each([[""], ["   "]])("rejects %j as invalid", (raw) => {
+    expect(validateEmail(raw)).toBe("Please enter a valid email address.");
+  });
+
+  it.each([["not-an-email"], ["no-at-sign.example"]])(
+    "rejects the malformed address %j",
+    (raw) => {
+      expect(validateEmail(raw)).toBe("Please enter a valid email address.");
+    },
+  );
+
+  // The rule is deliberately shallow — presence and an `@` — so "a@b@c"
+  // passes here exactly as it passes the server-side shape check's register
+  // path; the server's zod schema is the real validator.
+  it("does not guess at shape beyond the @ — a stricter client rule would reject addresses the server accepts", () => {
+    expect(validateEmail("a@b@c")).toBeNull();
+  });
+
+  it("agrees with validateRegister on every address — the two must not drift", () => {
+    const emails = ["", "  ", "not-an-email", "a@b@c", "alice@example.com", " alice@example.com "];
+
+    for (const email of emails) {
+      expect(validateRegister({ ...validFields, email })).toBe(validateEmail(email));
+    }
+  });
+});
+
+describe("validateResetPassword", () => {
+  it("returns null when the pair matches and is long enough", () => {
+    expect(
+      validateResetPassword({ newPassword: "password1", confirmPassword: "password1" }),
+    ).toBeNull();
+  });
+
+  it("rejects a password under 8 characters", () => {
+    expect(
+      validateResetPassword({ newPassword: "short12", confirmPassword: "short12" }),
+    ).toBe("Password must be at least 8 characters long.");
+  });
+
+  it("accepts a password of exactly 8 characters", () => {
+    expect(
+      validateResetPassword({ newPassword: "eightch1", confirmPassword: "eightch1" }),
+    ).toBeNull();
+  });
+
+  it("rejects mismatched passwords", () => {
+    expect(
+      validateResetPassword({ newPassword: "password1", confirmPassword: "password2" }),
+    ).toBe("Passwords do not match.");
+  });
+
+  it("length beats mismatch — the rule a person would fix first surfaces first", () => {
+    expect(
+      validateResetPassword({ newPassword: "short", confirmPassword: "different" }),
+    ).toBe("Password must be at least 8 characters long.");
+  });
+
+  it("does NOT trim the password — 8 spaces is accepted as a length-8 password", () => {
+    const eightSpaces = "        ";
+    expect(eightSpaces).toHaveLength(8);
+    expect(
+      validateResetPassword({ newPassword: eightSpaces, confirmPassword: eightSpaces }),
+    ).toBeNull();
+  });
+
+  it("does NOT trim the password for the mismatch check — a trailing space makes it a different password", () => {
+    expect(
+      validateResetPassword({ newPassword: "password1", confirmPassword: "password1 " }),
+    ).toBe("Passwords do not match.");
   });
 });
 
@@ -271,5 +422,74 @@ describe("validateTwoFactorCode", () => {
   it("does not guess at length — a client-side format rule would reject codes the server accepts", () => {
     expect(validateTwoFactorCode("1")).toBeNull();
     expect(validateTwoFactorCode("12345678901234567890")).toBeNull();
+  });
+});
+
+describe("validateDateOfBirth", () => {
+  it("accepts a date of birth older than 15", () => {
+    expect(validateDateOfBirth("1995-01-01")).toBeNull();
+  });
+
+  it("accepts a date of birth exactly 15 years ago", () => {
+    expect(validateDateOfBirth(yearsAgo(15))).toBeNull();
+  });
+
+  it("rejects a date of birth 15 years ago minus one day", () => {
+    expect(validateDateOfBirth(yearsAgo(15, 1))).toBe(
+      "You must be at least 15 years old to create an account.",
+    );
+  });
+
+  it("rejects a future date of birth", () => {
+    expect(validateDateOfBirth(yearsAgo(-1))).toBe(
+      "You must be at least 15 years old to create an account.",
+    );
+  });
+
+  it("trims surrounding whitespace before checking", () => {
+    expect(validateDateOfBirth("  1995-01-01  ")).toBeNull();
+  });
+
+  it.each([[""], ["   "]])("rejects %j as required", (raw) => {
+    expect(validateDateOfBirth(raw)).toBe("Date of Birth is required.");
+  });
+
+  it.each([
+    ["not-a-date"],
+    ["1995/01/01"],
+    ["01-01-1995"],
+    ["1995-1-1"],
+    ["19950101"],
+  ])("rejects the malformed date %j", (raw) => {
+    expect(validateDateOfBirth(raw)).toBe("Please enter a valid date of birth.");
+  });
+
+  it.each([["1995-02-30"], ["2025-13-01"], ["2025-00-10"]])(
+    "rejects the calendar-impossible date %j (Date would roll it over silently)",
+    (raw) => {
+      expect(validateDateOfBirth(raw)).toBe("Please enter a valid date of birth.");
+    },
+  );
+
+  it("accepts a leap-day date of birth", () => {
+    expect(validateDateOfBirth("1996-02-29")).toBeNull();
+  });
+});
+
+describe("date-of-birth wire formats", () => {
+  it("pins a date to UTC midnight for the wire", () => {
+    expect(dateOfBirthToIso("1995-01-01")).toBe("1995-01-01T00:00:00.000Z");
+  });
+
+  it("reads a Date back as YYYY-MM-DD through UTC parts", () => {
+    expect(dateOfBirthInputValue(new Date("1995-01-01T00:00:00.000Z"))).toBe("1995-01-01");
+  });
+
+  it("reads an ISO string back as YYYY-MM-DD", () => {
+    expect(dateOfBirthInputValue("1995-01-01T00:00:00.000Z")).toBe("1995-01-01");
+  });
+
+  it.each([[null], [undefined], [""], ["garbage"]])("yields '' for %j", (value) => {
+    expect(dateOfBirthInputValue(value as never)).toBe("");
   });
 });

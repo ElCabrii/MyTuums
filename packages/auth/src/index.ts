@@ -11,6 +11,8 @@ import { passkey } from "@better-auth/passkey";
 import { i18n } from "@better-auth/i18n";
 import { db } from "@my-tuums/db";
 import { authRateLimitEnabled, passkeyRpId, webOrigin } from "./env.js";
+import { validateDateOfBirthHook } from "./dob.js";
+import { validateProfileFieldsHook } from "./profile.js";
 import {
   localeFromRequest,
   otpEmail,
@@ -20,6 +22,20 @@ import {
 } from "./email.js";
 import { fr } from "./i18n.js";
 import { socialProviders, trustedProviders } from "./social.js";
+
+/**
+ * Every rule that must hold before a user row is written, in one hook because
+ * Better Auth takes exactly one `before` per operation.
+ *
+ * Composed rather than merged into a single function so each rule stays
+ * separately readable and separately testable — `./dob.ts` and `./profile.ts`
+ * are both pure and neither knows about the other. Order does not matter: they
+ * validate disjoint fields, and the first violation throws.
+ */
+const validateUserWrite = async (user: Record<string, unknown>): Promise<void> => {
+  await validateDateOfBirthHook(user);
+  await validateProfileFieldsHook(user);
+};
 
 export const auth = betterAuth({
   // Also the default TOTP issuer — this is the label that shows up beside the
@@ -42,6 +58,12 @@ export const auth = betterAuth({
     // predates verification existing, which is all of them — it is a decision
     // to make once there is a verified population, not part of this change.
     requireEmailVerification: false,
+    // Reset is the one moment the old password is known-or-likely-compromised;
+    // leaving existing sessions alive would let whoever held the old password
+    // (or the email inbox) keep acting as the user. Revoking every session
+    // forces re-authentication everywhere, in the same class as the
+    // two-factor plugin's account lockout.
+    revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }, request) => {
       await sendEmail({
         to: user.email,
@@ -68,6 +90,49 @@ export const auth = betterAuth({
       enabled: true,
       // See ./social.ts — this list is the security control, not a convenience.
       trustedProviders,
+    },
+  },
+
+  user: {
+    // Every one of these is `required: false`, and that is load-bearing rather
+    // than a courtesy: Better Auth throws MISSING_FIELD at parse time for any
+    // required field absent from the body, and OAuth sign-ups arrive with none
+    // of them — required would break every social sign-up. The columns are
+    // nullable for the same reason.
+    additionalFields: {
+      // The 15+ age rule's data, enforced by the hooks below (see ./dob.ts).
+      // The web app holds accounts that never declared one at /welcome until
+      // they do.
+      dateOfBirth: { type: "date", required: false },
+
+      // The editable profile (see ./profile.ts for the rules). `bannerImage`
+      // is the banner's counterpart to Better Auth's own `image`, and both
+      // hold either a provider URL or a `/media/<key>` path written by the
+      // upload procedure.
+      bio: { type: "string", required: false },
+      bannerImage: { type: "string", required: false },
+
+      // Stored *defaults* for theme and language, not the live values. The
+      // header and footer switchers still write to localStorage and the
+      // PARAGLIDE_LOCALE cookie, which win on the device that set them; these
+      // are what a device with no choice of its own falls back to, so a
+      // preference follows someone to a new browser. See apps/web/src/atoms/
+      // theme.ts and locale.ts for the resolution order.
+      themePreference: { type: "string", required: false },
+      localePreference: { type: "string", required: false },
+    },
+  },
+
+  databaseHooks: {
+    user: {
+      // Both creation paths — email/password and OAuth — run these. Each rule
+      // returns early on an absent value, so a sign-up that supplies none of
+      // these fields passes through untouched.
+      create: { before: validateUserWrite },
+      // updateUser is how the /welcome claim and every settings edit arrive;
+      // same rules, and this is the only place they actually hold — the
+      // columns are bare `text` and the client's checks are skippable.
+      update: { before: validateUserWrite },
     },
   },
 
@@ -151,9 +216,12 @@ export const auth = betterAuth({
       "/two-factor/verify-backup-code": { window: 60, max: 5 },
       // Mail-sending endpoints, limited by what they cost rather than what they
       // reveal: without a ceiling either one turns this server into a way to
-      // deliver unsolicited mail to an address of the caller's choosing.
+      // deliver unsolicited mail to an address of the caller's choosing. The
+      // path is /request-password-reset in 1.6.25 core — "/forget-password"
+      // (the email-otp plugin's spelling) would be a dead key, which is why
+      // the endpoint was silently running on Better Auth's weaker default.
       "/two-factor/send-otp": { window: 60, max: 3 },
-      "/forget-password": { window: 300, max: 3 },
+      "/request-password-reset": { window: 300, max: 3 },
       "/send-verification-email": { window: 300, max: 3 },
     },
   },

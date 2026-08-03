@@ -43,6 +43,28 @@ const envSchema = z.object({
   // Escape hatch for the Playwright suite, which drives every sign-in from one
   // IP. See the comment on `authRateLimitEnabled` in packages/auth/src/env.ts.
   AUTH_RATE_LIMIT: z.enum(["true", "false"]).optional(),
+
+  // Object storage for avatars and banners — a Railway Storage Bucket in every
+  // environment, including dev and CI. All optional as a group: with none of
+  // them set the server boots and everything except the two upload procedures
+  // works, exactly like an unconfigured OAuth provider. `packages/api/src/
+  // context.ts` reads these again to build the client; as with the OAuth pairs
+  // above, this schema is not the source of the values, only the loud check
+  // that a partial group is caught at boot.
+  //
+  // Railway names these ENDPOINT/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY/REGION
+  // on the bucket itself; map them onto these with reference variables.
+  S3_ENDPOINT: z.string().optional(),
+  S3_BUCKET: z.string().optional(),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  S3_REGION: z.string().optional(),
+
+  // Absolute path to the built web app (apps/web/dist). When set, this server
+  // also serves the SPA, which is what makes the deployed app single-origin —
+  // `apps/web/src/lib/orpc.ts` resolves /rpc against window.location.origin,
+  // and uploaded images are stored as relative /media/ paths. Unset in dev.
+  WEB_DIST: z.string().optional(),
 })
   /**
    * A provider configured with only half its credentials is the failure worth
@@ -65,6 +87,33 @@ const envSchema = z.object({
           id ? `${provider}_CLIENT_ID` : `${provider}_CLIENT_SECRET`
         } is set — a provider missing either half is not registered at all`,
       });
+    }
+
+    /**
+     * The same rule, one step stricter because the group is four wide: a
+     * bucket configured with three of its four required variables is not
+     * "partially working", it is uploads failing at runtime with an S3 error
+     * nobody can trace back to a missing line in `.env`. S3_REGION is excluded
+     * on purpose — it genuinely has a default (`auto`).
+     */
+    const s3Required = [
+      "S3_ENDPOINT",
+      "S3_BUCKET",
+      "S3_ACCESS_KEY_ID",
+      "S3_SECRET_ACCESS_KEY",
+    ] as const;
+    const s3Present = s3Required.filter((key) => Boolean(env[key]));
+
+    if (s3Present.length > 0 && s3Present.length < s3Required.length) {
+      for (const key of s3Required.filter((k) => !env[k])) {
+        ctx.addIssue({
+          code: "custom",
+          path: [key],
+          message: `is required because ${s3Present.join(", ")} ${
+            s3Present.length === 1 ? "is" : "are"
+          } set — image uploads need the whole S3_* group or none of it`,
+        });
+      }
     }
   });
 

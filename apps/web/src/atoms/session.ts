@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { sessionStore } from "@/lib/auth-client";
-import { handleOf, initialsOf } from "@/lib/user";
+import { handleOf } from "@/lib/user";
 
 /**
  * The bridge from BetterAuth's nanostore into the atom graph. Seeded from
@@ -35,8 +35,6 @@ export const viewerIdAtom = atom((get) => get(viewerAtom)?.id);
 
 export const viewerHandleAtom = atom((get) => handleOf(get(viewerAtom)));
 
-export const viewerInitialsAtom = atom((get) => initialsOf(get(viewerAtom)?.name));
-
 export const sessionPendingAtom = atom((get) => get(sessionAtom).isPending);
 
 /**
@@ -56,3 +54,25 @@ export const sessionPendingAtom = atom((get) => get(sessionAtom).isPending);
  * disagreeing about what "incomplete" means.
  */
 export const needsHandleAtom = atom((get) => get(isSignedInAtom) && !get(viewerHandleAtom));
+
+/**
+ * A signed-in account that has never declared a date of birth — a social
+ * sign-up that skipped it, or an account that predates the 15+ rule.
+ *
+ * The rule itself lives in `packages/auth/src/dob.ts` (server) and
+ * `lib/auth-validation.ts` (client); this atom exists because the *absence*
+ * of a declaration is a completeness state, exactly like a missing handle:
+ * the app holds such sessions at `/welcome` until they declare one. Sharing
+ * the definition through one derived atom is what keeps the gate, the header
+ * and the redirect from disagreeing about what "complete" means.
+ */
+export const viewerDateOfBirthAtom = atom((get) => get(viewerAtom)?.dateOfBirth ?? null);
+
+export const needsDobAtom = atom((get) => get(isSignedInAtom) && !get(viewerDateOfBirthAtom));
+
+/**
+ * The whole definition of an incomplete sign-up, so the gate and the `/welcome`
+ * page check the same thing. `use-require-handle.ts` gates on this rather than
+ * `needsHandleAtom` directly.
+ */
+export const needsCompletionAtom = atom((get) => get(needsHandleAtom) || get(needsDobAtom));

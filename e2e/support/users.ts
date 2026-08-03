@@ -13,6 +13,12 @@ export interface FixtureUser {
   name: string;
   email: string;
   password: string;
+  /**
+   * "YYYY-MM-DD". Every seeded account must carry one — the site now holds
+   * sessions without a date of birth at /welcome, and alice/bob's storage
+   * states are supposed to be complete.
+   */
+  dateOfBirth: string;
 }
 
 export const ALICE: FixtureUser = {
@@ -20,6 +26,7 @@ export const ALICE: FixtureUser = {
   name: "Alice Anderson",
   email: "alice@example.test",
   password: "correct-horse-battery-1",
+  dateOfBirth: "1995-01-01",
 };
 
 export const BOB: FixtureUser = {
@@ -27,10 +34,24 @@ export const BOB: FixtureUser = {
   name: "Bob Baker",
   email: "bob@example.test",
   password: "correct-horse-battery-2",
+  dateOfBirth: "1995-06-15",
 };
 
 /** Every account `auth.setup.ts` provisions storage state for. */
 export const FIXTURE_USERS: readonly FixtureUser[] = [ALICE, BOB];
+
+/**
+ * A "YYYY-MM-DD" that falls under the 15-year threshold — 15 years ago plus
+ * a day, relative so the assertion can't quietly stop being true as the
+ * calendar moves. Used to prove the age rule holds at the register form and
+ * at the /welcome claim.
+ */
+export function dateOfBirthUnder15(): string {
+  const d = new Date();
+  d.setUTCFullYear(d.getUTCFullYear() - 15);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
 
 let uniqueUserCounter = 0;
 
@@ -57,5 +78,6 @@ export function uniqueUser(prefix: string): FixtureUser {
     name: `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} Fixture`,
     email: `${username}@example.test`,
     password: "throwaway-password-1",
+    dateOfBirth: "1990-03-20",
   };
 }

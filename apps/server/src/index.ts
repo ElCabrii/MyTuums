@@ -1,11 +1,12 @@
 import { parseEnv } from "./env.js";
 import { resolveClientIp } from "./client-ip.js";
 import { createRequestHandler } from "./request-handler.js";
+import { createStaticFileHandler, noStaticFiles } from "./static-files.js";
 import { createServer } from "node:http";
 import { RPCHandler } from "@orpc/server/node";
 import { CORSPlugin } from "@orpc/server/plugins";
 import { onError } from "@orpc/server";
-import { appRouter, createContext } from "@my-tuums/api";
+import { appRouter, createContext, createMediaResolver, defaultStorage } from "@my-tuums/api";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "@my-tuums/auth";
 import { closeDb, pingDb } from "@my-tuums/db";
@@ -43,9 +44,10 @@ const handler = new RPCHandler(appRouter, {
 });
 
 // The routing decision tree itself lives in request-handler.ts, unit-tested
-// there against stand-ins for these three dependencies. This is the only
+// there against stand-ins for these four dependencies. This is the only
 // place they become real: a live DB ping, BetterAuth's actual node handler,
-// and a real oRPC context resolved per request.
+// a real oRPC context resolved per request, and a real presigner over the
+// configured bucket (or one that always 404s, when no bucket is configured).
 const handleRequest = createRequestHandler({
   pingDb,
   authNodeHandler,
@@ -57,6 +59,12 @@ const handleRequest = createRequestHandler({
 
     return handler.handle(req, res, { prefix: "/rpc", context });
   },
+  resolveMediaUrl: createMediaResolver(defaultStorage),
+  // Only when this deployment bundles the built web app. Unset in dev, where
+  // Vite serves it and proxies /rpc, /api/auth and /media back here — see
+  // ./static-files.ts for why one origin is a requirement rather than a
+  // preference.
+  serveStatic: env.WEB_DIST ? createStaticFileHandler(env.WEB_DIST) : noStaticFiles,
 });
 
 // `createServer`'s callback type is `(req, res) => void`; passing an async

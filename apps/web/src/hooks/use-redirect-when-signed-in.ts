@@ -1,7 +1,13 @@
 import { useEffect } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { isSignedInAtom, viewerHandleAtom } from "@/atoms/session";
+import {
+  isSignedInAtom,
+  needsDobAtom,
+  viewerHandleAtom,
+} from "@/atoms/session";
+import { offerTwoFactorAtom } from "@/atoms/onboarding";
+import { sanitizeRedirect } from "@/lib/redirect";
 
 /**
  * Shared by /login and /register: someone who already has a session has no
@@ -30,14 +36,46 @@ import { isSignedInAtom, viewerHandleAtom } from "@/atoms/session";
  *
  * A hook, not an atom: it needs the router's `navigate`, and an atom that
  * imported the router would cycle through `main.tsx`.
+ *
+ * `redirectFromSearch` is the `?redirect=` param the signed-in gate set
+ * (`use-require-signed-in.ts`): when present and sanitized, a *complete*
+ * session is sent there instead of the profile. The completeness guard
+ * (`handle && !needsDob`) exists because dumping a half-finished session on
+ * a page it will instantly bounce out of is a visible flash — and the
+ * `/welcome` page does not set the param, so a session completing there
+ * still lands on its profile.
  */
-export function useRedirectWhenSignedIn(): void {
+export function useRedirectWhenSignedIn(redirectFromSearch?: string | null): void {
   const navigate = useNavigate();
   const isSignedIn = useAtomValue(isSignedInAtom);
   const handle = useAtomValue(viewerHandleAtom);
+  const needsDob = useAtomValue(needsDobAtom);
+  const offerTwoFactor = useAtomValue(offerTwoFactorAtom);
 
   useEffect(() => {
     if (!isSignedIn) return;
+
+    // A sign-up that has just completed goes to `/welcome` for the two-factor
+    // offer instead of straight to its profile. Ahead of the `?redirect=`
+    // branch on purpose: the offer is shown once, and losing it to a
+    // `?redirect=` someone happened to arrive with would mean an account
+    // silently never gets asked. `/welcome` renders the offer only when the
+    // session is otherwise complete, so an OAuth sign-up still sees the handle
+    // form first — and this flag is never set for one anyway.
+    //
+    // Not a redirect loop: `/welcome`'s Skip and its successful enrolment both
+    // clear the flag, at which point this effect re-runs and falls through to
+    // the rules below.
+    if (offerTwoFactor) {
+      void navigate({ to: "/welcome", replace: true });
+      return;
+    }
+
+    const redirect = sanitizeRedirect(redirectFromSearch);
+    if (redirect && handle && !needsDob) {
+      void navigate({ href: redirect, replace: true });
+      return;
+    }
 
     if (handle) {
       void navigate({ to: "/@{$username}", params: { username: handle }, replace: true });
@@ -49,5 +87,5 @@ export function useRedirectWhenSignedIn(): void {
       // feed they cannot yet participate in.
       void navigate({ to: "/welcome", replace: true });
     }
-  }, [isSignedIn, handle, navigate]);
+  }, [isSignedIn, handle, needsDob, offerTwoFactor, navigate, redirectFromSearch]);
 }

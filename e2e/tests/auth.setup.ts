@@ -36,6 +36,9 @@ async function ensureFixtureSession(request: APIRequestContext, user: FixtureUse
       password: user.password,
       name: user.name,
       username: user.username,
+      // The ISO form the web form sends — without it, alice/bob would park at
+      // /welcome on their first navigation and the whole suite would break.
+      dateOfBirth: `${user.dateOfBirth}T00:00:00.000Z`,
     },
   });
 

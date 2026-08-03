@@ -33,6 +33,10 @@ describe("user.byUsername", () => {
         "username",
         "displayUsername",
         "image",
+        // Profile content, added deliberately when profiles became editable —
+        // these are what a visitor is meant to see.
+        "bio",
+        "bannerImage",
         "createdAt",
         "followerCount",
         "followingCount",
@@ -41,6 +45,14 @@ describe("user.byUsername", () => {
     );
     expect(result).not.toHaveProperty("email");
     expect(result).not.toHaveProperty("emailVerified");
+    // Reconnaissance, not profile: which accounts a stolen password alone would
+    // open, and which provider to phish.
+    expect(result).not.toHaveProperty("twoFactorEnabled");
+    expect(result).not.toHaveProperty("lastLoginMethod");
+    // Settings, not profile. Nobody visiting a profile needs its owner's theme.
+    expect(result).not.toHaveProperty("themePreference");
+    expect(result).not.toHaveProperty("localePreference");
+    expect(result).not.toHaveProperty("dateOfBirth");
   });
 
   it("followers/following items carry the same public columns — no email there either, since they spread publicUserColumns", async () => {

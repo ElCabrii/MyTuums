@@ -1,20 +1,22 @@
 import { useEffect } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { needsHandleAtom } from "@/atoms/session";
+import { needsCompletionAtom } from "@/atoms/session";
 
-/** Where a handle-less session is allowed to be. */
+/** Where an incomplete session is allowed to be. */
 const ALLOWED_WITHOUT_HANDLE = new Set(["/welcome", "/privacy", "/terms", "/mentions-legales"]);
 
 /**
- * Holds a signed-in account with no handle at `/welcome` until it claims one.
+ * Holds a signed-in account at `/welcome` until it finishes the missing half
+ * of its sign-up — a handle and/or a date of birth.
  *
  * Mounted once in `__root.tsx`, so it covers every route rather than the
- * handful that happen to remember to check. See `needsHandleAtom`
- * (`atoms/session.ts`) for why a handle-less session is treated as an
+ * handful that happen to remember to check. See `needsCompletionAtom`
+ * (`atoms/session.ts`) for why an incomplete session is treated as an
  * incomplete sign-up rather than a state to render around: without a handle
  * there is no profile URL to link to, and much of the app's navigation is
- * built from one.
+ * built from one; without a date of birth the account cannot stand against
+ * the 15+ rule.
  *
  * The legal pages are exempt because a sign-up gate that will not let someone
  * read the terms they are being asked to accept is its own problem. `/welcome`
@@ -32,15 +34,15 @@ const ALLOWED_WITHOUT_HANDLE = new Set(["/welcome", "/privacy", "/terms", "/ment
  */
 export function useRequireHandle(): void {
   const navigate = useNavigate();
-  const needsHandle = useAtomValue(needsHandleAtom);
+  const needsCompletion = useAtomValue(needsCompletionAtom);
   const { pathname } = useLocation();
 
   useEffect(() => {
-    if (!needsHandle) return;
+    if (!needsCompletion) return;
     if (ALLOWED_WITHOUT_HANDLE.has(pathname)) return;
 
     // `replace` so the back button doesn't bounce between the gate and the
     // page that triggered it.
     void navigate({ to: "/welcome", replace: true });
-  }, [needsHandle, pathname, navigate]);
+  }, [needsCompletion, pathname, navigate]);
 }

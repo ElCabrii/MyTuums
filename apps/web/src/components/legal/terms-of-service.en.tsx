@@ -31,17 +31,18 @@ export function TermsOfServiceEn() {
       <h2>2. Eligibility</h2>
       <p>
         You must be at least <strong>15 years old</strong> to create an account — the digital age
-        of consent in France (GDPR Art. 8 as locally implemented). By creating an account, you
-        represent that you're at least 15. The Service does not technically verify age; this
-        representation is your responsibility.
+        of consent in France (GDPR Art. 8 as locally implemented). Creating an account requires
+        providing your date of birth. The Service checks it against the 15-year threshold but
+        does not verify your identity or independently confirm your age; the accuracy of the date
+        you provide is your responsibility.
       </p>
 
       <h2>3. Your account</h2>
       <p>
         You're responsible for keeping your password confidential and for all activity on your
         account. Tell us promptly at contact@mytuums.com if you suspect unauthorized use of your
-        account. Information you provide at sign-up (email, username, display name) must be
-        accurate and kept up to date.
+        account. Information you provide at sign-up (email, username, display name, date of
+        birth) must be accurate and kept up to date.
       </p>
 
       <h2>4. Content you post</h2>
@@ -49,7 +50,7 @@ export function TermsOfServiceEn() {
         You keep ownership of any content you post (posts, replies). By posting it, you grant us
         a non-exclusive, royalty-free, worldwide license to host, store, display, and distribute
         that content as needed to operate the Service — that is, to make it visible to other
-        users and, for the global feed, to signed-out visitors. This license ends when you delete
+        users (the Service requires an account to be viewed). This license ends when you delete
         the content or your account, subject to the residual technical copies described in the{" "}
         <Link to="/privacy">Privacy Policy</Link>.
       </p>

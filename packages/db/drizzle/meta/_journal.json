@@ -50,6 +50,20 @@
       "when": 1785676714181,
       "tag": "0006_numerous_madelyne_pryor",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785694782357,
+      "tag": "0007_tiny_newton_destine",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785704989639,
+      "tag": "0008_amazing_red_ghost",
+      "breakpoints": true
     }
   ]
 }
