@@ -104,6 +104,12 @@ jobs:
           TRUST_PROXY=${TRUST_PROXY}
           EOF
 
+      # Catches a schema edit that never had `db:generate` run against it.
+      # The integration tests would fail anyway — `db:test:setup` builds the
+      # test database from the migrations — but as a confusing "column does
+      # not exist" three files away rather than as the drift it is.
+      - run: pnpm --filter @my-tuums/db db:check
+
       - run: pnpm db:test:setup
       - run: pnpm test:integration
 
@@ -146,7 +152,27 @@ jobs:
           BETTER_AUTH_URL=${BETTER_AUTH_URL}
           WEB_ORIGIN=${WEB_ORIGIN}
           TRUST_PROXY=${TRUST_PROXY}
+          S3_ENDPOINT=${S3_ENDPOINT}
+          S3_BUCKET=${S3_BUCKET}
+          S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}
+          S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}
+          S3_REGION=${S3_REGION}
           EOF
+        env:
+          # A bucket of its own — NOT the dev one. `truncateAll()` in
+          # e2e/support/db.ts deletes objects by prefix, so sharing a bucket
+          # with a developer's local `pnpm test:e2e` would let the two runs
+          # delete each other's objects mid-test.
+          #
+          # Absent on a fork PR, where secrets are not exposed. The upload specs
+          # then skip themselves (`test.skip(!process.env.S3_BUCKET)`) and the
+          # rest of the suite runs unchanged, rather than the job failing on
+          # something a fork cannot supply.
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          S3_REGION: ${{ secrets.S3_REGION }}
 
       - run: pnpm db:test:setup
 
@@ -174,3 +200,57 @@ jobs:
           name: playwright-report
           path: e2e/playwright-report/
           retention-days: 7
+
+  # The Dockerfile is load-bearing and nothing above touches it: `pnpm build`
+  # builds the apps, but the image is where the web bundle, the migration SQL
+  # and the VITE_* build args actually come together. Two production breakages
+  # got past a fully green CI before this job existed — a missing `ARG` that
+  # shipped a bundle with no OAuth buttons, and a static-file rule that 404'd
+  # the whole site — because neither is reachable without building the image.
+  #
+  # Build only, no push: Railway builds its own image on deploy. This exists to
+  # fail the commit, not to produce an artifact.
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          push: false
+          # Dummy values: this proves the ARGs are declared and the build
+          # consumes them, without putting real client ids in CI. The bundle
+          # assertion below is what checks they actually land.
+          build-args: |
+            VITE_SOCIAL_PROVIDERS=google,discord,twitch
+            VITE_GOOGLE_CLIENT_ID=ci-placeholder.apps.googleusercontent.com
+          load: true
+          tags: mytuums-server:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The regression that motivated this job. Vite inlines VITE_* at build
+      # time, so a missing `ARG` in the Dockerfile yields an image that starts
+      # cleanly and silently renders no OAuth buttons. Grepping the built
+      # bundle is the only place that is observable.
+      - name: Assert build args reached the web bundle
+        run: |
+          docker create --name ci-check mytuums-server:ci
+          docker cp ci-check:/app/apps/web/dist ./image-web-dist
+          docker rm ci-check
+          grep -rq "google,discord,twitch" ./image-web-dist/assets             || { echo "::error::VITE_SOCIAL_PROVIDERS did not reach the bundle - is the ARG declared in the builder stage?"; exit 1; }
+          grep -rq "ci-placeholder.apps.googleusercontent.com" ./image-web-dist/assets             || { echo "::error::VITE_GOOGLE_CLIENT_ID did not reach the bundle - is the ARG declared in the builder stage?"; exit 1; }
+          echo "Both VITE_* build args are baked into the bundle."
+
+      # The migration runner ships in the image and runs as Railway's
+      # pre-deploy step. If its entry point or the SQL folder ever stops being
+      # copied, the deploy is where you would find out.
+      - name: Assert the migration runner and SQL shipped
+        run: |
+          docker run --rm --entrypoint sh mytuums-server:ci -c             'test -f apps/server/dist/migrate.js && test -f packages/db/drizzle/meta/_journal.json'             || { echo "::error::migrate.js or packages/db/drizzle missing from the image"; exit 1; }
+          echo "Migration runner and SQL are present in the image."

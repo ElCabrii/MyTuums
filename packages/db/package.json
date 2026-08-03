@@ -23,6 +23,7 @@
   },
   "scripts": {
     "db:generate": "dotenv -e ../../.env -- drizzle-kit generate",
+    "db:check": "dotenv -e ../../.env -- drizzle-kit check",
     "db:generate:auth": "dotenv -e ../../.env -- npx @better-auth/cli generate --config ../auth/src/index.ts --output ./src/schema/auth.ts -y && node ./scripts/patch-auth-schema.mjs",
     "db:migrate": "dotenv -e ../../.env -- drizzle-kit migrate",
     "db:push": "dotenv -e ../../.env -- drizzle-kit push",
