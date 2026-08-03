@@ -3,11 +3,20 @@ import { test, expect } from "@playwright/test";
 // This project's baseURL is the server (E2E.serverUrl) — see the `api`
 // project in playwright.config.ts.
 
+/**
+ * The wire contract carries the CSRF header the real client sends (see
+ * apps/web/src/lib/orpc.ts): the server's SimpleCsrfProtectionHandlerPlugin
+ * rejects any `/rpc` request without it, which is exactly the point. These
+ * raw calls model the client, so they send it too.
+ */
+const RPC_HEADERS = { "x-csrf-token": "orpc" };
+
 test.describe("oRPC contract", () => {
   test("an unauthenticated call to a protected procedure returns the UNAUTHORIZED envelope", async ({
     request,
   }) => {
     const response = await request.post("/rpc/post/create", {
+      headers: RPC_HEADERS,
       data: { json: { content: "should never be created" } },
     });
 
@@ -29,7 +38,7 @@ test.describe("oRPC contract", () => {
     // syntactically valid JSON *string value*, which parses fine and defeats
     // the point). A `Buffer` is sent as-is.
     const response = await request.post("/rpc/post/list", {
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...RPC_HEADERS },
       data: Buffer.from("not json at all {"),
     });
 
@@ -65,6 +74,7 @@ test.describe("oRPC contract", () => {
 
     for (let i = 0; i < 20; i += 1) {
       const response = await request.post("/rpc/post/create", {
+        headers: RPC_HEADERS,
         data: { json: { content: `rate limit probe ${String(i)}` } },
       });
 

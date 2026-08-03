@@ -15,7 +15,7 @@ import { assertTestDatabase } from "@my-tuums/db/testing";
 import { post } from "@my-tuums/db/schema";
 import type { Context } from "../context.js";
 import { createRateLimiter, type RateLimiter } from "../rate-limit.js";
-import type { Storage } from "../storage.js";
+import type { DestructiveStorage, Storage } from "../storage.js";
 
 /**
  * `context.ts` types `Context.session` as `Awaited<ReturnType<typeof
@@ -87,7 +87,7 @@ const forwardingRateLimiter: RateLimiter = {
  */
 export const testStorageObjects = new Map<string, { contentType: string; bytes: Uint8Array }>();
 
-export const testStorage: Storage = {
+export const testStorage: DestructiveStorage = {
   put(key, bytes, contentType) {
     testStorageObjects.set(key, { contentType, bytes });
     return Promise.resolve();

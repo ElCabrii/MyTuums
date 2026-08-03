@@ -43,8 +43,9 @@ export class ImageError extends Error {
 const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
 
 /**
- * Re-encodes `file` to a WebP no larger than the slot's bounds, preserving
- * aspect ratio and never scaling up.
+ * Re-encodes `file` to a WebP (or a PNG on a browser without WebP encode
+ * support) no larger than the slot's bounds, preserving aspect ratio and never
+ * scaling up.
  *
  * WebP because it is in `ALLOWED_IMAGE_TYPES`, is markedly smaller than PNG for
  * photographs, and is supported by every browser this app targets. `cover`-style
@@ -79,7 +80,17 @@ export async function downscaleImage(file: File, kind: ImageKind): Promise<File>
     const blob = await toBlob(canvas);
     if (blob.size > IMAGE_LIMITS[kind].maxBytes) throw new ImageError("size");
 
-    return new File([blob], `${kind}.webp`, { type: "image/webp" });
+    // `canvas.toBlob` falls back to `image/png` when WebP encode is
+    // unsupported — silently, with no error — so the type must be read off the
+    // result, never asserted. Labelling PNG bytes as WebP is exactly the
+    // declared-vs-actual mismatch the server's sniffer rejects, and the user
+    // would then see "that file doesn't look like an image" about a file the
+    // browser itself just produced. Both types are in the allowlist; anything
+    // else is not a File worth sending.
+    const type = blob.type;
+    if (type !== "image/webp" && type !== "image/png") throw new ImageError("decode");
+    const extension = type === "image/webp" ? "webp" : "png";
+    return new File([blob], `${kind}.${extension}`, { type });
   } finally {
     // Bitmaps hold decoded pixel data outside the JS heap; without this an
     // avatar preview loop would retain every image the user auditioned.

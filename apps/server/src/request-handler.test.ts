@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
 import { createRequestHandler, type RequestHandlerDeps } from "./request-handler.js";
 
 /**
@@ -33,9 +34,16 @@ function resStub() {
   return { res: res as unknown as ServerResponse, calls, isDestroyed: () => destroyed };
 }
 
-function reqStub(url: string, method = "GET"): IncomingMessage {
-  return { url, method } as unknown as IncomingMessage;
+function reqStub(
+  url: string,
+  method = "GET",
+  headers: Record<string, string> = {},
+): IncomingMessage {
+  return { url, method, headers } as unknown as IncomingMessage;
 }
+
+/** A representative media hit: a URL plus the signing-window cache budget. */
+const MEDIA_HIT = { url: "https://bucket.example/signed?sig=abc", cacheSeconds: 300 };
 
 function deps(overrides: Partial<RequestHandlerDeps> = {}): RequestHandlerDeps {
   return {
@@ -100,6 +108,41 @@ describe("createRequestHandler", () => {
     expect(handleRpc).not.toHaveBeenCalled();
   });
 
+  it("rejects an oversized RPC body with 413 before handleRpc ever runs", async () => {
+    // oRPC buffers a multipart body before auth, rate limiting or any payload
+    // check — so the ceiling must hold in the router, ahead of everything. The
+    // handler must not even be reached: the point of the check is that a body
+    // that would be buffered never starts being buffered.
+    const { res, calls } = resStub();
+    const handleRpc = vi.fn();
+    const handle = createRequestHandler(deps({ handleRpc }));
+
+    await handle(reqStub("/rpc/user.uploadImage", "POST", {
+      "content-length": String(RPC_MAX_BODY_BYTES + 1),
+    }), res);
+
+    expect(handleRpc).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(413);
+    expect(calls.body).toBe("Payload too large");
+  });
+
+  it("accepts an RPC body at exactly the ceiling", async () => {
+    const { res, calls } = resStub();
+    const handleRpc = vi.fn().mockImplementation((_req: unknown, r: ServerResponse) => {
+      r.writeHead(200, { "Content-Type": "application/json" });
+      r.end("{}");
+      return Promise.resolve({ matched: true });
+    });
+    const handle = createRequestHandler(deps({ handleRpc }));
+
+    await handle(reqStub("/rpc/user.uploadImage", "POST", {
+      "content-length": String(RPC_MAX_BODY_BYTES),
+    }), res);
+
+    expect(handleRpc).toHaveBeenCalledOnce();
+    expect(calls.statusCode).toBe(200);
+  });
+
   it("dispatches /rpc* to handleRpc and returns when matched", async () => {
     const { res, calls } = resStub();
     const handleRpc = vi.fn().mockImplementation((_req: unknown, r: ServerResponse) => {
@@ -125,9 +168,9 @@ describe("createRequestHandler", () => {
     expect(calls.body).toBe("Not found");
   });
 
-  it("redirects a /media hit to the presigned URL, cached privately and briefly", async () => {
+  it("redirects a /media hit to the presigned URL, cached privately for the window", async () => {
     const { res, calls } = resStub();
-    const resolveMediaUrl = vi.fn().mockResolvedValue("https://bucket.example/signed?sig=abc");
+    const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
     const handle = createRequestHandler(deps({ resolveMediaUrl }));
 
     await handle(reqStub("/media/avatars/user-1/abc.webp"), res);
@@ -135,16 +178,17 @@ describe("createRequestHandler", () => {
     expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/user-1/abc.webp");
     expect(calls.statusCode).toBe(302);
     expect(calls.headers).toMatchObject({
-      Location: "https://bucket.example/signed?sig=abc",
+      Location: MEDIA_HIT.url,
       // Private, because the presigned URL it points at is a bearer credential:
       // a shared cache handing this to another viewer would hand out access.
-      "Cache-Control": "private, max-age=300",
+      // The max-age is the resolver's signing-window budget, never beyond it.
+      "Cache-Control": `private, max-age=${MEDIA_HIT.cacheSeconds}`,
     });
   });
 
   it("strips the query string before resolving a media key", async () => {
     const { res } = resStub();
-    const resolveMediaUrl = vi.fn().mockResolvedValue("https://bucket.example/signed");
+    const resolveMediaUrl = vi.fn().mockResolvedValue({ ...MEDIA_HIT, url: "https://bucket.example/signed" });
     const handle = createRequestHandler(deps({ resolveMediaUrl }));
 
     await handle(reqStub("/media/avatars/user-1/abc.webp?v=2"), res);
@@ -176,7 +220,7 @@ describe("createRequestHandler", () => {
 
   it("refuses a write verb on /media rather than letting it reach object storage", async () => {
     const { res, calls } = resStub();
-    const resolveMediaUrl = vi.fn().mockResolvedValue("https://bucket.example/signed");
+    const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
     const handle = createRequestHandler(deps({ resolveMediaUrl }));
 
     await handle(reqStub("/media/avatars/user-1/abc.webp", "DELETE"), res);

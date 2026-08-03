@@ -301,8 +301,12 @@ async function purgeUploadedImages(): Promise<void> {
   if (!process.env.S3_ENDPOINT || !process.env.S3_BUCKET) return;
 
   try {
-    const { createStorage } = await import("@my-tuums/api/storage");
-    const storage = createStorage({
+    // The destructive factory, on purpose: `removeByPrefix` lives only on
+    // `DestructiveStorage`, and only this cleanup may reach it. `createStorage`
+    // returns plain `Storage` — no procedures, and no other caller, can even
+    // name the method.
+    const { createDestructiveStorage } = await import("@my-tuums/api/storage");
+    const storage = createDestructiveStorage({
       endpoint: process.env.S3_ENDPOINT,
       bucket: process.env.S3_BUCKET,
       accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "",
