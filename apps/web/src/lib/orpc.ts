@@ -1,4 +1,5 @@
 import { createORPCClient, ORPCError } from "@orpc/client";
+import { SimpleCsrfProtectionLinkPlugin } from "@orpc/client/plugins";
 import { RPCLink } from "@orpc/client/fetch";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import type { RouterClient } from "@orpc/server";
@@ -13,6 +14,12 @@ import type { AppRouter } from "@my-tuums/api";
 // import outside the browser (tests, tooling) where `location` is undefined.
 const link = new RPCLink({
   url: () => new URL("/rpc", window.location.origin).toString(),
+  // The mirror of the server's `SimpleCsrfProtectionHandlerPlugin` (see
+  // apps/server/src/index.ts): adds the `x-csrf-token` header the server
+  // requires, which a cross-origin `<form>` cannot send. The two defaults
+  // agree on the header name and value; if one side is configured, the
+  // other must be reconfigured to match.
+  plugins: [new SimpleCsrfProtectionLinkPlugin()],
 });
 
 export const client = createORPCClient<RouterClient<AppRouter>>(link);

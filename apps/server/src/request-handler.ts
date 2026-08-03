@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
 
 export interface RequestHandlerDeps {
   /** `SELECT 1` — throws if Postgres is unreachable. */
@@ -14,15 +15,17 @@ export interface RequestHandlerDeps {
    */
   handleRpc: (req: IncomingMessage, res: ServerResponse) => Promise<{ matched: boolean }>;
   /**
-   * Turns a `/media/<key>` object key into a URL to redirect the browser to,
-   * or `null` when it should 404.
+   * Turns a `/media/<key>` object key into a redirect target and the cache
+   * budget for that redirect, or `null` when it should 404.
    *
    * Injected rather than imported for the same reason the three above are:
    * this module's job is the routing decision, and a unit test of it should
    * not need object storage, credentials or a network. The real implementation
    * is `createMediaResolver` in `@my-tuums/api`.
    */
-  resolveMediaUrl: (key: string) => Promise<string | null>;
+  resolveMediaUrl: (
+    key: string,
+  ) => Promise<{ url: string; cacheSeconds: number } | null>;
   /**
    * Serves the built web app, when this deployment bundles it.
    *
@@ -100,6 +103,23 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       }
 
       if (req.url?.startsWith("/rpc")) {
+        // The one body cap that holds before anything else gets a chance to
+        // reject the request: oRPC buffers a multipart body in memory while
+        // routing it, which is before auth, rate limiting or any payload check
+        // run — an anonymous caller could otherwise make this process buffer
+        // arbitrary gigabytes, and the upload budget would never see the
+        // request at all.
+        //
+        // Content-Length is present on every browser multipart upload, which is
+        // the traffic this protects; a `Transfer-Encoding: chunked` client could
+        // bypass it, a known limitation rather than a silent guarantee.
+        const declared = Number(req.headers["content-length"]);
+        if (Number.isFinite(declared) && declared > RPC_MAX_BODY_BYTES) {
+          res.writeHead(413, { "Content-Type": "text/plain" });
+          res.end("Payload too large");
+          return;
+        }
+
         const { matched } = await deps.handleRpc(req, res);
         if (matched) return;
       }
@@ -115,9 +135,9 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         }
 
         const key = mediaKeyOf(req.url);
-        const url = key ? await deps.resolveMediaUrl(key) : null;
+        const media = key ? await deps.resolveMediaUrl(key) : null;
 
-        if (!url) {
+        if (!media) {
           res.writeHead(404, { "Content-Type": "text/plain" });
           res.end("Not found");
           return;
@@ -127,13 +147,15 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // bucket to the browser, which costs no service egress and never holds
         // an image in this process's memory.
         //
-        // The cache is private and short. Private because the URL it points at
-        // is a bearer credential — a shared cache handing it to another viewer
-        // would be handing out access. Short because that URL expires, and the
-        // redirect must not outlive it (see MEDIA_URL_TTL_SECONDS).
+        // The cache is private and bounded by the signing window. Private
+        // because the URL it points at is a bearer credential — a shared cache
+        // handing it to another viewer would be handing out access. Bounded
+        // because the URL is byte-identical only until the window rolls (see
+        // MEDIA_SIGNING_WINDOW_MS); the resolver reports the remaining budget
+        // so this never serves a stale signature.
         res.writeHead(302, {
-          Location: url,
-          "Cache-Control": "private, max-age=300",
+          Location: media.url,
+          "Cache-Control": `private, max-age=${media.cacheSeconds}`,
         });
         res.end();
         return;

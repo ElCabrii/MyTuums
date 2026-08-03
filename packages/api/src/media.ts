@@ -14,19 +14,23 @@
  * itself.
  */
 import { isSafeObjectKey } from "./image.js";
-import type { Storage } from "./storage.js";
-
-export type MediaResolver = (key: string) => Promise<string | null>;
+import {
+  DEFAULT_SIGNED_URL_TTL,
+  secondsUntilWindowEnd,
+  type Storage,
+} from "./storage.js";
 
 /**
- * How long a presigned media URL stays valid.
+ * The read side of uploaded images: turning a `/media/<key>` request into
+ * something the browser can actually fetch.
  *
- * Comfortably longer than the 5 minutes the redirect itself is cached for, so
- * a browser replaying a cached 302 never lands on an already-expired URL — the
- * failure that would look like a randomly broken avatar and be near-impossible
- * to reproduce.
+ * `url` is where the browser should go; `cacheSeconds` is how long the redirect
+ * may be cached, bounded by the signing window so a cached redirect never
+ * outlives the signature it points at.
  */
-const MEDIA_URL_TTL_SECONDS = 3600;
+export type MediaResolver = (
+  key: string,
+) => Promise<{ url: string; cacheSeconds: number } | null>;
 
 /**
  * `null` means "404 this" and is deliberately the answer to every failure
@@ -41,9 +45,16 @@ const MEDIA_URL_TTL_SECONDS = 3600;
  * question for free when the browser follows the redirect.
  */
 export function createMediaResolver(storage: Storage | null): MediaResolver {
-  return async (key: string): Promise<string | null> => {
+  return async (key: string) => {
     if (!storage) return null;
     if (!isSafeObjectKey(key)) return null;
-    return storage.signedGetUrl(key, MEDIA_URL_TTL_SECONDS);
+    return {
+      url: await storage.signedGetUrl(key, DEFAULT_SIGNED_URL_TTL),
+      // The URL stays byte-identical only until the signing window rolls (see
+      // MEDIA_SIGNING_WINDOW_MS in ./storage.ts); past that the next request
+      // signs a different one. Caching the redirect for the remainder of the
+      // window is the longest cache that never serves a stale signature.
+      cacheSeconds: secondsUntilWindowEnd(),
+    };
   };
 }

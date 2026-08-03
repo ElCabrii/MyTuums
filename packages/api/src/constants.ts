@@ -78,6 +78,20 @@ export const IMAGE_LIMITS = {
 } as const satisfies Record<ImageKind, { maxBytes: number; maxWidth: number; maxHeight: number }>;
 
 /**
+ * The largest request body the RPC endpoint will accept.
+ *
+ * Derived from the image caps rather than written as a literal, so raising a
+ * slot's limit can never silently leave the ceiling behind. The headroom above
+ * the largest slot cap covers the multipart framing oRPC's file encoding adds
+ * around the payload (boundaries and part headers).
+ *
+ * Enforced in `apps/server/src/request-handler.ts`, which is the one chokepoint
+ * that runs before oRPC buffers a body in memory.
+ */
+export const RPC_MAX_BODY_BYTES =
+  Math.max(...Object.values(IMAGE_LIMITS).map((slot) => slot.maxBytes)) + 1024 * 1024;
+
+/**
  * The URL prefix under which uploaded images are served, and the marker that
  * distinguishes our own objects from a provider's absolute avatar URL.
  *

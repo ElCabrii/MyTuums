@@ -4,7 +4,7 @@ import { createRequestHandler } from "./request-handler.js";
 import { createStaticFileHandler, noStaticFiles } from "./static-files.js";
 import { createServer } from "node:http";
 import { RPCHandler } from "@orpc/server/node";
-import { CORSPlugin } from "@orpc/server/plugins";
+import { CORSPlugin, SimpleCsrfProtectionHandlerPlugin } from "@orpc/server/plugins";
 import { onError } from "@orpc/server";
 import { appRouter, createContext, createMediaResolver, defaultStorage } from "@my-tuums/api";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
@@ -35,6 +35,14 @@ const handler = new RPCHandler(appRouter, {
       allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       allowHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
     }),
+    // CORS stops an attacker from READING a response, but `multipart/form-data`
+    // — the upload procedures' content type — is one of the three that skip
+    // preflight, so a cross-origin `<form>` could still POST with the session
+    // cookie attached. What had been quietly protecting us is BetterAuth's
+    // `SameSite=Lax` cookie default; this makes the defence something the code
+    // states rather than something it inherits. The oRPC client sends the
+    // header it requires; an HTML form cannot.
+    new SimpleCsrfProtectionHandlerPlugin(),
   ],
   interceptors: [
     onError((error) => {
