@@ -44,16 +44,30 @@ describe("imageDimensions", () => {
   });
 
   it("parses lossy WebP (VP8) dimensions as 14-bit little-endian", () => {
-    // "RIFF" + size + "WEBP", then a "VP8 " chunk: tag, width=512, height=256.
+    // "RIFF" + size + "WEBP", then a "VP8 " chunk. The payload opens with a
+    // 3-byte FRAME TAG, and only then the start code — reading the start code
+    // at the payload's first byte is what used to make every simple lossy WebP
+    // unparseable, and therefore refused as "not an image".
     const webp = new Uint8Array([
       0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
       0x56, 0x50, 0x38, 0x20, 0x00, 0x00, 0x00, 0x00,
-      0x9d, 0x01, 0x2a,
+      0xb0, 0x5f, 0x00, // frame tag
+      0x9d, 0x01, 0x2a, // start code
       0x00, 0x02, // width: 512
       0x00, 0x01, // height: 256
     ]);
 
     expect(imageDimensions(webp, "image/webp")).toEqual({ width: 512, height: 256 });
+  });
+
+  it("returns null for a VP8 chunk with no start code after the frame tag", () => {
+    const webp = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+      0x56, 0x50, 0x38, 0x20, 0x00, 0x00, 0x00, 0x00,
+      0xb0, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01,
+    ]);
+
+    expect(imageDimensions(webp, "image/webp")).toBeNull();
   });
 
   it("parses lossless WebP (VP8L) dimensions from the packed word", () => {
@@ -70,17 +84,40 @@ describe("imageDimensions", () => {
   });
 
   it("parses extended WebP (VP8X) dimensions as 24-bit little-endian", () => {
-    // VP8X: flags byte, then width-1 and height-1 as 24-bit LE.
+    // VP8X: flags byte, a 3-byte RESERVED field, then width-1 and height-1 as
+    // 24-bit LE. Skipping the reserved field read it as the width — and since
+    // it is always zero, every VP8X image measured 1px wide.
     // width=1000 -> 0x3E7 + 1; height=2000 -> 0x7CF + 1.
     const webp = new Uint8Array([
       0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
-      0x56, 0x50, 0x38, 0x58, 0x00, 0x00, 0x00, 0x00,
-      0x00,
+      0x56, 0x50, 0x38, 0x58, 0x0a, 0x00, 0x00, 0x00,
+      0x20, // flags (ICC profile present)
+      0x00, 0x00, 0x00, // reserved
       0xe7, 0x03, 0x00, // width - 1
       0xcf, 0x07, 0x00, // height - 1
     ]);
 
     expect(imageDimensions(webp, "image/webp")).toEqual({ width: 1000, height: 2000 });
+  });
+
+  /**
+   * The one fixture here that is NOT hand-crafted: these are the real leading
+   * bytes of `canvas.toBlob(..., "image/webp")` in Chrome, captured from a
+   * 667x500 canvas — the shape `apps/web/src/lib/media.ts` produces for a
+   * banner. Chrome attaches an ICC profile to canvas WebP output, which forces
+   * the extended VP8X container, so this is what the upload procedure actually
+   * receives for EVERY image the web app re-encodes. A hand-built fixture can
+   * agree with a misreading of the spec; this cannot.
+   */
+  it("measures a real Chrome canvas WebP at its true dimensions", () => {
+    const chromeBanner = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x8e, 0x0f, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+      0x56, 0x50, 0x38, 0x58, 0x0a, 0x00, 0x00, 0x00,
+      0x20, 0x00, 0x00, 0x00, 0x9a, 0x02, 0x00, 0xf3, 0x01, 0x00,
+      0x49, 0x43, 0x43, 0x50, // the ICCP chunk that forced VP8X
+    ]);
+
+    expect(imageDimensions(chromeBanner, "image/webp")).toEqual({ width: 667, height: 500 });
   });
 
   it("returns null for an unknown type, a short header, or a garbled chunk", () => {
