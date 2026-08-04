@@ -42,7 +42,7 @@ export function ReplyComposer({
             <Link
               to="/@{$username}"
               params={{ username: replyingTo }}
-              className="text-primary hover:underline font-medium"
+              className="text-link hover:underline font-medium"
             >
               @{replyingTo}
             </Link>

@@ -159,7 +159,7 @@ function LoginPage() {
               </label>
               <Link
                 to="/forgot-password"
-                className="text-xs font-medium text-primary hover:underline"
+                className="text-xs font-medium text-link hover:underline"
               >
                 {m.auth_forgot_password_link()}
               </Link>
@@ -186,7 +186,7 @@ function LoginPage() {
           >
             {isSubmitting ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
                 <span>{m.auth_signing_in()}</span>
               </>
             ) : (
@@ -205,7 +205,7 @@ function LoginPage() {
           <Link
             to="/register"
             search={redirectFromSearch ? { redirect: redirectFromSearch } : {}}
-            className="font-medium text-primary hover:underline"
+            className="font-medium text-link hover:underline"
           >
             {m.auth_register_link()}
           </Link>

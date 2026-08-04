@@ -24,7 +24,7 @@ export function ThreadPage() {
   if (threadQuery.isPending) {
     return (
       <div className="flex h-[70vh] items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2 className="h-8 w-8 animate-spin motion-reduce:animate-none text-primary" />
       </div>
     );
   }

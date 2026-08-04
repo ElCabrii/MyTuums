@@ -19,7 +19,13 @@ export function Footer() {
     <footer className="w-full border-t bg-background py-6 md:py-8 mt-auto">
       <div className="w-full flex flex-col md:flex-row items-center justify-between gap-4 px-4 sm:px-8 text-sm text-muted-foreground">
         <div className="flex items-center gap-2">
-          <img src="/mytuums.svg" alt={m.app_logo_alt()} className="h-5 w-auto" />
+          <img
+            src="/mytuums.svg"
+            alt={m.app_logo_alt()}
+            width={2048}
+            height={2048}
+            className="h-5 w-auto"
+          />
           <span className="font-semibold text-foreground">MyTuums</span>
           <span>{m.footer_copyright({ year: String(new Date().getFullYear()) })}</span>
         </div>
@@ -40,12 +46,17 @@ export function Footer() {
             {m.legal_notice()}
           </Link>
           <DropdownMenu>
+            {/* WCAG 2.5.3 (label in name): the trigger's accessible name must
+                contain its visible text, which here is the current locale
+                ("English"/"Français") — a bare aria-label replaces it.
+                "Language: English" reads correctly, and the E2E suite matches
+                the button by "Language"/"Langue" as a substring. */}
             <DropdownMenuTrigger
               render={
                 <Button
                   variant="outline"
                   size="sm"
-                  aria-label={m.locale_label()}
+                  aria-label={`${m.locale_label()}: ${labelForLocale(currentLocale)}`}
                   title={m.locale_label()}
                   className="gap-1.5"
                 />

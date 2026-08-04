@@ -23,7 +23,7 @@ export function LegalDocument({
         [&_p]:mb-4 [&_p]:leading-relaxed [&_p]:text-muted-foreground
         [&_em]:block [&_em]:mb-6 [&_em]:text-sm [&_em]:text-muted-foreground [&_em]:not-italic
         [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:mb-4 [&_ul]:space-y-1.5 [&_ul]:text-muted-foreground
-        [&_a]:underline [&_a]:underline-offset-2 [&_a]:text-primary hover:[&_a]:text-primary/80
+        [&_a]:underline [&_a]:underline-offset-2 [&_a]:text-link hover:[&_a]:text-link/80
         [&_strong]:text-foreground [&_strong]:font-semibold
         [&_table]:w-full [&_table]:text-sm [&_table]:my-4 [&_table]:border-collapse
         [&_th]:text-left [&_th]:border-b [&_th]:pb-2 [&_th]:pr-4 [&_th]:font-semibold [&_th]:text-foreground

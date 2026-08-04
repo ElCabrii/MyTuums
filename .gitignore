@@ -40,3 +40,4 @@ e2e/blob-report/
 playwright/.cache/
 # Playwright MCP browser snapshots and console captures
 .playwright-mcp/
+lighthouse-reports/

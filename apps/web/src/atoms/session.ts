@@ -2,6 +2,7 @@ import { atom } from "jotai";
 import { atomEffect } from "jotai-effect";
 import { sessionStore } from "@/lib/auth-client";
 import { handleOf } from "@/lib/user";
+import { isReturningVisitor, stampReturningVisitor } from "@/lib/returning-visitor";
 
 /**
  * The bridge from BetterAuth's nanostore into the atom graph. Seeded from
@@ -18,7 +19,18 @@ import { handleOf } from "@/lib/user";
  */
 export const sessionAtom = atom(sessionStore.get());
 
-sessionAtom.onMount = (set) => sessionStore.subscribe(set);
+sessionAtom.onMount = (set) =>
+  sessionStore.subscribe((value) => {
+    // Every sign-in path — email/password, OAuth, passkey, One Tap — flows
+    // through this store, so a session appearing here is the one place to
+    // learn "this device has had a session". `lib/one-tap.ts` reads the flag
+    // to decide whether to offer the prompt; the server's session cookie is
+    // httpOnly and invisible to `document.cookie`, which is why the app has
+    // to stamp its own. Guarded so the write happens once, not on every
+    // `/get-session` refetch of a signed-in session.
+    if (value.data?.user && !isReturningVisitor()) stampReturningVisitor();
+    set(value);
+  });
 
 /**
  * The derived atoms below exist so a component reading one boolean re-renders

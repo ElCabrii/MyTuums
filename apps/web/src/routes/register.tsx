@@ -253,7 +253,7 @@ function RegisterPage() {
           <Link
             to="/login"
             search={redirectFromSearch ? { redirect: redirectFromSearch } : {}}
-            className="font-medium text-primary hover:underline"
+            className="font-medium text-link hover:underline"
           >
             {m.auth_login_link()}
           </Link>

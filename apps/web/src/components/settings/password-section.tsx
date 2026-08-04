@@ -113,7 +113,7 @@ export function PasswordSection() {
         {/* `role="status"` rather than `role="alert"`: this is a confirmation,
             and alert is for the failure banner the page already owns. */}
         {changed && (
-          <p role="status" className="text-xs text-primary">
+          <p role="status" className="text-xs text-link">
             {m.settings_password_changed()}
           </p>
         )}

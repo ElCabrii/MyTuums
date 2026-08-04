@@ -81,6 +81,43 @@ describe("createRequestHandler", () => {
     expect(JSON.parse(calls.body)).toEqual({ status: "error", reason: "database unreachable" });
   });
 
+  it("redirects a cookie-less GET to / to /login, skipping the whole SPA round trip", async () => {
+    // The client-side gate (`useRequireSignedIn`) would land a signed-out
+    // visitor on /login?redirect=%2F anyway, but only after the bundle, the
+    // splash and a /get-session round trip. The server can make that call
+    // statelessly for the no-cookie case.
+    const { res, calls } = resStub();
+    const serveStatic = vi.fn().mockResolvedValue({ served: false });
+    const handle = createRequestHandler(deps({ serveStatic }));
+
+    await handle(reqStub("/"), res);
+
+    expect(calls.statusCode).toBe(302);
+    expect(calls.headers).toMatchObject({ Location: "/login?redirect=%2F" });
+    expect(serveStatic).not.toHaveBeenCalled();
+  });
+
+  it("does NOT redirect when a session cookie is present — the app decides for stale sessions", async () => {
+    // A present-but-expired cookie is indistinguishable from a live one here;
+    // letting the request through is what the app has always done, and the
+    // client gate handles the stale case without this server knowing.
+    const { res, calls } = resStub();
+    const handle = createRequestHandler(deps());
+
+    await handle(reqStub("/", "GET", { cookie: "better-auth.session_token=stale" }), res);
+
+    expect(calls.statusCode).toBe(404);
+  });
+
+  it("redirects only the exact path /, not /?x=1 — consistent with the /health exact match", async () => {
+    const { res, calls } = resStub();
+    const handle = createRequestHandler(deps());
+
+    await handle(reqStub("/?x=1"), res);
+
+    expect(calls.statusCode).toBe(404);
+  });
+
   it("treats /health as an EXACT match — a query string is a different, unmatched route", async () => {
     // The real server checks `req.url === "/health"`, not a prefix. A probe
     // hitting "/health?x=1" should get the ordinary 404, not the health

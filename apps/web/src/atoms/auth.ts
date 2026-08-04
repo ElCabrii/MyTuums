@@ -4,14 +4,7 @@ import { authClient, type SocialProviderId } from "@/lib/auth-client";
 import { waitForSignedOut } from "@/lib/session-sync";
 import { dateOfBirthToIso } from "@/lib/auth-validation";
 import { sanitizeRedirect } from "@/lib/redirect";
-import { profileAtomFamily } from "@/atoms/profile";
-import { clearPostFeedFamily } from "@/atoms/post-feed";
-import { clearUserListFamily } from "@/atoms/user-list";
-import { clearLikeFamilies } from "@/atoms/like";
-import { clearFollowFamilies } from "@/atoms/follow";
-import { clearThreadFamily } from "@/atoms/thread";
 import { offerTwoFactorAtom } from "@/atoms/onboarding";
-import { clearReplyFamilies } from "@/atoms/reply-composer";
 import { m } from "@/paraglide/messages.js";
 
 /** Set by `signInAtom`/`signUpAtom`/`signOutAtom`/`requestPasswordResetAtom`/`resetPasswordAtom`; the form's `role="alert"` reads this. */
@@ -303,6 +296,23 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
     // user, and `useRedirectWhenSignedIn` bounces them back.
     await waitForSignedOut();
     get(queryClientAtom).clear();
+    // Dynamic import on purpose, not a static one at the top of this file:
+    // these helpers live in the same modules as the feed/query machinery they
+    // sweep (postFeedAtom, the like/follow intent atoms, the thread family),
+    // and a static import dragged ~60 KB of that machinery into the login
+    // page's chunks for the sake of an action only a signed-in user can
+    // trigger. Sign-out is also the one moment nothing is mounted against
+    // those families, which is what makes sweeping them safe — see
+    // `atoms/sign-out-sweep.ts`.
+    const {
+      profileAtomFamily,
+      clearPostFeedFamily,
+      clearUserListFamily,
+      clearThreadFamily,
+      clearReplyFamilies,
+      clearLikeFamilies,
+      clearFollowFamilies,
+    } = await import("@/atoms/sign-out-sweep");
     clearFamily(profileAtomFamily);
     clearPostFeedFamily();
     clearUserListFamily();

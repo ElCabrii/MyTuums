@@ -37,6 +37,23 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    // Source maps for the production bundle. This is a public repo, so the
+    // original TS is on GitHub anyway; the maps only ever download when
+    // DevTools is open, and the server already serves assets/ with immutable
+    // caching. They cost image size (~2-3x the JS) and nothing on the runtime
+    // path — what they buy is a stack trace that points at source instead of
+    // one 578 KB minified line. `hidden` would not do: Lighthouse (and
+    // DevTools) find maps through the sourceMappingURL comment, which `hidden`
+    // deliberately omits.
+    //
+    // Note: Lighthouse's valid-source-maps audit still flags the main chunk —
+    // its gatherer fetches the map with a 1.5 s budget, and a ~3 MB map
+    // exceeds it even on localhost (verified over CDP; the audit is
+    // weight-0, so no score impact). The maps themselves work: DevTools
+    // fetches them on demand with no such budget.
+    sourcemap: true,
+  },
   server: {
     proxy: {
       "/rpc": {

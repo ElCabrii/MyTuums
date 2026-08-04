@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
+import { createBrotliCompress, createGzip } from "node:zlib";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 /**
@@ -38,7 +39,57 @@ const CONTENT_TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
   ".txt": "text/plain; charset=utf-8",
   ".webmanifest": "application/manifest+json",
+  ".map": "application/json; charset=utf-8",
 };
+
+/**
+ * File types worth compressing. Everything else — images, fonts — is already
+ * compressed by its own format, and re-compressing costs CPU for nothing.
+ */
+const COMPRESSIBLE_EXTENSIONS = new Set([
+  ".html",
+  ".js",
+  ".css",
+  ".json",
+  ".svg",
+  ".txt",
+  ".webmanifest",
+  ".map",
+]);
+
+type Compression = "br" | "gzip" | null;
+
+/**
+ * The best compression this client accepts, or `null` for identity.
+ *
+ * Reads the q-values properly rather than substring-matching: `gzip;q=0` means
+ * "gzip refused" even though the token is present, and a client that names only
+ * one encoding should not get the other. Ties (the common `br, gzip` case) go
+ * to brotli, which wins by a comfortable margin on text.
+ *
+ * This is the byte-level partner of the cache headers below: without
+ * compression the immutable assets are downloaded raw, and on the slowest
+ * connections the main chunk dwarfs every other cost on the page.
+ */
+function preferredEncoding(acceptEncoding: string | undefined, file: string): Compression {
+  const ext = path.extname(file).toLowerCase();
+  if (!COMPRESSIBLE_EXTENSIONS.has(ext)) return null;
+  if (!acceptEncoding) return null;
+
+  let brotli = 0;
+  let gzip = 0;
+  for (const part of acceptEncoding.split(",")) {
+    const [name, ...params] = part.trim().split(";");
+    const qParam = params.map((p) => p.trim()).find((p) => p.startsWith("q="));
+    const q = qParam ? Number.parseFloat(qParam.slice(2)) : 1;
+    const value = Number.isFinite(q) ? q : 0;
+    if (name.trim() === "br" && value > brotli) brotli = value;
+    if (name.trim() === "gzip" && value > gzip) gzip = value;
+  }
+
+  if (brotli <= 0 && gzip <= 0) return null;
+  return brotli >= gzip ? "br" : "gzip";
+}
 
 export type StaticFileHandler = (
   req: IncomingMessage,
@@ -64,7 +115,7 @@ export function createStaticFileHandler(rootDir: string): StaticFileHandler {
     const file = (await isFile(requested)) ? requested : null;
 
     if (file) {
-      await send(res, req.method === "HEAD", file, cacheHeaderFor(root, file));
+      await send(req, res, req.method === "HEAD", file, cacheHeaderFor(root, file));
       return { served: true };
     }
 
@@ -89,7 +140,7 @@ export function createStaticFileHandler(rootDir: string): StaticFileHandler {
     // deployed site look broken to anything that isn't a browser.
     if (path.extname(requested) !== "") return { served: false };
 
-    await send(res, req.method === "HEAD", indexPath, "no-cache");
+    await send(req, res, req.method === "HEAD", indexPath, "no-cache");
     return { served: true };
   };
 }
@@ -136,31 +187,54 @@ function cacheHeaderFor(root: string, file: string): string {
 }
 
 function send(
+  req: IncomingMessage,
   res: ServerResponse,
   headOnly: boolean,
   file: string,
   cacheControl: string,
 ): Promise<void> {
-  const contentType =
-    CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream";
+  const encoding = preferredEncoding(req.headers["accept-encoding"], file);
 
-  res.writeHead(200, { "Content-Type": contentType, "Cache-Control": cacheControl });
+  const headers: Record<string, string> = {
+    "Content-Type":
+      CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
+    "Cache-Control": cacheControl,
+  };
+  if (encoding) {
+    headers["Content-Encoding"] = encoding;
+    // The body now depends on a request header. Without this, a shared cache
+    // (the Railway edge in front of the deployed server) could hand a
+    // compressed body to a client that asked for identity, or vice versa.
+    headers["Vary"] = "Accept-Encoding";
+  }
+
+  res.writeHead(200, headers);
 
   if (headOnly) {
+    // HEAD must advertise the same Content-Encoding as the matching GET, even
+    // though there is no body.
     res.end();
     return Promise.resolve();
   }
 
   return new Promise((resolve) => {
-    const stream = createReadStream(file);
-    stream.on("error", () => {
-      // The file existed when it was stat'd and does not now. Nothing useful
-      // can be written — headers are already sent — so drop the socket rather
-      // than emit a truncated body the browser would treat as complete.
+    const abort = () => {
+      // The file existed when it was stat'd and does not now (or zlib failed
+      // mid-stream). Nothing useful can be written — headers are already sent
+      // — so drop the socket rather than emit a truncated body the browser
+      // would treat as complete.
       res.destroy();
       resolve();
-    });
-    stream.on("end", resolve);
-    stream.pipe(res);
+    };
+    const stream = createReadStream(file);
+    stream.on("error", abort);
+
+    const compressor =
+      encoding === "br" ? createBrotliCompress() : encoding === "gzip" ? createGzip() : null;
+    if (compressor) compressor.on("error", abort);
+
+    const last = compressor ? stream.pipe(compressor) : stream;
+    last.on("end", resolve);
+    last.pipe(res);
   });
 }

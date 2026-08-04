@@ -2,6 +2,7 @@ import { createAuthClient } from "better-auth/client";
 import { oneTapClient } from "better-auth/client/plugins";
 import type { BetterAuthClientPlugin } from "better-auth";
 import { shouldOfferOneTap } from "@/lib/auth-client";
+import { isReturningVisitor } from "@/lib/returning-visitor";
 import { sanitizeRedirect } from "@/lib/redirect";
 
 /**
@@ -46,6 +47,9 @@ interface OneTapCapableClient {
   oneTap: (options?: { callbackURL?: string }) => Promise<unknown>;
 }
 
+/** Module-scope so the guard survives re-renders and effect re-runs. */
+let oneTapPrompted = false;
+
 /**
  * Shows the One Tap prompt, if this deployment configured Google.
  *
@@ -57,6 +61,24 @@ interface OneTapCapableClient {
  */
 export function promptOneTap(): void {
   if (!shouldOfferOneTap) return;
+
+  // The session store can notify twice in quick succession when the first
+  // `/get-session` lands, so `useOneTap`'s effect would otherwise call this
+  // twice — two GSI prompts, two console errors, and Google's own "request
+  // already in progress" warning. Once per document load is what the module
+  // comment in `use-one-tap.ts` always claimed but never enforced.
+  if (oneTapPrompted) return;
+
+  // One Tap is a returning-user accelerator (and Google's abuse policy
+  // discourages prompting first-time visitors). Skipping it for a brand-new
+  // device also means the 90 KB GSI script never loads and its FedCM call
+  // never logs "Not signed in with the identity provider" for them — the
+  // `errors-in-console` audit failure. The flag is stamped the moment a
+  // session first appears (`atoms/session.ts`); the Google button below
+  // remains for everyone.
+  if (!isReturningVisitor()) return;
+
+  oneTapPrompted = true;
 
   // Same `?redirect=` param `signInWithProviderAtom` reads — One Tap's
   // success is a hard navigation to this URL, so the destination the signed-in
