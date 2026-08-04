@@ -30,12 +30,24 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export interface StorageConfig {
-  /** The S3 API endpoint, e.g. `https://storage.railway.app`. */
+  /**
+   * The S3 API endpoint, as reported by the bucket's Credentials tab — today
+   * `https://t3.storageapi.dev`. Railway's docs still show the older
+   * `https://storage.railway.app` in their examples; read the value off the
+   * bucket rather than either of these, since it is per-bucket and has already
+   * changed once.
+   */
   endpoint: string;
   /**
    * The globally unique bucket name for the S3 API — Railway's `BUCKET`
    * variable (`my-bucket-jdhhd8oe18xi`), NOT the display name it shows as
    * `RAILWAY_BUCKET_NAME`.
+   *
+   * The two genuinely differ and the display name is *mutable*: renaming a
+   * bucket in Railway leaves the S3 name untouched, hash and all. So a bucket
+   * whose canvas label reads `mytuums-ci-media` can be addressed only as
+   * `mytuums-ci-media-ylixjsl6`, and a renamed bucket keeps answering to the
+   * name it was born with.
    */
   bucket: string;
   accessKeyId: string;

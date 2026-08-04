@@ -135,11 +135,32 @@ site. Neither is reachable without building the image.
 then takes traffic. A failed migration aborts the deploy and leaves the previous
 version serving. Nothing is deployed by hand.
 
-**The E2E suite uses three separate buckets and they must stay separate**:
-`mytuums-media` (production), `mytuums-media-dev` (local), `mytuums-media-ci`
-(CI). `truncateAll()` in `e2e/support/db.ts` deletes objects **by prefix**, so
-pointing two runners at one bucket lets them delete each other's objects
-mid-test — and pointing any of them at production would delete real avatars.
+**Dev, CI and production each get their own bucket, and the separation is what
+`truncateAll()` in `e2e/support/db.ts` makes non-negotiable** — it deletes
+objects **by prefix**, so two runners sharing a bucket delete each other's
+objects mid-test, and either one pointed at production deletes real avatars.
+
+The separation is enforced by **Railway environments**, not by a naming
+convention. The `MyTuums` project has three:
+
+| Environment | Bucket (display) | Consumed by |
+|---|---|---|
+| `production` | `mytuums-media` | the deployed server |
+| `dev` | `mytuums-dev-media` | your local `.env` |
+| `ci` | `mytuums-ci-media` | the `S3_*` GitHub Actions secrets |
+
+Each environment's bucket has **its own credentials**, so a dev or CI key
+cannot address the production bucket at all — the guarantee is structural
+rather than a matter of getting a name right in a secret. `dev` and `ci` hold
+*only* a bucket: no server, no Postgres, nothing that costs anything to run.
+Postgres stays local (docker-compose for dev, a service container for CI),
+because integration tests fire thousands of queries and a network round trip
+per query is what turns a 30-second suite into a several-minute one.
+
+Two traps when reading these values off Railway. The **display name is not the
+S3 name**: `S3_BUCKET` needs the hashed form (`mytuums-dev-media-jpyvwpb`), and
+renaming a bucket changes only the label — the S3 name it answers to is fixed
+at creation. And a bucket's **region cannot be changed after it is created**.
 
 ## Architecture
 

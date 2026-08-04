@@ -8,10 +8,10 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# Environment
-.env
-.env.local
-.env.*.local
+# Environment — `.env*` covers `.env`, `.env.local`, `.env.*.local` AND stray
+# backups like `.env.bak` that would otherwise be untracked-but-committable
+# files carrying live credentials.
+.env*
 
 # IDE
 .vscode/
@@ -38,3 +38,5 @@ e2e/test-results/
 e2e/playwright-report/
 e2e/blob-report/
 playwright/.cache/
+# Playwright MCP browser snapshots and console captures
+.playwright-mcp/

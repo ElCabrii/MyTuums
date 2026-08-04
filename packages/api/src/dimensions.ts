@@ -74,34 +74,53 @@ function jpegDimensions(bytes: Uint8Array): ImageDimensions | null {
  * WebP is a RIFF container: "RIFF" + size + "WEBP", then chunks of
  * fourcc + size + payload. The three chunk types carry dimensions differently:
  *
- * - VP8 (lossy): a fixed 3-byte tag, then 14-bit width and height (LE), masked
- *   because the top two bits of each word hold a scale flag.
+ * - VP8 (lossy): a 3-byte frame tag, THEN the 3-byte start code, then 14-bit
+ *   width and height (LE), masked because the top two bits of each word hold a
+ *   scale flag.
  * - VP8L (lossless): a 1-byte tag, then a 4-byte LE word with width-1 in bits
  *   0-13 and height-1 in bits 14-27.
- * - VP8X (extended): a flags byte, then 24-bit width-1 and height-1 (LE).
+ * - VP8X (extended): a flags byte, THEN a 3-byte reserved field, then 24-bit
+ *   width-1 and height-1 (LE).
+ *
+ * The two capitalised fields are the ones this parser used to skip, and both
+ * cost the same 3 bytes. Getting VP8X wrong read the reserved field as the
+ * width (always zero, so width 1) and the width as the height — which slipped
+ * past every check except the banner slot's 500px height bound, and so rejected
+ * every landscape banner as "too large" while every avatar passed. Getting VP8
+ * wrong looked for the start code where the frame tag is, so no simple lossy
+ * WebP parsed at all and each was refused as "not an image".
+ *
+ * Every chunk payload starts at byte 20: 12 bytes of RIFF/WEBP header, then the
+ * chunk's own 4-byte fourcc and 4-byte size. The offsets below are absolute, so
+ * that 20 is the base to read them against.
  */
 function webpDimensions(bytes: Uint8Array): ImageDimensions | null {
-  if (bytes.length < 25) return null;
+  if (bytes.length < 16) return null;
   if (bytes[0] !== 0x52 || bytes[1] !== 0x49 || bytes[2] !== 0x46 || bytes[3] !== 0x46) return null;
   if (bytes[8] !== 0x57 || bytes[9] !== 0x45 || bytes[10] !== 0x42 || bytes[11] !== 0x50) return null;
 
   const fourcc = String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15]);
 
-  if (fourcc === "VP8 " && bytes[20] === 0x9d && bytes[21] === 0x01 && bytes[22] === 0x2a) {
-    if (bytes.length < 27) return null;
+  if (fourcc === "VP8 ") {
+    if (bytes.length < 30) return null;
+    // Payload: frame tag at 20-22, start code at 23-25, then the dimensions.
+    if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) return null;
     // 14-bit little-endian words; the top two bits of each hold a scale flag.
-    return { width: (bytes[23] | (bytes[24] << 8)) & 0x3fff, height: (bytes[25] | (bytes[26] << 8)) & 0x3fff };
+    return { width: (bytes[26] | (bytes[27] << 8)) & 0x3fff, height: (bytes[28] | (bytes[29] << 8)) & 0x3fff };
   }
 
-  if (fourcc === "VP8L" && bytes[20] === 0x2f) {
+  if (fourcc === "VP8L") {
+    if (bytes.length < 25) return null;
+    if (bytes[20] !== 0x2f) return null;
     const packed = le32(bytes, 21);
     return { width: (packed & 0x3fff) + 1, height: ((packed >> 14) & 0x3fff) + 1 };
   }
 
   if (fourcc === "VP8X") {
-    if (bytes.length < 27) return null;
-    const width = bytes[21] | (bytes[22] << 8) | (bytes[23] << 16);
-    const height = bytes[24] | (bytes[25] << 8) | (bytes[26] << 16);
+    if (bytes.length < 30) return null;
+    // Payload: flags at 20, reserved at 21-23, width-1 at 24-26, height-1 at 27-29.
+    const width = bytes[24] | (bytes[25] << 8) | (bytes[26] << 16);
+    const height = bytes[27] | (bytes[28] << 8) | (bytes[29] << 16);
     return { width: width + 1, height: height + 1 };
   }
 
