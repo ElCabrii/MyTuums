@@ -1,3 +1,4 @@
+import { deflateSync } from "node:zlib";
 import { expect, test } from "../../support/fixtures";
 import { uniqueUser } from "../../support/users";
 
@@ -71,11 +72,72 @@ test.describe("profile details", () => {
  * A real 1x1 PNG. Real bytes matter: the client re-encodes through a canvas
  * (`lib/media.ts`) and the server sniffs the magic bytes of whatever arrives
  * (`packages/api/src/image.ts`), so a fake buffer would be rejected — correctly.
+ *
+ * Reserved for the specs that only care THAT an image landed. **A 1x1 is not a
+ * valid test of the upload path itself**, and this suite learned that the
+ * expensive way: every upload spec used one, and a 1x1 is the single size at
+ * which a WebP header misparse is invisible — the broken parser reported width
+ * 1 for everything, which is exactly what a 1x1 is. A banner bug that rejected
+ * every real landscape image as "too large" shipped through a fully green E2E
+ * run. The upload specs below use `solidPng` at realistic sizes instead.
  */
 const PNG_1X1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64",
 );
+
+function crc32(bytes: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([length, body, crc]);
+}
+
+/**
+ * A genuine PNG of arbitrary size, built here rather than committed as a
+ * fixture file so the dimensions that matter are visible at the call site.
+ *
+ * A gradient rather than a flat colour: a flat image compresses to almost
+ * nothing and would not exercise the byte caps at a realistic ratio.
+ */
+function solidPng(width: number, height: number): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // colour type 2: truecolour RGB
+
+  const stride = width * 3;
+  const raw = Buffer.alloc(height * (stride + 1));
+  for (let y = 0; y < height; y++) {
+    const row = y * (stride + 1);
+    raw[row] = 0; // filter: none
+    for (let x = 0; x < width; x++) {
+      const pixel = row + 1 + x * 3;
+      raw[pixel] = Math.floor((x * 255) / width);
+      raw[pixel + 1] = Math.floor((y * 255) / height);
+      raw[pixel + 2] = 0x80;
+    }
+  }
+
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
 
 /**
  * These hit the real Storage Bucket — there is no fake in the browser path.
@@ -90,10 +152,12 @@ test.describe("images", () => {
     const account = await signUpFresh(page, "avatar");
 
     await page.goto("/settings/account");
+    // Larger than the 512px avatar box, so the client actually downscales and
+    // the server measures a re-encoded WebP rather than a pass-through.
     await page.getByLabel("Profile picture").setInputFiles({
       name: "me.png",
       mimeType: "image/png",
-      buffer: PNG_1X1,
+      buffer: solidPng(800, 800),
     });
 
     // The Remove button only renders once the account actually has an image,
@@ -118,14 +182,21 @@ test.describe("images", () => {
     const account = await signUpFresh(page, "banner");
 
     await page.goto("/settings/account");
+    // A landscape banner, which is the shape a banner actually is — and the
+    // shape that regressed. The display object encodes at 1200x400, so its
+    // width is well past the slot's 500px HEIGHT bound: a parser that confuses
+    // the two axes rejects this as "too large" and passes a square or a 1x1.
     await page.getByLabel("Banner").setInputFiles({
       name: "banner.png",
       mimeType: "image/png",
-      buffer: PNG_1X1,
+      buffer: solidPng(1200, 400),
     });
     await expect(page.getByRole("button", { name: "Remove Banner" })).toBeVisible({
       timeout: 20_000,
     });
+    // An upload that failed leaves the error banner up; assert it never appeared
+    // so a future regression reports the reason rather than a bare timeout.
+    await expect(page.getByRole("alert")).toHaveCount(0);
 
     await page.goto(`/@${account.username}`);
     await expect(page.getByRole("img", { name: /banner/i })).toHaveAttribute(
