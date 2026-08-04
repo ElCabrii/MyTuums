@@ -33,28 +33,29 @@ jobs:
 
       # The DeepSeek provider lives in the ElCabrii fork, not on npm, and the
       # fork's repo root has no package.json, so CI builds the SDK from source
-      # and runs it via its launcher (no global install needed).
-      - name: Check out the DeepSeek-enabled scanner fork
-        uses: actions/checkout@v4
-        with:
-          repository: ElCabrii/codex-security
-          ref: main
-          path: codex-security
+      # and runs it via its launcher (no global install needed). The clone
+      # goes to $RUNNER_TEMP, deliberately OUTSIDE this checkout's tree: this
+      # repo is a pnpm workspace, and pnpm walks up to the nearest
+      # pnpm-workspace.yaml — a fork checked out inside the workspace would
+      # silently install *this repo's* dependencies instead of the fork's
+      # (which is exactly what the first run did).
+      - name: Clone the DeepSeek-enabled scanner fork
+        run: |
+          git clone --depth 1 --branch main \
+            https://github.com/ElCabrii/codex-security.git \
+            "$RUNNER_TEMP/codex-security"
 
-      # The fork is pinned to pnpm 11 while this repo pins pnpm 10 — point the
-      # action at the fork's package.json so it installs pnpm@11.9.0 from the
-      # packageManager field. (Also setting `version:` would conflict with this
-      # repo's own packageManager and fail the step.) No `cache: pnpm` on
-      # setup-node: this job never installs this repo's own dependencies.
+      # Plain pnpm setup, same as ci.yml — pnpm 10 reads the fork's
+      # lockfileVersion 9.0 lockfile fine, and the fork's packageManager
+      # (pnpm@11.9.0) governs the SDK build. No `cache: pnpm` on setup-node:
+      # this job never installs this repo's own dependencies.
       - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: codex-security/sdk/typescript/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Build the SDK from source
-        working-directory: codex-security/sdk/typescript
+        working-directory: ${{ runner.temp }}/codex-security/sdk/typescript
         run: |
           pnpm install --frozen-lockfile
           pnpm build
@@ -69,7 +70,7 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          node codex-security/sdk/typescript/bin/cyberseek.mjs scan . \
+          node "$RUNNER_TEMP/codex-security/sdk/typescript/bin/cyberseek.mjs" scan . \
             --output-dir "$RUNNER_TEMP/scan-output" \
             --fail-on-severity high \
             --json
