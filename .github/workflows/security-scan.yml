@@ -1,14 +1,14 @@
 name: Security scan
 
 on:
-  # Weekly baseline scan of the whole tree. PR-scoped diff scans are a
-  # follow-up (see the plan in the PR description): this job exists first to
-  # calibrate the scanner's noise on this repo and to anchor the
-  # `scans match`/`compare` baselines those PR scans diff against. Schedules
-  # only fire on the default branch, so workflow_dispatch exists for ad-hoc
-  # runs without waiting for Monday.
-  schedule:
-    - cron: "17 3 * * 1" # Monday 03:17 UTC
+  # Weekly schedule disabled: scans run locally on the dev machine
+  # (scripts/security-scan.ps1 via Windows Task Scheduler), which uploads
+  # the SARIF to code scanning directly. Codex's Linux build has flaky
+  # transport failures against DeepSeek's API that no runner environment
+  # fix resolves; Windows builds work reliably. Re-enable by uncommenting
+  # the schedule below. workflow_dispatch stays for on-demand CI runs.
+  # schedule:
+  #   - cron: "17 3 * * 1" # Monday 03:17 UTC
   workflow_dispatch:
 
 concurrency:
