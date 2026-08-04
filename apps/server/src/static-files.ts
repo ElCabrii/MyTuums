@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
+import type { Readable } from "node:stream";
 import path from "node:path";
 import { createBrotliCompress, createGzip } from "node:zlib";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -233,7 +234,13 @@ function send(
       encoding === "br" ? createBrotliCompress() : encoding === "gzip" ? createGzip() : null;
     if (compressor) compressor.on("error", abort);
 
-    const last = compressor ? stream.pipe(compressor) : stream;
+    // `stream.pipe(compressor)` narrows to `Gzip`, so a ternary here would
+    // infer `ReadStream | Gzip` — a union whose `.on` overloads do not unify
+    // (TS2349). Annotate the common readable surface instead.
+    let last: Readable;
+    if (compressor) last = stream.pipe(compressor);
+    else last = stream;
+    last.on("error", abort);
     last.on("end", resolve);
     last.pipe(res);
   });
