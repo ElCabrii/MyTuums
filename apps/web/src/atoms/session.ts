@@ -48,7 +48,30 @@ export const viewerIdAtom = atom((get) => get(viewerAtom)?.id);
 
 export const viewerHandleAtom = atom((get) => handleOf(get(viewerAtom)));
 
-export const sessionPendingAtom = atom((get) => get(sessionAtom).isPending);
+/**
+ * "Pending" also covers a refetch in flight over a null store, not just the
+ * cold-load fetch. BetterAuth can transiently settle the store as
+ * signed-out while a real session exists — an errored fetch keeps `data`
+ * null (challenge 403, 5xx, network blips), a 401 blip clears it, a failed
+ * refresh resettles the same shape — and reading that as resolved would
+ * bounce the gate in `use-require-signed-in.ts` to /login. The
+ * abort-clobber micro-state that would let a *successful* fetch read
+ * signed-out is unreachable in 1.6.25 (`settleAbortedFetch` guards
+ * `abortController !== controller`), so every transient null arrives
+ * through a settled error or a refetch — both absorbed here. Keep the
+ * invariant: null data with a refetch in flight is pending, never resolved.
+ */
+export const sessionPendingAtom = atom((get) => {
+  const session = get(sessionAtom);
+  return session.isPending || (session.data === null && session.isRefetching);
+});
+
+/**
+ * The error the session store last settled on, if any. The gate reads it to
+ * tell "transiently couldn't reach the server" (hold the bounce) from
+ * "genuinely signed out" (a 401 — bounce).
+ */
+export const sessionErrorAtom = atom((get) => get(sessionAtom).error);
 
 /**
  * The latch behind the app's splash screen: "the first `/get-session` has

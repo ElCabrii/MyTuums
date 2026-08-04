@@ -1,20 +1,17 @@
+import { lazy, Suspense } from "react";
 import { Link } from "@tanstack/react-router";
-import { Check, Languages } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
-import { getLocale, locales, setLocale } from "@/paraglide/runtime.js";
 import { m } from "@/paraglide/messages.js";
 
-export function Footer() {
-  const currentLocale = getLocale();
-  const labelForLocale = (locale: (typeof locales)[number]) =>
-    locale === "fr" ? m.locale_french() : m.locale_english();
+// The locale switcher is the only interactive control in the footer and the
+// only one that pulls in popover machinery (floating-ui + focus management);
+// lazy-loading it keeps the wordmark and legal links static. `fallback={null}`
+// is safe here because the footer's legal row has no fixed-size element —
+// unlike the header's icon button, nothing shifts when the chunk mounts.
+const FooterLocaleMenu = lazy(() =>
+  import("@/components/footer-locale-menu").then((mod) => ({ default: mod.FooterLocaleMenu }))
+);
 
+export function Footer() {
   return (
     <footer className="w-full border-t bg-background py-6 md:py-8 mt-auto">
       <div className="w-full flex flex-col md:flex-row items-center justify-between gap-4 px-4 sm:px-8 text-sm text-muted-foreground">
@@ -45,39 +42,9 @@ export function Footer() {
           <Link to="/mentions-legales" className="hover:underline hover:text-foreground">
             {m.legal_notice()}
           </Link>
-          <DropdownMenu>
-            {/* WCAG 2.5.3 (label in name): the trigger's accessible name must
-                contain its visible text, which here is the current locale
-                ("English"/"Français") — a bare aria-label replaces it.
-                "Language: English" reads correctly, and the E2E suite matches
-                the button by "Language"/"Langue" as a substring. */}
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  aria-label={`${m.locale_label()}: ${labelForLocale(currentLocale)}`}
-                  title={m.locale_label()}
-                  className="gap-1.5"
-                />
-              }
-            >
-              <Languages className="size-4" />
-              <span>{labelForLocale(currentLocale)}</span>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-36">
-              {locales.map((locale) => (
-                <DropdownMenuItem
-                  key={locale}
-                  onClick={() => void setLocale(locale)}
-                  className="justify-between"
-                >
-                  <span>{labelForLocale(locale)}</span>
-                  {locale === currentLocale && <Check className="size-4" />}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Suspense fallback={null}>
+            <FooterLocaleMenu />
+          </Suspense>
         </div>
       </div>
     </footer>

@@ -97,7 +97,13 @@ export interface TestSessionUser {
 interface TestSessionValue {
   data: { user: TestSessionUser } | null;
   isPending: boolean;
-  error: null;
+  isRefetching: boolean;
+  /**
+   * The last settled failure, when there was one. Only `.status` is read —
+   * `sessionErrorAtom` feeds the signed-in gate's 401 carve-out. Null until a
+   * fetch settles on an error, which is what every fixture ships.
+   */
+  error: { status: number } | null;
   /** The store value's own refetch — what `lib/session-sync.ts`'s `refreshSession` calls. */
   refetch: (queryParams?: unknown) => Promise<void>;
 }
@@ -123,6 +129,7 @@ interface TestSessionValue {
 let currentSession: TestSessionValue = {
   data: null,
   isPending: true,
+  isRefetching: false,
   error: null,
   refetch: vi.fn(() => Promise.resolve()),
 };
@@ -215,13 +222,24 @@ vi.mock("@/lib/auth-client", () => ({
 // replace it outright.
 window.scrollTo = () => {};
 
-function setTestSession(next: TestSessionValue): void {
+/**
+ * Pushes a value into the mocked session store and notifies every subscriber
+ * — how a test drives a session change mid-render, mirroring a live
+ * `/get-session` settling.
+ */
+export function setTestSession(next: TestSessionValue): void {
   currentSession = next;
   sessionListeners.forEach((listener) => listener(currentSession));
 }
 
 function signedOutSession(): TestSessionValue {
-  return { data: null, isPending: false, error: null, refetch: vi.fn(() => Promise.resolve()) };
+  return {
+    data: null,
+    isPending: false,
+    isRefetching: false,
+    error: null,
+    refetch: vi.fn(() => Promise.resolve()),
+  };
 }
 
 function signedInSession(user: Partial<TestSessionUser> = {}): TestSessionValue {
@@ -249,6 +267,7 @@ function signedInSession(user: Partial<TestSessionUser> = {}): TestSessionValue 
       },
     },
     isPending: false,
+    isRefetching: false,
     error: null,
     refetch: vi.fn(() => Promise.resolve()),
   };
@@ -261,6 +280,7 @@ function pendingSession(): TestSessionValue {
   return {
     data: null,
     isPending: true,
+    isRefetching: false,
     error: null,
     refetch: vi.fn(() => Promise.resolve()),
   };

@@ -47,6 +47,7 @@ const signedIn = {
     user: { id: "u1", username: "alexmercer", displayUsername: "AlexMercer", name: "Alex Mercer" },
   },
   isPending: false,
+  isRefetching: false,
 };
 // The fixture above has no date of birth — the completeness atoms below
 // deliberately distinguish it from a session that declares one.
@@ -61,16 +62,19 @@ const signedInWithDob = {
     },
   },
   isPending: false,
+  isRefetching: false,
 };
-const signedOut = { data: null, isPending: false };
+const signedOut = { data: null, isPending: false, isRefetching: false };
 
 /**
  * The fixtures above are deliberately partial. BetterAuth's real session
- * result also carries `isRefetching`, `error` and `refetch`, none of which any
- * derived atom here reads — spelling them out would add noise without adding
- * coverage. The widening is funnelled through this one helper rather than
- * scattered as a cast per call site, so there is exactly one place to revisit
- * if `sessionAtom`'s shape ever starts mattering to these tests.
+ * result also carries `isRefetching`, `error` and `refetch`; of those only
+ * `isRefetching` feeds a derived atom — `sessionPendingAtom`'s
+ * refetch-over-null hardening, exercised in its own test — and the rest
+ * would add noise without adding coverage. The widening is funnelled through
+ * this one helper rather than scattered as a cast per call site, so there is
+ * exactly one place to revisit if `sessionAtom`'s shape ever starts mattering
+ * to these tests.
  */
 function setSession(store: ReturnType<typeof createStore>, value: unknown): void {
   store.set(sessionAtom, value as never);
@@ -122,12 +126,22 @@ describe("derived session atoms", () => {
   // `sessionAtom` is a plain writable atom, so setting it on a fresh store
   // sidesteps the import-time-capture behaviour covered above.
 
-  it("sessionPendingAtom reflects isPending", () => {
+  it("sessionPendingAtom reflects isPending — and a refetch over null data, the transient-settle hardening", () => {
     const store = createStore();
     setSession(store, { data: null, isPending: true });
     expect(store.get(sessionPendingAtom)).toBe(true);
 
     setSession(store, signedOut);
+    expect(store.get(sessionPendingAtom)).toBe(false);
+
+    // BetterAuth can settle `{ data: null, isPending: false }` transiently
+    // (an errored fetch keeps null data) while a refetch is in flight — that
+    // must still read as pending, or the signed-in gate bounces to /login.
+    setSession(store, { data: null, isPending: false, isRefetching: true });
+    expect(store.get(sessionPendingAtom)).toBe(true);
+
+    // A refetch over real data is not pending — nothing to wait for.
+    setSession(store, { data: signedIn.data, isPending: false, isRefetching: true });
     expect(store.get(sessionPendingAtom)).toBe(false);
   });
 
