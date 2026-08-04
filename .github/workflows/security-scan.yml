@@ -60,33 +60,29 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      # Temporary diagnostics: the scan agent dies ~2 min in without writing
-      # any draft artifacts on Linux runners (works locally on Windows). This
-      # step and --verbose below exist to find out why; remove once green.
-      - name: Inspect scanner runtime
-        working-directory: ${{ runner.temp }}/codex-security/sdk/typescript
-        run: |
-          ls node_modules/.pnpm | grep -i codex || echo "NO codex platform packages in .pnpm"
-          ./node_modules/.bin/codex --version || echo "codex --version FAILED"
-          python3 --version || echo "no python3"
-          bwrap --version || echo "no bwrap (sandbox backend absent)"
-          echo "CODEX_HOME=${CODEX_HOME:-unset}"
-
       # `cyberseek` is the fork's launcher: it injects --provider deepseek and
       # --model deepseek-v4-flash unless given. Headless auth: with
       # DEEPSEEK_API_KEY set and no TTY it picks API-key auth with no prompt.
       # Exit codes: 0 clean, 1 = findings at/above --fail-on-severity, 2 =
       # incomplete coverage or hard failure — the job goes red either way,
       # which for a scheduled run is the alert itself.
+      #
+      # SSL_CERT_FILE is load-bearing: codex's Linux build validates TLS
+      # against its *bundled* root store, which does not trust DeepSeek's
+      # chain (Amazon Root CA 1 -> *.deepseek.com), so the scan agent dies at
+      # the first API call ("error sending request", no draft artifacts).
+      # Pointing it at the system store fixes the connection (verified in a
+      # container: same codex, PONG with SSL_CERT_FILE set). Windows builds
+      # use the OS store natively, which is why local scans worked.
       - name: Scan the repository
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
         run: |
           node "$RUNNER_TEMP/codex-security/sdk/typescript/bin/cyberseek.mjs" scan . \
             --output-dir "$RUNNER_TEMP/scan-output" \
             --fail-on-severity high \
-            --json \
-            --verbose
+            --json
 
       # The scan auto-exports exports/results.sarif on finalize. Upload even on
       # failure (that is exactly when we want the alert); skip when a hard
