@@ -1,12 +1,20 @@
+import { lazy, Suspense } from "react";
 import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { MessageSquare, Bell, Compass, Home, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ModeToggle } from "@/components/mode-toggle";
 import { viewerAtom, viewerHandleAtom } from "@/atoms/session";
 import { UserAvatar } from "@/components/user-avatar";
 import { m } from "@/paraglide/messages.js";
+
+// The theme dropdown is the only interactive control in the header that ships
+// its own popover machinery (floating-ui + focus management); loading it on
+// demand keeps that weight out of the first paint. The named export is mapped
+// to `default` so the dynamic module can be rendered as a lazy component.
+const ModeToggle = lazy(() =>
+  import("@/components/mode-toggle").then((mod) => ({ default: mod.ModeToggle }))
+);
 
 /**
  * The signed-in chrome. Rendered by `__root.tsx` only when a session exists,
@@ -98,7 +106,12 @@ export function Header() {
             <Bell className="h-5 w-5" />
           </Button>
           
-          <ModeToggle />
+          {/* The fallback is a plain, non-focusable div sized to the icon
+              button (size-9) so the sticky header row doesn't shift while the
+              lazy chunk loads. */}
+          <Suspense fallback={<div className="h-9 w-9 shrink-0" aria-hidden="true" />}>
+            <ModeToggle />
+          </Suspense>
 
           {/* The destination branches on the handle, not on `user` — `user`
               exists by the early return above. An OAuth sign-up has no handle

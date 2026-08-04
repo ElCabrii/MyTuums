@@ -136,17 +136,18 @@ export function PostCard({
               <Link
                 to="/post/$postId"
                 params={{ postId: post.id }}
-                title={m.reply_to_post()}
-                aria-label={m.reply_to_post()}
+                title={m.reply_to_post({ count: String(post.replyCount) })}
+                aria-label={m.reply_to_post({ count: String(post.replyCount) })}
                 className={replyLinkClass}
                 onClick={(e) => e.stopPropagation()}
               >
                 {replyContent}
               </Link>
             ) : (
-              // `aria-label` as well as `title`: the link's content is the
-              // reply count, and content wins over `title` for the accessible
-              // name — without this the link announces as a bare number.
+              // `aria-label` as well as `title`, and the visible reply count
+              // is `aria-hidden`: the label has no count in it, so the bare
+              // number would otherwise clash with it (axe
+              // label-content-name-mismatch).
               <Link
                 to="/login"
                 title={m.reply_signed_out()}
@@ -154,7 +155,8 @@ export function PostCard({
                 className={replyLinkClass}
                 onClick={(e) => e.stopPropagation()}
               >
-                {replyContent}
+                <MessageCircle className="h-4 w-4" />
+                <span aria-hidden="true">{post.replyCount}</span>
               </Link>
             )}
 
@@ -166,21 +168,32 @@ export function PostCard({
                   toggleLike();
                 }}
                 aria-pressed={post.viewerHasLiked}
-                aria-label={post.viewerHasLiked ? m.post_unlike() : m.post_like()}
+                aria-label={
+                  post.viewerHasLiked
+                    ? m.post_unlike({ count: String(post.likeCount) })
+                    : m.post_like({ count: String(post.likeCount) })
+                }
                 className={likeButtonClass}
               >
                 {likeContent}
               </button>
             ) : (
               // Signed out, the server would reject the like — send people to
-              // log in rather than let them click into a 401.
+              // log in rather than let them click into a 401. `aria-label` as
+              // well as `title`, and the visible like count is `aria-hidden`:
+              // the label has no count in it, so the bare number would clash
+              // with it (axe label-content-name-mismatch), and without the
+              // label the number would win over `title` as the accessible
+              // name.
               <Link
                 to="/login"
                 title={m.post_like_signed_out()}
+                aria-label={m.post_like_signed_out()}
                 className={likeButtonClass}
                 onClick={(e) => e.stopPropagation()}
               >
-                {likeContent}
+                <Heart className={`h-4 w-4 ${post.viewerHasLiked ? "fill-red-500" : ""}`} />
+                <span aria-hidden="true">{post.likeCount}</span>
               </Link>
             )}
           </div>

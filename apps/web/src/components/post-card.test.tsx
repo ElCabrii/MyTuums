@@ -35,12 +35,14 @@ describe("PostCard", () => {
       const replyLink = screen.getByRole("link", { name: m.reply_signed_out() });
       expect(replyLink).toHaveAttribute("href", "/login");
 
-      // The like control has no `aria-label` in the signed-out branch, only
-      // `title` — its accessible name comes from its content (the like
-      // count) instead. `getByTitle` sidesteps that to find it regardless.
-      const likeLink = screen.getByTitle(m.post_like_signed_out());
-      expect(likeLink.tagName).toBe("A");
+      // The like link now carries an `aria-label` ("Log in to like posts"),
+      // and its count span is `aria-hidden` — so unlike before, the
+      // accessible name is the label, not the bare number. Assert on the
+      // name (the point of the fix), and keep the `title` lookup for parity
+      // with the e2e locator.
+      const likeLink = screen.getByRole("link", { name: m.post_like_signed_out() });
       expect(likeLink).toHaveAttribute("href", "/login");
+      expect(screen.getByTitle(m.post_like_signed_out())).toBe(likeLink);
 
       // Neither is a real button.
       expect(screen.queryByRole("button")).not.toBeInTheDocument();
@@ -52,7 +54,7 @@ describe("PostCard", () => {
       const post = makePost({ viewerHasLiked: true, likeCount: 3 });
       await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
 
-      const likeButton = screen.getByRole("button", { name: m.post_unlike() });
+      const likeButton = screen.getByRole("button", { name: m.post_unlike({ count: "3" }) });
       expect(likeButton).toHaveAttribute("aria-pressed", "true");
 
       const user = userEvent.setup();
@@ -65,7 +67,9 @@ describe("PostCard", () => {
       const post = makePost({ viewerHasLiked: false });
       await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
 
-      const likeButton = screen.getByRole("button", { name: m.post_like() });
+      const likeButton = screen.getByRole("button", {
+        name: m.post_like({ count: String(post.likeCount) }),
+      });
       expect(likeButton).toHaveAttribute("aria-pressed", "false");
     });
 
@@ -77,7 +81,9 @@ describe("PostCard", () => {
       // `aria-label`, content wins over `title` for the accessible name and
       // the link would announce as a naked number. This is the case the
       // source comment on the signed-in reply link exists to prevent.
-      const replyLink = screen.getByRole("link", { name: m.reply_to_post() });
+      const replyLink = screen.getByRole("link", {
+        name: m.reply_to_post({ count: String(post.replyCount) }),
+      });
       expect(replyLink).toHaveAttribute("href", `/post/${post.id}`);
     });
   });
@@ -91,7 +97,9 @@ describe("PostCard", () => {
       // Both would point at the page already open, so neither is a link —
       // the reply count is a <span> with no accessible name of its own.
       expect(screen.getByText("7")).toBeInTheDocument();
-      expect(screen.queryByRole("link", { name: m.reply_to_post() })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: m.reply_to_post({ count: String(post.replyCount) }) }),
+      ).not.toBeInTheDocument();
     });
   });
 

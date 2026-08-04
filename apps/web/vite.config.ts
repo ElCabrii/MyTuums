@@ -58,6 +58,25 @@ export default defineConfig({
     // weight-0, so no score impact). The maps themselves work: DevTools
     // fetches them on demand with no such budget.
     sourcemap: true,
+    // The two heavy, rarely-changing runtime layers get their own chunks so a
+    // cache-busting release of app code doesn't force re-downloads of them, and
+    // so neither ends up duplicated across the lazy component chunks. The rest
+    // of the graph stays with Vite's default splitter.
+    //
+    // Only packages the web app declares directly are listed: Rollup resolves
+    // these entries from the app root, and under pnpm's strict node_modules the
+    // router's own transitive deps (`@tanstack/history`, `@tanstack/router-core`,
+    // `@tanstack/react-store`) are not linked there. That's fine — nothing in
+    // the graph imports them outside `@tanstack/react-router`, so Rollup folds
+    // them into the router-vendor chunk on its own.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "react-vendor": ["react", "react-dom", "react-dom/client"],
+          "router-vendor": ["@tanstack/react-router"],
+        },
+      },
+    },
   },
   server: {
     proxy: {
