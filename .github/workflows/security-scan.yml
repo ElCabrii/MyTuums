@@ -1,0 +1,93 @@
+name: Security scan
+
+on:
+  # Weekly baseline scan of the whole tree. PR-scoped diff scans are a
+  # follow-up (see the plan in the PR description): this job exists first to
+  # calibrate the scanner's noise on this repo and to anchor the
+  # `scans match`/`compare` baselines those PR scans diff against. Schedules
+  # only fire on the default branch, so workflow_dispatch exists for ad-hoc
+  # runs without waiting for Monday.
+  schedule:
+    - cron: "17 3 * * 1" # Monday 03:17 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # upload-sarif writes alerts to the Security > Code scanning tab.
+  security-events: write
+
+jobs:
+  security-scan:
+    name: Weekly security scan (cyberseek / DeepSeek)
+    runs-on: ubuntu-latest
+    # Spend bound: --max-cost is NOT usable with the DeepSeek model — the
+    # scanner's cost table only prices the gpt-5.6 family and refuses any
+    # other model at preflight — so the job timeout is the guardrail instead.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      # The DeepSeek provider lives in the ElCabrii fork, not on npm, and the
+      # fork's repo root has no package.json, so CI builds the SDK from source
+      # and runs it via its launcher (no global install needed).
+      - name: Check out the DeepSeek-enabled scanner fork
+        uses: actions/checkout@v4
+        with:
+          repository: ElCabrii/codex-security
+          ref: main
+          path: codex-security
+
+      # The fork is pinned to pnpm 11 (packageManager in sdk/typescript) while
+      # this repo pins pnpm 10 — be explicit so the fork's lockfile is read by
+      # the right pnpm. No `cache: pnpm` on setup-node: this job never installs
+      # this repo's own dependencies.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build the SDK from source
+        working-directory: codex-security/sdk/typescript
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      # `cyberseek` is the fork's launcher: it injects --provider deepseek and
+      # --model deepseek-v4-flash unless given. Headless auth: with
+      # DEEPSEEK_API_KEY set and no TTY it picks API-key auth with no prompt.
+      # Exit codes: 0 clean, 1 = findings at/above --fail-on-severity, 2 =
+      # incomplete coverage or hard failure — the job goes red either way,
+      # which for a scheduled run is the alert itself.
+      - name: Scan the repository
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          node codex-security/sdk/typescript/bin/cyberseek.mjs scan . \
+            --output-dir "$RUNNER_TEMP/scan-output" \
+            --fail-on-severity high \
+            --json
+
+      # The scan auto-exports exports/results.sarif on finalize. Upload even on
+      # failure (that is exactly when we want the alert); skip when a hard
+      # crash never produced one.
+      - name: Check for SARIF output
+        id: sarif
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/scan-output/exports/results.sarif" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload SARIF to code scanning
+        if: always() && steps.sarif.outputs.exists == 'true'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ runner.temp }}/scan-output/exports/results.sarif
