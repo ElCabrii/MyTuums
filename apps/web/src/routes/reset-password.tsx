@@ -214,7 +214,7 @@ function ResetPasswordPage() {
             </form>
 
             <div className="text-center text-xs text-muted-foreground pt-2 border-t border-border/40">
-              <Link to="/login" className="font-medium text-primary hover:underline">
+              <Link to="/login" className="font-medium text-link hover:underline">
                 {m.auth_forgot_back_to_login()}
               </Link>
             </div>

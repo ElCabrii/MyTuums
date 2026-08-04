@@ -39,7 +39,13 @@ export function Header() {
             pushing sign-in off-screen and making the page scroll sideways. */}
         <div className="flex items-center gap-6 min-w-0">
           <Link to="/" className="flex items-center gap-2 font-bold text-xl tracking-tight text-primary min-w-0">
-            <img src="/mytuums.svg" alt={m.app_logo_alt()} className="h-7 w-auto shrink-0" />
+            <img
+              src="/mytuums.svg"
+              alt={m.app_logo_alt()}
+              width={2048}
+              height={2048}
+              className="h-7 w-auto shrink-0"
+            />
             <span className="truncate">MyTuums</span>
           </Link>
           <nav className="hidden md:flex items-center gap-1">

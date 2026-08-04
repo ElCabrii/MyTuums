@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { PassThrough } from "node:stream";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createStaticFileHandler, noStaticFiles } from "./static-files.js";
 
@@ -39,11 +40,24 @@ function resStub() {
     },
   });
 
-  return { res: res as unknown as ServerResponse, calls, body: () => Buffer.concat(chunks).toString() };
+  return {
+    res: res as unknown as ServerResponse,
+    calls,
+    body: () => Buffer.concat(chunks).toString(),
+    // Raw bytes, for the compression tests: `body()` runs the bytes through
+    // `toString()`, which is right for text fixtures but corrupts a gzip or
+    // brotli body irreversibly (invalid UTF-8 sequences become U+FFFD).
+    bodyBuffer: () => Buffer.concat(chunks),
+  };
 }
 
-const req = (url: string, method = "GET", accept = "text/html"): IncomingMessage =>
-  ({ url, method, headers: { accept } }) as unknown as IncomingMessage;
+const req = (
+  url: string,
+  method = "GET",
+  accept = "text/html",
+  extraHeaders: Record<string, string> = {},
+): IncomingMessage =>
+  ({ url, method, headers: { accept, ...extraHeaders } }) as unknown as IncomingMessage;
 
 describe("noStaticFiles", () => {
   it("never serves — the dev configuration, where Vite owns the app", async () => {
@@ -142,5 +156,41 @@ describe("createStaticFileHandler", () => {
   it("serves nothing when the directory does not exist", async () => {
     const serve = createStaticFileHandler(path.join(root, "does-not-exist"));
     await expect(serve(req("/"), resStub().res)).resolves.toEqual({ served: false });
+  });
+});
+
+describe("compression", () => {
+  it("serves gzip when the client accepts it, plus a Vary header", async () => {
+    const { res, calls, bodyBuffer } = resStub();
+
+    await expect(
+      createStaticFileHandler(root)(req("/assets/index-abc123.js", "GET", "*/*", { "accept-encoding": "gzip" }), res),
+    ).resolves.toEqual({ served: true });
+
+    expect(calls.headers["Content-Encoding"]).toBe("gzip");
+    expect(calls.headers["Vary"]).toBe("Accept-Encoding");
+    expect(gunzipSync(bodyBuffer()).toString()).toBe("console.log(1)");
+  });
+
+  it("prefers brotli over gzip when both are offered", async () => {
+    const { res, calls, bodyBuffer } = resStub();
+
+    await expect(
+      createStaticFileHandler(root)(req("/assets/index-abc123.js", "GET", "*/*", { "accept-encoding": "gzip, br" }), res),
+    ).resolves.toEqual({ served: true });
+
+    expect(calls.headers["Content-Encoding"]).toBe("br");
+    expect(brotliDecompressSync(bodyBuffer()).toString()).toBe("console.log(1)");
+  });
+
+  it("honours an explicit q=0 refusal rather than compressing anyway", async () => {
+    const { res, calls, body } = resStub();
+
+    await expect(
+      createStaticFileHandler(root)(req("/assets/index-abc123.js", "GET", "*/*", { "accept-encoding": "gzip;q=0, br;q=0" }), res),
+    ).resolves.toEqual({ served: true });
+
+    expect(calls.headers["Content-Encoding"]).toBeUndefined();
+    expect(body()).toBe("console.log(1)");
   });
 });

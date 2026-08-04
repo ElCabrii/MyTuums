@@ -40,6 +40,25 @@ export interface RequestHandlerDeps {
 const MEDIA_PREFIX = "/media/";
 
 /**
+ * The session cookie BetterAuth sets. Hardcoded rather than imported from
+ * `@my-tuums/auth` — this module is deliberately free of that dependency (its
+ * unit tests stand in for the auth handler) — and packages/auth never
+ * overrides the default name. If the upstream default ever changes, the worst
+ * case is that the redirect below stops firing: the app's own
+ * `useRequireSignedIn` gate still covers the same ground client-side, so this
+ * is an optimization with a safe failure mode, not a security control.
+ */
+const SESSION_COOKIE_NAME = "better-auth.session_token";
+
+function hasSessionCookie(cookieHeader: string | undefined): boolean {
+  return (
+    cookieHeader
+      ?.split(";")
+      .some((part) => part.trim().startsWith(`${SESSION_COOKIE_NAME}=`)) ?? false
+  );
+}
+
+/**
  * The path of a request, without the query string.
  *
  * `req.url` is a raw target, so it carries `?...` and is percent-encoded. The
@@ -94,6 +113,22 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ status: "error", reason: "database unreachable" }));
         }
+        return;
+      }
+
+      // A visitor with no session cookie at all is signed out, and a signed-out
+      // visitor to `/` is about to be redirected to `/login` by
+      // `useRequireSignedIn` — but only after the bundle downloads, the splash
+      // clears and the first `/get-session` resolves, with the home page
+      // mounting and firing its feed query in between. That whole round trip is
+      // wasted work the server can skip, and the redirect target is identical
+      // (`?redirect=%2F` included). A visitor whose cookie is present but stale
+      // falls through to the app, whose own gate makes the same decision it
+      // always has — so this only ever removes work, never changes what a
+      // signed-out visitor ends up seeing.
+      if (req.url === "/" && req.method === "GET" && !hasSessionCookie(req.headers.cookie)) {
+        res.writeHead(302, { Location: "/login?redirect=%2F" });
+        res.end();
         return;
       }
 

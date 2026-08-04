@@ -197,7 +197,7 @@ function TwoFactorPage() {
         </div>
 
         <div className="text-center text-xs text-muted-foreground">
-          <Link to="/login" className="font-medium text-primary hover:underline">
+          <Link to="/login" className="font-medium text-link hover:underline">
             {m.twofa_back_to_login()}
           </Link>
         </div>

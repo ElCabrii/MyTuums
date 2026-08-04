@@ -19,11 +19,14 @@
     "docker:down": "docker compose down",
     "db:generate": "turbo run db:generate",
     "db:push": "turbo run db:push",
-    "db:test:setup": "pnpm --filter @my-tuums/db db:test:setup"
+    "db:test:setup": "pnpm --filter @my-tuums/db db:test:setup",
+    "lighthouse": "lighthouse http://localhost:3001/ --output=json --output-path=lighthouse-reports/mobile.json --chrome-flags=\"--headless=new\" --quiet",
+    "lighthouse:desktop": "lighthouse http://localhost:3001/ --preset=desktop --output=json --output-path=lighthouse-reports/desktop.json --chrome-flags=\"--headless=new\" --quiet"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.8.0",
+    "lighthouse": "^13.4.1",
     "turbo": "^2.10.7",
     "typescript-eslint": "^8.65.0"
   }
