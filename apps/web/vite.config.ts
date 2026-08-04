@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
+import { preloadInjectionPlugin } from "./build-inject-plugin";
 import path from "node:path";
 
 // Where /rpc and /api/auth are proxied in dev. Overridable so the E2E suite
@@ -31,6 +32,10 @@ export default defineConfig({
       outdir: "./src/paraglide",
       emitTsDeclarations: true,
     }),
+    // Post-build HTML surgery: modulepreload for the lazy login chunk, font
+    // preload, non-blocking stylesheet. `enforce: "post"` inside the plugin
+    // is what lets it see the final index.html — see build-inject-plugin.ts.
+    preloadInjectionPlugin(),
   ],
   resolve: {
     alias: {
