@@ -4,6 +4,7 @@ import type { Readable } from "node:stream";
 import path from "node:path";
 import { createBrotliCompress, createGzip } from "node:zlib";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { bestEncoding, type Compression } from "./compression.js";
 
 /**
  * Serving the built web app from the same origin as the API.
@@ -58,15 +59,13 @@ const COMPRESSIBLE_EXTENSIONS = new Set([
   ".map",
 ]);
 
-type Compression = "br" | "gzip" | null;
-
 /**
  * The best compression this client accepts, or `null` for identity.
  *
- * Reads the q-values properly rather than substring-matching: `gzip;q=0` means
- * "gzip refused" even though the token is present, and a client that names only
- * one encoding should not get the other. Ties (the common `br, gzip` case) go
- * to brotli, which wins by a comfortable margin on text.
+ * The q-value parsing itself is in `compression.ts` (shared with the response
+ * decorator, which compresses JSON bodies); here it is gated on the file
+ * extension, because images and fonts are already compressed by their own
+ * formats and re-compressing them costs CPU for nothing.
  *
  * This is the byte-level partner of the cache headers below: without
  * compression the immutable assets are downloaded raw, and on the slowest
@@ -75,21 +74,7 @@ type Compression = "br" | "gzip" | null;
 function preferredEncoding(acceptEncoding: string | undefined, file: string): Compression {
   const ext = path.extname(file).toLowerCase();
   if (!COMPRESSIBLE_EXTENSIONS.has(ext)) return null;
-  if (!acceptEncoding) return null;
-
-  let brotli = 0;
-  let gzip = 0;
-  for (const part of acceptEncoding.split(",")) {
-    const [name, ...params] = part.trim().split(";");
-    const qParam = params.map((p) => p.trim()).find((p) => p.startsWith("q="));
-    const q = qParam ? Number.parseFloat(qParam.slice(2)) : 1;
-    const value = Number.isFinite(q) ? q : 0;
-    if (name.trim() === "br" && value > brotli) brotli = value;
-    if (name.trim() === "gzip" && value > gzip) gzip = value;
-  }
-
-  if (brotli <= 0 && gzip <= 0) return null;
-  return brotli >= gzip ? "br" : "gzip";
+  return bestEncoding(acceptEncoding);
 }
 
 export type StaticFileHandler = (

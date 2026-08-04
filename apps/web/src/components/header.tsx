@@ -38,7 +38,7 @@ export function Header() {
             that yields, truncating its wordmark as a last resort instead of
             pushing sign-in off-screen and making the page scroll sideways. */}
         <div className="flex items-center gap-6 min-w-0">
-          <Link to="/" className="flex items-center gap-2 font-bold text-xl tracking-tight text-primary min-w-0">
+          <Link to="/" className="flex items-center gap-2 font-bold text-xl tracking-tight text-primary dark:text-foreground min-w-0">
             <img
               src="/mytuums.svg"
               alt={m.app_logo_alt()}

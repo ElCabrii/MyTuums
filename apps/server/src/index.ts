@@ -2,6 +2,7 @@ import { parseEnv } from "./env.js";
 import { resolveClientIp } from "./client-ip.js";
 import { createRequestHandler } from "./request-handler.js";
 import { createStaticFileHandler, noStaticFiles } from "./static-files.js";
+import { decorateResponse } from "./response-decorators.js";
 import { createServer } from "node:http";
 import { RPCHandler } from "@orpc/server/node";
 import { CORSPlugin, SimpleCsrfProtectionHandlerPlugin } from "@orpc/server/plugins";
@@ -82,8 +83,14 @@ const handleRequest = createRequestHandler({
 // work — `handleRequest`'s own try/catch still converts every failure into a
 // response, and the `unhandledRejection` handler further down is the
 // backstop if something ever escapes it anyway.
+// `decorateResponse` is the one place every response — health, auth, rpc,
+// media, static, 404 — gets its security headers and, when the content is
+// JSON and the body is big enough, gzip/brotli compression (see
+// ./response-decorators.ts). It wraps the `res` before any handler sees it,
+// so nothing below has to know it exists; handlers that set a header
+// themselves keep their value (inner wins).
 const server = createServer((req, res) => {
-  void handleRequest(req, res);
+  void handleRequest(req, decorateResponse(req, res));
 });
 
 /**
