@@ -38,8 +38,7 @@ test.describe("password reset", () => {
     await expect(page.getByRole("heading", { name: "Password updated" })).toBeVisible();
 
     // The success button signs the (nonexistent) stale session out first, then
-    // lands on /login; scoped to <main> because the header renders its own
-    // "Log in" button with the identical accessible name.
+    // lands on /login.
     await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
     await page.getByLabel("Username or Email").fill(user.email);
     await page.getByLabel("Password", { exact: true }).fill("fresh-e2e-password-1");

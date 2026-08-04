@@ -6,9 +6,79 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MyTuums — Social Media for Gamers</title>
     <meta name="description" content="MyTuums is the social media platform built for gamers." />
+    <style>
+      /* The cold-load splash, static on purpose. It lives here rather than in
+         React so it paints on the very first frame — before the bundle has
+         even parsed, let alone fetched the session. React never renders it:
+         `sessionSettledEffect` (src/atoms/session.ts) removes this element the
+         moment the first `/get-session` lands, and `__root.tsx` renders
+         nothing behind it until then.
+
+         The colours are hardcoded from the tokens in src/index.css (the
+         `light` and `.dark` blocks), because the bundle's CSS has not loaded
+         yet. `light-dark()` follows the OS scheme rather than the app's stored
+         theme preference — the splash must work before any JS can read
+         localStorage — and the first declaration is the fallback for browsers
+         without `light-dark()`.
+
+         "Loading" is the one string the i18n system cannot reach: Paraglide
+         compiles into the bundle, and this markup ships before it. */
+      #app-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.5rem;
+        color-scheme: light dark;
+        background: oklch(1 0 0);
+        background: light-dark(oklch(1 0 0), oklch(0.141 0.005 285.823));
+      }
+
+      #app-splash img {
+        height: 3.5rem;
+        width: auto;
+      }
+
+      #app-splash .mytuums-splash-spinner {
+        width: 1.5rem;
+        height: 1.5rem;
+        border-radius: 9999px;
+        border: 3px solid;
+        border-color: light-dark(oklch(0.525 0.223 3.958 / 0.25), oklch(0.459 0.187 3.815 / 0.25));
+        border-top-color: light-dark(oklch(0.525 0.223 3.958), oklch(0.459 0.187 3.815));
+        animation: mytuums-spin 1s linear infinite;
+      }
+
+      @keyframes mytuums-spin {
+        to { transform: rotate(360deg); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #app-splash .mytuums-splash-spinner {
+          animation: none;
+        }
+      }
+
+      #app-splash .mytuums-splash-sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="app-splash" role="status" aria-busy="true">
+      <img src="/mytuums.svg" alt="MyTuums logo" />
+      <div class="mytuums-splash-spinner" aria-hidden="true"></div>
+      <span class="mytuums-splash-sr">Loading</span>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

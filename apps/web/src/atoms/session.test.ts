@@ -247,3 +247,82 @@ describe("needsDobAtom / needsCompletionAtom", () => {
     expect(store.get(needsCompletionAtom)).toBe(false);
   });
 });
+
+/**
+ * `sessionSettledAtom` is the latch behind the app splash: false exactly
+ * while the cold-load `/get-session` is in flight, true from then on. Each
+ * test needs a FRESH latch — it is module state with no reset, and the whole
+ * point is that it never flips back — so each one `vi.resetModules()`s and
+ * re-imports `atoms/session`, the same trick the "seeded from
+ * sessionStore.get()" test at the top of this file uses. The `@/lib/auth-client`
+ * mock survives the reset, so `push()` still drives every instance.
+ *
+ * `store.sub(effect, ...)` is what mounts an `atomEffect` outside React, the
+ * same way `theme.test.ts` mounts `themeClassEffect`.
+ *
+ * The effect's second job — removing the static splash from index.html — is
+ * asserted through a `#app-splash` element created in jsdom, which mirrors
+ * what the real index.html ships.
+ */
+function mountSplash(): HTMLElement {
+  // Idempotent so a splash left behind by an earlier test can't shadow the
+  // one this test asserts on (`getElementById` returns the first match).
+  document.getElementById("app-splash")?.remove();
+  const splash = document.createElement("div");
+  splash.id = "app-splash";
+  document.body.appendChild(splash);
+  return splash;
+}
+
+describe("sessionSettledAtom", () => {
+  it("is false while the first /get-session is still in flight", async () => {
+    push({ data: null, isPending: true });
+    vi.resetModules();
+    const fresh = await import("@/atoms/session");
+
+    const store = createStore();
+    const splash = mountSplash();
+    const unsub = store.sub(fresh.sessionSettledEffect, () => {});
+    expect(store.get(fresh.sessionSettledAtom)).toBe(false);
+    // Still pending — the splash must stay on screen.
+    expect(document.getElementById("app-splash")).toBe(splash);
+    unsub();
+  });
+
+  it("latches true once the session resolves — signed out or in, either way", async () => {
+    push(signedOut);
+    vi.resetModules();
+    const fresh = await import("@/atoms/session");
+
+    const store = createStore();
+    const splash = mountSplash();
+    const unsub = store.sub(fresh.sessionSettledEffect, () => {});
+    expect(store.get(fresh.sessionSettledAtom)).toBe(true);
+    // The same moment the latch trips, the static splash is removed.
+    expect(document.getElementById("app-splash")).toBeNull();
+    unsub();
+    splash.remove();
+  });
+
+  it("stays true on a later pending — the sign-in refetch must not flash a splash", async () => {
+    // The scenario the latch exists for: signing in flips `$sessionSignal`,
+    // which refetches the session while `data` is still null, so
+    // `sessionPendingAtom` reads true AGAIN after it has already resolved
+    // once. A splash keyed on the raw flag would drop over the login form.
+    push(signedOut);
+    vi.resetModules();
+    const fresh = await import("@/atoms/session");
+
+    const store = createStore();
+    const splash = mountSplash();
+    const unsub = store.sub(fresh.sessionSettledEffect, () => {});
+    expect(store.get(fresh.sessionSettledAtom)).toBe(true);
+
+    push({ data: null, isPending: true });
+    expect(store.get(fresh.sessionSettledAtom)).toBe(true);
+    // And it is not re-added — the element is gone for good.
+    expect(document.getElementById("app-splash")).toBeNull();
+    unsub();
+    splash.remove();
+  });
+});

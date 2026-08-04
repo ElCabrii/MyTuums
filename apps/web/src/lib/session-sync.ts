@@ -1,4 +1,4 @@
-import { authClient, sessionStore } from "@/lib/auth-client";
+import { sessionStore } from "@/lib/auth-client";
 
 type SessionValue = ReturnType<typeof sessionStore.get>;
 
@@ -81,31 +81,28 @@ export const waitForCompletion = (): Promise<void> =>
  * nothing to outlast: `user.uploadImage` writes the row with Drizzle, straight
  * past Better Auth, so the client has no idea anything changed.
  *
- * **`authClient.getSession()` is not enough, and that is not obvious.** It does
- * fetch, and it does resolve with fresh data — but it does not touch the
- * nanostore, so `sessionAtom` and everything derived from it stay exactly as
- * stale as before. The store is only refetched when `$sessionSignal` flips, and
- * the client flips it for a fixed list of paths (`/update-user`, `/sign-in/*`,
- * `/change-password`, …) that `/get-session` is deliberately not on — see
- * `atomListeners` in better-auth's `client/config.mjs`. Calling `getSession`
- * and waiting for the store to change therefore waits forever, which showed up
- * as an avatar that uploaded successfully and never appeared.
+ * The refetch goes through the store's own `refetch` (the atom's `fetchSession`,
+ * better-auth's `client/session-atom.mjs`) — the code path that actually writes
+ * the nanostore, which `sessionAtom` mirrors. **`authClient.getSession()` is
+ * deliberately not used, and that is not obvious:** it fetches and resolves
+ * with fresh data, but it does not touch the store, so `sessionAtom` and
+ * everything derived from it stay exactly as stale as before. The store is
+ * only refetched when `$sessionSignal` flips, and the client flips it for a
+ * fixed list of paths (`/update-user`, `/sign-in/*`, `/change-password`, …)
+ * that `/get-session` is deliberately not on — see `atomListeners` in
+ * better-auth's `client/config.mjs`. Calling `getSession` and waiting for the
+ * store to change therefore waits forever, which showed up as an avatar that
+ * uploaded successfully and never appeared.
  *
- * So this notifies the signal instead. `session-refresh.mjs` listens on it and
- * calls the store's own `fetchSession`, which is the code path that actually
- * writes the atom.
+ * `disableCookieCache: true` is a no-op today — `session.cookieCache` is
+ * deliberately off, because the cached `get-session` path serves without
+ * re-validating the session token against the database and that breaks
+ * `revokeSessionsOnPasswordReset` (see packages/auth/src/index.ts) — but it
+ * is load-bearing for the day someone enables it: a Drizzle write is exactly
+ * the case that cookie does not know about, and this is the one client call
+ * that must read the row rather than the cache (`api/routes/session.mjs`
+ * gates the cookie path on `ctx.query?.disableCookieCache`). Keep it.
  */
 export async function refreshSession(): Promise<void> {
-  const before = sessionStore.get().data;
-
-  authClient.$store.notify("$sessionSignal");
-
-  // Object *identity*, not any particular field, so this stays correct whatever
-  // the caller changed — and it is exact rather than approximate: the store
-  // holds one parsed response object, so an unchanged store yields the very
-  // reference captured above and the predicate is false, while any refetch
-  // yields a freshly parsed one and it is true. Comparing a field like
-  // `updatedAt` would instead be comparing two Dates, where equal instants are
-  // still distinct objects.
-  await waitForSession((value) => value.data !== before);
+  await sessionStore.get().refetch({ query: { disableCookieCache: true } });
 }

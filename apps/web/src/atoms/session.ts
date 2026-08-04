@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import { atomEffect } from "jotai-effect";
 import { sessionStore } from "@/lib/auth-client";
 import { handleOf } from "@/lib/user";
 
@@ -36,6 +37,43 @@ export const viewerIdAtom = atom((get) => get(viewerAtom)?.id);
 export const viewerHandleAtom = atom((get) => handleOf(get(viewerAtom)));
 
 export const sessionPendingAtom = atom((get) => get(sessionAtom).isPending);
+
+/**
+ * The latch behind the app's splash screen: "the first `/get-session` has
+ * landed". `false` exactly while the cold-load fetch is in flight, `true`
+ * from then on — and it never flips back.
+ *
+ * The latch exists because `sessionPendingAtom` is the wrong key for a
+ * splash, even though it reads "pending" at cold load. `fetchSession` sets
+ * `isPending: current.data === null` on EVERY fetch (better-auth's
+ * client/session-atom.mjs), and a successful `/sign-in/email` flips the
+ * `$sessionSignal` → a refetch while `data` is still null → `isPending` true
+ * again. Keying a full-screen splash on the raw flag would drop it over the
+ * login form mid-sign-in. So this latches on the *first* resolution and
+ * stays put; it is not reset on sign-out, because one splash per document
+ * load is the whole point.
+ *
+ * A failed fetch is safe either way: the client only flips `$sessionSignal`
+ * from `onSuccess` (client/proxy.mjs), and an errored cold load settles the
+ * latch through the `catch` path that still clears `isPending`.
+ *
+ * A latch is state, and in this app state that outlives a render lives in an
+ * atom — but it cannot be a plain derived atom (nothing would ever set it
+ * true), so it is an `atomEffect` per the codebase rule that reactions to
+ * atom changes belong in effects, not `useState`.
+ */
+const sessionSettledStateAtom = atom(false);
+
+export const sessionSettledEffect = atomEffect((get, set) => {
+  if (get(sessionPendingAtom)) return;
+  set(sessionSettledStateAtom, true);
+  // The splash is static markup in index.html so it paints before the bundle
+  // loads; this is what removes it the moment the first session lands. `?.`
+  // — nothing to remove in tests, or on a second run of the effect.
+  document.getElementById("app-splash")?.remove();
+});
+
+export const sessionSettledAtom = atom((get) => get(sessionSettledStateAtom));
 
 /**
  * A signed-in account that has no handle yet — the state an OAuth sign-up

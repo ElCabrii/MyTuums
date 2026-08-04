@@ -49,6 +49,11 @@ test.describe("accessibility", () => {
     await expectNoSeriousViolations(signedOutPage);
   });
 
+  test("the 404 page has no serious or critical violations", async ({ page }) => {
+    await page.goto("/this-page-does-not-exist");
+    await expectNoSeriousViolations(page);
+  });
+
   test("a profile page has no serious or critical violations", async ({ page }) => {
     await page.goto(`/@${ALICE.username}`);
     await expectNoSeriousViolations(page);

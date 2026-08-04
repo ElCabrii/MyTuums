@@ -98,6 +98,8 @@ interface TestSessionValue {
   data: { user: TestSessionUser } | null;
   isPending: boolean;
   error: null;
+  /** The store value's own refetch — what `lib/session-sync.ts`'s `refreshSession` calls. */
+  refetch: (queryParams?: unknown) => Promise<void>;
 }
 
 /**
@@ -118,7 +120,12 @@ interface TestSessionValue {
 // read "resolved signed-out" here, a signed-in/pending test would redirect
 // before the immediate-fire subscription below delivers the real value. The
 // same trap is documented in `session.test.ts`.
-let currentSession: TestSessionValue = { data: null, isPending: true, error: null };
+let currentSession: TestSessionValue = {
+  data: null,
+  isPending: true,
+  error: null,
+  refetch: vi.fn(() => Promise.resolve()),
+};
 const sessionListeners = new Set<(value: TestSessionValue) => void>();
 
 vi.mock("@/lib/auth-client", () => ({
@@ -163,11 +170,6 @@ vi.mock("@/lib/auth-client", () => ({
     // its absence would be a "cannot read properties of undefined" at click
     // time rather than a type error.
     changePassword: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-    // `lib/session-sync.ts`'s `refreshSession()` flips this signal after an
-    // image upload — the upload writes the user row past Better Auth, so the
-    // store has nothing else to tell it anything changed. `getSession` alone
-    // would NOT do it (see the comment there).
-    $store: { notify: vi.fn() },
     listAccounts: vi.fn(() => Promise.resolve({ data: [], error: null })),
     linkSocial: vi.fn(() => Promise.resolve({ data: {}, error: null })),
     unlinkAccount: vi.fn(() => Promise.resolve({ data: {}, error: null })),
@@ -219,7 +221,7 @@ function setTestSession(next: TestSessionValue): void {
 }
 
 function signedOutSession(): TestSessionValue {
-  return { data: null, isPending: false, error: null };
+  return { data: null, isPending: false, error: null, refetch: vi.fn(() => Promise.resolve()) };
 }
 
 function signedInSession(user: Partial<TestSessionUser> = {}): TestSessionValue {
@@ -248,6 +250,7 @@ function signedInSession(user: Partial<TestSessionUser> = {}): TestSessionValue 
     },
     isPending: false,
     error: null,
+    refetch: vi.fn(() => Promise.resolve()),
   };
 }
 
@@ -255,7 +258,12 @@ function pendingSession(): TestSessionValue {
   // The cold-load state: BetterAuth's first /get-session still in flight.
   // `sessionPendingAtom` reads true and `isSignedInAtom` reads false — the
   // exact combination the signed-in gate must not redirect on.
-  return { data: null, isPending: true, error: null };
+  return {
+    data: null,
+    isPending: true,
+    error: null,
+    refetch: vi.fn(() => Promise.resolve()),
+  };
 }
 
 // ---------------------------------------------------------------------------
