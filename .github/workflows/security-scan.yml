@@ -41,13 +41,14 @@ jobs:
           ref: main
           path: codex-security
 
-      # The fork is pinned to pnpm 11 (packageManager in sdk/typescript) while
-      # this repo pins pnpm 10 — be explicit so the fork's lockfile is read by
-      # the right pnpm. No `cache: pnpm` on setup-node: this job never installs
-      # this repo's own dependencies.
+      # The fork is pinned to pnpm 11 while this repo pins pnpm 10 — point the
+      # action at the fork's package.json so it installs pnpm@11.9.0 from the
+      # packageManager field. (Also setting `version:` would conflict with this
+      # repo's own packageManager and fail the step.) No `cache: pnpm` on
+      # setup-node: this job never installs this repo's own dependencies.
       - uses: pnpm/action-setup@v4
         with:
-          version: 11
+          package_json_file: codex-security/sdk/typescript/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
