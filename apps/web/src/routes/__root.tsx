@@ -2,13 +2,22 @@ import { createRootRoute, Outlet } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
+import { NotFoundPage } from "@/components/not-found-page";
 import { themeClassEffect } from "@/atoms/theme";
 import { localeDocumentEffect, localePreferenceEffect } from "@/atoms/locale";
+import {
+  isSignedInAtom,
+  sessionSettledAtom,
+  sessionSettledEffect,
+} from "@/atoms/session";
 import { useRequireHandle } from "@/hooks/use-require-handle";
 import { useRequireSignedIn } from "@/hooks/use-require-signed-in";
 
 export const Route = createRootRoute({
   component: RootLayout,
+  // Rendered through this layout's own <Outlet/>, so an unmatched URL gets
+  // the normal header/footer chrome instead of the router's bare default.
+  notFoundComponent: NotFoundPage,
 });
 
 function RootLayout() {
@@ -24,6 +33,11 @@ function RootLayout() {
   // document.
   useAtomValue(localePreferenceEffect);
 
+  // Latches `sessionSettledAtom` on the first /get-session landing. Mounted
+  // here (before the splash branch below) so the latch is alive even while
+  // the splash is the only thing on screen.
+  useAtomValue(sessionSettledEffect);
+
   // Here rather than per-route so no future route can forget it: an OAuth
   // sign-up with no handle yet is sent to /welcome from wherever it lands.
   useRequireHandle();
@@ -32,9 +46,27 @@ function RootLayout() {
   // to /login with their destination preserved in ?redirect=.
   useRequireSignedIn();
 
+  // All reads live above the splash branch below — a hook called after a
+  // conditional return would be a rules-of-hooks violation the moment the
+  // splash unmounts.
+  const settled = useAtomValue(sessionSettledAtom);
+  const signedIn = useAtomValue(isSignedInAtom);
+
+  // While the first /get-session is in flight this renders nothing: the
+  // splash is static markup in index.html (`#app-splash`), already painted
+  // before the bundle loaded and removed by `sessionSettledEffect` the moment
+  // the session lands. `<Outlet/>` not rendering means no route fires its
+  // queries against a session that is about to change under it — this is the
+  // fix for the signed-out flash on cold load, see sessionSettledAtom.
+  if (!settled) return null;
+
+  // The header renders only for a real session — never the Log in / Register
+  // chrome. Signed-out visitors (on /login and friends) get a bare page; see
+  // header.tsx, which narrows `viewerAtom` rather than branching on it.
+
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground antialiased">
-      <Header />
+      {signedIn && <Header />}
       <main className="flex-1">
         <Outlet />
       </main>

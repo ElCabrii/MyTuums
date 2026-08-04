@@ -23,9 +23,6 @@ test.describe("registration", () => {
     // The 15+ rule is part of a valid registration — an under-15 date is
     // rejected below.
     await page.getByLabel("Date of Birth").fill("1995-01-01");
-    // Scoped to <main>: the header nav renders its own "Register" button
-    // (signed out) with the identical accessible name, so an unscoped query
-    // matches two elements.
     await page.getByRole("main").getByRole("button", { name: "Register" }).click();
 
     // useRedirectWhenSignedIn is the entire post-signup redirect — signUpAtom
@@ -64,9 +61,6 @@ test.describe("registration", () => {
     // A valid date of birth keeps native `required` from blocking submission
     // — the point of this test is the ordering of the *handler's* rules.
     await page.getByLabel("Date of Birth").fill("1995-01-01");
-    // Scoped to <main>: the header nav renders its own "Register" button
-    // (signed out) with the identical accessible name, so an unscoped query
-    // matches two elements.
     await page.getByRole("main").getByRole("button", { name: "Register" }).click();
 
     const alert = page.getByRole("alert");
@@ -101,9 +95,6 @@ test.describe("login", () => {
     await page.goto("/login");
     await page.getByLabel("Username or Email").fill(ALICE.username);
     await page.getByLabel("Password").fill(ALICE.password);
-    // Scoped to <main>: the header nav renders its own "Log in" button
-    // (signed out) with the identical accessible name, so an unscoped query
-    // matches two elements.
     await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
 
     await expect(page).toHaveURL(new RegExp(`/@${ALICE.username}$`));
@@ -113,9 +104,6 @@ test.describe("login", () => {
     await page.goto("/login");
     await page.getByLabel("Username or Email").fill(ALICE.email);
     await page.getByLabel("Password").fill(ALICE.password);
-    // Scoped to <main>: the header nav renders its own "Log in" button
-    // (signed out) with the identical accessible name, so an unscoped query
-    // matches two elements.
     await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
 
     await expect(page).toHaveURL(new RegExp(`/@${ALICE.username}$`));
@@ -125,9 +113,6 @@ test.describe("login", () => {
     await page.goto("/login");
     await page.getByLabel("Username or Email").fill(ALICE.username);
     await page.getByLabel("Password").fill(ALICE.password);
-    // Scoped to <main>: the header nav renders its own "Log in" button
-    // (signed out) with the identical accessible name, so an unscoped query
-    // matches two elements.
     await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
     await expect(page).toHaveURL(new RegExp(`/@${ALICE.username}$`));
 
@@ -138,13 +123,10 @@ test.describe("login", () => {
 });
 
 test.describe("logout", () => {
-  test("logging out clears the session and the header reflects it", async ({ page }) => {
+  test("logging out clears the session and removes the header", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("Username or Email").fill(ALICE.username);
     await page.getByLabel("Password").fill(ALICE.password);
-    // Scoped to <main>: the header nav renders its own "Log in" button
-    // (signed out) with the identical accessible name, so an unscoped query
-    // matches two elements.
     await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
     await expect(page).toHaveURL(new RegExp(`/@${ALICE.username}$`));
 
@@ -173,9 +155,10 @@ test.describe("logout", () => {
     // intended behaviour, not a bug.
     await expect(page).toHaveURL(/\/login(\?redirect=.*)?$/);
 
-    await expect(
-      page.getByRole("banner").getByRole("button", { name: "Log in" }),
-    ).toBeVisible();
+    // The header only renders for a real session (see __root.tsx), so after
+    // sign-out there is no banner at all — not merely no sign-in buttons in
+    // one. `toBeHidden` also passes when the element does not exist.
+    await expect(page.getByRole("banner")).toBeHidden();
   });
 });
 
@@ -214,5 +197,23 @@ test.describe("signed-in gate", () => {
 
     await page.goto("/terms");
     await expect(page).toHaveURL(/\/terms$/);
+  });
+});
+
+test.describe("cold load", () => {
+  test("the splash is on screen while the first session fetch is pending", async ({ page }) => {
+    // Hold the first /get-session open so the pending window is long enough
+    // to assert into. The splash is static markup in index.html — it must be
+    // on screen from the first paint, before the bundle even mounts. (That it
+    // is REMOVED once the session settles needs no dedicated test: every spec
+    // in this suite interacts with the app past the splash, and the removal
+    // logic itself is pinned by the sessionSettledAtom unit tests.)
+    await page.route("**/api/auth/get-session*", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await route.continue();
+    });
+    await page.goto("/");
+
+    await expect(page.getByRole("status")).toBeVisible();
   });
 });

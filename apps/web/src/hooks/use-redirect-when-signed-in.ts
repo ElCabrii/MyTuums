@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import {
   isSignedInAtom,
@@ -47,6 +47,7 @@ import { sanitizeRedirect } from "@/lib/redirect";
  */
 export function useRedirectWhenSignedIn(redirectFromSearch?: string | null): void {
   const navigate = useNavigate();
+  const router = useRouter();
   const isSignedIn = useAtomValue(isSignedInAtom);
   const handle = useAtomValue(viewerHandleAtom);
   const needsDob = useAtomValue(needsDobAtom);
@@ -54,6 +55,16 @@ export function useRedirectWhenSignedIn(redirectFromSearch?: string | null): voi
 
   useEffect(() => {
     if (!isSignedIn) return;
+
+    // Read imperatively, deliberately NOT through a reactive location
+    // subscription: this effect must fire on session changes only. Subscribing
+    // to the location would re-run it on every navigation, and it would
+    // ping-pong against `useRequireHandle` — profile → /welcome → profile →
+    // … — for sessions that are incomplete (the E2E suite caught exactly
+    // that as a session landing on its profile instead of /welcome). A stale
+    // pathname by a few milliseconds is fine for the self-navigation guard
+    // below.
+    const { pathname } = router.state.location;
 
     // A sign-up that has just completed goes to `/welcome` for the two-factor
     // offer instead of straight to its profile. Ahead of the `?redirect=`
@@ -67,7 +78,12 @@ export function useRedirectWhenSignedIn(redirectFromSearch?: string | null): voi
     // clear the flag, at which point this effect re-runs and falls through to
     // the rules below.
     if (offerTwoFactor) {
-      void navigate({ to: "/welcome", replace: true });
+      // Already on `/welcome`? The offer is what this page is rendering right
+      // now — navigating to the same path would remount the route, and the
+      // unmount resets the page's drafts (`resetHandleClaimAtom` in
+      // atoms/handle-claim.ts), discarding a handle the person has already
+      // typed. The guard matters the same way in the handle-less branch below.
+      if (pathname !== "/welcome") void navigate({ to: "/welcome", replace: true });
       return;
     }
 
@@ -79,13 +95,20 @@ export function useRedirectWhenSignedIn(redirectFromSearch?: string | null): voi
 
     if (handle) {
       void navigate({ to: "/@{$username}", params: { username: handle }, replace: true });
-    } else {
+    } else if (pathname !== "/welcome") {
       // No handle means an OAuth sign-up that never chose one — there is no
       // profile URL to send them to. `/welcome` rather than `/` because home
       // would immediately bounce them here anyway via `useRequireHandle`, and
       // routing through the intermediate page just adds a visible flash of a
-      // feed they cannot yet participate in.
-      void navigate({ to: "/welcome", replace: true });
+      // feed they cannot yet participate in. Skipped when the session is
+      // already there — same remount/cleared-draft reason as the offer branch,
+      // and the E2E suite caught it as a lost fill before a handle claim.
+      //
+      // `.catch(() => {})`: the stub route tree in the component tests has no
+      // `/welcome`, so the navigate rejects there; the real tree never does.
+      // Handled so the rejection can't surface as an unhandled rejection in
+      // the test process.
+      void navigate({ to: "/welcome", replace: true }).catch(() => {});
     }
-  }, [isSignedIn, handle, needsDob, offerTwoFactor, navigate, redirectFromSearch]);
+  }, [isSignedIn, handle, needsDob, offerTwoFactor, navigate, redirectFromSearch, router]);
 }

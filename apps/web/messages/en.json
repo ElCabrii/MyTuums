@@ -260,5 +260,8 @@
   "profile_joined": "Joined {date}",
   "profile_posts_heading": "Posts",
   "profile_own_empty": "You haven't posted anything yet.",
-  "profile_empty": "@{handle} hasn't posted anything yet."
+  "profile_empty": "@{handle} hasn't posted anything yet.",
+
+  "notfound_title": "Page not found",
+  "notfound_body": "This page doesn't exist or has moved."
 }

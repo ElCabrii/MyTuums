@@ -83,12 +83,26 @@ test.describe("handle gate", () => {
 
     // The regression this guards: the header used to branch on `user && handle`
     // and render sign-in buttons to a signed-in person with no handle yet.
+    // Those buttons are gone entirely now (the header only renders for a real
+    // session — see __root.tsx), but the assertions stay as a tripwire.
     await expect(
       page.getByRole("banner").getByRole("button", { name: "Log in" }),
     ).toHaveCount(0);
     await expect(
       page.getByRole("banner").getByRole("button", { name: "Register" }),
     ).toHaveCount(0);
+
+    // The positive half: the header DOES render here (the session exists even
+    // though the handle doesn't), and its avatar links to /welcome — which is
+    // also where useRequireHandle is sending the session, so the chrome and
+    // the redirect agree. `title` is the handleless avatar link's stable
+    // affordance: the avatar has no image (so no `img` role) and its
+    // accessible name is the initials-plus-name concatenation.
+    await expect(page.getByTitle("Finish setting up your account")).toBeVisible();
+    await expect(page.getByTitle("Finish setting up your account")).toHaveAttribute(
+      "href",
+      "/welcome",
+    );
   });
 
   test("still lets them read the legal pages — a gate that hides the terms is its own problem", async ({

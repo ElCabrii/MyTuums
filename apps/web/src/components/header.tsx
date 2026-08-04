@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { MessageSquare, Bell, LogIn, Compass, Home, Search, UserPlus } from "lucide-react";
+import { MessageSquare, Bell, Compass, Home, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ModeToggle } from "@/components/mode-toggle";
@@ -8,11 +8,25 @@ import { viewerAtom, viewerHandleAtom } from "@/atoms/session";
 import { UserAvatar } from "@/components/user-avatar";
 import { m } from "@/paraglide/messages.js";
 
+/**
+ * The signed-in chrome. Rendered by `__root.tsx` only when a session exists,
+ * so it never shows Log in / Register buttons to anyone — the else branch
+ * that used to sit here is gone, and there is deliberately no third view to
+ * reintroduce it. The early return below is not a second gate; it is the
+ * type narrowing that lets the rest of the component read `user` unguarded.
+ *
+ * `/welcome` keeps the header (the session exists, the handle doesn't) — the
+ * avatar links there, and `useRequireHandle` is sending the session there
+ * anyway, so the header agrees with the redirect rather than contradicting
+ * it (see the regression pinned in `e2e/tests/specs/welcome.spec.ts`).
+ */
 export function Header() {
   const user = useAtomValue(viewerAtom);
   const handle = useAtomValue(viewerHandleAtom);
 
-  const nameDisplay = user?.name || user?.displayUsername || user?.username || m.nav_profile();
+  if (!user) return null;
+
+  const nameDisplay = user.name || user.displayUsername || user.username || m.nav_profile();
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -80,57 +94,30 @@ export function Header() {
           
           <ModeToggle />
 
-          {/* Branches on `user` alone, NOT `user && handle`.
-              An OAuth sign-up has no handle until it claims one at /welcome,
-              and the old condition sent that perfectly valid session down the
-              else-branch — rendering "Log in" and "Register" to somebody who
-              was already signed in. The avatar points at /welcome in that
-              window instead, which is also where `useRequireHandle` is sending
-              them, so the header agrees with the redirect rather than
-              contradicting it. */}
-          {user ? (
-            <Link
-              {...(handle
-                ? ({ to: "/@{$username}", params: { username: handle } } as const)
-                : ({ to: "/welcome" } as const))}
-              className="flex items-center gap-2.5 p-1 rounded-full hover:bg-muted/60 transition-colors ml-1"
-              title={handle ? m.user_view_profile({ name: nameDisplay }) : m.welcome_finish_setup()}
-            >
-              <UserAvatar
-                user={user}
-                alt={user.name || m.user_avatar_alt()}
-                className="h-8 w-8 border border-primary/20"
-                fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
-              />
-              <span className="hidden sm:inline text-sm font-medium pr-1 text-foreground max-w-[140px] truncate">
-                {nameDisplay}
-              </span>
-            </Link>
-          ) : (
-            <div className="flex items-center gap-1.5 sm:gap-2 sm:ml-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                nativeButton={false}
-                render={<Link to="/login" className="gap-1.5" />}
-              >
-                {/* Label-only on phones: the icons are decorative here, and
-                    dropping them is what buys the brand wordmark enough room
-                    to render untruncated at 375px. */}
-                <LogIn className="hidden sm:block h-4 w-4" />
-                <span>{m.auth_log_in()}</span>
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                nativeButton={false}
-                render={<Link to="/register" className="gap-1.5" />}
-              >
-                <UserPlus className="hidden sm:block h-4 w-4" />
-                <span>{m.auth_register()}</span>
-              </Button>
-            </div>
-          )}
+          {/* The destination branches on the handle, not on `user` — `user`
+              exists by the early return above. An OAuth sign-up has no handle
+              until it claims one at /welcome: the avatar points there in that
+              window, which is also where `useRequireHandle` is sending the
+              session, so the header agrees with the redirect rather than
+              contradicting it (see the regression pinned in
+              e2e/tests/specs/welcome.spec.ts). */}
+          <Link
+            {...(handle
+              ? ({ to: "/@{$username}", params: { username: handle } } as const)
+              : ({ to: "/welcome" } as const))}
+            className="flex items-center gap-2.5 p-1 rounded-full hover:bg-muted/60 transition-colors ml-1"
+            title={handle ? m.user_view_profile({ name: nameDisplay }) : m.welcome_finish_setup()}
+          >
+            <UserAvatar
+              user={user}
+              alt={user.name || m.user_avatar_alt()}
+              className="h-8 w-8 border border-primary/20"
+              fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
+            />
+            <span className="hidden sm:inline text-sm font-medium pr-1 text-foreground max-w-[140px] truncate">
+              {nameDisplay}
+            </span>
+          </Link>
         </div>
       </div>
     </header>

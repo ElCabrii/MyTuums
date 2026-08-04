@@ -26,6 +26,18 @@ test.describe("profile", () => {
     await expect(page.getByRole("button", { name: "Back to home" })).toBeVisible();
   });
 
+  test("an unmatched URL shows the router's 404, not a redirect", async ({ page }) => {
+    // A handle-shaped URL that doesn't exist is the profile's own not-found
+    // state above; a path that matches NO route is the router's
+    // notFoundComponent (see __root.tsx). This spec file runs signed in
+    // (alice's storage state), so the signed-in gate must not send this
+    // visitor away either — the 404 renders in place, keeping the URL.
+    await page.goto("/no-such-page-anywhere");
+
+    await expect(page).toHaveURL(/\/no-such-page-anywhere$/);
+    await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+  });
+
   // The suite's privacy test. `user.byUsername` is public and deliberately
   // returns an explicit column allowlist (`publicUserColumns` in
   // packages/api/src/users.ts) specifically so a profile visit never leaks

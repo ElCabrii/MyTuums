@@ -47,6 +47,16 @@ export const auth = betterAuth({
     provider: "pg",
   }),
 
+  // No `session.cookieCache`. It is deliberately OFF, and the reason is the
+  // security property `revokeSessionsOnPasswordReset` above (and the
+  // integration test that pins it): the cached `GET /get-session` path serves
+  // the signed `session_data` cookie WITHOUT re-validating the session token
+  // against the database (better-auth/api/routes/session.mjs), so a revoked
+  // session would keep authenticating for up to `maxAge` — exactly the window
+  // `revokeSessionsOnPasswordReset` exists to close. The cold-load splash the
+  // cache would shorten is already solved client-side by the static splash in
+  // apps/web/index.html.
+
   emailAndPassword: {
     enabled: true,
     // The server's half of the rule apps/web/src/lib/auth-validation.ts already

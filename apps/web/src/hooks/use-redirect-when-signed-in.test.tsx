@@ -56,6 +56,13 @@ describe("useRedirectWhenSignedIn", () => {
       { signedInAs: { username: null, displayUsername: null } },
     );
 
+    // `/welcome` is not in the stub route tree, so the navigation resolves
+    // asynchronously through the unmatched-match path — flush it before
+    // asserting (the registered-route cases above commit synchronously).
+    await act(async () => {
+      await Promise.resolve();
+    });
+
     expect(router.state.location.pathname).toBe("/welcome");
   });
 
@@ -117,5 +124,46 @@ describe("useRedirectWhenSignedIn", () => {
     });
 
     expect(router.state.location.pathname).toBe("/login");
+  });
+
+  /**
+   * Navigating to the path the hook is already standing on would remount the
+   * route — and the `/welcome` page resets its drafts on unmount
+   * (`resetHandleClaimAtom`), discarding a handle the person has typed. The
+   * E2E suite caught this as a lost fill: the input reverted to empty, the
+   * native `required` validation swallowed the submit, and the claim never
+   * ran. The self-navigation is a no-op by construction, so it is skipped.
+   */
+  describe("already on /welcome", () => {
+    it("does not re-navigate a handle-less session that is already on /welcome", async () => {
+      const { router } = await renderWithProviders(<RedirectProbe />, {
+        initialPath: "/welcome",
+        signedInAs: { username: null, displayUsername: null },
+      });
+
+      expect(router.state.location.pathname).toBe("/welcome");
+    });
+
+    it("still sends a complete session away to its profile — only the self-navigation is skipped", async () => {
+      const { router } = await renderWithProviders(<RedirectProbe />, {
+        initialPath: "/welcome",
+        signedInAs: true,
+      });
+
+      expect(router.state.location.pathname).toBe("/@alexmercer");
+    });
+
+    it("does not re-navigate when the two-factor offer is already rendering on /welcome", async () => {
+      const store = createStore();
+      store.set(offerTwoFactorAtom, true);
+
+      const { router } = await renderWithProviders(<RedirectProbe />, {
+        store,
+        initialPath: "/welcome",
+        signedInAs: true,
+      });
+
+      expect(router.state.location.pathname).toBe("/welcome");
+    });
   });
 });
