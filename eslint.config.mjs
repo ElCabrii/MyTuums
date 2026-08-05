@@ -1,7 +1,16 @@
 // @ts-check
+// The monorepo's single ESLint flat config — every package lints against
+// this file via turbo's `lint` task. Type-aware rules are the point:
+// `projectService` below plus the three promise rules that have caught
+// real bugs in the server.
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
+/**
+ * Monorepo-wide ESLint flat config: type-aware rules (one program per
+ * tsconfig, discovered via projectService) plus the deliberate
+ * promise-safety trio that fixed a floating-promise bug in the server.
+ */
 export default tseslint.config(
   {
     ignores: [

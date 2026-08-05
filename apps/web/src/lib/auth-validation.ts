@@ -195,6 +195,7 @@ export function dateOfBirthInputValue(value: Date | string | null | undefined): 
 }
 
 
+/** The login form's two fields. */
 export type LoginFields = {
   identifier: string;
   password: string;
@@ -207,6 +208,7 @@ export function validateLogin(fields: LoginFields): string | null {
   return null;
 }
 
+/** The reset-password form's two fields. */
 export type ResetPasswordFields = {
   newPassword: string;
   confirmPassword: string;

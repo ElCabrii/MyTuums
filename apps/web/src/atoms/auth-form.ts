@@ -13,22 +13,35 @@ import {
   validateResetPassword,
 } from "@/lib/auth-validation";
 
+/** The login form's identifier field — an email or a username. */
 export const loginIdentifierAtom = atomWithReset("");
+/** The login form's password field. */
 export const loginPasswordAtom = atomWithReset("");
 
+/** The register form's username field. */
 export const registerUsernameAtom = atomWithReset("");
+/** The register form's display-name field. */
 export const registerNameAtom = atomWithReset("");
+/** The register form's email field. */
 export const registerEmailAtom = atomWithReset("");
+/** The register form's password field. */
 export const registerPasswordAtom = atomWithReset("");
+/** The register form's password confirmation. */
 export const registerConfirmPasswordAtom = atomWithReset("");
+/** The register form's date-of-birth field, in "YYYY-MM-DD" from the native input. */
 export const registerDateOfBirthAtom = atomWithReset("");
 
+/** The forgot-password form's email field. */
 export const forgotPasswordEmailAtom = atomWithReset("");
 
+/** The reset-password form's new-password field. */
 export const resetPasswordNewAtom = atomWithReset("");
+/** The reset-password form's confirmation field. */
 export const resetPasswordConfirmAtom = atomWithReset("");
 
 /**
+ * Resets every login-form field plus the shared auth error — unmount cleanup.
+ *
  * These atoms are module-scoped, not component-scoped, so their lifetime
  * has to be bounded some other way or a half-typed password would survive
  * navigating away from /login and back. The obvious-looking fix — wrap the

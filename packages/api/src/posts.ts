@@ -43,6 +43,7 @@ const replyCount = sql<number>`(
   select count(*)::int from ${post} as reply where reply.parent_id = ${post.id}
 )`;
 
+/** Whether the viewer has liked this post — an EXISTS subquery, literal `false` for anonymous viewers. */
 function viewerHasLiked(viewerId: string | undefined) {
   return viewerId
     ? sql<boolean>`exists (
@@ -52,6 +53,10 @@ function viewerHasLiked(viewerId: string | undefined) {
     : sql<boolean>`false`;
 }
 
+/**
+ * The one projection every feed and thread reads posts through, so no view of
+ * a post can drift from another's (an int test asserts the equality).
+ */
 const postSelection = (viewerId: string | undefined) => ({
   id: post.id,
   content: post.content,
@@ -81,7 +86,13 @@ async function countLikes(db: Database, postId: string): Promise<number> {
   return row?.count ?? 0;
 }
 
+/**
+ * The `post` procedure group: create, list, thread, like, unlike.
+ */
 export const postRouter = {
+  /**
+   * Creates a post, or a reply when `parentId` is set. Requires a session.
+   */
   create: protectedProcedure
     .use(rateLimit(RATE_LIMITS.write))
     .input(
@@ -143,6 +154,11 @@ export const postRouter = {
       };
     }),
 
+  /**
+   * Lists posts, keyset-paginated: the global feed, one author's posts, the
+   * following feed, or one post's direct replies. Public, except `following`,
+   * which requires a session.
+   */
   list: publicProcedure
     .use(rateLimit(RATE_LIMITS.read))
     .input(
@@ -343,11 +359,15 @@ export const postRouter = {
       };
     }),
 
-  // `like` and `unlike` are separate, idempotent procedures rather than one
-  // `toggle`. A toggle's result depends on the order two in-flight requests
-  // happen to arrive in — a double-click can leave the post unliked — and it
-  // can't be safely retried. These two state the intended end state, so
-  // repeating either is a no-op and matches the optimistic UI update.
+  /**
+   * Likes a post for the caller. Requires a session.
+   *
+   * `like` and `unlike` are separate, idempotent procedures rather than one
+   * `toggle`. A toggle's result depends on the order two in-flight requests
+   * happen to arrive in — a double-click can leave the post unliked — and it
+   * can't be safely retried. These two state the intended end state, so
+   * repeating either is a no-op and matches the optimistic UI update.
+   */
   like: protectedProcedure
     .use(rateLimit(RATE_LIMITS.like))
     .input(z.object({ postId: z.uuid() }))
@@ -376,6 +396,7 @@ export const postRouter = {
       };
     }),
 
+  /** Removes the caller's like from a post. Requires a session; a no-op when the like isn't there. */
   unlike: protectedProcedure
     .use(rateLimit(RATE_LIMITS.like))
     .input(z.object({ postId: z.uuid() }))

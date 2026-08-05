@@ -3,6 +3,7 @@ import { atomWithStorage } from "jotai/utils";
 import { atomEffect } from "jotai-effect";
 import { viewerAtom } from "@/atoms/session";
 
+/** The theme choices the app offers: an explicit pair, or "system" to follow the OS. */
 export type Theme = "dark" | "light" | "system";
 
 const STORAGE_KEY = "mytuums-ui-theme";

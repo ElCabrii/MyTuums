@@ -12,6 +12,10 @@ const FooterLocaleMenu = lazy(() =>
   import("@/components/footer-locale-menu").then((mod) => ({ default: mod.FooterLocaleMenu }))
 );
 
+/**
+ * The site-wide footer: wordmark, copyright, legal links, and the lazy-loaded
+ * locale switcher. Rendered by `__root.tsx` on every route, signed in or not.
+ */
 export function Footer() {
   return (
     <footer className="w-full border-t bg-background py-6 md:py-8 mt-auto">

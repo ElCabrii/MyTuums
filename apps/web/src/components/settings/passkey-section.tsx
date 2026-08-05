@@ -16,6 +16,10 @@ import { Input } from "@/components/ui/input";
 import { Section } from "@/components/settings/section";
 import { m } from "@/paraglide/messages.js";
 
+/**
+ * The settings card listing the account's passkeys, with add, rename and
+ * delete.
+ */
 export function PasskeySection() {
   const { data: passkeys, isPending } = useAtomValue(passkeysAtom);
   const [newName, setNewName] = useAtom(newPasskeyNameAtom);

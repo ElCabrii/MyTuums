@@ -42,6 +42,11 @@ export const Route = createFileRoute("/login")({
   }),
 });
 
+/**
+ * The sign-in page: identifier + password form, the OAuth/passkey options, and
+ * the `?error=` banner that surfaces a failed OAuth round trip. `?redirect=`
+ * carries the pre-login destination (see `validateSearch` above).
+ */
 function LoginPage() {
   const { redirect: redirectFromSearch } = Route.useSearch();
   useRedirectWhenSignedIn(redirectFromSearch);

@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
 
+# One run per ref at a time: a newer push to the same branch/PR cancels
+# the in-flight run instead of queuing behind it.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -36,6 +38,9 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # --frozen-lockfile: the committed lockfile is authoritative — any
+      # drift between it and a package.json fails here rather than
+      # installing something different from what CI will run.
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm lint
@@ -64,6 +69,8 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
+      # Ephemeral Postgres — same image (postgres:16-alpine) as
+      # docker-compose.yml, so CI exercises the same major version as dev.
       postgres:
         image: postgres:16-alpine
         env:
@@ -118,6 +125,7 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
+      # Same ephemeral Postgres as the integration job.
       postgres:
         image: postgres:16-alpine
         env:
@@ -194,6 +202,8 @@ jobs:
 
       - run: pnpm test:e2e
 
+      # Uploaded even when the job failed — that is when the report matters.
+      # Kept 7 days for flake triage, then auto-expired.
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:

@@ -33,9 +33,11 @@ export type PostFeedParams = {
  * fields ahead of it are all constrained (an enum, a flag, a uuid) and cannot
  * contain a delimiter.
  */
+/** Encodes feed params into the family key string — layout described above. */
 export const encode = (p: PostFeedParams): string =>
   `${p.feed}|${p.includeReplies ? "r" : ""}|${p.parentId ?? ""}|${p.authorId ?? ""}`;
 
+/** Decodes a family key string back into feed params — the inverse of {@link encode}. */
 export const decode = (key: string): PostFeedParams => {
   const [feed = "", replies = "", parentId = ""] = key.split("|", 3);
   // Everything past the third delimiter, however many more it contains.
@@ -95,6 +97,7 @@ const postFeedFamily = atomFamily((key: string) =>
   }),
 );
 
+/** The infinite-query atom for one (scope, author, parent) feed — components read this, not the family. */
 export const postFeedAtom = (p: PostFeedParams) => postFeedFamily(encode(p));
 
 /**

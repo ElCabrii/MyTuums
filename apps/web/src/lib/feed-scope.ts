@@ -1,6 +1,7 @@
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 
+/** The two home feeds: the global timeline, and the signed-in viewer's Following feed. */
 export type FeedScope = "following" | "global";
 
 const STORAGE_KEY = "my-tuums.feed-scope";

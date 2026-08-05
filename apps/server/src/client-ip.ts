@@ -1,8 +1,8 @@
 import type { IncomingMessage } from "node:http";
 
 /**
- * The caller's IP, for the rate limiter's anonymous-caller identity
- * (packages/api/src/procedures.ts).
+ * Resolves the caller's IP, which the rate limiter uses as the
+ * anonymous-caller identity (packages/api/src/procedures.ts).
  *
  * `X-Forwarded-For` is only consulted when TRUST_PROXY is on, and this is the
  * whole reason that flag exists. The header is client-supplied: with a

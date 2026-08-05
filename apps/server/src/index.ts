@@ -77,8 +77,8 @@ const handleRequest = createRequestHandler({
 });
 
 // `createServer`'s callback type is `(req, res) => void`; passing an async
-// function directly is exactly the "misused promise" shape Step 3's crash
-// fix was about (`@typescript-eslint/no-misused-promises` now flags it).
+// function directly is exactly the "misused promise" shape the enforced
+// `@typescript-eslint/no-misused-promises` rule exists to flag.
 // Keep the listener itself synchronous and explicitly `void` the async
 // work — `handleRequest`'s own try/catch still converts every failure into a
 // response, and the `unhandledRejection` handler further down is the
@@ -98,7 +98,8 @@ const server = createServer((req, res) => {
  * can be invoked from a plain (non-async) `server.close` callback via
  * `void drainAndExit(...)` — passing an async function directly as the
  * callback would hand `net.Server` a Promise it doesn't await, which is
- * exactly the floating/misused-promise bug class Step 3 fixed.
+ * exactly the floating/misused-promise bug class the enforced lint rules are
+ * meant to catch.
  */
 async function drainAndExit(code: number, forceExitTimer: NodeJS.Timeout) {
   try {

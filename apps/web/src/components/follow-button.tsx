@@ -6,6 +6,11 @@ import { toggleFollowAtomFamily } from "@/atoms/follow";
 import { viewerIdAtom } from "@/atoms/session";
 import { m } from "@/paraglide/messages.js";
 
+/**
+ * The Follow/Unfollow toggle for a user row — write-only and optimistic (the
+ * flip is the feedback), with a login link when signed out and nothing on the
+ * viewer's own row.
+ */
 export function FollowButton({
   userId,
   isFollowing,

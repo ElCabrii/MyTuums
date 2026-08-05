@@ -28,6 +28,7 @@ import type { DestructiveStorage, Storage } from "../storage.js";
  */
 export type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
 
+/** A signed-up test user: their session, and a `Context` already carrying it. */
 export interface TestUser {
   id: string;
   session: AuthSession;

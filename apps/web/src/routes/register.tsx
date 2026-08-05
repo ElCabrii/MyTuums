@@ -33,6 +33,12 @@ export const Route = createFileRoute("/register")({
     typeof search.redirect === "string" ? { redirect: search.redirect } : {},
 });
 
+/**
+ * The sign-up page: username, display name, email, password and date of birth,
+ * plus the same OAuth/passkey options as `/login`. Success flows through the
+ * session updating — navigation is owned by `useRedirectWhenSignedIn` (see the
+ * double-navigation note in the submit handler).
+ */
 function RegisterPage() {
   const { redirect: redirectFromSearch } = Route.useSearch();
   useRedirectWhenSignedIn(redirectFromSearch);

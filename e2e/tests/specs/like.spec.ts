@@ -3,10 +3,9 @@ import { ALICE } from "../../support/users";
 import { likeButtonFor } from "../../support/post-card";
 
 /**
- * The most valuable spec in the suite (see the task brief): it proves the
- * mutation `scope` serialisation in atoms/like.ts plus the intent-atom drop
- * of superseded responses, not just that clicking a heart eventually turns
- * red.
+ * The most valuable spec in the suite: it proves the mutation `scope`
+ * serialisation in atoms/like.ts plus the intent-atom drop of superseded
+ * responses, not just that clicking a heart eventually turns red.
  */
 test.describe("liking a post", () => {
   test("flips the heart instantly, then the count reconciles to the server value", async ({

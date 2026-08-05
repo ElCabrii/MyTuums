@@ -20,9 +20,11 @@ export type FollowDirection = "followers" | "following";
  * a `Map` lookup to a linear scan over every param it has ever created, on
  * every read.
  */
+/** Encodes (direction, username) into the family key — why direction is first is explained above. */
 export const encode = (username: string, direction: FollowDirection): string =>
   `${direction}:${username}`;
 
+/** Decodes a family key back into (direction, username) — the inverse of {@link encode}. */
 export const decode = (key: string): { username: string; direction: FollowDirection } => {
   const separator = key.indexOf(":");
   return {
@@ -64,6 +66,7 @@ const userListFamily = atomFamily((key: string) =>
   }),
 );
 
+/** The infinite-query atom for one (direction, handle) list — components read this, not the family. */
 export const userListAtom = (username: string, direction: FollowDirection) =>
   userListFamily(encode(username, direction));
 

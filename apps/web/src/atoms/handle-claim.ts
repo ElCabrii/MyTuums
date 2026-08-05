@@ -45,6 +45,7 @@ export const welcomeValidationAtom = atom((get) => {
   return null;
 });
 
+/** Clears the welcome drafts and the shared auth error — unmount cleanup. */
 export const resetHandleClaimAtom = atom(null, (_get, set) => {
   set(handleDraftAtom, RESET);
   set(dateOfBirthDraftAtom, RESET);

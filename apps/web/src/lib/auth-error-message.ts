@@ -71,6 +71,10 @@ const oauthErrorMessages: Record<string, () => string> = {
   state_invalid: () => m.auth_oauth_expired(),
 };
 
+/**
+ * Translates the `?error=<code>` a failed OAuth round trip returns; an unknown
+ * code falls back to a generic sign-in-failed message rather than raw text.
+ */
 export function localizeOAuthError(code: string): string {
   return oauthErrorMessages[code]?.() ?? m.auth_oauth_failed();
 }

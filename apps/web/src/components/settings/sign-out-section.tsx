@@ -5,6 +5,10 @@ import { authPendingAtom, signOutAtom } from "@/atoms/auth";
 import { Button } from "@/components/ui/button";
 import { m } from "@/paraglide/messages.js";
 
+/**
+ * The sign-out card at the bottom of `/settings/account` — navigates to
+ * `/login` only after `signOutAtom` has actually emptied the session store.
+ */
 export function SignOutSection() {
   const navigate = useNavigate();
   const signOut = useSetAtom(signOutAtom);

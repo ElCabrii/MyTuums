@@ -19,6 +19,7 @@
  */
 import type { TranslationDictionary } from "@better-auth/i18n";
 
+/** French translations of Better Auth's error messages, keyed by error code (file header explains the why). */
 export const fr: TranslationDictionary = {
   // Credentials and sessions
   INVALID_EMAIL_OR_PASSWORD: "E-mail ou mot de passe incorrect.",

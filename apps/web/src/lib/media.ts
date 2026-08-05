@@ -29,8 +29,10 @@ import { imageDimensions } from "@my-tuums/api/dimensions";
 /** What the file picker should offer, as an `accept` attribute. */
 export const IMAGE_ACCEPT = ALLOWED_IMAGE_TYPES.join(",");
 
+/** The client-side reasons an upload can be refused before anything hits the wire. */
 export type ImageProblem = "type" | "size" | "decode";
 
+/** An upload refused by the client itself — carries a typed `problem` the UI can translate. */
 export class ImageError extends Error {
   constructor(readonly problem: ImageProblem) {
     super(problem);

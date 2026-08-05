@@ -425,6 +425,7 @@ export async function renderWithProviders(
 // Factories
 // ---------------------------------------------------------------------------
 
+/** A minimal post author for fixtures. */
 export function makeAuthor(overrides: Partial<Post["author"]> = {}): Post["author"] {
   return {
     id: crypto.randomUUID(),
@@ -436,6 +437,7 @@ export function makeAuthor(overrides: Partial<Post["author"]> = {}): Post["autho
   };
 }
 
+/** A minimal post for fixtures. */
 export function makePost(overrides: Partial<Post> = {}): Post {
   return {
     id: crypto.randomUUID(),
@@ -450,6 +452,7 @@ export function makePost(overrides: Partial<Post> = {}): Post {
   };
 }
 
+/** A minimal follower/following list entry for fixtures. */
 export function makeUserSummary(overrides: Partial<UserSummary> = {}): UserSummary {
   return {
     id: crypto.randomUUID(),
@@ -495,6 +498,7 @@ export function postListQueryKey(): QueryKey {
   });
 }
 
+/** Seeds a `post.list` infinite query with the given pages, bypassing the network. */
 export function seedPostListPages(queryClient: QueryClient, pages: PostListPage[]): void {
   queryClient.setQueryData(postListQueryKey(), {
     pages,
@@ -502,6 +506,7 @@ export function seedPostListPages(queryClient: QueryClient, pages: PostListPage[
   });
 }
 
+/** The exact queryKey `userListAtom(username, direction)` produces. */
 /** The exact queryKey `userListAtom(username, direction)` produces. */
 export function userListQueryKey(username: string, direction: "followers" | "following"): QueryKey {
   const procedure = direction === "followers" ? orpc.user.followers : orpc.user.following;
@@ -511,6 +516,7 @@ export function userListQueryKey(username: string, direction: "followers" | "fol
   });
 }
 
+/** Seeds a follower/following infinite query with the given pages, bypassing the network. */
 export function seedUserListPages(
   queryClient: QueryClient,
   username: string,

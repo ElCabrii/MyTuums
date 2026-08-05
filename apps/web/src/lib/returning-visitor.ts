@@ -13,12 +13,14 @@
  */
 export const RETURNING_VISITOR_COOKIE = "mytuums_returning";
 
+/** Whether this device has had a session before, per the stamped cookie. */
 export function isReturningVisitor(): boolean {
   return document.cookie
     .split("; ")
     .some((part) => part.startsWith(`${RETURNING_VISITOR_COOKIE}=`));
 }
 
+/** Stamps the one-year "returning visitor" cookie; called the moment a session first appears. */
 export function stampReturningVisitor(): void {
   // Year-long, like the app's stored theme/locale overrides. SameSite=Lax so
   // the flag is never sent with cross-site requests.
