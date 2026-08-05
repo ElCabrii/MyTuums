@@ -4,10 +4,11 @@ import { createRequestHandler } from "./request-handler.js";
 import { createStaticFileHandler, noStaticFiles } from "./static-files.js";
 import { decorateResponse } from "./response-decorators.js";
 import { createServer } from "node:http";
-import { RPCHandler } from "@orpc/server/node";
+import { BodyLimitPlugin, RPCHandler } from "@orpc/server/node";
 import { CORSPlugin, SimpleCsrfProtectionHandlerPlugin } from "@orpc/server/plugins";
 import { onError } from "@orpc/server";
 import { appRouter, createContext, createMediaResolver, defaultStorage } from "@my-tuums/api";
+import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "@my-tuums/auth";
 import { closeDb, pingDb } from "@my-tuums/db";
@@ -44,6 +45,13 @@ const handler = new RPCHandler(appRouter, {
     // states rather than something it inherits. The oRPC client sends the
     // header it requires; an HTML form cannot.
     new SimpleCsrfProtectionHandlerPlugin(),
+    // The router's own cap (request-handler.ts) reads Content-Length, which a
+    // chunked (Transfer-Encoding) body does not carry — legitimate Node http
+    // clients send chunked whenever they omit Content-Length, so rejecting
+    // chunked outright would cut them off. This plugin counts body bytes as
+    // they stream and rejects at the same ceiling, before oRPC finishes
+    // buffering: one cap, two enforcement points for the two framings.
+    new BodyLimitPlugin({ maxBodySize: RPC_MAX_BODY_BYTES }),
   ],
   interceptors: [
     onError((error) => {

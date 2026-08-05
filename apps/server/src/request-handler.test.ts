@@ -177,22 +177,25 @@ describe("createRequestHandler", () => {
     expect(calls.body).toBe("Payload too large");
   });
 
-  it("rejects a chunked RPC body with 413 before handleRpc ever runs", async () => {
-    // A Transfer-Encoding request carries no Content-Length for the cap to
-    // read, so it is refused outright — otherwise oRPC would buffer an
-    // unbounded chunked body before auth/rate limiting (the same window the
-    // Content-Length cap exists to protect).
+  it("forwards a chunked RPC body to handleRpc — its cap lives in oRPC's BodyLimitPlugin", async () => {
+    // A Transfer-Encoding request carries no Content-Length for the router
+    // cap to read, and Node http clients legitimately send chunked when they
+    // omit the header — so the router must not reject it. The byte-counting
+    // cap for chunked bodies is oRPC's BodyLimitPlugin, wired in index.ts.
     const { res, calls } = resStub();
-    const handleRpc = vi.fn();
+    const handleRpc = vi.fn().mockImplementation((_req: unknown, r: ServerResponse) => {
+      r.writeHead(200, { "Content-Type": "application/json" });
+      r.end("{}");
+      return Promise.resolve({ matched: true });
+    });
     const handle = createRequestHandler(deps({ handleRpc }));
 
     await handle(reqStub("/rpc/user.uploadImage", "POST", {
       "transfer-encoding": "chunked",
     }), res);
 
-    expect(handleRpc).not.toHaveBeenCalled();
-    expect(calls.statusCode).toBe(413);
-    expect(calls.body).toBe("Payload too large");
+    expect(handleRpc).toHaveBeenCalledOnce();
+    expect(calls.statusCode).toBe(200);
   });
 
   it("accepts an RPC body at exactly the ceiling", async () => {

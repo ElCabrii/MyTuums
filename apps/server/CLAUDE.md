@@ -10,7 +10,7 @@ A plain `node:http` server (no framework) that terminates every request: health 
 
 - `src/index.ts` — the real entrypoint: the one place a bad env becomes `process.exit(1)`, wiring of real dependencies into the routing tree, the `decorateResponse` wrapper, and graceful shutdown (SIGTERM/SIGINT/unhandledRejection/uncaughtException → drain the Postgres pool, exit; 5s force-exit backstop).
 - `src/env.ts` — zod validation of every env var. Its `superRefine` catches half-configured OAuth providers and partial S3 groups at boot; `parseEnv` throws but never exits.
-- `src/request-handler.ts` — the routing decision tree, unit-tested with stand-ins. Exact-match `/health`, the signed-out `/` 302, `/api/auth`, `/rpc` (body cap before oRPC buffers — Content-Length checked, `Transfer-Encoding` rejected outright), `/media` (GET/HEAD only → presigned 302), static files last, 404, and the catch-all 500 / socket-destroy safety net.
+- `src/request-handler.ts` — the routing decision tree, unit-tested with stand-ins. Exact-match `/health`, the signed-out `/` 302, `/api/auth`, `/rpc` (body cap before oRPC buffers — Content-Length at the router, chunked bounded by oRPC's `BodyLimitPlugin`), `/media` (GET/HEAD only → presigned 302), static files last, 404, and the catch-all 500 / socket-destroy safety net.
 - `src/static-files.ts` — serves the built SPA when `WEB_DIST` is set: content-type allowlist, gzip/brotli with `Vary`, `assets/` immutable vs `no-cache` for `index.html`, SPA fallback for extension-less paths only, traversal protection.
 - `src/response-decorators.ts` — one choke point wrapping `res`: security headers (inner wins) and gzip/brotli for JSON bodies ≥ 1024 bytes, with the real `writeHead` deferred to `end` so `Content-Length`/`Vary` can be fixed up.
 - `src/compression.ts` — q-value-aware content negotiation shared by the decorator and static files; brotli wins ties.
@@ -29,7 +29,7 @@ A plain `node:http` server (no framework) that terminates every request: health 
 
 - `parseEnv` must never call `process.exit`; only `src/index.ts` may turn a bad env into exit(1) (keeps tests/scripts able to inspect the throw).
 - The `/` redirect must recognise the `__Secure-` session-cookie prefix (production HTTPS) — a mismatch 302s every signed-in visitor at `/`.
-- The `/rpc` body cap must run before oRPC buffers a multipart body (that buffer happens before auth/rate limiting). Content-Length is checked; chunked (`Transfer-Encoding`) bodies are rejected outright.
+- The `/rpc` body cap must run before oRPC buffers a multipart body (that buffer happens before auth/rate limiting). Content-Length is checked at the router; chunked (`Transfer-Encoding`) bodies — which carry no Content-Length and are legitimate Node-client traffic — are bounded at the same ceiling by oRPC's `BodyLimitPlugin` (wired in `index.ts`).
 - `TRUST_PROXY` stays off by default: `X-Forwarded-For` is client-supplied and spoofable.
 - `decorateResponse`'s deferred `writeHead` contract: writers call `writeHead` then `end`; handlers that set their own headers keep them; never compress a response that already sets `Content-Encoding`.
 - Static files: never serve `index.html` for a path with an extension (mistyped `/assets/x.js` must 404); `assets/` is immutable, `index.html` is `no-cache`.
