@@ -77,6 +77,7 @@ const stackEnv = {
   ...s3Env(),
 };
 
+/** The ambient `S3_*` group as-is, or `{}` when any half is missing — the server refuses to boot on a partial group. */
 function s3Env(): Record<string, string> {
   const required = [
     "S3_ENDPOINT",
@@ -93,6 +94,7 @@ function s3Env(): Record<string, string> {
   };
 }
 
+/** The suite's shared constants: server and web URLs, and the storage-state file path for a named fixture. */
 export const E2E = {
   serverUrl,
   webUrl,

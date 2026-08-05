@@ -25,6 +25,11 @@ import { getLocale } from "@/paraglide/runtime.js";
  */
 type PostCardVariant = "feed" | "ancestor" | "focused";
 
+/**
+ * One post rendered as a card — author link, timestamp, content, and the
+ * like/reply actions — in the `feed`, `ancestor` or `focused` variants (see
+ * `PostCardVariant`).
+ */
 export function PostCard({
   post,
   variant = "feed",

@@ -11,6 +11,10 @@ type Fixtures = {
   db: typeof db;
 };
 
+/**
+ * The suite's extended test handle: adds the `bobPage` and `signedOutPage`
+ * pages plus the `db` seeding helpers to Playwright's default fixtures.
+ */
 export const test = base.extend<Fixtures>({
   bobPage: async ({ browser }, use) => {
     const context = await browser.newContext({ storageState: E2E.storageStateFor("bob") });

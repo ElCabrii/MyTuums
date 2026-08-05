@@ -11,6 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Section } from "@/components/settings/section";
 import { m } from "@/paraglide/messages.js";
 
+/**
+ * The settings card for linking and unlinking social providers — the last
+ * remaining sign-in method is protected from being unlinked (mirrors the
+ * server's FAILED_TO_UNLINK_LAST_ACCOUNT).
+ */
 export function LinkedAccountsSection() {
   const { data: accounts, isPending } = useAtomValue(linkedAccountsAtom);
   const linkProvider = useSetAtom(linkProviderAtom);

@@ -5,6 +5,11 @@ import { PostCard } from "@/components/post-card";
 import type { postFeedAtom } from "@/atoms/post-feed";
 import { m } from "@/paraglide/messages.js";
 
+/**
+ * A paginated post feed with loading, retryable-error, empty and "Load more"
+ * states. The query lives in the `feedAtom` prop — scope and author are
+ * atom-family parameters, so this component never knows what it is showing.
+ */
 export function PostFeed({
   feedAtom,
   emptyMessage,

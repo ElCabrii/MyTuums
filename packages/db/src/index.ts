@@ -3,6 +3,10 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema/index.js";
 
+// Read at module scope on purpose: every import of @my-tuums/db shares one
+// process-wide client, and importing without DATABASE_URL throws immediately.
+// That is also why ./testing.ts is a separate entry point — a Vitest config
+// must resolve the test URL *before* this module is ever evaluated.
 const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
@@ -31,14 +35,22 @@ function requiresTls(url: string): boolean {
   return hostname.includes(".");
 }
 
+// One pool for the whole process (10 connections, 10s connect timeout): the
+// API procedures, the migration runner, and the test helpers all go through
+// this same client.
 const client = postgres(connectionString, {
   max: 10,
   connect_timeout: 10,
   ssl: requiresTls(connectionString) ? "require" : false,
 });
 
+/**
+ * The drizzle database handle over the full schema (app + auth tables).
+ * Passing `schema` is what makes relational queries (`with`) type-check.
+ */
 export const db = drizzle(client, { schema });
 
+/** The concrete type of the `db` handle — how contexts and helpers type their database parameter. */
 export type Database = typeof db;
 
 /**

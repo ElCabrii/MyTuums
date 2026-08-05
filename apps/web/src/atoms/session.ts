@@ -40,12 +40,16 @@ sessionAtom.onMount = (set) =>
  * change, even one that doesn't affect what they show.
  */
 
+/** The signed-in user, or null while signed out or still loading. */
 export const viewerAtom = atom((get) => get(sessionAtom).data?.user ?? null);
 
+/** True once the session carries a user. */
 export const isSignedInAtom = atom((get) => get(viewerAtom) !== null);
 
+/** The signed-in user's id, or undefined while signed out. */
 export const viewerIdAtom = atom((get) => get(viewerAtom)?.id);
 
+/** The signed-in user's URL handle (the normalised username, per `handleOf`), or null. */
 export const viewerHandleAtom = atom((get) => handleOf(get(viewerAtom)));
 
 /**
@@ -108,6 +112,7 @@ export const sessionSettledEffect = atomEffect((get, set) => {
   document.getElementById("app-splash")?.remove();
 });
 
+/** The latch value itself — true once the first `/get-session` has settled. */
 export const sessionSettledAtom = atom((get) => get(sessionSettledStateAtom));
 
 /**
@@ -141,6 +146,7 @@ export const needsHandleAtom = atom((get) => get(isSignedInAtom) && !get(viewerH
  */
 export const viewerDateOfBirthAtom = atom((get) => get(viewerAtom)?.dateOfBirth ?? null);
 
+/** Whether this session still needs a date of birth declared (see the note above). */
 export const needsDobAtom = atom((get) => get(isSignedInAtom) && !get(viewerDateOfBirthAtom));
 
 /**

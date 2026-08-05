@@ -40,6 +40,10 @@ export function SegmentedControl({
   );
 }
 
+/**
+ * One option inside a `SegmentedControl` — a toggle button whose selected
+ * state is reported via `aria-pressed`.
+ */
 export function SegmentedControlItem({
   active,
   onClick,

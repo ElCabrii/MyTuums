@@ -1,4 +1,7 @@
 services:
+  # Local dev Postgres. The database name `mytuums` must stay in agreement
+  # with DATABASE_URL in .env (host-side processes) and the server service's
+  # DATABASE_URL below (in-network). Same image as CI's service container.
   postgres:
     image: postgres:16-alpine
     container_name: mytuums-db
@@ -17,12 +20,17 @@ services:
       timeout: 5s
       retries: 5
 
+  # The production server image on :3001 — the same Dockerfile Railway
+  # deploys, so this stack runs what prod runs.
   server:
     build:
       context: .
       dockerfile: apps/server/Dockerfile
     container_name: mytuums-server
     restart: always
+    # `service_healthy` (the pg_isready probe above), not merely
+    # `service_started`: the server must not boot before Postgres accepts
+    # connections.
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,5 +82,6 @@ services:
     ports:
       - "3001:3001"
 
+# Named volume: data survives `docker compose down`; only `down -v` wipes it.
 volumes:
   postgres_data:

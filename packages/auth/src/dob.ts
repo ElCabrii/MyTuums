@@ -13,8 +13,10 @@
  */
 import { APIError } from "better-auth/api";
 
+/** Message thrown for an under-15 declaration — keep byte-identical with apps/web/src/lib/auth-validation.ts. */
 export const DOB_UNDER_AGE_MESSAGE =
   "You must be at least 15 years old to create an account.";
+/** Message thrown for a malformed date of birth — same byte-identical invariant. */
 export const DOB_INVALID_MESSAGE = "Please enter a valid date of birth.";
 
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;

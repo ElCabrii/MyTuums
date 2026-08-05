@@ -1,6 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
 
+/**
+ * The stand-ins `createRequestHandler` routes through, injected so the
+ * routing tree can be unit-tested with none of them real.
+ */
 export interface RequestHandlerDeps {
   /** `SELECT 1` — throws if Postgres is unreachable. */
   pingDb: () => Promise<unknown>;
@@ -55,7 +59,7 @@ const MEDIA_PREFIX = "/media/";
  * live cookie in either shape is recognised — a mismatch here 302s *every*
  * visitor at `/` to `/login?redirect=%2F`, logged in or not, and the login
  * page then bounces the real session back to `/` (the reload flicker this
- * file's sibling PR fixes).
+ * recognition exists to prevent).
  */
 const SESSION_COOKIE_NAME = "better-auth.session_token";
 
@@ -97,13 +101,13 @@ function mediaKeyOf(rawUrl: string): string | null {
 }
 
 /**
- * The routing decision tree `index.ts` hands to `createServer`: health check,
- * the `/api/auth` and `/rpc` prefixes, the 404 fallback, and the top-level
- * exception safety net.
+ * Builds the routing decision tree `index.ts` hands to `createServer`: health
+ * check, the `/api/auth` and `/rpc` prefixes, the 404 fallback, and the
+ * top-level exception safety net.
  *
  * Pulled out from `index.ts` specifically so this tree — which is entirely
  * our own logic, not a third-party library's — can be unit tested with
- * stand-ins for the three things it actually depends on, none of which need
+ * stand-ins for the five dependencies it routes through, none of which need
  * to be real: no Postgres, no BetterAuth, no oRPC router, no listening
  * socket. What is NOT covered here is CORS — that is `CORSPlugin`'s behaviour
  * on the real `RPCHandler`, which is wire-level HTTP behaviour of a

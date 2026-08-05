@@ -5,6 +5,10 @@ import { createStorage, type Storage } from "./storage.js";
 
 type Session = Awaited<ReturnType<typeof auth.api.getSession>>;
 
+/**
+ * Everything an oRPC procedure can read: the database, the caller's session
+ * and transport identity, the rate limiter and object storage.
+ */
 export interface Context {
   db: Database;
   session: Session;
@@ -83,6 +87,10 @@ const defaultStorage: Storage | null =
       })
     : null;
 
+/**
+ * Builds a `Context` for one request: resolves the session from the request
+ * headers and threads the process-wide limiter and storage.
+ */
 export async function createContext({
   headers,
   clientIp,

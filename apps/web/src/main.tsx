@@ -8,10 +8,12 @@ import { queryClient } from "@/lib/query-client";
 import { store } from "@/lib/store";
 import { routeTree } from "./routeTree.gen";
 
-// Create the router
+// The single router for the app, built from the Vite-generated route tree.
 const router = createRouter({ routeTree });
 
-// Register the router for type safety
+// Registers the router's generated types (routeTree.gen.ts) with TanStack
+// Router, which is what makes typed navigation, params and search resolve
+// in every file.
 declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router;

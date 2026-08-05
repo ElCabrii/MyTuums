@@ -30,12 +30,17 @@ function client(apiKey: string): Resend {
   return resend;
 }
 
+/** One email to send: recipient address plus plain-text subject and body. */
 export interface OutgoingEmail {
   to: string;
   subject: string;
   text: string;
 }
 
+/**
+ * Sends one email: through Resend when a key is configured, otherwise logged
+ * (dev/test) or a hard failure (production) — never silently dropped.
+ */
 export async function sendEmail({ to, subject, text }: OutgoingEmail): Promise<void> {
   if (!resendApiKey) {
     if (isProduction) {
@@ -73,6 +78,8 @@ export async function sendEmail({ to, subject, text }: OutgoingEmail): Promise<v
 }
 
 /**
+ * The two locales the server-side email copy ships in.
+ *
  * The app ships in English and French, and the message catalogue in
  * `apps/web/messages/` cannot reach the server — so the copy for these three
  * emails lives here, keyed the same two ways.
@@ -85,6 +92,7 @@ export async function sendEmail({ to, subject, text }: OutgoingEmail): Promise<v
  */
 export type EmailLocale = "en" | "fr";
 
+/** The email locale for this request: the PARAGLIDE_LOCALE cookie when it is exactly "fr", else the base locale. */
 export function localeFromRequest(headers: Headers | undefined): EmailLocale {
   const cookie = headers?.get("cookie");
   if (!cookie) return "en";
@@ -136,14 +144,17 @@ const copy = {
   },
 } as const;
 
+/** Builds the two-factor OTP email copy for the given locale. */
 export function otpEmail(otp: string, locale: EmailLocale): Omit<OutgoingEmail, "to"> {
   return copy.otp[locale](otp);
 }
 
+/** Builds the email-verification email copy for the given locale. */
 export function verificationEmail(url: string, locale: EmailLocale): Omit<OutgoingEmail, "to"> {
   return copy.verify[locale](url);
 }
 
+/** Builds the password-reset email copy for the given locale. */
 export function passwordResetEmail(url: string, locale: EmailLocale): Omit<OutgoingEmail, "to"> {
   return copy.reset[locale](url);
 }

@@ -17,6 +17,7 @@ import { m } from "@/paraglide/messages.js";
 /** Password confirmation for enabling/disabling — BetterAuth requires it for credential accounts. */
 export const twoFactorPasswordAtom = atomWithReset("");
 
+/** What `twoFactor.enable` returns: the TOTP URI to scan and the ten backup codes. */
 export interface TwoFactorSetup {
   totpURI: string;
   backupCodes: string[];
@@ -46,6 +47,7 @@ export type TwoFactorPanel = "idle" | "enable" | "verify" | "disable";
 
 export const twoFactorPanelAtom = atom<TwoFactorPanel>("idle");
 
+/** Opens a two-factor panel, clearing typed passwords, codes and errors from the previous one. */
 export const openTwoFactorPanelAtom = atom(null, (_get, set, panel: TwoFactorPanel) => {
   set(twoFactorPanelAtom, panel);
   // Never leave a typed password sitting in the store across panels.
@@ -87,6 +89,7 @@ export const startTwoFactorSetupAtom = atom(null, async (get, set): Promise<bool
   }
 });
 
+/** Disables two-factor, requiring the current password; returns whether it succeeded. */
 export const disableTwoFactorAtom = atom(null, async (get, set): Promise<boolean> => {
   set(authErrorAtom, null);
   set(authPendingAtom, true);
@@ -123,6 +126,7 @@ export const twoFactorCodeAtom = atomWithReset("");
  */
 export const trustDeviceAtom = atomWithReset(false);
 
+/** The second-factor kinds the /two-factor page can ask for. */
 export type TwoFactorMethod = "totp" | "otp" | "backup";
 
 /**

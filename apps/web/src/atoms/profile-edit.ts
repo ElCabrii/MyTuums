@@ -12,10 +12,12 @@ import { viewerAtom, viewerHandleAtom } from "@/atoms/session";
 import { m } from "@/paraglide/messages.js";
 
 /**
- * The editable-profile drafts, with the same lifetime rule as every other form
- * in this app: module-scoped atoms reset on unmount, never a nested
- * `<Provider>` (see the long comment in `atoms/auth-form.ts` for why that
- * would resolve session reads against an empty store).
+ * The editable-profile drafts, populated from the session and reset on unmount.
+ *
+ * Same lifetime rule as every other form in this app: module-scoped atoms reset
+ * on unmount, never a nested `<Provider>` (see the long comment in
+ * `atoms/auth-form.ts` for why that would resolve session reads against an
+ * empty store).
  *
  * Unlike the auth forms these start out *populated* from the session rather
  * than empty — an edit form pre-filled with what you already have. That is
@@ -164,6 +166,10 @@ export const uploadImageAtom = atom(
   },
 );
 
+/**
+ * Removes an image slot — avatar or banner — then refreshes the session and
+ * the cached profile so the header and the profile page agree immediately.
+ */
 export const removeImageAtom = atom(
   null,
   async (_get, set, kind: ImageKind): Promise<boolean> => {

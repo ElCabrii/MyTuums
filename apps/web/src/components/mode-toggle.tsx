@@ -10,6 +10,10 @@ import {
 import { themeAtom } from "@/atoms/theme";
 import { m } from "@/paraglide/messages.js";
 
+/**
+ * The header's theme dropdown (light / dark / system). Writes `themeAtom`
+ * without subscribing — the sun/moon icons follow the `dark` class directly.
+ */
 export function ModeToggle() {
   // Write-only: this control never needs to know the current theme (the
   // icons react to the `dark` class directly via `dark:` variants), so

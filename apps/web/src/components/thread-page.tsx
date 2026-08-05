@@ -16,6 +16,10 @@ import { m } from "@/paraglide/messages.js";
 
 const routeApi = getRouteApi("/post/$postId");
 
+/**
+ * The `/post/$postId` page: the ancestor chain above the focused post, the
+ * post itself, the reply composer, and the reply feed.
+ */
 export function ThreadPage() {
   const { postId } = routeApi.useParams();
   const signedIn = useAtomValue(isSignedInAtom);

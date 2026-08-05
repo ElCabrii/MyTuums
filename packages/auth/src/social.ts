@@ -25,6 +25,7 @@ const google = oauthCredentials("GOOGLE");
 const discord = oauthCredentials("DISCORD");
 const twitch = oauthCredentials("TWITCH");
 
+/** The OAuth providers this deployment is actually configured for, keyed by provider id (file header explains the why). */
 export const socialProviders: SocialProviders = {
   ...(google
     ? {

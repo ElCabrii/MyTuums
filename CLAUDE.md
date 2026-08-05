@@ -36,6 +36,18 @@ Single test:
 - `pnpm --filter @my-tuums/api exec vitest run src/posts.int.test.ts` (same pattern for web: `pnpm --filter @my-tuums/web exec vitest run src/atoms/foo.test.ts` — if `src/paraglide` doesn't exist yet, the web package's `test` script compiles it first).
 - E2E: `pnpm --filter @my-tuums/e2e e2e -- tests/specs/theme.spec.ts`.
 
+## Per-package documentation
+
+Each package — and the CI directory — carries its own `CLAUDE.md`: the authoritative deep-dive for that subtree (key-files map, load-bearing decisions, package commands). The Architecture section below is the summary; the per-package files are the detail.
+
+- `apps/server/CLAUDE.md` — the HTTP server: routing tree, env validation, graceful shutdown.
+- `apps/web/CLAUDE.md` — the SPA: atoms/lib/hooks, routes & components, load-bearing client decisions.
+- `packages/api/CLAUDE.md` — the oRPC contract: procedures, rate limiting, cursors, S3 storage.
+- `packages/auth/CLAUDE.md` — the better-auth composition: pinned settings, providers, email, testing.
+- `packages/db/CLAUDE.md` — schema, TLS rule, migrations, test helpers.
+- `e2e/CLAUDE.md` — the Playwright suite: projects, fixtures, stack env, invariants.
+- `.github/CLAUDE.md` — CI/CD pipeline and the security scan.
+
 ## Architecture
 
 ### One origin is a requirement, not a preference

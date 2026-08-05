@@ -5,8 +5,9 @@ import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import type { RouterClient } from "@orpc/server";
 import type { AppRouter } from "@my-tuums/api";
 
-// In dev, Vite proxies /rpc -> http://localhost:3001/rpc
-// In prod, configure this to your deployed server URL.
+// In dev, Vite proxies /rpc -> http://localhost:3001/rpc; in prod the server
+// serves the built SPA from the same origin, so `window.location.origin` is
+// the API origin in both cases.
 //
 // This must be absolute: RPCLink calls `new URL(url)` with no base, so a bare
 // "/rpc" throws "Failed to construct 'URL': Invalid URL" on every request.
@@ -22,16 +23,24 @@ const link = new RPCLink({
   plugins: [new SimpleCsrfProtectionLinkPlugin()],
 });
 
+/** The raw oRPC client, for direct procedure calls outside the query layer. */
 export const client = createORPCClient<RouterClient<AppRouter>>(link);
 
+/** TanStack Query utilities over `client` — the layer atoms build query/mutation options from. */
 export const orpc = createTanstackQueryUtils(client);
 
+/** One page of `post.list` — a keyset-paginated slice of posts. */
 export type PostListPage = Awaited<ReturnType<typeof client.post.list>>;
+/** A single post as served by the API, with viewer-relative like state. */
 export type Post = PostListPage["items"][number];
+/** The `post.thread` payload: the focused post plus its ancestor chain. */
 export type Thread = Awaited<ReturnType<typeof client.post.thread>>;
 
+/** One page of `user.followers`/`user.following`. */
 export type UserListPage = Awaited<ReturnType<typeof client.user.followers>>;
+/** A person as served in follower/following lists, with viewer-relative follow state. */
 export type UserSummary = UserListPage["items"][number];
+/** A user profile as served by `user.byUsername`. */
 export type Profile = Awaited<ReturnType<typeof client.user.byUsername>>;
 
 /**

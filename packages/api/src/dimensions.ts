@@ -12,6 +12,7 @@
  * pixel data is ever read. `null` means "not a parseable image of this type".
  */
 
+/** The pixel size a file's header declares. */
 export interface ImageDimensions {
   width: number;
   height: number;

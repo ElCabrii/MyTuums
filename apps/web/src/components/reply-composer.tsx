@@ -5,6 +5,10 @@ import { createReplyAtomFamily, replyDraftAtomFamily } from "@/atoms/reply-compo
 import { viewerAtom } from "@/atoms/session";
 import { m } from "@/paraglide/messages.js";
 
+/**
+ * The thread page's reply box — a `ComposerForm` bound to the per-parent reply
+ * draft and mutation atoms, with a "Replying to @x" header.
+ */
 export function ReplyComposer({
   parentId,
   replyingTo,

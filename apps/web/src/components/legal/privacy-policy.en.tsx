@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 
+/** The English privacy policy body — legal prose, rendered inside `LegalDocument`. */
 export function PrivacyPolicyEn() {
   return (
     <>

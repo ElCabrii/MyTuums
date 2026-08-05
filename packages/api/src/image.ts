@@ -90,12 +90,15 @@ export function sniffImageType(bytes: Uint8Array): AllowedImageType | null {
   return SIGNATURES.find((signature) => signature.test(bytes))?.type ?? null;
 }
 
+/** Narrows an arbitrary string to an `AllowedImageType`. */
 export function isAllowedImageType(value: string): value is AllowedImageType {
   return (ALLOWED_IMAGE_TYPES as readonly string[]).includes(value);
 }
 
+/** The reason codes `acceptImage` can refuse an upload with. */
 export type ImageRejection = "type" | "size" | "content";
 
+/** The verdict of `acceptImage`: accepted with the sniffed type, or refused with a reason. */
 export interface ImageAcceptance {
   ok: boolean;
   reason?: ImageRejection;

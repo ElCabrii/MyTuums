@@ -18,6 +18,11 @@ import { Input } from "@/components/ui/input";
 import { Section } from "@/components/settings/section";
 import { m } from "@/paraglide/messages.js";
 
+/**
+ * The settings card for enrolling, verifying and disabling two-factor. Shares
+ * its panel atoms with the `/welcome` one-time offer (see `TwoFactorOffer` in
+ * routes/welcome.tsx) so the two enrolments cannot drift.
+ */
 export function TwoFactorSection() {
   const viewer = useAtomValue(viewerAtom);
   const panel = useAtomValue(twoFactorPanelAtom);

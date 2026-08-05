@@ -89,7 +89,10 @@ export function errorCodeOf(error: object): string | undefined {
  */
 export const twoFactorMethodsAtom = atom<string[]>([]);
 
-/** Same email-vs-username split the old inline handler used. */
+/**
+ * Signs in with an email or a username and reports the outcome as a value;
+ * it never navigates — the redirect effect owns that (see the note above).
+ */
 export const signInAtom = atom(
   null,
   async (_get, set, { identifier, password }: SignInArgs): Promise<SignInOutcome> => {
@@ -225,7 +228,10 @@ type SignUpArgs = {
   dateOfBirth: string;
 };
 
-/** Trims username/name/email the same way `lib/auth-validation.ts` checks them; the password is sent as typed. */
+/**
+ * Registers a new account with email and password.
+ * Trims username/name/email the same way `lib/auth-validation.ts` checks them; the password is sent as typed.
+ */
 export const signUpAtom = atom(
   null,
   async (_get, set, fields: SignUpArgs): Promise<boolean> => {
@@ -273,6 +279,8 @@ function clearFamily<Param>(family: { getParams(): Iterable<Param>; remove(p: Pa
 
 
 /**
+ * Signs the viewer out and sweeps every viewer-dependent cache.
+ *
  * Replaces the inline `authClient.signOut()` + `queryClient.clear()` that
  * used to live in `profile-layout.tsx`. Cached profiles and feeds carry
  * viewer-dependent fields (`viewerIsFollowing`, `viewerHasLiked`) behind
@@ -379,6 +387,7 @@ export const requestPasswordResetAtom = atom(
   },
 );
 
+/** What a password-reset attempt ended in; the route renders a panel per outcome. */
 export type ResetPasswordOutcome =
   | { status: "success" }
   | { status: "invalid-token" }
