@@ -172,18 +172,27 @@ export function Header() {
                 {/* Menu items render real links, so the profile and settings
                     destinations keep link semantics (middle-click, open in
                     new tab) instead of going through a navigate() call. */}
+                {/* The preset styles menu rows `cursor-default` (base-ui's
+                    keyboard-first convention); these rows are links and an
+                    action the user will click with a mouse, so they get the
+                    pointer back per-item — `components/ui/**` is upstream. */}
                 <DropdownMenuItem
+                  className="cursor-pointer"
                   render={<Link to="/@{$username}" params={{ username: handle }} />}
                 >
                   <User />
                   <span>{m.menu_view_profile()}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem render={<Link to="/settings/account" />}>
+                <DropdownMenuItem
+                  className="cursor-pointer"
+                  render={<Link to="/settings/account" />}
+                >
                   <Settings />
                   <span>{m.profile_settings()}</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
+                  className="cursor-pointer"
                   variant="destructive"
                   disabled={isSigningOut}
                   onClick={() => void handleSignOut()}
