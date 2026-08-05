@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { viewerAtom, viewerHandleAtom } from "@/atoms/session";
 import { UserAvatar } from "@/components/user-avatar";
+import { VersionTag } from "@/components/version-tag";
 import { m } from "@/paraglide/messages.js";
 
 // The theme dropdown is the only interactive control in the header that ships
@@ -55,6 +56,10 @@ export function Header() {
               className="h-7 w-auto shrink-0"
             />
             <span className="truncate">MyTuums</span>
+            {/* Pre-1.0 builds are tagged next to the wordmark (alpha/beta);
+                stable builds render nothing. The `shrink-0` lives on the tag
+                so the wordmark's truncate can never swallow it. */}
+            <VersionTag />
           </Link>
           <nav className="hidden md:flex items-center gap-1">
             <Button variant="ghost" nativeButton={false} render={<Link to="/" className="flex items-center gap-2" />}>

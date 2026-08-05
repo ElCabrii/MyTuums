@@ -5,6 +5,7 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import { preloadInjectionPlugin } from "./build-inject-plugin";
 import path from "node:path";
+import pkg from "./package.json";
 
 // Where /rpc and /api/auth are proxied in dev. Overridable so the E2E suite
 // can point the web app at its own server on a different port and run beside
@@ -20,6 +21,15 @@ export default defineConfig({
   // buttons and no One Tap ever render, with nothing in the console to say
   // why - the code has no missing dependency, it just never saw the values.
   envDir: path.resolve(__dirname, "../.."),
+  define: {
+    // The footer's "v0.4.2" and the header's alpha/beta tag come from
+    // package.json's `version` field, inlined here rather than read at
+    // runtime — no env file or API round-trip to drift from the release
+    // the bundle was built from. Declared for TS in src/vite-env.d.ts;
+    // vitest.config.ts carries a stand-in define of its own because it
+    // deliberately does not load this file.
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [
     tailwindcss(),
     tanstackRouter({
