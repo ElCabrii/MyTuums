@@ -65,6 +65,10 @@ export function createRateLimiter(
      * spray of requests from many addresses would otherwise grow this map
      * without limit — which would turn the rate limiter itself into the
      * denial-of-service vector it exists to prevent.
+     *
+     * This is a hard bound: at capacity, a brand-new key is refused
+     * (`allowed: false`) until a tracked window expires; a returning caller
+     * whose own window expired recycles its slot.
      */
     maxKeys?: number;
   } = {},
@@ -93,6 +97,13 @@ export function createRateLimiter(
         // Only sweep when adding a key, and only once the map has actually
         // grown — an O(n) scan on every request would be worse than the leak.
         if (buckets.size >= maxKeys) sweep(at);
+        // Hard bound: at capacity with live windows, a brand-new key is refused
+        // rather than growing the map. A returning caller whose window expired
+        // just recycles its own slot — sweep is guaranteed to have removed it
+        // (resetAt <= at), so the set below cannot grow the map either.
+        if (buckets.size >= maxKeys && existing === undefined) {
+          return { allowed: false, remaining: 0, retryAfterSeconds: 1 };
+        }
         buckets.set(key, bucket);
       }
 
