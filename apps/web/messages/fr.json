@@ -203,7 +203,7 @@
   "feed_empty": "Aucune publication pour l'instant. Publiez quelque chose en premier.",
   "feed_load_error": "Impossible de charger les publications.",
   "post_action": "Publier",
-  "post_placeholder": "Partagez une pensée...",
+  "post_placeholder": "Partagez une actualité gaming, un clip ou un résultat de tournoi...",
   "post_publish_error": "Impossible de publier votre publication. Veuillez réessayer.",
   "post_like": "Aimer cette publication ({count})",
   "post_unlike": "Ne plus aimer cette publication ({count})",

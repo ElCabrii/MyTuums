@@ -203,7 +203,7 @@
   "feed_empty": "No posts yet. Be the first to post something.",
   "feed_load_error": "Could not load posts.",
   "post_action": "Post",
-  "post_placeholder": "Share your thoughts...",
+  "post_placeholder": "Share a gaming update, clip, or tournament result...",
   "post_publish_error": "Could not publish your post. Please try again.",
   "post_like": "Like this post ({count})",
   "post_unlike": "Unlike this post ({count})",
