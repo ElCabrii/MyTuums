@@ -14,6 +14,7 @@ the root — see `src/constants.ts` for why.
 - `src/router.ts` — `appRouter` + `AppRouter`; `me` lives here, `post`/`user` are posts.ts/users.ts. No RPC-level health check, on purpose.
 - `src/posts.ts` — `post.create` / `list` / `thread` / `like` / `unlike`; `postSelection` is the single projection feeds and threads share.
 - `src/users.ts` — `byUsername` / `uploadImage` / `removeImage` / `follow` / `unfollow` / `followers` / `following`; `publicUserColumns` is the privacy boundary.
+- `src/search.ts` — `search.typeahead` / `users` / `posts`; `escapeLikePattern` keeps user input literal against LIKE wildcards.
 - `src/procedures.ts` — `publicProcedure` / `protectedProcedure` and the `rateLimit(policy)` middleware.
 - `src/context.ts` — the `Context` shape and `createContext`; owns the one process-wide rate limiter and storage client.
 - `src/cursor.ts` — opaque base64url keyset cursors, parameterised on the tie-breaker's id schema.

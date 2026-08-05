@@ -49,7 +49,7 @@ import type { Storage } from "./storage.js";
  * The follower lists below spread this too, so they inherit the same property
  * rather than growing their own projection that could drift from it.
  */
-const publicUserColumns = {
+export const publicUserColumns = {
   id: user.id,
   name: user.name,
   username: user.username,
@@ -76,7 +76,7 @@ const followingCount = sql<number>`(
   select count(*)::int from ${follow} where ${follow.followerId} = ${user.id}
 )`;
 
-function viewerIsFollowing(viewerId: string | undefined) {
+export function viewerIsFollowing(viewerId: string | undefined) {
   return viewerId
     ? sql<boolean>`exists (
         select 1 from ${follow}

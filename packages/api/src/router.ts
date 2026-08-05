@@ -1,10 +1,11 @@
 import { postRouter } from "./posts.js";
+import { searchRouter } from "./search.js";
 import { userRouter } from "./users.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 
 /**
- * The oRPC router: `me`, plus the `post` and `user` procedure groups.
+ * The oRPC router: `me`, plus the `post`, `user` and `search` procedure groups.
  *
  * Liveness/readiness is served over plain HTTP at GET /health (see
  * apps/server/src/index.ts) so orchestrators (Docker, k8s) that can't speak
@@ -19,6 +20,7 @@ export const appRouter = {
   }),
   post: postRouter,
   user: userRouter,
+  search: searchRouter,
 };
 
 /** The inferred router type, for callers that import the contract (tests, the client). */

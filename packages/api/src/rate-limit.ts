@@ -162,4 +162,12 @@ export const RATE_LIMITS = {
    * shared budget with one large retry loop would take the composer down with it.
    */
   upload: { name: "upload", limit: 10, windowMs: MINUTE },
+  /**
+   * Search. An ILIKE scan costs more than the indexed reads the `read` tier
+   * serves, and a debounced typeahead legitimately fires several times a
+   * second — so search gets its own namespace: a search abuser must not be
+   * able to exhaust the `read` budget the feeds depend on. 120 covers the
+   * typeahead's bursts with room to spare.
+   */
+  search: { name: "search", limit: 120, windowMs: MINUTE },
 } as const satisfies Record<string, RateLimitPolicy>;
