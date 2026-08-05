@@ -116,7 +116,8 @@ export const MAX_IMAGE_MEGAPIXELS = 50;
  * slot total.
  *
  * Enforced in `apps/server/src/request-handler.ts`, which is the one chokepoint
- * that runs before oRPC buffers a body in memory.
+ * that runs before oRPC buffers a body in memory. Chunked (`Transfer-Encoding`)
+ * bodies carry no Content-Length and are rejected outright.
  */
 export const RPC_MAX_BODY_BYTES =
   Math.max(...Object.values(IMAGE_LIMITS).flatMap((slot) => [slot.maxOriginalBytes, slot.maxDisplayBytes])) +

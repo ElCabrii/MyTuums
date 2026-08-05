@@ -165,8 +165,16 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // request at all.
         //
         // Content-Length is present on every browser multipart upload, which is
-        // the traffic this protects; a `Transfer-Encoding: chunked` client could
-        // bypass it, a known limitation rather than a silent guarantee.
+        // the traffic this protects; a `Transfer-Encoding: chunked` client has no
+        // Content-Length to check, so it is rejected outright rather than
+        // buffered. A request carrying both is already refused by Node's own
+        // parser before this handler runs.
+        if (req.headers["transfer-encoding"]) {
+          res.writeHead(413, { "Content-Type": "text/plain" });
+          res.end("Payload too large");
+          return;
+        }
+
         const declared = Number(req.headers["content-length"]);
         if (Number.isFinite(declared) && declared > RPC_MAX_BODY_BYTES) {
           res.writeHead(413, { "Content-Type": "text/plain" });
