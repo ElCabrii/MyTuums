@@ -33,3 +33,12 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/**
+ * The `version` field of apps/web/package.json, inlined by the `define` block
+ * in vite.config.ts at build time. Unlike the `VITE_` variables above it does
+ * not come from an env file — package.json is the single source of truth, so
+ * the footer's "v0.4.2" and the header's stage tag always match the release
+ * the bundle was built from.
+ */
+declare const __APP_VERSION__: string;

@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Link } from "@tanstack/react-router";
 import { m } from "@/paraglide/messages.js";
+import { APP_VERSION } from "@/lib/app-version";
 
 // The locale switcher is the only interactive control in the footer and the
 // only one that pulls in popover machinery (floating-ui + focus management);
@@ -28,6 +29,7 @@ export function Footer() {
             className="h-5 w-auto"
           />
           <span className="font-semibold text-foreground">MyTuums</span>
+          <span className="text-xs">{`v${APP_VERSION}`}</span>
           <span>{m.footer_copyright({ year: String(new Date().getFullYear()) })}</span>
         </div>
         <div className="flex flex-wrap items-center gap-4 sm:gap-6">

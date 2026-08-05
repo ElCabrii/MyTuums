@@ -16,6 +16,15 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
   plugins: [react()],
+  define: {
+    // Stand-in only: vitest.config.ts deliberately does not load
+    // vite.config.ts (see the note above), so src/lib/app-version.ts's
+    // module-level constants need this global to exist for the module to
+    // evaluate. The helper under test takes the version as a parameter, so
+    // this value is never asserted — package.json via vite.config.ts remains
+    // the single source of truth for the bundle.
+    __APP_VERSION__: JSON.stringify("0.0.0"),
+  },
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),
