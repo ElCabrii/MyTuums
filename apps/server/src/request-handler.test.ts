@@ -109,6 +109,20 @@ describe("createRequestHandler", () => {
     expect(calls.statusCode).toBe(404);
   });
 
+  it("does NOT redirect when the production __Secure- session cookie is present", async () => {
+    // Over HTTPS, BetterAuth prefixes the cookie `__Secure-`, so production
+    // sends `__Secure-better-auth.session_token`, never the bare name. The
+    // check must recognise that shape — before the fix, every production
+    // visitor at `/`, logged in or not, was 302'd to /login?redirect=%2F and
+    // the login page bounced the live session back (reload flicker).
+    const { res, calls } = resStub();
+    const handle = createRequestHandler(deps());
+
+    await handle(reqStub("/", "GET", { cookie: "__Secure-better-auth.session_token=stale" }), res);
+
+    expect(calls.statusCode).toBe(404);
+  });
+
   it("redirects only the exact path /, not /?x=1 — consistent with the /health exact match", async () => {
     const { res, calls } = resStub();
     const handle = createRequestHandler(deps());

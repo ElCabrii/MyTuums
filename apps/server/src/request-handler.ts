@@ -47,6 +47,15 @@ const MEDIA_PREFIX = "/media/";
  * case is that the redirect below stops firing: the app's own
  * `useRequireSignedIn` gate still covers the same ground client-side, so this
  * is an optimization with a safe failure mode, not a security control.
+ *
+ * The name carries a `__Secure-` prefix whenever BetterAuth serves over
+ * HTTPS, i.e. every production request; plain HTTP (dev, localhost) gets the
+ * bare name. The check below mirrors BetterAuth's own `getCookie` fallback
+ * (`parsedCookie.get(`__Secure-${name}`) ?? parsedCookie.get(name)`) so a
+ * live cookie in either shape is recognised — a mismatch here 302s *every*
+ * visitor at `/` to `/login?redirect=%2F`, logged in or not, and the login
+ * page then bounces the real session back to `/` (the reload flicker this
+ * file's sibling PR fixes).
  */
 const SESSION_COOKIE_NAME = "better-auth.session_token";
 
@@ -54,7 +63,13 @@ function hasSessionCookie(cookieHeader: string | undefined): boolean {
   return (
     cookieHeader
       ?.split(";")
-      .some((part) => part.trim().startsWith(`${SESSION_COOKIE_NAME}=`)) ?? false
+      .some((part) => {
+        const name = part.trim();
+        return (
+          name.startsWith(`${SESSION_COOKIE_NAME}=`) ||
+          name.startsWith(`__Secure-${SESSION_COOKIE_NAME}=`)
+        );
+      }) ?? false
   );
 }
 
