@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { request as httpRequest } from "node:http";
 import { gunzipSync } from "node:zlib";
 import { E2E } from "../../playwright.config";
+import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
 
 // This project's baseURL is the server (E2E.serverUrl) — see the `api`
 // project in playwright.config.ts.
@@ -85,6 +86,28 @@ test.describe("security headers", () => {
 
     expect(response.status()).toBe(401);
     expectSecurityHeaders(response.headers());
+  });
+});
+
+test.describe("request body cap", () => {
+  test("a chunked /rpc body over the cap is refused with 413", async () => {
+    // rawRequest sends no Content-Length, so node encodes the body chunked —
+    // the framing the router's Content-Length check cannot see (and that Node
+    // http clients legitimately use). The cap for that framing lives in
+    // oRPC's BodyLimitPlugin (apps/server/src/index.ts), which counts body
+    // bytes as they stream and refuses at the same ceiling.
+    //
+    // RPC_MAX_BODY_BYTES is imported rather than mirrored: it derives from
+    // IMAGE_LIMITS, and this test only needs "over the cap", so importing
+    // keeps it correct when the image caps change.
+    const wire = await rawRequest("/rpc/user/uploadImage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...RPC_HEADERS },
+      body: "x".repeat(RPC_MAX_BODY_BYTES + 1024),
+    });
+
+    expect(wire.status).toBe(413);
+    expect(wire.body.toString()).toContain("PAYLOAD_TOO_LARGE");
   });
 });
 

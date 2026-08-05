@@ -111,6 +111,60 @@ describe("createRateLimiter", () => {
     });
   });
 
+  describe("maxKeys", () => {
+    it("refuses a brand-new key when the map is at capacity with live windows", () => {
+      // The clock never moves here: every window must stay live for the map
+      // to be genuinely at capacity when the third key arrives.
+      const clock = 0;
+      const limiter = createRateLimiter({ now: () => clock, maxKeys: 2 });
+      const p = policy({ limit: 3 });
+
+      expect(limiter.consume("a", p).allowed).toBe(true);
+      expect(limiter.consume("b", p).allowed).toBe(true);
+      expect(limiter.size).toBe(2);
+
+      // "c" would be a third tracked key; every window is live, so it is
+      // refused rather than growing the map past maxKeys.
+      const third = limiter.consume("c", p);
+      expect(third.allowed).toBe(false);
+      expect(third.remaining).toBe(0);
+      expect(limiter.size).toBe(2);
+    });
+
+    it("recycles a returning caller's expired slot even when the map holds a live window", () => {
+      let clock = 0;
+      const limiter = createRateLimiter({ now: () => clock, maxKeys: 2 });
+      const p = policy({ limit: 3 });
+
+      limiter.consume("a", p); // resetAt 1000
+      clock = 500;
+      limiter.consume("b", p); // resetAt 1500
+
+      clock = 1200; // "a" expired, "b" still live, map at capacity
+      // The refusal must apply only to brand-new keys: "a" replaces its own
+      // expired entry, which never grows the map.
+      expect(limiter.consume("a", p).allowed).toBe(true);
+      expect(limiter.size).toBe(2);
+    });
+
+    it("lets expired windows free capacity for a brand-new key", () => {
+      let clock = 0;
+      const limiter = createRateLimiter({ now: () => clock, maxKeys: 2 });
+      const p = policy({ limit: 3 });
+
+      limiter.consume("a", p);
+      limiter.consume("b", p);
+      clock = 1000; // both windows expired (windowMs 1000)
+
+      // Both share one clock, so sweep drops a AND b — the new key lands
+      // alone at size 1, and a fourth key fills the map back to capacity.
+      expect(limiter.consume("c", p).allowed).toBe(true);
+      expect(limiter.size).toBe(1);
+      expect(limiter.consume("d", p).allowed).toBe(true);
+      expect(limiter.size).toBe(2);
+    });
+  });
+
   it("clear() empties the map", () => {
     const limiter = createRateLimiter({ now: () => 0 });
     limiter.consume("a", policy());

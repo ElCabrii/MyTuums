@@ -165,8 +165,10 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // request at all.
         //
         // Content-Length is present on every browser multipart upload, which is
-        // the traffic this protects; a `Transfer-Encoding: chunked` client could
-        // bypass it, a known limitation rather than a silent guarantee.
+        // the traffic this protects; a `Transfer-Encoding: chunked` client has no
+        // Content-Length to check, and is legitimately used by Node http clients
+        // that omit the header — so chunked bodies are bounded downstream by
+        // oRPC's BodyLimitPlugin at the same ceiling (see index.ts).
         const declared = Number(req.headers["content-length"]);
         if (Number.isFinite(declared) && declared > RPC_MAX_BODY_BYTES) {
           res.writeHead(413, { "Content-Type": "text/plain" });
