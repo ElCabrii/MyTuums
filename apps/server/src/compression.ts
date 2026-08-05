@@ -4,6 +4,7 @@
  * path). The q-value parsing lives here so the two callers cannot drift.
  */
 
+/** The encodings this server can emit for text, or `null` for identity (no compression). */
 export type Compression = "br" | "gzip" | null;
 
 /**

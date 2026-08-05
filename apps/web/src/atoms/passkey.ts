@@ -18,8 +18,10 @@ import { m } from "@/paraglide/messages.js";
  * whole QueryClient, so one person's passkeys can never be served to the next
  * person on this browser.
  */
+/** The query key the passkeys query is cached under — shared so invalidations always target it. */
 export const passkeysQueryKey = ["passkeys"] as const;
 
+/** The signed-in user's passkeys, from a cached query. */
 export const passkeysAtom = atomWithQuery(() => ({
   queryKey: passkeysQueryKey,
   queryFn: async () => {
@@ -41,12 +43,15 @@ export const passkeysAtom = atomWithQuery(() => ({
  * is open makes "only one at a time" structural, where a flag per row makes it
  * something every row has to remember to enforce against every other.
  */
+/** Which passkey is being renamed — null when no row is open. */
 export const editingPasskeyIdAtom = atom<string | null>(null);
+/** The rename draft, seeded from the passkey being renamed. */
 export const passkeyNameDraftAtom = atomWithReset("");
 
 /** Name for a passkey about to be registered. Optional — the authenticator supplies a default. */
 export const newPasskeyNameAtom = atomWithReset("");
 
+/** Opens the rename row for a passkey (or closes it with null), seeding the draft. */
 export const startRenamingPasskeyAtom = atom(
   null,
   (_get, set, passkey: { id: string; name?: string | null } | null) => {
@@ -55,6 +60,7 @@ export const startRenamingPasskeyAtom = atom(
   },
 );
 
+/** Clears every passkey form field and the open row — unmount cleanup. */
 export const resetPasskeyFormsAtom = atom(null, (_get, set) => {
   set(editingPasskeyIdAtom, null);
   set(passkeyNameDraftAtom, RESET);
@@ -99,6 +105,7 @@ export const addPasskeyAtom = atom(null, async (get, set, name?: string): Promis
   }
 });
 
+/** Renames a passkey and re-reads the list; returns whether it succeeded. */
 export const renamePasskeyAtom = atom(
   null,
   async (get, set, { id, name }: { id: string; name: string }): Promise<boolean> => {
@@ -125,6 +132,7 @@ export const renamePasskeyAtom = atom(
   },
 );
 
+/** Deletes a passkey and re-reads the list; returns whether it succeeded. */
 export const deletePasskeyAtom = atom(null, async (get, set, id: string): Promise<boolean> => {
   set(authErrorAtom, null);
   set(authPendingAtom, true);

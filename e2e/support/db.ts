@@ -58,6 +58,10 @@ export interface CreateUserInput {
   dateOfBirth: string;
 }
 
+/**
+ * A user as `createUser` returns it — id, the normalised and display
+ * username pair, display name, and email.
+ */
 export interface CreatedUser {
   id: string;
   username: string;
@@ -134,6 +138,7 @@ export async function clearDateOfBirth(userId: string): Promise<void> {
   await db.update(user).set({ dateOfBirth: null }).where(eq(user.id, userId));
 }
 
+/** A post as the seeding helpers return it — id, content, and the explicit createdAt they were inserted with. */
 export interface SeededPost {
   id: string;
   content: string;

@@ -16,12 +16,18 @@ function optionalEnv(name: string): string | undefined {
   return value ? value : undefined;
 }
 
-// WEB_ORIGIN is optional with a dev-friendly default, matching the fallback
-// in apps/server/src/env.ts (the loud boot-time validator for the app).
+/**
+ * The web app's origin, defaulting to the Vite dev server.
+ *
+ * Optional with a dev-friendly default, matching the fallback in
+ * apps/server/src/env.ts (the loud boot-time validator for the app).
+ */
 export const webOrigin = optionalEnv("WEB_ORIGIN") ?? "http://localhost:5173";
 
+/** Whether the process runs with NODE_ENV=production. */
 export const isProduction = process.env.NODE_ENV === "production";
 
+/** Both halves of one OAuth provider's credential pair. */
 export interface OAuthCredentials {
   clientId: string;
   clientSecret: string;
@@ -41,6 +47,7 @@ export function oauthCredentials(prefix: string): OAuthCredentials | undefined {
   return clientId && clientSecret ? { clientId, clientSecret } : undefined;
 }
 
+/** Resend API key, or undefined when email delivery is unconfigured. */
 export const resendApiKey = optionalEnv("RESEND_API_KEY");
 
 /**
@@ -61,6 +68,8 @@ export const resendApiKey = optionalEnv("RESEND_API_KEY");
 export const authRateLimitEnabled = optionalEnv("AUTH_RATE_LIMIT") !== "false";
 
 /**
+ * The From address on every sent email, defaulting to Resend's onboarding one.
+ *
  * Resend rejects a `from` outside a verified domain, so this has no useful
  * default in production — but it also must not throw at import time. An unset
  * value surfaces as a send failure from ./email.ts, which names the variable.

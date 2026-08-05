@@ -37,6 +37,12 @@ const validateUserWrite = async (user: Record<string, unknown>): Promise<void> =
   await validateProfileFieldsHook(user);
 };
 
+/**
+ * The single Better Auth instance the whole app runs on: mounted at `/api/auth`
+ * by apps/server (toNodeHandler), and used by packages/api/src/context.ts to
+ * resolve every request's session. Every setting below carries a load-bearing
+ * inline comment — treat them as pinned invariants, not defaults to tweak.
+ */
 export const auth = betterAuth({
   // Also the default TOTP issuer — this is the label that shows up beside the
   // code in an authenticator app, so without it every entry would read

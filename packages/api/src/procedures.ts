@@ -41,8 +41,13 @@ export function rateLimit(policy: RateLimitPolicy) {
   });
 }
 
+/** The base procedure — usable without a session, which is what keeps the public feeds public. */
 export const publicProcedure = base;
 
+/**
+ * The base procedure plus a session requirement; handlers receive the session
+ * user as `context.user`.
+ */
 export const protectedProcedure = base.use(({ context, next }) => {
   if (!context.session?.user) throw new ORPCError("UNAUTHORIZED");
   return next({ context: { ...context, user: context.session.user } });

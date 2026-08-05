@@ -1,6 +1,6 @@
 // Application-specific tables live here, kept separate from ./auth.ts so
-// that regenerating the BetterAuth schema (`db:generate`, see auth.ts header)
-// never clobbers app-owned tables.
+// that regenerating the BetterAuth schema (`db:generate:auth`, see the header
+// of ./auth.ts) never clobbers app-owned tables.
 import { relations, sql } from "drizzle-orm";
 import {
   pgTable,
@@ -16,6 +16,10 @@ import { user } from "./auth.js";
 
 // Table names are singular to match the BetterAuth-generated tables in
 // ./auth.ts (`user`, `session`, ...) rather than mixing conventions.
+/**
+ * A single status update — a top-level post, or a reply threaded under
+ * `parentId`. Read and written by the `post` procedures in packages/api.
+ */
 export const post = pgTable(
   "post",
   {
@@ -80,6 +84,10 @@ export const post = pgTable(
   ],
 );
 
+/**
+ * A like — one row per (post, user) pair; the composite primary key *is* the
+ * "one like per user per post" rule (see the inline note below).
+ */
 export const postLike = pgTable(
   "post_like",
   {
@@ -107,6 +115,10 @@ export const postLike = pgTable(
   ],
 );
 
+/**
+ * A directed follow edge from `followerId` to `followingId` — the rows the
+ * Following feed and the follow lists are built from.
+ */
 export const follow = pgTable(
   "follow",
   {
@@ -157,6 +169,7 @@ export const follow = pgTable(
   ],
 );
 
+/** Drizzle relations for `post` — the joins `with` queries can reach: author, likes, parent, and replies. */
 export const postRelations = relations(post, ({ one, many }) => ({
   author: one(user, { fields: [post.authorId], references: [user.id] }),
   likes: many(postLike),
@@ -172,11 +185,13 @@ export const postRelations = relations(post, ({ one, many }) => ({
   replies: many(post, { relationName: "replies" }),
 }));
 
+/** Drizzle relations for `postLike` — the `post` and `user` a like references. */
 export const postLikeRelations = relations(postLike, ({ one }) => ({
   post: one(post, { fields: [postLike.postId], references: [post.id] }),
   user: one(user, { fields: [postLike.userId], references: [user.id] }),
 }));
 
+/** Drizzle relations for `follow` — the `user` rows on both sides of the edge. */
 export const followRelations = relations(follow, ({ one }) => ({
   // Named for the direction they point rather than for the column: `follower`
   // is the person doing the following, `following` the person being followed.

@@ -23,6 +23,11 @@ export const Route = createFileRoute("/forgot-password")({
   component: ForgotPasswordPage,
 });
 
+/**
+ * The password-reset request page: collects the account email, then swaps the
+ * form for a "check your email" panel that never reveals whether the account
+ * exists.
+ */
 function ForgotPasswordPage() {
   // Same as /login: there is no reason to be here with a live session.
   useRedirectWhenSignedIn();

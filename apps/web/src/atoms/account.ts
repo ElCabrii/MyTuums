@@ -26,12 +26,15 @@ import { m } from "@/paraglide/messages.js";
 
 // ---------------------------------------------------------------- handle
 
+/** The handle being typed in settings; reset on unmount like every form field. */
 export const handleChangeDraftAtom = atomWithReset("");
 
+/** First handle-validation error for the current draft, or `null`. */
 export const handleChangeValidationAtom = atom((get) =>
   validateUsername(get(handleChangeDraftAtom)),
 );
 
+/** Clears the handle draft and the shared auth error — unmount cleanup. */
 export const resetHandleChangeAtom = atom(null, (_get, set) => {
   set(handleChangeDraftAtom, RESET);
   set(authErrorAtom, null);
@@ -107,13 +110,17 @@ export const changeHandleAtom = atom(null, async (get, set): Promise<string | nu
 
 // -------------------------------------------------------------- password
 
+/** The current password — required, and only ever checked against the server. */
 export const currentPasswordAtom = atomWithReset("");
+/** The password being set; cleared on success so no typed password lingers. */
 export const newPasswordAtom = atomWithReset("");
+/** The re-typed new password; must equal `newPasswordAtom`. */
 export const confirmNewPasswordAtom = atomWithReset("");
 
 /** True once a password change has succeeded, so the form can say so. */
 export const passwordChangedAtom = atom(false);
 
+/** First password-change violation (missing current, too short, mismatch), or `null`. */
 export const passwordChangeValidationAtom = atom((get) => {
   if (!get(currentPasswordAtom)) return "Please enter your password.";
   if (get(newPasswordAtom).length < 8) return "Password must be at least 8 characters long.";
@@ -121,6 +128,7 @@ export const passwordChangeValidationAtom = atom((get) => {
   return null;
 });
 
+/** Clears the password fields, the success flag and the shared error — unmount cleanup. */
 export const resetPasswordChangeAtom = atom(null, (_get, set) => {
   set(currentPasswordAtom, RESET);
   set(newPasswordAtom, RESET);

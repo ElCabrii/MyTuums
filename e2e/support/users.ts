@@ -7,8 +7,13 @@
  * these two up once and saves their `storageState`; every browser spec reads
  * the handle from here instead, so a fixture rename is a one-line change.
  */
+
+/**
+ * A fixture account — the shape `auth.setup.ts` signs up and storage-state
+ * files are named after, so specs never hardcode "alice"/"bob".
+ */
 export interface FixtureUser {
-  /** Also used as the display name's slug-free counterpart in seed data. */
+  /** The handle — profile URLs, storage-state filenames, and seed emails are all derived from it. */
   username: string;
   name: string;
   email: string;
@@ -21,6 +26,7 @@ export interface FixtureUser {
   dateOfBirth: string;
 }
 
+/** Alice — the signed-in fixture account most browser specs run as. */
 export const ALICE: FixtureUser = {
   username: "alice",
   name: "Alice Anderson",
@@ -29,6 +35,7 @@ export const ALICE: FixtureUser = {
   dateOfBirth: "1995-01-01",
 };
 
+/** Bob — the second fixture account, reached through the `bobPage` fixture for two-viewer scenarios. */
 export const BOB: FixtureUser = {
   username: "bob",
   name: "Bob Baker",

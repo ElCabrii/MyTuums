@@ -21,6 +21,7 @@ import type { WritableAtom } from "better-auth/react";
  */
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
 
+/** True when a `VITE_GOOGLE_CLIENT_ID` is configured — the on/off switch for the One Tap prompt. */
 export const shouldOfferOneTap = googleClientId !== "";
 
 export const authClient = createAuthClient({
@@ -63,6 +64,7 @@ export const authClient = createAuthClient({
   ],
 });
 
+/** The client's React hook and action functions, re-exported for convenience. */
 export const { useSession, signIn, signUp, signOut } = authClient;
 
 /**
@@ -117,6 +119,7 @@ const KNOWN_SOCIAL_PROVIDERS = [
   { id: "twitch", label: "Twitch" },
 ] as const;
 
+/** The id of any provider this app knows how to render a button for. */
 export type SocialProviderId = (typeof KNOWN_SOCIAL_PROVIDERS)[number]["id"];
 
 /**

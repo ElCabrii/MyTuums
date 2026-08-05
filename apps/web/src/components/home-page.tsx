@@ -10,6 +10,10 @@ import { homeFeedScopeAtom, postFeedAtom } from "@/atoms/post-feed";
 import { feedScopeAtom } from "@/lib/feed-scope";
 import { m } from "@/paraglide/messages.js";
 
+/**
+ * The home feed page (route `/`): the For you|Following scope switch, the
+ * composer (signed in) or sign-in CTA (signed out), and the scoped feed.
+ */
 export function HomePage() {
   const setFeedScope = useSetAtom(feedScopeAtom);
   const signedIn = useAtomValue(isSignedInAtom);

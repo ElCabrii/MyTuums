@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 
+/** The French terms of service body — legal prose, rendered inside `LegalDocument`. */
 export function TermsOfServiceFr() {
   return (
     <>

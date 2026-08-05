@@ -15,8 +15,10 @@ import { m } from "@/paraglide/messages.js";
  * (`FAILED_TO_UNLINK_LAST_ACCOUNT`); this is so the button is disabled rather
  * than the error arriving after the click.
  */
+/** The query key the linked-accounts query is cached under — shared so invalidations always target it. */
 export const linkedAccountsQueryKey = ["linked-accounts"] as const;
 
+/** The signed-in account's linked providers, from a cached query. */
 export const linkedAccountsAtom = atomWithQuery(() => ({
   queryKey: linkedAccountsQueryKey,
   queryFn: async () => {
@@ -66,6 +68,11 @@ export const linkProviderAtom = atom(
   },
 );
 
+/**
+ * Unlinks a provider from this account and refreshes the list; returns whether
+ * it succeeded. The server refuses to unlink the last account — this surfaces
+ * that error for the banner rather than letting the click go through.
+ */
 export const unlinkProviderAtom = atom(
   null,
   async (

@@ -25,15 +25,23 @@ import { APIError } from "better-auth/api";
  */
 export const BIO_MAX_LENGTH = 160;
 
+/** The themes the settings page offers and this package will accept. */
 export const THEME_PREFERENCES = ["light", "dark", "system"] as const;
+/** The locales the settings page offers and this package will accept. */
 export const LOCALE_PREFERENCES = ["en", "fr"] as const;
 
+/** A valid themePreference value. */
 export type ThemePreference = (typeof THEME_PREFERENCES)[number];
+/** A valid localePreference value. */
 export type LocalePreference = (typeof LOCALE_PREFERENCES)[number];
 
+/** Message for a bio over BIO_MAX_LENGTH — kept byte-identical with the client's validateBio. */
 export const BIO_TOO_LONG_MESSAGE = "Your bio must be 160 characters or fewer.";
+/** Message for a theme outside THEME_PREFERENCES. */
 export const THEME_PREFERENCE_INVALID_MESSAGE = "Please choose a valid theme.";
+/** Message for a locale outside LOCALE_PREFERENCES. */
 export const LOCALE_PREFERENCE_INVALID_MESSAGE = "Please choose a valid language.";
+/** Message for any attempt to set an image field by hand — uploads are the only legitimate writer. */
 export const MANAGED_IMAGE_MESSAGE = "Profile images are set by uploading a file.";
 
 /** Absent in the sense every one of these rules means: nothing to check. */

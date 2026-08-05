@@ -29,6 +29,7 @@
  * fully independent of anything the request layer does.
  */
 
+/** A per-caller budget for one named operation. */
 export interface RateLimitPolicy {
   /** Namespaces the counter, so a caller's writes and reads don't share one. */
   name: string;
@@ -37,6 +38,7 @@ export interface RateLimitPolicy {
   windowMs: number;
 }
 
+/** The verdict of one `consume` call. */
 export interface RateLimitResult {
   allowed: boolean;
   /** Requests left in the current window; 0 once the limit is hit. */
@@ -45,6 +47,7 @@ export interface RateLimitResult {
   retryAfterSeconds: number;
 }
 
+/** The counter procedures consume budget from and tests substitute. */
 export interface RateLimiter {
   consume(key: string, policy: RateLimitPolicy): RateLimitResult;
   /** Drops all counters. Exposed for tests and for a deliberate operational reset. */
@@ -52,6 +55,7 @@ export interface RateLimiter {
   readonly size: number;
 }
 
+/** Creates an in-memory fixed-window rate limiter. */
 export function createRateLimiter(
   options: {
     /** Injectable so tests can advance time without sleeping. */

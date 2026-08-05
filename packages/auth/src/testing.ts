@@ -24,6 +24,7 @@ import { testUtils, username } from "better-auth/plugins";
 import { db } from "@my-tuums/db";
 import { webOrigin } from "./env.js";
 
+/** The test-only Better Auth instance, carrying the privileged testUtils helpers (file header explains why). */
 export const authTest = betterAuth({
   appName: "MyTuums",
   database: drizzleAdapter(db, { provider: "pg" }),
@@ -74,7 +75,7 @@ export const authTest = betterAuth({
   rateLimit: { enabled: false },
 });
 
-/** The privileged helpers, resolved once. */
+/** Resolves the privileged helpers (session minting, OTP capture, row writes) off the test instance. */
 export async function testHelpers() {
   const ctx = await authTest.$context;
   return ctx.test;

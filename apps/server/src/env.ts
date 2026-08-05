@@ -117,6 +117,10 @@ const envSchema = z.object({
     }
   });
 
+/**
+ * The validated shape `parseEnv` returns — every environment field the server
+ * reads, defaults and transforms (e.g. `TRUST_PROXY`) already applied.
+ */
 export type Env = z.infer<typeof envSchema>;
 
 /**

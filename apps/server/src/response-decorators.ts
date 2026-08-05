@@ -37,6 +37,10 @@ import { bestEncoding, type Compression } from "./compression.js";
  * byte-for-byte like an undecorated response.
  */
 
+/**
+ * The per-response security headers, applied to every response that does not
+ * already set one (inner wins — see `applyDefaults`).
+ */
 export const SECURITY_HEADERS: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",
@@ -53,6 +57,10 @@ const MIN_COMPRESS_BODY_BYTES = 1024;
 /** The callback shape `res.write(chunk, cb)` and `res.end(chunk, cb)` accept. */
 type WriteCallback = (error?: Error | null) => void;
 
+/**
+ * Wraps `res` so every response gets the security headers and, when eligible,
+ * gzip/brotli compression — the module header above is the full contract.
+ */
 export function decorateResponse(req: IncomingMessage, res: ServerResponse): ServerResponse {
   const originalWriteHead = res.writeHead.bind(res);
   const originalWrite = res.write.bind(res);

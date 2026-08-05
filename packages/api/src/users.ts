@@ -247,7 +247,15 @@ async function discardPrevious(
   }
 }
 
+/**
+ * The `user` procedure group: byUsername, uploadImage, removeImage, follow,
+ * unfollow, followers, following.
+ */
 export const userRouter = {
+  /**
+   * Returns one user's public profile by handle. Public — the shape is
+   * `publicUserColumns`, never the whole row.
+   */
   byUsername: publicProcedure
     .use(rateLimit(RATE_LIMITS.read))
     .input(z.object({ username: usernameInput }))
@@ -353,10 +361,14 @@ export const userRouter = {
       return { kind: input.kind, url: null };
     }),
 
-  // `follow` and `unfollow` are separate, idempotent procedures rather than
-  // one `toggle`, for the same reason `post.like`/`unlike` are: a toggle's
-  // result depends on the order two in-flight requests happen to arrive in —
-  // a double-click can leave you unfollowed — and it can't be safely retried.
+  /**
+   * Follows a user. Requires a session.
+   *
+   * `follow` and `unfollow` are separate, idempotent procedures rather than
+   * one `toggle`, for the same reason `post.like`/`unlike` are: a toggle's
+   * result depends on the order two in-flight requests happen to arrive in —
+   * a double-click can leave you unfollowed — and it can't be safely retried.
+   */
   follow: protectedProcedure
     .use(rateLimit(RATE_LIMITS.follow))
     .input(z.object({ userId: z.string().min(1) }))
@@ -393,10 +405,14 @@ export const userRouter = {
       };
     }),
 
-  // Deliberately *not* symmetric with `follow`'s self-check: "I do not follow
-  // myself" is an end state that is already true, so unfollowing yourself is a
-  // legitimate no-op. Following yourself is an end state the schema forbids,
-  // which is a genuine bad request.
+  /**
+   * Unfollows a user. Requires a session.
+   *
+   * Deliberately *not* symmetric with `follow`'s self-check: "I do not follow
+   * myself" is an end state that is already true, so unfollowing yourself is a
+   * legitimate no-op. Following yourself is an end state the schema forbids,
+   * which is a genuine bad request.
+   */
   unfollow: protectedProcedure
     .use(rateLimit(RATE_LIMITS.follow))
     .input(z.object({ userId: z.string().min(1) }))
@@ -424,9 +440,13 @@ export const userRouter = {
       };
     }),
 
-  // Both lists take a `username` rather than a user id so a list page can fire
-  // its two queries — the profile header and the list itself — in parallel,
-  // instead of waiting on `byUsername` to learn an id it would then pass here.
+  /**
+   * Pages a user's followers, newest first. Public.
+   *
+   * Both lists take a `username` rather than a user id so a list page can fire
+   * its two queries — the profile header and the list itself — in parallel,
+   * instead of waiting on `byUsername` to learn an id it would then pass here.
+   */
   followers: publicProcedure
     .use(rateLimit(RATE_LIMITS.read))
     .input(
@@ -477,6 +497,7 @@ export const userRouter = {
       };
     }),
 
+  /** Pages the users a person follows, newest first. Public. Same `username`-keyed contract as `followers`. */
   following: publicProcedure
     .use(rateLimit(RATE_LIMITS.read))
     .input(

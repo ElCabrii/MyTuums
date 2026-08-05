@@ -21,8 +21,8 @@ test.describe("profile", () => {
     await page.goto("/@unknownuser404");
 
     await expect(page.getByText("There's nobody here. This handle isn't taken.")).toBeVisible();
-    // role="button", not "link": Button with nativeButton={false} render={<Link/>}
-    // reports button semantics regardless of the <a> underneath (see CLAUDE.md).
+    // role="button", not "link": a shadcn Button with nativeButton={false} and
+    // render={<Link/>} keeps button semantics regardless of the <a> underneath.
     await expect(page.getByRole("button", { name: "Back to home" })).toBeVisible();
   });
 

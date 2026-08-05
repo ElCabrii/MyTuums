@@ -1,7 +1,9 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import { orpc, type Post, type PostListPage, type Thread } from "@/lib/orpc";
 
+/** Every cached `post.list` entry as [queryKey, data] — the snapshot unit for feeds. */
 export type CachedFeeds = [readonly unknown[], InfiniteData<PostListPage> | undefined][];
+/** Every cached `post.thread` entry as [queryKey, data] — the snapshot unit for threads. */
 export type CachedThreads = [readonly unknown[], Thread | undefined][];
 
 /**

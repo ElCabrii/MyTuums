@@ -77,6 +77,10 @@ function preferredEncoding(acceptEncoding: string | undefined, file: string): Co
   return bestEncoding(acceptEncoding);
 }
 
+/**
+ * A handler that may serve a request itself; `{ served: false }` means "not a
+ * static file" and falls through to the caller's 404.
+ */
 export type StaticFileHandler = (
   req: IncomingMessage,
   res: ServerResponse,
@@ -85,6 +89,13 @@ export type StaticFileHandler = (
 /** Never serves anything. What a dev server (and a test) gets. */
 export const noStaticFiles: StaticFileHandler = () => Promise.resolve({ served: false });
 
+/**
+ * Creates the static-file handler over a built SPA (`rootDir`): serves real
+ * files with per-extension content types and compression, caches `assets/`
+ * as immutable, and falls back to `index.html` for extension-less client
+ * routes. The production half of the one-origin requirement — wired in
+ * `index.ts` only when `WEB_DIST` is set (see the module header).
+ */
 export function createStaticFileHandler(rootDir: string): StaticFileHandler {
   const root = path.resolve(rootDir);
   const indexPath = path.join(root, "index.html");

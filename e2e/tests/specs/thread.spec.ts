@@ -5,12 +5,14 @@ import { likeButtonFor } from "../../support/post-card";
 const REPLY_PLACEHOLDER = "Post your reply...";
 
 /**
- * Mirrors `THREAD_ANCESTOR_MAX` in packages/api/src/constants.ts. Not
- * imported from `@my-tuums/api/constants` as the suite's brief suggests:
- * this package's own package.json (which the brief says not to modify)
- * deliberately depends on only `@my-tuums/db` and `@my-tuums/auth` — see the
- * comment on the `e2e` entry in pnpm-workspace.yaml — so `@my-tuums/api`
- * isn't linked into its node_modules and there is nothing to import.
+ * Mirrors `THREAD_ANCESTOR_MAX` in packages/api/src/constants.ts.
+ *
+ * It could be imported — `@my-tuums/api` is a dependency of this package
+ * (added for the destructive-storage cleanup in support/db.ts) and exports
+ * `./constants` — but the spec pins its own literal: the seeded chain depth
+ * and the expected truncation copy both derive from it here, and a mirror
+ * that drifts from the server constant fails the truncation test loudly
+ * instead of quietly seeding a different depth.
  */
 const THREAD_ANCESTOR_MAX = 20;
 

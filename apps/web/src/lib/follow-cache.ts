@@ -8,6 +8,7 @@ export interface FollowSnapshot {
   lists: CachedQueries<InfiniteData<UserListPage>>;
 }
 
+/** What `follow`/`unfollow` return: the person's id and the authoritative follow state. */
 export interface FollowResult {
   userId: string;
   followerCount: number;

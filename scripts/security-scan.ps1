@@ -21,6 +21,8 @@
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot   # scripts/ -> repo root
 $OutDir = Join-Path $env:TEMP "mytuums-security-scan"
+# Where findings are filed as issues and SARIF is uploaded. Pinned to the
+# fork's repo — change it here if the repo ever moves.
 $Repo = "ElCabrii/MyTuums"
 
 # Fresh output dir per run; transcript captures the full log for the
@@ -45,6 +47,8 @@ if (-not (Test-Path $sarif)) {
     try {
         $sha = (git rev-parse HEAD).Trim()
         $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($sarif))
+        # The code-scanning API wants the scanned commit and branch; pinned
+        # to main because that is what the scheduled scan runs on.
         $body = @{ commit_sha = $sha; ref = "refs/heads/main"; sarif = $b64 } |
             ConvertTo-Json -Compress
         $bodyFile = Join-Path $OutDir "sarif-upload.json"
@@ -93,6 +97,9 @@ Full report: $OutDir\report.md
         $payload = @{ title = "Security scan $date - $($findings.Count) finding(s)"; body = $issueBody } |
             ConvertTo-Json -Compress
         $payloadFile = Join-Path $OutDir "issue-body.json"
+        # BOM-less UTF-8 on purpose: Set-Content would use the platform
+        # default encoding, and a leading BOM makes `gh api --input` fail
+        # to parse the JSON body.
         [System.IO.File]::WriteAllText(
             $payloadFile, $payload, (New-Object System.Text.UTF8Encoding $false))
         $created = gh api -X POST "repos/$Repo/issues" --input $payloadFile
@@ -106,4 +113,6 @@ Full report: $OutDir\report.md
 
 Stop-Transcript | Out-Null
 Write-Host "Log: $OutDir\run.log"
+# Exit with cyberseek's code (0 clean, 1 findings, 2 error) so whoever
+# scheduled this run sees the outcome without parsing the log.
 exit $scanExit

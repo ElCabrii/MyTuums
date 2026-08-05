@@ -7,7 +7,7 @@ import { ALICE } from "../../support/users";
  * `minor`/`moderate` findings on this app skew toward noise (contrast on
  * decorative elements, landmark nitpicks) rather than something a real user
  * would trip over — filtering to `serious`/`critical` is what keeps this
- * spec a signal worth failing a build over, per the suite's brief.
+ * spec a signal worth failing a build over.
  */
 const SIGNIFICANT_IMPACTS = new Set(["serious", "critical"]);
 
@@ -17,6 +17,7 @@ const SIGNIFICANT_IMPACTS = new Set(["serious", "critical"]);
 // anywhere this workspace's strict pnpm linking would let TypeScript see it.
 type Violations = Awaited<ReturnType<AxeBuilder["analyze"]>>["violations"];
 
+/** One bullet per violation — id, impact, help text, node count — for the failure message. */
 function summarize(violations: Violations): string {
   return violations
     .map(
@@ -27,6 +28,7 @@ function summarize(violations: Violations): string {
     .join("\n");
 }
 
+/** Runs axe over the page and asserts no serious or critical violations remain. */
 async function expectNoSeriousViolations(page: Page): Promise<void> {
   const results = await new AxeBuilder({ page }).analyze();
   const significant = results.violations.filter((violation) =>
