@@ -19,6 +19,7 @@
   "user_unknown": "Inconnu",
   "user_avatar_alt": "Avatar de l'utilisateur",
   "user_view_profile": "Voir le profil de {name}",
+  "menu_view_profile": "Voir le profil",
   "theme_toggle": "Changer de thème",
   "theme_light": "Clair",
   "theme_dark": "Sombre",
@@ -91,7 +92,6 @@
   "auth_reset_invalid_title": "Ce lien est invalide ou a expiré",
   "auth_reset_invalid_hint": "Les liens de réinitialisation sont à usage unique et expirent après une heure. Demandez-en un nouveau pour continuer.",
   "auth_reset_request_new": "Demander un nouveau lien",
-
   "validation_username_required": "Le nom d'utilisateur est requis.",
   "validation_username_length": "Le nom d'utilisateur doit comporter entre 3 et 20 caractères.",
   "validation_username_characters": "Le nom d'utilisateur ne peut contenir que des lettres, des chiffres, des underscores et des tirets.",
@@ -243,7 +243,6 @@
   "profile_posts_heading": "Publications",
   "profile_own_empty": "Vous n'avez encore rien publié.",
   "profile_empty": "@{handle} n'a encore rien publié.",
-
   "notfound_title": "Page introuvable",
   "notfound_body": "Cette page n'existe pas ou a été déplacée."
 }

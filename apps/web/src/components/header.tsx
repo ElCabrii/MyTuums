@@ -1,18 +1,28 @@
 import { lazy, Suspense } from "react";
-import { Link } from "@tanstack/react-router";
-import { useAtomValue } from "jotai";
-import { MessageSquare, Bell, Compass, Home, Search } from "lucide-react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useAtomValue, useSetAtom } from "jotai";
+import { MessageSquare, Bell, Compass, Home, Search, Settings, LogOut, Loader2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { viewerAtom, viewerHandleAtom } from "@/atoms/session";
+import { authPendingAtom, signOutAtom } from "@/atoms/auth";
 import { UserAvatar } from "@/components/user-avatar";
 import { VersionTag } from "@/components/version-tag";
 import { m } from "@/paraglide/messages.js";
 
-// The theme dropdown is the only interactive control in the header that ships
-// its own popover machinery (floating-ui + focus management); loading it on
-// demand keeps that weight out of the first paint. The named export is mapped
-// to `default` so the dynamic module can be rendered as a lazy component.
+// The theme dropdown ships its own popover machinery (floating-ui + focus
+// management); loading it on demand keeps that weight out of the first paint.
+// The account menu below stays in the header chunk on purpose — it is small
+// and holds the only sign-out affordance visible on every page. The named
+// export is mapped to `default` so the dynamic module can be rendered as a
+// lazy component.
 const ModeToggle = lazy(() =>
   import("@/components/mode-toggle").then((mod) => ({ default: mod.ModeToggle }))
 );
@@ -30,12 +40,27 @@ const ModeToggle = lazy(() =>
  * it (see the regression pinned in `e2e/tests/specs/welcome.spec.ts`).
  */
 export function Header() {
+  const navigate = useNavigate();
   const user = useAtomValue(viewerAtom);
   const handle = useAtomValue(viewerHandleAtom);
+  const isSigningOut = useAtomValue(authPendingAtom);
+  const signOut = useSetAtom(signOutAtom);
 
   if (!user) return null;
 
   const nameDisplay = user.name || user.displayUsername || user.username || m.nav_profile();
+
+  const handleSignOut = async () => {
+    try {
+      // Same path as the profile page's sign-out button: signOutAtom
+      // (atoms/auth.ts) owns the call, the QueryClient.clear(), and the
+      // family sweep; only the final navigate lives here.
+      await signOut();
+      void navigate({ to: "/login" });
+    } catch (err) {
+      console.error("Failed to sign out", err);
+    }
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -120,28 +145,75 @@ export function Header() {
 
           {/* The destination branches on the handle, not on `user` — `user`
               exists by the early return above. An OAuth sign-up has no handle
-              until it claims one at /welcome: the avatar points there in that
-              window, which is also where `useRequireHandle` is sending the
-              session, so the header agrees with the redirect rather than
-              contradicting it (see the regression pinned in
-              e2e/tests/specs/welcome.spec.ts). */}
-          <Link
-            {...(handle
-              ? ({ to: "/@{$username}", params: { username: handle } } as const)
-              : ({ to: "/welcome" } as const))}
-            className="flex items-center gap-2.5 p-1 rounded-full hover:bg-muted/60 transition-colors ml-1"
-            title={handle ? m.user_view_profile({ name: nameDisplay }) : m.welcome_finish_setup()}
-          >
-            <UserAvatar
-              user={user}
-              alt={user.name || m.user_avatar_alt()}
-              className="h-8 w-8 border border-primary/20"
-              fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
-            />
-            <span className="hidden sm:inline text-sm font-medium pr-1 text-foreground max-w-[140px] truncate">
-              {nameDisplay}
-            </span>
-          </Link>
+              until it claims one at /welcome: the avatar stays a plain link
+              to /welcome in that window, which is also where
+              `useRequireHandle` is sending the session, so the header agrees
+              with the redirect rather than contradicting it (see the
+              regression pinned in e2e/tests/specs/welcome.spec.ts). Once a
+              handle exists, the pill becomes the account menu — View profile,
+              Settings, Sign out — instead of a bare link. */}
+          {handle ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                title={m.user_view_profile({ name: nameDisplay })}
+                className="flex items-center gap-2.5 p-1 rounded-full hover:bg-muted/60 transition-colors ml-1 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <UserAvatar
+                  user={user}
+                  alt={user.name || m.user_avatar_alt()}
+                  className="h-8 w-8 border border-primary/20"
+                  fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
+                />
+                <span className="hidden sm:inline text-sm font-medium pr-1 text-foreground max-w-[140px] truncate">
+                  {nameDisplay}
+                </span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-48">
+                {/* Menu items render real links, so the profile and settings
+                    destinations keep link semantics (middle-click, open in
+                    new tab) instead of going through a navigate() call. */}
+                <DropdownMenuItem
+                  render={<Link to="/@{$username}" params={{ username: handle }} />}
+                >
+                  <User />
+                  <span>{m.menu_view_profile()}</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem render={<Link to="/settings/account" />}>
+                  <Settings />
+                  <span>{m.profile_settings()}</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  disabled={isSigningOut}
+                  onClick={() => void handleSignOut()}
+                >
+                  {isSigningOut ? (
+                    <Loader2 className="animate-spin motion-reduce:animate-none" />
+                  ) : (
+                    <LogOut />
+                  )}
+                  <span>{m.auth_sign_out()}</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Link
+              to="/welcome"
+              className="flex items-center gap-2.5 p-1 rounded-full hover:bg-muted/60 transition-colors ml-1"
+              title={m.welcome_finish_setup()}
+            >
+              <UserAvatar
+                user={user}
+                alt={user.name || m.user_avatar_alt()}
+                className="h-8 w-8 border border-primary/20"
+                fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
+              />
+              <span className="hidden sm:inline text-sm font-medium pr-1 text-foreground max-w-[140px] truncate">
+                {nameDisplay}
+              </span>
+            </Link>
+          )}
         </div>
       </div>
     </header>

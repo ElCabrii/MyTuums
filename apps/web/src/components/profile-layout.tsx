@@ -112,9 +112,10 @@ export function ProfileLayout() {
           {isOwnProfile ? (
             <div className="flex gap-2.5 mb-2">
               {/* Was a dead button — now the way into /settings/account, where
-                  two-factor and passkeys live. It stays the only entry point on
-                  purpose: the header has no account menu, and adding one is a
-                  navigation change rather than an auth change. */}
+                  two-factor and passkeys live. The header's account menu
+                  (header.tsx) is the other entry point; this one stays so the
+                  destination is visible on the page itself, not only behind a
+                  menu. */}
               <Button
                 variant="outline"
                 size="sm"

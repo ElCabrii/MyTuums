@@ -334,6 +334,10 @@ function createTestRouteTree(ui: ReactNode) {
     stubRoute("/mentions-legales"),
     // Literal-prefix syntax — kept byte-identical to src/routes/@{$username}.tsx.
     stubRoute("/@{$username}"),
+    // Header-test targets: the account menu's View profile / Settings items
+    // and the handle-less avatar's /welcome link (header.test.tsx).
+    stubRoute("/welcome"),
+    stubRoute("/settings/account"),
   ]);
 }
 

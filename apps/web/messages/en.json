@@ -1,10 +1,8 @@
 {
   "$schema": "https://inlang.com/schema/inlang-message-format",
-
   "app_document_title": "MyTuums — Social Media for Gamers",
   "app_document_description": "MyTuums is the social media platform built for gamers.",
   "app_logo_alt": "MyTuums logo",
-
   "common_close": "Close",
   "common_try_again": "Try again",
   "common_load_more": "Load more",
@@ -12,32 +10,27 @@
   "common_something_went_wrong": "Something went wrong.",
   "common_cancel": "Cancel",
   "common_save": "Save",
-
   "nav_home": "Home",
   "nav_discover": "Discover",
   "nav_messages": "Messages",
   "nav_notifications": "Notifications",
   "nav_profile": "Profile",
   "nav_search_placeholder": "Search games, clips, or players...",
-
   "user_unknown": "Unknown",
   "user_avatar_alt": "User avatar",
   "user_view_profile": "View profile for {name}",
-
+  "menu_view_profile": "View profile",
   "theme_toggle": "Toggle theme",
   "theme_light": "Light",
   "theme_dark": "Dark",
   "theme_system": "System",
-
   "locale_label": "Language",
   "locale_english": "English",
   "locale_french": "French",
-
   "footer_copyright": "© {year} MyTuums. All rights reserved.",
   "legal_privacy_policy": "Privacy Policy",
   "legal_terms_of_service": "Terms of Service",
   "legal_notice": "Legal Notice",
-
   "auth_log_in": "Log in",
   "auth_register": "Register",
   "auth_sign_out": "Sign out",
@@ -99,7 +92,6 @@
   "auth_reset_invalid_title": "This link is invalid or expired",
   "auth_reset_invalid_hint": "Reset links are single-use and expire after one hour. Request a new one to continue.",
   "auth_reset_request_new": "Request a new link",
-
   "validation_username_required": "Username is required.",
   "validation_username_length": "Username must be between 3 and 20 characters long.",
   "validation_username_characters": "Username can only contain letters, numbers, underscores, and hyphens.",
@@ -119,7 +111,6 @@
   "validation_image_too_large": "That image is too large.",
   "validation_image_type": "That image format isn't supported. Use a PNG, JPEG or WebP.",
   "validation_image_unreadable": "That file doesn't look like an image.",
-
   "welcome_title": "Pick your handle",
   "welcome_subtitle": "One last step — choose the @name people will find you by.",
   "welcome_handle_hint": "3 to 20 characters. Letters, numbers, underscores and hyphens.",
@@ -136,7 +127,6 @@
   "welcome_2fa_subtitle": "Add a second step to your sign-in. You can always do this later.",
   "welcome_2fa_setup": "Set up two-factor",
   "welcome_2fa_skip": "Skip for now",
-
   "twofa_section_title": "Two-factor authentication",
   "twofa_section_on": "On. You'll be asked for a code when you sign in.",
   "twofa_section_off": "Off. Add a second step to protect your account.",
@@ -161,7 +151,6 @@
   "twofa_use_authenticator": "Use my authenticator app",
   "twofa_use_backup_code": "Use a backup code",
   "twofa_back_to_login": "Back to sign in",
-
   "passkey_section_title": "Passkeys",
   "passkey_section_description": "Sign in with your fingerprint, face or security key instead of a password.",
   "passkey_loading": "Loading passkeys...",
@@ -172,7 +161,6 @@
   "passkey_delete_label": "Delete passkey {name}",
   "passkey_name_label": "Passkey name",
   "passkey_name_placeholder": "e.g. My laptop",
-
   "settings_title": "Account settings",
   "settings_subtitle": "Manage how you sign in to MyTuums.",
   "settings_profile_title": "Profile",
@@ -204,7 +192,6 @@
   "settings_linked_unlink": "Unlink",
   "settings_linked_last_method": "This is your only way to sign in.",
   "settings_sign_out_description": "Sign out of MyTuums on this device.",
-
   "feed_title": "Home",
   "feed_label": "Feed",
   "feed_for_you": "For you",
@@ -215,7 +202,6 @@
   "feed_empty_following": "Nothing here yet — you're not following anyone who's posted.",
   "feed_empty": "No posts yet. Be the first to post something.",
   "feed_load_error": "Could not load posts.",
-
   "post_action": "Post",
   "post_placeholder": "Share a gaming update, clip, or tournament result...",
   "post_publish_error": "Could not publish your post. Please try again.",
@@ -227,7 +213,6 @@
   "post_not_found_hint": "This post may have been deleted, or the link may be wrong.",
   "post_load_error": "Could not load this post",
   "post_just_now": "just now",
-
   "reply_action": "Reply",
   "reply_placeholder": "Post your reply...",
   "reply_publish_error": "Could not publish your reply. Please try again.",
@@ -237,9 +222,7 @@
   "reply_count_one": "{count} reply",
   "reply_count_many": "{count} replies",
   "reply_empty": "No replies yet. Be the first to reply.",
-
   "thread_truncated": "This conversation continues above the {count} replies shown.",
-
   "follow_action": "Follow",
   "follow_unfollow": "Unfollow",
   "follow_following": "Following",
@@ -252,7 +235,6 @@
   "follow_list_load_error": "Could not load this list.",
   "follow_signed_out_suffix": "to follow people from here.",
   "follow_signed_out": "Log in to follow people",
-
   "profile_not_found": "There's nobody here. This handle isn't taken.",
   "profile_load_error": "Couldn't load this profile",
   "profile_settings": "Settings",
@@ -261,7 +243,6 @@
   "profile_posts_heading": "Posts",
   "profile_own_empty": "You haven't posted anything yet.",
   "profile_empty": "@{handle} hasn't posted anything yet.",
-
   "notfound_title": "Page not found",
   "notfound_body": "This page doesn't exist or has moved."
 }
