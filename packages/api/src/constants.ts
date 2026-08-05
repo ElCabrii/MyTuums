@@ -15,6 +15,13 @@ export const POST_PAGE_SIZE_MAX = 50;
 export const FOLLOW_PAGE_SIZE = 20;
 export const FOLLOW_PAGE_SIZE_MAX = 50;
 
+/** Maximum length of a search query, in characters, after trimming. */
+export const SEARCH_QUERY_MAX_LENGTH = 100;
+
+/** Default and maximum page sizes for `search.users` / `search.posts`. */
+export const SEARCH_PAGE_SIZE = 20;
+export const SEARCH_PAGE_SIZE_MAX = 50;
+
 /**
  * How far up a reply chain `post.thread` will walk to build the ancestor
  * context above the focused post.

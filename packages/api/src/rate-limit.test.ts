@@ -177,12 +177,12 @@ describe("createRateLimiter", () => {
 });
 
 describe("RATE_LIMITS", () => {
-  it("defines five tiers with distinct names", () => {
+  it("defines six tiers with distinct names", () => {
     const policies = Object.values(RATE_LIMITS);
-    expect(policies).toHaveLength(5);
+    expect(policies).toHaveLength(6);
     // Distinct names are the whole mechanism: `name` namespaces the counter, so
     // two tiers sharing one would silently share a budget.
-    expect(new Set(policies.map((p) => p.name)).size).toBe(5);
+    expect(new Set(policies.map((p) => p.name)).size).toBe(6);
   });
 
   it("gives uploads the tightest budget, and its own counter", () => {

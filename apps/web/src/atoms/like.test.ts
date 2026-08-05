@@ -5,7 +5,13 @@ import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
 
 const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: { post: { like: vi.fn(), unlike: vi.fn(), list: vi.fn(), thread: vi.fn() } },
+  // The mock mirrors the real client's procedure tree — the post-cache sweep
+  // in `updatePostEverywhere` now also walks `orpc.search.posts.key()`, so a
+  // missing group here throws inside every like mutation.
+  fakeClient: {
+    post: { like: vi.fn(), unlike: vi.fn(), list: vi.fn(), thread: vi.fn() },
+    search: { typeahead: vi.fn(), users: vi.fn(), posts: vi.fn() },
+  },
 }));
 
 vi.mock("@/lib/orpc", async () => {

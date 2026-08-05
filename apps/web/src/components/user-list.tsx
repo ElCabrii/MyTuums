@@ -6,11 +6,16 @@ import { Button } from "@/components/ui/button";
 import { FollowButton } from "@/components/follow-button";
 import { isSignedInAtom } from "@/atoms/session";
 import { userListAtom, type FollowDirection } from "@/atoms/user-list";
-import { type UserSummary } from "@/lib/orpc";
+import { type SearchUser, type UserSummary } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
-function UserRow({ user }: { user: UserSummary }) {
+/**
+ * One row in a people list — avatar, profile link and follow button. Shared
+ * by the follower/following dialogs and the search results page; `SearchUser`
+ * and `UserSummary` differ only in fields the row never touches.
+ */
+export function UserRow({ user }: { user: UserSummary | SearchUser }) {
   const handle = handleOf(user);
   const displayName = user.name || handle || m.user_unknown();
 

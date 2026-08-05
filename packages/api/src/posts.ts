@@ -57,7 +57,7 @@ function viewerHasLiked(viewerId: string | undefined) {
  * The one projection every feed and thread reads posts through, so no view of
  * a post can drift from another's (an int test asserts the equality).
  */
-const postSelection = (viewerId: string | undefined) => ({
+export const postSelection = (viewerId: string | undefined) => ({
   id: post.id,
   content: post.content,
   createdAt: post.createdAt,

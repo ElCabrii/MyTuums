@@ -1,5 +1,11 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
-import { orpc, type Post, type PostListPage, type Thread } from "@/lib/orpc";
+import {
+  orpc,
+  type Post,
+  type PostListPage,
+  type SearchPostsPage,
+  type Thread,
+} from "@/lib/orpc";
 
 /** Every cached `post.list` entry as [queryKey, data] — the snapshot unit for feeds. */
 export type CachedFeeds = [readonly unknown[], InfiniteData<PostListPage> | undefined][];
@@ -89,6 +95,23 @@ export function updatePostEverywhere(
           ancestors: cached.ancestors.map((post) => (post.id === postId ? update(post) : post)),
         }
       : cached,
+  );
+
+  // `search.posts` is a third home for the paginated shape: its items are the
+  // same `Post` rows, so a like on one must patch it here too or the button
+  // would sit stale until the results were refetched.
+  queryClient.setQueriesData<InfiniteData<SearchPostsPage>>(
+    { queryKey: orpc.search.posts.key() },
+    (cached) =>
+      cached
+        ? {
+            ...cached,
+            pages: cached.pages.map((page) => ({
+              ...page,
+              items: page.items.map((post) => (post.id === postId ? update(post) : post)),
+            })),
+          }
+        : cached,
   );
 }
 

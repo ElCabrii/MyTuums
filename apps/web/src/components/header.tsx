@@ -1,9 +1,8 @@
 import { lazy, Suspense } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { MessageSquare, Bell, Compass, Home, Search, Settings, LogOut, Loader2, User } from "lucide-react";
+import { MessageSquare, Bell, Compass, Home, Settings, LogOut, Loader2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { SearchBox } from "@/components/search-box";
 import { viewerAtom, viewerHandleAtom } from "@/atoms/session";
 import { authPendingAtom, signOutAtom } from "@/atoms/auth";
 import { UserAvatar } from "@/components/user-avatar";
@@ -71,7 +71,14 @@ export function Header() {
             are the ones that must stay reachable, so the brand is the part
             that yields, truncating its wordmark as a last resort instead of
             pushing sign-in off-screen and making the page scroll sideways. */}
-        <div className="flex items-center gap-6 min-w-0">
+        {/* `xl:flex-1` gives the left and right sections the same flex share
+            as the search bar (all three grow from basis 0), so the middle
+            lands exactly on the viewport center instead of in the leftover
+            gap — a `justify-between` row centers the box only when the sides
+            happen to be equally wide, which they never are. Below `xl` the
+            bar keeps taking the leftover room, where the sides would not fit
+            in equal thirds anyway. */}
+        <div className="flex items-center gap-6 min-w-0 xl:flex-1">
           <Link to="/" className="flex items-center gap-2 font-bold text-xl tracking-tight text-primary dark:text-foreground min-w-0">
             <img
               src="/mytuums.svg"
@@ -105,18 +112,11 @@ export function Header() {
             `flex-1` item defaults to `min-width: auto`, so without it the
             input's intrinsic width becomes a hard floor). */}
         <div className="hidden lg:block flex-1 min-w-0 max-w-md mx-2 sm:mx-4">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder={m.nav_search_placeholder()}
-              className="w-full pl-9 bg-muted/50 focus-visible:bg-background"
-            />
-          </div>
+          <SearchBox />
         </div>
 
         {/* Right Section: Messages, Notifications, Theme Toggle, Auth / Profile */}
-        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0 xl:flex-1 xl:justify-end">
           <Button
             variant="ghost"
             size="icon"

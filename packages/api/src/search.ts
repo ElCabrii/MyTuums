@@ -1,0 +1,237 @@
+import { and, desc, eq, ilike, isNull, like, or, sql } from "drizzle-orm";
+import { post, user } from "@my-tuums/db/schema";
+import { z } from "zod";
+import {
+  SEARCH_PAGE_SIZE,
+  SEARCH_PAGE_SIZE_MAX,
+  SEARCH_QUERY_MAX_LENGTH,
+} from "./constants.js";
+import { createCursorCodec } from "./cursor.js";
+import { postSelection } from "./posts.js";
+import { publicProcedure, rateLimit } from "./procedures.js";
+import { RATE_LIMITS } from "./rate-limit.js";
+import { publicUserColumns, viewerIsFollowing } from "./users.js";
+
+/**
+ * Search over users and posts.
+ *
+ * Matching is deliberately cheap rather than clever: a left-anchored `like`
+ * on the already-normalised `username` (which can use its unique btree index
+ * under C collation), or an `ilike` substring scan on name, displayUsername
+ * and post content — a seq scan, fine at this scale. User input is escaped
+ * (`escapeLikePattern`) so `%`, `_` and `\` are treated as literals, never as
+ * pattern wildcards. Replies are excluded everywhere, mirroring the global
+ * feed. pg_trgm GIN indexes are the documented future upgrade; none of this
+ * changes if they land.
+ *
+ * All three procedures are public, exactly like `post.list` — search serves
+ * public data, and `postSelection`/`viewerIsFollowing` already emit literal
+ * `false` for anonymous viewers.
+ */
+
+/**
+ * Escapes the LIKE metacharacters in a search query so the caller's `%`, `_`
+ * and `\` match literally instead of acting as pattern wildcards.
+ *
+ * `\` is escaped FIRST because it is LIKE's own escape character: replacing
+ * it first means the backslashes this function adds for `%`/`_` are not
+ * themselves escaped again, and a user-supplied backslash that preceded a
+ * wildcard stays a single literal backslash ahead of the now-literal wildcard.
+ * Everything else — including multi-byte text — passes through untouched.
+ */
+export function escapeLikePattern(pattern: string): string {
+  return pattern.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+/**
+ * Keyset cursor for `search.users`. The id half is `z.string()`, not a uuid,
+ * for the same reason as `followCursor` in ./users.ts: users tie-break on
+ * `user.id`, which is BetterAuth's text format.
+ */
+const searchUserCursor = createCursorCodec(z.string().min(1));
+
+/**
+ * Keyset cursor for `search.posts` — `post.id` is a uuid, so a cursor minted
+ * here won't validate anywhere else, exactly like `postCursor` in ./posts.ts.
+ */
+const searchPostCursor = createCursorCodec(z.uuid());
+
+/**
+ * The projection search results read users through: `publicUserColumns` plus
+ * the viewer's follow flag, so the results page can render a follow button
+ * without a second round trip per row. Spreads the same privacy boundary the
+ * profile procedures use, so no search result can leak `email` or the
+ * auth-reconnaissance columns.
+ */
+const searchUserSelection = (viewerId: string | undefined) => ({
+  ...publicUserColumns,
+  viewerIsFollowing: viewerIsFollowing(viewerId),
+});
+
+/**
+ * LIKE pattern for a left-anchored username match. `username` is already
+ * normalised to lowercase by the BetterAuth plugin, so the pattern is
+ * lowercased here and matched with case-sensitive `like` — never wrapped in
+ * `lower()` in SQL, which would guarantee the unique index can't be used.
+ */
+const prefixPattern = (pattern: string) => `${escapeLikePattern(pattern).toLowerCase()}%`;
+
+/** LIKE pattern for a case-insensitive substring match on name, displayUsername and content. */
+const containsPattern = (pattern: string) => `%${escapeLikePattern(pattern)}%`;
+
+/**
+ * The `search` procedure group: typeahead, users, posts.
+ */
+export const searchRouter = {
+  /**
+   * The header dropdown: up to 5 users and 5 posts for a query, no cursor.
+   *
+   * Users rank username prefix matches ahead of substring-only matches, which
+   * is what makes "al" suggest the person actually called al over everyone
+   * whose name merely contains "al". Each side is a hard cap of 5 because the
+   * dropdown fits roughly ten rows; a full results page goes through
+   * `users`/`posts` below instead.
+   */
+  typeahead: publicProcedure
+    .use(rateLimit(RATE_LIMITS.search))
+    .input(z.object({ q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH) }))
+    .handler(async ({ input, context }) => {
+      const viewerId = context.session?.user.id;
+      const prefix = prefixPattern(input.q);
+      const contains = containsPattern(input.q);
+
+      const users = await context.db
+        .select(searchUserSelection(viewerId))
+        .from(user)
+        .where(
+          or(
+            like(user.username, prefix),
+            ilike(user.name, contains),
+            ilike(user.displayUsername, contains),
+          ),
+        )
+        .orderBy(
+          // The CASE expression is the whole ranking rule: a prefix match on
+          // the normalised username ranks above any substring-only match, no
+          // matter how new the latter is. The timestamp + id tie-breakers are
+          // what the dropdown sees within each rank.
+          sql`case when ${user.username} like ${prefix} then 0 else 1 end`,
+          desc(user.createdAt),
+          desc(user.id),
+        )
+        .limit(5);
+
+      const posts = await context.db
+        .select(postSelection(viewerId))
+        .from(post)
+        .innerJoin(user, eq(user.id, post.authorId))
+        .where(and(ilike(post.content, contains), isNull(post.parentId)))
+        .orderBy(desc(post.createdAt), desc(post.id))
+        .limit(5);
+
+      return { users, posts };
+    }),
+
+  /**
+   * Pages users matching a query, newest first, keyset-paginated like every
+   * other list in this package.
+   *
+   * The cursor is `(created_at, id) DESC` — the house total order, not
+   * relevance: keyset pagination requires a total order, and relevance-ranked
+   * cursors are out of scope. This is what lets the results page walk the
+   * matches without dupes or skips.
+   */
+  users: publicProcedure
+    .use(rateLimit(RATE_LIMITS.search))
+    .input(
+      z.object({
+        q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH),
+        cursor: z.string().optional(),
+        limit: z.number().int().min(1).max(SEARCH_PAGE_SIZE_MAX).default(SEARCH_PAGE_SIZE),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      const viewerId = context.session?.user.id;
+      const cursor = input.cursor ? searchUserCursor.decode(input.cursor) : undefined;
+
+      const filters = [
+        or(
+          like(user.username, prefixPattern(input.q)),
+          ilike(user.name, containsPattern(input.q)),
+          ilike(user.displayUsername, containsPattern(input.q)),
+        ),
+        // Row-value comparison: strictly "older than the cursor" under the
+        // same (created_at DESC, id DESC) ordering, so Postgres can seek
+        // straight to the cursor position. The bound values must go through
+        // `sql.param` with their column as the encoder — interpolating a raw
+        // JS `Date` hands postgres.js a value it cannot serialise.
+        cursor
+          ? sql`(${user.createdAt}, ${user.id}) < (${sql.param(cursor.createdAt, user.createdAt)}, ${sql.param(cursor.id, user.id)})`
+          : undefined,
+      ].filter((f) => f !== undefined);
+
+      // One row beyond the page, purely to learn whether another page exists
+      // without a second COUNT query. It's dropped before returning.
+      const rows = await context.db
+        .select(searchUserSelection(viewerId))
+        .from(user)
+        .where(and(...filters))
+        .orderBy(desc(user.createdAt), desc(user.id))
+        .limit(input.limit + 1);
+
+      const hasMore = rows.length > input.limit;
+      const items = hasMore ? rows.slice(0, input.limit) : rows;
+      const last = items.at(-1);
+
+      return {
+        items,
+        nextCursor: hasMore && last ? searchUserCursor.encode(last.createdAt, last.id) : null,
+      };
+    }),
+
+  /**
+   * Pages posts matching a query, newest first, keyset-paginated — the same
+   * +1 lookahead skeleton as `post.list`. Replies are excluded, mirroring the
+   * global feed.
+   */
+  posts: publicProcedure
+    .use(rateLimit(RATE_LIMITS.search))
+    .input(
+      z.object({
+        q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH),
+        cursor: z.string().optional(),
+        limit: z.number().int().min(1).max(SEARCH_PAGE_SIZE_MAX).default(SEARCH_PAGE_SIZE),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      const viewerId = context.session?.user.id;
+      const cursor = input.cursor ? searchPostCursor.decode(input.cursor) : undefined;
+
+      const filters = [
+        ilike(post.content, containsPattern(input.q)),
+        isNull(post.parentId),
+        // Row-value comparison against the same (created_at DESC, id DESC)
+        // ordering — see the identical comment in the `users` procedure above.
+        cursor
+          ? sql`(${post.createdAt}, ${post.id}) < (${sql.param(cursor.createdAt, post.createdAt)}, ${sql.param(cursor.id, post.id)})`
+          : undefined,
+      ].filter((f) => f !== undefined);
+
+      const rows = await context.db
+        .select(postSelection(viewerId))
+        .from(post)
+        .innerJoin(user, eq(user.id, post.authorId))
+        .where(and(...filters))
+        .orderBy(desc(post.createdAt), desc(post.id))
+        .limit(input.limit + 1);
+
+      const hasMore = rows.length > input.limit;
+      const items = hasMore ? rows.slice(0, input.limit) : rows;
+      const last = items.at(-1);
+
+      return {
+        items,
+        nextCursor: hasMore && last ? searchPostCursor.encode(last.createdAt, last.id) : null,
+      };
+    }),
+};
