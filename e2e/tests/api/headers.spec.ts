@@ -100,7 +100,7 @@ test.describe("request body cap", () => {
     // RPC_MAX_BODY_BYTES is imported rather than mirrored: it derives from
     // IMAGE_LIMITS, and this test only needs "over the cap", so importing
     // keeps it correct when the image caps change.
-    const wire = await rawRequest("/rpc/user.uploadImage", {
+    const wire = await rawRequest("/rpc/user/uploadImage", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...RPC_HEADERS },
       body: "x".repeat(RPC_MAX_BODY_BYTES + 1024),
