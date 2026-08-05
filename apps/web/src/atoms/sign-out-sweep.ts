@@ -18,6 +18,7 @@
 export { profileAtomFamily } from "@/atoms/profile";
 export { clearPostFeedFamily } from "@/atoms/post-feed";
 export { clearUserListFamily } from "@/atoms/user-list";
+export { clearSearchFamilies } from "@/atoms/search";
 export { clearLikeFamilies } from "@/atoms/like";
 export { clearFollowFamilies } from "@/atoms/follow";
 export { clearThreadFamily } from "@/atoms/thread";

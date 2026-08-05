@@ -320,6 +320,7 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
       clearReplyFamilies,
       clearLikeFamilies,
       clearFollowFamilies,
+      clearSearchFamilies,
     } = await import("@/atoms/sign-out-sweep");
     clearFamily(profileAtomFamily);
     clearPostFeedFamily();
@@ -333,6 +334,11 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
     // next viewer's first response look superseded and be dropped.
     clearLikeFamilies();
     clearFollowFamilies();
+    // Search families are swept like every other family — results keyed on
+    // the previous session's queries shouldn't outlive it. (The debounced
+    // query and popover state die with the SearchBox at unmount, which the
+    // session gate triggers right after this runs.)
+    clearSearchFamilies();
     // Sign-in state that belongs to the session that just ended: a pending
     // challenge's methods would otherwise still be on screen for whoever signs
     // in next on this browser.

@@ -43,6 +43,15 @@ export type UserSummary = UserListPage["items"][number];
 /** A user profile as served by `user.byUsername`. */
 export type Profile = Awaited<ReturnType<typeof client.user.byUsername>>;
 
+/** The `search.typeahead` payload: up to five user and five post matches. */
+export type SearchTypeahead = Awaited<ReturnType<typeof client.search.typeahead>>;
+/** One page of `search.users` — a keyset-paginated slice of user matches. */
+export type SearchUsersPage = Awaited<ReturnType<typeof client.search.users>>;
+/** A person as served in search results, with viewer-relative follow state. */
+export type SearchUser = SearchUsersPage["items"][number];
+/** One page of `search.posts` — a keyset-paginated slice of post matches. */
+export type SearchPostsPage = Awaited<ReturnType<typeof client.search.posts>>;
+
 /**
  * A handle that doesn't exist won't start existing on the second attempt, and
  * neither will one the server rejected as malformed — only retry the failures
