@@ -285,6 +285,27 @@ export const moderationRouter = {
     }),
 
   /**
+   * The viewer's blocked users, newest block first — the settings page's
+   * "Blocked users" list. Deliberately not paginated: unlike every feed, the
+   * list is personal, bounded by the block rate tier, and read in full on a
+   * single settings screen — a keyset cursor would buy nothing here.
+   */
+  listBlocked: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.block))
+    .handler(async ({ context }) => {
+      const rows = await context.db
+        .select({
+          ...publicUserColumns,
+          blockedAt: userBlock.createdAt,
+        })
+        .from(userBlock)
+        .innerJoin(user, eq(user.id, userBlock.blockedId))
+        .where(eq(userBlock.blockerId, context.user.id))
+        .orderBy(desc(userBlock.createdAt), desc(userBlock.blockedId));
+      return { items: rows };
+    }),
+
+  /**
    * The moderation queue: unresolved reports grouped by target, merged with
    * open appeals, newest first.
    *

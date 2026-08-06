@@ -448,6 +448,40 @@ describe("block and unblock", () => {
   });
 });
 
+describe("listBlocked", () => {
+  it("lists the viewer's blocks newest first, drops the unblocked, and stays private", async () => {
+    const a = await createTestUser();
+    const b = await createTestUser();
+    const c = await createTestUser();
+    await call(appRouter.moderation.block, { userId: b.id }, { context: contextFor(a) });
+    await call(appRouter.moderation.block, { userId: c.id }, { context: contextFor(a) });
+
+    // c was blocked after b, so the list is newest first.
+    const list = await call(appRouter.moderation.listBlocked, {}, { context: contextFor(a) });
+    expect(list.items.map((u) => u.id)).toEqual([c.id, b.id]);
+    // The public profile shape plus the block's own timestamp — the row the
+    // settings page renders, nothing more. (TestUser carries no name/username,
+    // so read them from the row the join is supposed to have pulled in.)
+    const [cRow] = await anonContext.db
+      .select({ name: user.name, username: user.username })
+      .from(user)
+      .where(eq(user.id, c.id));
+    expect(list.items[0]).toMatchObject({ id: c.id, name: cRow?.name, username: cRow?.username });
+    expect(list.items[0].blockedAt).toBeInstanceOf(Date);
+
+    // Unblocking drops the user from the list.
+    await call(appRouter.moderation.unblock, { userId: c.id }, { context: contextFor(a) });
+    const after = await call(appRouter.moderation.listBlocked, {}, { context: contextFor(a) });
+    expect(after.items.map((u) => u.id)).toEqual([b.id]);
+
+    // The list is the viewer's own: someone else's block of a doesn't show.
+    const d = await createTestUser();
+    await call(appRouter.moderation.block, { userId: a.id }, { context: contextFor(d) });
+    const still = await call(appRouter.moderation.listBlocked, {}, { context: contextFor(a) });
+    expect(still.items.map((u) => u.id)).toEqual([b.id]);
+  });
+});
+
 describe("queue", () => {
   it("groups unresolved reports by target, counting reporters and deduping reasons", async () => {
     const author = await createTestUser();
