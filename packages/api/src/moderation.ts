@@ -8,8 +8,11 @@ import {
   moderationCaseResolutionEmail,
   moderationRemovalEmail,
   moderationResolutionEmail,
+  moderationRestoreEmail,
   moderationRoleEmail,
   moderationSuspensionEmail,
+  moderationUnbanEmail,
+  moderationUnsuspensionEmail,
 } from "@my-tuums/auth";
 import type { Database } from "@my-tuums/db";
 import { appeal, follow, moderationAction, post, report, session, user, userBlock } from "@my-tuums/db/schema";
@@ -26,6 +29,7 @@ import {
   unbanEffect,
   undoAction,
   type ActionRow,
+  type PendingEmail,
 } from "./moderation-actions.js";
 import {
   APPEAL_REASON_MAX_LENGTH,
@@ -175,11 +179,14 @@ export const moderationRouter = {
    * Reports a post or a user for one of the stable reason codes.
    *
    * Idempotent per (reporter, target): a repeat report refreshes the row's
-   * timestamp and reopens it if it was resolved — the reporter never has to
-   * remember whether they already spoke up. Self-reports are rejected, and
-   * user reports aimed across a block (either direction) are rejected too —
-   * post reports across a block are allowed, because the block hides the
-   * author from the viewer, not the evidence from the moderators.
+   * timestamp — an open case stays on top of the queue, a resolved one
+   * reopens — while the FIRST reason is kept, so the reporter never has to
+   * remember whether they already spoke up and moderators keep the reason
+   * they saw first (the test suite pins that contract). Self-reports are
+   * rejected, and user reports aimed across a block (either direction) are
+   * rejected too — post reports across a block are allowed, because the
+   * block hides the author from the viewer, not the evidence from the
+   * moderators.
    */
   report: protectedProcedure
     .use(rateLimit(RATE_LIMITS.report))
@@ -225,9 +232,14 @@ export const moderationRouter = {
             resolvedBy: null,
             resolvedOutcome: null,
             resolutionNote: null,
+            // A repeat report refreshes the case's clock whether the row is
+            // open or resolved (CONTEXT.md: "a repeat report refreshes the
+            // row's timestamp without creating a new one"). `reason` is
+            // deliberately NOT in the set: the first reason is the one the
+            // moderators saw (moderation.int.test.ts pins "reason is fixed
+            // at first report").
             createdAt: new Date(),
           },
-          where: sql`${report.resolvedAt} is not null`,
         });
 
       return { reported: true };
@@ -252,16 +264,22 @@ export const moderationRouter = {
         .limit(1);
       if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
 
-      await context.db
-        .delete(follow)
-        .where(
-          sql`(${follow.followerId} = ${context.user.id} and ${follow.followingId} = ${input.userId})
-               or (${follow.followerId} = ${input.userId} and ${follow.followingId} = ${context.user.id})`,
-        );
-      await context.db
-        .insert(userBlock)
-        .values({ blockerId: context.user.id, blockedId: input.userId })
-        .onConflictDoNothing();
+      // The follow sever and the block row commit together: two bare
+      // statements would let a mid-failure leave the follows deleted with no
+      // block in place — the severs are the block's side effect, not a
+      // standalone action.
+      await context.db.transaction(async (tx) => {
+        await tx
+          .delete(follow)
+          .where(
+            sql`(${follow.followerId} = ${context.user.id} and ${follow.followingId} = ${input.userId})
+                 or (${follow.followerId} = ${input.userId} and ${follow.followingId} = ${context.user.id})`,
+          );
+        await tx
+          .insert(userBlock)
+          .values({ blockerId: context.user.id, blockedId: input.userId })
+          .onConflictDoNothing();
+      });
 
       return { userId: input.userId, blocked: true };
     }),
@@ -552,21 +570,30 @@ export const moderationRouter = {
     .use(rateLimit(RATE_LIMITS.moderate))
     .input(resolveInput)
     .handler(async ({ input, context }) => {
-      const { reporterIds } = await stampReports(context.db, {
-        targetType: input.targetType,
-        targetId: input.targetId,
-        outcome: input.outcome,
-        resolvedBy: context.user.id,
-        note: input.note,
-      });
-      await logAction(context.db, {
-        action: "case_resolved",
-        actorId: context.user.id,
-        targetType: input.targetType,
-        targetPostId: input.targetType === "post" ? input.targetId : undefined,
-        targetUserId: input.targetType === "user" ? input.targetId : undefined,
-        note: input.note,
-        details: { outcome: input.outcome, reporterCount: reporterIds.length },
+      // The report stamps and the `case_resolved` audit row commit together:
+      // if the log insert failed after the stamps, the case would read as
+      // resolved with no trail of who resolved it — and the reporters were
+      // already stamped, so a retry would email nobody. Emails stay after
+      // the commit (the same "mail after the transaction" rule every other
+      // moderation action follows).
+      const { reporterIds } = await context.db.transaction(async (tx) => {
+        const stamped = await stampReports(tx, {
+          targetType: input.targetType,
+          targetId: input.targetId,
+          outcome: input.outcome,
+          resolvedBy: context.user.id,
+          note: input.note,
+        });
+        await logAction(tx, {
+          action: "case_resolved",
+          actorId: context.user.id,
+          targetType: input.targetType,
+          targetPostId: input.targetType === "post" ? input.targetId : undefined,
+          targetUserId: input.targetType === "user" ? input.targetId : undefined,
+          note: input.note,
+          details: { outcome: input.outcome, reporterCount: stamped.reporterIds.length },
+        });
+        return stamped;
       });
       for (const reporterId of reporterIds) {
         await emailUser(context.db, context.headers, reporterId, (locale) =>
@@ -644,12 +671,19 @@ export const moderationRouter = {
     .use(rateLimit(RATE_LIMITS.moderate))
     .input(z.object({ postId: z.string().uuid(), note: noteInput }))
     .handler(async ({ input, context }) => {
-      await restorePostEffect(context.db, {
+      const restored = await restorePostEffect(context.db, {
         postId: input.postId,
         actorId: context.user.id,
         note: input.note,
-        headers: context.headers,
       });
+      // The effect commits the tombstone clear + audit row, then the author
+      // is emailed — and an already-restored post (a race with the appeal
+      // overturn) gets no email: nothing happened.
+      if (restored) {
+        await emailUser(context.db, context.headers, restored.authorId, (locale) =>
+          moderationRestoreEmail(locale),
+        );
+      }
       return { postId: input.postId, restored: true };
     }),
 
@@ -777,14 +811,24 @@ export const moderationRouter = {
     .handler(async ({ input, context }) => {
       // The rank guard lives in `unbanEffect` (shared with the appeal
       // overturn), so no inverse path can skip it: lifting a sentence is as
-      // restricted as imposing one.
-      await unbanEffect(context.db, {
+      // restricted as imposing one. Strict by default — an account that
+      // isn't banned is the caller-facing error; the appeal path passes
+      // `tolerateNotBanned` instead.
+      const code = await unbanEffect(context.db, {
         userId: input.userId,
         actorId: context.user.id,
         actorRole: context.user.role ?? "user",
         note: input.note,
-        headers: context.headers,
       });
+      // The effect commits the clear + audit row, then the user is emailed
+      // with the copy matching the sentence that was lifted.
+      if (code) {
+        await emailUser(context.db, context.headers, input.userId, (locale) =>
+          code === "user_unsuspended"
+            ? moderationUnsuspensionEmail(locale)
+            : moderationUnbanEmail(locale),
+        );
+      }
       return { userId: input.userId, unbanned: true };
     }),
 
@@ -1121,47 +1165,72 @@ export const moderationRouter = {
         throw new ORPCError("FORBIDDEN", { message: "You can't review your own action." });
       }
 
-      if (input.outcome === "overturned") {
-        // The appeal contests a specific logged action. If a newer action of
-        // the same kind has since replaced it (remove → restore → remove,
-        // ban → unban → re-ban), overturning would reverse the NEWER state,
-        // not the contested one — the same hazard `isActionCurrent`'s
-        // live-state read cannot see.
-        if (!(await isActionLatest(context.db, action))) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: "A newer moderation action has superseded this one.",
-          });
+      // The overturn, the appeal stamp and the `appeal_resolved` audit row
+      // commit in ONE transaction — a failure between any of them would
+      // otherwise leave the action reversed with the appeal still open, or
+      // the appeal stamped with no audit trail. Emails go out after the
+      // commit, the same rule as every other moderation action.
+      let pendingEmails: PendingEmail[] = [];
+      await context.db.transaction(async (tx) => {
+        // Serialize on the appeal row: two reviewers who both passed the
+        // "still open" check above would otherwise stamp the same appeal
+        // twice — the second transaction must observe the first's commit and
+        // refuse instead of overwriting the review.
+        const [openAppeal] = await tx
+          .select({ id: appeal.id })
+          .from(appeal)
+          .where(and(eq(appeal.id, input.appealId), eq(appeal.status, "open")))
+          .for("update")
+          .limit(1);
+        if (!openAppeal) {
+          throw new ORPCError("BAD_REQUEST", { message: "This appeal has already been reviewed." });
         }
-        await undoAction(
-          context.db,
-          action,
-          context.user.id,
-          context.user.role ?? "user",
-          input.note,
-          context.headers,
-        );
-      }
 
-      await context.db
-        .update(appeal)
-        .set({
-          status: input.outcome,
-          reviewedBy: context.user.id,
-          reviewNote: input.note,
-          reviewedAt: new Date(),
-        })
-        .where(eq(appeal.id, input.appealId));
+        if (input.outcome === "overturned") {
+          // The appeal contests a specific logged action. If a newer action of
+          // the same kind has since replaced it (remove → restore → remove,
+          // ban → unban → re-ban), overturning would reverse the NEWER state,
+          // not the contested one — the same hazard `isActionCurrent`'s
+          // live-state read cannot see.
+          if (!(await isActionLatest(tx, action))) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: "A newer moderation action has superseded this one.",
+            });
+          }
+          pendingEmails = await undoAction(
+            tx,
+            action,
+            context.user.id,
+            context.user.role ?? "user",
+            input.note,
+          );
+        }
 
-      await logAction(context.db, {
-        action: "appeal_resolved",
-        actorId: context.user.id,
-        targetType: action.targetType,
-        targetPostId: action.targetPostId ?? undefined,
-        targetUserId: action.targetUserId ?? undefined,
-        note: input.note,
-        details: { outcome: input.outcome },
+        await tx
+          .update(appeal)
+          .set({
+            status: input.outcome,
+            reviewedBy: context.user.id,
+            reviewNote: input.note,
+            reviewedAt: new Date(),
+          })
+          .where(eq(appeal.id, input.appealId));
+
+        await logAction(tx, {
+          action: "appeal_resolved",
+          actorId: context.user.id,
+          targetType: action.targetType,
+          targetPostId: action.targetPostId ?? undefined,
+          targetUserId: action.targetUserId ?? undefined,
+          note: input.note,
+          details: { outcome: input.outcome },
+        });
       });
 
+      // Mail after the transaction commits — the review is final either way.
+      for (const pending of pendingEmails) {
+        await emailUser(context.db, context.headers, pending.userId, pending.build);
+      }
       await emailUser(context.db, context.headers, row.appellantId, (locale) =>
         moderationResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
       );

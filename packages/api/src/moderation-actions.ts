@@ -35,8 +35,16 @@ import { canManageRole } from "./roles.js";
  * that run inside a transaction (removals, suspensions) take this narrower
  * structural type instead, so the same helper serves both a bare `db` and a
  * `tx` with no casts.
+ *
+ * `transaction` is included so an effect can commit its own state change and
+ * audit row together (restorePostEffect, unbanEffect) — and nest inside a
+ * caller's transaction (savepoints) when one is already open, which is what
+ * the appeal overturn does.
  */
-export type DbLike = Pick<Database, "select" | "insert" | "update" | "delete" | "execute">;
+export type DbLike = Pick<
+  Database,
+  "select" | "insert" | "update" | "delete" | "execute" | "transaction"
+>;
 
 /**
  * The nine stable action codes and the appealable/inverse lists — defined in
@@ -297,13 +305,26 @@ export async function isActionLatest(
 }
 
 /**
- * Restores a removed post, logging and emailing the author — the inverse of a
- * removal, shared by `moderation.restorePost` and the appeal overturn.
+ * Restores a removed post — the inverse of a removal, shared by
+ * `moderation.restorePost` and the appeal overturn.
+ *
+ * The tombstone clear and its audit row commit in ONE transaction: a restore
+ * that fails midway must not leave the post visible with no `post_restored`
+ * row, or leave a row describing a restore that never happened. The author's
+ * email is deliberately NOT sent here — the caller sends it after its own
+ * transaction commits. The appeal overturn runs inside the review transaction
+ * (moderation.appealReview), and an email sent from inside a transaction that
+ * later aborts would describe an action that never happened.
+ *
+ * Returns the author's id, or `null` when there was nothing to restore (a race
+ * with the appeal overturn or a manual restore already cleared the tombstone)
+ * — the first restore's audit row exists, and a second one would lie about
+ * what happened. Callers email only when non-null.
  */
 export async function restorePostEffect(
   db: DbLike,
-  args: { postId: string; actorId: string; note?: string; headers: Headers | undefined },
-): Promise<void> {
+  args: { postId: string; actorId: string; note?: string },
+): Promise<{ authorId: string } | null> {
   // Read the tombstone BEFORE clearing it — a `returning` clause on the update
   // below would report the post-update value (always null) and make the
   // already-restored check below fire on every call.
@@ -318,31 +339,43 @@ export async function restorePostEffect(
   // Already restored (a race with the appeal overturn or a manual restore):
   // nothing to log — the first restore's audit row exists, and a second one
   // would lie about what happened.
-  if (target.removedAt === null) return;
+  if (target.removedAt === null) return null;
 
-  await db
-    .update(post)
-    .set({ removedAt: null, removedBy: null, removedReason: null })
-    .where(eq(post.id, args.postId));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(post)
+      .set({ removedAt: null, removedBy: null, removedReason: null })
+      .where(eq(post.id, args.postId));
 
-  await logAction(db, {
-    action: "post_restored",
-    actorId: args.actorId,
-    targetType: "post",
-    targetPostId: args.postId,
-    note: args.note,
+    await logAction(tx, {
+      action: "post_restored",
+      actorId: args.actorId,
+      targetType: "post",
+      targetPostId: args.postId,
+      note: args.note,
+    });
   });
-  await emailUser(db, args.headers, target.authorId, (locale) => moderationRestoreEmail(locale));
+
+  return { authorId: target.authorId };
 }
 
 /**
  * Clears a ban or suspension, logging the precise code from the expiry read
  * before clearing — shared by `moderation.unbanUser` and the appeal overturn.
  *
+ * The clear and its audit row commit in ONE transaction, and the email is
+ * sent by the caller after commit — the same shape as `restorePostEffect`.
+ *
  * Carries the same rank guard as the sentence itself: whoever lifts a ban or
  * suspension must be able to manage the account they're lifting it for — a
  * staff member cannot undo an admin's sentence on a staff peer, any more
  * than they could have imposed it.
+ *
+ * Returns the logged code (`user_unbanned` for a ban, `user_unsuspended` for
+ * a suspension) so the caller can email the matching copy, or `null` when
+ * nothing was done — either the account was never banned (only reachable
+ * with `tolerateNotBanned`) or a racing manual unban won the window between
+ * the appeal's `isActionCurrent` pre-check and this read.
  */
 export async function unbanEffect(
   db: DbLike,
@@ -352,9 +385,16 @@ export async function unbanEffect(
     /** The actor's own role — the guard compares it against the target's. */
     actorRole: string;
     note?: string;
-    headers: Headers | undefined;
+    /**
+     * When true, an account that is no longer banned is a no-op instead of a
+     * BAD_REQUEST — the appeal path, where a lost race with a manual unban
+     * must not fail the overturn. The direct `moderation.unbanUser` keeps
+     * the strict check: its caller-facing error is the readable answer to
+     * "why didn't my unban work?"
+     */
+    tolerateNotBanned?: boolean;
   },
-): Promise<void> {
+): Promise<"user_unbanned" | "user_unsuspended" | null> {
   const [target] = await db
     .select({ banned: user.banned, banExpires: user.banExpires, role: user.role })
     .from(user)
@@ -363,6 +403,7 @@ export async function unbanEffect(
 
   if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
   if (!target.banned) {
+    if (args.tolerateNotBanned) return null;
     throw new ORPCError("BAD_REQUEST", { message: "This account isn't banned or suspended." });
   }
   if (!canManageRole(args.actorRole, target.role ?? "user")) {
@@ -371,34 +412,49 @@ export async function unbanEffect(
 
   // A row without an expiry was a ban; with one, a suspension. The code the
   // audit log records and the email the user receives follow the read.
-  const code: ModerationActionCode =
+  const code: "user_unbanned" | "user_unsuspended" =
     target.banExpires == null ? "user_unbanned" : "user_unsuspended";
 
-  await db
-    .update(user)
-    .set({ banned: false, banReason: null, banExpires: null })
-    .where(eq(user.id, args.userId));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(user)
+      .set({ banned: false, banReason: null, banExpires: null })
+      .where(eq(user.id, args.userId));
 
-  await logAction(db, {
-    action: code,
-    actorId: args.actorId,
-    targetType: "user",
-    targetUserId: args.userId,
-    note: args.note,
+    await logAction(tx, {
+      action: code,
+      actorId: args.actorId,
+      targetType: "user",
+      targetUserId: args.userId,
+      note: args.note,
+    });
   });
-  await emailUser(db, args.headers, args.userId, (locale) =>
-    code === "user_unsuspended" ? moderationUnsuspensionEmail(locale) : moderationUnbanEmail(locale),
-  );
+
+  return code;
 }
+
+/**
+ * One email an overturn owes, handed back by {@link undoAction} and sent by
+ * the caller AFTER its transaction commits. The appeal review's transaction
+ * is the caller (moderation.appealReview); an email sent from inside it would
+ * describe an action that might still abort.
+ */
+export type PendingEmail = {
+  userId: string;
+  build: (locale: EmailLocale) => Omit<OutgoingEmail, "to">;
+};
 
 /**
  * Reverses an appealable action — the overturn half of `moderation.appealReview`.
  *
- * Race-tolerant on purpose: the currency pre-check (`isActionCurrent`) is
- * advisory. If the action was already undone between the check and here
- * (another reviewer, or a moderator restoring manually), the effect becomes a
- * no-op but the appeal still gets stamped — a legitimate overturn is never
- * reported as failed over a lost race.
+ * Race-tolerant on purpose, and that tolerance is now real rather than
+ * aspirational: the currency pre-check (`isActionCurrent`) is advisory, and
+ * if the action was already undone between the check and here (another
+ * reviewer, or a moderator acting manually), the effect becomes a no-op —
+ * `restorePostEffect` returns null on an already-restored post, `unbanEffect`
+ * with `tolerateNotBanned` returns null on an already-cleared sentence — so
+ * the appeal still gets stamped and a legitimate overturn is never reported
+ * as failed over a lost race.
  *
  * The rank guard is NOT advisory: an overturn restores a state the reviewer
  * must be able to manage themselves — the same `canManageRole` rule as the
@@ -406,6 +462,11 @@ export async function unbanEffect(
  * role being restored (for `role_changed`), or to the target's role (for
  * bans). A moderator overturning a demotion appeal cannot re-grant staff;
  * only someone who could have imposed the state can undo it.
+ *
+ * Runs inside the caller's transaction (it is only ever called from the
+ * appeal review's), so the state change and its audit row are not committed
+ * until the review commits. The emails the reversal owes are returned, not
+ * sent.
  */
 export async function undoAction(
   db: DbLike,
@@ -413,27 +474,44 @@ export async function undoAction(
   actorId: string,
   actorRole: string,
   note: string | undefined,
-  headers: Headers | undefined,
-): Promise<void> {
+): Promise<PendingEmail[]> {
   if (!APPEALABLE_ACTIONS.includes(action.action)) {
     throw new ORPCError("BAD_REQUEST", { message: "This action can't be overturned." });
   }
-  if (!(await isActionCurrent(db, action))) return;
+  if (!(await isActionCurrent(db, action))) return [];
+
+  const pending: PendingEmail[] = [];
 
   switch (action.action) {
     case "post_removed": {
-      await restorePostEffect(db, { postId: action.targetPostId!, actorId, note, headers });
+      const restored = await restorePostEffect(db, {
+        postId: action.targetPostId!,
+        actorId,
+        note,
+      });
+      if (restored) {
+        pending.push({ userId: restored.authorId, build: (locale) => moderationRestoreEmail(locale) });
+      }
       break;
     }
     case "user_suspended":
     case "user_banned": {
-      await unbanEffect(db, {
+      const code = await unbanEffect(db, {
         userId: action.targetUserId!,
         actorId,
         actorRole,
         note,
-        headers,
+        tolerateNotBanned: true,
       });
+      if (code) {
+        pending.push({
+          userId: action.targetUserId!,
+          build: (locale) =>
+            code === "user_unsuspended"
+              ? moderationUnsuspensionEmail(locale)
+              : moderationUnbanEmail(locale),
+        });
+      }
       break;
     }
     case "role_changed": {
@@ -466,10 +544,13 @@ export async function undoAction(
         targetUserId: action.targetUserId!,
         details: { oldRole: target.role ?? "user", newRole: oldRole },
       });
-      await emailUser(db, headers, action.targetUserId!, (locale) =>
-        moderationRoleEmail({ role: oldRole }, locale),
-      );
+      pending.push({
+        userId: action.targetUserId!,
+        build: (locale) => moderationRoleEmail({ role: oldRole }, locale),
+      });
       break;
     }
   }
+
+  return pending;
 }
