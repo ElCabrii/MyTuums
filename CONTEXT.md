@@ -36,10 +36,11 @@ _Avoid_: Action history, moderation log
 **Report**:
 A complaint by one user about a post or another user, tagged with exactly one
 report reason. Requires a session, and one report per (reporter, target) pair
-— the same person cannot report the same thing twice. A report is marked
-handled (resolved, with an outcome) when a moderator deals with it; the
-moderation queue is the unresolved reports grouped by target, and a new
-report on an already-resolved target reopens the case by itself.
+— the same person cannot report the same thing twice; a repeat report with a
+different reason refreshes the row's timestamp without creating a new one. A
+report is marked handled (resolved, with an outcome) when a moderator deals
+with it; the moderation queue is the unresolved reports grouped by target,
+and a new report on an already-resolved target reopens the case by itself.
 _Avoid_: Flag, ticket, complaint
 
 **Removed post**:

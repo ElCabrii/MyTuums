@@ -217,6 +217,15 @@ describe("createRequestHandler", () => {
     }
   });
 
+  it("keeps /appeal on SIGNED_OUT_PATHS — the signed-out appeal link must never be gated", () => {
+    // The moderation appeal flow is the one surface a banned user has, and
+    // it is the load-bearing member of the shared list: remove it here and
+    // the email link bounces to /login with no test noticing (the loop
+    // guard above only iterates whatever the list contains). Pinned so a
+    // removal is a deliberate act, not an accident.
+    expect(SIGNED_OUT_PATHS).toContain("/appeal");
+  });
+
   it("does not gate a static asset, even signed out — /login needs its own JS and CSS to render", async () => {
     // A gated asset would turn the redirect into a blank page: the browser
     // would land on /login with none of the bundle it needs to draw it.

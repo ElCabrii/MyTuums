@@ -99,6 +99,20 @@ describe("useRequireSignedIn", () => {
     }
   });
 
+  it("exempts /appeal — the signed-out appeal link is the one surface a banned user has", async () => {
+    // The moderation appeal email link lands here while the recipient cannot
+    // sign in (that is the point of the HMAC capability token). A gate would
+    // bounce the whole flow to /login.
+    const { router } = await renderWithProviders(<GateProbe />, {
+      initialPath: "/appeal?token=abc",
+      signedInAs: false,
+    });
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/appeal"), {
+      timeout: 1000,
+    });
+  });
+
   /**
    * BetterAuth can transiently settle the store as signed-out while a real
    * session exists (an errored fetch keeps null data, a 401 blip clears it).
