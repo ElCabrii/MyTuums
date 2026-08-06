@@ -175,6 +175,25 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         return;
       }
 
+      // The admin plugin's own endpoints (`/api/auth/admin/*`) are
+      // deliberately unreachable. They gate on better-auth's `adminRoles`
+      // option only, which cannot express the app's staff-vs-admin hierarchy
+      // (see CONTEXT.md), and every moderation action — appointing, removing
+      // a post, suspending, banning — must go through the `/rpc` procedures
+      // instead, which enforce that hierarchy AND write the audit log. A 404
+      // here keeps the enforcement in one place: whatever the plugin's own
+      // gate would have admitted (or, worse, admitted by role alone) is never
+      // reachable, so the hierarchy cannot be bypassed by calling the plugin's
+      // endpoints directly.
+      //
+      // Checked before the `/api/auth` pass-through below, which is why this
+      // prefix needs no other routing here.
+      if (req.url?.startsWith("/api/auth/admin/")) {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not found");
+        return;
+      }
+
       if (req.url?.startsWith("/api/auth")) {
         await deps.authNodeHandler(req, res);
         return;

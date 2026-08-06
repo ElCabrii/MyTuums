@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import {
+  admin,
   haveIBeenPwned,
   lastLoginMethod,
   oneTap,
@@ -171,6 +172,23 @@ export const auth = betterAuth({
       maxUsernameLength: 20,
       usernameValidator: (u) => /^[a-zA-Z0-9_-]+$/.test(u),
     }),
+
+    // The roles and ban fields the moderation system runs on (issue #38).
+    //
+    // `defaultRole` is what makes every account `user` until someone is
+    // promoted — the column lands in `user` and `session.user.role` is typed
+    // from this plugin, so `packages/api`'s role-gated procedures read it off
+    // the session without any `additionalFields` wiring.
+    //
+    // Two deliberate non-uses, both covered elsewhere:
+    // - The plugin's own `/api/auth/admin/*` endpoints are unreachable —
+    //   `apps/server/src/request-handler.ts` 404s the prefix. They gate on
+    //   `adminRoles` only, which cannot express our staff-vs-admin hierarchy,
+    //   and every moderation action must go through the `/rpc` procedures,
+    //   which enforce that hierarchy AND write the audit log.
+    // - There is no `auditLog` option in better-auth 1.6.25; the
+    //   `moderation_action` table (packages/db) is the hand-rolled audit log.
+    admin({ defaultRole: "user" }),
 
     twoFactor({
       // TOTP and backup codes work with no email transport configured at all,

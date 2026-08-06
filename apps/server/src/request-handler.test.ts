@@ -253,6 +253,23 @@ describe("createRequestHandler", () => {
     expect(handleRpc).not.toHaveBeenCalled();
   });
 
+  it("404s /api/auth/admin/* without reaching the BetterAuth handler", async () => {
+    // The admin plugin's endpoints gate on adminRoles only and can't express
+    // the staff-vs-admin hierarchy — every moderation action must go through
+    // the /rpc procedures, which enforce it and write the audit log. The
+    // plugin's own routes being unreachable is what makes that single
+    // enforcement point real rather than aspirational.
+    const { res, calls } = resStub();
+    const authNodeHandler = vi.fn().mockResolvedValue(undefined);
+    const handle = createRequestHandler(deps({ authNodeHandler }));
+
+    await handle(reqStub("/api/auth/admin/ban-user", "POST"), res);
+
+    expect(authNodeHandler).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(404);
+    expect(calls.body).toBe("Not found");
+  });
+
   it("rejects an oversized RPC body with 413 before handleRpc ever runs", async () => {
     // oRPC buffers a multipart body before auth, rate limiting or any payload
     // check — so the ceiling must hold in the router, ahead of everything. The
