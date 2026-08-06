@@ -23,26 +23,36 @@ export function QueueView() {
 
   if (queue.isPending) {
     return (
-      <div className="flex justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin motion-reduce:animate-none text-primary" />
-      </div>
+      <>
+        {/* Mounted above the state branches: an action (e.g. Remove post)
+            drains the queue while its case refetch lands, and the empty
+            state must not unmount the dialog mid-flow — that is where the
+            inverse (Restore) lives. */}
+        {openCase && <CaseDialog target={openCase} onClose={() => setOpenCase(null)} />}
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin motion-reduce:animate-none text-primary" />
+        </div>
+      </>
     );
   }
 
   if (queue.isError) {
     return (
-      <div
-        role="alert"
-        className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive"
-      >
-        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-        <div className="space-y-2">
-          <p>{queue.error.message || m.moderation_queue_error()}</p>
-          <Button variant="outline" size="sm" onClick={() => void queue.refetch()}>
-            {m.common_try_again()}
-          </Button>
+      <>
+        {openCase && <CaseDialog target={openCase} onClose={() => setOpenCase(null)} />}
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive"
+        >
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+          <div className="space-y-2">
+            <p>{queue.error.message || m.moderation_queue_error()}</p>
+            <Button variant="outline" size="sm" onClick={() => void queue.refetch()}>
+              {m.common_try_again()}
+            </Button>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -50,10 +60,13 @@ export function QueueView() {
 
   if (cases.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center">
-        <ShieldAlert className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
-        <p className="text-sm text-muted-foreground">{m.moderation_queue_empty()}</p>
-      </div>
+      <>
+        {openCase && <CaseDialog target={openCase} onClose={() => setOpenCase(null)} />}
+        <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center">
+          <ShieldAlert className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
+          <p className="text-sm text-muted-foreground">{m.moderation_queue_empty()}</p>
+        </div>
+      </>
     );
   }
 

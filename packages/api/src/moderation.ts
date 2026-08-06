@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
@@ -99,10 +99,15 @@ function isUniqueViolation(error: unknown): boolean {
 const caseCursor = createCursorCodec(z.string().min(1));
 
 /** One group of unresolved reports, raw from the GROUP BY. */
+// Raw `db.execute` rows carry postgres.js's own timestamptz string format
+// (`2026-08-06 06:33:09.451822+00`), not a `Date` — drizzle's `select()`
+// maps columns back to Date, raw SQL does not. The timestamp fields below
+// are typed as what the driver actually returns, and the queue handler
+// converts them at the row boundary.
 type ReportGroupRow = {
   target_type: "post" | "user";
   target_id: string;
-  newest_at: Date;
+  newest_at: string;
   report_count: number;
   reasons: string[];
 };
@@ -111,7 +116,7 @@ type ReportGroupRow = {
 type OpenAppealRow = {
   id: string;
   reason: string;
-  created_at: Date;
+  created_at: string;
   target_type: "post" | "user";
   target_id: string;
 };
@@ -334,7 +339,7 @@ export const moderationRouter = {
         byKey.set(`${group.target_type}:${group.target_id}`, {
           targetType: group.target_type,
           targetId: group.target_id,
-          newestAt: group.newest_at,
+          newestAt: new Date(group.newest_at),
           reportCount: group.report_count,
           reasons: [...new Set(group.reasons)],
           appeal: null,
@@ -342,16 +347,19 @@ export const moderationRouter = {
       }
       for (const open of openAppeals) {
         const key = `${open.target_type}:${open.target_id}`;
+        // The driver's string is offset-qualified (`+00`), so `new Date` is
+        // unambiguous — the merge must compare real instants, not strings.
+        const createdAt = new Date(open.created_at);
         const entry: MergedCase = byKey.get(key) ?? {
           targetType: open.target_type,
           targetId: open.target_id,
-          newestAt: open.created_at,
+          newestAt: createdAt,
           reportCount: 0,
           reasons: [],
           appeal: null,
         };
-        entry.appeal = { id: open.id, reason: open.reason, createdAt: open.created_at };
-        if (open.created_at.getTime() > entry.newestAt.getTime()) entry.newestAt = open.created_at;
+        entry.appeal = { id: open.id, reason: open.reason, createdAt };
+        if (createdAt.getTime() > entry.newestAt.getTime()) entry.newestAt = createdAt;
         byKey.set(key, entry);
       }
 
@@ -360,11 +368,18 @@ export const moderationRouter = {
           b.newestAt.getTime() - a.newestAt.getTime() ||
           (a.targetId < b.targetId ? 1 : a.targetId > b.targetId ? -1 : 0),
       );
+      // The anchor is the LAST case actually returned, with a strict "<"
+      // cursor — the house pattern every other keyset feed uses (post.list,
+      // search). Anchoring on the first case past the page instead would drop
+      // exactly that case at every boundary. The merged length decides
+      // hasMore: each side fetched `limit + 1`, so a merged list past the
+      // page proves another page exists.
+      const hasMore = sorted.length > limit;
       const items = sorted.slice(0, limit);
-      const last = sorted[limit];
+      const last = items.at(-1);
       return {
         items,
-        nextCursor: last ? caseCursor.encode(last.newestAt, last.targetId) : null,
+        nextCursor: hasMore && last ? caseCursor.encode(last.newestAt, last.targetId) : null,
       };
     }),
 
@@ -822,9 +837,13 @@ export const moderationRouter = {
         .orderBy(desc(moderationAction.createdAt), desc(moderationAction.id))
         .limit(limit + 1);
 
-      const items = rows.slice(0, limit);
-      const last = rows[limit];
-      return { items, nextCursor: last ? auditCursor.encode(last.createdAt, last.id) : null };
+      // Same last-returned anchor as every other keyset feed (see post.list):
+      // the extra row fetched by `limit + 1` proves a next page exists but is
+      // not itself the cursor, or it would be dropped at every boundary.
+      const hasMore = rows.length > limit;
+      const items = hasMore ? rows.slice(0, limit) : rows;
+      const last = items.at(-1);
+      return { items, nextCursor: hasMore && last ? auditCursor.encode(last.createdAt, last.id) : null };
     }),
 
   /**
@@ -936,13 +955,29 @@ export const moderationRouter = {
         });
       }
 
-      const [openAppeal] = await context.db
-        .select({ id: appeal.id })
+      // One query covers both refusals: a REUSED link (same nonce — a double
+      // click on the email) and a SECOND appeal against the same action (a
+      // fresh link while one is in flight). They answer different questions,
+      // so the nonce match wins: "your appeal was received, nothing to do"
+      // is the true reading of a replayed link, and a fresh-link retry gets
+      // the open-appeal message instead.
+      const [existing] = await context.db
+        .select({ id: appeal.id, status: appeal.status, tokenNonce: appeal.tokenNonce })
         .from(appeal)
-        .where(and(eq(appeal.actionId, actionId), eq(appeal.status, "open")))
+        .where(
+          or(
+            and(eq(appeal.actionId, actionId), eq(appeal.status, "open")),
+            eq(appeal.tokenNonce, nonce),
+          ),
+        )
         .limit(1);
-      if (openAppeal) {
-        throw new ORPCError("BAD_REQUEST", { message: "There's already an open appeal for this action." });
+      if (existing) {
+        if (existing.tokenNonce === nonce) {
+          throw new ORPCError("BAD_REQUEST", { message: "This appeal link has already been used." });
+        }
+        throw new ORPCError("BAD_REQUEST", {
+          message: "There's already an open appeal for this action.",
+        });
       }
 
       try {

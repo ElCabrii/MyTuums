@@ -277,18 +277,26 @@ export async function restorePostEffect(
   db: DbLike,
   args: { postId: string; actorId: string; note?: string; headers: Headers | undefined },
 ): Promise<void> {
-  const [updated] = await db
-    .update(post)
-    .set({ removedAt: null, removedBy: null, removedReason: null })
+  // Read the tombstone BEFORE clearing it — a `returning` clause on the update
+  // below would report the post-update value (always null) and make the
+  // already-restored check below fire on every call.
+  const [target] = await db
+    .select({ id: post.id, authorId: post.authorId, removedAt: post.removedAt })
+    .from(post)
     .where(eq(post.id, args.postId))
-    .returning({ id: post.id, authorId: post.authorId, removedAt: post.removedAt });
+    .limit(1);
 
-  if (!updated) throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
+  if (!target) throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
 
   // Already restored (a race with the appeal overturn or a manual restore):
   // nothing to log — the first restore's audit row exists, and a second one
   // would lie about what happened.
-  if (updated.removedAt === null) return;
+  if (target.removedAt === null) return;
+
+  await db
+    .update(post)
+    .set({ removedAt: null, removedBy: null, removedReason: null })
+    .where(eq(post.id, args.postId));
 
   await logAction(db, {
     action: "post_restored",
@@ -297,7 +305,7 @@ export async function restorePostEffect(
     targetPostId: args.postId,
     note: args.note,
   });
-  await emailUser(db, args.headers, updated.authorId, (locale) => moderationRestoreEmail(locale));
+  await emailUser(db, args.headers, target.authorId, (locale) => moderationRestoreEmail(locale));
 }
 
 /**

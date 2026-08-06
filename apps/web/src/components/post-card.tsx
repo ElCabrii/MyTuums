@@ -140,11 +140,26 @@ export function PostCard({
                 <DropdownMenuTrigger
                   aria-label={m.moderation_kebab()}
                   title={m.moderation_kebab()}
+                  // The card shell navigates to the thread on click (see
+                  // `handleCardClick` below) — like every other control inside
+                  // the card, the kebab must not let its click bubble there,
+                  // or "More" would also navigate.
+                  onClick={(e) => e.stopPropagation()}
                   className="ml-auto flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <MoreHorizontal className="h-4 w-4" />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-44">
+                <DropdownMenuContent
+                  align="end"
+                  className="min-w-44"
+                  // The popup is portaled to <body>, but React events still
+                  // bubble through the React tree — which passes through this
+                  // card's clickable shell. Without this, clicking a menu item
+                  // would also fire `handleCardClick` and navigate to the
+                  // thread (the trigger itself already stops propagation in
+                  // its own click, see above).
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <DropdownMenuItem className="cursor-pointer" onClick={() => setReportDialog({ targetType: "post", targetId: post.id })}>
                     {m.moderation_kebab_report_post()}
                   </DropdownMenuItem>

@@ -60,7 +60,10 @@ export function ReportDialog() {
         </DialogHeader>
         <div className="space-y-4 px-6 pb-6">
           <Select value={reason} onValueChange={(value) => setReason(value ?? "")}>
-            <SelectTrigger className="w-full">
+            {/* The trigger's only text is the placeholder rendered inside the
+                combobox, which is content, not a label — without this the
+                picker would have no accessible name at all. */}
+            <SelectTrigger aria-label={m.moderation_report_choose()} className="w-full">
               <SelectValue placeholder={m.moderation_report_choose()} />
             </SelectTrigger>
             <SelectContent>

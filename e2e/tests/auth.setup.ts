@@ -2,7 +2,8 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test as setup, type APIRequestContext } from "@playwright/test";
 import { E2E } from "../playwright.config";
-import { FIXTURE_USERS, type FixtureUser } from "../support/users";
+import { getUserId, setUserRole } from "../support/db";
+import { ALICE, FIXTURE_USERS, type FixtureUser } from "../support/users";
 
 // Lives under `tests/` rather than at the package root: playwright.config.ts
 // sets `testDir: "./tests"`, and Playwright only ever discovers spec files by
@@ -60,6 +61,15 @@ async function ensureFixtureSession(request: APIRequestContext, user: FixtureUse
 for (const user of FIXTURE_USERS) {
   setup(`authenticate as ${user.username}`, async ({ request }) => {
     await ensureFixtureSession(request, user);
+
+    // Alice is the suite's moderator fixture (moderation.spec.ts walks the
+    // queue as her). Promoted through the row — the admin plugin's endpoints
+    // are blocked — and idempotent, so re-running `--project setup` on its
+    // own (the sign-in fallback path above) can't wedge on the constraint.
+    if (user.username === ALICE.username) {
+      const aliceId = await getUserId(ALICE.username);
+      await setUserRole(aliceId, "moderator");
+    }
 
     // Sanity check before writing storage state that would otherwise fail
     // every downstream browser spec with a much less obvious error.

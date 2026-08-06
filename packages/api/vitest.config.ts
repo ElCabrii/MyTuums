@@ -83,6 +83,13 @@ export default defineConfig({
               process.env.BETTER_AUTH_SECRET ?? "vitest-integration-secret-at-least-32-chars",
             BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? "http://localhost:3001",
             WEB_ORIGIN: process.env.WEB_ORIGIN ?? "http://localhost:5173",
+            // The root `.env` loaded above leaks RESEND_API_KEY (and its
+            // friends) into every worker's process.env. The integration suite
+            // must not reach the real mail service — the moderation procedures
+            // email the affected user on every action, and Resend refuses the
+            // `vitest+…@example.com` fixtures. Overriding the key to empty
+            // routes `sendEmail` to its quiet-under-test log path instead.
+            RESEND_API_KEY: "",
           },
         },
       },

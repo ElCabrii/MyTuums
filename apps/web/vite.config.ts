@@ -52,6 +52,28 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // Pre-bundle every @base-ui module the app imports. Vite's dep optimizer
+  // runs on demand: the first time a module graph that reaches a not-yet-
+  // optimized dependency is requested, Vite discovers it, re-bundles, and
+  // full-reloads the page. Most of the app's chunks are lazy routes, so at
+  // runtime that first use can land in the middle of a user session — and in
+  // the E2E suite (which boots a fresh dev server per run, playwright.config.ts)
+  // it would wipe the page mid-interaction and fail the spec. Listing them
+  // here moves the optimization to server start, where it belongs.
+  optimizeDeps: {
+    include: [
+      "@base-ui/react/avatar",
+      "@base-ui/react/button",
+      "@base-ui/react/dialog",
+      "@base-ui/react/input",
+      "@base-ui/react/menu",
+      "@base-ui/react/merge-props",
+      "@base-ui/react/popover",
+      "@base-ui/react/select",
+      "@base-ui/react/tabs",
+      "@base-ui/react/use-render",
+    ],
+  },
   build: {
     // Source maps for the production bundle. This is a public repo, so the
     // original TS is on GitHub anyway; the maps only ever download when

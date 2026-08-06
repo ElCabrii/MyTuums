@@ -8,13 +8,14 @@
  */
 import { randomUUID } from "node:crypto";
 import { beforeEach } from "vitest";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { auth } from "@my-tuums/auth";
 import { db } from "@my-tuums/db";
 import { assertTestDatabase } from "@my-tuums/db/testing";
-import { post } from "@my-tuums/db/schema";
+import { post, user } from "@my-tuums/db/schema";
 import type { Context } from "../context.js";
 import { createRateLimiter, type RateLimiter } from "../rate-limit.js";
+import type { UserRole } from "../roles.js";
 import type { DestructiveStorage, Storage } from "../storage.js";
 
 /**
@@ -28,10 +29,21 @@ import type { DestructiveStorage, Storage } from "../storage.js";
  */
 export type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
 
-/** A signed-up test user: their session, and a `Context` already carrying it. */
+/**
+ * A signed-up test user: their session, and a `Context` already carrying it.
+ *
+ * `sessionCookie` is the signed value of the `better-auth.session_token`
+ * cookie, captured from the sign-up `set-cookie` header. It is NOT the same as
+ * `session.session.token` — better-auth issues the cookie as
+ * `<token>.<hmac-signature>` (URL-encoded), and `getSession` returns only the
+ * token half, which cannot be re-signed client-side. Re-presenting the cookie
+ * needs this stored value; see `sessionHeaders`.
+ */
 export interface TestUser {
   id: string;
   session: AuthSession;
+  /** The signed `better-auth.session_token` cookie value from sign-up. */
+  sessionCookie: string;
   context: Context;
 }
 
@@ -161,6 +173,23 @@ export async function createTestUser(overrides?: {
     );
   }
 
+  // The session cookie's VALUE is what matters, and it is signed — the raw
+  // `set-cookie` string cannot be handed to `Headers` again for `getSession`,
+  // and `session.session.token` below only carries the token half. The whole
+  // cookie header round-trips fine (the "cookie" header below), so parse the
+  // value out once, here, and let `sessionHeaders` re-present it later.
+  const sessionCookie = setCookie
+    .split(/,(?=\s*[\w.]+=)/)
+    .map((part) => part.trim().split(";")[0])
+    .find((pair) => pair.startsWith("better-auth.session_token="))
+    ?.slice("better-auth.session_token=".length);
+  if (!sessionCookie) {
+    throw new Error(
+      "auth.api.signUpEmail() returned no better-auth.session_token cookie — " +
+        "the session cookie name has changed upstream.",
+    );
+  }
+
   const session = await auth.api.getSession({ headers: new Headers({ cookie: setCookie }) });
   if (!session) {
     throw new Error(
@@ -172,6 +201,7 @@ export async function createTestUser(overrides?: {
   return {
     id: session.user.id,
     session,
+    sessionCookie,
     // Only ever read as `.context.db` for raw drizzle assertions in these
     // tests (not for making rate-limited calls — those go through
     // `contextFor`), so the forwarding limiter is a formality here, not a
@@ -252,4 +282,73 @@ export async function seedPosts(
   });
 
   return db.insert(post).values(rows).returning({ id: post.id, createdAt: post.createdAt });
+}
+
+/**
+ * The cookie header that re-presents a session to better-auth — the same
+ * `better-auth.session_token` cookie a real browser would send.
+ *
+ * This MUST use the user's stored `sessionCookie` (the signed value from the
+ * original `set-cookie` header), not `session.session.token`: better-auth
+ * issues the cookie as `<token>.<hmac-signature>`, and the signature cannot be
+ * rebuilt from the token alone. A `TestUser` carries the signed value
+ * precisely so a test can re-fetch a session (a role change, a fresh
+ * post-suspension read) through the real `getSession` path.
+ */
+export function sessionHeaders(user: TestUser): Headers {
+  return new Headers({ cookie: `better-auth.session_token=${user.sessionCookie}` });
+}
+
+/**
+ * Re-fetches a user's session through the real `auth.api.getSession`.
+ *
+ * The app deliberately runs no session cookie cache (packages/auth), so a
+ * role or ban change lands on the NEXT `getSession` — this helper is the way
+ * a test moves to that next one after mutating the `user` row directly.
+ * Throws when the session no longer exists (a suspension deleted it), which
+ * is exactly the assertion the suspension tests need to make by hand anyway.
+ */
+export async function freshSessionFor(testUser: TestUser): Promise<TestUser> {
+  const session = await auth.api.getSession({ headers: sessionHeaders(testUser) });
+  if (!session) {
+    throw new Error("freshSessionFor: getSession returned null — the session no longer exists.");
+  }
+  return {
+    id: testUser.id,
+    session,
+    // The signed cookie survives unchanged — `getSession` does not rotate the
+    // token or its signature, so the same value keeps re-presenting the same
+    // session until a suspension deletes the row.
+    sessionCookie: testUser.sessionCookie,
+    context: { db, session, rateLimiter: forwardingRateLimiter, storage: testStorage },
+  };
+}
+
+/**
+ * Sets a user's role directly in the database.
+ *
+ * The admin plugin's own `/api/auth/admin/*` endpoints are 404'd
+ * (apps/server/src/request-handler.ts) — our role gates are the only surface,
+ * and to exercise a moderator gate a test needs a moderator. Promoting
+ * through the row is the same path `pnpm db:promote` uses; the new role lands
+ * on the next `getSession` (see `freshSessionFor`).
+ */
+export async function setUserRole(userId: string, role: UserRole): Promise<void> {
+  await db.update(user).set({ role }).where(eq(user.id, userId));
+}
+
+/**
+ * Bans a user directly in the database — `expiresAt` null is a permanent ban,
+ * a past date an expired suspension, a future date a live one. The visibility
+ * predicate reads the row at query time, so the effect is immediate for any
+ * caller; only the `user` row itself changes.
+ */
+export async function setUserBan(
+  userId: string,
+  args: { reason: string; expiresAt: Date | null },
+): Promise<void> {
+  await db
+    .update(user)
+    .set({ banned: true, banReason: args.reason, banExpires: args.expiresAt })
+    .where(eq(user.id, userId));
 }

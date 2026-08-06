@@ -263,6 +263,27 @@ export async function seedLike(postId: string, userId: string): Promise<void> {
 }
 
 /**
+ * Sets a user's role directly in the database.
+ *
+ * The admin plugin's own endpoints are 404'd in the request handler
+ * (apps/server/src/request-handler.ts), so the only way a spec gets a
+ * moderator fixture is the same row update `pnpm db:promote` performs. The
+ * role lands on the next `getSession` — the app runs no session cookie cache,
+ * so a fixture promoted at sign-up time carries the role from its first
+ * browser request.
+ */
+export async function setUserRole(
+  userId: string,
+  role: "user" | "moderator" | "staff" | "admin",
+): Promise<void> {
+  assertTestDatabase();
+  const db = await getDb();
+  const { user } = await schemaModulePromise;
+
+  await db.update(user).set({ role }).where(eq(user.id, userId));
+}
+
+/**
  * Empties every table. `global-setup.ts` already does this once for the
  * whole run; this is for a spec that wants a guaranteed-clean slate of its
  * own rather than trusting no earlier spec left state behind (workers are
