@@ -8,8 +8,10 @@ import {
   uuid,
   timestamp,
   index,
+  uniqueIndex,
   primaryKey,
   check,
+  jsonb,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth.js";
@@ -43,6 +45,15 @@ export const post = pgTable(
     // instead, or deleting one post silently takes an unrelated conversation
     // with it.
     parentId: uuid("parent_id").references((): AnyPgColumn => post.id, { onDelete: "cascade" }),
+    // The removal tombstone (issue #38): a removed post is never deleted —
+    // it stays in feeds as a stub (see `postSelection` in packages/api) so
+    // threads, likes and replies keep their shape. `removedBy` is set null
+    // when the moderator's account goes away, the same policy as
+    // moderation_action.actor_id below; `removedReason` is the moderator's
+    // stated reason, shown to the author and the moderation queue.
+    removedAt: timestamp("removed_at", { withTimezone: true, precision: 3 }),
+    removedBy: text("removed_by").references(() => user.id, { onDelete: "set null" }),
+    removedReason: text("removed_reason"),
     // `withTimezone` is not cosmetic. On a bare `timestamp` (no time zone),
     // Postgres resolves `now()` to the *database session's* local wall clock,
     // while Drizzle's `mapFromDriverValue` reads the column back by appending
@@ -169,6 +180,242 @@ export const follow = pgTable(
   ],
 );
 
+/**
+ * A report of a post or user (issue #38) — the raw material of the
+ * moderation queue.
+ *
+ * The composite primary key *is* the "one report per (reporter, target)
+ * pair" rule, and it is what makes `report` idempotent: the procedure
+ * upserts with `onConflictDoUpdate`, so re-reporting the same target does
+ * not pile up rows. Reopening is a stamp clearing, never a new row.
+ *
+ * `targetId` is deliberately a plain `text` with NO foreign key. Reports
+ * are evidence: they must survive their target's deletion (a removed post
+ * is a tombstone, but a post's *author* can still be hard-deleted through
+ * better-auth), and a cascading FK would take the evidence with it. Whether
+ * the target exists is enforced by the procedure, which resolves the id
+ * against the target table before inserting.
+ */
+export const report = pgTable(
+  "report",
+  {
+    // `user.id` is text (BetterAuth's own id format), so the FK must be too.
+    reporterId: text("reporter_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // `'post'` or `'user'` (checked below). The pair (targetType, targetId)
+    // names the reported thing; `targetId` is a post uuid or a user id.
+    targetType: text("target_type").notNull(),
+    targetId: text("target_id").notNull(),
+    // One of the stable reason codes from the design (issue #38), checked
+    // below against the union of both targets' sets. The per-target subsets
+    // (posts: spam/harassment/hate_speech/misinformation/self_harm/
+    // illegal_content/nsfw; users: spam/harassment/impersonation/underage)
+    // are enforced at input by the procedure's discriminated union.
+    reason: text("reason").notNull(),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
+      .defaultNow()
+      .notNull(),
+    // A null `resolvedAt` means the case is open. Resolution is a stamp
+    // (`resolvedBy`/`resolvedOutcome`/`resolutionNote` land together), never
+    // a delete — the rows stay as the case's history.
+    resolvedAt: timestamp("resolved_at", { withTimezone: true, precision: 3 }),
+    resolvedBy: text("resolved_by").references(() => user.id, { onDelete: "set null" }),
+    resolvedOutcome: text("resolved_outcome"),
+    resolutionNote: text("resolution_note"),
+  },
+  (t) => [
+    // This composite primary key *is* the "one report per (reporter, target)
+    // pair" rule — see the table comment.
+    primaryKey({ columns: [t.reporterId, t.targetType, t.targetId] }),
+    check("report_target_type", sql`${t.targetType} in ('post', 'user')`),
+    // The union of both reason-code sets; the per-target split is input-
+    // enforced by the procedure's discriminated union. One union check (not
+    // two conditional ones) because the DB's job is to keep garbage out —
+    // which set a code belongs to is a contract decision the procedure owns.
+    check(
+      "report_reason",
+      sql`${t.reason} in ('spam', 'harassment', 'hate_speech', 'misinformation', 'self_harm', 'illegal_content', 'nsfw', 'impersonation', 'underage')`,
+    ),
+    // Reporting yourself is meaningless, and for a user-target report it
+    // would let a reporter adjudicate their own case. Vacuous for posts
+    // (a uuid can never equal a user id) and harmless there.
+    check("report_not_self", sql`${t.reporterId} <> ${t.targetId}`),
+    // The queue is built from unresolved reports, newest first. Partial to
+    // match the queue query's predicate, the same reasoning as
+    // post_created_idx above.
+    index("report_open_idx")
+      .on(t.createdAt.desc(), t.targetType, t.targetId)
+      .where(sql`${t.resolvedAt} is null`),
+  ],
+);
+
+/**
+ * A directed block edge from `blockerId` to `blockedId` (issue #38).
+ *
+ * Blocking is mutual in the design: a blocked user cannot see the blocker
+ * (posts, profile, search) and the blocker cannot see the blocked user
+ * either — `invisibleAuthor` in packages/api/src/visibility.ts checks both
+ * directions. The block procedure also severs follows in both directions
+ * before inserting.
+ *
+ * Deliberately does NOT touch `post_like`: a block is silent and revocable,
+ * and rewriting like state on every block/unblock is both noisy (email
+ * churn, audit rows) and wrong (a like is not a relationship).
+ */
+export const userBlock = pgTable(
+  "user_block",
+  {
+    // Both sides are `text` for the same reason post.author_id is: `user.id`
+    // is BetterAuth's own id format, not a uuid.
+    blockerId: text("blocker_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    blockedId: text("blocked_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    // This composite primary key *is* the "block someone at most once" rule;
+    // `block` is idempotent via `onConflictDoNothing`, like follow.
+    primaryKey({ columns: [t.blockerId, t.blockedId] }),
+    check("user_block_not_self", sql`${t.blockerId} <> ${t.blockedId}`),
+  ],
+);
+
+/**
+ * The audit log (issue #38) — one row per moderation action, append-only.
+ *
+ * This is the hand-rolled replacement for the admin plugin's `auditLog`
+ * option, which does not exist in better-auth 1.6.25 — and even if it did,
+ * it would not know our post removals, suspensions, role changes and case
+ * resolutions. Every `/rpc` moderation procedure writes exactly one row
+ * here, with `details` carrying the action-specific extras (old/new role,
+ * suspension duration, appeal outcome...).
+ *
+ * `actorId` is set null (not cascade) when the actor's account goes away:
+ * the action stays in the audit trail, the link just breaks. `reason` is
+ * the moderator's stated reason — what the emails quote; `note` is an
+ * optional internal note for the next moderator.
+ */
+export const moderationAction = pgTable(
+  "moderation_action",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // One of the action codes checked below — the design's stable set.
+    action: text("action").notNull(),
+    actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
+    // `'post'` or `'user'` — decides which target column below is set
+    // (checked below).
+    targetType: text("target_type").notNull(),
+    targetPostId: uuid("target_post_id").references(() => post.id, { onDelete: "set null" }),
+    targetUserId: text("target_user_id").references(() => user.id, { onDelete: "set null" }),
+    reason: text("reason"),
+    note: text("note"),
+    // Action-specific extras: `{oldRole, newRole}` for role_changed,
+    // `{durationSeconds}` for user_suspended, `{outcome}` for
+    // appeal_resolved, `{reporterCount, outcome}` for case_resolved.
+    details: jsonb("details").default({}).notNull(),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above — and because the audit log is keyset-paginated
+    // on (created_at, id), the precision is load-bearing here too.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    check(
+      "moderation_action_action",
+      sql`${t.action} in ('post_removed', 'post_restored', 'user_suspended', 'user_unsuspended', 'user_banned', 'user_unbanned', 'role_changed', 'case_resolved', 'appeal_resolved')`,
+    ),
+    check("moderation_action_target_type", sql`${t.targetType} in ('post', 'user')`),
+    // Exactly one of the two target columns is set — an audit row always
+    // names one thing it happened to.
+    check(
+      "moderation_action_one_target",
+      sql`(${t.targetPostId} is null) <> (${t.targetUserId} is null)`,
+    ),
+    // ...and the type column agrees with which one that is.
+    check(
+      "moderation_action_target_match",
+      sql`(${t.targetType} = 'post') = (${t.targetPostId} is not null)`,
+    ),
+    // The audit log's keyset order: newest first, `id` breaking ties.
+    index("moderation_action_created_idx").on(t.createdAt.desc(), t.id.desc()),
+    // "What was the last action on X" — the removed-post appeal stub path
+    // and the queue's latest-action lookups. Deliberately not partial: the
+    // audit log is queried by target across all of history, not just open
+    // cases.
+    index("moderation_action_target_idx").on(
+      t.targetType,
+      t.targetPostId,
+      t.targetUserId,
+      t.createdAt.desc(),
+    ),
+  ],
+);
+
+/**
+ * An appeal against a moderation action (issue #38) — opened either from the
+ * email link (signed-out, capability token) or from a removed-post stub
+ * (signed-in).
+ *
+ * `tokenNonce` is the replay-protection half of the appeal token: the token
+ * in the email is `payload.sig` where the payload carries this nonce, so a
+ * second submission with the same nonce violates the unique constraint and
+ * is refused as "already used" rather than silently reopening.
+ *
+ * One open appeal per action is enforced by the partial unique index below
+ * — re-appealing an upheld action must go through a moderator, not the
+ * form.
+ */
+export const appeal = pgTable(
+  "appeal",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Cascades with the action: an appeal is evidence attached to the
+    // action it contests, and the audit log never hides actions.
+    actionId: uuid("action_id")
+      .notNull()
+      .references(() => moderationAction.id, { onDelete: "cascade" }),
+    // Always set — the token's payload carries the userId even when the
+    // appellant submits signed-out.
+    appellantId: text("appellant_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    tokenNonce: text("token_nonce").notNull().unique(),
+    // The appellant's own words; 10..2000 characters enforced at input.
+    reason: text("reason").notNull(),
+    // `'open'`, `'upheld'` or `'overturned'` (checked below).
+    status: text("status").default("open").notNull(),
+    reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
+    reviewNote: text("review_note"),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
+      .defaultNow()
+      .notNull(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true, precision: 3 }),
+  },
+  (t) => [
+    check("appeal_status", sql`${t.status} in ('open', 'upheld', 'overturned')`),
+    // The queue scans open appeals only.
+    index("appeal_open_idx").on(t.status).where(sql`${t.status} = 'open'`),
+    // The "one open appeal per action" rule, as a partial unique index —
+    // resolved appeals are history and may accumulate.
+    uniqueIndex("appeal_open_action_idx")
+      .on(t.actionId)
+      .where(sql`${t.status} = 'open'`),
+  ],
+);
+
 /** Drizzle relations for `post` — the joins `with` queries can reach: author, likes, parent, and replies. */
 export const postRelations = relations(post, ({ one, many }) => ({
   author: one(user, { fields: [post.authorId], references: [user.id] }),
@@ -204,5 +451,69 @@ export const followRelations = relations(follow, ({ one }) => ({
     fields: [follow.followingId],
     references: [user.id],
     relationName: "following",
+  }),
+}));
+
+/** Drizzle relations for `report` — the reporter and the resolving moderator. */
+export const reportRelations = relations(report, ({ one }) => ({
+  reporter: one(user, {
+    fields: [report.reporterId],
+    references: [user.id],
+    relationName: "reporter",
+  }),
+  resolvedBy: one(user, {
+    fields: [report.resolvedBy],
+    references: [user.id],
+    relationName: "resolvedBy",
+  }),
+}));
+
+/** Drizzle relations for `userBlock` — the `user` rows on both sides of the edge. */
+export const userBlockRelations = relations(userBlock, ({ one }) => ({
+  blocker: one(user, {
+    fields: [userBlock.blockerId],
+    references: [user.id],
+    relationName: "blocker",
+  }),
+  blocked: one(user, {
+    fields: [userBlock.blockedId],
+    references: [user.id],
+    relationName: "blocked",
+  }),
+}));
+
+/** Drizzle relations for `moderationAction` — the actor and the thing it acted on. */
+export const moderationActionRelations = relations(moderationAction, ({ one }) => ({
+  actor: one(user, {
+    fields: [moderationAction.actorId],
+    references: [user.id],
+    relationName: "actor",
+  }),
+  targetPost: one(post, {
+    fields: [moderationAction.targetPostId],
+    references: [post.id],
+  }),
+  targetUser: one(user, {
+    fields: [moderationAction.targetUserId],
+    references: [user.id],
+    relationName: "targetUser",
+  }),
+}));
+
+/** Drizzle relations for `appeal` — the contested action, the appellant, and the reviewer. */
+export const appealRelations = relations(appeal, ({ one }) => ({
+  action: one(moderationAction, {
+    fields: [appeal.actionId],
+    references: [moderationAction.id],
+  }),
+  appellant: one(user, {
+    fields: [appeal.appellantId],
+    references: [user.id],
+    relationName: "appellant",
+  }),
+  reviewedBy: one(user, {
+    fields: [appeal.reviewedBy],
+    references: [user.id],
+    relationName: "reviewedBy",
   }),
 }));
