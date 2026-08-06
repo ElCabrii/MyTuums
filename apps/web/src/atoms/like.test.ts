@@ -19,7 +19,7 @@ vi.mock("@/lib/orpc", async () => {
   return { orpc: createTanstackQueryUtils(fakeClient) };
 });
 
-import { orpc, type Post, type PostListPage } from "@/lib/orpc";
+import { orpc, type Post, type PostListPage, type SearchPostsPage } from "@/lib/orpc";
 import { readCachedPost } from "@/lib/post-cache";
 import { clearLikeFamilies, toggleLikeAtomFamily } from "@/atoms/like";
 
@@ -40,6 +40,10 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
 }
 
 function feedPage(posts: Post[]): InfiniteData<PostListPage> {
+  return { pages: [{ items: posts, nextCursor: null }], pageParams: [undefined] };
+}
+
+function searchPage(posts: Post[]): InfiniteData<SearchPostsPage> {
   return { pages: [{ items: posts, nextCursor: null }], pageParams: [undefined] };
 }
 
@@ -135,6 +139,30 @@ describe("toggleLikeAtomFamily", () => {
 
     const scopeIds = queryClient.getMutationCache().getAll().map((m) => m.options.scope?.id);
     expect(scopeIds).toEqual(["post-like:post-1"]);
+  });
+
+  // The direction is read from whichever cache holds the post. A post whose
+  // ONLY cached copy is a search result — never in a feed or a thread — is
+  // still real cached state: with `viewerHasLiked: true` the button must send
+  // `unlike`. Before search results joined the read path, this computed
+  // "nothing cached" -> liked=true and re-sent `like`, so the button could
+  // never turn a search-result heart back off.
+  it("sends unlike for an already-liked post whose only cached copy is a search result", async () => {
+    const store = createStore();
+    const queryClient = new QueryClient();
+    store.set(queryClientAtom, queryClient);
+    queryClient.setQueryData(
+      orpc.search.posts.key({ input: { q: "hello", limit: 20 } }),
+      searchPage([makePost({ id: "search-only-1", viewerHasLiked: true, likeCount: 9 })]),
+    );
+    fakeClient.post.like.mockClear();
+    fakeClient.post.unlike.mockClear();
+    fakeClient.post.unlike.mockImplementation(() => new Promise(() => {}));
+
+    store.set(toggleLikeAtomFamily("search-only-1"));
+
+    await waitFor(() => expect(fakeClient.post.unlike).toHaveBeenCalled());
+    expect(fakeClient.post.like).not.toHaveBeenCalled();
   });
 
   it("reads the like direction from the cache, so a burst of clicks alternates", () => {

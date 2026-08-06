@@ -93,11 +93,13 @@ function toggleMutationAtom(postId: string, direction: "like" | "unlike") {
       // cancel + snapshot + patch stay one atomic block with no boundary for
       // an interleaved dispatch to land in.
       onMutate: (): LikeContext => {
-        // Both caches hold this post (see lib/post-cache.ts), so both need
-        // cancelling — an in-flight thread refetch landing after the patch
-        // would overwrite it with the pre-click server state.
+        // All three caches hold this post (see lib/post-cache.ts), so all three
+        // need cancelling — an in-flight refetch landing after the patch would
+        // overwrite it with the pre-click server state, whether it came from a
+        // feed, a thread or a search result.
         void queryClient.cancelQueries({ queryKey: orpc.post.list.key() });
         void queryClient.cancelQueries({ queryKey: orpc.post.thread.key() });
+        void queryClient.cancelQueries({ queryKey: orpc.search.posts.key() });
         const snapshot = snapshotPosts(queryClient);
 
         updatePostEverywhere(queryClient, postId, (post) =>

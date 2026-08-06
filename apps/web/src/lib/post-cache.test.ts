@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
-import { orpc, type Post, type PostListPage, type Thread } from "@/lib/orpc";
+import { orpc, type Post, type PostListPage, type SearchPostsPage, type Thread } from "@/lib/orpc";
 import {
   readCachedPost,
   restorePosts,
@@ -31,6 +31,13 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
 }
 
 function feedPage(posts: Post[]): InfiniteData<PostListPage> {
+  return {
+    pages: [{ items: posts, nextCursor: null }],
+    pageParams: [undefined],
+  };
+}
+
+function searchPage(posts: Post[]): InfiniteData<SearchPostsPage> {
   return {
     pages: [{ items: posts, nextCursor: null }],
     pageParams: [undefined],
@@ -78,6 +85,23 @@ describe("post-cache", () => {
       expect(replyListData?.pages[0]?.items.find((p) => p.id === "other-1")?.likeCount).toBe(0);
       const unrelatedData = queryClient.getQueryData<InfiniteData<PostListPage>>(unrelatedKey);
       expect(unrelatedData?.pages[0]?.items[0]?.likeCount).toBe(0);
+    });
+
+    it("patches a post cached under a search.posts result too", () => {
+      const queryClient = new QueryClient();
+      const target = makePost({ id: "search-1", likeCount: 3, viewerHasLiked: false });
+      const searchKey = orpc.search.posts.key({ input: { q: "hello", limit: 20 } });
+      queryClient.setQueryData(searchKey, searchPage([target]));
+
+      updatePostEverywhere(queryClient, "search-1", (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+        viewerHasLiked: true,
+      }));
+
+      const data = queryClient.getQueryData<InfiniteData<SearchPostsPage>>(searchKey);
+      expect(data?.pages[0]?.items.find((p) => p.id === "search-1")?.likeCount).toBe(4);
+      expect(data?.pages[0]?.items.find((p) => p.id === "search-1")?.viewerHasLiked).toBe(true);
     });
 
     it("patches the same post inside a post.thread entry as both data.post and an ancestor", () => {
@@ -144,6 +168,22 @@ describe("post-cache", () => {
       expect(readCachedPost(queryClient, "unknown-id")).toBeUndefined();
     });
 
+    // A post can live ONLY in a search result: the search page is the one
+    // screen that holds rows that were never part of a feed or a thread. If
+    // `readCachedPost` only scanned feeds and threads, the like button on a
+    // search result would compute its direction from "nothing cached" and
+    // re-send `like` for an already-liked post.
+    it("finds a post that exists only in a search.posts result", () => {
+      const queryClient = new QueryClient();
+      const post = makePost({ id: "search-only-1", viewerHasLiked: true, likeCount: 9 });
+      queryClient.setQueryData(
+        orpc.search.posts.key({ input: { q: "hello", limit: 20 } }),
+        searchPage([post]),
+      );
+
+      expect(readCachedPost(queryClient, "search-only-1")).toEqual(post);
+    });
+
     it("tolerates a registered query whose data is still undefined", () => {
       const queryClient = new QueryClient();
       // A query can be registered in the cache (e.g. mid-fetch) before it has
@@ -190,6 +230,33 @@ describe("post-cache", () => {
 
       expect(queryClient.getQueryData(feedKey)).toEqual(before.feed);
       expect(queryClient.getQueryData(threadKey)).toEqual(before.thread);
+    });
+
+    it("restorePosts undoes an edit to a post cached only under search.posts", () => {
+      const queryClient = new QueryClient();
+      const post = makePost({ id: "round-trip-search-1", likeCount: 5, viewerHasLiked: false });
+      const searchKey = orpc.search.posts.key({ input: { q: "hello", limit: 20 } });
+      queryClient.setQueryData(searchKey, searchPage([post]));
+
+      const snapshot = snapshotPosts(queryClient);
+      updatePostEverywhere(queryClient, "round-trip-search-1", (p) => ({
+        ...p,
+        likeCount: p.likeCount + 1,
+        viewerHasLiked: true,
+      }));
+
+      // Sanity: the edit actually landed in the search cache before restoring.
+      expect(
+        queryClient.getQueryData<InfiniteData<SearchPostsPage>>(searchKey)?.pages[0]?.items[0]
+          ?.likeCount,
+      ).toBe(6);
+
+      restorePosts(queryClient, snapshot);
+
+      expect(
+        queryClient.getQueryData<InfiniteData<SearchPostsPage>>(searchKey)?.pages[0]?.items[0]
+          ?.likeCount,
+      ).toBe(5);
     });
 
     it("handles empty caches without throwing", () => {
