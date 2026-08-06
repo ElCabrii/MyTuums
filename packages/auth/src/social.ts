@@ -86,6 +86,14 @@ export const configuredSocialProviders = Object.keys(socialProviders);
  * excluded on purpose — its sign-in still works, but the first time an existing
  * account's email matches, the person has to link it deliberately from
  * `/settings/account` instead of it happening silently.
+ *
+ * Being on this list does not mean the link happens silently for everyone:
+ * `accountLinking.requireLocalEmailVerified` defaults to `true`, so an
+ * existing account whose email is unverified is still asked to link
+ * deliberately — and most local accounts ARE unverified (sign-up does not
+ * require verification). This list only says the provider is trusted enough
+ * for implicit linking to be *offered* at all; the verified-email gate above
+ * it decides per account.
  */
 export const trustedProviders = ["google", "discord"].filter((id) =>
   configuredSocialProviders.includes(id),

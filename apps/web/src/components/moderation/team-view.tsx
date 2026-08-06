@@ -1,5 +1,5 @@
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { AlertCircle, Loader2, Users } from "lucide-react";
+import { Users } from "lucide-react";
 import {
   resetRoleFormEffect,
   roleSelectAtom,
@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PaginatedState } from "@/components/paginated-state";
 import { roleLabel, roleRank } from "@/components/moderation/labels";
 import { UserAvatar } from "@/components/user-avatar";
 import { handleOf } from "@/lib/user";
@@ -37,7 +38,9 @@ const ALL_ROLES = ["user", "moderator", "staff", "admin"] as const;
  * role affordance only where the viewer's rank permits managing that member.
  * Staff-only: the tab is hidden below staff, and `moderation.team` denies
  * below staff server-side regardless. The set-role dialog lives here because
- * this view is its only reader (same mount reasoning as `CaseDialog`).
+ * this view is its only reader (same mount reasoning as `CaseDialog`). The
+ * four-state skeleton is the shared `PaginatedState` — with no pagination for
+ * this endpoint, so no "Load more" ever renders.
  */
 export function TeamView() {
   const team = useAtomValue(teamAtom);
@@ -45,45 +48,17 @@ export function TeamView() {
   const viewerRole = useAtomValue(viewerRoleAtom);
   const openTarget = useAtomValue(setRoleDialogAtom);
   const setOpenTarget = useSetAtom(setRoleDialogAtom);
-
-  if (team.isPending) {
-    return (
-      <div className="flex justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin motion-reduce:animate-none text-primary" />
-      </div>
-    );
-  }
-
-  if (team.isError) {
-    return (
-      <div
-        role="alert"
-        className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive"
-      >
-        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-        <div className="space-y-2">
-          <p>{team.error.message || m.moderation_team_error()}</p>
-          <Button variant="outline" size="sm" onClick={() => void team.refetch()}>
-            {m.common_try_again()}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const members = team.data.items;
-
-  if (members.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center">
-        <Users className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
-        <p className="text-sm text-muted-foreground">{m.moderation_team_empty()}</p>
-      </div>
-    );
-  }
+  const members = team.data?.items ?? [];
 
   return (
-    <div className="space-y-2">
+    <PaginatedState
+      query={team}
+      errorMessage={m.moderation_team_error()}
+      emptyIcon={Users}
+      emptyMessage={m.moderation_team_empty()}
+      isEmpty={members.length === 0}
+      listClassName="space-y-2"
+    >
       {members.map((member) => {
         const memberHandle = handleOf(member);
         const canManage = member.id !== viewer?.id && roleRank(member.role ?? "user") < roleRank(viewerRole);
@@ -114,7 +89,7 @@ export function TeamView() {
       })}
 
       {openTarget && <SetRoleDialog />}
-    </div>
+    </PaginatedState>
   );
 }
 

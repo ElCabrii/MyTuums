@@ -24,31 +24,6 @@ describe("PostCard", () => {
     toggleLikeSpy.mockClear();
   });
 
-  describe("signed out", () => {
-    it("renders the like and reply controls as links to /login, not buttons", async () => {
-      const post = makePost({ viewerHasLiked: false });
-      await renderWithProviders(<PostCard post={post} />, { signedInAs: false });
-
-      // Signed out, the server would reject either action — send people to
-      // log in rather than let them click into a 401 (see the source
-      // comments on both branches).
-      const replyLink = screen.getByRole("link", { name: m.reply_signed_out() });
-      expect(replyLink).toHaveAttribute("href", "/login");
-
-      // The like link now carries an `aria-label` ("Log in to like posts"),
-      // and its count span is `aria-hidden` — so unlike before, the
-      // accessible name is the label, not the bare number. Assert on the
-      // name (the point of the fix), and keep the `title` lookup for parity
-      // with the e2e locator.
-      const likeLink = screen.getByRole("link", { name: m.post_like_signed_out() });
-      expect(likeLink).toHaveAttribute("href", "/login");
-      expect(screen.getByTitle(m.post_like_signed_out())).toBe(likeLink);
-
-      // Neither is a real button.
-      expect(screen.queryByRole("button")).not.toBeInTheDocument();
-    });
-  });
-
   describe("signed in", () => {
     it("renders the like control as a pressed toggle when already liked, and invokes the toggle on click", async () => {
       const post = makePost({ viewerHasLiked: true, likeCount: 3 });

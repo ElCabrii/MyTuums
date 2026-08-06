@@ -49,7 +49,7 @@ const isBlank = (value: unknown): boolean =>
   value === undefined || value === null || value === "";
 
 /**
- * `image` and `banner_image` hold one of exactly two things: an absolute URL an
+ * `image` and `bannerImage` hold one of exactly two things: an absolute URL an
  * OAuth provider gave us at sign-up, or a `/media/<key>` path pointing at this
  * app's own object storage.
  *
@@ -93,11 +93,13 @@ function assertOneOf(value: unknown, allowed: readonly string[], message: string
 
 /**
  * The original-image columns are the one place "no client writes, ever" is the
- * rule. They are declared `input: false` in the auth config so Better Auth
- * rejects them as input outright; this is the second line for anything that
- * bypasses that — the hook sees *every* user write, and any non-blank value
- * here is illegitimate by construction, because the only legitimate writer is
- * the upload procedure, which writes through Drizzle and skips these hooks.
+ * rule. They are declared `input: false` in the auth config, and Better Auth's
+ * own input parser rejects `input: false` fields before they ever reach a
+ * hook — so this check is defense-in-depth against an upstream change, not a
+ * second line against a current bypass. The hook sees *every* user write, and
+ * any non-blank value here is illegitimate by construction, because the only
+ * legitimate writer is the upload procedure, which writes through Drizzle and
+ * skips these hooks.
  */
 function assertNoClientOriginalImageWrite(value: unknown): void {
   if (!isBlank(value)) {

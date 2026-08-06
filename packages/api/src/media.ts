@@ -21,9 +21,6 @@ import {
 } from "./storage.js";
 
 /**
- * The read side of uploaded images: turning a `/media/<key>` request into
- * something the browser can actually fetch.
- *
  * `url` is where the browser should go; `cacheSeconds` is how long the redirect
  * may be cached, bounded by the signing window so a cached redirect never
  * outlives the signature it points at.

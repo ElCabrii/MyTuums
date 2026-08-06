@@ -124,9 +124,12 @@ export function Header() {
 
         {/* Right Section: Messages, Notifications, Theme Toggle, Auth / Profile */}
         <div className="flex items-center gap-1.5 sm:gap-3 shrink-0 xl:flex-1 xl:justify-end">
+          {/* Not shipped yet — kept as disabled stubs rather than inert-looking
+              buttons so nobody mistakes them for live controls. */}
           <Button
             variant="ghost"
             size="icon"
+            disabled
             title={m.nav_messages()}
             aria-label={m.nav_messages()}
             className="hidden sm:inline-flex"
@@ -136,6 +139,7 @@ export function Header() {
           <Button
             variant="ghost"
             size="icon"
+            disabled
             title={m.nav_notifications()}
             aria-label={m.nav_notifications()}
             className="hidden sm:inline-flex"

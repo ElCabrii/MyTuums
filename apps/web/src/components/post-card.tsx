@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { formatRelativeTime } from "@/lib/format";
-import { type Post } from "@/lib/orpc";
+import type { Post } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 import { getLocale } from "@/paraglide/runtime.js";
@@ -64,11 +64,11 @@ export function PostCard({
   };
 
   const likeButtonClass = `flex items-center gap-1.5 transition-colors ${
-    post.viewerHasLiked ? "text-red-500 font-bold" : "hover:text-red-500"
+    post.viewerHasLiked ? "text-destructive font-bold" : "hover:text-destructive"
   }`;
   const likeContent = (
     <>
-      <Heart className={`h-4 w-4 ${post.viewerHasLiked ? "fill-red-500" : ""}`} />
+      <Heart className={`h-4 w-4 ${post.viewerHasLiked ? "fill-destructive" : ""}`} />
       <span>{post.likeCount}</span>
     </>
   );
@@ -216,15 +216,12 @@ export function PostCard({
           {!post.removed && (
           <div className="flex items-center gap-6 max-w-md text-xs text-muted-foreground">
             {/* Replying is a navigation, not a mutation — the composer lives
-                on the thread page — so this is a link for everyone, signed in
-                or not. What differs is where it goes: the same "don't click
-                into a 401" reasoning as the like button below. */}
+                on the thread page — so this is a link, and the focused post
+                (whose composer is directly below) degrades it to plain text
+                rather than linking to the page you are on. */}
             {isFocused ? (
-              // The composer for this post is directly below, so a link here
-              // would point at the page you are already on — the same reason
-              // the timestamp degrades to plain text above.
               <span className="flex items-center gap-1.5">{replyContent}</span>
-            ) : isSignedIn ? (
+            ) : (
               <Link
                 to="/post/$postId"
                 params={{ postId: post.id }}
@@ -235,59 +232,24 @@ export function PostCard({
               >
                 {replyContent}
               </Link>
-            ) : (
-              // `aria-label` as well as `title`, and the visible reply count
-              // is `aria-hidden`: the label has no count in it, so the bare
-              // number would otherwise clash with it (axe
-              // label-content-name-mismatch).
-              <Link
-                to="/login"
-                title={m.reply_signed_out()}
-                aria-label={m.reply_signed_out()}
-                className={replyLinkClass}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <MessageCircle className="h-4 w-4" />
-                <span aria-hidden="true">{post.replyCount}</span>
-              </Link>
             )}
 
-            {isSignedIn ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleLike();
-                }}
-                aria-pressed={post.viewerHasLiked}
-                aria-label={
-                  post.viewerHasLiked
-                    ? m.post_unlike({ count: String(post.likeCount) })
-                    : m.post_like({ count: String(post.likeCount) })
-                }
-                className={likeButtonClass}
-              >
-                {likeContent}
-              </button>
-            ) : (
-              // Signed out, the server would reject the like — send people to
-              // log in rather than let them click into a 401. `aria-label` as
-              // well as `title`, and the visible like count is `aria-hidden`:
-              // the label has no count in it, so the bare number would clash
-              // with it (axe label-content-name-mismatch), and without the
-              // label the number would win over `title` as the accessible
-              // name.
-              <Link
-                to="/login"
-                title={m.post_like_signed_out()}
-                aria-label={m.post_like_signed_out()}
-                className={likeButtonClass}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Heart className={`h-4 w-4 ${post.viewerHasLiked ? "fill-red-500" : ""}`} />
-                <span aria-hidden="true">{post.likeCount}</span>
-              </Link>
-            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleLike();
+              }}
+              aria-pressed={post.viewerHasLiked}
+              aria-label={
+                post.viewerHasLiked
+                  ? m.post_unlike({ count: String(post.likeCount) })
+                  : m.post_like({ count: String(post.likeCount) })
+              }
+              className={likeButtonClass}
+            >
+              {likeContent}
+            </button>
           </div>
           )}
         </div>

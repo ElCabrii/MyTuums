@@ -22,17 +22,6 @@ describe("FollowButton", () => {
     toggleFollowSpy.mockClear();
   });
 
-  it("renders a link to /login when signed out", async () => {
-    await renderWithProviders(<FollowButton userId="user-1" isFollowing={false} />, {
-      signedInAs: false,
-    });
-
-    // Base UI applies button semantics to whatever it renders, so this
-    // reports role="button" even though the underlying element is an <a>.
-    const control = screen.getByRole("button", { name: m.follow_action() });
-    expect(control).toHaveAttribute("href", "/login");
-  });
-
   it("renders nothing on the viewer's own row", async () => {
     await renderWithProviders(<FollowButton userId="self-1" isFollowing={false} />, {
       signedInAs: { id: "self-1", name: "Me" },

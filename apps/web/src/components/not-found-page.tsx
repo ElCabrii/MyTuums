@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PageCard } from "@/components/page-card";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -15,7 +16,7 @@ import { m } from "@/paraglide/messages.js";
 export function NotFoundPage() {
   return (
     <div className="container max-w-md mx-auto px-4 py-16">
-      <div className="rounded-3xl border border-border/50 bg-card/60 backdrop-blur-xl p-6 sm:p-8 shadow-2xl text-center space-y-4">
+      <PageCard className="text-center space-y-4">
         <p className="text-5xl font-bold tracking-tight text-primary">404</p>
         <h1 className="text-xl font-bold tracking-tight">{m.notfound_title()}</h1>
         <p className="text-sm text-muted-foreground">{m.notfound_body()}</p>
@@ -23,7 +24,7 @@ export function NotFoundPage() {
           <Home className="h-4 w-4" />
           <span>{m.common_back_to_home()}</span>
         </Button>
-      </div>
+      </PageCard>
     </div>
   );
 }

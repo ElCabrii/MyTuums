@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,8 +7,9 @@ import { m } from "@/paraglide/messages.js";
 
 /**
  * The Follow/Unfollow toggle for a user row — write-only and optimistic (the
- * flip is the feedback), with a login link when signed out and nothing on the
- * viewer's own row.
+ * flip is the feedback), and nothing on the viewer's own row. Signed-out
+ * visitors never render this (every route it appears on is gated), so the
+ * old login-link branch is gone.
  */
 export function FollowButton({
   userId,
@@ -30,23 +30,6 @@ export function FollowButton({
   // constraint, so there is no state in which this button is meaningful on
   // your own row. Callers guard too; this is the backstop.
   if (viewerId === userId) return null;
-
-  if (!viewerId) {
-    // Signed out, the server would reject the follow — send people to log in
-    // rather than let them click into a 401, matching the like affordance in
-    // ./post-card.tsx.
-    return (
-      <Button
-        size="sm"
-        nativeButton={false}
-        className={className}
-        render={<Link to="/login" title={m.follow_signed_out()} className="gap-1.5 rounded-full" />}
-      >
-        <UserPlus className="h-4 w-4" />
-        <span>{m.follow_action()}</span>
-      </Button>
-    );
-  }
 
   // Deliberately no pending/disabled state: the optimistic flip *is* the
   // feedback and it lands on click, while disabling for the round trip would

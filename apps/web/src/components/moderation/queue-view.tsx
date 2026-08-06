@@ -1,9 +1,9 @@
 import { useAtomValue, useSetAtom } from "jotai";
-import { AlertCircle, Loader2, ShieldAlert } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 import { caseDialogAtom, moderationQueueAtom } from "@/atoms/moderation";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { CaseDialog } from "@/components/moderation/case-dialog";
+import { PaginatedState } from "@/components/paginated-state";
 import { reasonLabel } from "@/components/moderation/labels";
 import { formatRelativeTime } from "@/lib/format";
 import { m } from "@/paraglide/messages.js";
@@ -12,87 +12,36 @@ import type { ModerationCase } from "@/lib/orpc";
 
 /**
  * The moderation queue — one row per open case, newest report first, with an
- * open-appeal badge and the same four-state skeleton as `PostFeed`. A row
- * opens the shared case dialog (identity atom in `atoms/moderation.ts`), which
- * this view mounts because the queue is its only reader.
+ * open-appeal badge and the same four-state skeleton as `PostFeed` (shared via
+ * `PaginatedState`). A row opens the shared case dialog (identity atom in
+ * `atoms/moderation.ts`), which this view mounts because the queue is its only
+ * reader — once, above the state branches, so an action that drains the queue
+ * while its case refetch lands never unmounts the dialog mid-flow (that is
+ * where the inverse — Restore — lives).
  */
 export function QueueView() {
   const queue = useAtomValue(moderationQueueAtom);
   const openCase = useAtomValue(caseDialogAtom);
   const setOpenCase = useSetAtom(caseDialogAtom);
-
-  if (queue.isPending) {
-    return (
-      <>
-        {/* Mounted above the state branches: an action (e.g. Remove post)
-            drains the queue while its case refetch lands, and the empty
-            state must not unmount the dialog mid-flow — that is where the
-            inverse (Restore) lives. */}
-        {openCase && <CaseDialog target={openCase} onClose={() => setOpenCase(null)} />}
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin motion-reduce:animate-none text-primary" />
-        </div>
-      </>
-    );
-  }
-
-  if (queue.isError) {
-    return (
-      <>
-        {openCase && <CaseDialog target={openCase} onClose={() => setOpenCase(null)} />}
-        <div
-          role="alert"
-          className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive"
-        >
-          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-          <div className="space-y-2">
-            <p>{queue.error.message || m.moderation_queue_error()}</p>
-            <Button variant="outline" size="sm" onClick={() => void queue.refetch()}>
-              {m.common_try_again()}
-            </Button>
-          </div>
-        </div>
-      </>
-    );
-  }
-
-  const cases = queue.data.pages.flatMap((page) => page.items);
-
-  if (cases.length === 0) {
-    return (
-      <>
-        {openCase && <CaseDialog target={openCase} onClose={() => setOpenCase(null)} />}
-        <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center">
-          <ShieldAlert className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
-          <p className="text-sm text-muted-foreground">{m.moderation_queue_empty()}</p>
-        </div>
-      </>
-    );
-  }
+  const cases = queue.data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
-    <div className="space-y-4">
-      {cases.map((item) => (
-        <QueueRow key={`${item.targetType}|${item.targetId}`} item={item} />
-      ))}
-
-      {queue.hasNextPage && (
-        <div className="flex justify-center pt-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void queue.fetchNextPage()}
-            disabled={queue.isFetchingNextPage}
-            className="gap-2 rounded-full"
-          >
-            {queue.isFetchingNextPage && <Loader2 className="h-4 w-4 animate-spin" />}
-            <span>{m.common_load_more()}</span>
-          </Button>
-        </div>
-      )}
-
+    <>
+      {/* Mounted once, above the state branches — see the component comment. */}
       {openCase && <CaseDialog target={openCase} onClose={() => setOpenCase(null)} />}
-    </div>
+      <PaginatedState
+        query={queue}
+        errorMessage={m.moderation_queue_error()}
+        emptyIcon={ShieldAlert}
+        emptyMessage={m.moderation_queue_empty()}
+        isEmpty={cases.length === 0}
+        listClassName="space-y-4"
+      >
+        {cases.map((item) => (
+          <QueueRow key={`${item.targetType}|${item.targetId}`} item={item} />
+        ))}
+      </PaginatedState>
+    </>
   );
 }
 

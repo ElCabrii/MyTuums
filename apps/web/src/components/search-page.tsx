@@ -1,8 +1,9 @@
+import type { ReactNode } from "react";
 import { getRouteApi } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { AlertCircle, Loader2, MessageSquare, Search, Users } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { MessageSquare, Search, Users } from "lucide-react";
 import { PostCard } from "@/components/post-card";
+import { PaginatedState, type PaginatedStateQuery } from "@/components/paginated-state";
 import { UserRow } from "@/components/user-list";
 import { searchPostsAtom, searchUsersAtom } from "@/atoms/search";
 import { m } from "@/paraglide/messages.js";
@@ -31,182 +32,70 @@ export function SearchPage() {
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-8">
       <h1 className="text-lg font-bold tracking-tight">{m.search_results_for({ query: q })}</h1>
 
-      <SearchUsersSection q={q} />
-      <SearchPostsSection q={q} />
+      <SearchResultsSection
+        feed={useAtomValue(searchUsersAtom(q))}
+        headingId="search-users-heading"
+        headingLabel={m.search_section_users()}
+        emptyIcon={Users}
+        emptyMessage={m.search_no_users({ query: q })}
+        listClassName="space-y-3"
+        renderItem={(user) => <UserRow key={user.id} user={user} />}
+      />
+      <SearchResultsSection
+        feed={useAtomValue(searchPostsAtom(q))}
+        headingId="search-posts-heading"
+        headingLabel={m.search_section_posts()}
+        emptyIcon={MessageSquare}
+        emptyMessage={m.search_no_posts({ query: q })}
+        listClassName="space-y-4"
+        renderItem={(post) => <PostCard key={post.id} post={post} />}
+      />
     </div>
   );
 }
 
 /**
- * The people half of the results page — the same four states PostFeed renders
- * (spinner, retryable error, dashed empty, "Load more" rows), fed by
- * `searchUsersAtom`. The heading is hoisted because it must stay mounted in
- * every state: the `aria-labelledby` pair gives the region its accessible
- * name, so a section that swapped its heading for a spinner would lose it.
+ * The data-shaped half of a results section — the same four states the shared
+ * `PaginatedState` renders (spinner, retryable error, dashed empty, "Load
+ * more" rows), fed by either the users or the posts atom. The heading is
+ * hoisted because it must stay mounted in every state: the `aria-labelledby`
+ * pair gives the region its accessible name, so a section that swapped its
+ * heading for a spinner would lose it.
  */
-function SearchUsersSection({ q }: { q: string }) {
-  const feed = useAtomValue(searchUsersAtom(q));
-
-  const heading = (
-    <h2 id="search-users-heading" className="text-sm font-bold text-foreground">
-      {m.search_section_users()}
-    </h2>
-  );
-
-  if (feed.isPending) {
-    return (
-      <section aria-labelledby="search-users-heading" className="space-y-3">
-        {heading}
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin motion-reduce:animate-none text-primary" />
-        </div>
-      </section>
-    );
-  }
-
-  if (feed.isError) {
-    return (
-      <section aria-labelledby="search-users-heading" className="space-y-3">
-        {heading}
-        <div
-          role="alert"
-          className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive"
-        >
-          <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
-          <div className="space-y-2">
-            <p>{feed.error.message || m.feed_load_error()}</p>
-            <Button variant="outline" size="sm" onClick={() => void feed.refetch()}>
-              {m.common_try_again()}
-            </Button>
-          </div>
-        </div>
-      </section>
-    );
-  }
-
-  const users = feed.data.pages.flatMap((page) => page.items);
-
-  if (users.length === 0) {
-    return (
-      <section aria-labelledby="search-users-heading" className="space-y-3">
-        {heading}
-        <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center">
-          <Users className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
-          <p className="text-sm text-muted-foreground">{m.search_no_users({ query: q })}</p>
-        </div>
-      </section>
-    );
-  }
+function SearchResultsSection<T>({
+  feed,
+  headingId,
+  headingLabel,
+  emptyIcon,
+  emptyMessage,
+  listClassName,
+  renderItem,
+}: {
+  feed: PaginatedStateQuery & { data?: { pages: Array<{ items: T[] }> } };
+  headingId: string;
+  headingLabel: string;
+  emptyIcon: typeof Users;
+  emptyMessage: string;
+  listClassName: string;
+  renderItem: (item: T) => ReactNode;
+}) {
+  const items = feed.data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
-    <section aria-labelledby="search-users-heading" className="space-y-3">
-      {heading}
-      <div className="space-y-3">
-        {users.map((user) => (
-          <UserRow key={user.id} user={user} />
-        ))}
-
-        {feed.hasNextPage && (
-          <div className="flex justify-center pt-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void feed.fetchNextPage()}
-              disabled={feed.isFetchingNextPage}
-              className="gap-2 rounded-full"
-            >
-              {feed.isFetchingNextPage && <Loader2 className="h-4 w-4 animate-spin" />}
-              <span>{m.common_load_more()}</span>
-            </Button>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-/**
- * The posts half of the results page — the same four states PostFeed renders,
- * fed by `searchPostsAtom`. Same hoisted-heading reasoning as
- * `SearchUsersSection`: the `aria-labelledby` pair must survive every state.
- */
-function SearchPostsSection({ q }: { q: string }) {
-  const feed = useAtomValue(searchPostsAtom(q));
-
-  const heading = (
-    <h2 id="search-posts-heading" className="text-sm font-bold text-foreground">
-      {m.search_section_posts()}
-    </h2>
-  );
-
-  if (feed.isPending) {
-    return (
-      <section aria-labelledby="search-posts-heading" className="space-y-4">
-        {heading}
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin motion-reduce:animate-none text-primary" />
-        </div>
-      </section>
-    );
-  }
-
-  if (feed.isError) {
-    return (
-      <section aria-labelledby="search-posts-heading" className="space-y-4">
-        {heading}
-        <div
-          role="alert"
-          className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive"
-        >
-          <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
-          <div className="space-y-2">
-            <p>{feed.error.message || m.feed_load_error()}</p>
-            <Button variant="outline" size="sm" onClick={() => void feed.refetch()}>
-              {m.common_try_again()}
-            </Button>
-          </div>
-        </div>
-      </section>
-    );
-  }
-
-  const posts = feed.data.pages.flatMap((page) => page.items);
-
-  if (posts.length === 0) {
-    return (
-      <section aria-labelledby="search-posts-heading" className="space-y-4">
-        {heading}
-        <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center">
-          <MessageSquare className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
-          <p className="text-sm text-muted-foreground">{m.search_no_posts({ query: q })}</p>
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section aria-labelledby="search-posts-heading" className="space-y-4">
-      {heading}
-      <div className="space-y-4">
-        {posts.map((post) => (
-          <PostCard key={post.id} post={post} />
-        ))}
-
-        {feed.hasNextPage && (
-          <div className="flex justify-center pt-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void feed.fetchNextPage()}
-              disabled={feed.isFetchingNextPage}
-              className="gap-2 rounded-full"
-            >
-              {feed.isFetchingNextPage && <Loader2 className="h-4 w-4 animate-spin" />}
-              <span>{m.common_load_more()}</span>
-            </Button>
-          </div>
-        )}
-      </div>
+    <section aria-labelledby={headingId} className={listClassName}>
+      <h2 id={headingId} className="text-sm font-bold text-foreground">
+        {headingLabel}
+      </h2>
+      <PaginatedState
+        query={feed}
+        errorMessage={m.feed_load_error()}
+        emptyIcon={emptyIcon}
+        emptyMessage={emptyMessage}
+        isEmpty={items.length === 0}
+        listClassName={listClassName}
+      >
+        {items.map(renderItem)}
+      </PaginatedState>
     </section>
   );
 }

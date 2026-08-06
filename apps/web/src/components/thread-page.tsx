@@ -8,7 +8,6 @@ import { PostCard } from "@/components/post-card";
 import { PostFeed } from "@/components/post-feed";
 import { ProfileMessage } from "@/components/profile-message";
 import { ReplyComposer } from "@/components/reply-composer";
-import { isSignedInAtom } from "@/atoms/session";
 import { postFeedAtom } from "@/atoms/post-feed";
 import { threadAtomFamily } from "@/atoms/thread";
 import { handleOf } from "@/lib/user";
@@ -18,11 +17,12 @@ const routeApi = getRouteApi("/post/$postId");
 
 /**
  * The `/post/$postId` page: the ancestor chain above the focused post, the
- * post itself, the reply composer, and the reply feed.
+ * post itself, the reply composer, and the reply feed. Signed-out visitors
+ * never get here — the route is gated — so the composer renders for everyone
+ * who can see the page.
  */
 export function ThreadPage() {
   const { postId } = routeApi.useParams();
-  const signedIn = useAtomValue(isSignedInAtom);
   const threadQuery = useAtomValue(threadAtomFamily(postId));
 
   if (threadQuery.isPending) {
@@ -114,16 +114,7 @@ export function ThreadPage() {
           </h2>
         </div>
 
-        {signedIn ? (
-          <ReplyComposer parentId={post.id} replyingTo={authorHandle} />
-        ) : (
-          <div className="rounded-xl border border-border bg-card p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-muted-foreground">{m.reply_signed_out()}.</p>
-            <Button size="sm" nativeButton={false} render={<Link to="/login" />}>
-              {m.auth_log_in()}
-            </Button>
-          </div>
-        )}
+        <ReplyComposer parentId={post.id} replyingTo={authorHandle} />
 
         {/* Reply feed container */}
         <div className="pt-2 divide-y divide-border/50">

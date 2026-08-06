@@ -191,7 +191,7 @@ export function SearchBox() {
         {inputValue !== "" && (
           <button
             type="button"
-            aria-label={m.common_close()}
+            aria-label={m.search_clear()}
             onClick={() => {
               handleChange("");
               inputRef.current?.focus();
