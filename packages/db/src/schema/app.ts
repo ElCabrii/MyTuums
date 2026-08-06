@@ -249,6 +249,10 @@ export const report = pgTable(
     index("report_open_idx")
       .on(t.createdAt.desc(), t.targetType, t.targetId)
       .where(sql`${t.resolvedAt} is null`),
+    // "Everything reported against X" — the case view's full report history
+    // (resolved rows included) and the queue's GROUP BY both lead with the
+    // target key. Non-partial on purpose: the case view reads all history.
+    index("report_target_idx").on(t.targetType, t.targetId, t.createdAt.desc()),
   ],
 );
 
@@ -304,6 +308,14 @@ export const userBlock = pgTable(
  * the action stays in the audit trail, the link just breaks. `reason` is
  * the moderator's stated reason — what the emails quote; `note` is an
  * optional internal note for the next moderator.
+ *
+ * The two target columns deliberately have NO foreign keys, the same
+ * evidence-retention reasoning as `report.targetId` above: an audit row
+ * must survive its target's deletion. A FK with `ON DELETE SET NULL` would
+ * also contradict the `one_target`/`target_match` checks below — setting
+ * one target column null while the other is already null violates them, so
+ * the DELETE would abort wholesale. Whether the target exists is enforced
+ * by the procedures, which resolve the id before acting.
  */
 export const moderationAction = pgTable(
   "moderation_action",
@@ -315,8 +327,8 @@ export const moderationAction = pgTable(
     // `'post'` or `'user'` — decides which target column below is set
     // (checked below).
     targetType: text("target_type").notNull(),
-    targetPostId: uuid("target_post_id").references(() => post.id, { onDelete: "set null" }),
-    targetUserId: text("target_user_id").references(() => user.id, { onDelete: "set null" }),
+    targetPostId: uuid("target_post_id"),
+    targetUserId: text("target_user_id"),
     reason: text("reason"),
     note: text("note"),
     // Action-specific extras: `{oldRole, newRole}` for role_changed,
@@ -406,8 +418,9 @@ export const appeal = pgTable(
   },
   (t) => [
     check("appeal_status", sql`${t.status} in ('open', 'upheld', 'overturned')`),
-    // The queue scans open appeals only.
-    index("appeal_open_idx").on(t.status).where(sql`${t.status} = 'open'`),
+    // The queue scans open appeals, newest first — the sort column is in
+    // the index so the partial scan never needs a heap sort.
+    index("appeal_open_idx").on(t.status, t.createdAt.desc()).where(sql`${t.status} = 'open'`),
     // The "one open appeal per action" rule, as a partial unique index —
     // resolved appeals are history and may accumulate.
     uniqueIndex("appeal_open_action_idx")
