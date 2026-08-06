@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, isNull, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, like, not, or, sql } from "drizzle-orm";
 import { post, user } from "@my-tuums/db/schema";
 import { z } from "zod";
 import {
@@ -11,6 +11,7 @@ import { postSelection } from "./posts.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { publicUserColumns, viewerIsFollowing } from "./users.js";
+import { invisibleAuthor, visibleUser } from "./visibility.js";
 
 /**
  * Search over users and posts.
@@ -103,10 +104,15 @@ export const searchRouter = {
         .select(searchUserSelection(viewerId))
         .from(user)
         .where(
-          or(
-            like(user.username, prefix),
-            ilike(user.name, contains),
-            ilike(user.displayUsername, contains),
+          // Same visibility filter as the full results page: a banned or
+          // blocked account never suggests itself in the dropdown.
+          and(
+            visibleUser(viewerId),
+            or(
+              like(user.username, prefix),
+              ilike(user.name, contains),
+              ilike(user.displayUsername, contains),
+            ),
           ),
         )
         .orderBy(
@@ -124,7 +130,13 @@ export const searchRouter = {
         .select(postSelection(viewerId))
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(ilike(post.content, contains), isNull(post.parentId)))
+        .where(
+          and(
+            ilike(post.content, contains),
+            isNull(post.parentId),
+            not(invisibleAuthor(viewerId)),
+          ),
+        )
         .orderBy(desc(post.createdAt), desc(post.id))
         .limit(5);
 
@@ -159,6 +171,9 @@ export const searchRouter = {
           ilike(user.name, containsPattern(input.q)),
           ilike(user.displayUsername, containsPattern(input.q)),
         ),
+        // The visibility filter (issue #38): banned and blocked accounts are
+        // not search results, same as the typeahead above.
+        visibleUser(viewerId),
         // Row-value comparison: strictly "older than the cursor" under the
         // same (created_at DESC, id DESC) ordering, so Postgres can seek
         // straight to the cursor position. The bound values must go through
@@ -209,6 +224,10 @@ export const searchRouter = {
       const filters = [
         ilike(post.content, containsPattern(input.q)),
         isNull(post.parentId),
+        // The visibility filter (issue #38), same as `post.list`: a banned or
+        // blocked author's posts are not search results. (A removed post's
+        // content is null, so it already cannot match a content query.)
+        not(invisibleAuthor(viewerId)),
         // Row-value comparison against the same (created_at DESC, id DESC)
         // ordering — see the identical comment in the `users` procedure above.
         cursor

@@ -124,7 +124,9 @@ export function PostCard({
               isFocused ? "text-base" : "text-sm"
             }`}
           >
-            {post.content}
+            {/* Null only for removed posts — the P5 stub branch owns that
+                rendering; until removals exist this is never null at runtime. */}
+            {post.content ?? ""}
           </p>
 
           <div className="flex items-center gap-6 max-w-md text-xs text-muted-foreground">

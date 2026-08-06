@@ -452,6 +452,10 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     likeCount: 0,
     replyCount: 0,
     viewerHasLiked: false,
+    // The tombstone fields (issue #38): never removed by default — the stub
+    // branch in post-card owns the removed fixtures.
+    removed: false,
+    removedReason: null,
     ...overrides,
   };
 }
