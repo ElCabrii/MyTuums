@@ -1,4 +1,3 @@
-import { sql } from "drizzle-orm";
 import { assertTestDatabase, resolveTestDatabaseUrl } from "@my-tuums/db/testing";
 
 /**
@@ -21,6 +20,20 @@ import { assertTestDatabase, resolveTestDatabaseUrl } from "@my-tuums/db/testing
  * and a static top-of-file `import` is hoisted above every other statement
  * in this module, so it would run — and throw against the wrong database —
  * before a plain assignment ever got a chance to.
+ *
+ * The cleanup itself is delegated to `truncateAll` in `./support/db`, which
+ * is also the per-spec cleanup helper specs call for a guaranteed-clean
+ * slate. Delegating keeps one truncate statement instead of two that could
+ * drift apart, and it is what makes the bucket purge run: `truncateAll`
+ * truncates every table — the `twoFactor` and `passkey` tables included,
+ * which a hand-maintained list would have to remember to keep adding — and
+ * then deletes every object the suite's earlier runs uploaded to the dev/ci
+ * bucket, so avatars and banners do not accumulate between runs (that purge
+ * used to be dead code: nothing called `truncateAll`, and the inline
+ * truncate here never touched the bucket). The purge is best-effort by
+ * design: an unreachable bucket, or a run with no `S3_*` group at all, must
+ * not fail a suite whose subject is the database (the upload specs are
+ * skipped in that configuration anyway).
  */
 export default async function globalSetup(): Promise<void> {
   process.env.DATABASE_URL = resolveTestDatabaseUrl();
@@ -29,24 +42,18 @@ export default async function globalSetup(): Promise<void> {
   // proceed unless the database name it just computed ends in `_test`.
   assertTestDatabase();
 
-  const [{ db, closeDb }, schema] = await Promise.all([
+  // Both dynamic, and both after the assignment above: `./support/db`
+  // re-derives its own URL guardedly at module scope, and `@my-tuums/db`
+  // reads `DATABASE_URL` at module scope — either one evaluated earlier
+  // would hit the dev database. `closeDb` drains the pool `truncateAll`
+  // opened, the same drain the inline truncate used to do here.
+  const [{ truncateAll }, { closeDb }] = await Promise.all([
+    import("./support/db"),
     import("@my-tuums/db"),
-    import("@my-tuums/db/schema"),
   ]);
 
   try {
-    // A single TRUNCATE ... CASCADE rather than per-table deletes in
-    // dependency order: cheaper, atomic, and it can't drift out of sync with
-    // the schema's FK graph the way a hand-maintained delete order can. CASCADE
-    // is a formality here (every FK in the schema is already ON DELETE
-    // CASCADE) but makes the statement correct even if that ever changes.
-    await db.execute(sql`
-      truncate table
-        ${schema.postLike}, ${schema.follow}, ${schema.post},
-        ${schema.session}, ${schema.account}, ${schema.verification},
-        ${schema.rateLimit}, ${schema.user}
-      cascade
-    `);
+    await truncateAll();
   } finally {
     await closeDb();
   }

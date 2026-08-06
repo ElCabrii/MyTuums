@@ -13,7 +13,7 @@ The config defines three projects over `testDir: ./tests`:
 ## Key files
 
 - `playwright.config.ts` — the projects, both `webServer` entries with `stackEnv` (test DB, `BETTER_AUTH_URL`, blanked `RESEND_API_KEY`, `AUTH_RATE_LIMIT=false`, all-or-nothing `S3_*`), and the `E2E` constants (ports 3101/5273, storage-state paths) every other module imports.
-- `global-setup.ts` — truncates every table once per run, and is the canonical example of the `DATABASE_URL` fix-up (see below).
+- `global-setup.ts` — truncates every table and purges the suite's uploaded bucket objects once per run (delegating to `truncateAll` in `support/db.ts`), and is the canonical example of the `DATABASE_URL` fix-up (see below).
 - `support/users.ts` — `ALICE`/`BOB` fixture accounts, `uniqueUser()` for throwaway accounts, `dateOfBirthUnder15()`.
 - `support/db.ts` — seeding helpers (`createUser`, `seedPosts`, `seedReply`, `seedFollow`, `seedLike`, `getUserId`, `passwordResetTokenFor`) plus `setUserRole` (direct row update — the admin plugin's endpoints are 404'd, so this is the only way a spec gets a moderator fixture), `truncateAll()` and the bucket purge.
 - `support/fixtures.ts` — the extended `test` handle: `bobPage`, `signedOutPage`, and `db`.
@@ -26,7 +26,7 @@ The config defines three projects over `testDir: ./tests`:
 - **`workers: 1`.** Every spec shares one Postgres and one in-process server rate limiter; parallel workers would 429 one another and fight over fixtures. Consequence: the database is truncated exactly once (in `global-setup.ts`), so specs must seed unique content and never assume a clean database.
 - **Storage state is cookies only.** `auth.setup.ts` captures it via an `APIRequestContext`, which has no page and therefore no localStorage. Any spec asserting "nothing stored" must use a fresh `browser.newContext` explicitly.
 - **The `DATABASE_URL` fix-up.** `@my-tuums/db` reads `DATABASE_URL` at module scope, and the `e2e` script loads `../.env` (the dev database) into `process.env`. `global-setup.ts` and `support/db.ts` therefore re-derive the `_test` URL *before* a dynamic `import("@my-tuums/db")` — a static import would hoist above the fix-up and hit the dev database. `assertTestDatabase()` guards every destructive helper: the target database name must end in `_test`.
-- **The `S3_*` group is all-or-nothing**, forwarded from the ambient env; upload specs skip themselves when it is absent. `truncateAll()` deletes uploaded objects by prefix — never point the suite at the production bucket (see `.env.example`).
+- **The `S3_*` group is all-or-nothing**, forwarded from the ambient env; upload specs skip themselves when it is absent. `global-setup.ts` calls `truncateAll()`, which purges uploaded objects by prefix at the start of every run — never point the suite at the production bucket (see `.env.example`).
 - **`RESEND_API_KEY` is blanked** in `stackEnv`: fixture sign-ups must never fire live Resend calls (it once exhausted a real quota and raced the /welcome session wait). Reset/verification tokens are read from the DB instead (`passwordResetTokenFor`).
 - **Locators are structural or accessibility-based** (`getByRole`, `getByLabel`, `getByTitle`) — `data-testid` is banned across the app.
 - **The `setup` project's file must live under `tests/`**: `testMatch` only filters files the `testDir` scan already found.

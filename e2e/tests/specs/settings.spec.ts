@@ -13,6 +13,20 @@ import { uniqueUser } from "../../support/users";
  */
 test.use({ storageState: { cookies: [], origins: [] } });
 
+/**
+ * The same all-or-nothing check the stack applies when forwarding `S3_*` to
+ * the server (s3Env() in playwright.config.ts): the server refuses to boot on
+ * a *partial* group, so with three of four variables set it runs WITHOUT
+ * object storage and these upload specs would fail against NOT_IMPLEMENTED.
+ * The spec must skip whenever the full group isn't present, not just when
+ * the bucket name is.
+ */
+function storageBucketConfigured(): boolean {
+  return ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"].every(
+    (key) => Boolean(process.env[key]),
+  );
+}
+
 /** Signs up a fresh account through the UI and lands on its profile. */
 async function signUpFresh(
   page: import("@playwright/test").Page,
@@ -141,12 +155,13 @@ function solidPng(width: number, height: number): Buffer {
 
 /**
  * These hit the real Storage Bucket — there is no fake in the browser path.
- * `truncateAll()` deletes the objects by prefix after the run (support/db.ts),
- * and the whole suite is skipped gracefully on a machine with no `S3_*` group
- * because the procedure reports NOT_IMPLEMENTED rather than crashing.
+ * `global-setup.ts` purges the suite's uploaded objects by prefix at the
+ * start of every run (via `truncateAll` in support/db.ts), and the whole
+ * suite is skipped gracefully on a machine with no `S3_*` group because the
+ * procedure reports NOT_IMPLEMENTED rather than crashing.
  */
 test.describe("images", () => {
-  test.skip(!process.env.S3_BUCKET, "no Storage Bucket configured (S3_* unset)");
+  test.skip(!storageBucketConfigured(), "no Storage Bucket configured (S3_* unset)");
 
   test("uploads an avatar, and it renders on the profile from /media", async ({ page }) => {
     const account = await signUpFresh(page, "avatar");
