@@ -273,3 +273,26 @@ export const auth = betterAuth({
     },
   },
 });
+
+// Re-exported for packages/api — the one external consumer. The moderation
+// router (packages/api/src/moderation-actions.ts) builds its email copy here
+// and sends through the same `sendEmail` pipe as the auth flows, reads the
+// locale the same way, and points appeal links at `webOrigin`. The package's
+// exports map exposes only `.`, `./testing` and `./profile`, so the public
+// surface is whatever this file names.
+export {
+  localeFromRequest,
+  moderationBanEmail,
+  moderationCaseResolutionEmail,
+  moderationRemovalEmail,
+  moderationResolutionEmail,
+  moderationRestoreEmail,
+  moderationRoleEmail,
+  moderationSuspensionEmail,
+  moderationUnbanEmail,
+  moderationUnsuspensionEmail,
+  sendEmail,
+  type EmailLocale,
+  type OutgoingEmail,
+} from "./email.js";
+export { webOrigin } from "./env.js";

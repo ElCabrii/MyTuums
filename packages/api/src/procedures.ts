@@ -5,6 +5,18 @@ import { roleAtLeast, type UserRole } from "./roles.js";
 
 const base = os.$context<Context>();
 
+/**
+ * The session-less base procedure — the app's one public surface.
+ *
+ * Every procedure in this app is built from `protectedProcedure` (issue #36);
+ * this export is the single exception, used by exactly one procedure
+ * (`moderation.appealOpen`), which is capability-gated by an HMAC token
+ * rather than by a session — a suspended or banned user cannot sign in, so
+ * the appeal link in their email must work signed-out. The hole exists so a
+ * banned account can be heard, not as a door: nothing else may build from it.
+ */
+export const baseProcedure = base;
+
 /** The session user, once a session is guaranteed to exist — what `protectedProcedure` adds to `context.user`. */
 type SessionUser = NonNullable<Context["session"]>["user"];
 
