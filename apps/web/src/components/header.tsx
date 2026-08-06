@@ -1,7 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { MessageSquare, Bell, Compass, Home, Settings, LogOut, Loader2, User } from "lucide-react";
+import { MessageSquare, Bell, Compass, Home, Settings, LogOut, Loader2, User, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SearchBox } from "@/components/search-box";
-import { viewerAtom, viewerHandleAtom } from "@/atoms/session";
+import { isModeratorAtom, viewerAtom, viewerHandleAtom } from "@/atoms/session";
 import { authPendingAtom, signOutAtom } from "@/atoms/auth";
 import { UserAvatar } from "@/components/user-avatar";
 import { VersionTag } from "@/components/version-tag";
@@ -44,6 +44,7 @@ export function Header() {
   const user = useAtomValue(viewerAtom);
   const handle = useAtomValue(viewerHandleAtom);
   const isSigningOut = useAtomValue(authPendingAtom);
+  const isModerator = useAtomValue(isModeratorAtom);
   const signOut = useSetAtom(signOutAtom);
 
   if (!user) return null;
@@ -102,6 +103,12 @@ export function Header() {
               <Compass className="h-4 w-4" />
               <span>{m.nav_discover()}</span>
             </Button>
+            {isModerator && (
+              <Button variant="ghost" nativeButton={false} render={<Link to="/moderation" className="flex items-center gap-2" />}>
+                <Shield className="h-4 w-4" />
+                <span>{m.moderation_nav()}</span>
+              </Button>
+            )}
           </nav>
         </div>
 

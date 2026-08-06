@@ -1,0 +1,338 @@
+import { atom } from "jotai";
+import { atomFamily } from "jotai-family";
+import { atomEffect } from "jotai-effect";
+import { atomWithInfiniteQuery, atomWithMutation, atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
+import type { QueryClient } from "@tanstack/react-query";
+import { MODERATION_PAGE_SIZE } from "@my-tuums/api/constants";
+import { store } from "@/lib/store";
+import { orpc } from "@/lib/orpc";
+
+/**
+ * A reference to a moderation case target — what the queue rows hold, what the
+ * dialogs carry, and the payload of `moderation.case`.
+ */
+export type CaseRef = { targetType: "post" | "user"; targetId: string };
+
+/** Encodes a case ref into a family key — the id LAST, so it may contain the delimiter (same layout as `encode` in `atoms/post-feed.ts`). */
+export const encodeCaseKey = (ref: CaseRef): string => `${ref.targetType}|${ref.targetId}`;
+
+/** Decodes a case family key back into a ref — the inverse of {@link encodeCaseKey}. */
+export const decodeCaseKey = (key: string): CaseRef => {
+  const [targetType = "post", ...rest] = key.split("|");
+  return { targetType: targetType as CaseRef["targetType"], targetId: rest.join("|") };
+};
+
+/**
+ * One infinite-query atom per queue scope, shared by every component that
+ * reads that scope — the same structural-dedup reasoning as `postFeedFamily`
+ * in `atoms/post-feed.ts`. There is exactly one queue today, so the key is
+ * always `""`; the family exists so the sign-out sweep and a future filter
+ * (post vs user cases) do not require a migration.
+ */
+const queueFamily = atomFamily(() =>
+  atomWithInfiniteQuery(() =>
+    orpc.moderation.queue.infiniteOptions({
+      input: (cursor: string | undefined) => ({
+        limit: MODERATION_PAGE_SIZE,
+        // Conditional for the same reason as every cursor spread in this
+        // codebase: oRPC embeds the whole input object in the query key, so
+        // an unconditional `cursor: undefined` would fork the cache entry.
+        ...(cursor ? { cursor } : {}),
+      }),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+  ),
+);
+
+/** The infinite-query atom for the moderation queue — components read this, not the family. */
+export const moderationQueueAtom = queueFamily("");
+
+/**
+ * One infinite-query atom per audit-log scope — same reasoning as
+ * `queueFamily`; the key is always `""` today.
+ */
+const auditLogFamily = atomFamily(() =>
+  atomWithInfiniteQuery(() =>
+    orpc.moderation.auditLog.infiniteOptions({
+      input: (cursor: string | undefined) => ({
+        limit: MODERATION_PAGE_SIZE,
+        ...(cursor ? { cursor } : {}),
+      }),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+  ),
+);
+
+/** The infinite-query atom for the audit log — components read this, not the family. */
+export const auditLogAtom = auditLogFamily("");
+
+/**
+ * One query atom per case. Keyed on the case ref (encoded) so the queue rows
+ * that open the case dialog and the dialog's own refetch share a single
+ * observer — an action invalidating `moderation.case` refreshes exactly the
+ * open case.
+ */
+const caseFamily = atomFamily((key: string) =>
+  atomWithQuery(() => {
+    const ref = decodeCaseKey(key);
+    // Narrow the decoded ref back onto one of the schema's discriminated
+    // variants — a bare `targetType: "post" | "user"` is assignable to
+    // neither branch, so the literal is resolved here, at the only site that
+    // knows the key was built by `encodeCaseKey`.
+    const input: { targetType: "post"; targetId: string } | { targetType: "user"; targetId: string } =
+      ref.targetType === "post"
+        ? { targetType: "post", targetId: ref.targetId }
+        : { targetType: "user", targetId: ref.targetId };
+    return orpc.moderation.case.queryOptions({ input });
+  }),
+);
+
+/** The query atom for one moderation case — components read this, not the family. */
+export const caseAtom = (ref: CaseRef) => caseFamily(encodeCaseKey(ref));
+
+/** The moderation team roster, for the staff-only Team tab. */
+export const teamAtom = atomWithQuery(() => orpc.moderation.team.queryOptions());
+
+/**
+ * Which moderation case dialog is open, app-wide — at most one. Same
+ * identity-holding reasoning as `followListDialogAtom` in `atoms/user-list.ts`:
+ * the queue view renders the dialog conditionally off this value, so there is
+ * no per-instance boolean to reconcile.
+ */
+export const caseDialogAtom = atom<CaseRef | null>(null);
+
+/** Which report dialog is open: the target being reported, or null. */
+export const reportDialogAtom = atom<CaseRef | null>(null);
+
+/** Which block-confirm dialog is open: the user to block, or null. */
+export const blockDialogAtom = atom<{ userId: string; handle: string } | null>(null);
+
+/** Which set-role dialog is open: the team member whose role is changing, or null. */
+export const setRoleDialogAtom = atom<{ userId: string; handle: string } | null>(null);
+
+/** The suspension length the case dialog offers first: 24 hours. */
+export const DEFAULT_SUSPENSION_SECONDS = 24 * 60 * 60;
+
+/** The selected report reason in the report dialog — reset whenever it opens. */
+export const reportReasonAtom = atom("");
+
+/** The reason attached to a post removal, shown to the author in the stub. */
+export const caseRemoveReasonAtom = atom("");
+
+/** The moderator's optional note on a dismissal. */
+export const caseDismissNoteAtom = atom("");
+
+/** The reason attached to a suspension, shown to the user in their email. */
+export const caseSuspendReasonAtom = atom("");
+
+/** The suspension length in seconds, one of the preset durations. */
+export const caseSuspendDurationAtom = atom(DEFAULT_SUSPENSION_SECONDS);
+
+/** The reason attached to a ban, shown to the user in their email. */
+export const caseBanReasonAtom = atom("");
+
+/** The moderator's optional note on an appeal review. */
+export const caseReviewNoteAtom = atom("");
+
+/** The role picked in the set-role dialog — "" until one is chosen. */
+export const roleSelectAtom = atom("");
+
+/** The appeal page's draft text — reset on successful submission. */
+export const appealReasonAtom = atom("");
+
+/**
+ * Resets the case-dialog form fields whenever the open case changes. The
+ * dialog is conditionally mounted per case (see `caseDialogAtom`), so this
+ * runs once per open — the same mount-time-effect pattern as the reactions
+ * mounted with `useAtomValue` elsewhere.
+ */
+export const resetCaseFormEffect = atomEffect((get, set) => {
+  get(caseDialogAtom);
+  set(caseRemoveReasonAtom, "");
+  set(caseDismissNoteAtom, "");
+  set(caseSuspendReasonAtom, "");
+  set(caseSuspendDurationAtom, DEFAULT_SUSPENSION_SECONDS);
+  set(caseBanReasonAtom, "");
+  set(caseReviewNoteAtom, "");
+});
+
+/** Resets the report dialog's reason when a new target is picked. */
+export const resetReportFormEffect = atomEffect((get, set) => {
+  get(reportDialogAtom);
+  set(reportReasonAtom, "");
+});
+
+/** Resets the set-role dialog's pick when a new member is chosen. */
+export const resetRoleFormEffect = atomEffect((get, set) => {
+  get(setRoleDialogAtom);
+  set(roleSelectAtom, "");
+});
+
+/**
+ * Refetches every moderation query the queue and case views read — every
+ * action either changes the queue or the open case, and the prefix keys cover
+ * the family entries.
+ */
+function invalidateModerationQueries(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: orpc.moderation.queue.key() });
+  void queryClient.invalidateQueries({ queryKey: orpc.moderation.case.key() });
+}
+
+/** Reports a post or user for one of the stable reason codes (issue #38). */
+export const reportAtom = atomWithMutation(() => orpc.moderation.report.mutationOptions());
+
+/** Blocks a user: their posts leave the viewer's feeds and both follows are severed. */
+export const blockAtom = atomWithMutation((get) => {
+  const queryClient = get(queryClientAtom);
+  return orpc.moderation.block.mutationOptions({
+    onSuccess: () => {
+      // Blocking rewrites what every viewer-scoped cache should show — the
+      // target vanishes from feeds, threads, search and the typeahead, and
+      // the severed follow changes both follow lists — so sweep the shared
+      // prefixes rather than patch each entry.
+      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.search.users.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.user.followers.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.user.following.key() });
+    },
+  });
+});
+
+/** Unblocks a user — the mirror of {@link blockAtom}, same cache sweep. */
+export const unblockAtom = atomWithMutation((get) => {
+  const queryClient = get(queryClientAtom);
+  return orpc.moderation.unblock.mutationOptions({
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.search.users.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.user.followers.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.user.following.key() });
+    },
+  });
+});
+
+/** Removes a post and stamps its open reports `actioned`. */
+export const removePostAtom = atomWithMutation((get) => {
+  const queryClient = get(queryClientAtom);
+  return orpc.moderation.removePost.mutationOptions({
+    onSuccess: () => {
+      // The tombstone rewrites the post for every viewer (content nulls, the
+      // stub appears), so every cached copy — feeds, threads, search, the
+      // typeahead — must refetch.
+      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
+      invalidateModerationQueries(queryClient);
+    },
+  });
+});
+
+/** Restores a removed post — the removal's own inverse, and the appeal-overturn path. */
+export const restorePostAtom = atomWithMutation((get) => {
+  const queryClient = get(queryClientAtom);
+  return orpc.moderation.restorePost.mutationOptions({
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
+      invalidateModerationQueries(queryClient);
+    },
+  });
+});
+
+/** Resolves a case without acting on the target: stamps reports, emails reporters. */
+export const resolveAtom = atomWithMutation((get) => {
+  const queryClient = get(queryClientAtom);
+  return orpc.moderation.resolve.mutationOptions({
+    onSuccess: () => invalidateModerationQueries(queryClient),
+  });
+});
+
+/** Suspends a user for a set duration, ending their sessions. */
+export const suspendUserAtom = atomWithMutation((get) => {
+  const queryClient = get(queryClientAtom);
+  return orpc.moderation.suspendUser.mutationOptions({
+    onSuccess: () => invalidateModerationQueries(queryClient),
+  });
+});
+
+/** Bans a user indefinitely (staff). */
+export const banUserAtom = atomWithMutation((get) => {
+  const queryClient = get(queryClientAtom);
+  return orpc.moderation.banUser.mutationOptions({
+    onSuccess: () => invalidateModerationQueries(queryClient),
+  });
+});
+
+/** Lifts a suspension or ban (staff). */
+export const unbanUserAtom = atomWithMutation((get) => {
+  const queryClient = get(queryClientAtom);
+  return orpc.moderation.unbanUser.mutationOptions({
+    onSuccess: () => invalidateModerationQueries(queryClient),
+  });
+});
+
+/** Changes a team member's role (rank-checked by the server). */
+export const setRoleAtom = atomWithMutation((get) => {
+  const queryClient = get(queryClientAtom);
+  return orpc.moderation.setRole.mutationOptions({
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: orpc.moderation.team.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.moderation.auditLog.key() });
+    },
+  });
+});
+
+/**
+ * Opens an appeal — the app's one public surface, via capability token or a
+ * signed-in removed post's stub.
+ */
+export const appealOpenAtom = atomWithMutation((get) => {
+  const queryClient = get(queryClientAtom);
+  return orpc.moderation.appealOpen.mutationOptions({
+    onSuccess: () => {
+      // Same pattern as `createPostAtom` (atoms/composer.ts): the draft reset
+      // goes through the module-scope store, which `onSuccess` can reach, so
+      // the next appeal starts blank.
+      store.set(appealReasonAtom, "");
+      // The queue merges open appeals, so a successful submission must refetch
+      // it (a no-op for a signed-out submitter with nothing mounted).
+      void queryClient.invalidateQueries({ queryKey: orpc.moderation.queue.key() });
+    },
+  });
+});
+
+/** Reviews an appeal: upholds the action or overturns it, each with its own inverse + email. */
+export const appealReviewAtom = atomWithMutation((get) => {
+  const queryClient = get(queryClientAtom);
+  return orpc.moderation.appealReview.mutationOptions({
+    onSuccess: () => {
+      // An overturn restores the target, so the same sweep as the inverses
+      // themselves — content may have come back or a suspension lifted.
+      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
+      invalidateModerationQueries(queryClient);
+    },
+  });
+});
+
+/**
+ * Removes every entry the moderation families have created — the sign-out
+ * sweep (see `atoms/sign-out-sweep.ts`), run while nothing is mounted against
+ * them.
+ */
+export function clearModerationFamilies(): void {
+  for (const key of [...queueFamily.getParams()]) queueFamily.remove(key);
+  for (const key of [...auditLogFamily.getParams()]) auditLogFamily.remove(key);
+  for (const key of [...caseFamily.getParams()]) caseFamily.remove(key);
+}

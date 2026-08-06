@@ -1,9 +1,17 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Heart, MessageCircle } from "lucide-react";
+import { Heart, MessageCircle, MoreHorizontal } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { toggleLikeAtomFamily } from "@/atoms/like";
-import { isSignedInAtom } from "@/atoms/session";
+import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
+import { isSignedInAtom, viewerAtom } from "@/atoms/session";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { formatRelativeTime } from "@/lib/format";
 import { type Post } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
@@ -39,9 +47,13 @@ export function PostCard({
 }) {
   const navigate = useNavigate();
   const isSignedIn = useAtomValue(isSignedInAtom);
+  const viewer = useAtomValue(viewerAtom);
   const toggleLike = useSetAtom(toggleLikeAtomFamily(post.id));
+  const setReportDialog = useSetAtom(reportDialogAtom);
+  const setBlockDialog = useSetAtom(blockDialogAtom);
   const authorHandle = handleOf(post.author);
   const authorName = post.author.name || authorHandle || m.user_unknown();
+  const isOwnPost = viewer?.id === post.author.id;
   const isFocused = variant === "focused";
 
   const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -117,18 +129,76 @@ export function PostCard({
               <span className="font-bold text-sm text-foreground truncate">{authorName}</span>
             )}
             <span className="text-xs text-muted-foreground">• {timestamp}</span>
+
+            {/* Report / Block live in the shared dialogs mounted at the root
+                (identity atoms — see `atoms/moderation.ts`), so this menu only
+                has to set the target. Hidden on the viewer's own posts, and
+                shown even on removed ones: reporting the *author* of a removed
+                post is still a valid action. */}
+            {isSignedIn && !isOwnPost && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  aria-label={m.moderation_kebab()}
+                  title={m.moderation_kebab()}
+                  className="ml-auto flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-44">
+                  <DropdownMenuItem className="cursor-pointer" onClick={() => setReportDialog({ targetType: "post", targetId: post.id })}>
+                    {m.moderation_kebab_report_post()}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="cursor-pointer" onClick={() => setReportDialog({ targetType: "user", targetId: post.author.id })}>
+                    {m.moderation_kebab_report_author()}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="cursor-pointer"
+                    variant="destructive"
+                    onClick={() => setBlockDialog({ userId: post.author.id, handle: authorHandle ?? m.user_unknown() })}
+                  >
+                    {m.moderation_kebab_block()}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
 
-          <p
-            className={`text-foreground/90 whitespace-pre-line mb-3 leading-relaxed break-words ${
-              isFocused ? "text-base" : "text-sm"
-            }`}
-          >
-            {/* Null only for removed posts — the P5 stub branch owns that
-                rendering; until removals exist this is never null at runtime. */}
-            {post.content ?? ""}
-          </p>
+          {post.removed ? (
+            /* The stub. `removedReason` is author-only (the server nulls it
+                for everyone else), so its presence is also what gates the
+                appeal link — only the author can appeal from here. */
+            <div className="mb-3 space-y-1.5 rounded-lg border border-border/60 bg-muted/30 p-3">
+              <p className="text-sm text-muted-foreground">{m.moderation_post_removed_stub()}</p>
+              {post.removedReason && (
+                <p className="text-sm text-foreground/80">
+                  {m.moderation_post_removed_reason({ reason: post.removedReason })}
+                </p>
+              )}
+              {post.removedReason && (
+                <Link
+                  to="/appeal"
+                  search={{ postId: post.id }}
+                  className="inline-block text-xs text-primary hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {m.moderation_post_removed_appeal()}
+                </Link>
+              )}
+            </div>
+          ) : (
+            <p
+              className={`text-foreground/90 whitespace-pre-line mb-3 leading-relaxed break-words ${
+                isFocused ? "text-base" : "text-sm"
+              }`}
+            >
+              {/* Null only for removed posts, which the stub branch above
+                  owns; here the server guarantees content. */}
+              {post.content ?? ""}
+            </p>
+          )}
 
+          {!post.removed && (
           <div className="flex items-center gap-6 max-w-md text-xs text-muted-foreground">
             {/* Replying is a navigation, not a mutation — the composer lives
                 on the thread page — so this is a link for everyone, signed in
@@ -204,6 +274,7 @@ export function PostCard({
               </Link>
             )}
           </div>
+          )}
         </div>
       </div>
     </div>

@@ -4,6 +4,14 @@ import { ORPCError } from "@orpc/client";
 import { authPendingAtom, signOutAtom } from "@/atoms/auth";
 import { viewerAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
+import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { formatJoinDate } from "@/lib/format";
 import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
@@ -11,7 +19,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
-import { UserX, Mail, Calendar, LogOut, Loader2, AlertCircle, Settings } from "lucide-react";
+import { UserX, Mail, Calendar, LogOut, Loader2, AlertCircle, Settings, MoreHorizontal } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 import { getLocale } from "@/paraglide/runtime.js";
 
@@ -29,6 +37,8 @@ export function ProfileLayout() {
   const viewer = useAtomValue(viewerAtom);
   const isSigningOut = useAtomValue(authPendingAtom);
   const signOut = useSetAtom(signOutAtom);
+  const setReportDialog = useSetAtom(reportDialogAtom);
+  const setBlockDialog = useSetAtom(blockDialogAtom);
 
   const profileQuery = useAtomValue(profileAtomFamily(username));
 
@@ -138,8 +148,35 @@ export function ProfileLayout() {
               </Button>
             </div>
           ) : (
-            <div className="mb-2">
+            <div className="mb-2 flex items-center gap-2">
               <FollowButton userId={profile.id} isFollowing={profile.viewerIsFollowing} />
+              {/* Report and Block on someone else's profile — same shared
+                  dialogs as the post card's kebab (see `atoms/moderation.ts`). */}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  aria-label={m.moderation_kebab()}
+                  title={m.moderation_kebab()}
+                  className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-44">
+                  <DropdownMenuItem
+                    className="cursor-pointer"
+                    onClick={() => setReportDialog({ targetType: "user", targetId: profile.id })}
+                  >
+                    {m.moderation_kebab_report_author()}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="cursor-pointer"
+                    variant="destructive"
+                    onClick={() => setBlockDialog({ userId: profile.id, handle })}
+                  >
+                    {m.moderation_kebab_block()}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )}
         </div>

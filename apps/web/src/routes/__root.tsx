@@ -1,4 +1,5 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
 import { useAtomValue } from "jotai";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
@@ -12,6 +13,21 @@ import {
 } from "@/atoms/session";
 import { useRequireHandle } from "@/hooks/use-require-handle";
 import { useRequireSignedIn } from "@/hooks/use-require-signed-in";
+
+// The moderation dialogs open from a kebab anywhere (post cards, profile
+// pages) yet must exist in exactly one place: they are bound to shared
+// identity atoms, so a second mounted instance would stack a second dialog
+// on top of the first. Lazy, like the ModeToggle in the header — the dialogs
+// are only ever useful to someone who clicks Report or Block, so their chunk
+// (the Select, the mutations, the reason-code labels) stays out of first
+// paint. The named exports are mapped to `default` so the dynamic modules can
+// render as lazy components.
+const ReportDialog = lazy(() =>
+  import("@/components/moderation/report-dialog").then((mod) => ({ default: mod.ReportDialog }))
+);
+const BlockDialog = lazy(() =>
+  import("@/components/moderation/block-dialog").then((mod) => ({ default: mod.BlockDialog }))
+);
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -71,6 +87,15 @@ function RootLayout() {
         <Outlet />
       </main>
       <Footer />
+      {/* Mounted here, not per-call-site: the dialogs own the shared
+          `reportDialogAtom`/`blockDialogAtom` identities, and every kebab and
+          profile menu only sets the target. The Suspense fallback is null —
+          the dialogs are closed until a target lands, so there is nothing to
+          flash. */}
+      <Suspense fallback={null}>
+        <ReportDialog />
+        <BlockDialog />
+      </Suspense>
     </div>
   );
 }

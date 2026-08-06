@@ -52,6 +52,21 @@ export type SearchUser = SearchUsersPage["items"][number];
 /** One page of `search.posts` — a keyset-paginated slice of post matches. */
 export type SearchPostsPage = Awaited<ReturnType<typeof client.search.posts>>;
 
+/** One page of `moderation.queue` — unresolved report groups merged with open appeals. */
+export type ModerationQueuePage = Awaited<ReturnType<typeof client.moderation.queue>>;
+/** One case in the queue: reports and/or an open appeal against one target. */
+export type ModerationCase = ModerationQueuePage["items"][number];
+/** A moderation case detail — full report history, open appeal, moderator projection of target. */
+export type ModerationCaseDetail = Awaited<ReturnType<typeof client.moderation.case>>;
+/** One page of `moderation.auditLog`. */
+export type AuditLogPage = Awaited<ReturnType<typeof client.moderation.auditLog>>;
+/** One audit-log entry: an action plus actor and target summaries. */
+export type AuditEntry = AuditLogPage["items"][number];
+/** The `moderation.team` payload. */
+export type ModerationTeam = Awaited<ReturnType<typeof client.moderation.team>>;
+/** A person as served in the moderation team list. */
+export type TeamMember = ModerationTeam["items"][number];
+
 /**
  * A handle that doesn't exist won't start existing on the second attempt, and
  * neither will one the server rejected as malformed — only retry the failures
