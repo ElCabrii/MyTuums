@@ -170,7 +170,8 @@ jobs:
           # delete each other's objects mid-test.
           #
           # Absent on a fork PR, where secrets are not exposed. The upload specs
-          # then skip themselves (`test.skip(!process.env.S3_BUCKET)`) and the
+          # then skip themselves (settings.spec.ts's `storageBucketConfigured()`
+          # — the same all-or-nothing group check `s3Env()` applies) and the
           # rest of the suite runs unchanged, rather than the job failing on
           # something a fork cannot supply.
           S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
