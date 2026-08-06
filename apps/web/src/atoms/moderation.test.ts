@@ -9,7 +9,7 @@ const { fakeClient } = vi.hoisted(() => ({
   fakeClient: {
     post: { list: vi.fn(), thread: vi.fn() },
     search: { posts: vi.fn(), users: vi.fn(), typeahead: vi.fn() },
-    user: { followers: vi.fn(), following: vi.fn() },
+    user: { followers: vi.fn(), following: vi.fn(), byUsername: vi.fn() },
     moderation: { listBlocked: vi.fn(), unblock: vi.fn() },
   },
 }));
@@ -91,6 +91,10 @@ describe("blockedUsersAtom", () => {
     await waitFor(() =>
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.listBlocked.key() }),
     );
+    // The profile cache is swept too: blocking from the profile kebab severs
+    // the follow server-side, and the page being viewed must not keep lying
+    // about follow state (issue #38 review).
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.user.byUsername.key() });
     // The transport call carries the input first and an oRPC operation
     // context second — the input is the contract, the context is plumbing.
     expect(fakeClient.moderation.unblock).toHaveBeenCalledWith({ userId: "blocked-1" }, expect.anything());

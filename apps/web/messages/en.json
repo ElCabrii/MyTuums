@@ -254,6 +254,7 @@
   "follow_signed_out": "Log in to follow people",
   "profile_not_found": "There's nobody here. This handle isn't taken.",
   "profile_load_error": "Couldn't load this profile",
+  "profile_suspended_body": "This account has been suspended. The profile stays hidden while the suspension is in force.",
   "profile_settings": "Settings",
   "profile_banner_alt": "{name}'s banner",
   "profile_joined": "Joined {date}",

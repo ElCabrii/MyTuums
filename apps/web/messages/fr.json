@@ -254,6 +254,7 @@
   "follow_signed_out": "Connectez-vous pour suivre des personnes",
   "profile_not_found": "Personne ici. Ce pseudo n'est pas pris.",
   "profile_load_error": "Impossible de charger ce profil",
+  "profile_suspended_body": "Ce compte a été suspendu. Le profil reste masqué tant que la suspension est en vigueur.",
   "profile_settings": "Paramètres",
   "profile_banner_alt": "Banniere de {name}",
   "profile_joined": "Membre depuis {date}",

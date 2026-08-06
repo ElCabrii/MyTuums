@@ -142,7 +142,10 @@ function SetRoleDialog() {
         </DialogHeader>
         <div className="space-y-3 px-6 pb-6">
           <Select value={role} onValueChange={(value) => setRolePick(value ?? "")}>
-            <SelectTrigger className="w-full">
+            {/* The trigger's only text is the placeholder rendered inside the
+                combobox, which is content, not a label — same accessible-name
+                fix as the report dialog's reason picker. */}
+            <SelectTrigger aria-label={m.moderation_set_role_select()} className="w-full">
               <SelectValue placeholder={m.moderation_set_role_select()} />
             </SelectTrigger>
             <SelectContent>

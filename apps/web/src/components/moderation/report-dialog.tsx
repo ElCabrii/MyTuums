@@ -5,6 +5,7 @@ import {
   reportDialogAtom,
   reportReasonAtom,
   resetReportFormEffect,
+  type CaseRef,
 } from "@/atoms/moderation";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,20 +28,18 @@ import { m } from "@/paraglide/messages.js";
 /**
  * The report flow, one dialog app-wide. Mounted at the root layout and bound
  * to the shared `reportDialogAtom`, so a kebab on any card and the profile
- * menu open the same instance — never two stacked dialogs. The reason picker
- * resets per open via `resetReportFormEffect`: the effect re-runs whenever the
- * target atom's value changes (null → target), so every open starts fresh even
- * though the dialog itself stays mounted for the app's lifetime.
+ * menu open the same instance — never two stacked dialogs.
+ *
+ * The form lives in `ReportDialogBody`, mounted only while a target is set:
+ * the mutation atom is read there, so closing the dialog unmounts its last
+ * subscriber and the mutation observer resets. A success or error from one
+ * report therefore never leaks into the next open — the dialog used to stay
+ * stuck on "Thanks — we'll look into it." for the rest of the page load,
+ * because the root-mounted dialog kept the observer alive forever.
  */
 export function ReportDialog() {
-  useAtomValue(resetReportFormEffect);
   const target = useAtomValue(reportDialogAtom);
   const setTarget = useSetAtom(reportDialogAtom);
-  const report = useAtomValue(reportAtom);
-  const [reason, setReason] = useAtom(reportReasonAtom);
-  // The stable reason codes come from the shared constants — the same set the
-  // server validates against, so the picker can never offer an invalid one.
-  const reasons = target?.targetType === "user" ? USER_REPORT_REASONS : POST_REPORT_REASONS;
 
   return (
     <Dialog
@@ -49,16 +48,31 @@ export function ReportDialog() {
         if (!next) setTarget(null);
       }}
     >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            {target?.targetType === "user"
-              ? m.moderation_report_title_user()
-              : m.moderation_report_title_post()}
-          </DialogTitle>
-          <DialogDescription>{m.moderation_report_choose()}</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 px-6 pb-6">
+      {target && <ReportDialogBody target={target} />}
+    </Dialog>
+  );
+}
+
+/** The data-backed half of the report dialog — mounted only while a target is set. */
+function ReportDialogBody({ target }: { target: CaseRef }) {
+  useAtomValue(resetReportFormEffect);
+  const report = useAtomValue(reportAtom);
+  const [reason, setReason] = useAtom(reportReasonAtom);
+  // The stable reason codes come from the shared constants — the same set the
+  // server validates against, so the picker can never offer an invalid one.
+  const reasons = target.targetType === "user" ? USER_REPORT_REASONS : POST_REPORT_REASONS;
+
+  return (
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>
+          {target.targetType === "user"
+            ? m.moderation_report_title_user()
+            : m.moderation_report_title_post()}
+        </DialogTitle>
+        <DialogDescription>{m.moderation_report_choose()}</DialogDescription>
+      </DialogHeader>
+      <div className="space-y-4 px-6 pb-6">
           <Select value={reason} onValueChange={(value) => setReason(value ?? "")}>
             {/* The trigger's only text is the placeholder rendered inside the
                 combobox, which is content, not a label — without this the
@@ -116,6 +130,5 @@ export function ReportDialog() {
           )}
         </div>
       </DialogContent>
-    </Dialog>
   );
 }

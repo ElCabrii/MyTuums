@@ -19,7 +19,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
-import { UserX, Mail, Calendar, LogOut, Loader2, AlertCircle, Settings, MoreHorizontal } from "lucide-react";
+import { UserX, Mail, Calendar, LogOut, Loader2, AlertCircle, Settings, MoreHorizontal, ShieldAlert } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 import { getLocale } from "@/paraglide/runtime.js";
 
@@ -93,6 +93,22 @@ export function ProfileLayout() {
   const isOwnProfile = viewer?.id === profile.id;
   const handle = profile.displayUsername || handleOf(profile) || username;
   const displayName = profile.name || handle;
+
+  // The `suspended` flag is the server's contract for a banned profile (see
+  // `user.byUsername`): the profile resolves instead of 404ing, and the page
+  // renders a stub rather than the full profile — no bio, no counts, no
+  // Follow affordance. The account cannot sign in while the ban holds, so
+  // the stub never needs to explain itself to its own owner.
+  if (profile.suspended) {
+    return (
+      <ProfileMessage icon={ShieldAlert} title={`@${handle}`}>
+        <p className="text-muted-foreground text-sm mb-6">{m.profile_suspended_body()}</p>
+        <Button nativeButton={false} render={<Link to="/" className="w-full justify-center" />}>
+          {m.common_back_to_home()}
+        </Button>
+      </ProfileMessage>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background pb-12">

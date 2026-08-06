@@ -198,9 +198,10 @@ export const blockAtom = atomWithMutation((get) => {
   return orpc.moderation.block.mutationOptions({
     onSuccess: () => {
       // Blocking rewrites what every viewer-scoped cache should show — the
-      // target vanishes from feeds, threads, search and the typeahead, and
-      // the severed follow changes both follow lists — so sweep the shared
-      // prefixes rather than patch each entry.
+      // target vanishes from feeds, threads, search and the typeahead, the
+      // severed follow changes both follow lists, and the profile being
+      // viewed (if it is the blocked user's) must stop lying about follow
+      // state — so sweep the shared prefixes rather than patch each entry.
       void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
       void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
       void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
@@ -208,6 +209,7 @@ export const blockAtom = atomWithMutation((get) => {
       void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
       void queryClient.invalidateQueries({ queryKey: orpc.user.followers.key() });
       void queryClient.invalidateQueries({ queryKey: orpc.user.following.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.user.byUsername.key() });
       // Blocking removes the target from the blocked list.
       void queryClient.invalidateQueries({ queryKey: orpc.moderation.listBlocked.key() });
     },
@@ -226,6 +228,7 @@ export const unblockAtom = atomWithMutation((get) => {
       void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
       void queryClient.invalidateQueries({ queryKey: orpc.user.followers.key() });
       void queryClient.invalidateQueries({ queryKey: orpc.user.following.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.user.byUsername.key() });
       // Unblocking removes the target from the blocked list.
       void queryClient.invalidateQueries({ queryKey: orpc.moderation.listBlocked.key() });
     },
