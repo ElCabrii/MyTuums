@@ -15,6 +15,7 @@ import {
 } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appealToken } from "./appeal-token.js";
+import { unbanEffect } from "./moderation-actions.js";
 import type { Context } from "./context.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { appRouter } from "./router.js";
@@ -288,6 +289,46 @@ describe("report", () => {
       .where(eq(report.reporterId, reporter.id));
     expect(rows).toHaveLength(1);
     expect(rows[0].resolvedAt).toBeNull();
+
+    await clearQueueFixtures();
+  });
+
+  it("refreshes an OPEN case's timestamp on re-report — a repeat is never a new row, and the first reason is kept", async () => {
+    const reporter = await createTestUser();
+    const author = await createTestUser();
+    const postRow = await seedPostContent(author.id, "report me twice");
+
+    await call(
+      appRouter.moderation.report,
+      { targetType: "post", targetId: postRow.id, reason: "spam" },
+      { context: contextFor(reporter) },
+    );
+    const [before] = await anonContext.db
+      .select({ createdAt: report.createdAt })
+      .from(report)
+      .where(eq(report.reporterId, reporter.id));
+
+    // Re-report while the case is still OPEN: the upsert refreshes the
+    // row's clock (CONTEXT.md's "a repeat report refreshes the row's
+    // timestamp without creating a new one") instead of doing nothing, and
+    // the FIRST reason is the one moderators keep seeing. Before the
+    // transactional fix, the `where resolvedAt is not null` guard made this
+    // a silent no-op while the procedure reported success.
+    const second = await call(
+      appRouter.moderation.report,
+      { targetType: "post", targetId: postRow.id, reason: "harassment" },
+      { context: contextFor(reporter) },
+    );
+    expect(second).toEqual({ reported: true });
+
+    const rows = await anonContext.db
+      .select({ reason: report.reason, createdAt: report.createdAt, resolvedAt: report.resolvedAt })
+      .from(report)
+      .where(eq(report.reporterId, reporter.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reason).toBe("spam");
+    expect(rows[0].resolvedAt).toBeNull();
+    expect(rows[0].createdAt.getTime()).toBeGreaterThan(before.createdAt.getTime());
 
     await clearQueueFixtures();
   });
@@ -1317,6 +1358,64 @@ describe("banUser and unbanUser", () => {
       { context: contextFor(admin) },
     );
     expect(await latestAction("user_unbanned", "user", staffVictim.id)).toBeDefined();
+  });
+});
+
+describe("unbanEffect", () => {
+  it("refuses a sentence it cannot lift (strict) but no-ops on the appeal path (tolerateNotBanned) — the race undoAction's pre-check can lose", async () => {
+    const target = await createTestUser();
+    const actor = await staffUser();
+
+    // Never banned. Strict mode — what moderation.unbanUser uses — refuses
+    // with the caller-facing error.
+    await expect(
+      unbanEffect(anonContext.db, {
+        userId: target.id,
+        actorId: actor.id,
+        actorRole: "staff",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    // The appeal path (undoAction) tolerates the same state: the overturn
+    // must not fail over a lost race with a manual unban, and the appeal
+    // still gets stamped.
+    await expect(
+      unbanEffect(anonContext.db, {
+        userId: target.id,
+        actorId: actor.id,
+        actorRole: "staff",
+        tolerateNotBanned: true,
+      }),
+    ).resolves.toBeNull();
+
+    // No audit row was written for either attempt — nothing was lifted.
+    const rows = await anonContext.db
+      .select({ id: moderationAction.id })
+      .from(moderationAction)
+      .where(eq(moderationAction.targetUserId, target.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("clears the sentence and returns the matching code when the account is banned", async () => {
+    const target = await createTestUser();
+    await setUserBan(target.id, { reason: "permanent spam", expiresAt: null });
+    const actor = await staffUser();
+
+    await expect(
+      unbanEffect(anonContext.db, {
+        userId: target.id,
+        actorId: actor.id,
+        actorRole: "staff",
+      }),
+    ).resolves.toBe("user_unbanned");
+
+    const [row] = await anonContext.db
+      .select({ banned: user.banned, banExpires: user.banExpires })
+      .from(user)
+      .where(eq(user.id, target.id));
+    expect(row?.banned).toBe(false);
+    expect(row?.banExpires).toBeNull();
+    expect(await latestAction("user_unbanned", "user", target.id)).toBeDefined();
   });
 });
 
