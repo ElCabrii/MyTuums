@@ -14,6 +14,7 @@ import { PreferencesSection } from "@/components/settings/preferences-section";
 import { TwoFactorSection } from "@/components/settings/two-factor-section";
 import { PasskeySection } from "@/components/settings/passkey-section";
 import { LinkedAccountsSection } from "@/components/settings/linked-accounts-section";
+import { BlockedUsersSection } from "@/components/settings/blocked-users-section";
 import { SignOutSection } from "@/components/settings/sign-out-section";
 import { m } from "@/paraglide/messages.js";
 
@@ -35,7 +36,8 @@ export const Route = createFileRoute("/settings/account")({
  * signed-in guard, the single error banner every section writes to through
  * `authErrorAtom`, and the order the sections appear in — profile first
  * (what other people see), then identity and credentials, then preferences,
- * then the security enrolments, and sign-out last.
+ * then the security enrolments, then the privacy list (blocked users), and
+ * sign-out last.
  */
 function AccountSettingsPage() {
   const navigate = useNavigate();
@@ -101,6 +103,7 @@ function AccountSettingsPage() {
       <TwoFactorSection />
       <PasskeySection />
       <LinkedAccountsSection />
+      <BlockedUsersSection />
       <SignOutSection />
     </div>
   );

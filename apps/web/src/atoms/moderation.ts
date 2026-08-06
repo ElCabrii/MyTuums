@@ -96,6 +96,15 @@ export const caseAtom = (ref: CaseRef) => caseFamily(encodeCaseKey(ref));
 export const teamAtom = atomWithQuery(() => orpc.moderation.team.queryOptions());
 
 /**
+ * The viewer's blocked users, newest block first — what the settings page's
+ * "Blocked users" section renders. Not a family: one list per viewer, wiped
+ * with the QueryClient on sign-out like every other non-family query.
+ */
+export const blockedUsersAtom = atomWithQuery(() =>
+  orpc.moderation.listBlocked.queryOptions(),
+);
+
+/**
  * Which moderation case dialog is open, app-wide — at most one. Same
  * identity-holding reasoning as `followListDialogAtom` in `atoms/user-list.ts`:
  * the queue view renders the dialog conditionally off this value, so there is
@@ -199,6 +208,8 @@ export const blockAtom = atomWithMutation((get) => {
       void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
       void queryClient.invalidateQueries({ queryKey: orpc.user.followers.key() });
       void queryClient.invalidateQueries({ queryKey: orpc.user.following.key() });
+      // Blocking removes the target from the blocked list.
+      void queryClient.invalidateQueries({ queryKey: orpc.moderation.listBlocked.key() });
     },
   });
 });
@@ -215,6 +226,8 @@ export const unblockAtom = atomWithMutation((get) => {
       void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
       void queryClient.invalidateQueries({ queryKey: orpc.user.followers.key() });
       void queryClient.invalidateQueries({ queryKey: orpc.user.following.key() });
+      // Unblocking removes the target from the blocked list.
+      void queryClient.invalidateQueries({ queryKey: orpc.moderation.listBlocked.key() });
     },
   });
 });

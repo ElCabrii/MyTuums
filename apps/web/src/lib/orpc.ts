@@ -66,6 +66,10 @@ export type AuditEntry = AuditLogPage["items"][number];
 export type ModerationTeam = Awaited<ReturnType<typeof client.moderation.team>>;
 /** A person as served in the moderation team list. */
 export type TeamMember = ModerationTeam["items"][number];
+/** One person in the viewer's blocked list — the profile shape plus the block's timestamp. */
+export type BlockedUser = Awaited<
+  ReturnType<typeof client.moderation.listBlocked>
+>["items"][number];
 
 /**
  * A handle that doesn't exist won't start existing on the second attempt, and
