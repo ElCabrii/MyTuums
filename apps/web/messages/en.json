@@ -16,6 +16,7 @@
   "nav_notifications": "Notifications",
   "nav_profile": "Profile",
   "nav_search_placeholder": "Search people and posts",
+  "search_clear": "Clear search",
   "search_input_aria": "Search",
   "search_results_for": "Results for “{query}”",
   "search_empty_query": "Type something to search people and posts.",

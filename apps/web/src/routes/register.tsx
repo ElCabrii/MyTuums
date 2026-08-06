@@ -14,10 +14,12 @@ import {
 } from "@/atoms/auth-form";
 import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";
 import { localizeAuthError } from "@/lib/auth-error-message";
+import { ErrorBanner } from "@/components/error-banner";
+import { PageCard } from "@/components/page-card";
 import { SignInOptions } from "@/components/sign-in-options";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { UserPlus, AlertCircle, Loader2, User, Mail, Lock, AtSign, Calendar } from "lucide-react";
+import { UserPlus, Loader2, User, Mail, Lock, AtSign, Calendar } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 
 export const Route = createFileRoute("/register")({
@@ -76,7 +78,7 @@ function RegisterPage() {
 
   return (
     <div className="container max-w-lg mx-auto px-4 py-12">
-      <div className="rounded-3xl border border-border/50 bg-card/60 backdrop-blur-xl p-6 sm:p-8 shadow-2xl space-y-6">
+      <PageCard className="space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-2xl font-bold tracking-tight">{m.auth_register_title()}</h1>
           <p className="text-sm text-muted-foreground">
@@ -85,16 +87,7 @@ function RegisterPage() {
         </div>
 
         {error && (
-          <div
-            role="alert"
-            className="flex items-start gap-3 rounded-2xl bg-destructive/10 border border-destructive/20 p-4 text-sm text-destructive"
-          >
-            <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-medium">{m.auth_register_failed()}</p>
-              <p className="text-destructive/90 text-xs mt-0.5">{localizeAuthError(error)}</p>
-            </div>
-          </div>
+          <ErrorBanner title={m.auth_register_failed()} message={localizeAuthError(error)} />
         )}
 
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
@@ -264,7 +257,7 @@ function RegisterPage() {
             {m.auth_login_link()}
           </Link>
         </div>
-      </div>
+      </PageCard>
     </div>
   );
 }

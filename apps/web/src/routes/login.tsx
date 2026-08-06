@@ -11,10 +11,12 @@ import {
 import { useOneTap } from "@/hooks/use-one-tap";
 import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";
 import { localizeAuthError, localizeOAuthError } from "@/lib/auth-error-message";
+import { ErrorBanner } from "@/components/error-banner";
+import { PageCard } from "@/components/page-card";
 import { SignInOptions } from "@/components/sign-in-options";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { LogIn, AlertCircle, Loader2, User, Lock } from "lucide-react";
+import { LogIn, Loader2, User, Lock } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 
 export const Route = createFileRoute("/login")({
@@ -48,7 +50,9 @@ export const Route = createFileRoute("/login")({
  * carries the pre-login destination (see `validateSearch` above).
  */
 function LoginPage() {
-  const { redirect: redirectFromSearch } = Route.useSearch();
+  // Both search params arrive from *outside* (see `validateSearch` above) —
+  // read once, destructured.
+  const { redirect: redirectFromSearch, error: oauthError } = Route.useSearch();
   useRedirectWhenSignedIn(redirectFromSearch);
   // No-op unless VITE_GOOGLE_CLIENT_ID is set — see lib/one-tap.ts.
   useOneTap();
@@ -75,7 +79,6 @@ function LoginPage() {
    * there to one error surface: submitting the password form afterwards
    * clears this the same way it clears any other message.
    */
-  const { error: oauthError } = Route.useSearch();
   useEffect(() => {
     if (oauthError) setError(localizeOAuthError(oauthError));
   }, [oauthError, setError]);
@@ -108,7 +111,7 @@ function LoginPage() {
 
   return (
     <div className="container max-w-md mx-auto px-4 py-12">
-      <div className="rounded-3xl border border-border/50 bg-card/60 backdrop-blur-xl p-6 sm:p-8 shadow-2xl space-y-6">
+      <PageCard className="space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-2xl font-bold tracking-tight">{m.auth_login_title()}</h1>
           <p className="text-sm text-muted-foreground">
@@ -117,16 +120,7 @@ function LoginPage() {
         </div>
 
         {error && (
-          <div
-            role="alert"
-            className="flex items-start gap-3 rounded-2xl bg-destructive/10 border border-destructive/20 p-4 text-sm text-destructive"
-          >
-            <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-medium">{m.auth_login_failed()}</p>
-              <p className="text-destructive/90 text-xs mt-0.5">{localizeAuthError(error)}</p>
-            </div>
-          </div>
+          <ErrorBanner title={m.auth_login_failed()} message={localizeAuthError(error)} />
         )}
 
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
@@ -215,7 +209,7 @@ function LoginPage() {
             {m.auth_register_link()}
           </Link>
         </div>
-      </div>
+      </PageCard>
     </div>
   );
 }

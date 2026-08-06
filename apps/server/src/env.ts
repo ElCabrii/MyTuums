@@ -113,7 +113,7 @@ const envSchema = z.object({
  * The validated shape `parseEnv` returns — every environment field the server
  * reads, defaults and transforms already applied.
  */
-export type Env = z.infer<typeof envSchema>;
+type Env = z.infer<typeof envSchema>;
 
 /**
  * Validates `source` against the schema and returns it, or throws a

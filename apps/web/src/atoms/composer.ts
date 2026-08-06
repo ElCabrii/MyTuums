@@ -41,9 +41,7 @@ export const composerDraftAtom = atom(
 
 /**
  * `post.create` as a mutation atom. Unlike like/follow this has no `scope`,
- * no optimistic update, and no rollback, which is exactly why it migrates
- * first — see the commit-10 write-up for what that safely proved (and what
- * it rules out for like/follow).
+ * no optimistic update, and no rollback.
  *
  * `onSuccess` can't reach `set` — `atomWithMutation`'s `getOptions` is only
  * handed a `Getter` — so the draft reset goes through the module-scope

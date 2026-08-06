@@ -13,9 +13,11 @@ import {
 } from "@/atoms/two-factor";
 import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";
 import { localizeAuthError } from "@/lib/auth-error-message";
+import { ErrorBanner } from "@/components/error-banner";
+import { PageCard } from "@/components/page-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AlertCircle, KeyRound, Loader2, Mail, ShieldCheck } from "lucide-react";
+import { KeyRound, Loader2, Mail, ShieldCheck } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 
 export const Route = createFileRoute("/two-factor")({
@@ -74,7 +76,7 @@ function TwoFactorPage() {
 
   return (
     <div className="container max-w-md mx-auto px-4 py-12">
-      <div className="rounded-3xl border border-border/50 bg-card/60 backdrop-blur-xl p-6 sm:p-8 shadow-2xl space-y-6">
+      <PageCard className="space-y-6">
         <div className="text-center space-y-2">
           <ShieldCheck className="h-8 w-8 mx-auto text-primary" />
           <h1 className="text-2xl font-bold tracking-tight">{m.twofa_challenge_title()}</h1>
@@ -88,16 +90,7 @@ function TwoFactorPage() {
         </div>
 
         {error && (
-          <div
-            role="alert"
-            className="flex items-start gap-3 rounded-2xl bg-destructive/10 border border-destructive/20 p-4 text-sm text-destructive"
-          >
-            <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-medium">{m.twofa_challenge_failed()}</p>
-              <p className="text-destructive/90 text-xs mt-0.5">{localizeAuthError(error)}</p>
-            </div>
-          </div>
+          <ErrorBanner title={m.twofa_challenge_failed()} message={localizeAuthError(error)} />
         )}
 
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
@@ -201,7 +194,7 @@ function TwoFactorPage() {
             {m.twofa_back_to_login()}
           </Link>
         </div>
-      </div>
+      </PageCard>
     </div>
   );
 }

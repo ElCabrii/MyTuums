@@ -41,7 +41,7 @@ import { bestEncoding, type Compression } from "./compression.js";
  * The per-response security headers, applied to every response that does not
  * already set one (inner wins — see `applyDefaults`).
  */
-export const SECURITY_HEADERS: Record<string, string> = {
+const SECURITY_HEADERS: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "X-Frame-Options": "DENY",

@@ -515,7 +515,6 @@ export function seedPostListPages(queryClient: QueryClient, pages: PostListPage[
 }
 
 /** The exact queryKey `userListAtom(username, direction)` produces. */
-/** The exact queryKey `userListAtom(username, direction)` produces. */
 export function userListQueryKey(username: string, direction: "followers" | "following"): QueryKey {
   const procedure = direction === "followers" ? orpc.user.followers : orpc.user.following;
   return procedure.infiniteKey({

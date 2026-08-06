@@ -11,10 +11,11 @@
  * - in development and test the message is logged and the flow continues, so
  *   TOTP-based 2FA, sign-up and password reset are all fully usable on a clone
  *   with no email account at all;
- * - in production the send *throws*, because silently dropping a password-reset
- *   link is worse than the caller reporting that it couldn't be sent. The
- *   person then sees an error instead of watching an inbox that will never
- *   receive anything.
+ * - in production the send logs loudly — the mail is still silently dropped
+ *   from the caller's point of view. Better Auth swallows `sendEmail`
+ *   rejections and runs reset/verification sends in the background, so the
+ *   HTTP response is success and the person sees no error, only an inbox that
+ *   never receives anything.
  */
 import { Resend } from "resend";
 import { emailFrom, isProduction, resendApiKey } from "./env.js";
@@ -40,7 +41,10 @@ export interface OutgoingEmail {
 
 /**
  * Sends one email: through Resend when a key is configured, otherwise logged
- * (dev/test) or a hard failure (production) — never silently dropped.
+ * (dev/test) or a loudly-logged refusal (production). Note the prod path's
+ * throw does NOT surface to the user — Better Auth swallows send rejections
+ * and runs reset/verification sends in the background, so the HTTP response
+ * is success either way; the loud log is for operators.
  */
 export async function sendEmail({ to, subject, text }: OutgoingEmail): Promise<void> {
   if (!resendApiKey) {

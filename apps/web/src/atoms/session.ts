@@ -192,6 +192,3 @@ export const isModeratorAtom = atom((get) => viewerRoleAtLeast(get(viewerRoleAto
 
 /** Staff and above (staff, admin). */
 export const isStaffAtom = atom((get) => viewerRoleAtLeast(get(viewerRoleAtom), "staff"));
-
-/** Admin only. */
-export const isAdminAtom = atom((get) => viewerRoleAtLeast(get(viewerRoleAtom), "admin"));

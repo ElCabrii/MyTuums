@@ -31,11 +31,13 @@ export const handleValidationAtom = atom((get) => validateUsername(get(handleDra
  * The page-wide first-violated-rule, checking only the fields this session
  * actually still needs. A social sign-up lands here needing both a handle and
  * a date of birth; an account that predates the 15+ rule needs only the date
- * of birth. Each case validates exactly what it renders.
+ * of birth. Each case validates exactly what it renders. Composes
+ * `handleValidationAtom` for the username half rather than re-running
+ * `validateUsername` on its own, so the two can never disagree.
  */
 export const welcomeValidationAtom = atom((get) => {
   if (get(needsHandleAtom)) {
-    const usernameError = validateUsername(get(handleDraftAtom));
+    const usernameError = get(handleValidationAtom);
     if (usernameError) return usernameError;
   }
   if (get(needsDobAtom)) {
