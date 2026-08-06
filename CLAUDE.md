@@ -24,13 +24,13 @@ MyTuums — a Twitter-style social app (posts, likes, follows, profiles, auth). 
 
 Copy `.env.example` → `.env` first — it is the single source of env for every host-side process (all scripts load it via `dotenv -e ../../.env`; Vite reads it via `envDir`).
 
-- `pnpm docker:up` — full stack via docker-compose: Postgres on :5432 + the server image on :3001. Host-side processes use `localhost` in `DATABASE_URL`; the compose `server` service uses the `postgres` hostname.
+- `pnpm docker:up` — full stack via docker-compose: Postgres on :5432 + the server image on :3001. The stack applies pending migrations first (a one-shot `migrate` service running the same runner Railway uses pre-deploy), so a fresh clone's first boot works. Host-side processes use `localhost` in `DATABASE_URL`; the compose `server` service uses the `postgres` hostname.
 - `pnpm dev` — host-side dev: API on :3001, Vite web on :5173 (proxying `/rpc`, `/api/auth`, `/media` to the API). **Port conflict note:** `pnpm dev` and `docker compose up` both occupy 3001/5173 — run one or the other, not both.
 - `pnpm build` / `pnpm lint` / `pnpm typecheck` — turbo across the workspace.
 - `pnpm test:unit` — vitest unit suites (pure logic; must pass with no DB reachable — that's what keeps the unit/integration split honest).
 - `pnpm db:test:setup && pnpm test:integration` — API integration suites against real Postgres (run `pnpm docker:up` first, or use the local `DATABASE_URL`).
 - `pnpm test:e2e` — Playwright (slow, see above); `pnpm test:e2e:ui` for the UI runner. Uses its own ports (API :3101, web :5273) so it runs beside a live dev stack.
-- `pnpm db:generate` — new migration from schema changes; `pnpm db:push`/`db:migrate` to apply; `pnpm db:studio` to browse. `pnpm db:generate:auth` regenerates the better-auth schema (`src/schema/auth.ts` via the BetterAuth CLI + `scripts/patch-auth-schema.mjs`).
+- `pnpm db:generate` — new migration from schema changes; `pnpm db:push` — apply it; `pnpm db:promote` — grant a moderator/staff/admin role for the moderation bootstrap (root aliases into `@my-tuums/db`). The rest of the Drizzle toolbox is package-level: `pnpm --filter @my-tuums/db db:migrate` (apply), `db:studio` (browse), `db:generate:auth` (regenerate `src/schema/auth.ts` via the BetterAuth CLI + `scripts/patch-auth-schema.mjs`), and `db:check` (the schema-drift check CI runs).
 
 Single test:
 - `pnpm --filter @my-tuums/api exec vitest run src/posts.int.test.ts` (same pattern for web: `pnpm --filter @my-tuums/web exec vitest run src/atoms/foo.test.ts` — if `src/paraglide` doesn't exist yet, the web package's `test` script compiles it first).
@@ -54,7 +54,7 @@ Each package — and the CI directory — carries its own `CLAUDE.md`: the autho
 In production the API serves the built SPA (`WEB_DIST` set by the Dockerfile), because `apps/web/src/lib/orpc.ts` resolves `/rpc` against `window.location.origin` and uploaded images are stored as relative `/media/<key>` paths. In dev, Vite proxies `/rpc`, `/api/auth`, and `/media` to :3001; the browser follows the `/media` 302 to a presigned bucket URL itself.
 
 ### apps/server — the HTTP server
-- `src/env.ts`: zod-validated env; a *partial* OAuth pair or S3 group refuses to boot (`superRefine`). `parseEnv` throws but never exits — only the real entrypoint `src/index.ts` turns a bad env into `process.exit(1)`.
+- `src/env.ts`: zod-validated env; a *partial* OAuth pair or S3 group refuses to boot (`superRefine`). `parseEnv` throws but never exits — only the real entrypoint `src/index.ts` turns a bad env into `process.exit(1)`. One caveat: `@my-tuums/db` evaluates `DATABASE_URL` at module scope and throws when it is unset (packages/db/src/index.ts), which runs before `parseEnv` ever does — so that single variable is reported by the module-scope throw rather than by `parseEnv`'s unified report.
 - `src/request-handler.ts`: the routing tree (health → `/api/auth` (better-auth) → `/rpc` (oRPC) → `/media` (session required, checked before the key is parsed) → page gate → static SPA), unit-tested with stand-ins; `src/index.ts` wires the real dependencies, plus deliberate graceful shutdown that drains the DB pool. The page gate enforces the same sign-in requirement as the client's `useRequireSignedIn`, sharing its allowlist (`SIGNED_OUT_PATHS` in `@my-tuums/api/constants`) so the two can't drift into a redirect loop. Between `/media` and the page gate, no anonymous request ever reaches user content (issue #36 closed every procedure; a leaked media key is the one thing this doesn't retroactively fix — see the load-bearing note in `apps/server/CLAUDE.md`).
 - Bundled with tsup: source-only workspace packages (`@my-tuums/{api,auth,db}`) get inlined; real npm deps stay external.
 

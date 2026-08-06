@@ -23,7 +23,7 @@ single source of env for every host-side process.
 
 ```bash
 pnpm install
-pnpm docker:up   # Postgres :5432 + server image :3001
+pnpm docker:up   # Postgres :5432 + server image :3001 (migrations applied before the server starts)
 # or, for host-side dev (API :3001, Vite :5173 — ports clash, run one):
 pnpm dev
 ```
@@ -36,7 +36,8 @@ pnpm dev
 | `pnpm test:unit`                                         | vitest unit suites (pure logic, no DB)           |
 | `pnpm db:test:setup && pnpm test:integration`            | API integration against real Postgres            |
 | `pnpm test:e2e`                                          | Playwright (slow; own ports :3101/:5273)         |
-| `pnpm db:generate` / `db:push` / `db:migrate` / `db:studio` | Drizzle migrations and browser                 |
+| `pnpm db:generate` / `db:push` / `db:promote`              | migration from schema changes / apply / role grant (root aliases into `@my-tuums/db`) |
+| `pnpm --filter @my-tuums/db db:migrate` / `db:studio` / `db:generate:auth` | the rest of the Drizzle toolbox, package-level |
 | `pnpm --filter @my-tuums/api exec vitest run src/foo.int.test.ts` | single test (same pattern for web)      |
 
 ## Repository layout

@@ -20,6 +20,32 @@ services:
       timeout: 5s
       retries: 5
 
+  # One-shot migration runner: applies `packages/db/drizzle` to the postgres
+  # service and exits. `docker compose up` runs it between Postgres (healthy)
+  # and the server, so a fresh clone's first `pnpm docker:up` boots against a
+  # current schema instead of serving 500s on every query. Same image as the
+  # server — the Dockerfile already ships `apps/server/dist/migrate.js` and
+  # the drizzle SQL; this is the exact pre-deploy step Railway runs.
+  #
+  # No `restart` on purpose: one-shot, unlike the long-running services. It
+  # re-runs on every `up`, which is safe — drizzle's migrator skips
+  # already-applied migrations by hash.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    container_name: mytuums-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # migrate.js (tsup-bundled) imports @my-tuums/db, which needs nothing
+      # but DATABASE_URL. MIGRATIONS_DIR defaults to `packages/db/drizzle` —
+      # the path the Dockerfile copies the SQL to, relative to /app (the
+      # image's WORKDIR) — so no other variable is required.
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/mytuums
+    command: ["node", "apps/server/dist/migrate.js"]
+
   # The production server image on :3001 — the same Dockerfile Railway
   # deploys, so this stack runs what prod runs.
   server:
@@ -34,6 +60,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # A healthy Postgres is not a *migrated* one — the server must not
+      # start until the schema is current.
+      migrate:
+        condition: service_completed_successfully
     environment:
       # Points at the `postgres` service by its Compose DNS name, not
       # `localhost` — the two containers are on their own network. Host-side
