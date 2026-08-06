@@ -11,13 +11,14 @@ import {
   moderationRoleEmail,
   moderationSuspensionEmail,
 } from "@my-tuums/auth";
-import { type Database } from "@my-tuums/db";
+import type { Database } from "@my-tuums/db";
 import { appeal, follow, moderationAction, post, report, session, user, userBlock } from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
 import {
   APPEALABLE_ACTIONS,
   emailUser,
   isActionCurrent,
+  isActionLatest,
   logAction,
   makeAppealUrl,
   restorePostEffect,
@@ -175,8 +176,10 @@ export const moderationRouter = {
    *
    * Idempotent per (reporter, target): a repeat report refreshes the row's
    * timestamp and reopens it if it was resolved — the reporter never has to
-   * remember whether they already spoke up. Self-reports and reports aimed
-   * across a block (either direction) are rejected.
+   * remember whether they already spoke up. Self-reports are rejected, and
+   * user reports aimed across a block (either direction) are rejected too —
+   * post reports across a block are allowed, because the block hides the
+   * author from the viewer, not the evidence from the moderators.
    */
   report: protectedProcedure
     .use(rateLimit(RATE_LIMITS.report))
@@ -321,6 +324,42 @@ export const moderationRouter = {
       const limit = input.limit;
       const decoded = input.cursor ? caseCursor.decode(input.cursor) : undefined;
 
+      // A case's two halves sit on different timestamps, so each half's own
+      // `< cursor` filter cannot see the OTHER half. When a dual case's
+      // merged key is at or past the cursor (it was already shown) but one of
+      // its halves is older than the cursor, that half would be re-admitted
+      // and the case would reappear on the next page, missing the half it
+      // already showed. Each side therefore also excludes targets whose
+      // OTHER open half is at or past the cursor — the exact row-value test,
+      // tie-break included, so a case tied with the cursor but ordered after
+      // it (targetId desc) is never excluded before it was shown.
+      const reportSideExclusion =
+        decoded
+          ? sql`and not exists (
+               select 1
+               from ${appeal}, ${moderationAction}
+               where ${moderationAction.id} = ${appeal.actionId}
+                 and ${appeal.status} = 'open'
+                 and ${moderationAction.targetType} = ${report.targetType}
+                 and coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId}) = ${report.targetId}
+                 and (${appeal.createdAt}, coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId}))
+                     >= (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, report.targetId)})
+             )`
+          : sql``;
+      const appealSideExclusion =
+        decoded
+          ? sql`and not exists (
+               select 1
+               from ${report}
+               where ${report.resolvedAt} is null
+                 and ${report.targetType} = ${moderationAction.targetType}
+                 and ${report.targetId} = coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})
+               group by ${report.targetType}, ${report.targetId}
+               having (max(${report.createdAt}), ${report.targetId})
+                   >= (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, user.id)})
+             )`
+          : sql``;
+
       const reportGroups = await context.db.execute<ReportGroupRow>(sql`
         select ${report.targetType} as target_type,
                ${report.targetId} as target_id,
@@ -328,7 +367,7 @@ export const moderationRouter = {
                count(*)::int as report_count,
                array_agg(${report.reason}) as reasons
         from ${report}
-        where ${report.resolvedAt} is null
+        where ${report.resolvedAt} is null ${reportSideExclusion}
         group by ${report.targetType}, ${report.targetId}
         ${decoded
           ? sql`having (max(${report.createdAt}), ${report.targetId}) < (${sql.param(decoded.createdAt, report.createdAt)}, ${sql.param(decoded.id, report.targetId)})`
@@ -345,7 +384,7 @@ export const moderationRouter = {
                coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId}) as target_id
         from ${appeal}
         inner join ${moderationAction} on ${moderationAction.id} = ${appeal.actionId}
-        where ${appeal.status} = 'open'
+        where ${appeal.status} = 'open' ${appealSideExclusion}
         ${decoded
           ? sql`and (${appeal.createdAt}, coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})) < (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, user.id)})`
           : sql``}
@@ -384,11 +423,15 @@ export const moderationRouter = {
         byKey.set(key, entry);
       }
 
-      const sorted = [...byKey.values()].sort(
-        (a, b) =>
-          b.newestAt.getTime() - a.newestAt.getTime() ||
-          (a.targetId < b.targetId ? 1 : a.targetId > b.targetId ? -1 : 0),
-      );
+      const sorted = [...byKey.values()].sort((a, b) => {
+        const byTime = b.newestAt.getTime() - a.newestAt.getTime();
+        if (byTime !== 0) return byTime;
+        // Same newest instant: the case id breaks the tie, desc — matching
+        // the per-side orderings so the merged order is the same total order.
+        if (a.targetId < b.targetId) return 1;
+        if (a.targetId > b.targetId) return -1;
+        return 0;
+      });
       // The anchor is the LAST case actually returned, with a strict "<"
       // cursor — the house pattern every other keyset feed uses (post.list,
       // search). Anchoring on the first case past the page instead would drop
@@ -732,9 +775,13 @@ export const moderationRouter = {
     .use(rateLimit(RATE_LIMITS.moderate))
     .input(z.object({ userId: z.string().min(1), note: noteInput }))
     .handler(async ({ input, context }) => {
+      // The rank guard lives in `unbanEffect` (shared with the appeal
+      // overturn), so no inverse path can skip it: lifting a sentence is as
+      // restricted as imposing one.
       await unbanEffect(context.db, {
         userId: input.userId,
         actorId: context.user.id,
+        actorRole: context.user.role ?? "user",
         note: input.note,
         headers: context.headers,
       });
@@ -954,6 +1001,7 @@ export const moderationRouter = {
           targetType: moderationAction.targetType,
           targetPostId: moderationAction.targetPostId,
           targetUserId: moderationAction.targetUserId,
+          createdAt: moderationAction.createdAt,
           details: moderationAction.details,
         })
         .from(moderationAction)
@@ -975,29 +1023,37 @@ export const moderationRouter = {
           message: "There's nothing to appeal anymore — this action was already undone.",
         });
       }
+      if (!(await isActionLatest(context.db, action))) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "A newer moderation action has superseded this one.",
+        });
+      }
 
       // One query covers both refusals: a REUSED link (same nonce — a double
       // click on the email) and a SECOND appeal against the same action (a
       // fresh link while one is in flight). They answer different questions,
       // so the nonce match wins: "your appeal was received, nothing to do"
       // is the true reading of a replayed link, and a fresh-link retry gets
-      // the open-appeal message instead.
+      // the open-appeal message instead. A *reviewed* appeal is final — the
+      // action can never be appealed again (the schema comment and the
+      // resolution email both promise that), so a prior row in any status
+      // closes this path too.
       const [existing] = await context.db
         .select({ id: appeal.id, status: appeal.status, tokenNonce: appeal.tokenNonce })
         .from(appeal)
-        .where(
-          or(
-            and(eq(appeal.actionId, actionId), eq(appeal.status, "open")),
-            eq(appeal.tokenNonce, nonce),
-          ),
-        )
+        .where(or(eq(appeal.actionId, actionId), eq(appeal.tokenNonce, nonce)))
         .limit(1);
       if (existing) {
         if (existing.tokenNonce === nonce) {
           throw new ORPCError("BAD_REQUEST", { message: "This appeal link has already been used." });
         }
+        if (existing.status === "open") {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "There's already an open appeal for this action.",
+          });
+        }
         throw new ORPCError("BAD_REQUEST", {
-          message: "There's already an open appeal for this action.",
+          message: "This action has already been appealed, and the review is final.",
         });
       }
 
@@ -1048,6 +1104,7 @@ export const moderationRouter = {
             targetType: moderationAction.targetType,
             targetPostId: moderationAction.targetPostId,
             targetUserId: moderationAction.targetUserId,
+            createdAt: moderationAction.createdAt,
             details: moderationAction.details,
           },
         })
@@ -1065,7 +1122,24 @@ export const moderationRouter = {
       }
 
       if (input.outcome === "overturned") {
-        await undoAction(context.db, action, context.user.id, input.note, context.headers);
+        // The appeal contests a specific logged action. If a newer action of
+        // the same kind has since replaced it (remove → restore → remove,
+        // ban → unban → re-ban), overturning would reverse the NEWER state,
+        // not the contested one — the same hazard `isActionCurrent`'s
+        // live-state read cannot see.
+        if (!(await isActionLatest(context.db, action))) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "A newer moderation action has superseded this one.",
+          });
+        }
+        await undoAction(
+          context.db,
+          action,
+          context.user.id,
+          context.user.role ?? "user",
+          input.note,
+          context.headers,
+        );
       }
 
       await context.db

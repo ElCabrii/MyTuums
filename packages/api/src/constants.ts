@@ -30,6 +30,49 @@ export const MODERATION_PAGE_SIZE_MAX = 50;
 export const MODERATION_NOTE_MAX_LENGTH = 1000;
 
 /**
+ * The nine stable moderation action codes — the `moderation_action.action`
+ * check constraint's list (packages/db/src/schema/app.ts).
+ *
+ * These live here, in the dependency-free constants module, so unit tests can
+ * pin them without importing `moderation-actions.ts` — which pulls in
+ * `@my-tuums/auth` → `@my-tuums/db`, and the latter throws at module scope
+ * when `DATABASE_URL` is unset. `moderation-actions.ts` re-exports them, so
+ * every runtime importer keeps working unchanged.
+ */
+export const MODERATION_ACTION_CODES = [
+  "post_removed",
+  "post_restored",
+  "user_suspended",
+  "user_unsuspended",
+  "user_banned",
+  "user_unbanned",
+  "role_changed",
+  "case_resolved",
+  "appeal_resolved",
+] as const;
+
+/** One of the nine action codes. */
+export type ModerationActionCode = (typeof MODERATION_ACTION_CODES)[number];
+
+/**
+ * The four appealable actions and the inverse code the overturn logs.
+ * `role_changed` maps to itself: the restore is another role change, and its
+ * logged row records the full swing (old → the granted role → back).
+ */
+export const INVERSE_ACTION = {
+  post_removed: "post_restored",
+  user_suspended: "user_unsuspended",
+  user_banned: "user_unbanned",
+  role_changed: "role_changed",
+} as const;
+
+/**
+ * The actions `appealOpen` accepts, derived from the inverse map so the two
+ * lists can never drift — anything with an inverse is appealable.
+ */
+export const APPEALABLE_ACTIONS = Object.keys(INVERSE_ACTION) as ModerationActionCode[];
+
+/**
  * The stable report-reason codes (issue #38), one set per target type.
  *
  * The codes ARE the contract: they are checked into the `report` table's

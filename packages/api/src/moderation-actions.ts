@@ -12,9 +12,10 @@ import {
   type EmailLocale,
   type OutgoingEmail,
 } from "@my-tuums/auth";
-import { type Database } from "@my-tuums/db";
+import type { Database } from "@my-tuums/db";
 import { moderationAction, post, report, user } from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
+import { canManageRole } from "./roles.js";
 
 /**
  * The shared effects every moderation procedure composes (issue #38).
@@ -37,39 +38,24 @@ import { appealToken } from "./appeal-token.js";
  */
 export type DbLike = Pick<Database, "select" | "insert" | "update" | "delete" | "execute">;
 
-/** The nine stable action codes — the `moderation_action.action` check constraint's list. */
-export const MODERATION_ACTION_CODES = [
-  "post_removed",
-  "post_restored",
-  "user_suspended",
-  "user_unsuspended",
-  "user_banned",
-  "user_unbanned",
-  "role_changed",
-  "case_resolved",
-  "appeal_resolved",
-] as const;
-
-/** One of the nine action codes. */
-export type ModerationActionCode = (typeof MODERATION_ACTION_CODES)[number];
-
 /**
- * The four actions an appeal can contest, and the inverse code the overturn
- * logs. `role_changed` maps to itself: the restore is another role change,
- * and its logged row records the full swing (old → the granted role → back).
+ * The nine stable action codes and the appealable/inverse lists — defined in
+ * the dependency-free `./constants.js` (see the comment there for why),
+ * re-exported here so every runtime importer keeps one import site.
  */
-export const INVERSE_ACTION = {
-  post_removed: "post_restored",
-  user_suspended: "user_unsuspended",
-  user_banned: "user_unbanned",
-  role_changed: "role_changed",
-} as const;
+import {
+  APPEALABLE_ACTIONS,
+  INVERSE_ACTION,
+  MODERATION_ACTION_CODES,
+  type ModerationActionCode,
+} from "./constants.js";
 
-/**
- * The actions `appealOpen` accepts, derived from the inverse map so the two
- * lists can never drift — anything with an inverse is appealable.
- */
-export const APPEALABLE_ACTIONS = Object.keys(INVERSE_ACTION) as ModerationActionCode[];
+export {
+  APPEALABLE_ACTIONS,
+  INVERSE_ACTION,
+  MODERATION_ACTION_CODES,
+  type ModerationActionCode,
+};
 
 /**
  * The `moderation_action` row shape the shared effects read.
@@ -86,6 +72,7 @@ export interface ActionRow {
   targetType: "post" | "user";
   targetPostId: string | null;
   targetUserId: string | null;
+  createdAt: Date;
   details: unknown;
 }
 
@@ -270,6 +257,46 @@ export async function isActionCurrent(
 }
 
 /**
+ * Whether a logged action is the latest of its kind against its target.
+ *
+ * `isActionCurrent` judges an action against the target's *live state*; this
+ * judges it against the action *log*. The two answer different questions:
+ * remove → appeal → restore → remove again leaves the first removal's state
+ * check reading the *second* tombstone as "still current", when the appeal
+ * actually contests a decision that no longer governs anything. Overturning
+ * a superseded action would reverse the newer one's state, so appeals gate
+ * on both: current (there is something to contest) AND latest (what's there
+ * is the contested thing).
+ */
+export async function isActionLatest(
+  db: DbLike,
+  action: Pick<ActionRow, "id" | "action" | "targetType" | "targetPostId" | "targetUserId" | "createdAt">,
+): Promise<boolean> {
+  const targetMatch =
+    action.targetType === "post"
+      ? eq(moderationAction.targetPostId, action.targetPostId!)
+      : eq(moderationAction.targetUserId, action.targetUserId!);
+
+  const [newer] = await db
+    .select({ id: moderationAction.id })
+    .from(moderationAction)
+    .where(
+      and(
+        eq(moderationAction.action, action.action),
+        targetMatch,
+        // Row-value comparison under the same (created_at, id) ordering the
+        // `moderation_action_created_idx` index provides. `sql.param` keeps
+        // the driver's type mapping — a bare interpolated Date would reach
+        // postgres.js untyped.
+        sql`(${moderationAction.createdAt}, ${moderationAction.id}) > (${sql.param(action.createdAt, moderationAction.createdAt)}, ${sql.param(action.id, moderationAction.id)})`,
+      ),
+    )
+    .limit(1);
+
+  return newer === undefined;
+}
+
+/**
  * Restores a removed post, logging and emailing the author — the inverse of a
  * removal, shared by `moderation.restorePost` and the appeal overturn.
  */
@@ -311,13 +338,25 @@ export async function restorePostEffect(
 /**
  * Clears a ban or suspension, logging the precise code from the expiry read
  * before clearing — shared by `moderation.unbanUser` and the appeal overturn.
+ *
+ * Carries the same rank guard as the sentence itself: whoever lifts a ban or
+ * suspension must be able to manage the account they're lifting it for — a
+ * staff member cannot undo an admin's sentence on a staff peer, any more
+ * than they could have imposed it.
  */
 export async function unbanEffect(
   db: DbLike,
-  args: { userId: string; actorId: string; note?: string; headers: Headers | undefined },
+  args: {
+    userId: string;
+    actorId: string;
+    /** The actor's own role — the guard compares it against the target's. */
+    actorRole: string;
+    note?: string;
+    headers: Headers | undefined;
+  },
 ): Promise<void> {
   const [target] = await db
-    .select({ banned: user.banned, banExpires: user.banExpires })
+    .select({ banned: user.banned, banExpires: user.banExpires, role: user.role })
     .from(user)
     .where(eq(user.id, args.userId))
     .limit(1);
@@ -326,10 +365,14 @@ export async function unbanEffect(
   if (!target.banned) {
     throw new ORPCError("BAD_REQUEST", { message: "This account isn't banned or suspended." });
   }
+  if (!canManageRole(args.actorRole, target.role ?? "user")) {
+    throw new ORPCError("FORBIDDEN");
+  }
 
-  // A row with an expiry was a suspension; without one, a ban. The code the
+  // A row without an expiry was a ban; with one, a suspension. The code the
   // audit log records and the email the user receives follow the read.
-  const code: ModerationActionCode = target.banExpires != null ? "user_unsuspended" : "user_unbanned";
+  const code: ModerationActionCode =
+    target.banExpires == null ? "user_unbanned" : "user_unsuspended";
 
   await db
     .update(user)
@@ -356,11 +399,19 @@ export async function unbanEffect(
  * (another reviewer, or a moderator restoring manually), the effect becomes a
  * no-op but the appeal still gets stamped — a legitimate overturn is never
  * reported as failed over a lost race.
+ *
+ * The rank guard is NOT advisory: an overturn restores a state the reviewer
+ * must be able to manage themselves — the same `canManageRole` rule as the
+ * sentence that created it, applied to both the role currently held and the
+ * role being restored (for `role_changed`), or to the target's role (for
+ * bans). A moderator overturning a demotion appeal cannot re-grant staff;
+ * only someone who could have imposed the state can undo it.
  */
 export async function undoAction(
   db: DbLike,
   action: ActionRow,
   actorId: string,
+  actorRole: string,
   note: string | undefined,
   headers: Headers | undefined,
 ): Promise<void> {
@@ -376,7 +427,13 @@ export async function undoAction(
     }
     case "user_suspended":
     case "user_banned": {
-      await unbanEffect(db, { userId: action.targetUserId!, actorId, note, headers });
+      await unbanEffect(db, {
+        userId: action.targetUserId!,
+        actorId,
+        actorRole,
+        note,
+        headers,
+      });
       break;
     }
     case "role_changed": {
@@ -391,6 +448,15 @@ export async function undoAction(
         .where(eq(user.id, action.targetUserId!))
         .limit(1);
       if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
+
+      // Both ends of the swing must be manageable: the role currently held
+      // (what the reviewer would be acting on) and the role being restored.
+      if (
+        !canManageRole(actorRole, target.role ?? "user") ||
+        !canManageRole(actorRole, oldRole)
+      ) {
+        throw new ORPCError("FORBIDDEN");
+      }
 
       await db.update(user).set({ role: oldRole }).where(eq(user.id, action.targetUserId!));
       await logAction(db, {

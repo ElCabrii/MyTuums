@@ -3,8 +3,9 @@ import {
   APPEALABLE_ACTIONS,
   INVERSE_ACTION,
   MODERATION_ACTION_CODES,
-} from "./moderation-actions.js";
-import { POST_REPORT_REASONS, USER_REPORT_REASONS } from "./constants.js";
+  POST_REPORT_REASONS,
+  USER_REPORT_REASONS,
+} from "./constants.js";
 
 describe("MODERATION_ACTION_CODES", () => {
   it("lists the nine stable codes — the schema check constraint's list", () => {

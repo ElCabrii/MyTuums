@@ -16,6 +16,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appealToken } from "./appeal-token.js";
 import type { Context } from "./context.js";
+import { RATE_LIMITS } from "./rate-limit.js";
 import { appRouter } from "./router.js";
 import {
   anonContext,
@@ -540,6 +541,110 @@ describe("queue", () => {
     // returned (the house pattern); anchoring on the first case past the
     // page instead dropped exactly that case at every page boundary.
     for (const limit of [1, 2, 5]) {
+      const walked = await walkAllQueuePages(contextFor(mod), limit);
+      const keys = walked.map((k) => `${k.targetType}:${k.targetId}`);
+      expect(new Set(keys).size).toBe(keys.length);
+      expect(new Set(keys)).toEqual(new Set(await openCaseKeysFromDb()));
+    }
+
+    await clearQueueFixtures();
+  });
+
+  it("keyset walk stays exactly-once when a reported-and-appealed case's appeal is its newest half — the older report group is not re-admitted", async () => {
+    const author = await createTestUser();
+    const reporter = await createTestUser();
+    const mod = await moderatorUser();
+    const base = Date.UTC(2026, 7, 6, 12, 0, 0);
+
+    // Seven report-only cases, so the dual case below (merged key = its
+    // appeal, which is newer than every seeded report) is shown on page 1
+    // while its older report group sits below every later cursor — the
+    // position where a cursor that only knows the merged key re-admits the
+    // half that lost the merge, on every page until the cursor passes it.
+    const posts = await seedPosts(author.id, 7, {
+      createdAt: (index) => new Date(base - index * 60_000),
+    });
+    for (const p of posts) {
+      await seedReport(reporter.id, "post", p.id, "spam", p.createdAt);
+    }
+
+    // The dual case: reported (stamped by the removal), re-reported by a
+    // second reporter, appealed. Its merged key is the appeal's instant; its
+    // report group is older than every page-2+ cursor, so without the
+    // per-side exclusion the report half is re-admitted on every later page
+    // and the case shows up again.
+    const dual = await seedPostContent(author.id, "dual half", {
+      createdAt: new Date(base - 8 * 60_000),
+    });
+    const reporter2 = await createTestUser();
+    await seedReport(reporter.id, "post", dual.id, "spam", new Date(base - 7 * 60_000));
+    await call(
+      appRouter.moderation.removePost,
+      { postId: dual.id, reason: "rule break" },
+      { context: contextFor(mod) },
+    );
+    await seedReport(reporter2.id, "post", dual.id, "harassment", new Date(base - 6 * 60_000));
+    const removal = await latestAction("post_removed", "post", dual.id);
+    await call(
+      appRouter.moderation.appealOpen,
+      { token: appealLink(removal!.id, author.id), reason: "Appealing this removal" },
+      { context: anonContext },
+    );
+
+    for (const limit of [1, 2, 3]) {
+      const walked = await walkAllQueuePages(contextFor(mod), limit);
+      const keys = walked.map((k) => `${k.targetType}:${k.targetId}`);
+      expect(new Set(keys).size).toBe(keys.length);
+      expect(new Set(keys)).toEqual(new Set(await openCaseKeysFromDb()));
+    }
+
+    await clearQueueFixtures();
+  });
+
+  it("keyset walk stays exactly-once when the appeal is the older half — a newer report does not re-admit the appeal", async () => {
+    const author = await createTestUser();
+    const reporter = await createTestUser();
+    const mod = await moderatorUser();
+    const base = Date.UTC(2026, 7, 6, 12, 0, 0);
+
+    const posts = await seedPosts(author.id, 7, {
+      createdAt: (index) => new Date(base - index * 60_000),
+    });
+    for (const p of posts) {
+      await seedReport(reporter.id, "post", p.id, "spam", p.createdAt);
+    }
+
+    // The dual case with the appeal as the OLDER half: reported, removed
+    // (stamping that report actioned), appealed, restored, re-reported. Its
+    // merged key is the re-report's instant, so the next page's appeal query
+    // alone would re-admit the appeal as an appeal-only duplicate.
+    const dual = await seedPostContent(author.id, "dual half, appeal older", {
+      createdAt: new Date(base - 8 * 60_000),
+    });
+    await call(
+      appRouter.moderation.report,
+      { targetType: "post", targetId: dual.id, reason: "spam" },
+      { context: contextFor(reporter) },
+    );
+    await call(
+      appRouter.moderation.removePost,
+      { postId: dual.id, reason: "rule break" },
+      { context: contextFor(mod) },
+    );
+    const removal = await latestAction("post_removed", "post", dual.id);
+    await call(
+      appRouter.moderation.appealOpen,
+      { token: appealLink(removal!.id, author.id), reason: "Appealing this removal" },
+      { context: anonContext },
+    );
+    await call(appRouter.moderation.restorePost, { postId: dual.id }, { context: contextFor(mod) });
+    await call(
+      appRouter.moderation.report,
+      { targetType: "post", targetId: dual.id, reason: "harassment" },
+      { context: contextFor(reporter) },
+    );
+
+    for (const limit of [1, 2, 3]) {
       const walked = await walkAllQueuePages(contextFor(mod), limit);
       const keys = walked.map((k) => `${k.targetType}:${k.targetId}`);
       expect(new Set(keys).size).toBe(keys.length);
@@ -1182,6 +1287,37 @@ describe("banUser and unbanUser", () => {
       ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "This account isn't banned or suspended." });
   });
+
+  it("unbanUser carries the same rank guard as the sentence — staff cannot lift an admin's ban on a staff peer", async () => {
+    const staffVictim = await staffUser();
+    const admin = await adminUser();
+    const staffReviewer = await staffUser();
+
+    // Only an admin can impose a sentence on a staff member — and only
+    // someone who could have imposed it may lift it (issue #38 review: the
+    // inverse path was the one enforcement gap).
+    await call(
+      appRouter.moderation.banUser,
+      { userId: staffVictim.id, reason: "spam" },
+      { context: contextFor(admin) },
+    );
+
+    await expect(
+      call(
+        appRouter.moderation.unbanUser,
+        { userId: staffVictim.id },
+        { context: contextFor(staffReviewer) },
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    // The admin who could impose the sentence can lift it.
+    await call(
+      appRouter.moderation.unbanUser,
+      { userId: staffVictim.id },
+      { context: contextFor(admin) },
+    );
+    expect(await latestAction("user_unbanned", "user", staffVictim.id)).toBeDefined();
+  });
 });
 
 describe("setRole, team, auditLog", () => {
@@ -1309,6 +1445,14 @@ describe("setRole, team, auditLog", () => {
   });
 
   it("auditLog keyset walk returns every action exactly once, newest first — the boundary row is never dropped", async () => {
+    // The walk asserts against the WHOLE table, and each page is a procedure
+    // call against the `moderate` rate tier (60/min per user). The suite
+    // accumulates audit rows on purpose (evidence is append-only), so the
+    // table only grows — truncating here keeps the walk bounded and
+    // deterministic instead of one PR away from a rate-limit failure. The
+    // append-only re-walk below still proves the head-of-queue behavior.
+    await anonContext.db.delete(moderationAction);
+
     const staff = await staffUser();
     const victim = await createTestUser();
     const bob = await createTestUser();
@@ -1622,6 +1766,153 @@ describe("appeal flow", () => {
     await clearQueueFixtures();
   });
 
+  it("a reviewed appeal is final — a fresh link for the same action is refused even after the review", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const mod2 = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "final appeal");
+
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "spam" },
+      { context: contextFor(mod) },
+    );
+    const removal = await latestAction("post_removed", "post", postRow.id);
+
+    const opened = await call(
+      appRouter.moderation.appealOpen,
+      { token: appealLink(removal!.id, author.id), reason: "This removal is unfair" },
+      { context: anonContext },
+    );
+    await call(
+      appRouter.moderation.appealReview,
+      { appealId: opened.appealId, outcome: "upheld" },
+      { context: contextFor(mod2) },
+    );
+
+    // The action is still current (upheld), so a second appeal would
+    // otherwise be meaningful — but the review is final by design: the
+    // schema comment and the resolution email both promise it.
+    await expect(
+      call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(removal!.id, author.id), reason: "Appealing again anyway" },
+        { context: anonContext },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This action has already been appealed, and the review is final.",
+    });
+
+    await clearQueueFixtures();
+  });
+
+  it("an appeal cannot overturn a newer sentence — the contested action must still be the latest of its kind", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const mod2 = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "superseded removal");
+
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "first offense" },
+      { context: contextFor(mod) },
+    );
+    const removal1 = await latestAction("post_removed", "post", postRow.id);
+    const opened = await call(
+      appRouter.moderation.appealOpen,
+      { token: appealLink(removal1!.id, author.id), reason: "The first removal was unfair" },
+      { context: anonContext },
+    );
+
+    // Manual restore, then a SECOND removal: the contested action no longer
+    // governs the post's state, and overturning it would clear the NEWER
+    // tombstone — the live-state currency check cannot see this, the action
+    // log can.
+    await call(appRouter.moderation.restorePost, { postId: postRow.id }, { context: contextFor(mod) });
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "second offense" },
+      { context: contextFor(mod) },
+    );
+
+    await expect(
+      call(
+        appRouter.moderation.appealReview,
+        { appealId: opened.appealId, outcome: "overturned" },
+        { context: contextFor(mod2) },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "A newer moderation action has superseded this one.",
+    });
+
+    // The newer removal is untouched.
+    const [row] = await anonContext.db
+      .select({ removedAt: post.removedAt })
+      .from(post)
+      .where(eq(post.id, postRow.id));
+    expect(row?.removedAt).not.toBeNull();
+
+    // A fresh link for the superseded action can't open a new appeal either.
+    await expect(
+      call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(removal1!.id, author.id), reason: "Appealing the old removal" },
+        { context: anonContext },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "A newer moderation action has superseded this one.",
+    });
+
+    await clearQueueFixtures();
+  });
+
+  it("an overturn cannot restore a rank above the reviewer's own — only a rank that could manage the state may undo it", async () => {
+    const victim = await staffUser();
+    const admin = await adminUser();
+    const otherAdmin = await adminUser();
+    const mod = await moderatorUser();
+
+    // The admin demotes the staff member; the demotion is appealable.
+    await call(
+      appRouter.moderation.setRole,
+      { userId: victim.id, role: "moderator" },
+      { context: contextFor(admin) },
+    );
+    const demotion = await latestAction("role_changed", "user", victim.id);
+
+    const opened = await call(
+      appRouter.moderation.appealOpen,
+      { token: appealLink(demotion!.id, victim.id), reason: "I should keep my rank" },
+      { context: anonContext },
+    );
+
+    // A moderator reviewer cannot overturn — that would re-grant staff, a
+    // state they could never have imposed (issue #38 review).
+    await expect(
+      call(
+        appRouter.moderation.appealReview,
+        { appealId: opened.appealId, outcome: "overturned" },
+        { context: contextFor(mod) },
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    // An admin (not the original actor) can: the restore is another role
+    // change, logged with the full swing.
+    await call(
+      appRouter.moderation.appealReview,
+      { appealId: opened.appealId, outcome: "overturned" },
+      { context: contextFor(otherAdmin) },
+    );
+    const [row] = await anonContext.db
+      .select({ role: user.role })
+      .from(user)
+      .where(eq(user.id, victim.id));
+    expect(row?.role).toBe("staff");
+  });
+
   it("the signed-in stub path: the author appeals their own removed post; others are refused", async () => {
     const author = await createTestUser();
     const stranger = await createTestUser();
@@ -1774,6 +2065,9 @@ describe("gates", () => {
       call(appRouter.moderation.unblock, { userId: author.id }, { context: anonContext }),
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
     await expect(
+      call(appRouter.moderation.listBlocked, undefined, { context: anonContext }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(
       call(appRouter.moderation.queue, {}, { context: anonContext }),
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
     await expect(
@@ -1888,6 +2182,32 @@ describe("gates", () => {
       ),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
+    // Plain user → staff procedures: FORBIDDEN too — the matrix must not
+    // silently degrade to "any signed-in user" without a test failing.
+    await expect(
+      call(
+        appRouter.moderation.banUser,
+        { userId: victim.id, reason: "spam" },
+        { context: contextFor(plain) },
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      call(appRouter.moderation.unbanUser, { userId: victim.id }, { context: contextFor(plain) }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      call(
+        appRouter.moderation.setRole,
+        { userId: victim.id, role: "moderator" },
+        { context: contextFor(plain) },
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      call(appRouter.moderation.team, undefined, { context: contextFor(plain) }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      call(appRouter.moderation.auditLog, {}, { context: contextFor(plain) }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
     // Moderator → staff procedures: FORBIDDEN.
     await expect(
       call(
@@ -1912,5 +2232,30 @@ describe("gates", () => {
     await expect(
       call(appRouter.moderation.auditLog, {}, { context: contextFor(mod) }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("the report rate tier is wired to the procedure — a 21st report in a minute trips TOO_MANY_REQUESTS", async () => {
+    const reporter = await createTestUser();
+    const author = await createTestUser();
+    // One post per report: the procedure's upsert is per (reporter, target),
+    // so distinct targets keep the calls independent of idempotency.
+    const posts = await seedPosts(author.id, RATE_LIMITS.report.limit + 1);
+
+    let refused: unknown = null;
+    for (const p of posts) {
+      try {
+        await call(
+          appRouter.moderation.report,
+          { targetType: "post", targetId: p.id, reason: "spam" },
+          { context: contextFor(reporter) },
+        );
+      } catch (error) {
+        refused = error;
+      }
+    }
+
+    expect(refused).toMatchObject({ code: "TOO_MANY_REQUESTS" });
+
+    await clearQueueFixtures();
   });
 });
