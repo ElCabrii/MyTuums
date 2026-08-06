@@ -170,4 +170,24 @@ export const RATE_LIMITS = {
    * typeahead's bursts with room to spare.
    */
   search: { name: "search", limit: 120, windowMs: MINUTE },
+  /**
+   * Reporting. One indexed upsert per report, so by cost it could share the
+   * `write` tier — but a flood of reports is a moderation nuisance (a queue
+   * full of junk), not a data hazard, so it gets its own namespace: someone
+   * burning this one must not also lock themselves out of posting.
+   */
+  report: { name: "report", limit: 20, windowMs: MINUTE },
+  /**
+   * Blocking. The same shape as `follow` (one indexed insert, a mass-action
+   * spam vector), so it gets the same budget by the same reasoning.
+   */
+  block: { name: "block", limit: 30, windowMs: MINUTE },
+  /**
+   * Moderation actions — removals, suspensions, bans, resolutions. The most
+   * generous of the moderation namespaces on purpose: one moderator working
+   * a queue legitimately clears many cases in a minute, and every action
+   * also writes an audit row and sends mail, so this one has real per-call
+   * cost.
+   */
+  moderate: { name: "moderate", limit: 60, windowMs: MINUTE },
 } as const satisfies Record<string, RateLimitPolicy>;

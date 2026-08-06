@@ -104,6 +104,15 @@ type SessionWithDeclaredFields = ReturnType<typeof useSession> & {
       bannerImage: string | null;
       themePreference: string | null;
       localePreference: string | null;
+      // The moderation system's role and ban fields (issue #38), typed off
+      // the wire exactly like the additionalFields above: the admin plugin's
+      // schema reaches this client only as JSON. `role` defaults to "user"
+      // on every account; the ban trio is false/null until a moderator acts.
+      // `atoms/session.ts` sanitises role on read — never trust the wire.
+      role: string | null;
+      banned: boolean;
+      banExpires: Date | string | null;
+      banReason: string | null;
     };
   } | null;
 };
