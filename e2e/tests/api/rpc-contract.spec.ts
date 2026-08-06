@@ -27,11 +27,24 @@ test.describe("oRPC contract", () => {
   });
 
   test("a malformed body is rejected cleanly rather than 500ing", async ({ request }) => {
-    // Against a PUBLIC procedure deliberately, not post/create: a protected
-    // one would 401 before ever attempting to parse the body (auth runs
-    // ahead of input validation — see the test above), which would prove
-    // nothing about malformed-body handling itself.
-    //
+    // Every procedure is `protectedProcedure` now (issue #36) and auth runs
+    // ahead of input validation (see the test above) — an unauthenticated
+    // call would 401 before ever attempting to parse the body, which would
+    // prove nothing about malformed-body handling itself. A throwaway signed
+    // -up user, under its own identity for the same reason the rate-limit
+    // test below uses one, gets this past the auth guard so the malformed
+    // body actually reaches input parsing.
+    const username = `mb${Date.now().toString(36)}`;
+    const signUp = await request.post("/api/auth/sign-up/email", {
+      data: {
+        email: `${username}@example.test`,
+        password: "malformed-body-probe-password",
+        name: "Malformed Body Probe",
+        username,
+      },
+    });
+    expect(signUp.ok(), await signUp.text()).toBe(true);
+
     // The body has to go over the wire as raw bytes, not Playwright's `data`
     // string handling: passing a plain string still gets JSON-encoded when a
     // `Content-Type: application/json` header is present (turning it into a

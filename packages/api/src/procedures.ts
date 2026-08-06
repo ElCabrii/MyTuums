@@ -4,15 +4,18 @@ import type { RateLimitPolicy } from "./rate-limit.js";
 
 const base = os.$context<Context>();
 
+/** The session user, once a session is guaranteed to exist — what `protectedProcedure` adds to `context.user`. */
+type SessionUser = NonNullable<Context["session"]>["user"];
+
 /**
- * Throttles a procedure per caller.
+ * Throttles a procedure per signed-in caller, keyed on `user:<id>`.
  *
- * Identity is the user id when there is a session and the client IP
- * otherwise, prefixed so a user id can never collide with an IP. A caller we
- * can't identify at all falls into a single shared `ip:unknown` bucket: that
- * bucket is easy for unrelated callers to exhaust between them, but the
- * alternative — treating "no identity" as exempt — would make the limit
- * trivially bypassable, and being throttled is the safer failure.
+ * There is no anonymous surface left to fall back to an IP-keyed bucket for —
+ * every procedure in this app requires a session (see `protectedProcedure`
+ * below; issue #36). This is typed against a context that already carries
+ * `user`, not the bare `Context`, so a procedure that tried to rate-limit
+ * without going through `protectedProcedure` first would fail to compile
+ * rather than silently keying on `undefined`.
  *
  * Applied per procedure rather than globally so the budget can match what the
  * call actually costs; see RATE_LIMITS in ./rate-limit.ts.
@@ -23,30 +26,27 @@ const base = os.$context<Context>();
  * doc comment on `Context.rateLimiter` in ./context.ts.
  */
 export function rateLimit(policy: RateLimitPolicy) {
-  return base.middleware(({ context, next }) => {
-    const identity = context.session?.user.id
-      ? `user:${context.session.user.id}`
-      : `ip:${context.clientIp ?? "unknown"}`;
+  return os
+    .$context<Context & { user: SessionUser }>()
+    .middleware(({ context, next }) => {
+      const result = context.rateLimiter.consume(`${policy.name}:user:${context.user.id}`, policy);
 
-    const result = context.rateLimiter.consume(`${policy.name}:${identity}`, policy);
+      if (!result.allowed) {
+        throw new ORPCError("TOO_MANY_REQUESTS", {
+          message: "You're doing that too fast. Try again in a moment.",
+          data: { retryAfterSeconds: result.retryAfterSeconds },
+        });
+      }
 
-    if (!result.allowed) {
-      throw new ORPCError("TOO_MANY_REQUESTS", {
-        message: "You're doing that too fast. Try again in a moment.",
-        data: { retryAfterSeconds: result.retryAfterSeconds },
-      });
-    }
-
-    return next();
-  });
+      return next();
+    });
 }
-
-/** The base procedure — usable without a session, which is what keeps the public feeds public. */
-export const publicProcedure = base;
 
 /**
  * The base procedure plus a session requirement; handlers receive the session
- * user as `context.user`.
+ * user as `context.user`. Every procedure in this app is built from this —
+ * there is no anonymous surface (issue #36; `publicProcedure` used to sit
+ * here for the five/eight reads that stayed public, and is now gone).
  */
 export const protectedProcedure = base.use(({ context, next }) => {
   if (!context.session?.user) throw new ORPCError("UNAUTHORIZED");

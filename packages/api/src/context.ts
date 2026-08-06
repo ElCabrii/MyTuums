@@ -13,17 +13,6 @@ export interface Context {
   db: Database;
   session: Session;
   /**
-   * The caller's IP, as resolved by the transport (see
-   * apps/server/src/client-ip.ts). It is the rate limiter's fallback identity
-   * for anonymous callers, who have no user id to key on.
-   *
-   * Optional because it is transport-specific: `call()` in tests, and any
-   * future in-process caller, have no socket behind them. A missing IP is
-   * treated as one shared bucket rather than as "unlimited" — see
-   * ./procedures.ts.
-   */
-  clientIp?: string;
-  /**
    * Where `./procedures.ts`'s `rateLimit()` middleware consumes budget.
    *
    * Required, not optional: every `Context` has to come from somewhere, and
@@ -93,19 +82,17 @@ const defaultStorage: Storage | null =
  */
 export async function createContext({
   headers,
-  clientIp,
   rateLimiter = defaultRateLimiter,
   storage = defaultStorage,
 }: {
   headers: Headers;
-  clientIp?: string;
   /** Override for tests that want to build a context without a real request. */
   rateLimiter?: RateLimiter;
   /** Override so a test can supply a fake bucket instead of reaching a real one. */
   storage?: Storage | null;
 }): Promise<Context> {
   const session = await auth.api.getSession({ headers });
-  return { db, session, clientIp, rateLimiter, storage };
+  return { db, session, rateLimiter, storage };
 }
 
 /** The process-wide storage client, for callers outside a procedure (the `/media` route). */

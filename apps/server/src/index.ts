@@ -1,5 +1,4 @@
 import { parseEnv } from "./env.js";
-import { resolveClientIp } from "./client-ip.js";
 import { createRequestHandler } from "./request-handler.js";
 import { createStaticFileHandler, noStaticFiles } from "./static-files.js";
 import { decorateResponse } from "./response-decorators.js";
@@ -61,17 +60,17 @@ const handler = new RPCHandler(appRouter, {
 });
 
 // The routing decision tree itself lives in request-handler.ts, unit-tested
-// there against stand-ins for these four dependencies. This is the only
+// there against stand-ins for these six dependencies. This is the only
 // place they become real: a live DB ping, BetterAuth's actual node handler,
-// a real oRPC context resolved per request, and a real presigner over the
-// configured bucket (or one that always 404s, when no bucket is configured).
+// a real oRPC context resolved per request, a real presigner over the
+// configured bucket (or one that always 404s, when no bucket is configured),
+// and a real session check for the page gate.
 const handleRequest = createRequestHandler({
   pingDb,
   authNodeHandler,
   handleRpc: async (req, res) => {
     const context = await createContext({
       headers: fromNodeHeaders(req.headers),
-      clientIp: resolveClientIp(req, env.TRUST_PROXY),
     });
 
     return handler.handle(req, res, { prefix: "/rpc", context });
@@ -82,6 +81,24 @@ const handleRequest = createRequestHandler({
   // ./static-files.ts for why one origin is a requirement rather than a
   // preference.
   serveStatic: env.WEB_DIST ? createStaticFileHandler(env.WEB_DIST) : noStaticFiles,
+  // Deliberately fails OPEN (`true`) on any error — a database blip must
+  // degrade to "the client gate decides", the behaviour every visitor already
+  // had before this server-side gate existed, never to "every signed-in
+  // visitor gets bounced to /login and reads it as a mass logout". The page
+  // gate leaks nothing on a false positive: the served shell carries no data
+  // (see request-handler.ts), and every `/rpc` procedure still requires its
+  // own session independently.
+  hasValidSession: async (req) => {
+    try {
+      return (await auth.api.getSession({ headers: fromNodeHeaders(req.headers) })) !== null;
+    } catch (error) {
+      console.error(
+        "Page gate: session check failed; serving the app and letting its own gate decide:",
+        error,
+      );
+      return true;
+    }
+  },
 });
 
 // `createServer`'s callback type is `(req, res) => void`; passing an async

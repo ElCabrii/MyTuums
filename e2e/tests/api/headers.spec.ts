@@ -140,9 +140,21 @@ test.describe("JSON response compression", () => {
       expect(created.status(), await created.text()).toBe(200);
     }
 
+    // `post.list` is `protectedProcedure` now (issue #36), and `rawRequest`
+    // below is a raw `node:http` client — deliberately, so the gzip assertion
+    // can see undecoded bytes — which shares no cookie jar with the `request`
+    // fixture above. The session cookie has to be forwarded by hand.
+    const { cookies } = await request.storageState();
+    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+
     const wire = await rawRequest("/rpc/post/list", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...RPC_HEADERS, "accept-encoding": "gzip" },
+      headers: {
+        "Content-Type": "application/json",
+        ...RPC_HEADERS,
+        "accept-encoding": "gzip",
+        cookie: cookieHeader,
+      },
       body: JSON.stringify({ json: {} }),
     });
 

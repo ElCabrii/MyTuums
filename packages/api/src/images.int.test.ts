@@ -252,7 +252,7 @@ describe("user.uploadImage", () => {
         appRouter.user.uploadImage,
         uploadInput("avatar"),
         // The supported "no S3_* group" configuration — see context.ts.
-        { context: contextFor(alice, undefined, undefined, null) },
+        { context: contextFor(alice, undefined, null) },
       ),
     ).rejects.toThrow(/aren't configured/);
   });

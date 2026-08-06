@@ -37,7 +37,6 @@ const stackEnv = {
   PORT: String(SERVER_PORT),
   HOST: "127.0.0.1",
   NODE_ENV: "development",
-  TRUST_PROXY: "false",
   // Every request in this suite comes from 127.0.0.1, so to BetterAuth's rate
   // limiter the whole run looks like one client brute-forcing sign-in — the
   // exact shape `customRules` in packages/auth/src/index.ts exists to stop. The

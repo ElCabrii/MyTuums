@@ -55,13 +55,13 @@ In production the API serves the built SPA (`WEB_DIST` set by the Dockerfile), b
 
 ### apps/server — the HTTP server
 - `src/env.ts`: zod-validated env; a *partial* OAuth pair or S3 group refuses to boot (`superRefine`). `parseEnv` throws but never exits — only the real entrypoint `src/index.ts` turns a bad env into `process.exit(1)`.
-- `src/request-handler.ts`: the routing tree (health → `/api/auth` (better-auth) → `/rpc` (oRPC) → `/media` → static SPA), unit-tested with stand-ins; `src/index.ts` wires the real dependencies, plus deliberate graceful shutdown that drains the DB pool.
+- `src/request-handler.ts`: the routing tree (health → `/api/auth` (better-auth) → `/rpc` (oRPC) → `/media` (session required, checked before the key is parsed) → page gate → static SPA), unit-tested with stand-ins; `src/index.ts` wires the real dependencies, plus deliberate graceful shutdown that drains the DB pool. The page gate enforces the same sign-in requirement as the client's `useRequireSignedIn`, sharing its allowlist (`SIGNED_OUT_PATHS` in `@my-tuums/api/constants`) so the two can't drift into a redirect loop. Between `/media` and the page gate, no anonymous request ever reaches user content (issue #36 closed every procedure; a leaked media key is the one thing this doesn't retroactively fix — see the load-bearing note in `apps/server/CLAUDE.md`).
 - Bundled with tsup: source-only workspace packages (`@my-tuums/{api,auth,db}`) get inlined; real npm deps stay external.
 
 ### packages/api — the oRPC contract
-- `src/router.ts` defines `appRouter` (`me`, `post`, `user`); `posts.ts`/`users.ts` hold the procedures, built from `publicProcedure`/`protectedProcedure` in `procedures.ts` over drizzle queries.
-- `Context` (`{ db, session, clientIp, rateLimiter, storage }`) threads the rate limiter and S3 storage through every procedure — never module globals — so tests can substitute fakes.
-- `rateLimit(policy)` middleware keys on `user:<id>` or `ip:<ip>`; unidentifiable callers share one `ip:unknown` bucket rather than being exempt.
+- `src/router.ts` defines `appRouter` (`me`, `post`, `user`, `search`); `posts.ts`/`users.ts`/`search.ts` hold the procedures, all built from `protectedProcedure` in `procedures.ts` over drizzle queries — there is no anonymous surface (issue #36).
+- `Context` (`{ db, session, rateLimiter, storage }`) threads the rate limiter and S3 storage through every procedure — never module globals — so tests can substitute fakes.
+- `rateLimit(policy)` middleware keys on `user:<id>` — every caller is a signed-in user, so there is no anonymous fallback to key on.
 - Feeds are keyset-paginated on `(created_at, id)` (`cursor.ts`); like/reply counts are derived subqueries, not denormalized columns.
 - `storage.ts`/`media.ts`: S3 presigned-upload abstraction; `dimensions.ts` parses WebP dimensions.
 - Test split by filename: `*.test.ts` (unit, no I/O) vs `*.int.test.ts` (real Postgres + sessions; shared harness in `src/testing/harness.ts`, `fileParallelism: false`).

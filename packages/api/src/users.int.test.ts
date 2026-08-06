@@ -18,12 +18,24 @@ afterAll(async () => {
 });
 
 describe("user.byUsername", () => {
+  it("rejects an anonymous caller", async () => {
+    const alice = await createTestUser();
+    await expect(
+      call(
+        appRouter.user.byUsername,
+        { username: alice.session.user.username! },
+        { context: anonContext },
+      ),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
   it("never returns email or emailVerified — this is the privacy boundary: widening publicUserColumns should fail this test", async () => {
     const alice = await createTestUser();
+    const viewer = await createTestUser();
     const result = await call(
       appRouter.user.byUsername,
       { username: alice.session.user.username! },
-      { context: anonContext },
+      { context: contextFor(viewer) },
     );
 
     expect(Object.keys(result).sort()).toEqual(
@@ -63,12 +75,12 @@ describe("user.byUsername", () => {
     const followers = await call(
       appRouter.user.followers,
       { username: hub.session.user.username! },
-      { context: anonContext },
+      { context: contextFor(hub) },
     );
     const following = await call(
       appRouter.user.following,
       { username: follower.session.user.username! },
-      { context: anonContext },
+      { context: contextFor(hub) },
     );
 
     expect(followers.items).not.toHaveLength(0);
@@ -81,16 +93,17 @@ describe("user.byUsername", () => {
 
   it("resolves case-insensitively and preserves the typed display casing", async () => {
     const created = await createTestUser({ username: "AlexMercer" });
+    const viewer = await createTestUser();
 
     const byMixed = await call(
       appRouter.user.byUsername,
       { username: "AlexMercer" },
-      { context: anonContext },
+      { context: contextFor(viewer) },
     );
     const byLower = await call(
       appRouter.user.byUsername,
       { username: "alexmercer" },
-      { context: anonContext },
+      { context: contextFor(viewer) },
     );
 
     expect(byMixed.id).toBe(created.id);
@@ -100,43 +113,59 @@ describe("user.byUsername", () => {
   });
 
   it("an unknown handle is NOT_FOUND", async () => {
+    const viewer = await createTestUser();
     await expect(
-      call(appRouter.user.byUsername, { username: "nosuchhandleatall" }, { context: anonContext }),
+      call(
+        appRouter.user.byUsername,
+        { username: "nosuchhandleatall" },
+        { context: contextFor(viewer) },
+      ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("rejects handles shorter than 3 or longer than 20 characters, and accepts the boundary lengths", async () => {
+    const viewer = await createTestUser();
+
     await expect(
-      call(appRouter.user.byUsername, { username: "ab" }, { context: anonContext }),
+      call(appRouter.user.byUsername, { username: "ab" }, { context: contextFor(viewer) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(
-      call(appRouter.user.byUsername, { username: "a".repeat(21) }, { context: anonContext }),
+      call(
+        appRouter.user.byUsername,
+        { username: "a".repeat(21) },
+        { context: contextFor(viewer) },
+      ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
     // 3 and 20 chars are valid *lengths*; no user has these exact handles, so
     // the boundary is proven by NOT_FOUND rather than BAD_REQUEST — a
     // BAD_REQUEST here would mean the length check is still off by one.
     await expect(
-      call(appRouter.user.byUsername, { username: "abc" }, { context: anonContext }),
+      call(appRouter.user.byUsername, { username: "abc" }, { context: contextFor(viewer) }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(
-      call(appRouter.user.byUsername, { username: "a".repeat(20) }, { context: anonContext }),
+      call(
+        appRouter.user.byUsername,
+        { username: "a".repeat(20) },
+        { context: contextFor(viewer) },
+      ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("reports correct followerCount/followingCount/viewerIsFollowing, false for an anonymous viewer", async () => {
+  it("reports correct followerCount/followingCount/viewerIsFollowing, false for a viewer with no relationship to the target", async () => {
     const hub = await createTestUser();
     const follower = await createTestUser();
+    const stranger = await createTestUser();
     await call(appRouter.user.follow, { userId: hub.id }, { context: contextFor(follower) });
 
     const hubUsername = hub.session.user.username!;
-    const asAnon = await call(
+    const asStranger = await call(
       appRouter.user.byUsername,
       { username: hubUsername },
-      { context: anonContext },
+      { context: contextFor(stranger) },
     );
-    expect(asAnon.followerCount).toBe(1);
-    expect(asAnon.viewerIsFollowing).toBe(false);
+    expect(asStranger.followerCount).toBe(1);
+    expect(asStranger.viewerIsFollowing).toBe(false);
 
     const asFollower = await call(
       appRouter.user.byUsername,
@@ -148,7 +177,7 @@ describe("user.byUsername", () => {
     const followerProfile = await call(
       appRouter.user.byUsername,
       { username: follower.session.user.username! },
-      { context: anonContext },
+      { context: contextFor(stranger) },
     );
     expect(followerProfile.followingCount).toBe(1);
   });

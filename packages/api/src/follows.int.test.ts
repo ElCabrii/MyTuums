@@ -127,12 +127,12 @@ describe("user.follow / user.unfollow", () => {
     const targetProfile = await call(
       appRouter.user.byUsername,
       { username: target.session.user.username! },
-      { context: anonContext },
+      { context: contextFor(follower) },
     );
     const followerProfile = await call(
       appRouter.user.byUsername,
       { username: follower.session.user.username! },
-      { context: anonContext },
+      { context: contextFor(follower) },
     );
 
     expect(targetProfile.followerCount).toBe(1);
@@ -141,6 +141,17 @@ describe("user.follow / user.unfollow", () => {
 });
 
 describe("user.followers / user.following", () => {
+  it("followers/following require authentication", async () => {
+    const hub = await createTestUser();
+    const hubUsername = hub.session.user.username!;
+    await expect(
+      call(appRouter.user.followers, { username: hubUsername }, { context: anonContext }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(
+      call(appRouter.user.following, { username: hubUsername }, { context: anonContext }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
   it("followers and following join opposite columns of the relation", async () => {
     const hub = await createTestUser();
     const followerOfHub = await createTestUser();
@@ -161,12 +172,12 @@ describe("user.followers / user.following", () => {
     const followers = await call(
       appRouter.user.followers,
       { username: hubUsername },
-      { context: anonContext },
+      { context: contextFor(hub) },
     );
     const following = await call(
       appRouter.user.following,
       { username: hubUsername },
-      { context: anonContext },
+      { context: contextFor(hub) },
     );
 
     expect(followers.items.map((i) => i.id)).toEqual([followerOfHub.id]);
@@ -174,11 +185,20 @@ describe("user.followers / user.following", () => {
   });
 
   it("followers/following for an unknown handle is NOT_FOUND", async () => {
+    const viewer = await createTestUser();
     await expect(
-      call(appRouter.user.followers, { username: "nobodyusesthishandle" }, { context: anonContext }),
+      call(
+        appRouter.user.followers,
+        { username: "nobodyusesthishandle" },
+        { context: contextFor(viewer) },
+      ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(
-      call(appRouter.user.following, { username: "nobodyusesthishandle" }, { context: anonContext }),
+      call(
+        appRouter.user.following,
+        { username: "nobodyusesthishandle" },
+        { context: contextFor(viewer) },
+      ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
@@ -190,14 +210,14 @@ describe("user.followers / user.following", () => {
       call(
         appRouter.user.followers,
         { username: hubUsername, cursor: "garbage" },
-        { context: anonContext },
+        { context: contextFor(hub) },
       ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(
       call(
         appRouter.user.following,
         { username: hubUsername, cursor: "garbage" },
-        { context: anonContext },
+        { context: contextFor(hub) },
       ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
@@ -213,7 +233,7 @@ describe("user.followers / user.following", () => {
         .insert(follow)
         .values(followers.map((f) => ({ followerId: f.id, followingId: hub.id, createdAt: tiedAt })));
 
-      const ids = await walkAllFollowerIds(hub.session.user.username!, anonContext, 1);
+      const ids = await walkAllFollowerIds(hub.session.user.username!, contextFor(hub), 1);
 
       expect(ids).toHaveLength(3);
       expect(new Set(ids)).toEqual(new Set(followers.map((f) => f.id)));
@@ -232,7 +252,7 @@ describe("user.followers / user.following", () => {
         .insert(follow)
         .values(followees.map((f) => ({ followerId: hub.id, followingId: f.id, createdAt: tiedAt })));
 
-      const ids = await walkAllFollowingIds(hub.session.user.username!, anonContext, 1);
+      const ids = await walkAllFollowingIds(hub.session.user.username!, contextFor(hub), 1);
 
       expect(ids).toHaveLength(3);
       expect(new Set(ids)).toEqual(new Set(followees.map((f) => f.id)));
@@ -258,12 +278,16 @@ describe("user.followers / user.following", () => {
     const followPage = await call(
       appRouter.user.followers,
       { username: hub.session.user.username!, limit: 1 },
-      { context: anonContext },
+      { context: contextFor(followerA) },
     );
     expect(followPage.nextCursor).not.toBeNull();
 
     await expect(
-      call(appRouter.post.list, { cursor: followPage.nextCursor! }, { context: anonContext }),
+      call(
+        appRouter.post.list,
+        { cursor: followPage.nextCursor! },
+        { context: contextFor(followerA) },
+      ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });

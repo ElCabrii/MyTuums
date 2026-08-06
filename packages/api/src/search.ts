@@ -8,7 +8,7 @@ import {
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { postSelection } from "./posts.js";
-import { publicProcedure, rateLimit } from "./procedures.js";
+import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { publicUserColumns, viewerIsFollowing } from "./users.js";
 
@@ -24,9 +24,8 @@ import { publicUserColumns, viewerIsFollowing } from "./users.js";
  * feed. pg_trgm GIN indexes are the documented future upgrade; none of this
  * changes if they land.
  *
- * All three procedures are public, exactly like `post.list` — search serves
- * public data, and `postSelection`/`viewerIsFollowing` already emit literal
- * `false` for anonymous viewers.
+ * All three procedures require a session, like every procedure in this app
+ * (issue #36).
  */
 
 /**
@@ -63,7 +62,7 @@ const searchPostCursor = createCursorCodec(z.uuid());
  * profile procedures use, so no search result can leak `email` or the
  * auth-reconnaissance columns.
  */
-const searchUserSelection = (viewerId: string | undefined) => ({
+const searchUserSelection = (viewerId: string) => ({
   ...publicUserColumns,
   viewerIsFollowing: viewerIsFollowing(viewerId),
 });
@@ -92,11 +91,11 @@ export const searchRouter = {
    * dropdown fits roughly ten rows; a full results page goes through
    * `users`/`posts` below instead.
    */
-  typeahead: publicProcedure
+  typeahead: protectedProcedure
     .use(rateLimit(RATE_LIMITS.search))
     .input(z.object({ q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH) }))
     .handler(async ({ input, context }) => {
-      const viewerId = context.session?.user.id;
+      const viewerId = context.user.id;
       const prefix = prefixPattern(input.q);
       const contains = containsPattern(input.q);
 
@@ -141,7 +140,7 @@ export const searchRouter = {
    * cursors are out of scope. This is what lets the results page walk the
    * matches without dupes or skips.
    */
-  users: publicProcedure
+  users: protectedProcedure
     .use(rateLimit(RATE_LIMITS.search))
     .input(
       z.object({
@@ -151,7 +150,7 @@ export const searchRouter = {
       }),
     )
     .handler(async ({ input, context }) => {
-      const viewerId = context.session?.user.id;
+      const viewerId = context.user.id;
       const cursor = input.cursor ? searchUserCursor.decode(input.cursor) : undefined;
 
       const filters = [
@@ -194,7 +193,7 @@ export const searchRouter = {
    * +1 lookahead skeleton as `post.list`. Replies are excluded, mirroring the
    * global feed.
    */
-  posts: publicProcedure
+  posts: protectedProcedure
     .use(rateLimit(RATE_LIMITS.search))
     .input(
       z.object({
@@ -204,7 +203,7 @@ export const searchRouter = {
       }),
     )
     .handler(async ({ input, context }) => {
-      const viewerId = context.session?.user.id;
+      const viewerId = context.user.id;
       const cursor = input.cursor ? searchPostCursor.decode(input.cursor) : undefined;
 
       const filters = [

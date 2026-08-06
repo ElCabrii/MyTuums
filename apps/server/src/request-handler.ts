@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
+import path from "node:path";
+import { RPC_MAX_BODY_BYTES, SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
 
 /**
  * The stand-ins `createRequestHandler` routes through, injected so the
@@ -20,7 +21,9 @@ export interface RequestHandlerDeps {
   handleRpc: (req: IncomingMessage, res: ServerResponse) => Promise<{ matched: boolean }>;
   /**
    * Turns a `/media/<key>` object key into a redirect target and the cache
-   * budget for that redirect, or `null` when it should 404.
+   * budget for that redirect, or `null` when it should 404. Only ever called
+   * for a request that already passed the session gate below — this resolver
+   * itself has no opinion on who is asking, same as it always has.
    *
    * Injected rather than imported for the same reason the three above are:
    * this module's job is the routing decision, and a unit test of it should
@@ -39,6 +42,21 @@ export interface RequestHandlerDeps {
    * itself keeps the 404 in one place.
    */
   serveStatic: (req: IncomingMessage, res: ServerResponse) => Promise<{ served: boolean }>;
+  /**
+   * Whether `req` carries a live session — a real `auth.api.getSession` check,
+   * not just "a cookie is present" (see `hasSessionCookie` below, which both
+   * gates that use this — the page gate and the `/media` gate — check first
+   * to avoid paying for this on every anonymous request).
+   *
+   * Injected rather than imported for the same reason as the deps above: this
+   * module stays free of `@my-tuums/auth`, so its unit tests need no database
+   * and no real session store. The real implementation must fail OPEN (return
+   * `true`) on an error — see its doc comment in `index.ts` — so a database
+   * blip degrades to "the client gate decides" for pages, and "images keep
+   * loading" for media, rather than either one turning a database hiccup into
+   * a mass sign-out or every avatar in the app breaking at once.
+   */
+  hasValidSession: (req: IncomingMessage) => Promise<boolean>;
 }
 
 const MEDIA_PREFIX = "/media/";
@@ -47,19 +65,20 @@ const MEDIA_PREFIX = "/media/";
  * The session cookie BetterAuth sets. Hardcoded rather than imported from
  * `@my-tuums/auth` — this module is deliberately free of that dependency (its
  * unit tests stand in for the auth handler) — and packages/auth never
- * overrides the default name. If the upstream default ever changes, the worst
- * case is that the redirect below stops firing: the app's own
- * `useRequireSignedIn` gate still covers the same ground client-side, so this
- * is an optimization with a safe failure mode, not a security control.
+ * overrides the default name.
+ *
+ * This is a genuine correctness dependency, not just an optimization: the
+ * page gate below short-circuits to "redirect, don't bother asking the
+ * session store" whenever this returns `false`, so a name mismatch would 302
+ * *every* visitor to `/login` — signed in or not — the same failure mode the
+ * old `/`-only version of this check had. If the upstream default ever
+ * changes, this must change with it.
  *
  * The name carries a `__Secure-` prefix whenever BetterAuth serves over
  * HTTPS, i.e. every production request; plain HTTP (dev, localhost) gets the
  * bare name. The check below mirrors BetterAuth's own `getCookie` fallback
- * (`parsedCookie.get(`__Secure-${name}`) ?? parsedCookie.get(name)`) so a
- * live cookie in either shape is recognised — a mismatch here 302s *every*
- * visitor at `/` to `/login?redirect=%2F`, logged in or not, and the login
- * page then bounces the real session back to `/` (the reload flicker this
- * recognition exists to prevent).
+ * (`parsedCookie.get(`__Secure-${name}`) ?? parsedCookie.get(name)`) so a live
+ * cookie in either shape is recognised.
  */
 const SESSION_COOKIE_NAME = "better-auth.session_token";
 
@@ -101,13 +120,34 @@ function mediaKeyOf(rawUrl: string): string | null {
 }
 
 /**
+ * The page gate's path check, deliberately NOT percent-decoded (unlike
+ * `mediaKeyOf` above). `SIGNED_OUT_PATHS` is compared against the raw
+ * pathname, so an encoded path like `/%6Cogin` — which decodes to `/login`
+ * but is not the literal string `"/login"` — fails the allowlist match and
+ * gets redirected rather than let through. Failing closed is the right
+ * direction for a gate; the worst case is an odd path getting redirected to
+ * `/login` unnecessarily, never a signed-out visitor reaching a page they
+ * shouldn't.
+ *
+ * Returns `null` for a malformed target, same as `mediaKeyOf` — a bad request
+ * is not a page this gate has an opinion on either.
+ */
+function pageGatePathname(rawUrl: string): string | null {
+  try {
+    return new URL(rawUrl, "http://page.invalid").pathname;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Builds the routing decision tree `index.ts` hands to `createServer`: health
  * check, the `/api/auth` and `/rpc` prefixes, the 404 fallback, and the
  * top-level exception safety net.
  *
  * Pulled out from `index.ts` specifically so this tree — which is entirely
  * our own logic, not a third-party library's — can be unit tested with
- * stand-ins for the five dependencies it routes through, none of which need
+ * stand-ins for the six dependencies it routes through, none of which need
  * to be real: no Postgres, no BetterAuth, no oRPC router, no listening
  * socket. What is NOT covered here is CORS — that is `CORSPlugin`'s behaviour
  * on the real `RPCHandler`, which is wire-level HTTP behaviour of a
@@ -132,22 +172,6 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ status: "error", reason: "database unreachable" }));
         }
-        return;
-      }
-
-      // A visitor with no session cookie at all is signed out, and a signed-out
-      // visitor to `/` is about to be redirected to `/login` by
-      // `useRequireSignedIn` — but only after the bundle downloads, the splash
-      // clears and the first `/get-session` resolves, with the home page
-      // mounting and firing its feed query in between. That whole round trip is
-      // wasted work the server can skip, and the redirect target is identical
-      // (`?redirect=%2F` included). A visitor whose cookie is present but stale
-      // falls through to the app, whose own gate makes the same decision it
-      // always has — so this only ever removes work, never changes what a
-      // signed-out visitor ends up seeing.
-      if (req.url === "/" && req.method === "GET" && !hasSessionCookie(req.headers.cookie)) {
-        res.writeHead(302, { Location: "/login?redirect=%2F" });
-        res.end();
         return;
       }
 
@@ -183,10 +207,36 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       if (req.url?.startsWith(MEDIA_PREFIX)) {
         // Reads only. These URLs sit in `<img src>` all over the app, and a
         // write verb reaching object storage through them is not something to
-        // leave to the bucket's own permissions to refuse.
+        // leave to the bucket's own permissions to refuse. Checked before the
+        // session gate below: a wrong verb is refused regardless of who is
+        // asking.
         if (req.method !== "GET" && req.method !== "HEAD") {
           res.writeHead(405, { "Content-Type": "text/plain", Allow: "GET, HEAD" });
           res.end("Method not allowed");
+          return;
+        }
+
+        // Same session gate as the page gate below, and deliberately BEFORE
+        // the key is even parsed: an anonymous caller must not be able to
+        // learn which keys are well-formed, let alone which objects exist, by
+        // watching whether the response differs. `no-store` is load-bearing,
+        // not decoration — without it a cached 401 could keep showing a
+        // broken image after the browser signs in, a failure mode invisible
+        // enough to be worth spelling out explicitly rather than relying on a
+        // 401 being merely non-heuristically-cacheable by default.
+        //
+        // This closes the one remaining anonymous read of user content: a
+        // media key that leaked (a pasted link, browser history, a log line)
+        // used to work forever, for anyone. It still requires a session now,
+        // same as every oRPC procedure (issue #36) and every page (the page
+        // gate above). What this does NOT do is revoke a presigned URL
+        // already handed out — that is a bearer credential good for its own
+        // TTL regardless, since this server never sees it again once issued.
+        const hasSession =
+          hasSessionCookie(req.headers.cookie) && (await deps.hasValidSession(req));
+        if (!hasSession) {
+          res.writeHead(401, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+          res.end("Unauthorized");
           return;
         }
 
@@ -215,6 +265,55 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         });
         res.end();
         return;
+      }
+
+      // The page gate: everything that reaches here is neither `/health`,
+      // `/api/auth`, `/rpc` nor `/media` — i.e. it is either a page the SPA
+      // would render or a static asset. Placed after those prefixes rather
+      // than at the top of the tree, deliberately, so this needs no
+      // hand-maintained copy of the routing decisions above it — `/` reaches
+      // here exactly as it always did.
+      //
+      // The site is private: `apps/web/src/hooks/use-require-signed-in.ts`
+      // bounces every path outside `SIGNED_OUT_PATHS` to `/login` client-side,
+      // but only after the bundle downloads, the splash clears and the first
+      // `/get-session` resolves — the app mounting and firing its own queries
+      // in between. That round trip is wasted work (and, before this gate,
+      // the only thing standing between an anonymous visitor and the shell)
+      // that the server can skip for the common case.
+      //
+      // Only extension-less GET/HEAD requests are gated — the same rule
+      // `static-files.ts`'s SPA fallback uses for "this is a client route, not
+      // an asset". A gated asset would be a bug with a nasty failure mode:
+      // `/login` needs its own JS and CSS to render at all, so gating those
+      // would turn the redirect into a blank page.
+      //
+      // `path.extname` is checked against the PATHNAME, never the raw
+      // `req.url` — a query string can itself contain a dot (`?ref=site.com`,
+      // a decimal in a numeric param), and `path.extname` has no idea where a
+      // path ends and a query begins. Checking the raw url would let a
+      // crafted query string masquerade a real page as an asset and skip the
+      // gate entirely.
+      if (req.method === "GET" || req.method === "HEAD") {
+        const pathname = pageGatePathname(req.url ?? "");
+
+        if (pathname !== null && path.extname(pathname) === "" && !SIGNED_OUT_PATHS.has(pathname)) {
+          // No cookie at all is the cheap, common case: redirect without
+          // paying for a session lookup. A cookie that turns out to be stale
+          // or forged still needs the real check below — that is the whole
+          // reason this gate validates a session rather than only checking
+          // for a cookie the way the old `/`-only version did.
+          const hasCookie = hasSessionCookie(req.headers.cookie);
+          const hasSession = hasCookie && (await deps.hasValidSession(req));
+
+          if (!hasSession) {
+            const search = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+            const redirect = encodeURIComponent(pathname + search);
+            res.writeHead(302, { Location: `/login?redirect=${redirect}` });
+            res.end();
+            return;
+          }
+        }
       }
 
       // After every API prefix, so a route this server owns can never be

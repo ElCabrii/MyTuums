@@ -39,6 +39,10 @@ function uniqueTag(): string {
  * the search procedures match against (seedPosts' content is hardcoded).
  * `createdAt`/`parentId` are omitted from the insert (rather than passed as
  * `undefined`) when not given, so the column's own defaults apply.
+ *
+ * Goes through `anonContext.db` — a raw drizzle handle, not a rate-limited
+ * procedure call — so this stays unaffected by search now requiring a
+ * session (issue #36).
  */
 async function seedPostContent(
   authorId: string,
@@ -143,24 +147,41 @@ async function walkAllPostPages(q: string, context: Context, limit?: number): Pr
   return ids;
 }
 
+describe("search requires authentication", () => {
+  it("rejects an anonymous caller on all three procedures", async () => {
+    await expect(
+      call(appRouter.search.typeahead, { q: "al" }, { context: anonContext }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(
+      call(appRouter.search.users, { q: "al" }, { context: anonContext }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(
+      call(appRouter.search.posts, { q: "al" }, { context: anonContext }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+});
+
 describe("search input validation", () => {
   it("rejects an empty query", async () => {
+    const viewer = await createTestUser();
     await expect(
-      call(appRouter.search.typeahead, { q: "" }, { context: anonContext }),
+      call(appRouter.search.typeahead, { q: "" }, { context: contextFor(viewer) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("rejects a whitespace-only query — trimming first is what makes min(1) catch this", async () => {
+    const viewer = await createTestUser();
     await expect(
-      call(appRouter.search.typeahead, { q: "   \n\t  " }, { context: anonContext }),
+      call(appRouter.search.typeahead, { q: "   \n\t  " }, { context: contextFor(viewer) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("rejects a query one character over SEARCH_QUERY_MAX_LENGTH, and accepts exactly at it", async () => {
+    const viewer = await createTestUser();
     const result = await call(
       appRouter.search.typeahead,
       { q: "a".repeat(SEARCH_QUERY_MAX_LENGTH) },
-      { context: anonContext },
+      { context: contextFor(viewer) },
     );
     expect(result.users).toEqual([]);
     expect(result.posts).toEqual([]);
@@ -169,17 +190,18 @@ describe("search input validation", () => {
       call(
         appRouter.search.typeahead,
         { q: "a".repeat(SEARCH_QUERY_MAX_LENGTH + 1) },
-        { context: anonContext },
+        { context: contextFor(viewer) },
       ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("rejects an empty query on search.users and search.posts too — all three share the same q schema", async () => {
+    const viewer = await createTestUser();
     await expect(
-      call(appRouter.search.users, { q: "" }, { context: anonContext }),
+      call(appRouter.search.users, { q: "" }, { context: contextFor(viewer) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(
-      call(appRouter.search.posts, { q: "" }, { context: anonContext }),
+      call(appRouter.search.posts, { q: "" }, { context: contextFor(viewer) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
@@ -188,6 +210,7 @@ describe("search.typeahead", () => {
   it(
     "ranks username prefix matches above substring-only matches — even a newer one — and breaks ties deterministically",
     async () => {
+      const viewer = await createTestUser();
       // Direct inserts so the tie-break is fully controlled: alpha and albert
       // share one instant (both prefix matches for "al"); beta matches only
       // via its name (a substring) but is NEWER — ranking must still put it
@@ -200,7 +223,11 @@ describe("search.typeahead", () => {
         { username: "beta", name: "Alpha Fan", createdAt: newer },
       ]);
 
-      const result = await call(appRouter.search.typeahead, { q: "al" }, { context: anonContext });
+      const result = await call(
+        appRouter.search.typeahead,
+        { q: "al" },
+        { context: contextFor(viewer) },
+      );
 
       // alpha/albert tie on the timestamp, so the id is the whole tie-break.
       const prefixUsers = [seeded[0], seeded[1]].sort((a, b) => b.id.localeCompare(a.id));
@@ -213,6 +240,7 @@ describe("search.typeahead", () => {
   );
 
   it("caps users at 5 even when more match — the newest five win", async () => {
+    const viewer = await createTestUser();
     const seeded = await seedUsers(
       Array.from({ length: 6 }, (_, i) => ({
         username: `cap${i}`,
@@ -220,7 +248,11 @@ describe("search.typeahead", () => {
       })),
     );
 
-    const result = await call(appRouter.search.typeahead, { q: "cap" }, { context: anonContext });
+    const result = await call(
+      appRouter.search.typeahead,
+      { q: "cap" },
+      { context: contextFor(viewer) },
+    );
 
     expect(result.users).toHaveLength(5);
     // cap0 is the oldest — excluded by the cap, not by the filter.
@@ -240,7 +272,11 @@ describe("search.typeahead", () => {
       (i) => new Date(Date.UTC(2025, 0, 1, 0, 0, i)),
     );
 
-    const result = await call(appRouter.search.typeahead, { q: tag }, { context: anonContext });
+    const result = await call(
+      appRouter.search.typeahead,
+      { q: tag },
+      { context: contextFor(author) },
+    );
 
     expect(result.posts).toHaveLength(5);
     // post0 is the oldest — excluded by the cap, not by the filter.
@@ -250,8 +286,13 @@ describe("search.typeahead", () => {
 
   it("matches case-insensitively — aLice finds the alice username and the Alice name", async () => {
     const alice = await createTestUser({ username: "Alice", name: "Alice" });
+    const viewer = await createTestUser();
 
-    const result = await call(appRouter.search.typeahead, { q: "aLiCe" }, { context: anonContext });
+    const result = await call(
+      appRouter.search.typeahead,
+      { q: "aLiCe" },
+      { context: contextFor(viewer) },
+    );
     const ids = result.users.map((u) => u.id);
 
     // She matches on both axes — the prefix match on the normalised username
@@ -269,13 +310,17 @@ describe("search.typeahead", () => {
     const byLiteral = await call(
       appRouter.search.posts,
       { q: "100%" },
-      { context: anonContext },
+      { context: contextFor(author) },
     );
     expect(byLiteral.items.map((p) => p.id)).toEqual([battery.id]);
 
     // A bare % must not become a match-everything wildcard either — it finds
     // only content with a literal percent sign in it.
-    const byPercent = await call(appRouter.search.posts, { q: "%" }, { context: anonContext });
+    const byPercent = await call(
+      appRouter.search.posts,
+      { q: "%" },
+      { context: contextFor(author) },
+    );
     expect(byPercent.items.map((p) => p.id)).toEqual([battery.id]);
   });
 
@@ -285,21 +330,30 @@ describe("search.typeahead", () => {
     const root = await seedPostContent(author.id, `${tag} root`);
     await seedPostContent(author.id, `${tag} reply`, { parentId: root.id });
 
-    const posts = await call(appRouter.search.posts, { q: tag }, { context: anonContext });
+    const posts = await call(
+      appRouter.search.posts,
+      { q: tag },
+      { context: contextFor(author) },
+    );
     expect(posts.items.map((p) => p.id)).toEqual([root.id]);
 
-    const typeahead = await call(appRouter.search.typeahead, { q: tag }, { context: anonContext });
+    const typeahead = await call(
+      appRouter.search.typeahead,
+      { q: tag },
+      { context: contextFor(author) },
+    );
     expect(typeahead.posts.map((p) => p.id)).toEqual([root.id]);
   });
 
-  it("serves anonymous callers, reporting viewerIsFollowing and viewerHasLiked as false", async () => {
+  it("serves a viewer with no relationship to the target, reporting viewerIsFollowing and viewerHasLiked as false", async () => {
     const author = await createTestUser({ username: uniqueTag() });
     await seedPostContent(author.id, `${author.session.user.username} content`);
+    const stranger = await createTestUser();
 
     const matching = await call(
       appRouter.search.typeahead,
       { q: author.session.user.username! },
-      { context: anonContext },
+      { context: contextFor(stranger) },
     );
     expect(matching.users.map((u) => u.id)).toEqual([author.id]);
     expect(matching.users[0].viewerIsFollowing).toBe(false);
@@ -309,7 +363,7 @@ describe("search.typeahead", () => {
     const users = await call(
       appRouter.search.users,
       { q: author.session.user.username! },
-      { context: anonContext },
+      { context: contextFor(stranger) },
     );
     expect(users.items.map((u) => u.id)).toEqual([author.id]);
     expect(users.items[0].viewerIsFollowing).toBe(false);
@@ -317,7 +371,7 @@ describe("search.typeahead", () => {
     const posts = await call(
       appRouter.search.posts,
       { q: author.session.user.username! },
-      { context: anonContext },
+      { context: contextFor(stranger) },
     );
     expect(posts.items[0].viewerHasLiked).toBe(false);
   });
@@ -327,6 +381,7 @@ describe("search.users", () => {
   it(
     "keyset walk never repeats or skips a row across every page",
     async () => {
+      const viewer = await createTestUser();
       const tag = uniqueTag();
       const count = SEARCH_PAGE_SIZE * 2 + 7; // guarantees at least 3 pages at the default page size
       const base = Date.now();
@@ -337,7 +392,7 @@ describe("search.users", () => {
         })),
       );
 
-      const ids = await walkAllUserPages(tag, anonContext);
+      const ids = await walkAllUserPages(tag, contextFor(viewer));
 
       expect(ids).toHaveLength(count);
       expect(new Set(ids).size).toBe(count); // no duplicates
@@ -349,6 +404,7 @@ describe("search.users", () => {
   it(
     "rows sharing a millisecond are still traversed exactly once — the silent-skip hazard posts.int.test.ts pins for posts, here on BetterAuth's text-id tie-break",
     async () => {
+      const viewer = await createTestUser();
       const tag = uniqueTag();
       const tiedAt = new Date("2025-06-01T12:00:00.000Z");
       const tieCount = SEARCH_PAGE_SIZE + 5; // more than a small page, all sharing one createdAt
@@ -362,7 +418,7 @@ describe("search.users", () => {
       // A small explicit limit forces the walk to cross the tied-timestamp
       // boundary several times, which is where a lost fractional-millisecond
       // cursor would silently drop every row in the current window.
-      const ids = await walkAllUserPages(tag, anonContext, 10);
+      const ids = await walkAllUserPages(tag, contextFor(viewer), 10);
 
       expect(ids).toHaveLength(tieCount);
       expect(new Set(ids).size).toBe(tieCount);
@@ -372,13 +428,14 @@ describe("search.users", () => {
   );
 
   it("nextCursor is null on the last page", async () => {
+    const viewer = await createTestUser();
     const tag = uniqueTag();
     await seedUsers([{ username: tag }]);
 
     const page = await call(
       appRouter.search.users,
       { q: tag, limit: 10 },
-      { context: anonContext },
+      { context: contextFor(viewer) },
     );
 
     expect(page.items).toHaveLength(1);
@@ -386,35 +443,47 @@ describe("search.users", () => {
   });
 
   it("rejects a malformed cursor with BAD_REQUEST", async () => {
+    const viewer = await createTestUser();
     await expect(
-      call(appRouter.search.users, { q: "al", cursor: "not-a-real-cursor" }, { context: anonContext }),
+      call(
+        appRouter.search.users,
+        { q: "al", cursor: "not-a-real-cursor" },
+        { context: contextFor(viewer) },
+      ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("rejects limit 0 and anything above SEARCH_PAGE_SIZE_MAX, and accepts exactly SEARCH_PAGE_SIZE_MAX", async () => {
+    const viewer = await createTestUser();
+
     await expect(
-      call(appRouter.search.users, { q: "al", limit: 0 }, { context: anonContext }),
+      call(appRouter.search.users, { q: "al", limit: 0 }, { context: contextFor(viewer) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
     await expect(
-      call(appRouter.search.users, { q: "al", limit: SEARCH_PAGE_SIZE_MAX + 1 }, { context: anonContext }),
+      call(
+        appRouter.search.users,
+        { q: "al", limit: SEARCH_PAGE_SIZE_MAX + 1 },
+        { context: contextFor(viewer) },
+      ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
     const page = await call(
       appRouter.search.users,
       { q: "al", limit: SEARCH_PAGE_SIZE_MAX },
-      { context: anonContext },
+      { context: contextFor(viewer) },
     );
     expect(page.items.length).toBeLessThanOrEqual(SEARCH_PAGE_SIZE_MAX);
   });
 
   it("items pin the publicUserColumns key set — no email, and no auth-reconnaissance columns", async () => {
     const author = await createTestUser();
+    const viewer = await createTestUser();
 
     const result = await call(
       appRouter.search.users,
       { q: author.session.user.username! },
-      { context: anonContext },
+      { context: contextFor(viewer) },
     );
     const item = result.items.find((u) => u.id === author.id);
 
@@ -454,7 +523,7 @@ describe("search.posts", () => {
       const base = Date.now();
       const seeded = await seedPostContentMany(author.id, count, tag, (i) => new Date(base + i * 17));
 
-      const ids = await walkAllPostPages(tag, anonContext);
+      const ids = await walkAllPostPages(tag, contextFor(author));
 
       expect(ids).toHaveLength(count);
       expect(new Set(ids).size).toBe(count);
@@ -472,7 +541,7 @@ describe("search.posts", () => {
       const tieCount = SEARCH_PAGE_SIZE + 5;
       const seeded = await seedPostContentMany(author.id, tieCount, tag, tiedAt);
 
-      const ids = await walkAllPostPages(tag, anonContext, 10);
+      const ids = await walkAllPostPages(tag, contextFor(author), 10);
 
       expect(ids).toHaveLength(tieCount);
       expect(new Set(ids).size).toBe(tieCount);
@@ -494,12 +563,12 @@ describe("search.posts", () => {
       // *between* that page's boundary row and the rows the next page will
       // return — the worst case for a cursor that had already walked past
       // this point.
-      await call(appRouter.search.posts, { q: tag, limit: 10 }, { context: anonContext });
+      await call(appRouter.search.posts, { q: tag, limit: 10 }, { context: contextFor(author) });
       const midWalk = await seedPostContent(author.id, `${tag} mid-walk`, {
         createdAt: new Date(base + (count - 10) * 17 - 8),
       });
 
-      const ids = await walkAllPostPages(tag, anonContext, 10);
+      const ids = await walkAllPostPages(tag, contextFor(author), 10);
 
       // The mid-walk row sorts inside the not-yet-visited range, so the walk
       // must pick it up without disturbing the seeded rows.
@@ -516,8 +585,16 @@ describe("search.posts", () => {
     const target = await seedPostContent(author.id, `${tag} needle`);
     await seedPostContent(author.id, `${tag} other`);
 
-    const searchResult = await call(appRouter.search.posts, { q: tag }, { context: anonContext });
-    const listResult = await call(appRouter.post.list, { authorId: author.id }, { context: anonContext });
+    const searchResult = await call(
+      appRouter.search.posts,
+      { q: tag },
+      { context: contextFor(author) },
+    );
+    const listResult = await call(
+      appRouter.post.list,
+      { authorId: author.id },
+      { context: contextFor(author) },
+    );
     const searchRow = searchResult.items.find((p) => p.id === target.id);
     const listRow = listResult.items.find((p) => p.id === target.id);
 
@@ -527,8 +604,9 @@ describe("search.posts", () => {
 });
 
 describe("search viewer context", () => {
-  it("a signed-in viewer sees their follow and like reflected; an anonymous viewer of the same query sees neither", async () => {
+  it("a signed-in viewer sees their follow and like reflected; a viewer with no relationship to the same query sees neither", async () => {
     const viewer = await createTestUser();
+    const stranger = await createTestUser();
     const tag = uniqueTag();
     const author = await createTestUser({ username: tag });
     const targetPost = await seedPostContent(author.id, `${tag} content`);
@@ -544,9 +622,13 @@ describe("search viewer context", () => {
     expect(asViewer.users.find((u) => u.id === author.id)?.viewerIsFollowing).toBe(true);
     expect(asViewer.posts.find((p) => p.id === targetPost.id)?.viewerHasLiked).toBe(true);
 
-    const asAnon = await call(appRouter.search.typeahead, { q: tag }, { context: anonContext });
-    expect(asAnon.users.find((u) => u.id === author.id)?.viewerIsFollowing).toBe(false);
-    expect(asAnon.posts.find((p) => p.id === targetPost.id)?.viewerHasLiked).toBe(false);
+    const asStranger = await call(
+      appRouter.search.typeahead,
+      { q: tag },
+      { context: contextFor(stranger) },
+    );
+    expect(asStranger.users.find((u) => u.id === author.id)?.viewerIsFollowing).toBe(false);
+    expect(asStranger.posts.find((p) => p.id === targetPost.id)?.viewerHasLiked).toBe(false);
   });
 });
 
@@ -554,27 +636,27 @@ describe("search rate limiting", () => {
   it(
     "exhausting the search budget rejects further search calls while post.list still succeeds — namespaces don't share",
     async () => {
-      const author = await createTestUser();
+      const viewer = await createTestUser();
       const tag = uniqueTag();
-      await seedPostContent(author.id, `${tag} content`);
+      await seedPostContent(viewer.id, `${tag} content`);
 
       // The whole search budget, burned through `search.users` — the cheapest
       // of the three procedures, and proof that all three share one namespace.
       const attempts = Array.from({ length: RATE_LIMITS.search.limit }, () =>
-        call(appRouter.search.users, { q: tag }, { context: anonContext }),
+        call(appRouter.search.users, { q: tag }, { context: contextFor(viewer) }),
       );
       await Promise.all(attempts);
 
       await expect(
-        call(appRouter.search.users, { q: tag }, { context: anonContext }),
+        call(appRouter.search.users, { q: tag }, { context: contextFor(viewer) }),
       ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
       await expect(
-        call(appRouter.search.typeahead, { q: tag }, { context: anonContext }),
+        call(appRouter.search.typeahead, { q: tag }, { context: contextFor(viewer) }),
       ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
 
       // The read tier is a different namespace: a search abuser must not be
       // able to take the feeds down with them.
-      const list = await call(appRouter.post.list, {}, { context: anonContext });
+      const list = await call(appRouter.post.list, {}, { context: contextFor(viewer) });
       expect(list.items).toBeDefined();
     },
     20_000,

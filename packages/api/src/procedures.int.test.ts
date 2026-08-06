@@ -50,50 +50,6 @@ describe("rate limiting", () => {
   );
 
   it(
-    "keys anonymous callers on ip:<clientIp> — exhausting one IP's read budget doesn't touch another IP's",
-    async () => {
-      const ipA = "203.0.113.9";
-      const ipB = "198.51.100.4";
-
-      const attempts = Array.from({ length: RATE_LIMITS.read.limit }, () =>
-        call(appRouter.post.list, {}, { context: { ...anonContext, clientIp: ipA } }),
-      );
-      await Promise.all(attempts);
-
-      await expect(
-        call(appRouter.post.list, {}, { context: { ...anonContext, clientIp: ipA } }),
-      ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
-
-      const stillFine = await call(
-        appRouter.post.list,
-        {},
-        { context: { ...anonContext, clientIp: ipB } },
-      );
-      expect(stillFine.items).toBeDefined();
-    },
-    20_000,
-  );
-
-  it(
-    "callers with no clientIp at all share a single ip:unknown bucket",
-    async () => {
-      // No clientIp is set on any of these calls, simulating several distinct
-      // anonymous callers the transport couldn't resolve an IP for. Treating
-      // "no identity" as exempt would make the limit trivially bypassable, so
-      // they fall into one shared bucket instead (see procedures.ts).
-      const attempts = Array.from({ length: RATE_LIMITS.read.limit }, () =>
-        call(appRouter.post.list, {}, { context: { ...anonContext } }),
-      );
-      await Promise.all(attempts);
-
-      await expect(
-        call(appRouter.post.list, {}, { context: { ...anonContext } }),
-      ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
-    },
-    20_000,
-  );
-
-  it(
     "follow and like are separate namespaces despite costing the same — exhausting the follow budget still leaves liking free, so mass-follow spam can't also lock someone out of liking",
     async () => {
       const actor = await createTestUser();
@@ -160,7 +116,7 @@ describe("rate limiting", () => {
           call(
             appRouter.post.create,
             { content: "nope" },
-            { context: { ...anonContext, clientIp: "203.0.113.77" } },
+            { context: anonContext },
           ),
         ),
       );

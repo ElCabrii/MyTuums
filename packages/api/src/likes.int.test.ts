@@ -76,6 +76,7 @@ describe("post.like / post.unlike", () => {
     const author = await createTestUser();
     const alice = await createTestUser();
     const bob = await createTestUser();
+    const stranger = await createTestUser();
     const [target] = await seedPosts(author.id, 1);
 
     await call(appRouter.post.like, { postId: target.id }, { context: contextFor(alice) });
@@ -89,7 +90,7 @@ describe("post.like / post.unlike", () => {
     const [fromAlice, fromBob, fromStranger] = await Promise.all([
       call(appRouter.post.thread, { postId: target.id }, { context: contextFor(alice) }),
       call(appRouter.post.thread, { postId: target.id }, { context: contextFor(bob) }),
-      call(appRouter.post.thread, { postId: target.id }, { context: anonContext }),
+      call(appRouter.post.thread, { postId: target.id }, { context: contextFor(stranger) }),
     ]);
 
     expect(fromAlice.post.viewerHasLiked).toBe(true);
@@ -108,8 +109,8 @@ describe("post.like / post.unlike", () => {
       { context: contextFor(liker) },
     );
     const [threadAfterLike, listAfterLike] = await Promise.all([
-      call(appRouter.post.thread, { postId: target.id }, { context: anonContext }),
-      call(appRouter.post.list, { authorId: author.id }, { context: anonContext }),
+      call(appRouter.post.thread, { postId: target.id }, { context: contextFor(liker) }),
+      call(appRouter.post.list, { authorId: author.id }, { context: contextFor(liker) }),
     ]);
     expect(threadAfterLike.post.likeCount).toBe(likeResult.likeCount);
     expect(listAfterLike.items.find((i) => i.id === target.id)!.likeCount).toBe(
@@ -124,7 +125,7 @@ describe("post.like / post.unlike", () => {
     const threadAfterUnlike = await call(
       appRouter.post.thread,
       { postId: target.id },
-      { context: anonContext },
+      { context: contextFor(liker) },
     );
     expect(threadAfterUnlike.post.likeCount).toBe(unlikeResult.likeCount);
   });
@@ -138,7 +139,7 @@ describe("post.like / post.unlike", () => {
     const before = await call(
       appRouter.post.thread,
       { postId: target.id },
-      { context: anonContext },
+      { context: contextFor(author) },
     );
     expect(before.post.likeCount).toBe(1);
 
@@ -151,7 +152,7 @@ describe("post.like / post.unlike", () => {
     const after = await call(
       appRouter.post.thread,
       { postId: target.id },
-      { context: anonContext },
+      { context: contextFor(author) },
     );
     expect(after.post.likeCount).toBe(0);
   });
