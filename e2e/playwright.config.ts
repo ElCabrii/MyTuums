@@ -72,7 +72,9 @@ const stackEnv = {
   // *partial* group: a machine with no bucket configured gets a server with
   // uploads reporting NOT_IMPLEMENTED and every other spec unaffected, rather
   // than a stack that will not start. The bucket must be the dev one —
-  // `truncateAll()` deletes its objects by prefix after every run.
+  // `global-setup.ts` purges the suite's uploaded objects by prefix at the
+  // start of every run (via `truncateAll` in support/db.ts), so pointing it
+  // at any other bucket would delete that bucket's objects.
   ...s3Env(),
 };
 

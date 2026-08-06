@@ -284,10 +284,11 @@ export async function setUserRole(
 }
 
 /**
- * Empties every table. `global-setup.ts` already does this once for the
- * whole run; this is for a spec that wants a guaranteed-clean slate of its
- * own rather than trusting no earlier spec left state behind (workers are
- * pinned to 1, so specs do share one database — see playwright.config.ts).
+ * Empties every table and purges the suite's uploaded bucket objects.
+ * `global-setup.ts` calls this once at the start of every run; a spec can
+ * also call it directly for a guaranteed-clean slate of its own rather than
+ * trusting no earlier spec left state behind (workers are pinned to 1, so
+ * specs do share one database — see playwright.config.ts).
  */
 export async function truncateAll(): Promise<void> {
   assertTestDatabase();
