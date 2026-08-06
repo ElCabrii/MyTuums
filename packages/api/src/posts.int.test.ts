@@ -147,7 +147,7 @@ describe("post.list", () => {
         createdAt: (i) => new Date(base + i * 17),
       });
 
-      const ids = await walkAllPostPages({ authorId: author.id }, anonContext);
+      const ids = await walkAllPostPages({ authorId: author.id }, contextFor(author));
 
       expect(ids).toHaveLength(count);
       expect(new Set(ids).size).toBe(count); // no duplicates
@@ -167,7 +167,7 @@ describe("post.list", () => {
       // A small explicit limit forces the walk to cross the tied-timestamp
       // boundary several times, which is where a lost fractional-millisecond
       // cursor would silently drop every row in the current window.
-      const ids = await walkAllPostPages({ authorId: author.id, limit: 10 }, anonContext);
+      const ids = await walkAllPostPages({ authorId: author.id, limit: 10 }, contextFor(author));
 
       expect(ids).toHaveLength(tieCount);
       expect(new Set(ids).size).toBe(tieCount);
@@ -183,7 +183,7 @@ describe("post.list", () => {
     const page = await call(
       appRouter.post.list,
       { authorId: author.id, limit: 10 },
-      { context: anonContext },
+      { context: contextFor(author) },
     );
 
     expect(page.items).toHaveLength(3);
@@ -191,8 +191,9 @@ describe("post.list", () => {
   });
 
   it("rejects a malformed cursor with BAD_REQUEST", async () => {
+    const viewer = await createTestUser();
     await expect(
-      call(appRouter.post.list, { cursor: "not-a-real-cursor" }, { context: anonContext }),
+      call(appRouter.post.list, { cursor: "not-a-real-cursor" }, { context: contextFor(viewer) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
@@ -206,21 +207,21 @@ describe("post.list", () => {
     const defaultPage = await call(
       appRouter.post.list,
       { authorId: author.id },
-      { context: anonContext },
+      { context: contextFor(author) },
     );
     expect(defaultPage.items.map((i) => i.id)).toEqual([root.id]);
 
     const withReplies = await call(
       appRouter.post.list,
       { authorId: author.id, includeReplies: true },
-      { context: anonContext },
+      { context: contextFor(author) },
     );
     expect(withReplies.items).toHaveLength(3);
 
     const directReplies = await call(
       appRouter.post.list,
       { parentId: root.id },
-      { context: anonContext },
+      { context: contextFor(author) },
     );
     expect(directReplies.items.map((i) => i.id)).toEqual([reply.id]);
   });
@@ -234,15 +235,15 @@ describe("post.list", () => {
     const page = await call(
       appRouter.post.list,
       { authorId: authorA.id, limit: POST_PAGE_SIZE_MAX },
-      { context: anonContext },
+      { context: contextFor(authorA) },
     );
 
     expect(new Set(page.items.map((i) => i.id))).toEqual(new Set(postsA.map((p) => p.id)));
   });
 
-  it("feed: 'following' with an anonymous caller is UNAUTHORIZED", async () => {
+  it("rejects an anonymous caller — every mode of list requires a session now, not just 'following' (issue #36)", async () => {
     await expect(
-      call(appRouter.post.list, { feed: "following" }, { context: anonContext }),
+      call(appRouter.post.list, {}, { context: anonContext }),
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
@@ -270,27 +271,36 @@ describe("post.list", () => {
   });
 
   it("rejects limit 0 and anything above POST_PAGE_SIZE_MAX, and accepts exactly POST_PAGE_SIZE_MAX", async () => {
+    const viewer = await createTestUser();
+
     await expect(
-      call(appRouter.post.list, { limit: 0 }, { context: anonContext }),
+      call(appRouter.post.list, { limit: 0 }, { context: contextFor(viewer) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
     await expect(
-      call(appRouter.post.list, { limit: POST_PAGE_SIZE_MAX + 1 }, { context: anonContext }),
+      call(appRouter.post.list, { limit: POST_PAGE_SIZE_MAX + 1 }, { context: contextFor(viewer) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
     const page = await call(
       appRouter.post.list,
       { limit: POST_PAGE_SIZE_MAX },
-      { context: anonContext },
+      { context: contextFor(viewer) },
     );
     expect(page.items.length).toBeLessThanOrEqual(POST_PAGE_SIZE_MAX);
   });
 });
 
 describe("post.thread", () => {
-  it("an unknown id is NOT_FOUND", async () => {
+  it("rejects an anonymous caller", async () => {
     await expect(
       call(appRouter.post.thread, { postId: randomUUID() }, { context: anonContext }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("an unknown id is NOT_FOUND", async () => {
+    const viewer = await createTestUser();
+    await expect(
+      call(appRouter.post.thread, { postId: randomUUID() }, { context: contextFor(viewer) }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
@@ -301,7 +311,7 @@ describe("post.thread", () => {
     const result = await call(
       appRouter.post.thread,
       { postId: root.id },
-      { context: anonContext },
+      { context: contextFor(author) },
     );
 
     expect(result.post.id).toBe(root.id);
@@ -319,7 +329,7 @@ describe("post.thread", () => {
     const result = await call(
       appRouter.post.thread,
       { postId: focused.id },
-      { context: anonContext },
+      { context: contextFor(author) },
     );
 
     expect(result.ancestors.map((a) => a.id)).toEqual([grandparent.id, parent.id]);
@@ -341,7 +351,7 @@ describe("post.thread", () => {
       const result = await call(
         appRouter.post.thread,
         { postId: focusedId },
-        { context: anonContext },
+        { context: contextFor(author) },
       );
 
       expect(result.ancestors).toHaveLength(THREAD_ANCESTOR_MAX);
@@ -363,7 +373,7 @@ describe("post.thread", () => {
       const result = await call(
         appRouter.post.thread,
         { postId: focusedId },
-        { context: anonContext },
+        { context: contextFor(author) },
       );
 
       expect(result.ancestors).toHaveLength(THREAD_ANCESTOR_MAX);

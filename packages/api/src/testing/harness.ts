@@ -189,18 +189,17 @@ export const anonContext: Context = {
 };
 
 /**
- * A signed-in caller's context, optionally carrying the IP the rate limiter
- * would see and/or a specific `RateLimiter` instance — a test that wants a
- * budget isolated even from its own file's other tests (rather than the
- * per-test-file default above) can pass its own `createRateLimiter()`.
+ * A signed-in caller's context, optionally carrying a specific `RateLimiter`
+ * instance — a test that wants a budget isolated even from its own file's
+ * other tests (rather than the per-test-file default above) can pass its own
+ * `createRateLimiter()`.
  */
 export function contextFor(
   user: TestUser,
-  clientIp?: string,
   rateLimiter: RateLimiter = forwardingRateLimiter,
   storage: Storage | null = testStorage,
 ): Context {
-  return { db, session: user.session, clientIp, rateLimiter, storage };
+  return { db, session: user.session, rateLimiter, storage };
 }
 
 /**

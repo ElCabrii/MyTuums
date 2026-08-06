@@ -10,7 +10,7 @@ import {
   THREAD_ANCESTOR_MAX,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
-import { protectedProcedure, publicProcedure, rateLimit } from "./procedures.js";
+import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 
 /**
@@ -43,21 +43,19 @@ const replyCount = sql<number>`(
   select count(*)::int from ${post} as reply where reply.parent_id = ${post.id}
 )`;
 
-/** Whether the viewer has liked this post — an EXISTS subquery, literal `false` for anonymous viewers. */
-function viewerHasLiked(viewerId: string | undefined) {
-  return viewerId
-    ? sql<boolean>`exists (
-        select 1 from ${postLike}
-        where ${postLike.postId} = ${post.id} and ${postLike.userId} = ${viewerId}
-      )`
-    : sql<boolean>`false`;
+/** Whether the viewer has liked this post — an EXISTS subquery. */
+function viewerHasLiked(viewerId: string) {
+  return sql<boolean>`exists (
+    select 1 from ${postLike}
+    where ${postLike.postId} = ${post.id} and ${postLike.userId} = ${viewerId}
+  )`;
 }
 
 /**
  * The one projection every feed and thread reads posts through, so no view of
  * a post can drift from another's (an int test asserts the equality).
  */
-export const postSelection = (viewerId: string | undefined) => ({
+export const postSelection = (viewerId: string) => ({
   id: post.id,
   content: post.content,
   createdAt: post.createdAt,
@@ -156,10 +154,10 @@ export const postRouter = {
 
   /**
    * Lists posts, keyset-paginated: the global feed, one author's posts, the
-   * following feed, or one post's direct replies. Public, except `following`,
-   * which requires a session.
+   * following feed, or one post's direct replies. Requires a session, like
+   * every procedure in this app (issue #36).
    */
-  list: publicProcedure
+  list: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
     .input(
       z.object({
@@ -204,13 +202,7 @@ export const postRouter = {
       }),
     )
     .handler(async ({ input, context }) => {
-      const viewerId = context.session?.user.id;
-
-      // This stays a `publicProcedure` because the global feed *is* the
-      // signed-out home page; promoting the whole procedure would break it.
-      if (input.feed === "following" && !viewerId) {
-        throw new ORPCError("UNAUTHORIZED", { message: "Sign in to see your Following feed." });
-      }
+      const viewerId = context.user.id;
 
       const cursor = input.cursor ? postCursor.decode(input.cursor) : undefined;
 
@@ -240,7 +232,7 @@ export const postRouter = {
         // is following very few people relative to global post volume — the
         // rewrite is `author_id = any(array(select following_id ...))`, which
         // follow_follower_created_idx already covers.
-        input.feed === "following" && viewerId
+        input.feed === "following"
           ? sql`(${post.authorId} = ${viewerId} or exists (
               select 1 from ${follow}
               where ${follow.followingId} = ${post.authorId} and ${follow.followerId} = ${viewerId}
@@ -294,11 +286,11 @@ export const postRouter = {
    * replies here too would give the same rows two cache homes with no way to
    * keep them in step.
    */
-  thread: publicProcedure
+  thread: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
-      const viewerId = context.session?.user.id;
+      const viewerId = context.user.id;
 
       const [focused] = await context.db
         .select(postSelection(viewerId))

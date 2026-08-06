@@ -38,13 +38,12 @@ test.describe("home feed scope", () => {
     await expect(page).toHaveURL("/");
   });
 
-  test("signed out, only the Global feed is available", async ({ signedOutPage }) => {
-    await signedOutPage.goto("/");
-
-    await expect(signedOutPage.getByRole("group", { name: "Feed" })).toHaveCount(0);
-    // feed_global_subtitle — the label that replaces the switch when signed out.
-    await expect(signedOutPage.getByText("Latest from everyone")).toBeVisible();
-  });
+  // A "signed out, only the Global feed is available" test used to live here.
+  // The app has no anonymous surface any more (issue #36): `post.list` is
+  // `protectedProcedure`, and `use-require-signed-in.ts` bounces a signed-out
+  // visitor to `/login` before the feed ever mounts. `like.spec.ts`'s "signed
+  // out, the site gate holds a visitor at /login" test already covers that
+  // redirect — this one would just be racing it.
 });
 
 test.describe("home feed pagination", () => {

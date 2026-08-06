@@ -15,12 +15,12 @@ the root — see `src/constants.ts` for why.
 - `src/posts.ts` — `post.create` / `list` / `thread` / `like` / `unlike`; `postSelection` is the single projection feeds and threads share.
 - `src/users.ts` — `byUsername` / `uploadImage` / `removeImage` / `follow` / `unfollow` / `followers` / `following`; `publicUserColumns` is the privacy boundary.
 - `src/search.ts` — `search.typeahead` / `users` / `posts`; `escapeLikePattern` keeps user input literal against LIKE wildcards.
-- `src/procedures.ts` — `publicProcedure` / `protectedProcedure` and the `rateLimit(policy)` middleware.
+- `src/procedures.ts` — `protectedProcedure` and the `rateLimit(policy)` middleware. No `publicProcedure` — every procedure requires a session (issue #36).
 - `src/context.ts` — the `Context` shape and `createContext`; owns the one process-wide rate limiter and storage client.
 - `src/cursor.ts` — opaque base64url keyset cursors, parameterised on the tie-breaker's id schema.
 - `src/rate-limit.ts` — in-memory fixed-window limiter and the `RATE_LIMITS` tiers.
 - `src/storage.ts` — S3 factory; `Storage` vs `DestructiveStorage` split; windowed presigned URLs.
-- `src/media.ts` — the `/media/<key>` resolver: presigned redirect + cache budget.
+- `src/media.ts` — the `/media/<key>` resolver: presigned redirect + cache budget. A pure key→URL function with no session logic of its own — `apps/server/src/request-handler.ts` requires a live session before this is ever called.
 - `src/image.ts` — pure upload rules: type sniffing, bounds, key layout, the `isSafeObjectKey` path-traversal guard.
 - `src/dimensions.ts` — dependency-free header-only dimension parser, also exported to the web app.
 - `src/constants.ts` — browser-safe constants, also exported to the web app.

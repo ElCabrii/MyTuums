@@ -18,7 +18,7 @@ import {
   objectKeyFromMediaPath,
   type ImageRejection,
 } from "./image.js";
-import { protectedProcedure, publicProcedure, rateLimit } from "./procedures.js";
+import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import type { Storage } from "./storage.js";
 
@@ -76,13 +76,11 @@ const followingCount = sql<number>`(
   select count(*)::int from ${follow} where ${follow.followerId} = ${user.id}
 )`;
 
-export function viewerIsFollowing(viewerId: string | undefined) {
-  return viewerId
-    ? sql<boolean>`exists (
-        select 1 from ${follow}
-        where ${follow.followingId} = ${user.id} and ${follow.followerId} = ${viewerId}
-      )`
-    : sql<boolean>`false`;
+export function viewerIsFollowing(viewerId: string) {
+  return sql<boolean>`exists (
+    select 1 from ${follow}
+    where ${follow.followingId} = ${user.id} and ${follow.followerId} = ${viewerId}
+  )`;
 }
 
 /**
@@ -253,10 +251,10 @@ async function discardPrevious(
  */
 export const userRouter = {
   /**
-   * Returns one user's public profile by handle. Public — the shape is
-   * `publicUserColumns`, never the whole row.
+   * Returns one user's public profile by handle. Requires a session; the
+   * shape is `publicUserColumns`, never the whole row.
    */
-  byUsername: publicProcedure
+  byUsername: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
     .input(z.object({ username: usernameInput }))
     .handler(async ({ input, context }) => {
@@ -265,7 +263,7 @@ export const userRouter = {
           ...publicUserColumns,
           followerCount,
           followingCount,
-          viewerIsFollowing: viewerIsFollowing(context.session?.user.id),
+          viewerIsFollowing: viewerIsFollowing(context.user.id),
         })
         .from(user)
         .where(eq(user.username, input.username.toLowerCase()))
@@ -441,13 +439,13 @@ export const userRouter = {
     }),
 
   /**
-   * Pages a user's followers, newest first. Public.
+   * Pages a user's followers, newest first. Requires a session.
    *
    * Both lists take a `username` rather than a user id so a list page can fire
    * its two queries — the profile header and the list itself — in parallel,
    * instead of waiting on `byUsername` to learn an id it would then pass here.
    */
-  followers: publicProcedure
+  followers: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
     .input(
       z.object({
@@ -476,7 +474,7 @@ export const userRouter = {
         .select({
           ...publicUserColumns,
           followedAt: follow.createdAt,
-          viewerIsFollowing: viewerIsFollowing(context.session?.user.id),
+          viewerIsFollowing: viewerIsFollowing(context.user.id),
         })
         .from(follow)
         // The join is on follower_id: these are the people following the
@@ -497,8 +495,8 @@ export const userRouter = {
       };
     }),
 
-  /** Pages the users a person follows, newest first. Public. Same `username`-keyed contract as `followers`. */
-  following: publicProcedure
+  /** Pages the users a person follows, newest first. Requires a session. Same `username`-keyed contract as `followers`. */
+  following: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
     .input(
       z.object({
@@ -526,7 +524,7 @@ export const userRouter = {
         .select({
           ...publicUserColumns,
           followedAt: follow.createdAt,
-          viewerIsFollowing: viewerIsFollowing(context.session?.user.id),
+          viewerIsFollowing: viewerIsFollowing(context.user.id),
         })
         .from(follow)
         .innerJoin(user, eq(user.id, follow.followingId))

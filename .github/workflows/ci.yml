@@ -20,7 +20,6 @@ env:
   BETTER_AUTH_SECRET: ci-better-auth-secret-at-least-32-characters
   BETTER_AUTH_URL: http://localhost:3001
   WEB_ORIGIN: http://localhost:5173
-  TRUST_PROXY: "false"
 
 jobs:
   # Build first, and not only because it must pass: `src/routeTree.gen.ts` and
@@ -108,7 +107,6 @@ jobs:
           BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
           BETTER_AUTH_URL=${BETTER_AUTH_URL}
           WEB_ORIGIN=${WEB_ORIGIN}
-          TRUST_PROXY=${TRUST_PROXY}
           EOF
 
       # Catches a schema edit that never had `db:generate` run against it.
@@ -159,7 +157,6 @@ jobs:
           BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
           BETTER_AUTH_URL=${BETTER_AUTH_URL}
           WEB_ORIGIN=${WEB_ORIGIN}
-          TRUST_PROXY=${TRUST_PROXY}
           S3_ENDPOINT=${S3_ENDPOINT}
           S3_BUCKET=${S3_BUCKET}
           S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}

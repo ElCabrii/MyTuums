@@ -34,10 +34,18 @@ export type MediaResolver = (
 
 /**
  * `null` means "404 this" and is deliberately the answer to every failure
- * mode — an unconfigured bucket, a malformed key, a traversal attempt — rather
- * than distinguishing them in the response. A caller probing `/media/` learns
- * only whether an object exists, which is what a public avatar URL already
- * tells them.
+ * mode this function itself can produce — an unconfigured bucket, a malformed
+ * key, a traversal attempt — rather than distinguishing them in the response.
+ * A signed-in caller probing `/media/` learns only whether an object exists,
+ * never why one doesn't.
+ *
+ * "Signed-in" is load-bearing: this resolver is never reached by an
+ * unauthenticated request at all. `apps/server/src/request-handler.ts` checks
+ * for a live session before the key is even parsed, so an anonymous caller
+ * gets a flat 401 and never learns anything about which keys are well-formed,
+ * let alone which objects exist. This function itself stays a pure key→URL
+ * mapping with no opinion on who is asking — the session lives entirely at
+ * the routing layer, which is where it already had to check for `/rpc`.
  *
  * Note this does NOT check the object exists: presigning is a local signature
  * operation, so verifying would add a HEAD round trip to every image request

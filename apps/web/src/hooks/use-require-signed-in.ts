@@ -1,37 +1,9 @@
 import { useEffect } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
+import { SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
 import { isSignedInAtom, sessionErrorAtom, sessionPendingAtom } from "@/atoms/session";
 import { sanitizeRedirect } from "@/lib/redirect";
-
-/**
- * Where a signed-out visitor is allowed to be. Everything else redirects to
- * `/login` — the site is private, like a social media app where nothing
- * renders until you're signed in.
- *
- * The auth pages speak for themselves. `/welcome` is here because it is the
- * completion page for a *signed-in* session that lacks a handle or a date of
- * birth; a signed-out visitor landing on it is sent to `/login` by the page's
- * own guard. The legal pages are exempt because a sign-in gate that will not
- * let someone read the terms and privacy policy they are being asked to
- * accept is its own problem — the same reason `use-require-handle.ts`
- * exempts them.
- */
-const ALLOWED_SIGNED_OUT = new Set([
-  "/login",
-  "/register",
-  "/two-factor",
-  // `/forgot-password` is an auth page like the ones above; `/reset-password`
-  // is exempt on purpose even though it is NOT — resetting your own password
-  // from an email link is legitimate while signed in, and the reset revokes
-  // every session anyway.
-  "/forgot-password",
-  "/reset-password",
-  "/welcome",
-  "/privacy",
-  "/terms",
-  "/mentions-legales",
-]);
 
 /**
  * How long the gate waits before bouncing a signed-out-looking visitor to
@@ -81,7 +53,7 @@ export function useRequireSignedIn(): void {
     // from the fetch catch path has no `.status`, so it is blocked too —
     // correct, that one is transient.
     if (sessionError && sessionError.status !== 401) return;
-    if (ALLOWED_SIGNED_OUT.has(pathname)) return;
+    if (SIGNED_OUT_PATHS.has(pathname)) return;
 
     const timeout = setTimeout(() => {
       void navigate({

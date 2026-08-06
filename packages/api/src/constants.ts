@@ -142,3 +142,39 @@ export const RPC_MAX_BODY_BYTES =
  * `window.location.origin` for the same reason).
  */
 export const MEDIA_URL_PREFIX = "/media/";
+
+/**
+ * Where a signed-out visitor is allowed to be. Everything else redirects to
+ * `/login` — the site is private, like a social media app where nothing
+ * renders until you're signed in.
+ *
+ * The auth pages speak for themselves. `/welcome` is here because it is the
+ * completion page for a *signed-in* session that lacks a handle or a date of
+ * birth; a signed-out visitor landing on it is sent to `/login` by the page's
+ * own guard. The legal pages are exempt because a sign-in gate that will not
+ * let someone read the terms and privacy policy they are being asked to
+ * accept is its own problem — the same reason `use-require-handle.ts`
+ * exempts them.
+ *
+ * Shared, deliberately, between the client gate (`apps/web/src/hooks/
+ * use-require-signed-in.ts`) and the server gate (`apps/server/src/
+ * request-handler.ts`): if the two ever drifted, a path gated on one side but
+ * not the other could send a signed-out visitor into a redirect loop between
+ * the server and `/login`. One list is what makes that impossible rather than
+ * merely unlikely.
+ */
+export const SIGNED_OUT_PATHS = new Set([
+  "/login",
+  "/register",
+  "/two-factor",
+  // `/forgot-password` is an auth page like the ones above; `/reset-password`
+  // is exempt on purpose even though it is NOT — resetting your own password
+  // from an email link is legitimate while signed in, and the reset revokes
+  // every session anyway.
+  "/forgot-password",
+  "/reset-password",
+  "/welcome",
+  "/privacy",
+  "/terms",
+  "/mentions-legales",
+]);
