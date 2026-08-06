@@ -11,14 +11,19 @@ the root — see `src/constants.ts` for why.
 
 ## Key files
 
-- `src/router.ts` — `appRouter` + `AppRouter`; `me` lives here, `post`/`user` are posts.ts/users.ts. No RPC-level health check, on purpose.
+- `src/router.ts` — `appRouter` + `AppRouter`; `me` lives here, `post`/`user` are posts.ts/users.ts, `moderation` is moderation.ts. No RPC-level health check, on purpose.
 - `src/posts.ts` — `post.create` / `list` / `thread` / `like` / `unlike`; `postSelection` is the single projection feeds and threads share.
-- `src/users.ts` — `byUsername` / `uploadImage` / `removeImage` / `follow` / `unfollow` / `followers` / `following`; `publicUserColumns` is the privacy boundary.
+- `src/users.ts` — `byUsername` / `uploadImage` / `removeImage` / `follow` / `unfollow` / `followers` / `following`; `publicUserColumns` is the privacy boundary. `byUsername` resolves banned profiles with `suspended: true` (the profile stub's contract) and 404s blocked ones.
 - `src/search.ts` — `search.typeahead` / `users` / `posts`; `escapeLikePattern` keeps user input literal against LIKE wildcards.
-- `src/procedures.ts` — `protectedProcedure` and the `rateLimit(policy)` middleware. No `publicProcedure` — every procedure requires a session (issue #36).
+- `src/procedures.ts` — `protectedProcedure` and the `rateLimit(policy)` middleware, plus the role gates (`moderatorProcedure` / `staffProcedure` / `adminProcedure`) and ONE deliberate exception: `baseProcedure`, used only by `moderation.appealOpen` — a banned user cannot sign in, so the HMAC-capability appeal link must work signed-out (issue #36's "no anonymous surface" holds everywhere else).
+- `src/moderation.ts` — the moderation router (issue #38): reports, blocks, the merged queue, case actions, the audit log, and the two appeal procedures. The queue merges report groups and open appeals in JS with a single keyset cursor; each side carries a correlated not-exists exclusion so a dual report+appeal case is never re-emitted across pages.
+- `src/moderation-actions.ts` — the shared effects every moderation procedure composes: `logAction` / `stampReports` / `emailUser` / the inverses (`restorePostEffect` / `unbanEffect` / `undoAction`). The rank guard lives here, on the inverse paths, so no restore can skip it. The action-code constants are defined in constants.ts and re-exported here.
+- `src/appeal-token.ts` — the HMAC-SHA256 signed-out appeal link signer/verifier (constant-time, zod re-parse, 7-day TTL); `BETTER_AUTH_SECRET`-keyed.
+- `src/roles.ts` — `USER_ROLES`, `roleRank`, `roleAtLeast`, `canManageRole` (strictly-greater) — the hierarchy every gate and rank guard runs on.
+- `src/visibility.ts` — `effectivelyBanned` / `invisibleAuthor` / `visibleUser`: the one filter every surface applies so banned/blocked content cannot leak.
 - `src/context.ts` — the `Context` shape and `createContext`; owns the one process-wide rate limiter and storage client.
 - `src/cursor.ts` — opaque base64url keyset cursors, parameterised on the tie-breaker's id schema.
-- `src/rate-limit.ts` — in-memory fixed-window limiter and the `RATE_LIMITS` tiers.
+- `src/rate-limit.ts` — in-memory fixed-window limiter and the `RATE_LIMITS` tiers (read/like/follow/write/upload/search/report/block/moderate).
 - `src/storage.ts` — S3 factory; `Storage` vs `DestructiveStorage` split; windowed presigned URLs.
 - `src/media.ts` — the `/media/<key>` resolver: presigned redirect + cache budget. A pure key→URL function with no session logic of its own — `apps/server/src/request-handler.ts` requires a live session before this is ever called.
 - `src/image.ts` — pure upload rules: type sniffing, bounds, key layout, the `isSafeObjectKey` path-traversal guard.

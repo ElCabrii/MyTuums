@@ -32,6 +32,8 @@ function makeProfile(overrides: Partial<Profile> & { id: string; username: strin
     followerCount: 0,
     followingCount: 0,
     viewerIsFollowing: false,
+    // The suspension flag (issue #38): never suspended by default.
+    suspended: false,
     ...overrides,
   };
 }

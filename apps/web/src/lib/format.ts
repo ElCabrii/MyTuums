@@ -44,3 +44,14 @@ export function formatCount(value: number, locale?: string): string {
     maximumFractionDigits: 1,
   }).format(value);
 }
+
+/**
+ * "6 Aug 2026, 14:30" — for moderation deadlines, where relative time ("in 3
+ * days") is too vague for a suspension the user needs to plan around.
+ */
+export function formatDateTime(date: Date, locale?: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}

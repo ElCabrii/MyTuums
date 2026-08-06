@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, not, or, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
-import { follow, user } from "@my-tuums/db/schema";
+import { follow, user, userBlock } from "@my-tuums/db/schema";
 import { z } from "zod";
 import {
   FOLLOW_PAGE_SIZE,
@@ -21,6 +21,7 @@ import {
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import type { Storage } from "./storage.js";
+import { effectivelyBanned, invisibleUser, visibleUser } from "./visibility.js";
 
 /**
  * The public shape of a user — deliberately not `select()`-all.
@@ -258,15 +259,21 @@ export const userRouter = {
     .use(rateLimit(RATE_LIMITS.read))
     .input(z.object({ username: usernameInput }))
     .handler(async ({ input, context }) => {
+      // A profile blocked in either direction reads as nonexistent — the
+      // same "no such user" as a missing handle, so the block doesn't leak
+      // that the profile exists. A banned profile DOES resolve, carrying
+      // `suspended: true` (additive — `publicUserColumns` is untouched): the
+      // profile page renders a stub instead of an existence leak.
       const [found] = await context.db
         .select({
           ...publicUserColumns,
           followerCount,
           followingCount,
           viewerIsFollowing: viewerIsFollowing(context.user.id),
+          suspended: effectivelyBanned,
         })
         .from(user)
-        .where(eq(user.username, input.username.toLowerCase()))
+        .where(and(eq(user.username, input.username.toLowerCase()), not(invisibleUser(context.user.id))))
         .limit(1);
 
       if (!found) {
@@ -389,6 +396,26 @@ export const userRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
+      // A block in either direction makes the follow a bad request, not a
+      // silent no-op: the block severing follows is the P4 `block` procedure,
+      // and a follow that quietly did nothing would read as broken UI. A
+      // blocked account's profile is already invisible, so this guard is
+      // what stops a direct follow attempt after the block.
+      const [block] = await context.db
+        .select({ id: userBlock.blockerId })
+        .from(userBlock)
+        .where(
+          or(
+            and(eq(userBlock.blockerId, context.user.id), eq(userBlock.blockedId, input.userId)),
+            and(eq(userBlock.blockerId, input.userId), eq(userBlock.blockedId, context.user.id)),
+          ),
+        )
+        .limit(1);
+
+      if (block) {
+        throw new ORPCError("BAD_REQUEST", { message: "You can't follow this user." });
+      }
+
       // The (follower_id, following_id) primary key makes the duplicate
       // impossible; this just declines to error on it.
       await context.db
@@ -460,6 +487,9 @@ export const userRouter = {
 
       const filters = [
         eq(follow.followingId, targetId),
+        // Banned and blocked accounts drop out of the list — a follower you
+        // can't see (or who can't see you) is not a follower to list.
+        visibleUser(context.user.id),
         // Row-value comparison against the same (created_at, follower_id) DESC
         // ordering `follow_following_created_idx` provides, so Postgres seeks
         // straight to the cursor position. The bound values must go through
@@ -511,6 +541,9 @@ export const userRouter = {
 
       const filters = [
         eq(follow.followerId, targetId),
+        // Banned and blocked accounts drop out of the list — same filter as
+        // `followers`, which is what keeps the two lists symmetric.
+        visibleUser(context.user.id),
         // Note the tie-breaker is `following_id` here, matching both the
         // ORDER BY below and `follow_follower_created_idx`. Copying the
         // `followers` predicate without swapping this column yields a cursor

@@ -38,6 +38,14 @@ export interface Context {
    * unconfigured OAuth provider is simply absent rather than fatal.
    */
   storage: Storage | null;
+  /**
+   * The raw request headers, for the one thing that still needs them after
+   * session resolution: the moderation emails' locale fallback
+   * (`localeFromRequest` in packages/auth/src/email.ts), used only when the
+   * recipient has no stored `localePreference`. Absent in tests, which build
+   * `Context` objects directly and always fall back to the base locale.
+   */
+  headers?: Headers;
 }
 
 /**
@@ -92,7 +100,7 @@ export async function createContext({
   storage?: Storage | null;
 }): Promise<Context> {
   const session = await auth.api.getSession({ headers });
-  return { db, session, rateLimiter, storage };
+  return { db, session, rateLimiter, storage, headers };
 }
 
 /** The process-wide storage client, for callers outside a procedure (the `/media` route). */

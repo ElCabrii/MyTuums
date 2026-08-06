@@ -1,8 +1,21 @@
 import { ORPCError, os } from "@orpc/server";
 import type { Context } from "./context.js";
 import type { RateLimitPolicy } from "./rate-limit.js";
+import { roleAtLeast, type UserRole } from "./roles.js";
 
 const base = os.$context<Context>();
+
+/**
+ * The session-less base procedure — the app's one public surface.
+ *
+ * Every procedure in this app is built from `protectedProcedure` (issue #36);
+ * this export is the single exception, used by exactly one procedure
+ * (`moderation.appealOpen`), which is capability-gated by an HMAC token
+ * rather than by a session — a suspended or banned user cannot sign in, so
+ * the appeal link in their email must work signed-out. The hole exists so a
+ * banned account can be heard, not as a door: nothing else may build from it.
+ */
+export const baseProcedure = base;
 
 /** The session user, once a session is guaranteed to exist — what `protectedProcedure` adds to `context.user`. */
 type SessionUser = NonNullable<Context["session"]>["user"];
@@ -52,3 +65,36 @@ export const protectedProcedure = base.use(({ context, next }) => {
   if (!context.session?.user) throw new ORPCError("UNAUTHORIZED");
   return next({ context: { ...context, user: context.session.user } });
 });
+
+/**
+ * Denies with FORBIDDEN when the caller's role is below the minimum.
+ *
+ * Built on `protectedProcedure`, so the session requirement is inherited.
+ * The role arrives typed on `session.user.role` from the admin plugin
+ * (packages/auth/src/index.ts) — no `additionalFields` wiring. The
+ * `?? "user"` is defensive: the column has a database default, so a missing
+ * value can only mean a row written before the plugin landed, and the
+ * weakest role is the safe read for it.
+ *
+ * These are the only three gates the moderation router uses; every procedure
+ * in packages/api/src/moderation.ts is built from one of them plus
+ * `rateLimit`. Deny here is a 403, not a 401 — the caller exists and is
+ * signed in, this is just not their desk (see ./roles.ts for the ordering).
+ */
+function requireRole(minRole: UserRole) {
+  return protectedProcedure.use(({ context, next }) => {
+    if (!roleAtLeast(context.user.role ?? "user", minRole)) {
+      throw new ORPCError("FORBIDDEN");
+    }
+    return next();
+  });
+}
+
+/** Moderator and above (moderator, staff, admin). */
+export const moderatorProcedure = requireRole("moderator");
+
+/** Staff and above (staff, admin). */
+export const staffProcedure = requireRole("staff");
+
+/** Admin only. */
+export const adminProcedure = requireRole("admin");

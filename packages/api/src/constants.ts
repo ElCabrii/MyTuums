@@ -22,6 +22,89 @@ export const SEARCH_QUERY_MAX_LENGTH = 100;
 export const SEARCH_PAGE_SIZE = 20;
 export const SEARCH_PAGE_SIZE_MAX = 50;
 
+/** Default and maximum page sizes for `moderation.queue` / `moderation.auditLog`. */
+export const MODERATION_PAGE_SIZE = 20;
+export const MODERATION_PAGE_SIZE_MAX = 50;
+
+/** Maximum length of a moderator's stated reason or note, in characters, after trimming. */
+export const MODERATION_NOTE_MAX_LENGTH = 1000;
+
+/**
+ * The nine stable moderation action codes — the `moderation_action.action`
+ * check constraint's list (packages/db/src/schema/app.ts).
+ *
+ * These live here, in the dependency-free constants module, so unit tests can
+ * pin them without importing `moderation-actions.ts` — which pulls in
+ * `@my-tuums/auth` → `@my-tuums/db`, and the latter throws at module scope
+ * when `DATABASE_URL` is unset. `moderation-actions.ts` re-exports them, so
+ * every runtime importer keeps working unchanged.
+ */
+export const MODERATION_ACTION_CODES = [
+  "post_removed",
+  "post_restored",
+  "user_suspended",
+  "user_unsuspended",
+  "user_banned",
+  "user_unbanned",
+  "role_changed",
+  "case_resolved",
+  "appeal_resolved",
+] as const;
+
+/** One of the nine action codes. */
+export type ModerationActionCode = (typeof MODERATION_ACTION_CODES)[number];
+
+/**
+ * The four appealable actions and the inverse code the overturn logs.
+ * `role_changed` maps to itself: the restore is another role change, and its
+ * logged row records the full swing (old → the granted role → back).
+ */
+export const INVERSE_ACTION = {
+  post_removed: "post_restored",
+  user_suspended: "user_unsuspended",
+  user_banned: "user_unbanned",
+  role_changed: "role_changed",
+} as const;
+
+/**
+ * The actions `appealOpen` accepts, derived from the inverse map so the two
+ * lists can never drift — anything with an inverse is appealable.
+ */
+export const APPEALABLE_ACTIONS = Object.keys(INVERSE_ACTION) as ModerationActionCode[];
+
+/**
+ * The stable report-reason codes (issue #38), one set per target type.
+ *
+ * The codes ARE the contract: they are checked into the `report` table's
+ * check constraint (packages/db/src/schema/app.ts), accepted verbatim by
+ * `moderation.report`'s discriminated union, and translated at render time
+ * by the web app's message catalogue — renaming one lands in all three
+ * places or the check constraint and the union stop agreeing.
+ */
+export const POST_REPORT_REASONS = [
+  "spam",
+  "harassment",
+  "hate_speech",
+  "misinformation",
+  "self_harm",
+  "illegal_content",
+  "nsfw",
+] as const;
+
+export const USER_REPORT_REASONS = ["spam", "harassment", "impersonation", "underage"] as const;
+
+/** Length bounds for an appeal's own words, in characters, after trimming. */
+export const APPEAL_REASON_MIN_LENGTH = 10;
+export const APPEAL_REASON_MAX_LENGTH = 2000;
+
+/**
+ * Bounds for `moderation.suspendUser`'s duration, in seconds: one hour to one
+ * year. Permanence is what `moderation.banUser` is for — a suspension always
+ * ends, by clock or by moderator.
+ */
+export const SUSPENSION_MIN_SECONDS = 60 * 60;
+export const SUSPENSION_MAX_SECONDS = 365 * 24 * 60 * 60;
+
 /**
  * How far up a reply chain `post.thread` will walk to build the ancestor
  * context above the focused post.
@@ -177,4 +260,10 @@ export const SIGNED_OUT_PATHS = new Set([
   "/privacy",
   "/terms",
   "/mentions-legales",
+  // The moderation appeal form (issue #38): the signed-out path a suspended or
+  // banned user's email link lands on. It must stay exempt from the gates —
+  // the whole point is that the person cannot sign in — and the page itself
+  // still requires the `?token=` capability (or a session for a post-stub
+  // appeal) before it will submit.
+  "/appeal",
 ]);

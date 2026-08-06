@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, not, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import { follow, post, postLike, user } from "@my-tuums/db/schema";
 import { z } from "zod";
@@ -12,6 +12,7 @@ import {
 import { createCursorCodec } from "./cursor.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
+import { invisibleAuthor } from "./visibility.js";
 
 /**
  * Feeds are keyset-paginated on `(post.created_at, post.id) DESC`; see
@@ -57,7 +58,15 @@ function viewerHasLiked(viewerId: string) {
  */
 export const postSelection = (viewerId: string) => ({
   id: post.id,
-  content: post.content,
+  // The tombstone projection (issue #38): a removed post keeps its row —
+  // removals are never hard deletes — but reads as null content here, which
+  // is what renders the stub. `removedReason` is null for everyone but the
+  // author, so a removed post can say why to the person it happened to and
+  // nothing to anyone else. The moderation case view reads a separate
+  // raw-content projection (moderator-gated), never this one.
+  content: sql<string | null>`case when ${post.removedAt} is not null then null else ${post.content} end`,
+  removed: sql<boolean>`${post.removedAt} is not null`,
+  removedReason: sql<string | null>`case when ${post.removedAt} is not null and ${post.authorId} = ${viewerId} then ${post.removedReason} else null end`,
   createdAt: post.createdAt,
   // Null for a top-level post. The web app reads it to decide whether a card
   // needs a "Replying to" line, so it belongs in the shared selection rather
@@ -107,11 +116,18 @@ export const postRouter = {
       // surfaces as an unexplained INTERNAL_SERVER_ERROR. Checking first is
       // the same courtesy `user.follow` pays for its CHECK constraint — the
       // constraint remains the invariant.
+      //
+      // The visibility filter is part of the same courtesy: a parent hidden
+      // from you (banned author, a block either way) reads as nonexistent
+      // rather than hinting it exists. A parent that was *removed* stays
+      // replyable — removal is not invisibility, and a removed post is still
+      // a real post with a thread.
       if (input.parentId) {
         const [parent] = await context.db
           .select({ id: post.id })
           .from(post)
-          .where(eq(post.id, input.parentId))
+          .innerJoin(user, eq(user.id, post.authorId))
+          .where(and(eq(post.id, input.parentId), not(invisibleAuthor(context.user.id))))
           .limit(1);
 
         if (!parent) {
@@ -139,6 +155,10 @@ export const postRouter = {
 
       return {
         ...created,
+        // Matches the additive tombstone fields of `postSelection` — a fresh
+        // post is never removed, so these are constants rather than columns.
+        removed: false,
+        removedReason: null,
         author: {
           id: context.user.id,
           name: context.user.name,
@@ -238,6 +258,10 @@ export const postRouter = {
               where ${follow.followingId} = ${post.authorId} and ${follow.followerId} = ${viewerId}
             ))`
           : undefined,
+        // The visibility filter (issue #38): posts by a banned author or by
+        // someone blocked in either direction drop out of every feed. This
+        // does NOT drop removed posts — removal is not invisibility.
+        not(invisibleAuthor(viewerId)),
         // Row-value comparison: strictly "older than the cursor" under the
         // same (created_at DESC, id DESC) ordering `post_created_idx`
         // provides, so Postgres can seek straight to the cursor position.
@@ -296,7 +320,7 @@ export const postRouter = {
         .select(postSelection(viewerId))
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(eq(post.id, input.postId))
+        .where(and(eq(post.id, input.postId), not(invisibleAuthor(viewerId))))
         .limit(1);
 
       if (!focused) {
@@ -328,11 +352,14 @@ export const postRouter = {
 
       const ancestorIds = chain.map((row) => row.id);
 
+      // Hidden ancestors are dropped rather than 404ing the thread: the
+      // focused post's chain is walked through them, so a blocked middle
+      // link must leave a gap, not take the whole conversation down.
       const rows = await context.db
         .select(postSelection(viewerId))
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(inArray(post.id, ancestorIds));
+        .where(and(inArray(post.id, ancestorIds), not(invisibleAuthor(viewerId))));
 
       // `inArray` has no ordering of its own, so the CTE's depth ordering is
       // reapplied here rather than trusted from the second query.
@@ -367,7 +394,8 @@ export const postRouter = {
       const [target] = await context.db
         .select({ id: post.id })
         .from(post)
-        .where(eq(post.id, input.postId))
+        .innerJoin(user, eq(user.id, post.authorId))
+        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
         .limit(1);
 
       if (!target) {
@@ -396,7 +424,8 @@ export const postRouter = {
       const [target] = await context.db
         .select({ id: post.id })
         .from(post)
-        .where(eq(post.id, input.postId))
+        .innerJoin(user, eq(user.id, post.authorId))
+        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
         .limit(1);
 
       if (!target) {

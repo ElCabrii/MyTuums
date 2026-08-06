@@ -319,7 +319,8 @@ export function SearchBox() {
                       {authorName}
                     </span>
                     <span className="block line-clamp-1 text-xs text-muted-foreground">
-                      {row.post.content}
+                      {/* Null only for removed posts (see post-card.tsx). */}
+                      {row.post.content ?? ""}
                     </span>
                   </span>
                 </Link>

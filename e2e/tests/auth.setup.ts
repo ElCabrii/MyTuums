@@ -2,7 +2,8 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test as setup, type APIRequestContext } from "@playwright/test";
 import { E2E } from "../playwright.config";
-import { FIXTURE_USERS, type FixtureUser } from "../support/users";
+import { getUserId, setUserRole } from "../support/db";
+import { ALICE, FIXTURE_USERS, type FixtureUser } from "../support/users";
 
 // Lives under `tests/` rather than at the package root: playwright.config.ts
 // sets `testDir: "./tests"`, and Playwright only ever discovers spec files by
@@ -61,12 +62,28 @@ for (const user of FIXTURE_USERS) {
   setup(`authenticate as ${user.username}`, async ({ request }) => {
     await ensureFixtureSession(request, user);
 
+    // Alice is the suite's moderator fixture (moderation.spec.ts walks the
+    // queue as her). Promoted through the row — the admin plugin's endpoints
+    // are blocked — and idempotent, so re-running `--project setup` on its
+    // own (the sign-in fallback path above) can't wedge on the constraint.
+    if (user.username === ALICE.username) {
+      const aliceId = await getUserId(ALICE.username);
+      await setUserRole(aliceId, "moderator");
+    }
+
     // Sanity check before writing storage state that would otherwise fail
-    // every downstream browser spec with a much less obvious error.
+    // every downstream browser spec with a much less obvious error. Alice's
+    // role is asserted too: the promotion above is the suite's moderator
+    // fixture, and if it ever silently failed (a migration gap, a wrong
+    // row), the failure would otherwise surface as confusing FORBIDDEN
+    // errors in moderation.spec.ts instead of here at setup.
     const session = await request.get(`${E2E.webUrl}/api/auth/get-session`);
     expect(session.ok(), `get-session should succeed once signed in as ${user.username}`).toBe(true);
-    const body = (await session.json()) as { user?: { username?: string } } | null;
+    const body = (await session.json()) as { user?: { username?: string; role?: string } } | null;
     expect(body?.user?.username, `session user should be ${user.username}`).toBe(user.username);
+    if (user.username === ALICE.username) {
+      expect(body?.user?.role, "alice should be the suite's moderator fixture").toBe("moderator");
+    }
 
     await request.storageState({ path: E2E.storageStateFor(user.username) });
   });

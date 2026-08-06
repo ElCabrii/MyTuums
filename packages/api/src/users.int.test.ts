@@ -53,6 +53,11 @@ describe("user.byUsername", () => {
         "followerCount",
         "followingCount",
         "viewerIsFollowing",
+        // Computed, never a stored column: the profile stub for a suspended
+        // author (issue #38). Not part of publicUserColumns — the boolean is
+        // derived at query time, so a real widening of that boundary still
+        // fails this test.
+        "suspended",
       ].sort(),
     );
     expect(result).not.toHaveProperty("email");

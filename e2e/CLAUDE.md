@@ -15,11 +15,11 @@ The config defines three projects over `testDir: ./tests`:
 - `playwright.config.ts` — the projects, both `webServer` entries with `stackEnv` (test DB, `BETTER_AUTH_URL`, blanked `RESEND_API_KEY`, `AUTH_RATE_LIMIT=false`, all-or-nothing `S3_*`), and the `E2E` constants (ports 3101/5273, storage-state paths) every other module imports.
 - `global-setup.ts` — truncates every table once per run, and is the canonical example of the `DATABASE_URL` fix-up (see below).
 - `support/users.ts` — `ALICE`/`BOB` fixture accounts, `uniqueUser()` for throwaway accounts, `dateOfBirthUnder15()`.
-- `support/db.ts` — seeding helpers (`createUser`, `seedPosts`, `seedReply`, `seedFollow`, `seedLike`, `getUserId`, `passwordResetTokenFor`) plus `truncateAll()` and the bucket purge.
+- `support/db.ts` — seeding helpers (`createUser`, `seedPosts`, `seedReply`, `seedFollow`, `seedLike`, `getUserId`, `passwordResetTokenFor`) plus `setUserRole` (direct row update — the admin plugin's endpoints are 404'd, so this is the only way a spec gets a moderator fixture), `truncateAll()` and the bucket purge.
 - `support/fixtures.ts` — the extended `test` handle: `bobPage`, `signedOutPage`, and `db`.
 - `support/post-card.ts` — structural post-card locators (`postCardWithText`, like/reply controls); there is a no-`data-testid` policy, so this is where the deepest-div heuristic lives.
-- `tests/auth.setup.ts` — the `setup` project: signs up alice/bob over HTTP (through `E2E.webUrl`, so the session cookie is scoped to the origin the browser will use) and writes their storage state.
-- `tests/api/*.spec.ts` — transport-level specs; `tests/specs/*.spec.ts` — browser journeys.
+- `tests/auth.setup.ts` — the `setup` project: signs up alice/bob over HTTP (through `E2E.webUrl`, so the session cookie is scoped to the origin the browser will use) and writes their storage state. Alice is also promoted to `moderator` here (via `setUserRole`, idempotent for `--project setup` re-runs) — she is the suite's moderator fixture.
+- `tests/api/*.spec.ts` — transport-level specs; `tests/specs/*.spec.ts` — browser journeys. `moderation.spec.ts` walks report → queue → remove → appeal as alice (moderator) and bob, and deliberately stops at "appeal submitted": the `appealReview` reviewer-exclusion invariant means overturning needs a second moderator fixture, so uphold/overturn stay covered by `moderation.int.test.ts`.
 
 ## Load-bearing decisions — do not break
 

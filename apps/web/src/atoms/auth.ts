@@ -321,6 +321,7 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
       clearLikeFamilies,
       clearFollowFamilies,
       clearSearchFamilies,
+      clearModerationFamilies,
     } = await import("@/atoms/sign-out-sweep");
     clearFamily(profileAtomFamily);
     clearPostFeedFamily();
@@ -334,6 +335,11 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
     // next viewer's first response look superseded and be dropped.
     clearLikeFamilies();
     clearFollowFamilies();
+    // Moderation families hold per-case query atoms and the dialogs' form
+    // atoms; the data was already wiped by `queryClient.clear()` above, but
+    // the family Maps would keep stale atom instances (and stale mutation
+    // results) per case ref for the next session.
+    clearModerationFamilies();
     // Search families are swept like every other family — results keyed on
     // the previous session's queries shouldn't outlive it. (The debounced
     // query and popover state die with the SearchBox at unmount, which the

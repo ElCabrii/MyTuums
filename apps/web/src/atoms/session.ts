@@ -155,3 +155,43 @@ export const needsDobAtom = atom((get) => get(isSignedInAtom) && !get(viewerDate
  * `needsHandleAtom` directly.
  */
 export const needsCompletionAtom = atom((get) => get(needsHandleAtom) || get(needsDobAtom));
+
+/**
+ * The four roles, weakest to strongest — the client mirror of `UserRole`
+ * in packages/api/src/roles.ts, which the browser cannot import (the api
+ * root is server-only; see constants.ts's export rules). Keep the two
+ * orderings in step.
+ */
+export type ViewerRole = "user" | "moderator" | "staff" | "admin";
+
+/**
+ * The role ordering, weakest to strongest — same ranks as `roleRank` in
+ * packages/api/src/roles.ts.
+ */
+const ROLE_RANK: Record<ViewerRole, number> = { user: 0, moderator: 1, staff: 2, admin: 3 };
+
+/** True when `role` is at least `min` — the client mirror of `roleAtLeast` in packages/api. */
+export function viewerRoleAtLeast(role: ViewerRole, min: ViewerRole): boolean {
+  return ROLE_RANK[role] >= ROLE_RANK[min];
+}
+
+/**
+ * The signed-in viewer's role, sanitised on read like theme/locale: an
+ * unknown string off the wire (a future deployment's role, say) reads as
+ * `user`, the weakest. Signed-out reads `user` too — the header that would
+ * show a Moderation link only renders for a real session, so there is
+ * nothing for a signed-out default to hide behind.
+ */
+export const viewerRoleAtom = atom((get) => {
+  const role = get(viewerAtom)?.role;
+  return role === "moderator" || role === "staff" || role === "admin" ? role : "user";
+});
+
+/** Moderator and above (moderator, staff, admin) — the client half of the `/moderation` route's gate. */
+export const isModeratorAtom = atom((get) => viewerRoleAtLeast(get(viewerRoleAtom), "moderator"));
+
+/** Staff and above (staff, admin). */
+export const isStaffAtom = atom((get) => viewerRoleAtLeast(get(viewerRoleAtom), "staff"));
+
+/** Admin only. */
+export const isAdminAtom = atom((get) => viewerRoleAtLeast(get(viewerRoleAtom), "admin"));
