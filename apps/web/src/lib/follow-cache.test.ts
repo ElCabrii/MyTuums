@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
-import { orpc, type Profile, type UserListPage, type UserSummary } from "@/lib/orpc";
+import { orpc, type Profile, type SearchUser, type SearchUsersPage, type UserListPage, type UserSummary } from "@/lib/orpc";
 import {
   patchFollowState,
   readCachedIsFollowing,
@@ -44,6 +44,25 @@ function listPage(items: UserSummary[]): InfiniteData<UserListPage> {
   return { pages: [{ items, nextCursor: null }], pageParams: [undefined] };
 }
 
+function makeSearchUser(
+  overrides: Partial<SearchUser> & { id: string; username: string },
+): SearchUser {
+  return {
+    name: overrides.username,
+    displayUsername: overrides.username,
+    image: null,
+    bio: null,
+    bannerImage: null,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    viewerIsFollowing: false,
+    ...overrides,
+  };
+}
+
+function searchUsersPage(items: SearchUser[]): InfiniteData<SearchUsersPage> {
+  return { pages: [{ items, nextCursor: null }], pageParams: [undefined] };
+}
+
 const profileKey = (username: string) => orpc.user.byUsername.key({ input: { username } });
 const followersKey = (username: string) => orpc.user.followers.key({ input: { username } });
 const followingKey = (username: string) => orpc.user.following.key({ input: { username } });
@@ -81,6 +100,25 @@ describe("patchFollowState", () => {
     // The viewer's follower count and viewerIsFollowing (they don't follow themselves) are untouched.
     expect(patchedViewer?.followerCount).toBe(3);
     expect(patchedViewer?.viewerIsFollowing).toBe(false);
+  });
+
+  it("flips viewerIsFollowing on matching search.users rows, touching no counts", () => {
+    const queryClient = new QueryClient();
+    const searchKey = orpc.search.users.key({ input: { q: "target", limit: 20 } });
+    queryClient.setQueryData(
+      searchKey,
+      searchUsersPage([
+        makeSearchUser({ id: "target-1", username: "target", viewerIsFollowing: false }),
+        makeSearchUser({ id: "other-1", username: "other", viewerIsFollowing: true }),
+      ]),
+    );
+
+    patchFollowState(queryClient, { userId: "target-1", viewerId: "viewer-1", following: true });
+
+    const data = queryClient.getQueryData<InfiniteData<SearchUsersPage>>(searchKey);
+    expect(data?.pages[0]?.items.find((i) => i.id === "target-1")?.viewerIsFollowing).toBe(true);
+    // The other row is untouched, and search rows carry no counts to move.
+    expect(data?.pages[0]?.items.find((i) => i.id === "other-1")?.viewerIsFollowing).toBe(true);
   });
 
   it("clamps followerCount and followingCount at 0 on unfollow", () => {
@@ -149,6 +187,23 @@ describe("readCachedIsFollowing", () => {
     queryClient.setQueryData(
       followingKey("someone"),
       listPage([makeSummary({ id: "target-1", username: "target", viewerIsFollowing: true })]),
+    );
+
+    expect(readCachedIsFollowing(queryClient, "target-1")).toBe(true);
+  });
+
+  // The search page renders live follow buttons off `search.users` rows
+  // (user-list.tsx), and a user who appears ONLY there has no profile or
+  // follower-list cache entry yet. The direction must come from that row or
+  // every click on a search-result button would be treated as "follow" —
+  // making unfollow from search results impossible.
+  it("falls back to the search.users cache when the person appears only there", () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(
+      orpc.search.users.key({ input: { q: "target", limit: 20 } }),
+      searchUsersPage([
+        makeSearchUser({ id: "target-1", username: "target", viewerIsFollowing: true }),
+      ]),
     );
 
     expect(readCachedIsFollowing(queryClient, "target-1")).toBe(true);

@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
 
 const { fakeClient } = vi.hoisted(() => ({
   fakeClient: {
     user: { follow: vi.fn(), unfollow: vi.fn(), byUsername: vi.fn(), followers: vi.fn(), following: vi.fn() },
     post: { list: vi.fn() },
+    // The follow-cache sweep now also walks `orpc.search.users.key()`, so a
+    // missing group here throws inside every follow mutation — mirroring the
+    // `search` group like.test.ts already carries.
+    search: { typeahead: vi.fn(), users: vi.fn(), posts: vi.fn() },
   },
 }));
 
@@ -16,7 +20,7 @@ vi.mock("@/lib/orpc", async () => {
   return { orpc: createTanstackQueryUtils(fakeClient) };
 });
 
-import { orpc, type Profile } from "@/lib/orpc";
+import { orpc, type Profile, type SearchUser, type SearchUsersPage } from "@/lib/orpc";
 import { readCachedIsFollowing } from "@/lib/follow-cache";
 import { clearFollowFamilies, toggleFollowAtomFamily } from "@/atoms/follow";
 import { sessionAtom } from "@/atoms/session";
@@ -43,6 +47,25 @@ function makeProfile(overrides: Partial<Profile> & { id: string; username: strin
 // coercion keeps the call sites free of non-null assertions.
 const profileKey = (username: string | null) =>
   orpc.user.byUsername.key({ input: { username: username ?? "" } });
+
+function makeSearchUser(
+  overrides: Partial<SearchUser> & { id: string; username: string },
+): SearchUser {
+  return {
+    name: overrides.username,
+    displayUsername: overrides.username,
+    image: null,
+    bio: null,
+    bannerImage: null,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    viewerIsFollowing: false,
+    ...overrides,
+  };
+}
+
+function searchUsersPage(items: SearchUser[]): InfiniteData<SearchUsersPage> {
+  return { pages: [{ items, nextCursor: null }], pageParams: [undefined] };
+}
 
 function freshStoreWithTarget(profile: Profile) {
   const store = createStore();
@@ -130,6 +153,36 @@ describe("toggleFollowAtomFamily", () => {
     // Putting the viewer in the scope would fork the serialisation queue on
     // sign-in — it must never be there, not even as a substring.
     expect(scopeIds.some((id) => id?.includes("viewer-1"))).toBe(false);
+  });
+
+  // The direction is read from whichever cache holds the person. A user whose
+  // ONLY cached copy is a search result — no profile, no follower list — is
+  // still real cached state: with `viewerIsFollowing: true` the button must
+  // send `unfollow`. Before search results joined the read path, this computed
+  // "nothing cached" -> following=true and re-sent `follow`, so the button
+  // could never turn a search-result "Following" back off.
+  it("sends unfollow for an already-followed user whose only cached copy is a search result", async () => {
+    const store = createStore();
+    const queryClient = new QueryClient();
+    store.set(queryClientAtom, queryClient);
+    store.set(sessionAtom, {
+      data: { user: { id: "viewer-1" } },
+      isPending: false,
+    } as never);
+    queryClient.setQueryData(
+      orpc.search.users.key({ input: { q: "target", limit: 20 } }),
+      searchUsersPage([
+        makeSearchUser({ id: "target-1", username: "target", viewerIsFollowing: true }),
+      ]),
+    );
+    fakeClient.user.follow.mockClear();
+    fakeClient.user.unfollow.mockClear();
+    fakeClient.user.unfollow.mockImplementation(() => new Promise(() => {}));
+
+    store.set(toggleFollowAtomFamily("target-1"));
+
+    await waitFor(() => expect(fakeClient.user.unfollow).toHaveBeenCalled());
+    expect(fakeClient.user.follow).not.toHaveBeenCalled();
   });
 
   it("reads the follow direction from the cache, so a burst of clicks alternates", () => {

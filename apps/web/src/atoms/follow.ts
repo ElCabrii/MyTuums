@@ -59,7 +59,11 @@ function toggleMutationAtom(userId: string, direction: "follow" | "unfollow") {
       scope: { id: `follow:${userId}` },
 
       onMutate: (): FollowContext => {
+        // Profile and search-result caches both hold the person (see
+        // lib/follow-cache.ts); cancelling them stops an in-flight refetch
+        // landing after the patch and overwriting it with pre-click state.
         void queryClient.cancelQueries({ queryKey: orpc.user.byUsername.key() });
+        void queryClient.cancelQueries({ queryKey: orpc.search.users.key() });
         const snapshot = snapshotFollowCaches(queryClient);
         patchFollowState(queryClient, { userId, viewerId, following });
         return { snapshot };
