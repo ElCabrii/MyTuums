@@ -30,7 +30,7 @@ const intentFamily = atomFamily<string, PrimitiveAtom<boolean | null>>(() =>
 );
 
 interface LikeContext {
-  snapshot: PostSnapshot;
+  snapshot: PostSnapshot | undefined;
 }
 
 interface LikeResult {
@@ -100,7 +100,11 @@ function toggleMutationAtom(postId: string, direction: "like" | "unlike") {
         void queryClient.cancelQueries({ queryKey: orpc.post.list.key() });
         void queryClient.cancelQueries({ queryKey: orpc.post.thread.key() });
         void queryClient.cancelQueries({ queryKey: orpc.search.posts.key() });
-        const snapshot = snapshotPosts(queryClient);
+        // Scoped to this post (issue #53): likes on two different posts are
+        // genuinely concurrent, so the rollback must not replay state another
+        // post's mutation — or confirmation — has since written into the same
+        // entries.
+        const snapshot = snapshotPosts(queryClient, postId);
 
         updatePostEverywhere(queryClient, postId, (post) => {
           if (post.viewerHasLiked === liked) return post;
@@ -128,7 +132,9 @@ function toggleMutationAtom(postId: string, direction: "like" | "unlike") {
       },
 
       onError: (_error: Error, _variables: LikeVariables, context: LikeContext | undefined) => {
-        if (context) restorePosts(queryClient, context.snapshot);
+        // No snapshot means the post was cached nowhere at `onMutate` time, so
+        // the optimistic patch was a no-op and there is nothing to undo.
+        if (context?.snapshot) restorePosts(queryClient, context.snapshot);
       },
     };
   });

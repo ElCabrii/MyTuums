@@ -216,7 +216,7 @@ describe("post-cache", () => {
         thread: queryClient.getQueryData(threadKey),
       };
 
-      const snapshot = snapshotPosts(queryClient);
+      const snapshot = snapshotPosts(queryClient, "round-trip-1");
       updatePostEverywhere(queryClient, "round-trip-1", (p) => ({
         ...p,
         likeCount: p.likeCount + 1,
@@ -226,7 +226,7 @@ describe("post-cache", () => {
       // Sanity: the mutation actually changed something before restoring.
       expect(queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items[0]?.likeCount).toBe(6);
 
-      restorePosts(queryClient, snapshot);
+      restorePosts(queryClient, snapshot!);
 
       expect(queryClient.getQueryData(feedKey)).toEqual(before.feed);
       expect(queryClient.getQueryData(threadKey)).toEqual(before.thread);
@@ -238,7 +238,7 @@ describe("post-cache", () => {
       const searchKey = orpc.search.posts.key({ input: { q: "hello", limit: 20 } });
       queryClient.setQueryData(searchKey, searchPage([post]));
 
-      const snapshot = snapshotPosts(queryClient);
+      const snapshot = snapshotPosts(queryClient, "round-trip-search-1");
       updatePostEverywhere(queryClient, "round-trip-search-1", (p) => ({
         ...p,
         likeCount: p.likeCount + 1,
@@ -251,7 +251,7 @@ describe("post-cache", () => {
           ?.likeCount,
       ).toBe(6);
 
-      restorePosts(queryClient, snapshot);
+      restorePosts(queryClient, snapshot!);
 
       expect(
         queryClient.getQueryData<InfiniteData<SearchPostsPage>>(searchKey)?.pages[0]?.items[0]
@@ -259,15 +259,52 @@ describe("post-cache", () => {
       ).toBe(5);
     });
 
-    it("handles empty caches without throwing", () => {
+    it("returns no snapshot for a post that isn't cached anywhere", () => {
       const queryClient = new QueryClient();
 
+      expect(snapshotPosts(queryClient, "nothing-cached")).toBeUndefined();
       expect(() => {
-        const snapshot = snapshotPosts(queryClient);
         updatePostEverywhere(queryClient, "nothing-cached", (p) => p);
-        restorePosts(queryClient, snapshot);
         readCachedPost(queryClient, "nothing-cached");
       }).not.toThrow();
+    });
+
+    // Issue #53: the rollback helpers used to snapshot and restore EVERY
+    // cached entry, so a failed like on post A silently reverted a concurrent
+    // — possibly already-confirmed — like on post B. A and B share one feed
+    // entry here, the exact case a whole-cache replay gets wrong.
+    it("rollback for one post leaves another post's confirmed state untouched, even in the same feed entry", () => {
+      const queryClient = new QueryClient();
+      const postA = makePost({ id: "post-a", likeCount: 5, viewerHasLiked: false });
+      const postB = makePost({ id: "post-b", likeCount: 10, viewerHasLiked: false });
+      const feedKey = orpc.post.list.key({ input: { limit: 20 } });
+      queryClient.setQueryData(feedKey, feedPage([postA, postB]));
+
+      // Like A: snapshot, then optimistic patch.
+      const snapshotA = snapshotPosts(queryClient, "post-a");
+      updatePostEverywhere(queryClient, "post-a", (p) => ({
+        ...p,
+        likeCount: p.likeCount + 1,
+        viewerHasLiked: true,
+      }));
+
+      // Like B concurrently: optimistic patch, then the server confirms with
+      // an authoritative count.
+      updatePostEverywhere(queryClient, "post-b", (p) => ({
+        ...p,
+        likeCount: p.likeCount + 1,
+        viewerHasLiked: true,
+      }));
+      updatePostEverywhere(queryClient, "post-b", (p) => ({ ...p, likeCount: 42 }));
+
+      // A's request fails: the rollback must undo A's patch only.
+      restorePosts(queryClient, snapshotA!);
+
+      const items = queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items;
+      expect(items?.find((p) => p.id === "post-a")?.likeCount).toBe(5);
+      expect(items?.find((p) => p.id === "post-a")?.viewerHasLiked).toBe(false);
+      expect(items?.find((p) => p.id === "post-b")?.likeCount).toBe(42);
+      expect(items?.find((p) => p.id === "post-b")?.viewerHasLiked).toBe(true);
     });
   });
 });
