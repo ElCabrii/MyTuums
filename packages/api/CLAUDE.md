@@ -27,6 +27,7 @@ the root — see `src/constants.ts` for why.
 - `src/storage.ts` — S3 factory; `Storage` vs `DestructiveStorage` split; windowed presigned URLs.
 - `src/media.ts` — the `/media/<key>` resolver: presigned redirect + cache budget. A pure key→URL function with no session logic of its own — `apps/server/src/request-handler.ts` requires a live session before this is ever called.
 - `src/image.ts` — pure upload rules: type sniffing, bounds, key layout, the `isSafeObjectKey` path-traversal guard.
+- `src/reconcile-media.ts` — the reconcile-script core (`scripts/reconcile-media.mjs` is the guarded wrapper). Lists the bucket BEFORE reading the `user` rows, on purpose.
 - `src/dimensions.ts` — dependency-free header-only dimension parser, also exported to the web app.
 - `src/constants.ts` — browser-safe constants, also exported to the web app.
 - `src/testing/harness.ts` — int-test harness: real BetterAuth sign-up, in-memory bucket, FK-safe truncate, per-test rate limiter.
@@ -45,7 +46,7 @@ the root — see `src/constants.ts` for why.
 - **`like` / `follow` are separate idempotent procedures**, not a `toggle`: ordering and retry safety.
 - **Replies are a mode of `post.list` (`parentId`)**, not a separate procedure — the web app's optimistic like sweep covers every cached `post.list` by key prefix, so a separate procedure would miss reply likes.
 - **`publicUserColumns` is a privacy boundary**: email, `twoFactorEnabled`, `lastLoginMethod` and preferences must never be added (`users.int.test.ts` pins the exact shape).
-- **Upload order matters**: row write before object delete; display + original share one uuid (`.orig` infix); `objectKeyFromMediaPath` returns `null` for provider URLs; leaks are reaped by `scripts/reconcile-media.mjs`.
+- **Upload order matters**: row write before object delete; display + original share one uuid (`.orig` infix); `objectKeyFromMediaPath` returns `null` for provider URLs; leaks are reaped by `scripts/reconcile-media.mjs`, which must keep listing the bucket BEFORE reading the `user` rows — an upload landing between the two steps would otherwise look like an orphan and be deleted while its row points at it (issue #52; the order is pinned by `src/reconcile-media.test.ts`).
 - **The inverse effects read their guard under `FOR UPDATE`, inside their own transaction** (`restorePostEffect` / `unbanEffect`): the audit log is append-only, so a double-log is a lie about what happened — an unlocked pre-read of the tombstone/sentence is a TOCTOU that two concurrent restores/unbans both pass and both log (issue #51). Moving the read back out of the transaction "for speed" re-opens the double-log.
 - **Cursor bounds go through `sql.param(value, column)`** — interpolating a JS `Date` hands postgres.js something it can't serialise.
 - **Presigned URLs are windowed** (`MEDIA_SIGNING_WINDOW_MS`): byte-identical within a window — what makes the object cache work; redirects must not be cached past `secondsUntilWindowEnd()`.

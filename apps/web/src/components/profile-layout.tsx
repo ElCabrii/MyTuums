@@ -2,9 +2,9 @@ import { getRouteApi, Link, Outlet, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { ORPCError } from "@orpc/client";
 import { authPendingAtom, signOutAtom } from "@/atoms/auth";
-import { viewerAtom } from "@/atoms/session";
+import { viewerAtom, isStaffAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
-import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
+import { blockDialogAtom, reportDialogAtom, unbanUserAtom } from "@/atoms/moderation";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,7 +19,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
-import { UserX, Mail, Calendar, LogOut, Loader2, AlertCircle, Settings, MoreHorizontal, ShieldAlert } from "lucide-react";
+import { UserX, Mail, Calendar, LogOut, Loader2, AlertCircle, Settings, MoreHorizontal, ShieldAlert, ShieldCheck } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 import { getLocale } from "@/paraglide/runtime.js";
 
@@ -39,6 +39,8 @@ export function ProfileLayout() {
   const signOut = useSetAtom(signOutAtom);
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
+  const isStaff = useAtomValue(isStaffAtom);
+  const unbanUser = useAtomValue(unbanUserAtom);
 
   const profileQuery = useAtomValue(profileAtomFamily(username));
 
@@ -98,11 +100,39 @@ export function ProfileLayout() {
   // `user.byUsername`): the profile resolves instead of 404ing, and the page
   // renders a stub rather than the full profile — no bio, no counts, no
   // Follow affordance. The account cannot sign in while the ban holds, so
-  // the stub never needs to explain itself to its own owner.
+  // the stub never needs to explain itself to its own owner. For the staff
+  // who imposed the sentence, the same stub is the one place to lift it:
+  // the gate mirrors `moderation.unbanUser`'s own gate (`staffProcedure`,
+  // packages/api/src/procedures.ts) — the tier that can impose a ban is the
+  // tier that can undo it, so the button never renders for a role the
+  // server would 403. On success the mutation's cache sweep refetches
+  // `user.byUsername`, and the stub swaps back to the full profile.
   if (profile.suspended) {
     return (
       <ProfileMessage icon={ShieldAlert} title={`@${handle}`}>
         <p className="text-muted-foreground text-sm mb-6">{m.profile_suspended_body()}</p>
+        {isStaff && (
+          <div className="space-y-2 mb-6">
+            {unbanUser.isError && (
+              <p role="alert" className="text-xs text-destructive">
+                {unbanUser.error?.message || m.common_something_went_wrong()}
+              </p>
+            )}
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled={unbanUser.isPending}
+              onClick={() => unbanUser.mutate({ userId: profile.id })}
+            >
+              {unbanUser.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+              ) : (
+                <ShieldCheck className="h-4 w-4" />
+              )}
+              {m.moderation_unban()}
+            </Button>
+          </div>
+        )}
         <Button nativeButton={false} render={<Link to="/" className="w-full justify-center" />}>
           {m.common_back_to_home()}
         </Button>
