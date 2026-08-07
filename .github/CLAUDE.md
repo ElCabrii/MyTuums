@@ -32,7 +32,10 @@ CI). CI never deploys: Railway builds its own image from
      this job exists for, since a missing `ARG` silently ships a bundle
      with no OAuth buttons;
   2. the migration runner (`apps/server/dist/migrate.js`) and migration
-     SQL (`packages/db/drizzle/`) shipped in the image.
+     SQL (`packages/db/drizzle/`) shipped in the image;
+  3. the runner installed only the server's production dependencies — no
+     `apps/web/node_modules` may exist (issue #58's regression), while
+     the server's own prod deps must be present.
 
 ## Workflows — security scanning
 

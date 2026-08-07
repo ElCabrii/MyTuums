@@ -310,3 +310,17 @@ jobs:
         run: |
           docker run --rm --entrypoint sh mytuums-server:ci -c             'test -f apps/server/dist/migrate.js && test -f packages/db/drizzle/meta/_journal.json'             || { echo "::error::migrate.js or packages/db/drizzle missing from the image"; exit 1; }
           echo "Migration runner and SQL are present in the image."
+
+      # The regression that motivated this step (issue #58): the runner used
+      # to `pnpm install --prod` over the both-workspaces prune, shipping the
+      # entire web dependency tree (react, jotai, shadcn, ...) into an image
+      # whose process never imports any of it — Vite already bundled the SPA.
+      # The first test fails on that old layout (apps/web/node_modules held
+      # the tree); the second proves the server's own prod deps ARE installed,
+      # so the guarantee cannot be "satisfied" by pruning the runner down to
+      # nothing.
+      - name: Assert the runner installs only the server's production dependencies
+        run: |
+          docker run --rm --entrypoint sh mytuums-server:ci -c             'test ! -d apps/web/node_modules'             || { echo "::error::apps/web dependencies were installed into the runner - prune the runner to @my-tuums/server alone"; exit 1; }
+          docker run --rm --entrypoint sh mytuums-server:ci -c             'test -d apps/server/node_modules/better-auth'             || { echo "::error::the server's production dependencies are missing from the runner"; exit 1; }
+          echo "Runner holds the server's prod deps and nothing from apps/web."
