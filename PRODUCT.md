@@ -22,7 +22,7 @@ manage.
 - Image uploads with MIME sniffing and WebP dimension validation, served via
   S3 presigned URLs
 - i18n in English and French (Paraglide), light/dark theme
-- Rate limiting keyed on user/IP identity; keyset-paginated feeds
+- Rate limiting keyed on the signed-in user; keyset-paginated feeds
 
 ## How it runs
 

@@ -22,4 +22,4 @@ This document also serves as policy context for the agentic security scanner
 - **Auth** is better-auth composition (OAuth providers, two-factor, passkeys)
   in `packages/auth`; the OAuth callback trust decisions live there.
 - The **API** (`apps/server`, `packages/api`) handles all user input; rate
-  limiting keys on user/ip identity.
+  limiting keys on the signed-in user; there is no anonymous surface.
