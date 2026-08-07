@@ -180,39 +180,61 @@ export const resetRoleFormEffect = atomEffect((get, set) => {
 });
 
 /**
- * Refetches every moderation query the queue and case views read — every
- * action either changes the queue or the open case, and the prefix keys cover
- * the family entries.
+ * Refetches every moderation query the queue, case and audit views read —
+ * every audit-writing action must show up in the audit log (`logAction` is
+ * the one writer of `moderation_action` rows), and every action here changes
+ * the queue or the open case. The prefix keys cover the family entries.
  */
 function invalidateModerationQueries(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: orpc.moderation.queue.key() });
   void queryClient.invalidateQueries({ queryKey: orpc.moderation.case.key() });
+  void queryClient.invalidateQueries({ queryKey: orpc.moderation.auditLog.key() });
+}
+
+/**
+ * Refetches every cache whose content `visibility.ts`'s predicate filters —
+ * the surfaces where a banned account (`effectivelyBanned`) or a blocked
+ * pair (either direction) disappears: feeds, threads, search, typeahead,
+ * follow lists, and the profile being viewed. Block/unblock change the
+ * block half of the predicate; ban/suspend/unban change the ban half — two
+ * relationship kinds, one set of surfaces, so one sweep is what stops them
+ * drifting again (issue #50). `listBlocked` rides along: it is the viewer's
+ * block-relationship list, changed only by block/unblock, and the refetch a
+ * ban triggers returns identical data — but keeping it inside the sweep is
+ * the only thing that stops the block side from forking off the helper.
+ */
+function invalidateVisibilityCaches(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
+  void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
+  void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
+  void queryClient.invalidateQueries({ queryKey: orpc.search.users.key() });
+  void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
+  void queryClient.invalidateQueries({ queryKey: orpc.user.followers.key() });
+  void queryClient.invalidateQueries({ queryKey: orpc.user.following.key() });
+  void queryClient.invalidateQueries({ queryKey: orpc.user.byUsername.key() });
+  void queryClient.invalidateQueries({ queryKey: orpc.moderation.listBlocked.key() });
 }
 
 /** Reports a post or user for one of the stable reason codes (issue #38). */
-export const reportAtom = atomWithMutation(() => orpc.moderation.report.mutationOptions());
+export const reportAtom = atomWithMutation((get) => {
+  const queryClient = get(queryClientAtom);
+  return orpc.moderation.report.mutationOptions({
+    onSuccess: () => {
+      // A report writes `report` rows, not `moderation_action` rows — it
+      // moves the queue (a new case, or a resolved one reopens) and any
+      // open case dialog's report list, so the reporter's own views must
+      // refetch (issue #50). The audit-log refetch the shared sweep also
+      // triggers is a no-op: no audit row was written.
+      invalidateModerationQueries(queryClient);
+    },
+  });
+});
 
 /** Blocks a user: their posts leave the viewer's feeds and both follows are severed. */
 export const blockAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.block.mutationOptions({
-    onSuccess: () => {
-      // Blocking rewrites what every viewer-scoped cache should show — the
-      // target vanishes from feeds, threads, search and the typeahead, the
-      // severed follow changes both follow lists, and the profile being
-      // viewed (if it is the blocked user's) must stop lying about follow
-      // state — so sweep the shared prefixes rather than patch each entry.
-      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.users.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.user.followers.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.user.following.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.user.byUsername.key() });
-      // Blocking removes the target from the blocked list.
-      void queryClient.invalidateQueries({ queryKey: orpc.moderation.listBlocked.key() });
-    },
+    onSuccess: () => invalidateVisibilityCaches(queryClient),
   });
 });
 
@@ -220,18 +242,7 @@ export const blockAtom = atomWithMutation((get) => {
 export const unblockAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.unblock.mutationOptions({
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.users.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.user.followers.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.user.following.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.user.byUsername.key() });
-      // Unblocking removes the target from the blocked list.
-      void queryClient.invalidateQueries({ queryKey: orpc.moderation.listBlocked.key() });
-    },
+    onSuccess: () => invalidateVisibilityCaches(queryClient),
   });
 });
 
@@ -278,7 +289,13 @@ export const resolveAtom = atomWithMutation((get) => {
 export const suspendUserAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.suspendUser.mutationOptions({
-    onSuccess: () => invalidateModerationQueries(queryClient),
+    onSuccess: () => {
+      invalidateModerationQueries(queryClient);
+      // The suspension hides the target from every viewer (`effectivelyBanned`
+      // in visibility.ts), not just the acting moderator — so their own
+      // feeds and follow caches need the same sweep a block runs (issue #50).
+      invalidateVisibilityCaches(queryClient);
+    },
   });
 });
 
@@ -286,7 +303,12 @@ export const suspendUserAtom = atomWithMutation((get) => {
 export const banUserAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.banUser.mutationOptions({
-    onSuccess: () => invalidateModerationQueries(queryClient),
+    onSuccess: () => {
+      invalidateModerationQueries(queryClient);
+      // A ban is `effectivelyBanned` app-wide — the same predicate family a
+      // block flips, so the same sweep (issue #50).
+      invalidateVisibilityCaches(queryClient);
+    },
   });
 });
 
@@ -294,7 +316,12 @@ export const banUserAtom = atomWithMutation((get) => {
 export const unbanUserAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.unbanUser.mutationOptions({
-    onSuccess: () => invalidateModerationQueries(queryClient),
+    onSuccess: () => {
+      invalidateModerationQueries(queryClient);
+      // Lifting the sentence brings the content back app-wide — the inverse
+      // of the ban sweep (issue #50).
+      invalidateVisibilityCaches(queryClient);
+    },
   });
 });
 
@@ -303,8 +330,10 @@ export const setRoleAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.setRole.mutationOptions({
     onSuccess: () => {
+      // The roster changes with the role; the swing is itself an audit row,
+      // so the shared moderation sweep covers the log (issue #50).
       void queryClient.invalidateQueries({ queryKey: orpc.moderation.team.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.moderation.auditLog.key() });
+      invalidateModerationQueries(queryClient);
     },
   });
 });
