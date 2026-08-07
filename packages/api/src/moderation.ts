@@ -579,6 +579,11 @@ export const moderationRouter = {
       // already stamped, so a retry would email nobody. Emails stay after
       // the commit (the same "mail after the transaction" rule every other
       // moderation action follows).
+      //
+      // Zero stamped reports makes the whole thing a no-op that would only
+      // write a misleading `case_resolved` row (`reporterCount: 0`) — the
+      // queue's appeal-only cases reach this otherwise (issue #59) — so it
+      // is refused inside the transaction, audit row and all.
       const { reporterIds } = await context.db.transaction(async (tx) => {
         const stamped = await stampReports(tx, {
           targetType: input.targetType,
@@ -587,6 +592,11 @@ export const moderationRouter = {
           resolvedBy: context.user.id,
           note: input.note,
         });
+        if (stamped.reporterIds.length === 0) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "This case has no open reports to resolve.",
+          });
+        }
         await logAction(tx, {
           action: "case_resolved",
           actorId: context.user.id,

@@ -998,6 +998,23 @@ describe("resolve", () => {
     expect(action?.details).toEqual({ outcome: "dismissed", reporterCount: 2 });
     expect(action?.note).toBe("no rule broken");
   });
+
+  it("refuses a case with no open reports — no stamp, no case_resolved audit row", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "nothing to dismiss");
+
+    await expect(
+      call(
+        appRouter.moderation.resolve,
+        { targetType: "post", targetId: postRow.id, outcome: "dismissed" },
+        { context: contextFor(mod) },
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "This case has no open reports to resolve." });
+
+    const action = await latestAction("case_resolved", "post", postRow.id);
+    expect(action).toBeUndefined();
+  });
 });
 
 describe("removePost and restorePost", () => {

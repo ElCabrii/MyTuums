@@ -262,7 +262,6 @@ function send(
     } else if (encoding === "gzip") {
       compressor = createGzip();
     }
-    if (compressor) compressor.on("error", abort);
 
     // `stream.pipe(compressor)` narrows to `Gzip`, so a ternary here would
     // infer `ReadStream | Gzip` — a union whose `.on` overloads do not unify
@@ -270,7 +269,13 @@ function send(
     let last: Readable;
     if (compressor) last = stream.pipe(compressor);
     else last = stream;
-    last.on("error", abort);
+    // `last` is the compressor when one exists and the stream itself when
+    // not. `abort` is registered on `stream` above and here only when the
+    // two differ, so each stream gets exactly one handler — previously the
+    // no-compressor path registered it twice on `stream` (and the compressed
+    // path twice on the compressor), firing `abort` twice on a single error
+    // (double `res.destroy()`, issue #59).
+    if (last !== stream) last.on("error", abort);
     last.on("end", resolve);
     last.pipe(res);
   });

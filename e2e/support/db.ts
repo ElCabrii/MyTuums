@@ -289,6 +289,13 @@ export async function setUserRole(
  * also call it directly for a guaranteed-clean slate of its own rather than
  * trusting no earlier spec left state behind (workers are pinned to 1, so
  * specs do share one database — see playwright.config.ts).
+ * The list is explicit — the same fourteen tables the API harness truncates
+ * (`packages/api/src/testing/harness.ts`) — and not a thinner `user`-only
+ * `cascade` version. Most moderation tables would be reached through the
+ * `user` foreign keys anyway, but `moderation_action.target_post_id` and
+ * `target_user_id` deliberately have NO foreign keys, so cascade-only
+ * reachability is one schema tweak away from silently leaking rows between
+ * specs (issue #59).
  */
 export async function truncateAll(): Promise<void> {
   assertTestDatabase();
@@ -297,7 +304,9 @@ export async function truncateAll(): Promise<void> {
 
   await db.execute(sql`
     truncate table
-      ${schema.postLike}, ${schema.follow}, ${schema.post},
+      ${schema.postLike}, ${schema.follow}, ${schema.report},
+      ${schema.userBlock}, ${schema.appeal}, ${schema.moderationAction},
+      ${schema.post},
       ${schema.session}, ${schema.account}, ${schema.verification},
       ${schema.rateLimit}, ${schema.twoFactor}, ${schema.passkey},
       ${schema.user}

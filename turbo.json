@@ -9,8 +9,19 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
-    "lint": {},
-    "typecheck": {},
+    // `lint` and `typecheck` need the generated, git-ignored files that the
+    // web build produces (`routeTree.gen.ts`, `src/paraglide/**`), so they
+    // depend on the package's OWN build — `^build` alone would only build
+    // dependencies, whose dist is never referenced (workspace packages
+    // export their source). CI used to paper over this by ordering its steps;
+    // a contributor running `pnpm typecheck` on a fresh clone gets the same
+    // guarantee (issue #59).
+    "lint": {
+      "dependsOn": ["build"]
+    },
+    "typecheck": {
+      "dependsOn": ["build"]
+    },
     "test": {
       "cache": false
     },
