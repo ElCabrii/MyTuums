@@ -230,7 +230,7 @@ describe("snapshot / restore round trip", () => {
       list: queryClient.getQueryData(followersKey("someone")),
     };
 
-    const snapshot = snapshotFollowCaches(queryClient);
+    const snapshot = snapshotFollowCaches(queryClient, { userId: "target-1", viewerId: undefined });
     patchFollowState(queryClient, { userId: "target-1", viewerId: undefined, following: true });
 
     expect(queryClient.getQueryData<Profile>(profileKey("target"))?.followerCount).toBe(6);
@@ -239,6 +239,57 @@ describe("snapshot / restore round trip", () => {
 
     expect(queryClient.getQueryData(profileKey("target"))).toEqual(before.profile);
     expect(queryClient.getQueryData(followersKey("someone"))).toEqual(before.list);
+  });
+
+  // Issue #53: the rollback helpers used to snapshot and restore EVERY
+  // cached entry, so a failed follow on person X silently reverted a
+  // concurrent — possibly already-confirmed — follow on person Y. X and Y
+  // share one followers-list entry here, the exact case a whole-cache replay
+  // gets wrong even though their profiles are separate entries.
+  it("rollback for one person leaves another person's confirmed state untouched, even in the same list entry", () => {
+    const queryClient = new QueryClient();
+    const x = makeProfile({ id: "x-1", username: "x", followerCount: 5, viewerIsFollowing: false });
+    const y = makeProfile({ id: "y-1", username: "y", followerCount: 10, viewerIsFollowing: false });
+    const viewer = makeProfile({
+      id: "viewer-1",
+      username: "viewer",
+      followingCount: 2,
+      viewerIsFollowing: false,
+    });
+    queryClient.setQueryData(profileKey("x"), x);
+    queryClient.setQueryData(profileKey("y"), y);
+    queryClient.setQueryData(profileKey("viewer"), viewer);
+    queryClient.setQueryData(
+      followersKey("someone"),
+      listPage([
+        makeSummary({ id: "x-1", username: "x", viewerIsFollowing: false }),
+        makeSummary({ id: "y-1", username: "y", viewerIsFollowing: false }),
+      ]),
+    );
+
+    // Follow X: snapshot, then optimistic patch.
+    const snapshotX = snapshotFollowCaches(queryClient, { userId: "x-1", viewerId: "viewer-1" });
+    patchFollowState(queryClient, { userId: "x-1", viewerId: "viewer-1", following: true });
+
+    // Follow Y concurrently: optimistic patch, then the server confirms with
+    // an authoritative count.
+    patchFollowState(queryClient, { userId: "y-1", viewerId: "viewer-1", following: true });
+    reconcileFollow(queryClient, { userId: "y-1", followerCount: 42, viewerIsFollowing: true });
+
+    // X's request fails: the rollback must undo X's patch only.
+    restoreFollowCaches(queryClient, snapshotX);
+
+    const xProfile = queryClient.getQueryData<Profile>(profileKey("x"));
+    expect(xProfile?.followerCount).toBe(5);
+    expect(xProfile?.viewerIsFollowing).toBe(false);
+
+    const yProfile = queryClient.getQueryData<Profile>(profileKey("y"));
+    expect(yProfile?.followerCount).toBe(42);
+    expect(yProfile?.viewerIsFollowing).toBe(true);
+
+    const list = queryClient.getQueryData<InfiniteData<UserListPage>>(followersKey("someone"));
+    expect(list?.pages[0]?.items.find((i) => i.id === "x-1")?.viewerIsFollowing).toBe(false);
+    expect(list?.pages[0]?.items.find((i) => i.id === "y-1")?.viewerIsFollowing).toBe(true);
   });
 });
 

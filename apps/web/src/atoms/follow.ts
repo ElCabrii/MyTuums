@@ -64,7 +64,11 @@ function toggleMutationAtom(userId: string, direction: "follow" | "unfollow") {
         // landing after the patch and overwriting it with pre-click state.
         void queryClient.cancelQueries({ queryKey: orpc.user.byUsername.key() });
         void queryClient.cancelQueries({ queryKey: orpc.search.users.key() });
-        const snapshot = snapshotFollowCaches(queryClient);
+        // Scoped to this person (issue #53): follow/unfollow of two different
+        // people are genuinely concurrent, so the rollback must not replay
+        // state the other's mutation — or confirmation — has since written
+        // into the same entries.
+        const snapshot = snapshotFollowCaches(queryClient, { userId, viewerId });
         patchFollowState(queryClient, { userId, viewerId, following });
         return { snapshot };
       },
