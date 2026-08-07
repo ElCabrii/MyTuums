@@ -13,6 +13,15 @@ const routeApi = getRouteApi("/search");
 /**
  * The `/search` results page: a heading for the query and the People and
  * Posts sections, or a "type something" prompt when the URL carries no `q`.
+ *
+ * The results body is a child component (`SearchResultsBody`) rather than
+ * inline JSX so that no hook in this file is conditional: `SearchPage`
+ * itself calls exactly one hook (`useSearch`), and the data hooks run in the
+ * body, which mounts only when `q` exists. The alternative — hoisting both
+ * `useAtomValue`s above the guard — would call the search families with an
+ * undefined key on the prompt render, and worse, issue #49 was precisely a
+ * hook-count change (`/search` → `/search?q=...` re-renders this component
+ * without remounting it) and this keeps the count stable on every path.
  */
 export function SearchPage() {
   const { q } = routeApi.useSearch();
@@ -28,12 +37,24 @@ export function SearchPage() {
     );
   }
 
+  return <SearchResultsBody q={q} />;
+}
+
+/**
+ * The results half of `/search`, mounted only once the URL carries a `q` —
+ * the same split as `CaseBody` in the moderation desk, for the same reason:
+ * its hooks are unconditional while the parent's early return is in play.
+ */
+function SearchResultsBody({ q }: { q: string }) {
+  const usersFeed = useAtomValue(searchUsersAtom(q));
+  const postsFeed = useAtomValue(searchPostsAtom(q));
+
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-8">
       <h1 className="text-lg font-bold tracking-tight">{m.search_results_for({ query: q })}</h1>
 
       <SearchResultsSection
-        feed={useAtomValue(searchUsersAtom(q))}
+        feed={usersFeed}
         headingId="search-users-heading"
         headingLabel={m.search_section_users()}
         emptyIcon={Users}
@@ -42,7 +63,7 @@ export function SearchPage() {
         renderItem={(user) => <UserRow key={user.id} user={user} />}
       />
       <SearchResultsSection
-        feed={useAtomValue(searchPostsAtom(q))}
+        feed={postsFeed}
         headingId="search-posts-heading"
         headingLabel={m.search_section_posts()}
         emptyIcon={MessageSquare}

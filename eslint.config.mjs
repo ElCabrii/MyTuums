@@ -5,6 +5,7 @@
 // real bugs in the server.
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
+import reactHooks from "eslint-plugin-react-hooks";
 
 /**
  * Monorepo-wide ESLint flat config: type-aware rules (one program per
@@ -25,6 +26,23 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
+  // The react-hooks plugin's flat-config entrypoint, scoped to the web app:
+  // it is the only React surface in the monorepo, and the rules misfire
+  // elsewhere — Playwright fixtures name their handoff callback `use`
+  // (`async ({ browser }, use) => …`), which rules-of-hooks misreads as
+  // React 19's `use` hook in a non-component (e2e/support/fixtures.ts).
+  //
+  // v7 still ships its configs in eslintrc shape (`plugins: ["react-hooks"]`
+  // — a string array, which flat config rejects outright), so the rules are
+  // taken verbatim from the entrypoint while the plugin itself is
+  // registered in the object form flat config requires. No rule is added,
+  // removed or has its severity changed here; the entrypoint remains the
+  // single source of truth.
+  {
+    files: ["apps/web/**"],
+    plugins: { "react-hooks": reactHooks },
+    rules: reactHooks.configs.flat.recommended.rules,
+  },
   {
     languageOptions: {
       parserOptions: {
@@ -36,8 +54,15 @@ export default tseslint.config(
           // (e.g. apps/web/tsconfig.json only includes "src") still get
           // linted with type information, using the nearest tsconfig as a
           // stand-in rather than being skipped or crashing the run.
+          //
+          // `eslint.config.mjs` itself is NOT here: the root tsconfig.json
+          // (node.json profile, allowJs/checkJs) includes it, so it joins
+          // the project service like any source file. Before that tsconfig
+          // existed, the stand-in could not resolve this file's imports —
+          // everything read as `error` typed, and linting the config against
+          // itself failed with no-unsafe-* errors on lines that were not
+          // actually unsafe.
           allowDefaultProject: [
-            "eslint.config.mjs",
             "packages/db/drizzle.config.ts",
             "apps/server/tsup.config.ts",
             // `apps/server/tsconfig.json` sets `rootDir: "src"`, so this one
