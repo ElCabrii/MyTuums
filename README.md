@@ -8,13 +8,13 @@ developing it. Claude Code's own guidance lives in [CLAUDE.md](CLAUDE.md).
 
 ## Stack
 
-| Layer               | Tech                                                                  |
-| ------------------- | --------------------------------------------------------------------- |
-| Monorepo            | pnpm 10 + Turborepo, Node 22, TypeScript strict everywhere            |
-| Web (`apps/web`)    | React 19, Vite, TanStack Router, Jotai atoms, Paraglide i18n, shadcn/ui (base-maia, zinc, lucide) |
-| Server (`apps/server`) | Node `http` server: `/api/auth` (better-auth) → `/rpc` (oRPC) → `/media` → static SPA |
-| Packages            | `api` (oRPC contract), `auth` (better-auth composition), `db` (Drizzle + postgres.js) |
-| Hosting             | Railway, EU region — production serves the built SPA from the API (one origin) |
+| Layer                  | Tech                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| Monorepo               | pnpm 10 + Turborepo, Node 22, TypeScript strict everywhere                                        |
+| Web (`apps/web`)       | React 19, Vite, TanStack Router, Jotai atoms, Paraglide i18n, shadcn/ui (base-maia, zinc, lucide) |
+| Server (`apps/server`) | Node `http` server: `/api/auth` (better-auth) → `/rpc` (oRPC) → `/media` → static SPA             |
+| Packages               | `api` (oRPC contract), `auth` (better-auth composition), `db` (Drizzle + postgres.js)             |
+| Hosting                | Railway, EU region — production serves the built SPA from the API (one origin)                    |
 
 ## Quick start
 
@@ -30,15 +30,15 @@ pnpm dev
 
 ## Common commands
 
-| Command                                                  | What                                             |
-| -------------------------------------------------------- | ------------------------------------------------ |
-| `pnpm build` / `pnpm lint` / `pnpm typecheck`            | turbo across the workspace                       |
-| `pnpm test:unit`                                         | vitest unit suites (pure logic, no DB)           |
-| `pnpm db:test:setup && pnpm test:integration`            | API integration against real Postgres            |
-| `pnpm test:e2e`                                          | Playwright (slow; own ports :3101/:5273)         |
-| `pnpm db:generate` / `db:push` / `db:promote`              | migration from schema changes / apply / role grant (root aliases into `@my-tuums/db`) |
-| `pnpm --filter @my-tuums/db db:migrate` / `db:studio` / `db:generate:auth` | the rest of the Drizzle toolbox, package-level |
-| `pnpm --filter @my-tuums/api exec vitest run src/foo.int.test.ts` | single test (same pattern for web)      |
+| Command                                                                    | What                                                                                  |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `pnpm build` / `pnpm lint` / `pnpm typecheck`                              | turbo across the workspace                                                            |
+| `pnpm test:unit`                                                           | vitest unit suites (pure logic, no DB)                                                |
+| `pnpm db:test:setup && pnpm test:integration`                              | API integration against real Postgres                                                 |
+| `pnpm test:e2e`                                                            | Playwright (slow; own ports :3101/:5273)                                              |
+| `pnpm db:generate` / `db:push` / `db:promote`                              | migration from schema changes / apply / role grant (root aliases into `@my-tuums/db`) |
+| `pnpm --filter @my-tuums/db db:migrate` / `db:studio` / `db:generate:auth` | the rest of the Drizzle toolbox, package-level                                        |
+| `pnpm --filter @my-tuums/api exec vitest run src/foo.int.test.ts`          | single test (same pattern for web)                                                    |
 
 ## Repository layout
 
