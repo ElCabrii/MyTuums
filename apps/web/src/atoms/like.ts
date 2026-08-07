@@ -102,11 +102,11 @@ function toggleMutationAtom(postId: string, direction: "like" | "unlike") {
         void queryClient.cancelQueries({ queryKey: orpc.search.posts.key() });
         const snapshot = snapshotPosts(queryClient);
 
-        updatePostEverywhere(queryClient, postId, (post) =>
-          post.viewerHasLiked === liked
-            ? post
-            : { ...post, viewerHasLiked: liked, likeCount: post.likeCount + (liked ? 1 : -1) },
-        );
+        updatePostEverywhere(queryClient, postId, (post) => {
+          if (post.viewerHasLiked === liked) return post;
+          const likeDelta = liked ? 1 : -1;
+          return { ...post, viewerHasLiked: liked, likeCount: post.likeCount + likeDelta };
+        });
 
         return { snapshot };
       },
