@@ -1013,6 +1013,11 @@ export const moderationRouter = {
           .from(moderationAction)
           .where(
             and(
+              // Redundant — the `moderation_action_target_match` check
+              // constraint guarantees a post target has target_type = 'post' —
+              // but it is what lets the planner use `moderation_action_target_idx`,
+              // whose leading column is target_type (issue #55).
+              eq(moderationAction.targetType, "post"),
               eq(moderationAction.action, "post_removed"),
               eq(moderationAction.targetPostId, postId),
             ),
