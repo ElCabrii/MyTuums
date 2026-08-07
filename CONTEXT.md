@@ -1,8 +1,13 @@
 # MyTuums
 
 A Twitter-style social app (posts, likes, follows, profiles). This glossary records
-the shared language of the moderation system being designed — roles, reports,
-blocks, and the actions moderators take.
+the shared language of the moderation system — roles, reports, blocks, and the
+actions moderators take.
+
+The system is built and shipped, so these definitions are normative rather than
+aspirational: the code cites them (see `packages/api/src/moderation.ts` and the
+page gate in `apps/server/src/request-handler.ts`). Change a definition here only
+alongside the behaviour it describes.
 
 ## Language
 
