@@ -290,6 +290,12 @@ export async function isActionLatest(
     .from(moderationAction)
     .where(
       and(
+        // Redundant — the `moderation_action_target_match` check constraint
+        // guarantees target_type agrees with whichever target column is set —
+        // but it is what lets the planner use `moderation_action_target_idx`,
+        // whose leading column is target_type. Without it this lookup seq-scans
+        // the whole audit log (issue #55).
+        eq(moderationAction.targetType, action.targetType),
         eq(moderationAction.action, action.action),
         targetMatch,
         // Row-value comparison under the same (created_at, id) ordering the

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
 import { auth } from "@my-tuums/auth";
-import { closeDb } from "@my-tuums/db";
+import { closeDb, type Database } from "@my-tuums/db";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
   appeal,
@@ -15,7 +15,7 @@ import {
 } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appealToken } from "./appeal-token.js";
-import { unbanEffect } from "./moderation-actions.js";
+import { isActionLatest, unbanEffect, type DbLike } from "./moderation-actions.js";
 import type { Context } from "./context.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { appRouter } from "./router.js";
@@ -2356,5 +2356,177 @@ describe("gates", () => {
     expect(refused).toMatchObject({ code: "TOO_MANY_REQUESTS" });
 
     await clearQueueFixtures();
+  });
+});
+
+/**
+ * A `DbLike` that records the SQL of every select it runs.
+ *
+ * The appeal-path lookups (issue #55) live inside handlers, so the only way
+ * to assert on the SQL they actually send is to watch it go by. Drizzle
+ * builders are thenables that expose `toSQL()`, so wrapping every object
+ * that comes out of `db.select(...)` in a proxy that peeks at `then` — the
+ * moment the handler awaits it — captures the exact statement, values and
+ * all, without touching the handler. Only ever hand the wrapped db to the
+ * code under test; everything else in this file keeps the raw
+ * `anonContext.db`.
+ */
+function capturingDb(
+  target: Database,
+  capture: (query: { sql: string; params: unknown[] }) => void,
+): DbLike {
+  const wrap = (value: unknown): unknown => {
+    if (value === null || typeof value !== "object") return value;
+    return new Proxy(value, {
+      get(obj, prop) {
+        if (prop === "then") {
+          // `await builder` reaches this: record what it is about to run,
+          // then hand the await through to the real thenable.
+          return (onFulfilled: (v: object) => unknown, onRejected: (e: unknown) => unknown) => {
+            const builder = obj as { toSQL?: () => { sql: string; params: unknown[] } };
+            if (builder.toSQL) capture(builder.toSQL());
+            return Promise.resolve(obj).then(onFulfilled, onRejected);
+          };
+        }
+        const member = (obj as Record<PropertyKey, unknown>)[prop];
+        if (typeof member === "function") {
+          return (...args: unknown[]) =>
+            wrap((member as (...args: unknown[]) => unknown).apply(obj, args));
+        }
+        return member;
+      },
+    });
+  };
+  return wrap(target) as DbLike;
+}
+
+/**
+ * Runs `EXPLAIN` on a captured query.
+ *
+ * `toSQL()` leaves the values as `$n` parameters, which a standalone
+ * EXPLAIN cannot see, so each parameter is inlined as a literal first. The
+ * planner's choice depends on the query's shape, not on parameterisation,
+ * and the values are this test's own.
+ */
+async function explainPlan(db: Database, query: { sql: string; params: unknown[] }): Promise<string> {
+  const literal = (value: unknown): string => {
+    if (value === null) return "null";
+    if (value instanceof Date) return `'${value.toISOString()}'`;
+    if (typeof value === "string") return `'${value.replaceAll("'", "''")}'`;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    throw new Error(`cannot inline EXPLAIN parameter of type ${typeof value}`);
+  };
+  let sqlText = query.sql;
+  // Highest first, so `$10` is never hit by the `$1` replacement.
+  for (let i = query.params.length; i >= 1; i -= 1) {
+    sqlText = sqlText.replaceAll(`$${i}`, () => literal(query.params[i - 1]));
+  }
+  const rows = await db.execute<{ "QUERY PLAN": string }>(sql.raw(`explain ${sqlText}`));
+  return rows.map((row) => row["QUERY PLAN"]).join("\n");
+}
+
+/**
+ * The two "what was the last action on X" lookups on the appeal path exist
+ * to be served by `moderation_action_target_idx` (see the index's comment in
+ * packages/db/src/schema/app.ts). Both used to omit `target_type` — the
+ * index's leading column — which left the planner no choice but to seq-scan
+ * the whole audit log (issue #55). The redundant `target_type` predicates
+ * that fix it are invisible to behaviour tests (the
+ * `moderation_action_target_match` check constraint makes them no-ops
+ * semantically), so the regression test is a plan assertion on the SQL the
+ * handlers really send.
+ */
+describe("moderation_action_target_idx reachability", () => {
+  it("the appeal-path lookups reach the target index once the table has history", async () => {
+    // The planner needs a populated, ANALYZEd table before it will prefer
+    // the index over a seq scan — a handful of fixture rows would never
+    // show the regression this test exists for.
+    try {
+      await anonContext.db.execute(sql`
+        insert into ${moderationAction}
+          (action, target_type, target_post_id, target_user_id, reason, note, details, created_at)
+        select 'post_removed', 'post',
+               ('00000000-0000-4000-8000-' || lpad(to_hex((i / 5) % 4000 + 1), 12, '0'))::uuid,
+               null, 'fixture', 'index-plan-fixture', '{}',
+               now() - (i || ' seconds')::interval
+        from generate_series(1, 20000) as i
+      `);
+      await anonContext.db.execute(sql`analyze "moderation_action"`);
+
+      const captured: Array<{ sql: string; params: unknown[] }> = [];
+      const capturedDb = capturingDb(anonContext.db, (query) => captured.push(query));
+
+      // `isActionLatest`'s "anything newer?" probe — the real function,
+      // running against the populated table, SQL captured on the way out.
+      // The createdAt anchor is deliberately old: a recent anchor makes the
+      // `(created_at, id) > (…)` comparison a "scan the newest rows" plan on
+      // moderation_action_created_idx, which is a fine plan but not the one
+      // this test exists for (see the aging below).
+      await isActionLatest(capturedDb, {
+        id: "00000000-0000-4000-8000-000000000099",
+        action: "post_removed",
+        targetType: "post",
+        targetPostId: "00000000-0000-4000-8000-000000000042",
+        targetUserId: null,
+        createdAt: new Date(Date.now() - 30 * 86_400_000),
+      });
+      expect(captured).toHaveLength(1);
+
+      // The signed-in `appealOpen` path — the real procedure, so the
+      // removal lookup is the handler's own SQL. removePost below logs the
+      // removal row the lookup is meant to find.
+      const author = await createTestUser();
+      const mod = await moderatorUser();
+      const postRow = await seedPostContent(author.id, "index plan fodder");
+      await call(
+        appRouter.moderation.removePost,
+        { postId: postRow.id, reason: "spam" },
+        { context: contextFor(mod) },
+      );
+
+      // Age the contested rows 30 days: a fresh removal row is the newest
+      // row in the table, and the planner then serves both lookups from
+      // moderation_action_created_idx ("start at the newest row, walk until
+      // the filter matches") — correct, but not the target_idx plan this
+      // test asserts. With the matches buried under all 20k filler rows,
+      // moderation_action_target_idx is unambiguously cheapest, the same
+      // shape as the issue's 50k-row evidence.
+      const removal = await latestAction("post_removed", "post", postRow.id);
+      if (!removal) throw new Error("removePost logged no removal row");
+      await anonContext.db
+        .update(moderationAction)
+        .set({ createdAt: new Date(Date.now() - 30 * 86_400_000) })
+        .where(eq(moderationAction.id, removal.id));
+      await anonContext.db.execute(sql`analyze "moderation_action"`);
+
+      captured.length = 0;
+      await call(
+        appRouter.moderation.appealOpen,
+        { postId: postRow.id, reason: "Appealing from the plan test" },
+        // The handler runs every query through the capture db, which still
+        // is the real connection — only the SQL is recorded.
+        { context: { ...contextFor(author), db: capturedDb as unknown as Database } },
+      );
+
+      // The two queries under test are the only captured ones whose
+      // parameters carry the 'post_removed' action code: the removal lookup
+      // and `isActionLatest`. The action-by-id and appeal lookups
+      // parameterize on their own ids, the post lookup on the post id.
+      const underTest = captured.filter((query) => query.params.includes("post_removed"));
+      expect(underTest).toHaveLength(2);
+
+      for (const query of underTest) {
+        const plan = await explainPlan(anonContext.db, query);
+        expect(plan).toContain("Index Scan using moderation_action_target_idx");
+        expect(plan).not.toContain("Seq Scan on moderation_action");
+      }
+    } finally {
+      // This test's rows are its own: the audit-log walk asserts against the
+      // whole table, so the filler must not outlive the test.
+      await anonContext.db
+        .delete(moderationAction)
+        .where(eq(moderationAction.note, "index-plan-fixture"));
+      await clearQueueFixtures();
+    }
   });
 });
