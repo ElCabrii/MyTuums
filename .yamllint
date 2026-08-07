@@ -1,0 +1,18 @@
+---
+# The repo's yamllint standard (yamllint auto-discovers this file from the
+# file's directory upward; pi-lens's yamllint checker honours it).
+#
+# line-length is deliberately not enforced: the workflows keep long
+# single-line shell steps on purpose (the `|| { echo ...; exit 1; }` idiom
+# keeps each assertion greppable as one unit) and the DATABASE_URL values
+# are unbreakable YAML scalars. 80 columns is yamllint's default, not a
+# standard this repo has ever had — nothing else here enforces line length.
+extends: default
+rules:
+  line-length: disable
+  # GitHub Actions workflows deliberately omit the document start marker
+  # (the runner does not need it), and the `on:` trigger key is
+  # YAML-truthy by GitHub convention.
+  document-start: disable
+  truthy:
+    check-keys: false

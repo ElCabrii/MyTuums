@@ -31,7 +31,13 @@ jobs:
     # other model at preflight — so the job timeout is the guardrail instead.
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      # Third-party actions are pinned to the full commit SHA their major tag
+      # points at — mutable tags can be silently repointed (see the trivy-action
+      # and kics-github-action compromises). The `# vN` comment records the tag
+      # for the next bump. Same convention as ci.yml.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
 
       # The DeepSeek provider lives in the ElCabrii fork, not on npm, and the
       # fork's repo root has no package.json, so CI builds the SDK from source
@@ -51,8 +57,8 @@ jobs:
       # lockfileVersion 9.0 lockfile fine, and the fork's packageManager
       # (pnpm@11.9.0) governs the SDK build. No `cache: pnpm` on setup-node:
       # this job never installs this repo's own dependencies.
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa  # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: 22
 
@@ -101,6 +107,6 @@ jobs:
 
       - name: Upload SARIF to code scanning
         if: always() && steps.sarif.outputs.exists == 'true'
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@c3400c2f38909e0dcf3c3a41f2030a8217be5d3e  # v3
         with:
           sarif_file: ${{ runner.temp }}/scan-output/exports/results.sarif

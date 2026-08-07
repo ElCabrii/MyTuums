@@ -154,6 +154,25 @@ export const resetTwoFactorChallengeAtom = atom(null, (_get, set) => {
 });
 
 /**
+ * Dispatches to the verify endpoint for the chosen method.
+ *
+ * A helper instead of a ternary chain because the chain nested a conditional
+ * inside a conditional (which the lint rule flags), and an explicitly
+ * annotated `let res` collapsed to `any` (better-auth's client types defeat
+ * `ReturnType` extraction). The inferred union of the three returns is what
+ * the original chain produced — `res.error` below stays type-safe.
+ */
+function verifyTwoFactor(
+  method: TwoFactorMethod,
+  code: string,
+  trustDevice: boolean,
+) {
+  if (method === "totp") return authClient.twoFactor.verifyTotp({ code, trustDevice });
+  if (method === "otp") return authClient.twoFactor.verifyOtp({ code, trustDevice });
+  return authClient.twoFactor.verifyBackupCode({ code, trustDevice });
+}
+
+/**
  * Verifies the second factor and completes sign-in.
  *
  * All three methods share one action because they differ only in which
@@ -177,12 +196,7 @@ export const verifyTwoFactorAtom = atom(
     set(authPendingAtom, true);
     try {
       const trustDevice = get(trustDeviceAtom);
-      const res =
-        method === "totp"
-          ? await authClient.twoFactor.verifyTotp({ code, trustDevice })
-          : method === "otp"
-            ? await authClient.twoFactor.verifyOtp({ code, trustDevice })
-            : await authClient.twoFactor.verifyBackupCode({ code, trustDevice });
+      const res = await verifyTwoFactor(method, code, trustDevice);
 
       if (res.error) {
         set(authErrorAtom, res.error.message || m.common_something_went_wrong());

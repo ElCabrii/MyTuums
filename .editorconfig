@@ -1,0 +1,16 @@
+root = true
+
+# The repo's formatting ground rules, declared so every editor and tool
+# agrees: 2-space indentation, LF endings (this repo has repeatedly had
+# files re-saved with tabs and/or CRLF by formatters that guessed).
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Markdown hard line breaks (two trailing spaces) are a real feature.
+[*.md]
+trim_trailing_whitespace = false
