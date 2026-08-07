@@ -13,7 +13,7 @@ import { z } from "zod";
  */
 const payloadSchema = z.object({
   purpose: z.literal("appeal"),
-  actionId: z.string().uuid(),
+  actionId: z.uuid(),
   userId: z.string().min(1),
   nonce: z.string().min(1),
   /** Seconds since the epoch. A number, not a Date, so the token stays JSON. */
