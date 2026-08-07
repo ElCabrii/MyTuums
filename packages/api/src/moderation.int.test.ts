@@ -2244,6 +2244,70 @@ describe("appeal flow", () => {
     });
     expect(signIn.headers.get("set-cookie")).toBeTruthy();
   });
+
+  it("the report-tier budget gates the signed-in postId branch — a 21st appeal in a minute trips TOO_MANY_REQUESTS", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "appeal budget fodder");
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "spam" },
+      { context: contextFor(mod) },
+    );
+
+    // Every call lands on the same key (`report:appeal:<actionId>`): the
+    // first opens the appeal, the rest are refused as duplicates — and each
+    // still consumes budget, so the 21st call trips the tier.
+    let refused: unknown = null;
+    for (let i = 0; i < RATE_LIMITS.report.limit + 1; i++) {
+      try {
+        await call(
+          appRouter.moderation.appealOpen,
+          { postId: postRow.id, reason: "Appeal budget fodder" },
+          { context: contextFor(author) },
+        );
+      } catch (error) {
+        refused = error;
+      }
+    }
+
+    expect(refused).toMatchObject({ code: "TOO_MANY_REQUESTS" });
+
+    await clearQueueFixtures();
+  });
+
+  it("the report-tier budget also gates the signed-out token branch, keyed on the link's nonce", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "appeal budget fodder");
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "spam" },
+      { context: contextFor(mod) },
+    );
+    const removal = await latestAction("post_removed", "post", postRow.id);
+    const token = appealLink(removal!.id, author.id);
+
+    // Replays of one link share its nonce's budget (`report:appeal:<nonce>`):
+    // the first opens the appeal, later ones are refused as used links — and
+    // each still consumes budget, so the 21st replay trips the tier.
+    let refused: unknown = null;
+    for (let i = 0; i < RATE_LIMITS.report.limit + 1; i++) {
+      try {
+        await call(
+          appRouter.moderation.appealOpen,
+          { token, reason: "Appeal budget fodder" },
+          { context: anonContext },
+        );
+      } catch (error) {
+        refused = error;
+      }
+    }
+
+    expect(refused).toMatchObject({ code: "TOO_MANY_REQUESTS" });
+
+    await clearQueueFixtures();
+  });
 });
 
 describe("gates", () => {

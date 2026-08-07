@@ -48,6 +48,7 @@ import {
   moderatorProcedure,
   protectedProcedure,
   rateLimit,
+  rateLimitCapability,
   staffProcedure,
 } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
@@ -60,9 +61,11 @@ import { publicUserColumns } from "./users.js";
  * two appeal procedures.
  *
  * Every procedure is built from one of the role gates in procedures.ts plus
- * the `moderate` rate tier — except `appealOpen`, which is the app's one
- * public surface (a suspended user cannot sign in; the HMAC token is the
- * gate, so it deliberately carries no rate limit).
+ * the `moderate` rate tier — except `appealOpen`, the app's one public
+ * surface (a suspended user cannot sign in; the HMAC token is the gate). It
+ * is not unthrottled for that: it consumes its own budget on the `report`
+ * tier, keyed on the capability the caller presented rather than on a
+ * session (see `rateLimitCapability` in procedures.ts).
  */
 
 /** A moderator's stated reason or note on an action. */
@@ -963,9 +966,13 @@ export const moderationRouter = {
    *
    * Either `token` (the signed-out HMAC link from the email) or `postId` (a
    * signed-in author appealing their own removed post) identifies the
-   * action, exactly one of the two. Deliberately unthrottled: the
-   * capability token IS the limiter, and a signature-valid link costs
-   * nothing to honor.
+   * action, exactly one of the two. Both branches consume the `report`
+   * rate tier (20/min), keyed on the capability the caller presented — the
+   * link's nonce, or the appealed action's id — never on a session, which
+   * the token branch cannot have by construction. The signature check
+   * itself stays unthrottled: a bad signature is rejected by a cheap HMAC
+   * comparison before any database work, and only the link's holder can
+   * present a signature that consumes budget.
    */
   appealOpen: baseProcedure
     .input(
@@ -991,6 +998,12 @@ export const moderationRouter = {
         if (!payload) {
           throw new ORPCError("BAD_REQUEST", { message: "This appeal link is invalid or has expired." });
         }
+        // One budget per link, keyed on its nonce — the capability the
+        // caller presented, and unguessable to anyone who does not hold
+        // the email. An invalid signature is rejected above before any
+        // database work, so this consume is only ever reached by someone
+        // holding a genuine link.
+        rateLimitCapability(context, RATE_LIMITS.report, `appeal:${payload.nonce}`);
         actionId = payload.actionId;
         userId = payload.userId;
         nonce = payload.nonce;
@@ -1027,6 +1040,15 @@ export const moderationRouter = {
         if (!removal) {
           throw new ORPCError("NOT_FOUND", { message: "This post has no removal to appeal." });
         }
+        // The budget lands here, after the one query that finds the action
+        // (its id is the key, unknowable before this) and before the five
+        // that follow: the post and ownership checks plus the common tail.
+        // A flood of postIds that never resolve to a removal pays one
+        // lookup each and stops at NOT_FOUND; a stranger probing a
+        // known-removed post can spend this action's 20/min, but the
+        // email-token branch keys on its own nonce, so a legitimate
+        // appellant is at worst delayed a minute on the signed-in path.
+        rateLimitCapability(context, RATE_LIMITS.report, `appeal:${removal.id}`);
         const [target] = await context.db
           .select({ authorId: post.authorId })
           .from(post)
