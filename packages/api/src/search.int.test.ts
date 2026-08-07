@@ -11,7 +11,14 @@ import {
 import type { Context } from "./context.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { appRouter } from "./router.js";
-import { anonContext, contextFor, createTestUser, truncateAll } from "./testing/harness.js";
+import {
+  anonContext,
+  contextFor,
+  createTestUser,
+  freshSessionFor,
+  setUserRole,
+  truncateAll,
+} from "./testing/harness.js";
 
 beforeAll(async () => {
   await truncateAll();
@@ -27,6 +34,13 @@ afterAll(async () => {
   await truncateAll();
   await closeDb();
 });
+
+/** A user promoted to moderator through the row, re-fetched so the session carries the role (no cookieCache). */
+async function moderatorUser() {
+  const user = await createTestUser();
+  await setUserRole(user.id, "moderator");
+  return freshSessionFor(user);
+}
 
 /** A tag unique to the calling test, so its queries can't match rows another test seeded. */
 function uniqueTag(): string {
@@ -600,6 +614,47 @@ describe("search.posts", () => {
 
     expect(listRow).toBeDefined();
     expect(searchRow).toEqual(listRow);
+  });
+
+  it("a removed post's content is not matchable by a third party, while the feed still shows the stub", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const stranger = await createTestUser();
+    const tag = uniqueTag();
+    const removed = await seedPostContent(author.id, `hello ${tag} world`);
+
+    await call(
+      appRouter.moderation.removePost,
+      { postId: removed.id, reason: "classified content" },
+      { context: contextFor(mod) },
+    );
+
+    // The phrase exists ONLY in the removed post — a result here would prove
+    // the searcher can probe removed content (the substring oracle).
+    const posts = await call(
+      appRouter.search.posts,
+      { q: tag },
+      { context: contextFor(stranger) },
+    );
+    expect(posts.items).toEqual([]);
+
+    const typeahead = await call(
+      appRouter.search.typeahead,
+      { q: tag },
+      { context: contextFor(stranger) },
+    );
+    expect(typeahead.posts).toEqual([]);
+
+    // The same post still shows in the feed as a bare stub — search is
+    // different in kind from the feed, and this pins the distinction.
+    const feed = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(stranger) },
+    );
+    const stub = feed.items.find((p) => p.id === removed.id);
+    expect(stub?.removed).toBe(true);
+    expect(stub?.content).toBeNull();
   });
 });
 

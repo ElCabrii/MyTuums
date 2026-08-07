@@ -134,6 +134,10 @@ export const searchRouter = {
           and(
             ilike(post.content, contains),
             isNull(post.parentId),
+            // Same removal rule as `search.posts` below — a removed post's
+            // text must not be probeable through the dropdown either
+            // (issue #48).
+            isNull(post.removedAt),
             not(invisibleAuthor(viewerId)),
           ),
         )
@@ -224,9 +228,17 @@ export const searchRouter = {
       const filters = [
         ilike(post.content, containsPattern(input.q)),
         isNull(post.parentId),
+        // Removed posts are not search results — the one visibility rule
+        // search does NOT share with `post.list` (issue #48). The feed keeps
+        // a removed post as a stub because `postSelection` nulls its content
+        // by projection; the WHERE clause here matches the raw `content`
+        // column, which no projection touches, so a removed post's text
+        // would stay probeable by anyone who can guess it. The row itself
+        // must be unreachable: search is the one surface where matching on
+        // text the viewer may not read leaks it.
+        isNull(post.removedAt),
         // The visibility filter (issue #38), same as `post.list`: a banned or
-        // blocked author's posts are not search results. (A removed post's
-        // content is null, so it already cannot match a content query.)
+        // blocked author's posts are not search results.
         not(invisibleAuthor(viewerId)),
         // Row-value comparison against the same (created_at DESC, id DESC)
         // ordering — see the identical comment in the `users` procedure above.
