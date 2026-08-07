@@ -57,7 +57,7 @@ jobs:
       # lockfileVersion 9.0 lockfile fine, and the fork's packageManager
       # (pnpm@11.9.0) governs the SDK build. No `cache: pnpm` on setup-node:
       # this job never installs this repo's own dependencies.
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa  # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: 22
@@ -107,6 +107,6 @@ jobs:
 
       - name: Upload SARIF to code scanning
         if: always() && steps.sarif.outputs.exists == 'true'
-        uses: github/codeql-action/upload-sarif@c3400c2f38909e0dcf3c3a41f2030a8217be5d3e  # v3
+        uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b  # v3
         with:
           sarif_file: ${{ runner.temp }}/scan-output/exports/results.sarif
