@@ -10,7 +10,19 @@ const { fakeClient } = vi.hoisted(() => ({
     post: { list: vi.fn(), thread: vi.fn() },
     search: { posts: vi.fn(), users: vi.fn(), typeahead: vi.fn() },
     user: { followers: vi.fn(), following: vi.fn(), byUsername: vi.fn() },
-    moderation: { listBlocked: vi.fn(), unblock: vi.fn() },
+    moderation: {
+      listBlocked: vi.fn(),
+      unblock: vi.fn(),
+      banUser: vi.fn(),
+      resolve: vi.fn(),
+      report: vi.fn(),
+      // The `invalidateModerationQueries` prefix keys (`queue`/`case`/
+      // `auditLog`) are read by the sweeps under test, so the fake must
+      // expose them like every other accessor the onSuccess paths touch.
+      queue: vi.fn(),
+      case: vi.fn(),
+      auditLog: vi.fn(),
+    },
   },
 }));
 
@@ -20,7 +32,13 @@ vi.mock("@/lib/orpc", async () => {
 });
 
 import { orpc, type BlockedUser } from "@/lib/orpc";
-import { blockedUsersAtom, unblockAtom } from "@/atoms/moderation";
+import {
+  banUserAtom,
+  blockedUsersAtom,
+  reportAtom,
+  resolveAtom,
+  unblockAtom,
+} from "@/atoms/moderation";
 // `onSuccess` reaches the app's ONE store's client (via `get(queryClientAtom)`
 // inside the mutation atom), so the sweep is only observable on the singleton
 // wiring — same reasoning as reply-composer.test.ts.
@@ -104,6 +122,85 @@ describe("blockedUsersAtom", () => {
     await waitFor(() => expect(fakeClient.moderation.listBlocked).toHaveBeenCalledTimes(2));
 
     unsub();
+    mutationUnsub();
+  });
+});
+
+describe("moderation action cache sweeps", () => {
+  it("banning sweeps the same visibility caches a block does — the moderator's own feeds must drop the target (issue #50)", async () => {
+    fakeClient.moderation.banUser.mockResolvedValue({ userId: "bad-actor", banned: true });
+
+    const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
+    const mutationUnsub = singletonStore.sub(banUserAtom, () => {});
+    singletonStore.get(banUserAtom).mutate({ userId: "bad-actor", reason: "spam" });
+
+    // The moderation sweep first — wait for any one of its keys, then the
+    // rest of the calls are already synchronous.
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.queue.key() }),
+    );
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.case.key() });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.auditLog.key() });
+
+    // The point of the shared helper: a ban hides the target from EVERY
+    // viewer (`effectivelyBanned`), so the acting moderator's feeds, search
+    // and follow caches must refetch — the exact key set `blockAtom` sweeps.
+    // Every call carries exactly one argument (the options object), hence the
+    // non-null assertion.
+    const swept = new Set(invalidateSpy.mock.calls.map(([args]) => args!.queryKey));
+    expect(swept).toEqual(
+      new Set([
+        orpc.moderation.queue.key(),
+        orpc.moderation.case.key(),
+        orpc.moderation.auditLog.key(),
+        orpc.post.list.key(),
+        orpc.post.thread.key(),
+        orpc.search.posts.key(),
+        orpc.search.users.key(),
+        orpc.search.typeahead.key(),
+        orpc.user.followers.key(),
+        orpc.user.following.key(),
+        orpc.user.byUsername.key(),
+        orpc.moderation.listBlocked.key(),
+      ]),
+    );
+
+    mutationUnsub();
+  });
+
+  it("resolving a case invalidates the audit log — the action wrote a `case_resolved` row (issue #50)", async () => {
+    fakeClient.moderation.resolve.mockResolvedValue({
+      targetType: "post",
+      targetId: "post-1",
+      resolved: 1,
+    });
+
+    const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
+    const mutationUnsub = singletonStore.sub(resolveAtom, () => {});
+    singletonStore
+      .get(resolveAtom)
+      .mutate({ targetType: "post", targetId: "post-1", outcome: "dismissed" });
+
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.auditLog.key() }),
+    );
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.queue.key() });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.case.key() });
+
+    mutationUnsub();
+  });
+
+  it("reporting refreshes the reporter's own queue (issue #50)", async () => {
+    fakeClient.moderation.report.mockResolvedValue({ reported: true });
+
+    const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
+    const mutationUnsub = singletonStore.sub(reportAtom, () => {});
+    singletonStore.get(reportAtom).mutate({ targetType: "post", targetId: "post-1", reason: "spam" });
+
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.queue.key() }),
+    );
+
     mutationUnsub();
   });
 });
