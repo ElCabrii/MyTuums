@@ -124,6 +124,12 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
   const targetPost = detail.target.kind === "post" ? detail.target : null;
   const targetUser = detail.target.kind === "user" ? detail.target : null;
   const appeal = detail.appeal;
+  // The queue also surfaces appeal-only cases (a removed post whose author
+  // appealed), which have zero open reports. Dismissing is resolving the
+  // open reports — with none, the action would just write an empty
+  // `case_resolved` audit row (issue #59), so the form is swapped for an
+  // explicit notice.
+  const openReportCount = detail.reports.filter((report) => !report.resolvedAt).length;
 
   return (
     <div className="space-y-5">
@@ -335,38 +341,42 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
           </div>
         )}
 
-        <div className="space-y-2">
-          <label htmlFor="case-dismiss-note" className="text-xs font-medium text-muted-foreground">
-            {m.moderation_dismiss_note_label()}
-          </label>
-          <Textarea
-            id="case-dismiss-note"
-            value={dismissNote}
-            onChange={(event) => setDismissNote(event.target.value)}
-            maxLength={MODERATION_NOTE_MAX_LENGTH}
-            className="min-h-16"
-          />
-          {resolve.isError && (
-            <p role="alert" className="text-xs text-destructive">
-              {resolve.error?.message ?? m.moderation_dismiss_error()}
-            </p>
-          )}
-          <Button
-            variant="outline"
-            className="w-full"
-            disabled={resolve.isPending}
-            onClick={() =>
-              resolve.mutate({
-                targetType: detail.target.kind,
-                targetId: detail.target.id,
-                outcome: "dismissed",
-                note: dismissNote.trim() || undefined,
-              })
-            }
-          >
-            {m.moderation_dismiss()}
-          </Button>
-        </div>
+        {openReportCount === 0 ? (
+          <p className="text-xs text-muted-foreground">{m.moderation_dismiss_no_open()}</p>
+        ) : (
+          <div className="space-y-2">
+            <label htmlFor="case-dismiss-note" className="text-xs font-medium text-muted-foreground">
+              {m.moderation_dismiss_note_label()}
+            </label>
+            <Textarea
+              id="case-dismiss-note"
+              value={dismissNote}
+              onChange={(event) => setDismissNote(event.target.value)}
+              maxLength={MODERATION_NOTE_MAX_LENGTH}
+              className="min-h-16"
+            />
+            {resolve.isError && (
+              <p role="alert" className="text-xs text-destructive">
+                {resolve.error?.message ?? m.moderation_dismiss_error()}
+              </p>
+            )}
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled={resolve.isPending}
+              onClick={() =>
+                resolve.mutate({
+                  targetType: detail.target.kind,
+                  targetId: detail.target.id,
+                  outcome: "dismissed",
+                  note: dismissNote.trim() || undefined,
+                })
+              }
+            >
+              {m.moderation_dismiss()}
+            </Button>
+          </div>
+        )}
       </section>
     </div>
   );

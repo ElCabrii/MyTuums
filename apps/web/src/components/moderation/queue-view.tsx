@@ -1,4 +1,4 @@
-import { useAtomValue, useSetAtom } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { ShieldAlert } from "lucide-react";
 import { caseDialogAtom, moderationQueueAtom } from "@/atoms/moderation";
 import { Badge } from "@/components/ui/badge";
@@ -21,14 +21,25 @@ import type { ModerationCase } from "@/lib/orpc";
  */
 export function QueueView() {
   const queue = useAtomValue(moderationQueueAtom);
-  const openCase = useAtomValue(caseDialogAtom);
-  const setOpenCase = useSetAtom(caseDialogAtom);
+  // One `useAtom` instead of `useAtomValue` + `useSetAtom` — the dialog
+  // identity is read and written in the same component, so the pair of
+  // hooks collapses into a single subscription (issue #59).
+  const [openCase, setOpenCase] = useAtom(caseDialogAtom);
   const cases = queue.data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
     <>
-      {/* Mounted once, above the state branches — see the component comment. */}
-      {openCase && <CaseDialog target={openCase} onClose={() => setOpenCase(null)} />}
+      {/* Mounted once, above the state branches — see the component comment.
+          Keyed per case, the same defence `AppealPage` uses: the dialog's
+          mutation atoms are module-scoped singletons, so a failed action on
+          one case must not greet the next case's dialog (issue #59). */}
+      {openCase && (
+        <CaseDialog
+          key={`${openCase.targetType}|${openCase.targetId}`}
+          target={openCase}
+          onClose={() => setOpenCase(null)}
+        />
+      )}
       <PaginatedState
         query={queue}
         errorMessage={m.moderation_queue_error()}
