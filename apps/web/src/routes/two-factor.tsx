@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, type FormEvent } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { authErrorAtom, authPendingAtom, twoFactorMethodsAtom } from "@/atoms/auth";
 import {
@@ -67,7 +67,7 @@ function TwoFactorPage() {
   // response, not an error.
   const offersEmailCode = availableMethods.length === 0 || availableMethods.includes("otp");
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     await verify(method);
   };

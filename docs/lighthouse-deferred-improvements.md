@@ -8,15 +8,15 @@
 
 **Issue verification:** all open issues were read in full via `gh issue list --state open` (5 open: #21, #22, #24, #27) plus a keyword search (`perf OR performance OR lighthouse OR HTTP/2 OR CSP OR security header OR bundle OR paraglide OR i18n OR LCP OR critical css` — no matches). `gh project list` could not run (token lacks `read:project` scope); issue-list coverage is complete regardless. **No existing issue covers any item below.** The two open security bugs (#21 chunked-body cap bypass, #22 rate-limiter map growth) are adjacent but distinct scope.
 
-| # | Item | Issue status |
-|---|------|--------------|
-| 1 | HTTP/2 (local-only limitation) | No existing issue — draft below (recommendation: document, don't build) |
-| 2 | Critical / split CSS | No existing issue — draft below |
-| 3 | Paraglide dual-locale main-chunk footprint | No existing issue — draft below (recommendation: accept + document, optional chunk merge) |
-| 4 | Static HTML shell for auth pages | No existing issue — draft below |
-| 5 | Security headers (CSP, XFO, HSTS, COOP) | No existing issue — draft below |
-| 6 | CI performance budgets (LHCI) | No existing issue — draft below |
-| 7 | Leftovers bundle (wordmark contrast, fonts, /rpc gzip, forced reflow) | No existing issue — draft below |
+| #   | Item                                                                  | Issue status                                                                              |
+| --- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 1   | HTTP/2 (local-only limitation)                                        | No existing issue — draft below (recommendation: document, don't build)                   |
+| 2   | Critical / split CSS                                                  | No existing issue — draft below                                                           |
+| 3   | Paraglide dual-locale main-chunk footprint                            | No existing issue — draft below (recommendation: accept + document, optional chunk merge) |
+| 4   | Static HTML shell for auth pages                                      | No existing issue — draft below                                                           |
+| 5   | Security headers (CSP, XFO, HSTS, COOP)                               | No existing issue — draft below                                                           |
+| 6   | CI performance budgets (LHCI)                                         | No existing issue — draft below                                                           |
+| 7   | Leftovers bundle (wordmark contrast, fonts, /rpc gzip, forced reflow) | No existing issue — draft below                                                           |
 
 ---
 

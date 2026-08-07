@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, type FormEvent } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { authErrorAtom, authPendingAtom } from "@/atoms/auth";
 import {
@@ -117,7 +117,7 @@ function WelcomePage() {
   const closeTwoFactorPanel = useSetAtom(openTwoFactorPanelAtom);
   useEffect(() => () => closeTwoFactorPanel("idle"), [closeTwoFactorPanel]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
     if (validationError) {

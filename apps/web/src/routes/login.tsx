@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, type FormEvent } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { authErrorAtom, authPendingAtom, signInAtom } from "@/atoms/auth";
 import {
@@ -83,7 +83,7 @@ function LoginPage() {
     if (oauthError) setError(localizeOAuthError(oauthError));
   }, [oauthError, setError]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
     if (validationError) {

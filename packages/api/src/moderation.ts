@@ -132,14 +132,14 @@ const queueInput = z.object({
 });
 
 const targetInput = z.discriminatedUnion("targetType", [
-  z.object({ targetType: z.literal("post"), targetId: z.string().uuid() }),
+  z.object({ targetType: z.literal("post"), targetId: z.uuid() }),
   z.object({ targetType: z.literal("user"), targetId: z.string().min(1) }),
 ]);
 
 const reportInput = z.discriminatedUnion("targetType", [
   z.object({
     targetType: z.literal("post"),
-    targetId: z.string().uuid(),
+    targetId: z.uuid(),
     reason: z.enum(POST_REPORT_REASONS),
   }),
   z.object({
@@ -152,7 +152,7 @@ const reportInput = z.discriminatedUnion("targetType", [
 const resolveInput = z.discriminatedUnion("targetType", [
   z.object({
     targetType: z.literal("post"),
-    targetId: z.string().uuid(),
+    targetId: z.uuid(),
     outcome: z.enum(["actioned", "dismissed"]),
     note: noteInput,
   }),
@@ -616,7 +616,7 @@ export const moderationRouter = {
     .use(rateLimit(RATE_LIMITS.moderate))
     .input(
       z.object({
-        postId: z.string().uuid(),
+        postId: z.uuid(),
         reason: z.string().trim().min(1).max(MODERATION_NOTE_MAX_LENGTH),
       }),
     )
@@ -669,7 +669,7 @@ export const moderationRouter = {
   /** Restores a removed post: clears the tombstone, logs `post_restored`, emails the author. */
   restorePost: moderatorProcedure
     .use(rateLimit(RATE_LIMITS.moderate))
-    .input(z.object({ postId: z.string().uuid(), note: noteInput }))
+    .input(z.object({ postId: z.uuid(), note: noteInput }))
     .handler(async ({ input, context }) => {
       const restored = await restorePostEffect(context.db, {
         postId: input.postId,
@@ -971,7 +971,7 @@ export const moderationRouter = {
     .input(
       z.object({
         token: z.string().min(1).optional(),
-        postId: z.string().uuid().optional(),
+        postId: z.uuid().optional(),
         reason: z.string().trim().min(APPEAL_REASON_MIN_LENGTH).max(APPEAL_REASON_MAX_LENGTH),
       }),
     )
@@ -1101,13 +1101,12 @@ export const moderationRouter = {
         });
       }
 
+      let inserted: { id: string } | undefined;
       try {
-        const [inserted] = await context.db
+        [inserted] = await context.db
           .insert(appeal)
           .values({ actionId, appellantId: userId, tokenNonce: nonce, reason: input.reason })
           .returning({ id: appeal.id });
-        if (!inserted) throw new Error("appeal insert returned no row");
-        return { appealId: inserted.id, status: "open" as const };
       } catch (error) {
         // The unique tokenNonce (or the partial unique open-per-action index)
         // caught a replay of a used link, or a racing duplicate open.
@@ -1116,6 +1115,11 @@ export const moderationRouter = {
         }
         throw error;
       }
+      // Outside the catch on purpose: this is a "cannot happen" guard on the
+      // insert's own result, not a database error the unique-violation branch
+      // above should ever be asked to classify.
+      if (!inserted) throw new Error("appeal insert returned no row");
+      return { appealId: inserted.id, status: "open" as const };
     }),
 
   /**
@@ -1128,7 +1132,7 @@ export const moderationRouter = {
     .use(rateLimit(RATE_LIMITS.moderate))
     .input(
       z.object({
-        appealId: z.string().uuid(),
+        appealId: z.uuid(),
         outcome: z.enum(["upheld", "overturned"]),
         note: noteInput,
       }),

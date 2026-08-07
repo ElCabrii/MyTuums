@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { UserX } from "lucide-react";
 
 /**
@@ -13,7 +14,7 @@ export function ProfileMessage({
 }: {
   icon: typeof UserX;
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className="container max-w-md mx-auto py-16 px-4">

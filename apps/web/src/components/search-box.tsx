@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type KeyboardEvent, type SyntheticEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Loader2, Search, X } from "lucide-react";
@@ -28,7 +28,7 @@ import { m } from "@/paraglide/messages.js";
  * a `preventBaseUIHandler` method (absent from React's types) that stops them
  * from running. See `mergeProps` in base-ui's docs.
  */
-type BaseUiMergedEvent = React.SyntheticEvent & { preventBaseUIHandler?: () => void };
+type BaseUiMergedEvent = SyntheticEvent & { preventBaseUIHandler?: () => void };
 
 /**
  * Where an Enter press on a highlighted row goes — the same destinations the
@@ -284,8 +284,8 @@ function SearchField({
   highlight: number;
   onValueChange: (value: string) => void;
   onFocus: () => void;
-  onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
-  onTriggerClick: (event: React.SyntheticEvent) => void;
+  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+  onTriggerClick: (event: SyntheticEvent) => void;
   onClear: (value: string) => void;
 }) {
   // Reached from the clear button: clearing must hand the caret straight
@@ -433,7 +433,7 @@ export function SearchBox() {
 
   const rows = suggestionRows(typeahead.data);
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -493,7 +493,7 @@ export function SearchBox() {
     }
   };
 
-  const handleTriggerClick = (event: React.SyntheticEvent) => {
+  const handleTriggerClick = (event: SyntheticEvent) => {
     // base-ui merges the trigger's own click handler — a toggle that would
     // dismiss the list on a repeated click — onto the rendered element. A
     // combobox must not toggle: the open state is owned by focus, typing and

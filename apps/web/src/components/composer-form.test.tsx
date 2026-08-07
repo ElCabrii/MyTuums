@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -11,7 +12,7 @@ import { ComposerForm } from "@/components/composer-form";
  * prop rather than simulated typing. That matches how the real callers
  * (the atoms backing the draft) drive it.
  */
-async function renderComposer(overrides: Partial<React.ComponentProps<typeof ComposerForm>> = {}) {
+async function renderComposer(overrides: Partial<ComponentProps<typeof ComposerForm>> = {}) {
   const onSubmit = overrides.onSubmit ?? vi.fn();
   const onValueChange = overrides.onValueChange ?? vi.fn();
 

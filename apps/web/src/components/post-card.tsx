@@ -1,3 +1,4 @@
+import type { MouseEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Heart, MessageCircle, MoreHorizontal } from "lucide-react";
@@ -56,7 +57,7 @@ export function PostCard({
   const isOwnPost = viewer?.id === post.author.id;
   const isFocused = variant === "focused";
 
-  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleCardClick = (e: MouseEvent<HTMLDivElement>) => {
     if (isFocused) return;
     const target = e.target as HTMLElement;
     if (target.closest("a, button, [role='button']")) return;
