@@ -32,15 +32,3 @@ export function postCardWithText(page: Page, text: string): Locator {
 export function likeButtonFor(page: Page, text: string): Locator {
   return postCardWithText(page, text).getByRole("button", { name: /this post/ });
 }
-
-/**
- * The like control within one card, signed out: a plain `<Link>` to
- * `/login` with a `title` and matching `aria-label` ("Log in to like
- * posts") — the visible like count is `aria-hidden`, so the accessible
- * *name* is the description, not the bare number (post-card.tsx). `title`
- * is the one attribute both the like and reply signed-out links set, so
- * this keys on that rather than the accessible name.
- */
-export function signedOutLikeLinkFor(page: Page, text: string): Locator {
-  return postCardWithText(page, text).getByTitle("Log in to like posts");
-}
