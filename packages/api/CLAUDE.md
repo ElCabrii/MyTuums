@@ -20,7 +20,7 @@ the root — see `src/constants.ts` for why.
 - `src/moderation-actions.ts` — the shared effects every moderation procedure composes: `logAction` / `stampReports` / `emailUser` / the inverses (`restorePostEffect` / `unbanEffect` / `undoAction`). The rank guard lives here, on the inverse paths, so no restore can skip it. The action-code constants are defined in constants.ts and re-exported here.
 - `src/appeal-token.ts` — the HMAC-SHA256 signed-out appeal link signer/verifier (constant-time, zod re-parse, 7-day TTL); `BETTER_AUTH_SECRET`-keyed.
 - `src/roles.ts` — `USER_ROLES`, `roleRank`, `roleAtLeast`, `canManageRole` (strictly-greater) — the hierarchy every gate and rank guard runs on.
-- `src/visibility.ts` — `effectivelyBanned` / `invisibleAuthor` / `visibleUser`: the one filter every surface applies so banned/blocked content cannot leak.
+- `src/visibility.ts` — `effectivelyBanned` / `invisibleAuthor` / `invisibleUser` / `visibleUser`: the one filter every surface applies so banned/blocked content cannot leak. `invisibleUser` is the stricter of the two per-user filters — what `users.byUsername` filters on so a banned-but-not-blocked profile still resolves to its suspended stub instead of 404ing.
 - `src/context.ts` — the `Context` shape and `createContext`; owns the one process-wide rate limiter and storage client.
 - `src/cursor.ts` — opaque base64url keyset cursors, parameterised on the tie-breaker's id schema.
 - `src/rate-limit.ts` — in-memory fixed-window limiter and the `RATE_LIMITS` tiers (read/like/follow/write/upload/search/report/block/moderate).

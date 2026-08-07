@@ -61,14 +61,16 @@ export function createRateLimiter(
     /** Injectable so tests can advance time without sleeping. */
     now?: () => number;
     /**
-     * Upper bound on tracked keys. Anonymous callers are keyed by IP, so a
-     * spray of requests from many addresses would otherwise grow this map
-     * without limit — which would turn the rate limiter itself into the
-     * denial-of-service vector it exists to prevent.
+     * Upper bound on tracked keys. Every caller is a signed-in user keyed on
+     * `user:<id>` — there is no anonymous surface left to key on IP — so the
+     * map grows with the number of distinct users hitting the API inside the
+     * longest tracked window. The hard bound keeps that growth from turning
+     * the rate limiter itself into the denial-of-service vector it exists to
+     * prevent.
      *
-     * This is a hard bound: at capacity, a brand-new key is refused
-     * (`allowed: false`) until a tracked window expires; a returning caller
-     * whose own window expired recycles its slot.
+     * At capacity, a brand-new key is refused (`allowed: false`) until a
+     * tracked window expires; a returning caller whose own window expired
+     * recycles its slot.
      */
     maxKeys?: number;
   } = {},

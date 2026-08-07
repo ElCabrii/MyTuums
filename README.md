@@ -52,7 +52,7 @@ pnpm dev
   OAuth or S3 pair refuses to boot), graceful shutdown that drains the DB
   pool. Bundled with tsup.
 - **`packages/api`** — oRPC procedures (`me`, `post`, `user`) over Drizzle;
-  rate limiting keyed on `user:<id>` / `ip:<ip>`; feeds keyset-paginated on
+  rate limiting keyed on the signed-in user; feeds keyset-paginated on
   `(created_at, id)`; presigned S3 uploads with WebP dimension parsing.
 - **`packages/auth`** — better-auth with username, two-factor, passkey,
   oneTap, last-login-method, have-I-been-pwned, i18n; social providers only
