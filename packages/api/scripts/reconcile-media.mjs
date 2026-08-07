@@ -17,10 +17,14 @@
  * environment alone is enough to arm it — the same instinct as
  * `assertTestDatabase()` in @my-tuums/db/testing, which refuses to run
  * against anything but a `_test` database.
+ *
+ * The reconcile logic itself — the list-before-read ordering, which is
+ * load-bearing — lives in `src/reconcile-media.ts`, where it is unit-tested.
+ * This file is only the guard and the wiring.
  */
 import { closeDb, db } from "@my-tuums/db";
 import { user } from "@my-tuums/db/schema";
-import { objectKeyFromMediaPath } from "@my-tuums/api";
+import { reconcileMedia } from "../src/reconcile-media.ts";
 import { createDestructiveStorage } from "@my-tuums/api/storage";
 
 const bucketArg = process.argv
@@ -50,38 +54,18 @@ const storage = createDestructiveStorage({
   region: process.env.S3_REGION,
 });
 
-const rows = await db
-  .select({
-    image: user.image,
-    bannerImage: user.bannerImage,
-    imageOriginal: user.imageOriginal,
-    bannerImageOriginal: user.bannerImageOriginal,
-  })
-  .from(user);
-
-const referenced = new Set();
-for (const row of rows) {
-  for (const value of [row.image, row.bannerImage, row.imageOriginal, row.bannerImageOriginal]) {
-    const key = objectKeyFromMediaPath(value);
-    if (key) referenced.add(key);
-  }
-}
-
-console.log(`scanning ${rows.length} user rows; ${referenced.size} referenced objects`);
-
-let listed = 0;
-let deleted = 0;
-for (const prefix of ["avatars/", "banners/"]) {
-  const keys = await storage.listByPrefix(prefix);
-  listed += keys.length;
-  const orphans = keys.filter((key) => !referenced.has(key));
-  if (orphans.length > 0) {
-    deleted += await storage.removeMany(orphans);
-    console.log(`${prefix}: deleted ${orphans.length} of ${keys.length} objects`);
-  } else if (keys.length > 0) {
-    console.log(`${prefix}: all ${keys.length} objects referenced, nothing to do`);
-  }
-}
+const { listed, deleted } = await reconcileMedia({
+  storage,
+  readUserRows: () =>
+    db
+      .select({
+        image: user.image,
+        bannerImage: user.bannerImage,
+        imageOriginal: user.imageOriginal,
+        bannerImageOriginal: user.bannerImageOriginal,
+      })
+      .from(user),
+});
 
 console.log(`done: listed ${listed}, deleted ${deleted}, kept ${listed - deleted}`);
 
