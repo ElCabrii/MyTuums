@@ -5,6 +5,7 @@
 // real bugs in the server.
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
+import reactHooks from "eslint-plugin-react-hooks";
 
 /**
  * Monorepo-wide ESLint flat config: type-aware rules (one program per
@@ -25,6 +26,23 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
+  // The react-hooks plugin's flat-config entrypoint, scoped to the web app:
+  // it is the only React surface in the monorepo, and the rules misfire
+  // elsewhere — Playwright fixtures name their handoff callback `use`
+  // (`async ({ browser }, use) => …`), which rules-of-hooks misreads as
+  // React 19's `use` hook in a non-component (e2e/support/fixtures.ts).
+  //
+  // v7 still ships its configs in eslintrc shape (`plugins: ["react-hooks"]`
+  // — a string array, which flat config rejects outright), so the rules are
+  // taken verbatim from the entrypoint while the plugin itself is
+  // registered in the object form flat config requires. No rule is added,
+  // removed or has its severity changed here; the entrypoint remains the
+  // single source of truth.
+  {
+    files: ["apps/web/**"],
+    plugins: { "react-hooks": reactHooks },
+    rules: reactHooks.configs.flat.recommended.rules,
+  },
   {
     languageOptions: {
       parserOptions: {

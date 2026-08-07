@@ -78,6 +78,19 @@ export function SearchBox() {
   // a later real focus (clicking back into the input) still reopens.
   const dismissedRef = useRef(false);
 
+  // The rows' click contract, hoisted to component scope: dismissing sets the
+  // focus-return guard (see dismissedRef above) before closing the popup. It
+  // cannot live inside the render-created row props — react-hooks/refs flags
+  // any ref write in an inline arrow it cannot prove runs after commit, and
+  // this is the one ref the rows write. `selectRow` is split out the same
+  // way, so the four row elements attach the same two handlers instead of
+  // re-creating a fresh closure pair per row per render.
+  const dismiss = () => {
+    dismissedRef.current = true;
+    setOpen(false);
+  };
+  const selectRow = (i: number) => setHighlight(i);
+
   // The query atoms are module-scoped and the header outlives the pages
   // beneath it, so without a reset they would keep the previous session's
   // query and popover state (the same unmount-reset pattern as login.tsx).
@@ -251,12 +264,14 @@ export function SearchBox() {
                 "flex items-center gap-3 px-2.5 py-2 rounded-lg cursor-pointer",
                 isActive && "bg-muted/60"
               ),
-              onMouseEnter: () => setHighlight(i),
-              onClick: () => {
-                dismissedRef.current = true;
-                setOpen(false);
-              },
             };
+            // The interaction contract stays shared even though the handlers
+            // attach per element: hover selects (keyboard and pointer share a
+            // single highlight) and a click dismisses before the row's own
+            // navigation runs. They are passed explicitly rather than through
+            // the spread because react-hooks/refs cannot see event-handler
+            // props through an object spread, and the dismiss handler writes
+            // a ref (see `dismiss` above).
 
             if (row.kind === "user") {
               const handle = handleOf(row.user);
@@ -267,6 +282,8 @@ export function SearchBox() {
                   to="/@{$username}"
                   params={{ username: handle }}
                   {...rowProps}
+                  onMouseEnter={() => selectRow(i)}
+                  onClick={dismiss}
                 >
                   <UserAvatar
                     user={row.user}
@@ -284,7 +301,7 @@ export function SearchBox() {
                   </span>
                 </Link>
               ) : (
-                <div key={row.user.id} {...rowProps}>
+                <div key={row.user.id} {...rowProps} onMouseEnter={() => selectRow(i)} onClick={dismiss}>
                   <UserAvatar
                     user={row.user}
                     alt={displayName}
@@ -307,6 +324,8 @@ export function SearchBox() {
                   to="/post/$postId"
                   params={{ postId: row.post.id }}
                   {...rowProps}
+                  onMouseEnter={() => selectRow(i)}
+                  onClick={dismiss}
                 >
                   <UserAvatar
                     user={row.post.author}
@@ -333,6 +352,8 @@ export function SearchBox() {
                 to="/search"
                 search={{ q: inputValue }}
                 {...rowProps}
+                onMouseEnter={() => selectRow(i)}
+                onClick={dismiss}
                 className={cn(rowProps.className, "mt-1.5 border-t border-border/60 pt-1.5")}
               >
                 <Search className="h-4 w-4 shrink-0 text-muted-foreground" />

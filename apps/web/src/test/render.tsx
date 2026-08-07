@@ -12,8 +12,16 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { vi } from "vitest";
-import { FOLLOW_PAGE_SIZE, POST_PAGE_SIZE } from "@my-tuums/api/constants";
-import { orpc, type Post, type PostListPage, type UserListPage, type UserSummary } from "@/lib/orpc";
+import { FOLLOW_PAGE_SIZE, POST_PAGE_SIZE, SEARCH_PAGE_SIZE } from "@my-tuums/api/constants";
+import {
+  orpc,
+  type Post,
+  type PostListPage,
+  type SearchPostsPage,
+  type SearchUsersPage,
+  type UserListPage,
+  type UserSummary,
+} from "@/lib/orpc";
 
 /**
  * The shared harness every component test in this directory renders through.
@@ -326,6 +334,11 @@ function createTestRouteTree(ui: ReactNode) {
     stubRoute("/forgot-password"),
     stubRoute("/reset-password"),
     stubRoute("/discover"),
+    // search-page.test.tsx navigates the real `SearchPage` between `/search`
+    // and `/search?q=...` — `getRouteApi("/search")` needs the route to
+    // exist in the tree even though the stub never renders it (the page is
+    // mounted directly as `ui`, like the not-found-page test).
+    stubRoute("/search"),
     stubRoute("/post/$postId"),
     // The legal pages are signed-in-gate exemptions — tests for the gate
     // need them reachable without a redirect.
@@ -520,6 +533,51 @@ export function userListQueryKey(username: string, direction: "followers" | "fol
   return procedure.infiniteKey({
     input: () => ({ username, limit: FOLLOW_PAGE_SIZE }),
     initialPageParam: undefined as string | undefined,
+  });
+}
+
+/**
+ * The exact queryKey `searchUsersAtom(q)` produces — mirrors the input
+ * builder in `atoms/search.ts`'s `searchUsersFamily` for the first page (no
+ * cursor). `q` is embedded in the key, so the seed only satisfies the
+ * section for that one query string.
+ */
+export function searchUsersQueryKey(q: string): QueryKey {
+  return orpc.search.users.infiniteKey({
+    input: () => ({ q, limit: SEARCH_PAGE_SIZE }),
+    initialPageParam: undefined as string | undefined,
+  });
+}
+
+/** The exact queryKey `searchPostsAtom(q)` produces — the `posts` twin of {@link searchUsersQueryKey}. */
+export function searchPostsQueryKey(q: string): QueryKey {
+  return orpc.search.posts.infiniteKey({
+    input: () => ({ q, limit: SEARCH_PAGE_SIZE }),
+    initialPageParam: undefined as string | undefined,
+  });
+}
+
+/** Seeds a `search.users` infinite query with the given pages, bypassing the network. */
+export function seedSearchUsersPages(
+  queryClient: QueryClient,
+  q: string,
+  pages: SearchUsersPage[],
+): void {
+  queryClient.setQueryData(searchUsersQueryKey(q), {
+    pages,
+    pageParams: pages.map((_page, index) => (index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined))),
+  });
+}
+
+/** Seeds a `search.posts` infinite query with the given pages, bypassing the network. */
+export function seedSearchPostsPages(
+  queryClient: QueryClient,
+  q: string,
+  pages: SearchPostsPage[],
+): void {
+  queryClient.setQueryData(searchPostsQueryKey(q), {
+    pages,
+    pageParams: pages.map((_page, index) => (index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined))),
   });
 }
 
