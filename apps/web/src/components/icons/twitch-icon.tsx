@@ -6,12 +6,14 @@
  * Discord symbol — this uses `currentColor` rather than baking in a fixed
  * color, and the button sets it to white against the Twitch Purple fill.
  */
+import type { CSSProperties } from "react";
+
 export function TwitchIcon({
   className,
   style,
 }: {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
 }) {
   return (
     <svg

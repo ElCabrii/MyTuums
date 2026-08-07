@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { AlertCircle, Loader2, Send } from "lucide-react";
 import { POST_MAX_LENGTH } from "@my-tuums/api/constants";
 import { UserAvatar } from "@/components/user-avatar";
@@ -37,7 +38,7 @@ export function ComposerForm({
   submitLabel: string;
   rows?: number;
   /** Rendered above the textarea — the reply box's "Replying to @x" line. */
-  header?: React.ReactNode;
+  header?: ReactNode;
 }) {
   const trimmed = value.trim();
   const remaining = POST_MAX_LENGTH - value.length;

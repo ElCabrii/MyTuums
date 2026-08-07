@@ -7,12 +7,14 @@
  * backgrounds — so this uses `currentColor` and the button decides the color
  * (white, for the Blurple background this app renders it on).
  */
+import type { CSSProperties } from "react";
+
 export function DiscordIcon({
   className,
   style,
 }: {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
 }) {
   return (
     <svg

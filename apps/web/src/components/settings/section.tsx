@@ -7,6 +7,8 @@
  * `components/ui/` because it is this page's layout, not a design-system
  * primitive: nothing else in the app renders a titled card with a leading icon.
  */
+import type { ReactNode } from "react";
+
 export function Section({
   title,
   description,
@@ -15,8 +17,8 @@ export function Section({
 }: {
   title: string;
   description: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
+  icon: ReactNode;
+  children: ReactNode;
 }) {
   return (
     <section className="rounded-3xl border border-border/50 bg-card/60 backdrop-blur-xl p-6 space-y-4">

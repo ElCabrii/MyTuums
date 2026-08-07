@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Fingerprint } from "lucide-react";
 import {
@@ -119,7 +120,7 @@ function NeutralButton({
 }: {
   disabled: boolean;
   onClick: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <button
