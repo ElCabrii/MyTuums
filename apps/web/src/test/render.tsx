@@ -622,16 +622,16 @@ export async function seedInfiniteError(
   queryKey: QueryKey,
   message = "Something went wrong",
 ): Promise<void> {
-  await queryClient
-    .fetchInfiniteQuery({
+  try {
+    await queryClient.fetchInfiniteQuery({
       queryKey,
       queryFn: () => Promise.reject(new Error(message)),
       initialPageParam: undefined as string | undefined,
       getNextPageParam: () => undefined,
-    })
-    .catch(() => {
-      // The rejection is the point: it lands the query in an `error` state
-      // in the cache before the component under test mounts an observer.
-      // Nothing here needs to see it again.
     });
+  } catch {
+    // The rejection is the point: it lands the query in an `error` state
+    // in the cache before the component under test mounts an observer.
+    // Nothing here needs to see it again.
+  }
 }
