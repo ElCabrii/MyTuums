@@ -2,7 +2,8 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import type { Readable } from "node:stream";
 import path from "node:path";
-import { createBrotliCompress, createGzip } from "node:zlib";
+import { createBrotliCompress, constants, createGzip } from "node:zlib";
+import type { BrotliCompress, Gzip } from "node:zlib";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { bestEncoding, type Compression } from "./compression.js";
 
@@ -226,8 +227,20 @@ function send(
     const stream = createReadStream(file);
     stream.on("error", abort);
 
-    const compressor =
-      encoding === "br" ? createBrotliCompress() : encoding === "gzip" ? createGzip() : null;
+    let compressor: BrotliCompress | Gzip | null = null;
+    if (encoding === "br") {
+      // Brotli quality is set explicitly, never inherited: the zlib default
+      // (11) is for assets compressed once at build time, but this stream runs
+      // per request on a ~300 KB bundle. The output is immutable-cached so
+      // repeat hits are free, yet a cold load still pays q=11's ~10 ms of
+      // blocked event loop for a few percent of bytes (issue #54) — quality 4
+      // is the dynamic-content range.
+      compressor = createBrotliCompress({
+        params: { [constants.BROTLI_PARAM_QUALITY]: 4 },
+      });
+    } else if (encoding === "gzip") {
+      compressor = createGzip();
+    }
     if (compressor) compressor.on("error", abort);
 
     // `stream.pipe(compressor)` narrows to `Gzip`, so a ternary here would

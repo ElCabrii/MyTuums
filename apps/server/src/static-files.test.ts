@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { PassThrough } from "node:stream";
-import { brotliDecompressSync, gunzipSync } from "node:zlib";
+import { brotliCompressSync, brotliDecompressSync, constants, gunzipSync } from "node:zlib";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createStaticFileHandler, noStaticFiles } from "./static-files.js";
 
@@ -19,6 +19,13 @@ beforeAll(() => {
   mkdirSync(path.join(root, "assets"));
   writeFileSync(path.join(root, "index.html"), "<!doctype html><div id=root></div>");
   writeFileSync(path.join(root, "assets", "index-abc123.js"), "console.log(1)");
+  // A realistically-sized chunk, for the brotli-quality test: on a 13-byte
+  // file every brotli quality emits the same bytes, so the fixture must be
+  // big enough for quality to matter (q=4 vs q=11 diverge from a few KB).
+  writeFileSync(
+    path.join(root, "assets", "chunk-big.js"),
+    `export const v = ${JSON.stringify("x".repeat(3000))};\n`,
+  );
   writeFileSync(path.join(root, "mytuums.svg"), "<svg/>");
 });
 
@@ -181,6 +188,29 @@ describe("compression", () => {
 
     expect(calls.headers["Content-Encoding"]).toBe("br");
     expect(brotliDecompressSync(bodyBuffer()).toString()).toBe("console.log(1)");
+  });
+
+  it("compresses brotli at the explicit dynamic quality, not the zlib default (11)", async () => {
+    // The zlib default brotli quality (11) is designed for build-time assets;
+    // this stream runs per request on bundles a cold load pays for once, and
+    // q=11 blocks the event loop for ~10 ms for a few percent of bytes
+    // (issue #54). Asserted byte-for-byte against a q=4 compression of the
+    // same file, which differs from the q=11 bytes at this size.
+    const { res, calls, bodyBuffer } = resStub();
+    const fixture = Buffer.from(
+      `export const v = ${JSON.stringify("x".repeat(3000))};\n`,
+    );
+
+    await expect(
+      createStaticFileHandler(root)(req("/assets/chunk-big.js", "GET", "*/*", { "accept-encoding": "gzip, br" }), res),
+    ).resolves.toEqual({ served: true });
+
+    expect(calls.headers["Content-Encoding"]).toBe("br");
+    expect(bodyBuffer()).toEqual(
+      brotliCompressSync(fixture, {
+        params: { [constants.BROTLI_PARAM_QUALITY]: 4 },
+      }),
+    );
   });
 
   it("honours an explicit q=0 refusal rather than compressing anyway", async () => {

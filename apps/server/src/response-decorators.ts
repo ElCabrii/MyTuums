@@ -1,5 +1,5 @@
 import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from "node:http";
-import { brotliCompressSync, gzipSync } from "node:zlib";
+import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { bestEncoding, type Compression } from "./compression.js";
 
 /**
@@ -303,7 +303,16 @@ export function decorateResponse(req: IncomingMessage, res: ServerResponse): Ser
     const payload =
       body.length > 0 && compress
         ? pendingEncoding === "br"
-          ? brotliCompressSync(body)
+          ? // Brotli quality is set explicitly, never inherited: the zlib
+            // default (11) is for assets compressed once at build time, but
+            // this runs per request, synchronously, on the only thread — ~10
+            // ms of blocked event loop per feed page for a few percent of
+            // bytes (issue #54). Quality 4 is the standard dynamic-content
+            // range; the trade is a few percent of bytes for an order of
+            // magnitude less CPU.
+            brotliCompressSync(body, {
+              params: { [constants.BROTLI_PARAM_QUALITY]: 4 },
+            })
           : gzipSync(body)
         : body;
     flush(compress, compress ? payload.length : undefined);
