@@ -46,6 +46,7 @@ the root — see `src/constants.ts` for why.
 - **Replies are a mode of `post.list` (`parentId`)**, not a separate procedure — the web app's optimistic like sweep covers every cached `post.list` by key prefix, so a separate procedure would miss reply likes.
 - **`publicUserColumns` is a privacy boundary**: email, `twoFactorEnabled`, `lastLoginMethod` and preferences must never be added (`users.int.test.ts` pins the exact shape).
 - **Upload order matters**: row write before object delete; display + original share one uuid (`.orig` infix); `objectKeyFromMediaPath` returns `null` for provider URLs; leaks are reaped by `scripts/reconcile-media.mjs`.
+- **The inverse effects read their guard under `FOR UPDATE`, inside their own transaction** (`restorePostEffect` / `unbanEffect`): the audit log is append-only, so a double-log is a lie about what happened — an unlocked pre-read of the tombstone/sentence is a TOCTOU that two concurrent restores/unbans both pass and both log (issue #51). Moving the read back out of the transaction "for speed" re-opens the double-log.
 - **Cursor bounds go through `sql.param(value, column)`** — interpolating a JS `Date` hands postgres.js something it can't serialise.
 - **Presigned URLs are windowed** (`MEDIA_SIGNING_WINDOW_MS`): byte-identical within a window — what makes the object cache work; redirects must not be cached past `secondsUntilWindowEnd()`.
 

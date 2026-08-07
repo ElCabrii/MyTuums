@@ -316,9 +316,12 @@ export async function isActionLatest(
  *
  * The tombstone clear and its audit row commit in ONE transaction: a restore
  * that fails midway must not leave the post visible with no `post_restored`
- * row, or leave a row describing a restore that never happened. The author's
- * email is deliberately NOT sent here — the caller sends it after its own
- * transaction commits. The appeal overturn runs inside the review transaction
+ * row, or leave a row describing a restore that never happened. The guard
+ * read (is the tombstone still set?) happens inside that same transaction
+ * under a row lock, so two concurrent restores serialize instead of both
+ * passing the check and each logging (issue #51). The author's email is
+ * deliberately NOT sent here — the caller sends it after its own transaction
+ * commits. The appeal overturn runs inside the review transaction
  * (moderation.appealReview), and an email sent from inside a transaction that
  * later aborts would describe an action that never happened.
  *
@@ -331,23 +334,29 @@ export async function restorePostEffect(
   db: DbLike,
   args: { postId: string; actorId: string; note?: string },
 ): Promise<{ authorId: string } | null> {
-  // Read the tombstone BEFORE clearing it — a `returning` clause on the update
-  // below would report the post-update value (always null) and make the
-  // already-restored check below fire on every call.
-  const [target] = await db
-    .select({ id: post.id, authorId: post.authorId, removedAt: post.removedAt })
-    .from(post)
-    .where(eq(post.id, args.postId))
-    .limit(1);
+  // The guard read lives INSIDE the transaction, under the same row lock the
+  // forward paths take — a moderator's Restore racing the appeal overturn
+  // must not both pass an unlocked "is it still removed?" check and each log
+  // a `post_restored` row that lies about what happened (issue #51). The lock
+  // serializes them: the loser's read observes the winner's commit and
+  // returns null below. The read also has to happen BEFORE the clear — a
+  // `returning` clause on the update would report the post-update value
+  // (always null) and make the already-restored check fire on every call.
+  return db.transaction(async (tx) => {
+    const [target] = await tx
+      .select({ id: post.id, authorId: post.authorId, removedAt: post.removedAt })
+      .from(post)
+      .where(eq(post.id, args.postId))
+      .for("update")
+      .limit(1);
 
-  if (!target) throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
+    if (!target) throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
 
-  // Already restored (a race with the appeal overturn or a manual restore):
-  // nothing to log — the first restore's audit row exists, and a second one
-  // would lie about what happened.
-  if (target.removedAt === null) return null;
+    // Already restored (a race with the appeal overturn or a manual restore):
+    // nothing to log — the first restore's audit row exists, and a second one
+    // would lie about what happened.
+    if (target.removedAt === null) return null;
 
-  await db.transaction(async (tx) => {
     await tx
       .update(post)
       .set({ removedAt: null, removedBy: null, removedReason: null })
@@ -360,9 +369,9 @@ export async function restorePostEffect(
       targetPostId: args.postId,
       note: args.note,
     });
-  });
 
-  return { authorId: target.authorId };
+    return { authorId: target.authorId };
+  });
 }
 
 /**
@@ -370,7 +379,10 @@ export async function restorePostEffect(
  * before clearing — shared by `moderation.unbanUser` and the appeal overturn.
  *
  * The clear and its audit row commit in ONE transaction, and the email is
- * sent by the caller after commit — the same shape as `restorePostEffect`.
+ * sent by the caller after commit — the same shape as `restorePostEffect`,
+ * including the guard read (is the sentence still in force?) inside the
+ * transaction under a row lock, so two concurrent unbans serialize instead
+ * of both passing the check and each logging and emailing (issue #51).
  *
  * Carries the same rank guard as the sentence itself: whoever lifts a ban or
  * suspension must be able to manage the account they're lifting it for — a
@@ -401,27 +413,34 @@ export async function unbanEffect(
     tolerateNotBanned?: boolean;
   },
 ): Promise<"user_unbanned" | "user_unsuspended" | null> {
-  const [target] = await db
-    .select({ banned: user.banned, banExpires: user.banExpires, role: user.role })
-    .from(user)
-    .where(eq(user.id, args.userId))
-    .limit(1);
+  // Same shape as restorePostEffect (issue #51): the guard read happens
+  // inside the transaction under a row lock, so two concurrent unbans cannot
+  // both read "banned" and each write a `user_unbanned` row and email the
+  // user. The lock serializes them — the loser observes the winner's commit
+  // and either no-ops (the appeal path's tolerateNotBanned) or refuses with
+  // the caller-facing error (the direct path's strict check).
+  return db.transaction(async (tx) => {
+    const [target] = await tx
+      .select({ banned: user.banned, banExpires: user.banExpires, role: user.role })
+      .from(user)
+      .where(eq(user.id, args.userId))
+      .for("update")
+      .limit(1);
 
-  if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
-  if (!target.banned) {
-    if (args.tolerateNotBanned) return null;
-    throw new ORPCError("BAD_REQUEST", { message: "This account isn't banned or suspended." });
-  }
-  if (!canManageRole(args.actorRole, target.role ?? "user")) {
-    throw new ORPCError("FORBIDDEN");
-  }
+    if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
+    if (!target.banned) {
+      if (args.tolerateNotBanned) return null;
+      throw new ORPCError("BAD_REQUEST", { message: "This account isn't banned or suspended." });
+    }
+    if (!canManageRole(args.actorRole, target.role ?? "user")) {
+      throw new ORPCError("FORBIDDEN");
+    }
 
-  // A row without an expiry was a ban; with one, a suspension. The code the
-  // audit log records and the email the user receives follow the read.
-  const code: "user_unbanned" | "user_unsuspended" =
-    target.banExpires == null ? "user_unbanned" : "user_unsuspended";
+    // A row without an expiry was a ban; with one, a suspension. The code the
+    // audit log records and the email the user receives follow the read.
+    const code: "user_unbanned" | "user_unsuspended" =
+      target.banExpires == null ? "user_unbanned" : "user_unsuspended";
 
-  await db.transaction(async (tx) => {
     await tx
       .update(user)
       .set({ banned: false, banReason: null, banExpires: null })
@@ -434,9 +453,9 @@ export async function unbanEffect(
       targetUserId: args.userId,
       note: args.note,
     });
-  });
 
-  return code;
+    return code;
+  });
 }
 
 /**
