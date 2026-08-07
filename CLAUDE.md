@@ -59,7 +59,7 @@ In production the API serves the built SPA (`WEB_DIST` set by the Dockerfile), b
 - Bundled with tsup: source-only workspace packages (`@my-tuums/{api,auth,db}`) get inlined; real npm deps stay external.
 
 ### packages/api — the oRPC contract
-- `src/router.ts` defines `appRouter` (`me`, `post`, `user`, `search`); `posts.ts`/`users.ts`/`search.ts` hold the procedures, all built from `protectedProcedure` in `procedures.ts` over drizzle queries — there is no anonymous surface (issue #36).
+- `src/router.ts` defines `appRouter` (`me`, `post`, `user`, `search`, `moderation`); `posts.ts`/`users.ts`/`search.ts`/`moderation.ts` hold the procedures, all built from `protectedProcedure` in `procedures.ts` over drizzle queries — there is no anonymous surface (issue #36).
 - `Context` (`{ db, session, rateLimiter, storage }`) threads the rate limiter and S3 storage through every procedure — never module globals — so tests can substitute fakes.
 - `rateLimit(policy)` middleware keys on `user:<id>` — every caller is a signed-in user, so there is no anonymous fallback to key on.
 - Feeds are keyset-paginated on `(created_at, id)` (`cursor.ts`); like/reply counts are derived subqueries, not denormalized columns.

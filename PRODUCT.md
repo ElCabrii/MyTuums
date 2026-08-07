@@ -12,8 +12,13 @@ manage.
 ## Features
 
 - Posts, likes, replies, follows, and user profiles
-- Full auth, composed with better-auth: email/password, Google OAuth,
-  two-factor, passkeys, one-tap sign-in
+- Full auth, composed with better-auth: email/password, OAuth (Google, Discord,
+  Twitch), two-factor, passkeys, one-tap sign-in
+- Moderation: a role hierarchy (user → moderator → staff → admin), a report
+  queue, post removals, timed suspensions and permanent bans, an append-only
+  audit log, and an email-linked appeal path — see [CONTEXT.md](CONTEXT.md) for
+  the vocabulary
+- User blocks: mutual, silent, and private — not a moderation action
 - Image uploads with MIME sniffing and WebP dimension validation, served via
   S3 presigned URLs
 - i18n in English and French (Paraglide), light/dark theme
