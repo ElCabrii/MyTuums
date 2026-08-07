@@ -147,9 +147,6 @@ importers:
       react-qr-code:
         specifier: ^2.2.0
         version: 2.2.0(react@19.2.8)
-      shadcn:
-        specifier: ^4.16.1
-        version: 4.16.1(typescript@5.9.3)
       tailwind-merge:
         specifier: ^3.6.0
         version: 3.6.0
@@ -205,6 +202,9 @@ importers:
       jsdom:
         specifier: ^25.0.1
         version: 25.0.1
+      shadcn:
+        specifier: ^4.16.1
+        version: 4.16.1(typescript@5.9.3)
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3

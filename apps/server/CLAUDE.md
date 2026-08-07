@@ -15,7 +15,7 @@ A plain `node:http` server (no framework) that terminates every request: health 
 - `src/response-decorators.ts` — one choke point wrapping `res`: security headers (inner wins) and gzip/brotli for JSON bodies ≥ 1024 bytes, with the real `writeHead` deferred to `end` so `Content-Length`/`Vary` can be fixed up.
 - `src/compression.ts` — q-value-aware content negotiation shared by the decorator and static files; brotli wins ties.
 - `src/migrate.ts` — the pre-deploy migration runner: applies `packages/db/drizzle` SQL and exits non-zero so Railway aborts the deploy on failure.
-- `Dockerfile` — multi-stage (prune → build → runner); ships the tsup bundle, the built SPA (`WEB_DIST=/app/apps/web/dist`), and the drizzle SQL; must declare `VITE_SOCIAL_PROVIDERS`/`VITE_GOOGLE_CLIENT_ID` as ARGs or OAuth buttons silently don't ship.
+- `Dockerfile` — multi-stage (prune → build → runner); ships the tsup bundle, the built SPA (`WEB_DIST=/app/apps/web/dist`), and the drizzle SQL; must declare `VITE_SOCIAL_PROVIDERS`/`VITE_GOOGLE_CLIENT_ID` as ARGs or OAuth buttons silently don't ship. The runner is fed by a second, server-only `turbo prune` (`--out-dir out-runner`) so `pnpm install --prod` installs only `@my-tuums/server`'s own declared deps — the web tree is already bundled into `dist` and would otherwise ship for nothing (issue #58).
 - `tsup.config.ts` — bundles `src/index.ts` + `src/migrate.ts`; inlines `@my-tuums/*` (source-only packages) because Node's native type-stripping cannot rewrite their `.js` specifiers.
 - `vitest.config.ts` — unit tests only. `src/index.ts` is deliberately out of scope (module-scope env parse + exit handlers would kill the runner); HTTP behaviour is covered by the Playwright `api` project in `e2e/`.
 
