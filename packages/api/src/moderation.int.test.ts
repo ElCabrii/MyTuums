@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
-import { auth } from "@my-tuums/auth";
+import { auth, sendEmail } from "@my-tuums/auth";
 import { closeDb, type Database } from "@my-tuums/db";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
@@ -13,7 +13,7 @@ import {
   user,
   userBlock,
 } from "@my-tuums/db/schema";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { appealToken } from "./appeal-token.js";
 import { isActionLatest, unbanEffect, type DbLike } from "./moderation-actions.js";
 import type { Context } from "./context.js";
@@ -32,8 +32,21 @@ import {
   type TestUser,
 } from "./testing/harness.js";
 
+// The moderation emails go through `sendEmail` (packages/auth/src/email.ts),
+// which is a silent no-op under NODE_ENV=test — so the spy changes nothing
+// about what the flows do, only what the tests can assert: "exactly one email"
+// is the audit trail the concurrency tests need (issue #51).
+vi.mock("@my-tuums/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@my-tuums/auth")>();
+  return { ...actual, sendEmail: vi.fn() };
+});
+
 beforeAll(async () => {
   await truncateAll();
+});
+
+beforeEach(() => {
+  vi.mocked(sendEmail).mockClear();
 });
 
 afterAll(async () => {
@@ -1136,6 +1149,46 @@ describe("removePost and restorePost", () => {
     ).resolves.toEqual({ postId: postRow.id, restored: true });
   });
 
+  it("concurrent restores log exactly one audit row and send exactly one email — the guard read is locked (issue #51)", async () => {
+    const author = await createTestUser();
+    const postRow = await seedPostContent(author.id, "race me");
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "spam" },
+      { context: contextFor(await moderatorUser()) },
+    );
+
+    // The filed race: a moderator clicking Restore in the case dialog while an
+    // appeal overturn commits. Every caller passes the unlocked "is it still
+    // removed?" read before any transaction writes — so each one logs
+    // `post_restored` and emails the author, and the audit log ends up with a
+    // row for a restore that never happened.
+    const mods = await Promise.all(Array.from({ length: 5 }, () => moderatorUser()));
+    const results = await Promise.all(
+      mods.map((mod) =>
+        call(appRouter.moderation.restorePost, { postId: postRow.id }, { context: contextFor(mod) }),
+      ),
+    );
+    expect(results).toHaveLength(mods.length);
+
+    const restoredRows = await anonContext.db
+      .select({ id: moderationAction.id })
+      .from(moderationAction)
+      .where(
+        and(
+          eq(moderationAction.action, "post_restored"),
+          eq(moderationAction.targetType, "post"),
+          eq(moderationAction.targetPostId, postRow.id),
+        ),
+      );
+    expect(restoredRows).toHaveLength(1);
+
+    const restoreEmails = vi
+      .mocked(sendEmail)
+      .mock.calls.filter(([mail]) => mail.subject === "Your post was restored");
+    expect(restoreEmails).toHaveLength(1);
+  });
+
   it("is NOT_FOUND for a missing post", async () => {
     const mod = await moderatorUser();
     await expect(
@@ -1358,6 +1411,56 @@ describe("banUser and unbanUser", () => {
       { context: contextFor(admin) },
     );
     expect(await latestAction("user_unbanned", "user", staffVictim.id)).toBeDefined();
+  });
+
+  it("concurrent unbans log exactly one audit row and send exactly one email — the guard read is locked (issue #51)", async () => {
+    const victim = await createTestUser();
+    await call(
+      appRouter.moderation.banUser,
+      { userId: victim.id, reason: "permanent spam" },
+      { context: contextFor(await staffUser()) },
+    );
+
+    // The filed race: several reviewers lifting the same sentence at once.
+    // Every caller passes the unlocked "is it banned?" read before any
+    // transaction writes — so each one logs `user_unbanned` and emails the
+    // user, and the audit log ends up with rows for unbans that never happened.
+    const staff = await Promise.all(Array.from({ length: 5 }, () => staffUser()));
+    const results = await Promise.allSettled(
+      staff.map((s) =>
+        call(appRouter.moderation.unbanUser, { userId: victim.id }, { context: contextFor(s) }),
+      ),
+    );
+
+    // Strict mode: the winner lifts the sentence; every loser reads the
+    // winner's committed clear under the row lock and refuses with the
+    // caller-facing error instead of double-logging.
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    for (const r of rejected) {
+      expect(r.reason).toMatchObject({
+        code: "BAD_REQUEST",
+        message: "This account isn't banned or suspended.",
+      });
+    }
+
+    const unbannedRows = await anonContext.db
+      .select({ id: moderationAction.id })
+      .from(moderationAction)
+      .where(
+        and(
+          eq(moderationAction.action, "user_unbanned"),
+          eq(moderationAction.targetType, "user"),
+          eq(moderationAction.targetUserId, victim.id),
+        ),
+      );
+    expect(unbannedRows).toHaveLength(1);
+
+    const unbanEmails = vi
+      .mocked(sendEmail)
+      .mock.calls.filter(([mail]) => mail.subject === "Your account is no longer banned");
+    expect(unbanEmails).toHaveLength(1);
   });
 });
 
