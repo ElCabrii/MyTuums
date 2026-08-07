@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Check, Image as ImageIcon, Loader2, Trash2, Upload, UserRound } from "lucide-react";
 import type { ImageKind } from "@my-tuums/api/constants";
@@ -179,7 +179,7 @@ function ImageRow({
   label: string;
   hint: string;
   hasImage: boolean;
-  preview: React.ReactNode;
+  preview: ReactNode;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const uploading = useAtomValue(imageUploadingAtom);

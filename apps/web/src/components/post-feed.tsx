@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useAtomValue } from "jotai";
 import { MessageSquare } from "lucide-react";
 import { PostCard } from "@/components/post-card";
@@ -21,7 +22,7 @@ export function PostFeed({
   feedAtom: ReturnType<typeof postFeedAtom>;
   emptyMessage: string;
   /** Rendered under `emptyMessage` — e.g. a "find people to follow" CTA. */
-  emptyAction?: React.ReactNode;
+  emptyAction?: ReactNode;
 }) {
   const feed = useAtomValue(feedAtom);
   const posts = feed.data?.pages.flatMap((page) => page.items) ?? [];
