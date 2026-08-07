@@ -6,9 +6,13 @@
 # inlines the source-only workspace packages (`@my-tuums/{api,auth,db}`) into
 # a single dist/index.js — Node's native TS type-stripping does not rewrite
 # the `.js` specifiers those packages ship, so importing the unbundled
-# source directly (the naive approach) fails at runtime. Real npm
-# dependencies (better-auth, @orpc/server, drizzle-orm, postgres, zod, ...)
-# stay external and are installed normally in the `runner` stage below.
+# source directly (the naive approach) fails at runtime. Only the packages
+# apps/server itself declares in `dependencies` (better-auth, @orpc/server,
+# zod) stay external; everything else tsup reaches — including the transitive
+# npm deps of the inlined workspace packages, such as drizzle-orm and postgres
+# — is bundled into dist/ (grep the external `from "..."` imports in
+# dist/index.js to re-verify). The runner therefore needs nothing more than
+# those declared dependencies installed.
 #
 # The image also carries the BUILT WEB APP and serves it from the same origin
 # as the API (see apps/server/src/static-files.ts). That is a requirement, not
@@ -28,7 +32,14 @@ FROM base AS pruner
 WORKDIR /app
 COPY . .
 # Both workspaces, since this image builds and ships both halves.
-RUN npx -y turbo@^2 prune @my-tuums/server @my-tuums/web --docker
+# The second, server-only prune feeds the runner stage: `pnpm install --prod`
+# over the both-workspaces prune would install apps/web's entire production
+# dependency tree (react, jotai, shadcn, lucide-react, ...) into an image
+# whose process never imports any of it — Vite already bundled the SPA into
+# apps/web/dist at build time. Pruning to @my-tuums/server alone keeps the
+# web tree out of the runtime image structurally, not by install-time luck.
+RUN npx -y turbo@^2 prune @my-tuums/server @my-tuums/web --docker && \
+    npx -y turbo@^2 prune @my-tuums/server --docker --out-dir out-runner
 
 # ---- Install full (dev+prod) deps and build the pruned subset ----
 FROM base AS builder
@@ -54,7 +65,10 @@ RUN pnpm --filter @my-tuums/web run build
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=pruner /app/out/json/ .
+# The server-only pruned tree: apps/web is not even a workspace member here,
+# so this install cannot pull a single web dependency (see the second prune
+# in the pruner stage).
+COPY --from=pruner /app/out-runner/json/ .
 RUN pnpm install --prod --frozen-lockfile
 COPY --from=builder /app/apps/server/dist ./apps/server/dist
 COPY --from=builder /app/apps/web/dist ./apps/web/dist
