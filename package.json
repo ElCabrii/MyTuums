@@ -26,6 +26,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@my-tuums/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
     "eslint": "^10.8.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "lighthouse": "^13.4.1",

@@ -54,8 +54,15 @@ export default tseslint.config(
           // (e.g. apps/web/tsconfig.json only includes "src") still get
           // linted with type information, using the nearest tsconfig as a
           // stand-in rather than being skipped or crashing the run.
+          //
+          // `eslint.config.mjs` itself is NOT here: the root tsconfig.json
+          // (node.json profile, allowJs/checkJs) includes it, so it joins
+          // the project service like any source file. Before that tsconfig
+          // existed, the stand-in could not resolve this file's imports —
+          // everything read as `error` typed, and linting the config against
+          // itself failed with no-unsafe-* errors on lines that were not
+          // actually unsafe.
           allowDefaultProject: [
-            "eslint.config.mjs",
             "packages/db/drizzle.config.ts",
             "apps/server/tsup.config.ts",
             // `apps/server/tsconfig.json` sets `rootDir: "src"`, so this one
