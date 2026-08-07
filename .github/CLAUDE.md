@@ -64,6 +64,11 @@ CI). CI never deploys: Railway builds its own image from
 
 ## Load-bearing decisions — do not break
 
+- Every third-party GitHub Action is pinned to a full commit SHA — never a
+  mutable tag, which can be silently repointed (see the trivy-action and
+  kics-github-action compromises). The trailing `# vN` comment records the
+  tag for the next bump: re-resolve the tag, update the SHA, keep the
+  comment in step.
 - CI never points at the production bucket: e2e cleanup deletes objects
   by prefix (`truncateAll()`), so a shared bucket would let CI and a
   local run delete each other's objects mid-test.

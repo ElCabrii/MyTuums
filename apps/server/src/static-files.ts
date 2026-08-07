@@ -2,7 +2,8 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import type { Readable } from "node:stream";
 import path from "node:path";
-import { createBrotliCompress, createGzip } from "node:zlib";
+import { createBrotliCompress, constants, createGzip } from "node:zlib";
+import type { BrotliCompress, Gzip } from "node:zlib";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { bestEncoding, type Compression } from "./compression.js";
 
@@ -112,7 +113,11 @@ export function createStaticFileHandler(rootDir: string): StaticFileHandler {
     const file = (await isFile(requested)) ? requested : null;
 
     if (file) {
-      await send(req, res, req.method === "HEAD", file, cacheHeaderFor(root, file));
+      await send(req, res, {
+        headOnly: req.method === "HEAD",
+        file,
+        cacheControl: cacheHeaderFor(root, file),
+      });
       return { served: true };
     }
 
@@ -137,10 +142,23 @@ export function createStaticFileHandler(rootDir: string): StaticFileHandler {
     // deployed site look broken to anything that isn't a browser.
     if (path.extname(requested) !== "") return { served: false };
 
-    await send(req, res, req.method === "HEAD", indexPath, "no-cache");
+    await send(req, res, {
+      headOnly: req.method === "HEAD",
+      file: indexPath,
+      cacheControl: "no-cache",
+    });
     return { served: true };
   };
 }
+
+/**
+ * The base URL the WHATWG parser needs to resolve a request path. The host
+ * is a sentinel — the server only ever sees path names, never a request for
+ * this host — so it contributes nothing but parsing rules (path
+ * normalisation, percent-encoding and query stripping). Deliberately a named
+ * constant, not an env var: it is a parser detail, not configuration.
+ */
+const URL_PARSE_BASE = "http://static.invalid";
 
 /**
  * The absolute path a request maps to, or `null` if it escapes `root`.
@@ -152,7 +170,7 @@ export function createStaticFileHandler(rootDir: string): StaticFileHandler {
 function resolveWithinRoot(root: string, rawUrl: string): string | null {
   let pathname: string;
   try {
-    pathname = decodeURIComponent(new URL(rawUrl, "http://static.invalid").pathname);
+    pathname = decodeURIComponent(new URL(rawUrl, URL_PARSE_BASE).pathname);
   } catch {
     return null;
   }
@@ -164,6 +182,11 @@ function resolveWithinRoot(root: string, rawUrl: string): string | null {
 
 async function isFile(candidate: string): Promise<boolean> {
   try {
+    // The parens are load-bearing, not stylistic: `await stat(candidate)`
+    // yields the Stats, and `.isFile()` is called on *that*. Without them,
+    // `await stat(candidate).isFile()` would call `.isFile()` on the Promise
+    // itself — a TypeError the catch below would swallow into a silent 404
+    // for every existing file.
     return (await stat(candidate)).isFile();
   } catch {
     return false;
@@ -186,10 +209,9 @@ function cacheHeaderFor(root: string, file: string): string {
 function send(
   req: IncomingMessage,
   res: ServerResponse,
-  headOnly: boolean,
-  file: string,
-  cacheControl: string,
+  options: { headOnly: boolean; file: string; cacheControl: string },
 ): Promise<void> {
+  const { headOnly, file, cacheControl } = options;
   const encoding = preferredEncoding(req.headers["accept-encoding"], file);
 
   const headers: Record<string, string> = {
@@ -226,8 +248,20 @@ function send(
     const stream = createReadStream(file);
     stream.on("error", abort);
 
-    const compressor =
-      encoding === "br" ? createBrotliCompress() : encoding === "gzip" ? createGzip() : null;
+    let compressor: BrotliCompress | Gzip | null = null;
+    if (encoding === "br") {
+      // Brotli quality is set explicitly, never inherited: the zlib default
+      // (11) is for assets compressed once at build time, but this stream runs
+      // per request on a ~300 KB bundle. The output is immutable-cached so
+      // repeat hits are free, yet a cold load still pays q=11's ~10 ms of
+      // blocked event loop for a few percent of bytes (issue #54) — quality 4
+      // is the dynamic-content range.
+      compressor = createBrotliCompress({
+        params: { [constants.BROTLI_PARAM_QUALITY]: 4 },
+      });
+    } else if (encoding === "gzip") {
+      compressor = createGzip();
+    }
     if (compressor) compressor.on("error", abort);
 
     // `stream.pipe(compressor)` narrows to `Gzip`, so a ternary here would

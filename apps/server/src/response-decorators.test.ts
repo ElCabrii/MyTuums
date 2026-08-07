@@ -1,7 +1,7 @@
 import { createServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { brotliDecompressSync, gunzipSync, gzipSync } from "node:zlib";
+import { brotliCompressSync, brotliDecompressSync, constants, gunzipSync, gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { decorateResponse } from "./response-decorators.js";
 
@@ -135,6 +135,29 @@ describe("decorateResponse", () => {
         const r = await raw("/", { headers: { "accept-encoding": "gzip, br" } });
         expect(r.headers["content-encoding"]).toBe("br");
         expect(brotliDecompressSync(r.body).toString()).toBe(BIG_JSON);
+      },
+    );
+  });
+
+  it("compresses brotli at the explicit dynamic quality, not the zlib default (11)", async () => {
+    // The zlib default brotli quality (11) is designed for build-time assets;
+    // on the per-request path it blocks the event loop for ~10 ms per feed
+    // page for a few percent of bytes (issue #54). The decorator must pass
+    // the per-request quality explicitly — asserted byte-for-byte against a
+    // q=4 compression of the same body, which differs from the q=11 bytes.
+    await withServer(
+      (_req, res) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(BIG_JSON);
+      },
+      async (raw) => {
+        const r = await raw("/", { headers: { "accept-encoding": "gzip, br" } });
+        expect(r.headers["content-encoding"]).toBe("br");
+        expect(r.body).toEqual(
+          brotliCompressSync(Buffer.from(BIG_JSON), {
+            params: { [constants.BROTLI_PARAM_QUALITY]: 4 },
+          }),
+        );
       },
     );
   });
