@@ -1024,7 +1024,10 @@ describe("resolve", () => {
         { targetType: "post", targetId: postRow.id, outcome: "dismissed" },
         { context: contextFor(mod) },
       ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "This case has no open reports to resolve." });
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This case has no open reports to resolve.",
+    });
 
     const action = await latestAction("case_resolved", "post", postRow.id);
     expect(action).toBeUndefined();
