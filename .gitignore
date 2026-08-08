@@ -41,3 +41,4 @@ playwright/.cache/
 # Playwright MCP browser snapshots and console captures
 .playwright-mcp/
 lighthouse-reports/
+.pi-lens/
