@@ -37,6 +37,16 @@ export const Route = createFileRoute("/login")({
    * outside, so anything else is dropped instead of being rendered — and
    * `redirect` is sanitized again in `lib/redirect.ts` before any navigation
    * honours it.
+   *
+   * `error_description` (issue #74) is deliberately NOT captured here even
+   * though BetterAuth's OAuth callback appends one alongside `error`: it's
+   * the server's raw, unlocalized English exception message, and every code
+   * this page knows how to react to already has its own Paraglide copy
+   * (`localizeOAuthError`, or the dedicated `/banned` screen for
+   * `BANNED_USER`) that says the same thing in the viewer's language. Reading
+   * it would only reintroduce the thing this issue removes — a
+   * server-controlled English string surfacing in the UI — for codes that
+   * fall through to the generic `auth_oauth_failed` message anyway.
    */
   validateSearch: (search: Record<string, unknown>): { error?: string; redirect?: string } => ({
     ...(typeof search.error === "string" ? { error: search.error } : {}),
@@ -78,10 +88,20 @@ function LoginPage() {
    * Feeding `authErrorAtom` instead of rendering separately is what keeps
    * there to one error surface: submitting the password form afterwards
    * clears this the same way it clears any other message.
+   *
+   * `BANNED_USER` (issue #74) is the one code that does NOT go through the
+   * banner: a banned account isn't "try again", so this navigates to the
+   * dedicated `/banned` screen instead — `replace: true` so the address bar's
+   * `?error=BANNED_USER` never lingers and the back button can't return to it.
    */
   useEffect(() => {
-    if (oauthError) setError(localizeOAuthError(oauthError));
-  }, [oauthError, setError]);
+    if (!oauthError) return;
+    if (oauthError === "BANNED_USER") {
+      void navigate({ to: "/banned", replace: true });
+      return;
+    }
+    setError(localizeOAuthError(oauthError));
+  }, [oauthError, setError, navigate]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -106,6 +126,13 @@ function LoginPage() {
         to: "/two-factor",
         ...(redirectFromSearch ? { search: { redirect: redirectFromSearch } } : {}),
       });
+      return;
+    }
+
+    // See `SignInOutcome`'s docblock (atoms/auth.ts): a banned account gets
+    // the dedicated screen instead of the form's error banner (issue #74).
+    if (outcome.status === "banned") {
+      void navigate({ to: "/banned", replace: true });
     }
   };
 
