@@ -12,16 +12,28 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { vi } from "vitest";
-import { FOLLOW_PAGE_SIZE, POST_PAGE_SIZE, SEARCH_PAGE_SIZE } from "@my-tuums/api/constants";
+import {
+  FOLLOW_PAGE_SIZE,
+  MODERATION_PAGE_SIZE,
+  POST_PAGE_SIZE,
+  SEARCH_PAGE_SIZE,
+} from "@my-tuums/api/constants";
 import {
   orpc,
+  type AuditEntry,
+  type AuditLogPage,
+  type ModerationCase,
+  type ModerationCaseDetail,
+  type ModerationQueuePage,
   type Post,
   type PostListPage,
   type SearchPostsPage,
   type SearchUsersPage,
+  type TeamMember,
   type UserListPage,
   type UserSummary,
 } from "@/lib/orpc";
+import type { CaseRef } from "@/atoms/moderation";
 
 /**
  * The shared harness every component test in this directory renders through.
@@ -100,6 +112,13 @@ export interface TestSessionUser {
   localePreference?: string | null;
   /** Read by `/settings/account`'s two-factor section to decide on/off. */
   twoFactorEnabled?: boolean | null;
+  /**
+   * The moderation role (issue #38): "user" (the default), "moderator",
+   * "staff" or "admin" — `atoms/session.ts`'s `viewerRoleAtom` sanitises
+   * anything else down to "user". Omit it (the default) to exercise a plain
+   * signed-in viewer; pass one of the other three to test role-gated UI.
+   */
+  role?: string | null;
 }
 
 interface TestSessionValue {
@@ -265,6 +284,9 @@ function signedInSession(user: Partial<TestSessionUser> = {}): TestSessionValue 
         bannerImage: null,
         themePreference: null,
         localePreference: null,
+        // The unprivileged default every account starts at — see the
+        // `role` field's doc comment above.
+        role: "user",
         // A complete sign-up by default — the state components assume when
         // they render a generic signed-in viewer. Omit it (or set username
         // null) to build an incomplete session on purpose.
@@ -338,6 +360,13 @@ function createTestRouteTree(ui: ReactNode) {
     // mounted directly as `ui`, like the not-found-page test).
     stubRoute("/search"),
     stubRoute("/post/$postId"),
+    // Moderation targets (moderation-page.test.tsx, appeal-page.test.tsx):
+    // `AppealPage` reads `getRouteApi("/appeal").useSearch()` the same way
+    // `SearchPage` reads `/search`'s, so the route has to exist in the tree
+    // even though the stub never renders it — the real component is mounted
+    // directly as `ui`.
+    stubRoute("/moderation"),
+    stubRoute("/appeal"),
     // The legal pages are signed-in-gate exemptions — tests for the gate
     // need them reachable without a redirect.
     stubRoute("/privacy"),
@@ -488,6 +517,138 @@ export function makeUserSummary(overrides: Partial<UserSummary> = {}): UserSumma
   };
 }
 
+/**
+ * A minimal moderation queue row — mirrors the merged-case shape
+ * `moderation.queue` returns (`packages/api/src/moderation.ts`'s
+ * `MergedCase`). No open reports and no appeal by default; a real case
+ * always has at least one of the two.
+ */
+export function makeModerationCase(overrides: Partial<ModerationCase> = {}): ModerationCase {
+  return {
+    targetType: "post",
+    targetId: crypto.randomUUID(),
+    newestAt: new Date(),
+    reportCount: 1,
+    reasons: ["spam"],
+    appeal: null,
+    ...overrides,
+  };
+}
+
+/**
+ * A minimal moderation case detail for the post branch — the shape
+ * `moderation.case` returns for a post target (raw content, tombstone
+ * fields, the moderator's author projection).
+ */
+export function makeModerationCaseDetail(
+  overrides: Partial<Extract<ModerationCaseDetail["target"], { kind: "post" }>> = {},
+  common: Partial<Omit<ModerationCaseDetail, "target">> = {},
+): ModerationCaseDetail {
+  return {
+    targetType: "post",
+    targetId: crypto.randomUUID(),
+    reports: [],
+    // `ModerationCaseDetail["appeal"]`'s inferred type omits `null` even
+    // though the value genuinely can be one at runtime: `moderation.ts`'s
+    // handler destructures `[openAppeal] = await ....limit(1)` — with
+    // `noUncheckedIndexedAccess` off, TS treats that as always-present, so
+    // `openAppeal ?? null` elides the unreachable-per-types `null` branch
+    // from the inferred return type. The double cast keeps this fixture
+    // truthful about what the API can actually send.
+    appeal: null as unknown as ModerationCaseDetail["appeal"],
+    ...common,
+    target: {
+      kind: "post",
+      id: crypto.randomUUID(),
+      content: "Hello, world!",
+      createdAt: new Date(),
+      parentId: null,
+      removedAt: null,
+      removedBy: null,
+      removedReason: null,
+      author: makeAuthor(),
+      ...overrides,
+    },
+  };
+}
+
+/**
+ * A minimal moderation case detail for the user branch — the shape
+ * `moderation.case` returns for a user target (role and ban state, no raw
+ * content). A distinct factory from {@link makeModerationCaseDetail} rather
+ * than a union parameter: the two branches share almost no fields, and a
+ * caller always knows which one it's building.
+ */
+export function makeUserModerationCaseDetail(
+  overrides: Partial<Extract<ModerationCaseDetail["target"], { kind: "user" }>> = {},
+  common: Partial<Omit<ModerationCaseDetail, "target">> = {},
+): ModerationCaseDetail {
+  return {
+    targetType: "user",
+    targetId: crypto.randomUUID(),
+    reports: [],
+    // `ModerationCaseDetail["appeal"]`'s inferred type omits `null` even
+    // though the value genuinely can be one at runtime: `moderation.ts`'s
+    // handler destructures `[openAppeal] = await ....limit(1)` — with
+    // `noUncheckedIndexedAccess` off, TS treats that as always-present, so
+    // `openAppeal ?? null` elides the unreachable-per-types `null` branch
+    // from the inferred return type. The double cast keeps this fixture
+    // truthful about what the API can actually send.
+    appeal: null as unknown as ModerationCaseDetail["appeal"],
+    ...common,
+    target: {
+      kind: "user",
+      id: crypto.randomUUID(),
+      name: "Jamie Rivera",
+      username: "jamierivera",
+      displayUsername: "JamieRivera",
+      image: null,
+      bio: null,
+      bannerImage: null,
+      createdAt: new Date(),
+      role: "user",
+      banned: false,
+      banExpires: null,
+      banReason: null,
+      ...overrides,
+    },
+  };
+}
+
+/** A minimal audit-log entry — `moderation.auditLog`'s row shape, no actor/target by default. */
+export function makeAuditEntry(overrides: Partial<AuditEntry> = {}): AuditEntry {
+  return {
+    id: crypto.randomUUID(),
+    action: "post_removed",
+    actorId: null,
+    targetType: "post",
+    targetPostId: crypto.randomUUID(),
+    targetUserId: null,
+    reason: null,
+    note: null,
+    // `moderation_action.details` is `jsonb().notNull().default({})` — never
+    // null, unlike every other optional column here.
+    details: {},
+    createdAt: new Date(),
+    actor: null,
+    targetUser: null,
+    ...overrides,
+  };
+}
+
+/** A minimal moderation-team roster entry — `moderation.team`'s row shape. */
+export function makeTeamMember(overrides: Partial<TeamMember> = {}): TeamMember {
+  return {
+    id: crypto.randomUUID(),
+    name: "Jamie Rivera",
+    username: "jamierivera",
+    displayUsername: "JamieRivera",
+    image: null,
+    role: "moderator",
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Infinite-query cache seeding
 //
@@ -598,6 +759,80 @@ export function seedUserListPages(
       index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
     ),
   });
+}
+
+/** The exact queryKey `moderationQueueAtom` produces — mirrors `queueFamily`'s input builder in `atoms/moderation.ts` for the first page (no cursor). */
+export function moderationQueueQueryKey(): QueryKey {
+  return orpc.moderation.queue.infiniteKey({
+    input: () => ({ limit: MODERATION_PAGE_SIZE }),
+    initialPageParam: undefined as string | undefined,
+  });
+}
+
+/** Seeds `moderation.queue` with the given pages, bypassing the network. */
+export function seedModerationQueuePages(
+  queryClient: QueryClient,
+  pages: ModerationQueuePage[],
+): void {
+  queryClient.setQueryData(moderationQueueQueryKey(), {
+    pages,
+    pageParams: pages.map((_page, index) =>
+      index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
+    ),
+  });
+}
+
+/** The exact queryKey `moderationQueueAtom` produces for the audit log — the `auditLog` twin of {@link moderationQueueQueryKey}. */
+export function auditLogQueryKey(): QueryKey {
+  return orpc.moderation.auditLog.infiniteKey({
+    input: () => ({ limit: MODERATION_PAGE_SIZE }),
+    initialPageParam: undefined as string | undefined,
+  });
+}
+
+/** Seeds `moderation.auditLog` with the given pages, bypassing the network. */
+export function seedAuditLogPages(queryClient: QueryClient, pages: AuditLogPage[]): void {
+  queryClient.setQueryData(auditLogQueryKey(), {
+    pages,
+    pageParams: pages.map((_page, index) =>
+      index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
+    ),
+  });
+}
+
+/**
+ * The exact queryKey `caseAtom(ref)` produces — a plain (non-infinite) query,
+ * unlike the queue/audit families above. `moderation.case`'s input is a
+ * discriminated union, so the narrow — same fix as `caseFamily` in
+ * `atoms/moderation.ts` — is needed here too: a bare `CaseRef` (whose
+ * `targetType` is the *union* `"post" | "user"`) isn't assignable to either
+ * branch on its own.
+ */
+export function moderationCaseQueryKey(target: CaseRef): QueryKey {
+  const input =
+    target.targetType === "post"
+      ? { targetType: "post" as const, targetId: target.targetId }
+      : { targetType: "user" as const, targetId: target.targetId };
+  return orpc.moderation.case.queryKey({ input });
+}
+
+/** Seeds `moderation.case` for one target, bypassing the network. */
+export function seedModerationCase(
+  queryClient: QueryClient,
+  target: CaseRef,
+  detail: ModerationCaseDetail,
+): void {
+  queryClient.setQueryData(moderationCaseQueryKey(target), detail);
+}
+
+/** The exact queryKey `teamAtom` produces — no input, unlike every other moderation query. */
+export function teamQueryKey(): QueryKey {
+  return orpc.moderation.team.queryKey();
+}
+
+/** Seeds `moderation.team` with the given roster, bypassing the network. */
+export function seedTeam(queryClient: QueryClient, items: TeamMember[]): void {
+  queryClient.setQueryData(teamQueryKey(), { items });
 }
 
 /** Drives an infinite query at `queryKey` into a permanent loading state, without a network call. */
