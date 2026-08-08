@@ -13,11 +13,11 @@ import { createStore } from "jotai";
 type AuthClientResult = { data: unknown; error: unknown };
 
 const { requestPasswordReset, resetPassword } = vi.hoisted(() => ({
-  requestPasswordReset: vi.fn(
-    (): Promise<AuthClientResult> => Promise.resolve({ data: { status: true }, error: null }),
+  requestPasswordReset: vi.fn((): Promise<AuthClientResult> =>
+    Promise.resolve({ data: { status: true }, error: null }),
   ),
-  resetPassword: vi.fn(
-    (): Promise<AuthClientResult> => Promise.resolve({ data: { status: true }, error: null }),
+  resetPassword: vi.fn((): Promise<AuthClientResult> =>
+    Promise.resolve({ data: { status: true }, error: null }),
   ),
 }));
 

@@ -28,11 +28,13 @@ export function readCachedIsFollowing(queryClient: QueryClient, userId: string):
 
   if (fromList) return fromList.viewerIsFollowing;
 
-  return queryClient
-    .getQueriesData<InfiniteData<SearchUsersPage>>({ queryKey: orpc.search.users.key() })
-    .flatMap(([, data]) => data?.pages ?? [])
-    .flatMap((page) => page.items)
-    .find((item) => item.id === userId)?.viewerIsFollowing ?? false;
+  return (
+    queryClient
+      .getQueriesData<InfiniteData<SearchUsersPage>>({ queryKey: orpc.search.users.key() })
+      .flatMap(([, data]) => data?.pages ?? [])
+      .flatMap((page) => page.items)
+      .find((item) => item.id === userId)?.viewerIsFollowing ?? false
+  );
 }
 
 /** Finds a cached profile by user id — `byUsername` entries are keyed by username, so the match is a scan. */
@@ -110,7 +112,11 @@ function setFollowFlagInSearchCaches(
  */
 export function patchFollowState(
   queryClient: QueryClient,
-  { userId, viewerId, following }: { userId: string; viewerId: string | undefined; following: boolean },
+  {
+    userId,
+    viewerId,
+    following,
+  }: { userId: string; viewerId: string | undefined; following: boolean },
 ): void {
   queryClient.setQueriesData<Profile>({ queryKey: orpc.user.byUsername.key() }, (cached) => {
     if (!cached) return cached;

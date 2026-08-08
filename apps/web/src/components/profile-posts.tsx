@@ -35,9 +35,9 @@ export function ProfilePosts() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 pb-2 border-b border-border">
-        <MessageSquare className="h-4 w-4 text-foreground" />
-        <h2 className="text-sm font-bold text-foreground">{m.profile_posts_heading()}</h2>
+      <div className="border-border flex items-center gap-2 border-b pb-2">
+        <MessageSquare className="text-foreground h-4 w-4" />
+        <h2 className="text-foreground text-sm font-bold">{m.profile_posts_heading()}</h2>
       </div>
 
       {isOwnProfile && <PostComposer />}
@@ -50,9 +50,7 @@ export function ProfilePosts() {
       */}
       <PostFeed
         feedAtom={postFeedAtom({ authorId: profile.id, feed: "global", includeReplies: true })}
-        emptyMessage={
-          isOwnProfile ? m.profile_own_empty() : m.profile_empty({ handle })
-        }
+        emptyMessage={isOwnProfile ? m.profile_own_empty() : m.profile_empty({ handle })}
       />
     </div>
   );

@@ -57,9 +57,7 @@ export function preloadInjectionPlugin(): Plugin {
         (entry) => entry.type === "chunk" && /^assets\/login-.*\.js$/.test(entry.fileName),
       );
       if (loginChunk) {
-        tags.push(
-          `<link rel="modulepreload" crossorigin href="${urlOf(loginChunk.fileName)}">`,
-        );
+        tags.push(`<link rel="modulepreload" crossorigin href="${urlOf(loginChunk.fileName)}">`);
       }
 
       // The latin subset of Inter — the one en/fr text actually renders with.

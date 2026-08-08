@@ -211,7 +211,9 @@ export const MAX_IMAGE_MEGAPIXELS = 50;
  * BodyLimitPlugin (wired in `apps/server/src/index.ts`).
  */
 export const RPC_MAX_BODY_BYTES =
-  Math.max(...Object.values(IMAGE_LIMITS).flatMap((slot) => [slot.maxOriginalBytes, slot.maxDisplayBytes])) +
+  Math.max(
+    ...Object.values(IMAGE_LIMITS).flatMap((slot) => [slot.maxOriginalBytes, slot.maxDisplayBytes]),
+  ) +
   1024 * 1024;
 
 /**

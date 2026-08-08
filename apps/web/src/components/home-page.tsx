@@ -23,14 +23,11 @@ export function HomePage() {
   const scope = useAtomValue(homeFeedScopeAtom);
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8 space-y-4">
-      <div className="flex items-baseline justify-between gap-3 pb-2 border-b border-border">
+    <div className="mx-auto max-w-2xl space-y-4 px-4 py-8">
+      <div className="border-border flex items-baseline justify-between gap-3 border-b pb-2">
         <h1 className="text-lg font-bold tracking-tight">{m.feed_title()}</h1>
         <SegmentedControl label={m.feed_label()}>
-          <SegmentedControlItem
-            active={scope === "global"}
-            onClick={() => setFeedScope("global")}
-          >
+          <SegmentedControlItem active={scope === "global"} onClick={() => setFeedScope("global")}>
             {m.feed_for_you()}
           </SegmentedControlItem>
           <SegmentedControlItem
@@ -53,17 +50,19 @@ export function HomePage() {
       */}
       {scope === null ? (
         <div className="flex justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin motion-reduce:animate-none text-primary" />
+          <Loader2 className="text-primary h-6 w-6 animate-spin motion-reduce:animate-none" />
         </div>
       ) : (
         <PostFeed
           feedAtom={postFeedAtom({ feed: scope })}
-          emptyMessage={
-            scope === "following" ? m.feed_empty_following() : m.feed_empty()
-          }
+          emptyMessage={scope === "following" ? m.feed_empty_following() : m.feed_empty()}
           emptyAction={
             scope === "following" ? (
-              <Button size="sm" nativeButton={false} render={<Link to="/discover" className="gap-1.5" />}>
+              <Button
+                size="sm"
+                nativeButton={false}
+                render={<Link to="/discover" className="gap-1.5" />}
+              >
                 <Compass className="h-4 w-4" />
                 <span>{m.feed_find_people()}</span>
               </Button>

@@ -132,7 +132,10 @@ export function acceptImage(
 ): ImageAcceptance {
   if (!isAllowedImageType(declaredType)) return { ok: false, reason: "type" };
 
-  const cap = variant === "original" ? IMAGE_LIMITS[kind].maxOriginalBytes : IMAGE_LIMITS[kind].maxDisplayBytes;
+  const cap =
+    variant === "original"
+      ? IMAGE_LIMITS[kind].maxOriginalBytes
+      : IMAGE_LIMITS[kind].maxDisplayBytes;
   if (bytes.byteLength === 0 || bytes.byteLength > cap) return { ok: false, reason: "size" };
 
   const sniffed = sniffImageType(bytes);

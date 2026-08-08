@@ -215,8 +215,7 @@ function send(
   const encoding = preferredEncoding(req.headers["accept-encoding"], file);
 
   const headers: Record<string, string> = {
-    "Content-Type":
-      CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
+    "Content-Type": CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
     "Cache-Control": cacheControl,
   };
   if (encoding) {

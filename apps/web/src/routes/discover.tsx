@@ -15,10 +15,10 @@ export const Route = createFileRoute("/discover")({
  */
 function DiscoverPage() {
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8">
-      <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center">
-        <Compass className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
-        <p className="text-sm text-muted-foreground">{m.discover_coming_soon()}</p>
+    <div className="mx-auto max-w-2xl px-4 py-8">
+      <div className="border-border bg-card/40 rounded-xl border border-dashed p-10 text-center">
+        <Compass className="text-muted-foreground/60 mx-auto mb-3 h-8 w-8" />
+        <p className="text-muted-foreground text-sm">{m.discover_coming_soon()}</p>
       </div>
     </div>
   );

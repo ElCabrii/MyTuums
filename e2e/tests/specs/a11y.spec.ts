@@ -35,9 +35,10 @@ async function expectNoSeriousViolations(page: Page): Promise<void> {
     SIGNIFICANT_IMPACTS.has(violation.impact ?? ""),
   );
 
-  expect(significant, `Serious/critical accessibility violations:\n${summarize(significant)}`).toEqual(
-    [],
-  );
+  expect(
+    significant,
+    `Serious/critical accessibility violations:\n${summarize(significant)}`,
+  ).toEqual([]);
 }
 
 test.describe("accessibility", () => {

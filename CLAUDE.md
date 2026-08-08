@@ -33,6 +33,7 @@ Copy `.env.example` → `.env` first — it is the single source of env for ever
 - `pnpm db:generate` — new migration from schema changes; `pnpm db:push` — apply it; `pnpm db:promote` — grant a moderator/staff/admin role for the moderation bootstrap (root aliases into `@my-tuums/db`). The rest of the Drizzle toolbox is package-level: `pnpm --filter @my-tuums/db db:migrate` (apply), `db:studio` (browse), `db:generate:auth` (regenerate `src/schema/auth.ts` via the BetterAuth CLI + `scripts/patch-auth-schema.mjs`), and `db:check` (the schema-drift check CI runs).
 
 Single test:
+
 - `pnpm --filter @my-tuums/api exec vitest run src/posts.int.test.ts` (same pattern for web: `pnpm --filter @my-tuums/web exec vitest run src/atoms/foo.test.ts` — if `src/paraglide` doesn't exist yet, the web package's `test` script compiles it first).
 - E2E: `pnpm --filter @my-tuums/e2e e2e -- tests/specs/theme.spec.ts`.
 
@@ -51,14 +52,17 @@ Each package — and the CI directory — carries its own `CLAUDE.md`: the autho
 ## Architecture
 
 ### One origin is a requirement, not a preference
+
 In production the API serves the built SPA (`WEB_DIST` set by the Dockerfile), because `apps/web/src/lib/orpc.ts` resolves `/rpc` against `window.location.origin` and uploaded images are stored as relative `/media/<key>` paths. In dev, Vite proxies `/rpc`, `/api/auth`, and `/media` to :3001; the browser follows the `/media` 302 to a presigned bucket URL itself.
 
 ### apps/server — the HTTP server
-- `src/env.ts`: zod-validated env; a *partial* OAuth pair or S3 group refuses to boot (`superRefine`). `parseEnv` throws but never exits — only the real entrypoint `src/index.ts` turns a bad env into `process.exit(1)`. One caveat: `@my-tuums/db` evaluates `DATABASE_URL` at module scope and throws when it is unset (packages/db/src/index.ts), which runs before `parseEnv` ever does — so that single variable is reported by the module-scope throw rather than by `parseEnv`'s unified report.
+
+- `src/env.ts`: zod-validated env; a _partial_ OAuth pair or S3 group refuses to boot (`superRefine`). `parseEnv` throws but never exits — only the real entrypoint `src/index.ts` turns a bad env into `process.exit(1)`. One caveat: `@my-tuums/db` evaluates `DATABASE_URL` at module scope and throws when it is unset (packages/db/src/index.ts), which runs before `parseEnv` ever does — so that single variable is reported by the module-scope throw rather than by `parseEnv`'s unified report.
 - `src/request-handler.ts`: the routing tree (health → `/api/auth` (better-auth) → `/rpc` (oRPC) → `/media` (session required, checked before the key is parsed) → page gate → static SPA), unit-tested with stand-ins; `src/index.ts` wires the real dependencies, plus deliberate graceful shutdown that drains the DB pool. The page gate enforces the same sign-in requirement as the client's `useRequireSignedIn`, sharing its allowlist (`SIGNED_OUT_PATHS` in `@my-tuums/api/constants`) so the two can't drift into a redirect loop. Between `/media` and the page gate, no anonymous request ever reaches user content (issue #36 closed every procedure; a leaked media key is the one thing this doesn't retroactively fix — see the load-bearing note in `apps/server/CLAUDE.md`).
 - Bundled with tsup: source-only workspace packages (`@my-tuums/{api,auth,db}`) get inlined; real npm deps stay external.
 
 ### packages/api — the oRPC contract
+
 - `src/router.ts` defines `appRouter` (`me`, `post`, `user`, `search`, `moderation`); `posts.ts`/`users.ts`/`search.ts`/`moderation.ts` hold the procedures, all built from `protectedProcedure` in `procedures.ts` over drizzle queries — there is no anonymous surface (issue #36).
 - `Context` (`{ db, session, rateLimiter, storage }`) threads the rate limiter and S3 storage through every procedure — never module globals — so tests can substitute fakes.
 - `rateLimit(policy)` middleware keys on `user:<id>` — every caller is a signed-in user, so there is no anonymous fallback to key on.
@@ -67,6 +71,7 @@ In production the API serves the built SPA (`WEB_DIST` set by the Dockerfile), b
 - Test split by filename: `*.test.ts` (unit, no I/O) vs `*.int.test.ts` (real Postgres + sessions; shared harness in `src/testing/harness.ts`, `fileParallelism: false`).
 
 ### packages/auth — better-auth
+
 - Plugins: username, twoFactor, passkey, oneTap, lastLoginMethod, haveIBeenPwned, i18n. `trustedOrigins: [webOrigin]`.
 - Social providers register only when both halves of a credential pair exist (`social.ts`); email goes through Resend with a console fallback in dev and a loud failure in prod.
 - The `i18n` plugin reads the `PARAGLIDE_LOCALE` cookie — the same cookie the web app sets — so one locale governs both client copy and server error messages.
@@ -74,21 +79,25 @@ In production the API serves the built SPA (`WEB_DIST` set by the Dockerfile), b
 - Some settings are deliberately pinned and load-bearing (see the comments in `src/index.ts`): `requireEmailVerification: false`, `revokeSessionsOnPasswordReset: true`, no session cookie cache, upload-only fields marked `input: false`.
 
 ### apps/web — the SPA
+
 - TanStack Router with file routes in `src/routes/`. The route tree (`routeTree.gen.ts`) and Paraglide output (`src/paraglide/**`) are **generated and git-ignored** by the Vite plugins — build or dev must run before typecheck can resolve them (CI builds first, for this reason).
 - One Jotai store (`src/lib/store.ts`) is hydrated with the single `QueryClient` at module scope (never `useHydrateAtoms`); every atom file wraps the `orpc` utils via `jotai-tanstack-query`, with `atomFamily` string keys for structural dedup (`atoms/post-feed.ts` is the house style).
 - i18n: Paraglide messages live in `apps/web/messages/`, compiled to `src/paraglide`; edit messages and recompile — never hand-edit generated files.
 - shadcn components in `src/components/ui/`; `@/` aliases to `src`.
 
 ### packages/db — drizzle + postgres.js
+
 - Connection requires TLS for dotted hostnames but not loopback (`src/index.ts`); `closeDb`/`pingDb` serve shutdown and `/health`.
 - Schema split: hand-written `src/schema/app.ts` + generated `src/schema/auth.ts`. Migrations live in `drizzle/` (committed; the Docker image ships them for the pre-deploy step).
 - `src/testing.ts`: `resolveTestDatabaseUrl()` (derives `DATABASE_URL_TEST` by suffixing `_test`) and `assertTestDatabase()` — destructive helpers refuse to run against a database whose name doesn't end in `_test`.
 
 ### e2e — Playwright
+
 - Projects: `setup` (signs up alice/bob once via HTTP, saves cookie state), `api` (transport-level: health, CORS, error envelope, rate limiting — no browser), `chromium` (browser specs, signed in as alice; `bobPage`/`signedOutPage` fixtures cover the rest).
 - Single worker, `global-setup.ts` truncates the test database, and upload specs skip themselves when no S3 env (dev bucket) is present.
 
 ### CI (`.github/workflows/ci.yml`)
+
 `check` (build → lint → typecheck), `unit` (deliberately no Postgres), `integration` (Postgres service; `db:check` catches schema drift), `e2e` (Postgres + ci-bucket S3 secrets), `docker` (builds the image and asserts the VITE_* ARGs landed in the bundle and the migration runner/SQL shipped).
 
 ## Env gotchas

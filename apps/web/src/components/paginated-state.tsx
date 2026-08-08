@@ -57,7 +57,7 @@ export function PaginatedState({
   if (query.isPending) {
     return (
       <div className="flex justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin motion-reduce:animate-none text-primary" />
+        <Loader2 className="text-primary h-6 w-6 animate-spin motion-reduce:animate-none" />
       </div>
     );
   }
@@ -66,7 +66,7 @@ export function PaginatedState({
     return (
       <div
         role="alert"
-        className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive"
+        className="border-destructive/20 bg-destructive/10 text-destructive flex items-start gap-3 rounded-xl border p-4 text-sm"
       >
         <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
         <div className="space-y-2">
@@ -81,9 +81,9 @@ export function PaginatedState({
 
   if (isEmpty) {
     return (
-      <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center">
-        <EmptyIcon className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
-        <p className="text-sm text-muted-foreground">{emptyMessage}</p>
+      <div className="border-border bg-card/40 rounded-xl border border-dashed p-10 text-center">
+        <EmptyIcon className="text-muted-foreground/60 mx-auto mb-3 h-8 w-8" />
+        <p className="text-muted-foreground text-sm">{emptyMessage}</p>
         {emptyAction && <div className="mt-4 flex justify-center">{emptyAction}</div>}
       </div>
     );

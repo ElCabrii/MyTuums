@@ -42,7 +42,10 @@ test.describe("moderation", () => {
     await expect(page.getByRole("heading", { name: "Moderation" })).toBeVisible();
     // The queue is newest-first, so the first "1 report" row is this run's
     // case even if a crashed earlier run left a stale one behind.
-    await page.getByRole("button", { name: /1 report/ }).first().click();
+    await page
+      .getByRole("button", { name: /1 report/ })
+      .first()
+      .click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText(marker, { exact: true })).toBeVisible();
     await dialog.getByLabel("Reason").fill(`removed by e2e ${marker}`);
@@ -64,7 +67,9 @@ test.describe("moderation", () => {
     await expect(
       bobPage.getByRole("heading", { name: "Appeal a moderation decision" }),
     ).toBeVisible();
-    await bobPage.getByLabel("Your appeal").fill("This removal was a mistake — my post followed the rules.");
+    await bobPage
+      .getByLabel("Your appeal")
+      .fill("This removal was a mistake — my post followed the rules.");
     await bobPage.getByRole("button", { name: "Submit appeal" }).click();
     await expect(bobPage.getByRole("heading", { name: "Appeal submitted" })).toBeVisible();
 
@@ -72,7 +77,9 @@ test.describe("moderation", () => {
     await page.goto("/moderation");
     // Reports are stamped, so the row's summary is the appeal's own text, and
     // the open appeal is badged.
-    await expect(page.getByText("This removal was a mistake — my post followed the rules.")).toBeVisible();
+    await expect(
+      page.getByText("This removal was a mistake — my post followed the rules."),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: /Appeal/ })).toBeVisible();
   });
 });

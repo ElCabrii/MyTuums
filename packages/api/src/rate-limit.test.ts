@@ -84,7 +84,11 @@ describe("createRateLimiter", () => {
 
     // Window rolls over here — only ~1ms of real time has passed.
     clock = 1000;
-    const windowNPlus1 = [limiter.consume("k", p), limiter.consume("k", p), limiter.consume("k", p)];
+    const windowNPlus1 = [
+      limiter.consume("k", p),
+      limiter.consume("k", p),
+      limiter.consume("k", p),
+    ];
     expect(windowNPlus1.every((r) => r.allowed)).toBe(true);
     // 2 * limit (6) requests allowed across the boundary.
   });

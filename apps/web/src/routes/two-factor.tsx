@@ -75,12 +75,12 @@ function TwoFactorPage() {
   const isBackup = method === "backup";
 
   return (
-    <div className="container max-w-md mx-auto px-4 py-12">
+    <div className="container mx-auto max-w-md px-4 py-12">
       <PageCard className="space-y-6">
-        <div className="text-center space-y-2">
-          <ShieldCheck className="h-8 w-8 mx-auto text-primary" />
+        <div className="space-y-2 text-center">
+          <ShieldCheck className="text-primary mx-auto h-8 w-8" />
           <h1 className="text-2xl font-bold tracking-tight">{m.twofa_challenge_title()}</h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             {isBackup
               ? m.twofa_challenge_backup_subtitle()
               : method === "otp"
@@ -97,18 +97,18 @@ function TwoFactorPage() {
           <div className="space-y-2">
             <label
               htmlFor="code"
-              className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
             >
               {isBackup ? m.twofa_field_backup_code() : m.twofa_field_code()}
             </label>
             <div className="relative">
-              <KeyRound className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+              <KeyRound className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
               <Input
                 id="code"
                 type="text"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                className="pl-10 h-10 bg-background/50 tracking-[0.3em] font-mono"
+                className="bg-background/50 h-10 pl-10 font-mono tracking-[0.3em]"
                 // `one-time-code` lets iOS and Android offer the code straight
                 // from the notification. Backup codes are not one-time-codes in
                 // that sense and would only confuse the autofill heuristics.
@@ -120,19 +120,19 @@ function TwoFactorPage() {
             </div>
           </div>
 
-          <label className="flex items-center gap-2.5 text-sm text-muted-foreground cursor-pointer">
+          <label className="text-muted-foreground flex cursor-pointer items-center gap-2.5 text-sm">
             <input
               type="checkbox"
               checked={trustDevice}
               onChange={(e) => setTrustDevice(e.target.checked)}
-              className="h-4 w-4 rounded border-border accent-primary"
+              className="border-border accent-primary h-4 w-4 rounded"
             />
             <span>{m.twofa_trust_device()}</span>
           </label>
 
           <Button
             type="submit"
-            className="w-full h-11 text-base font-medium rounded-2xl gap-2 mt-2"
+            className="mt-2 h-11 w-full gap-2 rounded-2xl text-base font-medium"
             disabled={isSubmitting}
           >
             {isSubmitting ? (
@@ -149,7 +149,7 @@ function TwoFactorPage() {
           </Button>
         </form>
 
-        <div className="space-y-2 pt-2 border-t border-border/40">
+        <div className="border-border/40 space-y-2 border-t pt-2">
           {method !== "otp" && offersEmailCode && (
             <Button
               variant="ghost"
@@ -189,8 +189,8 @@ function TwoFactorPage() {
           )}
         </div>
 
-        <div className="text-center text-xs text-muted-foreground">
-          <Link to="/login" className="font-medium text-link hover:underline">
+        <div className="text-muted-foreground text-center text-xs">
+          <Link to="/login" className="text-link font-medium hover:underline">
             {m.twofa_back_to_login()}
           </Link>
         </div>

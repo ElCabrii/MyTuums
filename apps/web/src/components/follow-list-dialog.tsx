@@ -56,8 +56,8 @@ export function FollowListDialog({
         setOpenDialog(next ? { username, direction } : null);
       }}
     >
-      <DialogTrigger className="rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-         <span className="font-bold text-foreground">{formatCount(count, getLocale())}</span>{" "}
+      <DialogTrigger className="focus-visible:outline-ring rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2">
+        <span className="text-foreground font-bold">{formatCount(count, getLocale())}</span>{" "}
         <span className="text-muted-foreground">{label}</span>
       </DialogTrigger>
 
@@ -65,7 +65,9 @@ export function FollowListDialog({
         <DialogHeader className="pb-4">
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            {isFollowers ? m.follow_list_followers_title({ handle }) : m.follow_list_following_title({ handle })}
+            {isFollowers
+              ? m.follow_list_followers_title({ handle })
+              : m.follow_list_following_title({ handle })}
           </DialogDescription>
         </DialogHeader>
 

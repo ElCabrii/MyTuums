@@ -10,7 +10,11 @@ import { createRequestHandler, type RequestHandlerDeps } from "./request-handler
  * module needs.
  */
 function resStub() {
-  const calls = { statusCode: undefined as number | undefined, headers: undefined as unknown, body: "" };
+  const calls = {
+    statusCode: undefined as number | undefined,
+    headers: undefined as unknown,
+    body: "",
+  };
   let destroyed = false;
 
   const res = {
@@ -89,7 +93,9 @@ describe("createRequestHandler", () => {
 
   it("responds 503 when pingDb rejects, rather than letting the request hang or 500", async () => {
     const { res, calls } = resStub();
-    const handle = createRequestHandler(deps({ pingDb: vi.fn().mockRejectedValue(new Error("ECONNREFUSED")) }));
+    const handle = createRequestHandler(
+      deps({ pingDb: vi.fn().mockRejectedValue(new Error("ECONNREFUSED")) }),
+    );
 
     await handle(reqStub("/health"), res);
 
@@ -288,9 +294,12 @@ describe("createRequestHandler", () => {
     const handleRpc = vi.fn();
     const handle = createRequestHandler(deps({ handleRpc }));
 
-    await handle(reqStub("/rpc/user.uploadImage", "POST", {
-      "content-length": String(RPC_MAX_BODY_BYTES + 1),
-    }), res);
+    await handle(
+      reqStub("/rpc/user.uploadImage", "POST", {
+        "content-length": String(RPC_MAX_BODY_BYTES + 1),
+      }),
+      res,
+    );
 
     expect(handleRpc).not.toHaveBeenCalled();
     expect(calls.statusCode).toBe(413);
@@ -310,9 +319,12 @@ describe("createRequestHandler", () => {
     });
     const handle = createRequestHandler(deps({ handleRpc }));
 
-    await handle(reqStub("/rpc/user.uploadImage", "POST", {
-      "transfer-encoding": "chunked",
-    }), res);
+    await handle(
+      reqStub("/rpc/user.uploadImage", "POST", {
+        "transfer-encoding": "chunked",
+      }),
+      res,
+    );
 
     expect(handleRpc).toHaveBeenCalledOnce();
     expect(calls.statusCode).toBe(200);
@@ -327,9 +339,12 @@ describe("createRequestHandler", () => {
     });
     const handle = createRequestHandler(deps({ handleRpc }));
 
-    await handle(reqStub("/rpc/user.uploadImage", "POST", {
-      "content-length": String(RPC_MAX_BODY_BYTES),
-    }), res);
+    await handle(
+      reqStub("/rpc/user.uploadImage", "POST", {
+        "content-length": String(RPC_MAX_BODY_BYTES),
+      }),
+      res,
+    );
 
     expect(handleRpc).toHaveBeenCalledOnce();
     expect(calls.statusCode).toBe(200);
@@ -352,7 +367,9 @@ describe("createRequestHandler", () => {
 
   it("falls through to 404 when handleRpc reports no match under /rpc", async () => {
     const { res, calls } = resStub();
-    const handle = createRequestHandler(deps({ handleRpc: vi.fn().mockResolvedValue({ matched: false }) }));
+    const handle = createRequestHandler(
+      deps({ handleRpc: vi.fn().mockResolvedValue({ matched: false }) }),
+    );
 
     await handle(reqStub("/rpc/does.not.exist"), res);
 
@@ -383,7 +400,9 @@ describe("createRequestHandler", () => {
 
   it("strips the query string before resolving a media key", async () => {
     const { res } = resStub();
-    const resolveMediaUrl = vi.fn().mockResolvedValue({ ...MEDIA_HIT, url: "https://bucket.example/signed" });
+    const resolveMediaUrl = vi
+      .fn()
+      .mockResolvedValue({ ...MEDIA_HIT, url: "https://bucket.example/signed" });
     const session = signedIn();
     const handle = createRequestHandler(
       deps({ resolveMediaUrl, hasValidSession: session.hasValidSession }),

@@ -99,9 +99,9 @@ describe("createStaticFileHandler", () => {
   it("falls back to index.html for a client route, so a refresh works", async () => {
     const { res, calls, body } = resStub();
 
-    await expect(
-      createStaticFileHandler(root)(req("/settings/account"), res),
-    ).resolves.toEqual({ served: true });
+    await expect(createStaticFileHandler(root)(req("/settings/account"), res)).resolves.toEqual({
+      served: true,
+    });
     expect(calls.statusCode).toBe(200);
     expect(body()).toContain("id=root");
   });
@@ -144,9 +144,9 @@ describe("createStaticFileHandler", () => {
     // to <root>/etc/passwd, which does not exist. What comes back is the SPA
     // fallback for an unknown route — never the host's /etc/passwd.
     const { res, body, calls } = resStub();
-    await expect(
-      createStaticFileHandler(root)(req("/../../etc/passwd"), res),
-    ).resolves.toEqual({ served: true });
+    await expect(createStaticFileHandler(root)(req("/../../etc/passwd"), res)).resolves.toEqual({
+      served: true,
+    });
 
     expect(calls.statusCode).toBe(200);
     expect(body()).toContain("id=root");
@@ -155,9 +155,9 @@ describe("createStaticFileHandler", () => {
 
   it("ignores write verbs", async () => {
     const { res } = resStub();
-    await expect(
-      createStaticFileHandler(root)(req("/mytuums.svg", "POST"), res),
-    ).resolves.toEqual({ served: false });
+    await expect(createStaticFileHandler(root)(req("/mytuums.svg", "POST"), res)).resolves.toEqual({
+      served: false,
+    });
   });
 
   it("serves nothing when the directory does not exist", async () => {
@@ -171,7 +171,10 @@ describe("compression", () => {
     const { res, calls, bodyBuffer } = resStub();
 
     await expect(
-      createStaticFileHandler(root)(req("/assets/index-abc123.js", "GET", "*/*", { "accept-encoding": "gzip" }), res),
+      createStaticFileHandler(root)(
+        req("/assets/index-abc123.js", "GET", "*/*", { "accept-encoding": "gzip" }),
+        res,
+      ),
     ).resolves.toEqual({ served: true });
 
     expect(calls.headers["Content-Encoding"]).toBe("gzip");
@@ -183,7 +186,10 @@ describe("compression", () => {
     const { res, calls, bodyBuffer } = resStub();
 
     await expect(
-      createStaticFileHandler(root)(req("/assets/index-abc123.js", "GET", "*/*", { "accept-encoding": "gzip, br" }), res),
+      createStaticFileHandler(root)(
+        req("/assets/index-abc123.js", "GET", "*/*", { "accept-encoding": "gzip, br" }),
+        res,
+      ),
     ).resolves.toEqual({ served: true });
 
     expect(calls.headers["Content-Encoding"]).toBe("br");
@@ -197,12 +203,13 @@ describe("compression", () => {
     // (issue #54). Asserted byte-for-byte against a q=4 compression of the
     // same file, which differs from the q=11 bytes at this size.
     const { res, calls, bodyBuffer } = resStub();
-    const fixture = Buffer.from(
-      `export const v = ${JSON.stringify("x".repeat(3000))};\n`,
-    );
+    const fixture = Buffer.from(`export const v = ${JSON.stringify("x".repeat(3000))};\n`);
 
     await expect(
-      createStaticFileHandler(root)(req("/assets/chunk-big.js", "GET", "*/*", { "accept-encoding": "gzip, br" }), res),
+      createStaticFileHandler(root)(
+        req("/assets/chunk-big.js", "GET", "*/*", { "accept-encoding": "gzip, br" }),
+        res,
+      ),
     ).resolves.toEqual({ served: true });
 
     expect(calls.headers["Content-Encoding"]).toBe("br");
@@ -217,7 +224,10 @@ describe("compression", () => {
     const { res, calls, body } = resStub();
 
     await expect(
-      createStaticFileHandler(root)(req("/assets/index-abc123.js", "GET", "*/*", { "accept-encoding": "gzip;q=0, br;q=0" }), res),
+      createStaticFileHandler(root)(
+        req("/assets/index-abc123.js", "GET", "*/*", { "accept-encoding": "gzip;q=0, br;q=0" }),
+        res,
+      ),
     ).resolves.toEqual({ served: true });
 
     expect(calls.headers["Content-Encoding"]).toBeUndefined();

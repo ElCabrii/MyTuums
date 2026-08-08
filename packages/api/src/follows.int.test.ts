@@ -21,7 +21,11 @@ afterAll(async () => {
 });
 
 /** Walks `user.followers` to exhaustion via `nextCursor`, collecting every follower id it returns. */
-async function walkAllFollowerIds(username: string, context: Context, limit?: number): Promise<string[]> {
+async function walkAllFollowerIds(
+  username: string,
+  context: Context,
+  limit?: number,
+): Promise<string[]> {
   const ids: string[] = [];
   let cursor: string | undefined;
   let pages = 0;
@@ -38,7 +42,11 @@ async function walkAllFollowerIds(username: string, context: Context, limit?: nu
 }
 
 /** Walks `user.following` to exhaustion via `nextCursor`, collecting every followee id it returns. */
-async function walkAllFollowingIds(username: string, context: Context, limit?: number): Promise<string[]> {
+async function walkAllFollowingIds(
+  username: string,
+  context: Context,
+  limit?: number,
+): Promise<string[]> {
   const ids: string[] = [];
   let cursor: string | undefined;
   let pages = 0;
@@ -157,16 +165,8 @@ describe("user.followers / user.following", () => {
     const followerOfHub = await createTestUser();
     const followedByHub = await createTestUser();
 
-    await call(
-      appRouter.user.follow,
-      { userId: hub.id },
-      { context: contextFor(followerOfHub) },
-    );
-    await call(
-      appRouter.user.follow,
-      { userId: followedByHub.id },
-      { context: contextFor(hub) },
-    );
+    await call(appRouter.user.follow, { userId: hub.id }, { context: contextFor(followerOfHub) });
+    await call(appRouter.user.follow, { userId: followedByHub.id }, { context: contextFor(hub) });
 
     const hubUsername = hub.session.user.username!;
     const followers = await call(
@@ -222,43 +222,35 @@ describe("user.followers / user.following", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
-  it(
-    "followers paginates by keyset without repeats, even when many rows share created_at — the tie-break hazard the source comments warn about",
-    async () => {
-      const hub = await createTestUser();
-      const followers = await Promise.all(Array.from({ length: 3 }, () => createTestUser()));
+  it("followers paginates by keyset without repeats, even when many rows share created_at — the tie-break hazard the source comments warn about", async () => {
+    const hub = await createTestUser();
+    const followers = await Promise.all(Array.from({ length: 3 }, () => createTestUser()));
 
-      const tiedAt = new Date("2025-06-01T12:00:00.000Z");
-      await hub.context.db
-        .insert(follow)
-        .values(followers.map((f) => ({ followerId: f.id, followingId: hub.id, createdAt: tiedAt })));
+    const tiedAt = new Date("2025-06-01T12:00:00.000Z");
+    await hub.context.db
+      .insert(follow)
+      .values(followers.map((f) => ({ followerId: f.id, followingId: hub.id, createdAt: tiedAt })));
 
-      const ids = await walkAllFollowerIds(hub.session.user.username!, contextFor(hub), 1);
+    const ids = await walkAllFollowerIds(hub.session.user.username!, contextFor(hub), 1);
 
-      expect(ids).toHaveLength(3);
-      expect(new Set(ids)).toEqual(new Set(followers.map((f) => f.id)));
-    },
-    20_000,
-  );
+    expect(ids).toHaveLength(3);
+    expect(new Set(ids)).toEqual(new Set(followers.map((f) => f.id)));
+  }, 20_000);
 
-  it(
-    "following paginates by keyset without repeats, even when many rows share created_at",
-    async () => {
-      const hub = await createTestUser();
-      const followees = await Promise.all(Array.from({ length: 3 }, () => createTestUser()));
+  it("following paginates by keyset without repeats, even when many rows share created_at", async () => {
+    const hub = await createTestUser();
+    const followees = await Promise.all(Array.from({ length: 3 }, () => createTestUser()));
 
-      const tiedAt = new Date("2025-06-01T12:00:00.000Z");
-      await hub.context.db
-        .insert(follow)
-        .values(followees.map((f) => ({ followerId: hub.id, followingId: f.id, createdAt: tiedAt })));
+    const tiedAt = new Date("2025-06-01T12:00:00.000Z");
+    await hub.context.db
+      .insert(follow)
+      .values(followees.map((f) => ({ followerId: hub.id, followingId: f.id, createdAt: tiedAt })));
 
-      const ids = await walkAllFollowingIds(hub.session.user.username!, contextFor(hub), 1);
+    const ids = await walkAllFollowingIds(hub.session.user.username!, contextFor(hub), 1);
 
-      expect(ids).toHaveLength(3);
-      expect(new Set(ids)).toEqual(new Set(followees.map((f) => f.id)));
-    },
-    20_000,
-  );
+    expect(ids).toHaveLength(3);
+    expect(new Set(ids)).toEqual(new Set(followees.map((f) => f.id)));
+  }, 20_000);
 
   it("rejects a cursor minted by a follow list when fed to post.list — the codecs are parameterised on different id schemas", async () => {
     // ./cursor.ts parameterises each codec on the tie-breaker's id schema.

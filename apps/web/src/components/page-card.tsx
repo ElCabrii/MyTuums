@@ -11,16 +11,10 @@ import type { ReactNode } from "react";
  * deliberately do NOT use this: their variant drops `sm:p-8`/`shadow-2xl` and
  * renders a `<section>`, so they keep their own shell (`./settings/section.tsx`).
  */
-export function PageCard({
-  className,
-  children,
-}: {
-  className?: string;
-  children: ReactNode;
-}) {
+export function PageCard({ className, children }: { className?: string; children: ReactNode }) {
   return (
     <div
-      className={`rounded-3xl border border-border/50 bg-card/60 backdrop-blur-xl p-6 sm:p-8 shadow-2xl ${
+      className={`border-border/50 bg-card/60 rounded-3xl border p-6 shadow-2xl backdrop-blur-xl sm:p-8 ${
         className ?? ""
       }`}
     >

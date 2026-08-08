@@ -27,7 +27,12 @@ import {
   resetPasswordDoneAtom,
   resetPasswordInvalidAtom,
 } from "@/atoms/auth";
-import { validateEmail, validateLogin, validateRegister, validateResetPassword } from "@/lib/auth-validation";
+import {
+  validateEmail,
+  validateLogin,
+  validateRegister,
+  validateResetPassword,
+} from "@/lib/auth-validation";
 
 describe("field atoms", () => {
   it("default to empty strings and are individually settable", () => {

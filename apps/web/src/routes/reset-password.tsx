@@ -87,18 +87,18 @@ function ResetPasswordPage() {
   const showInvalidLink = done ? false : invalid || linkError === "INVALID_TOKEN" || !token;
 
   return (
-    <div className="container max-w-md mx-auto px-4 py-12">
+    <div className="container mx-auto max-w-md px-4 py-12">
       <PageCard className="space-y-6">
         {done ? (
           <>
-            <div className="text-center space-y-2">
-              <CheckCircle2 className="h-8 w-8 mx-auto text-primary" />
+            <div className="space-y-2 text-center">
+              <CheckCircle2 className="text-primary mx-auto h-8 w-8" />
               <h1 className="text-2xl font-bold tracking-tight">{m.auth_reset_success_title()}</h1>
-              <p className="text-sm text-muted-foreground">{m.auth_reset_success_hint()}</p>
+              <p className="text-muted-foreground text-sm">{m.auth_reset_success_hint()}</p>
             </div>
 
             <Button
-              className="w-full h-11 text-base font-medium rounded-2xl gap-2"
+              className="h-11 w-full gap-2 rounded-2xl text-base font-medium"
               onClick={() => {
                 // The reset revoked every session server-side
                 // (`revokeSessionsOnPasswordReset`), so a stale client-side
@@ -115,14 +115,14 @@ function ResetPasswordPage() {
           </>
         ) : showInvalidLink ? (
           <>
-            <div className="text-center space-y-2">
-              <AlertCircle className="h-8 w-8 mx-auto text-destructive" />
+            <div className="space-y-2 text-center">
+              <AlertCircle className="text-destructive mx-auto h-8 w-8" />
               <h1 className="text-2xl font-bold tracking-tight">{m.auth_reset_invalid_title()}</h1>
-              <p className="text-sm text-muted-foreground">{m.auth_reset_invalid_hint()}</p>
+              <p className="text-muted-foreground text-sm">{m.auth_reset_invalid_hint()}</p>
             </div>
 
             <Button
-              className="w-full h-11 text-base font-medium rounded-2xl gap-2"
+              className="h-11 w-full gap-2 rounded-2xl text-base font-medium"
               nativeButton={false}
               render={<Link to="/forgot-password" className="gap-2" />}
             >
@@ -132,10 +132,10 @@ function ResetPasswordPage() {
           </>
         ) : (
           <>
-            <div className="text-center space-y-2">
-              <KeyRound className="h-8 w-8 mx-auto text-primary" />
+            <div className="space-y-2 text-center">
+              <KeyRound className="text-primary mx-auto h-8 w-8" />
               <h1 className="text-2xl font-bold tracking-tight">{m.auth_reset_title()}</h1>
-              <p className="text-sm text-muted-foreground">{m.auth_reset_subtitle()}</p>
+              <p className="text-muted-foreground text-sm">{m.auth_reset_subtitle()}</p>
             </div>
 
             {error && (
@@ -146,19 +146,19 @@ function ResetPasswordPage() {
               <div className="space-y-2">
                 <label
                   htmlFor="new-password"
-                  className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                  className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
                 >
                   {m.auth_field_new_password()}
                 </label>
                 <div className="relative">
-                  <Lock className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+                  <Lock className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
                   <Input
                     id="new-password"
                     type="password"
                     placeholder="••••••••"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    className="pl-10 h-10 bg-background/50"
+                    className="bg-background/50 h-10 pl-10"
                     autoComplete="new-password"
                     required
                   />
@@ -168,19 +168,19 @@ function ResetPasswordPage() {
               <div className="space-y-2">
                 <label
                   htmlFor="confirm-password"
-                  className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                  className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
                 >
                   {m.auth_field_confirm_password()}
                 </label>
                 <div className="relative">
-                  <Lock className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+                  <Lock className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
                   <Input
                     id="confirm-password"
                     type="password"
                     placeholder="••••••••"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="pl-10 h-10 bg-background/50"
+                    className="bg-background/50 h-10 pl-10"
                     autoComplete="new-password"
                     required
                   />
@@ -189,7 +189,7 @@ function ResetPasswordPage() {
 
               <Button
                 type="submit"
-                className="w-full h-11 text-base font-medium rounded-2xl gap-2 mt-2"
+                className="mt-2 h-11 w-full gap-2 rounded-2xl text-base font-medium"
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (
@@ -206,8 +206,8 @@ function ResetPasswordPage() {
               </Button>
             </form>
 
-            <div className="text-center text-xs text-muted-foreground pt-2 border-t border-border/40">
-              <Link to="/login" className="font-medium text-link hover:underline">
+            <div className="text-muted-foreground border-border/40 border-t pt-2 text-center text-xs">
+              <Link to="/login" className="text-link font-medium hover:underline">
                 {m.auth_forgot_back_to_login()}
               </Link>
             </div>

@@ -83,15 +83,11 @@ describe("createCursorCodec", () => {
     });
 
     it("throws BAD_REQUEST when JSON parses but createdAt fails the schema", () => {
-      expectMalformedCursor(() =>
-        codec.decode(encodeRaw({ createdAt: "nope", id: VALID_UUID })),
-      );
+      expectMalformedCursor(() => codec.decode(encodeRaw({ createdAt: "nope", id: VALID_UUID })));
     });
 
     it("throws BAD_REQUEST when JSON parses but id is missing", () => {
-      expectMalformedCursor(() =>
-        codec.decode(encodeRaw({ createdAt: new Date().toISOString() })),
-      );
+      expectMalformedCursor(() => codec.decode(encodeRaw({ createdAt: new Date().toISOString() })));
     });
 
     it("throws BAD_REQUEST for an offset-bearing timestamp — z.iso.datetime() requires UTC", () => {

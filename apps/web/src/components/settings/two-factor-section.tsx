@@ -81,7 +81,10 @@ export function TwoFactorSection() {
           }}
         >
           <div className="space-y-2">
-            <label htmlFor="twofa-password" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <label
+              htmlFor="twofa-password"
+              className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
+            >
               {m.auth_field_password()}
             </label>
             <Input
@@ -90,17 +93,23 @@ export function TwoFactorSection() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
-              className="h-10 bg-background/50"
+              className="bg-background/50 h-10"
               required
             />
-            <p className="text-xs text-muted-foreground">{m.twofa_password_hint()}</p>
+            <p className="text-muted-foreground text-xs">{m.twofa_password_hint()}</p>
           </div>
           <div className="flex gap-2">
-            <Button type="submit" size="sm" className="rounded-full gap-2" disabled={isBusy}>
+            <Button type="submit" size="sm" className="gap-2 rounded-full" disabled={isBusy}>
               {isBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               {panel === "enable" ? m.twofa_enable() : m.twofa_disable()}
             </Button>
-            <Button type="button" variant="ghost" size="sm" className="rounded-full" onClick={() => openPanel("idle")}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="rounded-full"
+              onClick={() => openPanel("idle")}
+            >
               {m.common_cancel()}
             </Button>
           </div>
@@ -110,21 +119,21 @@ export function TwoFactorSection() {
       {panel === "verify" && setup && (
         <div className="space-y-4">
           <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">{m.twofa_scan_hint()}</p>
+            <p className="text-muted-foreground text-xs">{m.twofa_scan_hint()}</p>
             {/* White plate regardless of theme: QR scanners need the light
                 modules lighter than the dark ones, and a dark-mode card
                 background behind a dark foreground is unreadable to them. */}
-            <div className="bg-white p-4 rounded-2xl w-fit">
+            <div className="w-fit rounded-2xl bg-white p-4">
               <QRCode value={setup.totpURI} size={160} />
             </div>
           </div>
 
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
               {m.twofa_backup_codes()}
             </p>
-            <p className="text-xs text-muted-foreground">{m.twofa_backup_codes_hint()}</p>
-            <ul className="grid grid-cols-2 gap-1.5 font-mono text-xs bg-muted/40 rounded-2xl p-4">
+            <p className="text-muted-foreground text-xs">{m.twofa_backup_codes_hint()}</p>
+            <ul className="bg-muted/40 grid grid-cols-2 gap-1.5 rounded-2xl p-4 font-mono text-xs">
               {setup.backupCodes.map((backupCode) => (
                 <li key={backupCode}>{backupCode}</li>
               ))}
@@ -139,7 +148,10 @@ export function TwoFactorSection() {
             }}
           >
             <div className="space-y-2">
-              <label htmlFor="twofa-code" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <label
+                htmlFor="twofa-code"
+                className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
+              >
                 {m.twofa_field_code()}
               </label>
               <Input
@@ -149,16 +161,26 @@ export function TwoFactorSection() {
                 onChange={(e) => setCode(e.target.value)}
                 autoComplete="one-time-code"
                 inputMode="numeric"
-                className="h-10 bg-background/50 font-mono tracking-[0.3em]"
+                className="bg-background/50 h-10 font-mono tracking-[0.3em]"
                 required
               />
             </div>
             <div className="flex gap-2">
-              <Button type="submit" size="sm" className="rounded-full gap-2" disabled={isBusy}>
-                {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              <Button type="submit" size="sm" className="gap-2 rounded-full" disabled={isBusy}>
+                {isBusy ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Check className="h-3.5 w-3.5" />
+                )}
                 {m.twofa_confirm()}
               </Button>
-              <Button type="button" variant="ghost" size="sm" className="rounded-full" onClick={() => openPanel("idle")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="rounded-full"
+                onClick={() => openPanel("idle")}
+              >
                 {m.common_cancel()}
               </Button>
             </div>

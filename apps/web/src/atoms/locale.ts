@@ -8,7 +8,9 @@ export const localeDocumentEffect = atomEffect(() => {
   const root = document.documentElement;
   root.lang = getLocale();
   document.title = m.app_document_title();
-  document.querySelector('meta[name="description"]')?.setAttribute("content", m.app_document_description());
+  document
+    .querySelector('meta[name="description"]')
+    ?.setAttribute("content", m.app_document_description());
 });
 
 /** The cookie Paraglide resolves the locale from, and the BetterAuth i18n plugin reads. */

@@ -90,7 +90,9 @@ describe("ComposerForm", () => {
 
   it("shows the send icon, not a spinner, when idle", async () => {
     const { container } = await renderComposer({ value: "hello", isPending: false });
-    expect(container.querySelector("button[type='submit'] svg.animate-spin")).not.toBeInTheDocument();
+    expect(
+      container.querySelector("button[type='submit'] svg.animate-spin"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders errorMessage in an alert, and renders no alert when null", async () => {
@@ -108,7 +110,9 @@ describe("ComposerForm", () => {
     const header = screen.getByText("Replying to @alexmercer");
     const textarea = screen.getByRole("textbox");
 
-    expect(header.compareDocumentPosition(textarea) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      header.compareDocumentPosition(textarea) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("does not call onSubmit on a form submit event when canSubmit is false (guard is in the handler, not just the disabled attribute)", async () => {

@@ -77,13 +77,11 @@ function RegisterPage() {
   };
 
   return (
-    <div className="container max-w-lg mx-auto px-4 py-12">
+    <div className="container mx-auto max-w-lg px-4 py-12">
       <PageCard className="space-y-6">
-        <div className="text-center space-y-2">
+        <div className="space-y-2 text-center">
           <h1 className="text-2xl font-bold tracking-tight">{m.auth_register_title()}</h1>
-          <p className="text-sm text-muted-foreground">
-            {m.auth_register_subtitle()}
-          </p>
+          <p className="text-muted-foreground text-sm">{m.auth_register_subtitle()}</p>
         </div>
 
         {error && (
@@ -91,23 +89,23 @@ function RegisterPage() {
         )}
 
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <label
                 htmlFor="username"
-                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
               >
                 {m.auth_field_username()}
               </label>
               <div className="relative">
-                <AtSign className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+                <AtSign className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
                 <Input
                   id="username"
                   type="text"
                   placeholder={m.auth_field_username_placeholder()}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="pl-10 h-10 bg-background/50"
+                  className="bg-background/50 h-10 pl-10"
                   autoComplete="username"
                   required
                 />
@@ -117,19 +115,19 @@ function RegisterPage() {
             <div className="space-y-2">
               <label
                 htmlFor="name"
-                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
               >
                 {m.auth_field_display_name()}
               </label>
               <div className="relative">
-                <User className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+                <User className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
                 <Input
                   id="name"
                   type="text"
                   placeholder={m.auth_field_display_name_placeholder()}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="pl-10 h-10 bg-background/50"
+                  className="bg-background/50 h-10 pl-10"
                   autoComplete="name"
                   required
                 />
@@ -140,42 +138,42 @@ function RegisterPage() {
           <div className="space-y-2">
             <label
               htmlFor="email"
-              className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
             >
               {m.auth_field_email()}
             </label>
             <div className="relative">
-              <Mail className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+              <Mail className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
               <Input
                 id="email"
                 type="email"
                 placeholder={m.auth_field_email_placeholder()}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="pl-10 h-10 bg-background/50"
+                className="bg-background/50 h-10 pl-10"
                 autoComplete="email"
                 required
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <label
                 htmlFor="password"
-                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
               >
                 {m.auth_field_password()}
               </label>
               <div className="relative">
-                <Lock className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+                <Lock className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
                 <Input
                   id="password"
                   type="password"
                   placeholder=""
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10 h-10 bg-background/50"
+                  className="bg-background/50 h-10 pl-10"
                   autoComplete="new-password"
                   required
                 />
@@ -185,19 +183,19 @@ function RegisterPage() {
             <div className="space-y-2">
               <label
                 htmlFor="confirmPassword"
-                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
               >
                 {m.auth_field_confirm_password()}
               </label>
               <div className="relative">
-                <Lock className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+                <Lock className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
                 <Input
                   id="confirmPassword"
                   type="password"
                   placeholder=""
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="pl-10 h-10 bg-background/50"
+                  className="bg-background/50 h-10 pl-10"
                   autoComplete="new-password"
                   required
                 />
@@ -208,18 +206,18 @@ function RegisterPage() {
           <div className="space-y-2">
             <label
               htmlFor="dateOfBirth"
-              className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
             >
               {m.auth_field_date_of_birth()}
             </label>
             <div className="relative">
-              <Calendar className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+              <Calendar className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
               <Input
                 id="dateOfBirth"
                 type="date"
                 value={dateOfBirth}
                 onChange={(e) => setDateOfBirth(e.target.value)}
-                className="pl-10 h-10 bg-background/50"
+                className="bg-background/50 h-10 pl-10"
                 autoComplete="bday"
                 required
               />
@@ -228,7 +226,7 @@ function RegisterPage() {
 
           <Button
             type="submit"
-            className="w-full h-11 text-base font-medium rounded-2xl gap-2 mt-2"
+            className="mt-2 h-11 w-full gap-2 rounded-2xl text-base font-medium"
             disabled={isSubmitting}
           >
             {isSubmitting ? (
@@ -247,12 +245,12 @@ function RegisterPage() {
 
         <SignInOptions />
 
-        <div className="text-center text-xs text-muted-foreground pt-2 border-t border-border/40">
+        <div className="text-muted-foreground border-border/40 border-t pt-2 text-center text-xs">
           {m.auth_already_have_account()}{" "}
           <Link
             to="/login"
             search={redirectFromSearch ? { redirect: redirectFromSearch } : {}}
-            className="font-medium text-link hover:underline"
+            className="text-link font-medium hover:underline"
           >
             {m.auth_login_link()}
           </Link>

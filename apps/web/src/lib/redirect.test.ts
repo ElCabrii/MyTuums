@@ -11,7 +11,9 @@ import { sanitizeRedirect } from "@/lib/redirect";
  * on this origin that isn't an auth page", and a table shows that shape at a
  * glance while still naming the offending input in the diff when a row fails.
  */
-function expectRedirects(cases: readonly (readonly [string | null | undefined, string | null])[]): void {
+function expectRedirects(
+  cases: readonly (readonly [string | null | undefined, string | null])[],
+): void {
   expect(cases.map(([input]) => [input, sanitizeRedirect(input)])).toEqual(
     cases.map(([input, expected]) => [input, expected]),
   );

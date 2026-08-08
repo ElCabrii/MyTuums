@@ -63,31 +63,32 @@ export function QueueView() {
  */
 function QueueRow({ item }: { item: ModerationCase }) {
   const setOpenCase = useSetAtom(caseDialogAtom);
-  const reasonSummary =
-    item.reasons.map(reasonLabel).join(" · ") || item.appeal?.reason || "";
+  const reasonSummary = item.reasons.map(reasonLabel).join(" · ") || item.appeal?.reason || "";
 
   return (
     <button
       type="button"
       onClick={() => setOpenCase({ targetType: item.targetType, targetId: item.targetId })}
-      className="w-full cursor-pointer rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/30"
+      className="border-border bg-card hover:border-primary/30 w-full cursor-pointer rounded-xl border p-4 text-left transition-colors"
     >
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={item.targetType === "post" ? "secondary" : "outline"}>
-          {item.targetType === "post" ? m.moderation_queue_target_post() : m.moderation_queue_target_user()}
+          {item.targetType === "post"
+            ? m.moderation_queue_target_post()
+            : m.moderation_queue_target_user()}
         </Badge>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-muted-foreground text-xs">
           {item.reportCount === 1
             ? m.moderation_case_reports_one({ count: "1" })
             : m.moderation_case_reports_many({ count: String(item.reportCount) })}
         </span>
         {item.appeal && <Badge variant="destructive">{m.moderation_queue_appeal()}</Badge>}
-        <span className="ml-auto text-xs text-muted-foreground">
+        <span className="text-muted-foreground ml-auto text-xs">
           {formatRelativeTime(item.newestAt, getLocale(), m.post_just_now())}
         </span>
       </div>
       {reasonSummary && (
-        <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{reasonSummary}</p>
+        <p className="text-muted-foreground mt-2 line-clamp-2 text-sm">{reasonSummary}</p>
       )}
     </button>
   );

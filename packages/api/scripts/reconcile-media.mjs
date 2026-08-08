@@ -41,7 +41,11 @@ if (bucketArg !== process.env.S3_BUCKET) {
   );
   process.exit(1);
 }
-if (!process.env.S3_ENDPOINT || !process.env.S3_ACCESS_KEY_ID || !process.env.S3_SECRET_ACCESS_KEY) {
+if (
+  !process.env.S3_ENDPOINT ||
+  !process.env.S3_ACCESS_KEY_ID ||
+  !process.env.S3_SECRET_ACCESS_KEY
+) {
   console.error("Refusing to run: the S3_* group is not fully set in the environment.");
   process.exit(1);
 }

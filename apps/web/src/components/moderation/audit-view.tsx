@@ -37,7 +37,7 @@ export function AuditView() {
       isEmpty={entries.length === 0}
       listClassName="space-y-4"
     >
-      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+      <div className="border-border bg-card overflow-x-auto rounded-xl border">
         <Table>
           <TableHeader>
             <TableRow>
@@ -60,9 +60,13 @@ export function AuditView() {
 
 /** One audit row: the action, its reason/note, and the actor and target it involved. */
 function AuditRow({ entry }: { entry: AuditEntry }) {
-  const actorName = entry.actor ? (entry.actor.name || handleOf(entry.actor)) || m.user_unknown() : m.moderation_audit_none();
+  const actorName = entry.actor
+    ? entry.actor.name || handleOf(entry.actor) || m.user_unknown()
+    : m.moderation_audit_none();
   const actorHandle = entry.actor ? handleOf(entry.actor) : null;
-  const targetName = entry.targetUser ? (entry.targetUser.name || handleOf(entry.targetUser)) || m.user_unknown() : null;
+  const targetName = entry.targetUser
+    ? entry.targetUser.name || handleOf(entry.targetUser) || m.user_unknown()
+    : null;
   const targetHandle = entry.targetUser ? handleOf(entry.targetUser) : null;
 
   return (
@@ -70,28 +74,34 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
       <TableCell className="align-top">
         <p className="font-medium">{actionLabel(entry.action)}</p>
         {(entry.reason || entry.note) && (
-          <p className="mt-0.5 text-xs text-muted-foreground">{entry.reason ?? entry.note}</p>
+          <p className="text-muted-foreground mt-0.5 text-xs">{entry.reason ?? entry.note}</p>
         )}
       </TableCell>
       <TableCell className="align-top">
         {targetName ? (
           <p className="text-sm">
             {targetName}
-            {targetHandle && <span className="ml-1 text-xs text-muted-foreground">@{targetHandle}</span>}
+            {targetHandle && (
+              <span className="text-muted-foreground ml-1 text-xs">@{targetHandle}</span>
+            )}
           </p>
         ) : entry.targetPostId ? (
-          <p className="text-sm">{m.moderation_audit_post({ id: entry.targetPostId.slice(0, 8) })}</p>
+          <p className="text-sm">
+            {m.moderation_audit_post({ id: entry.targetPostId.slice(0, 8) })}
+          </p>
         ) : (
-          <p className="text-xs text-muted-foreground">{m.moderation_audit_none()}</p>
+          <p className="text-muted-foreground text-xs">{m.moderation_audit_none()}</p>
         )}
       </TableCell>
       <TableCell className="align-top">
         <p className="text-sm">
           {actorName}
-          {actorHandle && <span className="ml-1 text-xs text-muted-foreground">@{actorHandle}</span>}
+          {actorHandle && (
+            <span className="text-muted-foreground ml-1 text-xs">@{actorHandle}</span>
+          )}
         </p>
       </TableCell>
-      <TableCell className="align-top whitespace-nowrap text-xs text-muted-foreground">
+      <TableCell className="text-muted-foreground align-top text-xs whitespace-nowrap">
         {formatRelativeTime(entry.createdAt, getLocale(), m.post_just_now())}
       </TableCell>
     </TableRow>

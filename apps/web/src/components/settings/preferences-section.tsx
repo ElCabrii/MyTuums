@@ -56,7 +56,7 @@ export function PreferencesSection() {
     >
       <div className="space-y-4">
         <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
             {m.settings_prefs_theme_label()}
           </p>
           <SegmentedControl label={m.settings_prefs_theme_label()}>
@@ -75,7 +75,7 @@ export function PreferencesSection() {
         </div>
 
         <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
             {m.settings_prefs_locale_label()}
           </p>
           <SegmentedControl label={m.settings_prefs_locale_label()}>
@@ -93,7 +93,7 @@ export function PreferencesSection() {
           </SegmentedControl>
         </div>
 
-        <p className="text-xs text-muted-foreground">{m.settings_prefs_hint()}</p>
+        <p className="text-muted-foreground text-xs">{m.settings_prefs_hint()}</p>
       </div>
     </Section>
   );

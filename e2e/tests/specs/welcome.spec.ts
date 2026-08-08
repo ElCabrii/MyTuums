@@ -85,12 +85,8 @@ test.describe("handle gate", () => {
     // and render sign-in buttons to a signed-in person with no handle yet.
     // Those buttons are gone entirely now (the header only renders for a real
     // session — see __root.tsx), but the assertions stay as a tripwire.
-    await expect(
-      page.getByRole("banner").getByRole("button", { name: "Log in" }),
-    ).toHaveCount(0);
-    await expect(
-      page.getByRole("banner").getByRole("button", { name: "Register" }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("banner").getByRole("button", { name: "Log in" })).toHaveCount(0);
+    await expect(page.getByRole("banner").getByRole("button", { name: "Register" })).toHaveCount(0);
 
     // The positive half: the header DOES render here (the session exists even
     // though the handle doesn't), and its avatar links to /welcome — which is

@@ -42,19 +42,17 @@ describe("useRedirectWhenSignedIn", () => {
   });
 
   it("sends a session without a date of birth to its profile, ignoring the redirect — the completeness guard", async () => {
-    const { router } = await renderWithProviders(
-      <RedirectProbe redirect="/discover" />,
-      { signedInAs: { dateOfBirth: null } },
-    );
+    const { router } = await renderWithProviders(<RedirectProbe redirect="/discover" />, {
+      signedInAs: { dateOfBirth: null },
+    });
 
     expect(router.state.location.pathname).toBe("/@alexmercer");
   });
 
   it("sends a session without a handle to /welcome, redirect or not", async () => {
-    const { router } = await renderWithProviders(
-      <RedirectProbe redirect="/discover" />,
-      { signedInAs: { username: null, displayUsername: null } },
-    );
+    const { router } = await renderWithProviders(<RedirectProbe redirect="/discover" />, {
+      signedInAs: { username: null, displayUsername: null },
+    });
 
     // `/welcome` is not in the stub route tree, so the navigation resolves
     // asynchronously through the unmatched-match path — flush it before

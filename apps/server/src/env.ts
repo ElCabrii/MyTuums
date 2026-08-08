@@ -1,63 +1,62 @@
 import { z } from "zod";
 
-const envSchema = z.object({
-  DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
-  BETTER_AUTH_SECRET: z
-    .string()
-    .min(32, "BETTER_AUTH_SECRET must be at least 32 characters long"),
-  BETTER_AUTH_URL: z.string().min(1, "BETTER_AUTH_URL is required"),
-  WEB_ORIGIN: z.string().default("http://localhost:5173"),
-  PORT: z.coerce.number().default(3001),
-  HOST: z.string().default("127.0.0.1"),
-  NODE_ENV: z
-    .enum(["development", "production", "test"])
-    .default("development"),
+const envSchema = z
+  .object({
+    DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+    BETTER_AUTH_SECRET: z
+      .string()
+      .min(32, "BETTER_AUTH_SECRET must be at least 32 characters long"),
+    BETTER_AUTH_URL: z.string().min(1, "BETTER_AUTH_URL is required"),
+    WEB_ORIGIN: z.string().default("http://localhost:5173"),
+    PORT: z.coerce.number().default(3001),
+    HOST: z.string().default("127.0.0.1"),
+    NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 
-  // Everything below is optional, and `packages/auth/src/env.ts` reads it
-  // again independently (that package has to work when imported by the
-  // BetterAuth CLI, with no server around). This schema is not the source of
-  // those values — it is the loud check that a *half*-filled pair gets caught
-  // at boot, which is the failure the `.superRefine` below exists for.
-  GOOGLE_CLIENT_ID: z.string().optional(),
-  GOOGLE_CLIENT_SECRET: z.string().optional(),
-  DISCORD_CLIENT_ID: z.string().optional(),
-  DISCORD_CLIENT_SECRET: z.string().optional(),
-  TWITCH_CLIENT_ID: z.string().optional(),
-  TWITCH_CLIENT_SECRET: z.string().optional(),
+    // Everything below is optional, and `packages/auth/src/env.ts` reads it
+    // again independently (that package has to work when imported by the
+    // BetterAuth CLI, with no server around). This schema is not the source of
+    // those values — it is the loud check that a *half*-filled pair gets caught
+    // at boot, which is the failure the `.superRefine` below exists for.
+    GOOGLE_CLIENT_ID: z.string().optional(),
+    GOOGLE_CLIENT_SECRET: z.string().optional(),
+    DISCORD_CLIENT_ID: z.string().optional(),
+    DISCORD_CLIENT_SECRET: z.string().optional(),
+    TWITCH_CLIENT_ID: z.string().optional(),
+    TWITCH_CLIENT_SECRET: z.string().optional(),
 
-  RESEND_API_KEY: z.string().optional(),
-  EMAIL_FROM: z.string().optional(),
+    RESEND_API_KEY: z.string().optional(),
+    EMAIL_FROM: z.string().optional(),
 
-  // Defaults to WEB_ORIGIN's hostname in packages/auth. Only set this when the
-  // browser origin and the intended WebAuthn Relying Party differ.
-  PASSKEY_RP_ID: z.string().optional(),
+    // Defaults to WEB_ORIGIN's hostname in packages/auth. Only set this when the
+    // browser origin and the intended WebAuthn Relying Party differ.
+    PASSKEY_RP_ID: z.string().optional(),
 
-  // Escape hatch for the Playwright suite, which drives every sign-in from one
-  // IP. See the comment on `authRateLimitEnabled` in packages/auth/src/env.ts.
-  AUTH_RATE_LIMIT: z.enum(["true", "false"]).optional(),
+    // Escape hatch for the Playwright suite, which drives every sign-in from one
+    // IP. See the comment on `authRateLimitEnabled` in packages/auth/src/env.ts.
+    AUTH_RATE_LIMIT: z.enum(["true", "false"]).optional(),
 
-  // Object storage for avatars and banners — a Railway Storage Bucket in every
-  // environment, including dev and CI. All optional as a group: with none of
-  // them set the server boots and everything except the two upload procedures
-  // works, exactly like an unconfigured OAuth provider. `packages/api/src/
-  // context.ts` reads these again to build the client; as with the OAuth pairs
-  // above, this schema is not the source of the values, only the loud check
-  // that a partial group is caught at boot.
-  //
-  // Railway names these ENDPOINT/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY/REGION
-  // on the bucket itself; map them onto these with reference variables.
-  S3_ENDPOINT: z.string().optional(),
-  S3_BUCKET: z.string().optional(),
-  S3_ACCESS_KEY_ID: z.string().optional(),
-  S3_SECRET_ACCESS_KEY: z.string().optional(),
-  S3_REGION: z.string().optional(),
+    // Object storage for avatars and banners — a Railway Storage Bucket in every
+    // environment, including dev and CI. All optional as a group: with none of
+    // them set the server boots and everything except the two upload procedures
+    // works, exactly like an unconfigured OAuth provider. `packages/api/src/
+    // context.ts` reads these again to build the client; as with the OAuth pairs
+    // above, this schema is not the source of the values, only the loud check
+    // that a partial group is caught at boot.
+    //
+    // Railway names these ENDPOINT/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY/REGION
+    // on the bucket itself; map them onto these with reference variables.
+    S3_ENDPOINT: z.string().optional(),
+    S3_BUCKET: z.string().optional(),
+    S3_ACCESS_KEY_ID: z.string().optional(),
+    S3_SECRET_ACCESS_KEY: z.string().optional(),
+    S3_REGION: z.string().optional(),
 
-  // Absolute path to the built web app (apps/web/dist). When set, this server
-  // also serves the SPA, which is what makes the deployed app single-origin —
-  // `apps/web/src/lib/orpc.ts` resolves /rpc against window.location.origin,
-  // and uploaded images are stored as relative /media/ paths. Unset in dev.
-  WEB_DIST: z.string().optional(),
-})
+    // Absolute path to the built web app (apps/web/dist). When set, this server
+    // also serves the SPA, which is what makes the deployed app single-origin —
+    // `apps/web/src/lib/orpc.ts` resolves /rpc against window.location.origin,
+    // and uploaded images are stored as relative /media/ paths. Unset in dev.
+    WEB_DIST: z.string().optional(),
+  })
   /**
    * A provider configured with only half its credentials is the failure worth
    * catching here. `packages/auth/src/social.ts` registers a provider only when

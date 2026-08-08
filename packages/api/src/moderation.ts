@@ -15,7 +15,16 @@ import {
   moderationUnsuspensionEmail,
 } from "@my-tuums/auth";
 import type { Database } from "@my-tuums/db";
-import { appeal, follow, moderationAction, post, report, session, user, userBlock } from "@my-tuums/db/schema";
+import {
+  appeal,
+  follow,
+  moderationAction,
+  post,
+  report,
+  session,
+  user,
+  userBlock,
+} from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
 import {
   APPEALABLE_ACTIONS,
@@ -170,11 +179,7 @@ const resolveInput = z.discriminatedUnion("targetType", [
 const suspensionInput = z.object({
   userId: z.string().min(1),
   reason: z.string().trim().min(1).max(MODERATION_NOTE_MAX_LENGTH),
-  durationSeconds: z
-    .number()
-    .int()
-    .min(SUSPENSION_MIN_SECONDS)
-    .max(SUSPENSION_MAX_SECONDS),
+  durationSeconds: z.number().int().min(SUSPENSION_MIN_SECONDS).max(SUSPENSION_MAX_SECONDS),
 });
 
 export const moderationRouter = {
@@ -211,7 +216,8 @@ export const moderationRouter = {
               .from(user)
               .where(eq(user.id, input.targetId))
               .limit(1);
-      if (!target) throw new ORPCError("NOT_FOUND", { message: "The thing you reported doesn't exist." });
+      if (!target)
+        throw new ORPCError("NOT_FOUND", { message: "The thing you reported doesn't exist." });
 
       if (
         input.targetType === "user" &&
@@ -272,12 +278,10 @@ export const moderationRouter = {
       // block in place — the severs are the block's side effect, not a
       // standalone action.
       await context.db.transaction(async (tx) => {
-        await tx
-          .delete(follow)
-          .where(
-            sql`(${follow.followerId} = ${context.user.id} and ${follow.followingId} = ${input.userId})
+        await tx.delete(follow).where(
+          sql`(${follow.followerId} = ${context.user.id} and ${follow.followingId} = ${input.userId})
                  or (${follow.followerId} = ${input.userId} and ${follow.followingId} = ${context.user.id})`,
-          );
+        );
         await tx
           .insert(userBlock)
           .values({ blockerId: context.user.id, blockedId: input.userId })
@@ -314,20 +318,18 @@ export const moderationRouter = {
    * list is personal, bounded by the block rate tier, and read in full on a
    * single settings screen — a keyset cursor would buy nothing here.
    */
-  listBlocked: protectedProcedure
-    .use(rateLimit(RATE_LIMITS.block))
-    .handler(async ({ context }) => {
-      const rows = await context.db
-        .select({
-          ...publicUserColumns,
-          blockedAt: userBlock.createdAt,
-        })
-        .from(userBlock)
-        .innerJoin(user, eq(user.id, userBlock.blockedId))
-        .where(eq(userBlock.blockerId, context.user.id))
-        .orderBy(desc(userBlock.createdAt), desc(userBlock.blockedId));
-      return { items: rows };
-    }),
+  listBlocked: protectedProcedure.use(rateLimit(RATE_LIMITS.block)).handler(async ({ context }) => {
+    const rows = await context.db
+      .select({
+        ...publicUserColumns,
+        blockedAt: userBlock.createdAt,
+      })
+      .from(userBlock)
+      .innerJoin(user, eq(user.id, userBlock.blockedId))
+      .where(eq(userBlock.blockerId, context.user.id))
+      .orderBy(desc(userBlock.createdAt), desc(userBlock.blockedId));
+    return { items: rows };
+  }),
 
   /**
    * The moderation queue: unresolved reports grouped by target, merged with
@@ -354,9 +356,8 @@ export const moderationRouter = {
       // OTHER open half is at or past the cursor — the exact row-value test,
       // tie-break included, so a case tied with the cursor but ordered after
       // it (targetId desc) is never excluded before it was shown.
-      const reportSideExclusion =
-        decoded
-          ? sql`and not exists (
+      const reportSideExclusion = decoded
+        ? sql`and not exists (
                select 1
                from ${appeal}, ${moderationAction}
                where ${moderationAction.id} = ${appeal.actionId}
@@ -366,10 +367,9 @@ export const moderationRouter = {
                  and (${appeal.createdAt}, coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId}))
                      >= (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, report.targetId)})
              )`
-          : sql``;
-      const appealSideExclusion =
-        decoded
-          ? sql`and not exists (
+        : sql``;
+      const appealSideExclusion = decoded
+        ? sql`and not exists (
                select 1
                from ${report}
                where ${report.resolvedAt} is null
@@ -379,7 +379,7 @@ export const moderationRouter = {
                having (max(${report.createdAt}), ${report.targetId})
                    >= (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, user.id)})
              )`
-          : sql``;
+        : sql``;
 
       const reportGroups = await context.db.execute<ReportGroupRow>(sql`
         select ${report.targetType} as target_type,
@@ -390,9 +390,11 @@ export const moderationRouter = {
         from ${report}
         where ${report.resolvedAt} is null ${reportSideExclusion}
         group by ${report.targetType}, ${report.targetId}
-        ${decoded
-          ? sql`having (max(${report.createdAt}), ${report.targetId}) < (${sql.param(decoded.createdAt, report.createdAt)}, ${sql.param(decoded.id, report.targetId)})`
-          : sql``}
+        ${
+          decoded
+            ? sql`having (max(${report.createdAt}), ${report.targetId}) < (${sql.param(decoded.createdAt, report.createdAt)}, ${sql.param(decoded.id, report.targetId)})`
+            : sql``
+        }
         order by newest_at desc, ${report.targetId} desc
         limit ${limit + 1}
       `);
@@ -406,9 +408,11 @@ export const moderationRouter = {
         from ${appeal}
         inner join ${moderationAction} on ${moderationAction.id} = ${appeal.actionId}
         where ${appeal.status} = 'open' ${appealSideExclusion}
-        ${decoded
-          ? sql`and (${appeal.createdAt}, coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})) < (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, user.id)})`
-          : sql``}
+        ${
+          decoded
+            ? sql`and (${appeal.createdAt}, coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})) < (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, user.id)})`
+            : sql``
+        }
         order by ${appeal.createdAt} desc, target_id desc
         limit ${limit + 1}
       `);
@@ -496,7 +500,12 @@ export const moderationRouter = {
           ? eq(moderationAction.targetPostId, input.targetId)
           : eq(moderationAction.targetUserId, input.targetId);
       const [openAppeal] = await context.db
-        .select({ id: appeal.id, reason: appeal.reason, createdAt: appeal.createdAt, status: appeal.status })
+        .select({
+          id: appeal.id,
+          reason: appeal.reason,
+          createdAt: appeal.createdAt,
+          status: appeal.status,
+        })
         .from(appeal)
         .innerJoin(moderationAction, eq(moderationAction.id, appeal.actionId))
         .where(
@@ -636,7 +645,12 @@ export const moderationRouter = {
     .handler(async ({ input, context }) => {
       const result = await context.db.transaction(async (tx) => {
         const [target] = await tx
-          .select({ id: post.id, content: post.content, authorId: post.authorId, removedAt: post.removedAt })
+          .select({
+            id: post.id,
+            content: post.content,
+            authorId: post.authorId,
+            removedAt: post.removedAt,
+          })
           .from(post)
           .where(eq(post.id, input.postId))
           .for("update")
@@ -670,11 +684,14 @@ export const moderationRouter = {
       // Mail after the transaction commits: a failed send must not roll the
       // removal back, and the mail itself needs no transaction.
       await emailUser(context.db, context.headers, result.authorId, (locale) =>
-        moderationRemovalEmail({
-          postText: result.content,
-          reason: input.reason,
-          appealUrl: makeAppealUrl(result.actionId, result.authorId),
-        }, locale),
+        moderationRemovalEmail(
+          {
+            postText: result.content,
+            reason: input.reason,
+            appealUrl: makeAppealUrl(result.actionId, result.authorId),
+          },
+          locale,
+        ),
       );
       return { postId: input.postId, removed: true };
     }),
@@ -751,15 +768,21 @@ export const moderationRouter = {
           reason: input.reason,
           details: { durationSeconds: input.durationSeconds },
         });
-        return { actionId: action.id, expiresAt: new Date(Date.now() + input.durationSeconds * 1000) };
+        return {
+          actionId: action.id,
+          expiresAt: new Date(Date.now() + input.durationSeconds * 1000),
+        };
       });
 
       await emailUser(context.db, context.headers, input.userId, (locale) =>
-        moderationSuspensionEmail({
-          reason: input.reason,
-          expiresAt: result.expiresAt,
-          appealUrl: makeAppealUrl(result.actionId, input.userId),
-        }, locale),
+        moderationSuspensionEmail(
+          {
+            reason: input.reason,
+            expiresAt: result.expiresAt,
+            appealUrl: makeAppealUrl(result.actionId, input.userId),
+          },
+          locale,
+        ),
       );
       return { userId: input.userId, suspended: true, banExpires: result.expiresAt };
     }),
@@ -809,10 +832,13 @@ export const moderationRouter = {
       });
 
       await emailUser(context.db, context.headers, input.userId, (locale) =>
-        moderationBanEmail({
-          reason: input.reason,
-          appealUrl: makeAppealUrl(result.actionId, input.userId),
-        }, locale),
+        moderationBanEmail(
+          {
+            reason: input.reason,
+            appealUrl: makeAppealUrl(result.actionId, input.userId),
+          },
+          locale,
+        ),
       );
       return { userId: input.userId, banned: true };
     }),
@@ -896,26 +922,24 @@ export const moderationRouter = {
     }),
 
   /** The moderation team: every account holding a role, ranked then by name. */
-  team: staffProcedure
-    .use(rateLimit(RATE_LIMITS.moderate))
-    .handler(async ({ context }) => {
-      const rows = await context.db
-        .select({
-          id: user.id,
-          name: user.name,
-          username: user.username,
-          displayUsername: user.displayUsername,
-          image: user.image,
-          role: user.role,
-        })
-        .from(user)
-        .where(sql`${user.role} in ('moderator', 'staff', 'admin')`)
-        .orderBy(
-          sql`case ${user.role} when 'admin' then 0 when 'staff' then 1 else 2 end`,
-          asc(user.name),
-        );
-      return { items: rows };
-    }),
+  team: staffProcedure.use(rateLimit(RATE_LIMITS.moderate)).handler(async ({ context }) => {
+    const rows = await context.db
+      .select({
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        displayUsername: user.displayUsername,
+        image: user.image,
+        role: user.role,
+      })
+      .from(user)
+      .where(sql`${user.role} in ('moderator', 'staff', 'admin')`)
+      .orderBy(
+        sql`case ${user.role} when 'admin' then 0 when 'staff' then 1 else 2 end`,
+        asc(user.name),
+      );
+    return { items: rows };
+  }),
 
   /** The audit log: every moderation action, newest first, keyset-paginated. */
   auditLog: staffProcedure
@@ -968,7 +992,10 @@ export const moderationRouter = {
       const hasMore = rows.length > limit;
       const items = hasMore ? rows.slice(0, limit) : rows;
       const last = items.at(-1);
-      return { items, nextCursor: hasMore && last ? auditCursor.encode(last.createdAt, last.id) : null };
+      return {
+        items,
+        nextCursor: hasMore && last ? auditCursor.encode(last.createdAt, last.id) : null,
+      };
     }),
 
   /**
@@ -1006,7 +1033,9 @@ export const moderationRouter = {
       if (input.token) {
         const payload = appealToken.verify(input.token);
         if (!payload) {
-          throw new ORPCError("BAD_REQUEST", { message: "This appeal link is invalid or has expired." });
+          throw new ORPCError("BAD_REQUEST", {
+            message: "This appeal link is invalid or has expired.",
+          });
         }
         // One budget per link, keyed on its nonce — the capability the
         // caller presented, and unguessable to anyone who does not hold
@@ -1126,7 +1155,9 @@ export const moderationRouter = {
         .limit(1);
       if (existing) {
         if (existing.tokenNonce === nonce) {
-          throw new ORPCError("BAD_REQUEST", { message: "This appeal link has already been used." });
+          throw new ORPCError("BAD_REQUEST", {
+            message: "This appeal link has already been used.",
+          });
         }
         if (existing.status === "open") {
           throw new ORPCError("BAD_REQUEST", {
@@ -1148,7 +1179,9 @@ export const moderationRouter = {
         // The unique tokenNonce (or the partial unique open-per-action index)
         // caught a replay of a used link, or a racing duplicate open.
         if (isUniqueViolation(error)) {
-          throw new ORPCError("BAD_REQUEST", { message: "This appeal link has already been used." });
+          throw new ORPCError("BAD_REQUEST", {
+            message: "This appeal link has already been used.",
+          });
         }
         throw error;
       }

@@ -257,9 +257,10 @@ export const saveLocalePreferenceAtom = atom(
     set(authErrorAtom, null);
     set(authPendingAtom, true);
     try {
-      const res = await authClient.updateUser(
-        { localePreference: preference } as Record<string, string>,
-      );
+      const res = await authClient.updateUser({ localePreference: preference } as Record<
+        string,
+        string
+      >);
       if (res.error) {
         set(authErrorAtom, res.error.message || m.common_something_went_wrong());
         return false;

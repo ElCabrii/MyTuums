@@ -51,14 +51,22 @@ describe("a live suspension makes the author invisible everywhere", () => {
 
     await setUserBan(alice.id, { reason: "spam", expiresAt: new Date(Date.now() + 3_600_000) });
 
-    const globalFeed = await call(appRouter.post.list, { feed: "global" }, { context: contextFor(bob) });
+    const globalFeed = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(bob) },
+    );
     const ids = globalFeed.items.map((p) => p.id);
     expect(ids).not.toContain(alicePosts[0].id);
     expect(ids).not.toContain(alicePosts[1].id);
     expect(ids).not.toContain(tagged.id);
     expect(ids).toContain(controlPost[0].id);
 
-    const authorFeed = await call(appRouter.post.list, { authorId: alice.id }, { context: contextFor(bob) });
+    const authorFeed = await call(
+      appRouter.post.list,
+      { authorId: alice.id },
+      { context: contextFor(bob) },
+    );
     expect(authorFeed.items).toHaveLength(0);
 
     // The thread reads as nonexistent — same silence as a missing post.
@@ -72,9 +80,17 @@ describe("a live suspension makes the author invisible everywhere", () => {
       call(appRouter.post.unlike, { postId: alicePosts[0].id }, { context: contextFor(bob) }),
     ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Post not found." });
 
-    const searchPosts = await call(appRouter.search.posts, { q: "vis-search-tag" }, { context: contextFor(bob) });
+    const searchPosts = await call(
+      appRouter.search.posts,
+      { q: "vis-search-tag" },
+      { context: contextFor(bob) },
+    );
     expect(searchPosts.items).toHaveLength(0);
-    const typeahead = await call(appRouter.search.typeahead, { q: "vis-search-tag" }, { context: contextFor(bob) });
+    const typeahead = await call(
+      appRouter.search.typeahead,
+      { q: "vis-search-tag" },
+      { context: contextFor(bob) },
+    );
     expect(typeahead.posts).toHaveLength(0);
   });
 
@@ -87,7 +103,11 @@ describe("a live suspension makes the author invisible everywhere", () => {
 
     await setUserBan(alice.id, { reason: "spam", expiresAt: new Date(Date.now() + 3_600_000) });
 
-    const feed = await call(appRouter.post.list, { feed: "following" }, { context: contextFor(bob) });
+    const feed = await call(
+      appRouter.post.list,
+      { feed: "following" },
+      { context: contextFor(bob) },
+    );
     const ids = feed.items.map((p) => p.id);
     expect(ids).not.toContain(alicePost[0].id);
     expect(ids).toContain(bobPost[0].id);
@@ -98,9 +118,17 @@ describe("a live suspension makes the author invisible everywhere", () => {
     const bob = await createTestUser({ username: "visfinder" });
     await setUserBan(alice.id, { reason: "spam", expiresAt: new Date(Date.now() + 3_600_000) });
 
-    const results = await call(appRouter.search.users, { q: "vishidden" }, { context: contextFor(bob) });
+    const results = await call(
+      appRouter.search.users,
+      { q: "vishidden" },
+      { context: contextFor(bob) },
+    );
     expect(results.items).toHaveLength(0);
-    const typeahead = await call(appRouter.search.typeahead, { q: "vishidden" }, { context: contextFor(bob) });
+    const typeahead = await call(
+      appRouter.search.typeahead,
+      { q: "vishidden" },
+      { context: contextFor(bob) },
+    );
     expect(typeahead.users).toHaveLength(0);
   });
 
@@ -173,7 +201,11 @@ describe("byUsername and the suspension stub", () => {
     );
     expect(profile.suspended).toBe(false);
 
-    const results = await call(appRouter.search.users, { q: "visexposed" }, { context: contextFor(bob) });
+    const results = await call(
+      appRouter.search.users,
+      { q: "visexposed" },
+      { context: contextFor(bob) },
+    );
     expect(results.items.map((u) => u.id)).toContain(alice.id);
   });
 
@@ -204,13 +236,25 @@ describe("a block hides the two users from each other in both directions", () =>
 
     await call(appRouter.moderation.block, { userId: bob.id }, { context: contextFor(alice) });
 
-    const aliceFeed = await call(appRouter.post.list, { feed: "global" }, { context: contextFor(alice) });
+    const aliceFeed = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(alice) },
+    );
     expect(aliceFeed.items.map((p) => p.id)).not.toContain(bobPosts[0].id);
-    const bobFeed = await call(appRouter.post.list, { feed: "global" }, { context: contextFor(bob) });
+    const bobFeed = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(bob) },
+    );
     expect(bobFeed.items.map((p) => p.id)).not.toContain(alicePosts[0].id);
 
     await call(appRouter.moderation.unblock, { userId: bob.id }, { context: contextFor(alice) });
-    const restored = await call(appRouter.post.list, { feed: "global" }, { context: contextFor(alice) });
+    const restored = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(alice) },
+    );
     expect(restored.items.map((p) => p.id)).toContain(bobPosts[0].id);
   });
 
@@ -287,20 +331,32 @@ describe("removed posts stay visible as stubs — removal is not invisibility", 
       { context: contextFor(mod) },
     );
 
-    const viewerFeed = await call(appRouter.post.list, { feed: "global" }, { context: contextFor(viewer) });
+    const viewerFeed = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(viewer) },
+    );
     const viewerItem = viewerFeed.items.find((p) => p.id === postRow.id);
     expect(viewerItem).toBeDefined();
     expect(viewerItem!.removed).toBe(true);
     expect(viewerItem!.content).toBeNull();
     expect(viewerItem!.removedReason).toBeNull();
 
-    const authorFeed = await call(appRouter.post.list, { feed: "global" }, { context: contextFor(author) });
+    const authorFeed = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(author) },
+    );
     const authorItem = authorFeed.items.find((p) => p.id === postRow.id);
     expect(authorItem!.removedReason).toBe("spam");
 
     // Contrast with the ban: the thread still resolves the removed post —
     // the tombstone is a first-class citizen of the conversation.
-    const thread = await call(appRouter.post.thread, { postId: postRow.id }, { context: contextFor(viewer) });
+    const thread = await call(
+      appRouter.post.thread,
+      { postId: postRow.id },
+      { context: contextFor(viewer) },
+    );
     expect(thread.post.removed).toBe(true);
     expect(thread.post.content).toBeNull();
   });

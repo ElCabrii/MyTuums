@@ -24,11 +24,7 @@ export function PostComposer() {
         createPost.mutate({ content: body });
       }}
       isPending={createPost.isPending}
-      errorMessage={
-        createPost.isError
-          ? createPost.error.message || m.post_publish_error()
-          : null
-      }
+      errorMessage={createPost.isError ? createPost.error.message || m.post_publish_error() : null}
       placeholder={m.post_placeholder()}
       submitLabel={m.post_action()}
     />

@@ -21,12 +21,12 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-3xl border border-border/50 bg-card/60 backdrop-blur-xl p-6 space-y-4">
+    <section className="border-border/50 bg-card/60 space-y-4 rounded-3xl border p-6 backdrop-blur-xl">
       <div className="flex items-start gap-3">
         <div className="text-primary mt-0.5">{icon}</div>
         <div className="space-y-1">
           <h2 className="font-semibold">{title}</h2>
-          <p className="text-xs text-muted-foreground">{description}</p>
+          <p className="text-muted-foreground text-xs">{description}</p>
         </div>
       </div>
       {children}

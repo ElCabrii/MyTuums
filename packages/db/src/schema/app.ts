@@ -70,9 +70,7 @@ export const post = pgTable(
     // then excludes the stored `.340448` along with *every other row in that
     // millisecond*: a silent skip. Storing at the precision the consumer can
     // represent makes the cursor round-trip exact.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
-      .defaultNow()
-      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
   },
   (t) => [
     // All three indexes are ordered to match the keyset pagination in
@@ -110,9 +108,7 @@ export const postLike = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
-      .defaultNow()
-      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
   },
   (t) => [
     // This composite primary key *is* the "one like per user per post" rule.
@@ -146,9 +142,7 @@ export const follow = pgTable(
     // rows are routinely written in batches that share a single `now()`, so
     // the tie-breaker in the cursor is exercised constantly rather than by
     // coincidence.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
-      .defaultNow()
-      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
   },
   (t) => [
     // As with post_like, this composite primary key *is* the "you can follow
@@ -172,11 +166,7 @@ export const follow = pgTable(
       t.createdAt.desc(),
       t.followerId.desc(),
     ),
-    index("follow_follower_created_idx").on(
-      t.followerId,
-      t.createdAt.desc(),
-      t.followingId.desc(),
-    ),
+    index("follow_follower_created_idx").on(t.followerId, t.createdAt.desc(), t.followingId.desc()),
   ],
 );
 
@@ -215,9 +205,7 @@ export const report = pgTable(
     reason: text("reason").notNull(),
     // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
-      .defaultNow()
-      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
     // A null `resolvedAt` means the case is open. Resolution is a stamp
     // (`resolvedBy`/`resolvedOutcome`/`resolutionNote` land together), never
     // a delete — the rows stay as the case's history.
@@ -282,9 +270,7 @@ export const userBlock = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
-      .defaultNow()
-      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
   },
   (t) => [
     // This composite primary key *is* the "block someone at most once" rule;
@@ -338,9 +324,7 @@ export const moderationAction = pgTable(
     // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above — and because the audit log is keyset-paginated
     // on (created_at, id), the precision is load-bearing here too.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
-      .defaultNow()
-      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
   },
   (t) => [
     check(
@@ -411,16 +395,16 @@ export const appeal = pgTable(
     reviewNote: text("review_note"),
     // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
-      .defaultNow()
-      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true, precision: 3 }),
   },
   (t) => [
     check("appeal_status", sql`${t.status} in ('open', 'upheld', 'overturned')`),
     // The queue scans open appeals, newest first — the sort column is in
     // the index so the partial scan never needs a heap sort.
-    index("appeal_open_idx").on(t.status, t.createdAt.desc()).where(sql`${t.status} = 'open'`),
+    index("appeal_open_idx")
+      .on(t.status, t.createdAt.desc())
+      .where(sql`${t.status} = 'open'`),
     // The "one open appeal per action" rule, as a partial unique index —
     // resolved appeals are history and may accumulate.
     uniqueIndex("appeal_open_action_idx")

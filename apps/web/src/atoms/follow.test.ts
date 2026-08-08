@@ -6,7 +6,13 @@ import { waitFor } from "@testing-library/react";
 
 const { fakeClient } = vi.hoisted(() => ({
   fakeClient: {
-    user: { follow: vi.fn(), unfollow: vi.fn(), byUsername: vi.fn(), followers: vi.fn(), following: vi.fn() },
+    user: {
+      follow: vi.fn(),
+      unfollow: vi.fn(),
+      byUsername: vi.fn(),
+      followers: vi.fn(),
+      following: vi.fn(),
+    },
     post: { list: vi.fn() },
     // The follow-cache sweep now also walks `orpc.search.users.key()`, so a
     // missing group here throws inside every follow mutation — mirroring the
@@ -84,7 +90,12 @@ function freshStoreWithTarget(profile: Profile) {
 describe("toggleFollowAtomFamily", () => {
   it("lands the optimistic patch synchronously, before the mutationFn resolves", () => {
     const { store, queryClient } = freshStoreWithTarget(
-      makeProfile({ id: "target-1", username: "target", followerCount: 5, viewerIsFollowing: false }),
+      makeProfile({
+        id: "target-1",
+        username: "target",
+        followerCount: 5,
+        viewerIsFollowing: false,
+      }),
     );
     fakeClient.user.follow.mockImplementation(() => new Promise(() => {}));
 
@@ -101,7 +112,12 @@ describe("toggleFollowAtomFamily", () => {
   // gated on `hasListeners()` and would silently never run.
   it("rolls back a rejected mutation", async () => {
     const { store, queryClient } = freshStoreWithTarget(
-      makeProfile({ id: "target-1", username: "target", followerCount: 5, viewerIsFollowing: false }),
+      makeProfile({
+        id: "target-1",
+        username: "target",
+        followerCount: 5,
+        viewerIsFollowing: false,
+      }),
     );
     fakeClient.user.follow.mockRejectedValue(new Error("network down"));
 
@@ -109,19 +125,29 @@ describe("toggleFollowAtomFamily", () => {
     expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(true);
 
     await waitFor(() => {
-      expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(false);
+      expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(
+        false,
+      );
     });
     expect(queryClient.getQueryData<Profile>(profileKey("target"))?.followerCount).toBe(5);
   });
 
   it("drops a superseded response instead of flickering the UI back", async () => {
     const { store, queryClient } = freshStoreWithTarget(
-      makeProfile({ id: "target-1", username: "target", followerCount: 5, viewerIsFollowing: false }),
+      makeProfile({
+        id: "target-1",
+        username: "target",
+        followerCount: 5,
+        viewerIsFollowing: false,
+      }),
     );
 
     let resolveFollow!: (value: unknown) => void;
     fakeClient.user.follow.mockImplementation(
-      () => new Promise((resolve) => { resolveFollow = resolve; }),
+      () =>
+        new Promise((resolve) => {
+          resolveFollow = resolve;
+        }),
     );
     fakeClient.user.unfollow.mockImplementation(() => new Promise(() => {}));
 
@@ -148,7 +174,10 @@ describe("toggleFollowAtomFamily", () => {
 
     store.set(toggleFollowAtomFamily("target-1"));
 
-    const scopeIds = queryClient.getMutationCache().getAll().map((m) => m.options.scope?.id);
+    const scopeIds = queryClient
+      .getMutationCache()
+      .getAll()
+      .map((m) => m.options.scope?.id);
     expect(scopeIds).toEqual(["follow:target-1"]);
     // Putting the viewer in the scope would fork the serialisation queue on
     // sign-in — it must never be there, not even as a substring.

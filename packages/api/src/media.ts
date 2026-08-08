@@ -14,20 +14,14 @@
  * itself.
  */
 import { isSafeObjectKey } from "./image.js";
-import {
-  DEFAULT_SIGNED_URL_TTL,
-  secondsUntilWindowEnd,
-  type Storage,
-} from "./storage.js";
+import { DEFAULT_SIGNED_URL_TTL, secondsUntilWindowEnd, type Storage } from "./storage.js";
 
 /**
  * `url` is where the browser should go; `cacheSeconds` is how long the redirect
  * may be cached, bounded by the signing window so a cached redirect never
  * outlives the signature it points at.
  */
-export type MediaResolver = (
-  key: string,
-) => Promise<{ url: string; cacheSeconds: number } | null>;
+export type MediaResolver = (key: string) => Promise<{ url: string; cacheSeconds: number } | null>;
 
 /**
  * `null` means "404 this" and is deliberately the answer to every failure

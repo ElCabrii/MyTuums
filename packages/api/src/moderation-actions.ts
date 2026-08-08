@@ -58,12 +58,7 @@ import {
   type ModerationActionCode,
 } from "./constants.js";
 
-export {
-  APPEALABLE_ACTIONS,
-  INVERSE_ACTION,
-  MODERATION_ACTION_CODES,
-  type ModerationActionCode,
-};
+export { APPEALABLE_ACTIONS, INVERSE_ACTION, MODERATION_ACTION_CODES, type ModerationActionCode };
 
 /**
  * The `moderation_action` row shape the shared effects read.
@@ -278,7 +273,10 @@ export async function isActionCurrent(
  */
 export async function isActionLatest(
   db: DbLike,
-  action: Pick<ActionRow, "id" | "action" | "targetType" | "targetPostId" | "targetUserId" | "createdAt">,
+  action: Pick<
+    ActionRow,
+    "id" | "action" | "targetType" | "targetPostId" | "targetUserId" | "createdAt"
+  >,
 ): Promise<boolean> {
   const targetMatch =
     action.targetType === "post"
@@ -515,7 +513,10 @@ export async function undoAction(
         note,
       });
       if (restored) {
-        pending.push({ userId: restored.authorId, build: (locale) => moderationRestoreEmail(locale) });
+        pending.push({
+          userId: restored.authorId,
+          build: (locale) => moderationRestoreEmail(locale),
+        });
       }
       break;
     }
@@ -554,10 +555,7 @@ export async function undoAction(
 
       // Both ends of the swing must be manageable: the role currently held
       // (what the reviewer would be acting on) and the role being restored.
-      if (
-        !canManageRole(actorRole, target.role ?? "user") ||
-        !canManageRole(actorRole, oldRole)
-      ) {
+      if (!canManageRole(actorRole, target.role ?? "user") || !canManageRole(actorRole, oldRole)) {
         throw new ORPCError("FORBIDDEN");
       }
 

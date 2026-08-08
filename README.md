@@ -48,7 +48,7 @@ pnpm dev
   `src/paraglide/**`). The route tree and Paraglide output are git-ignored
   generated files — build once before typecheck.
 - **`apps/server`** — the routing tree in `request-handler.ts` (health →
-  auth → rpc → media → SPA), zod-validated env in `env.ts` (a *partial*
+  auth → rpc → media → SPA), zod-validated env in `env.ts` (a _partial_
   OAuth or S3 pair refuses to boot), graceful shutdown that drains the DB
   pool. Bundled with tsup.
 - **`packages/api`** — oRPC procedures (`me`, `post`, `user`) over Drizzle;

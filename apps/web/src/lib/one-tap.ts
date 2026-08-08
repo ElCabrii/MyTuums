@@ -83,9 +83,7 @@ export function promptOneTap(): void {
   // Same `?redirect=` param `signInWithProviderAtom` reads — One Tap's
   // success is a hard navigation to this URL, so the destination the signed-in
   // gate recorded survives a One Tap sign-in too.
-  const redirect = sanitizeRedirect(
-    new URLSearchParams(window.location.search).get("redirect"),
-  );
+  const redirect = sanitizeRedirect(new URLSearchParams(window.location.search).get("redirect"));
 
   void (oneTapAuthClient as unknown as OneTapCapableClient)
     .oneTap({ callbackURL: redirect ?? "/" })

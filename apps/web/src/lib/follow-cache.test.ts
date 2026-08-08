@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
-import { orpc, type Profile, type SearchUser, type SearchUsersPage, type UserListPage, type UserSummary } from "@/lib/orpc";
+import {
+  orpc,
+  type Profile,
+  type SearchUser,
+  type SearchUsersPage,
+  type UserListPage,
+  type UserSummary,
+} from "@/lib/orpc";
 import {
   patchFollowState,
   readCachedIsFollowing,
@@ -26,7 +33,9 @@ function makeProfile(overrides: Partial<Profile> & { id: string; username: strin
   };
 }
 
-function makeSummary(overrides: Partial<UserSummary> & { id: string; username: string }): UserSummary {
+function makeSummary(
+  overrides: Partial<UserSummary> & { id: string; username: string },
+): UserSummary {
   return {
     name: overrides.username,
     displayUsername: overrides.username,
@@ -144,9 +153,7 @@ describe("patchFollowState", () => {
 
     patchFollowState(queryClient, { userId: "target-1", viewerId: "viewer-1", following: true });
 
-    const followers = queryClient.getQueryData<InfiniteData<UserListPage>>(
-      followersKey("someone"),
-    );
+    const followers = queryClient.getQueryData<InfiniteData<UserListPage>>(followersKey("someone"));
     expect(followers?.pages[0]?.items.find((i) => i.id === "target-1")?.viewerIsFollowing).toBe(
       true,
     );
@@ -249,7 +256,12 @@ describe("snapshot / restore round trip", () => {
   it("rollback for one person leaves another person's confirmed state untouched, even in the same list entry", () => {
     const queryClient = new QueryClient();
     const x = makeProfile({ id: "x-1", username: "x", followerCount: 5, viewerIsFollowing: false });
-    const y = makeProfile({ id: "y-1", username: "y", followerCount: 10, viewerIsFollowing: false });
+    const y = makeProfile({
+      id: "y-1",
+      username: "y",
+      followerCount: 10,
+      viewerIsFollowing: false,
+    });
     const viewer = makeProfile({
       id: "viewer-1",
       username: "viewer",
@@ -298,7 +310,12 @@ describe("reconcileFollow", () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(
       profileKey("target"),
-      makeProfile({ id: "target-1", username: "target", followerCount: 6, viewerIsFollowing: true }),
+      makeProfile({
+        id: "target-1",
+        username: "target",
+        followerCount: 6,
+        viewerIsFollowing: true,
+      }),
     );
     const listBefore = listPage([
       makeSummary({ id: "target-1", username: "target", viewerIsFollowing: true }),

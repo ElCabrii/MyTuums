@@ -45,7 +45,12 @@ describe("SearchPage", () => {
     seedSearchPostsPages(queryClient, "hello", [
       // Distinct author name — `makePost`'s default author is also Alex
       // Mercer, which would trip the name assertion below twice.
-      { items: [makePost({ content: "Hello, world!", author: makeAuthor({ name: "Dana Scully" }) })], nextCursor: null },
+      {
+        items: [
+          makePost({ content: "Hello, world!", author: makeAuthor({ name: "Dana Scully" }) }),
+        ],
+        nextCursor: null,
+      },
     ]);
 
     await act(async () => {

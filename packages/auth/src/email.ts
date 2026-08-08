@@ -177,7 +177,15 @@ const copy = {
    */
   moderation: {
     removal: {
-      en: ({ postText, reason, appealUrl }: { postText: string; reason: string; appealUrl: string }) => ({
+      en: ({
+        postText,
+        reason,
+        appealUrl,
+      }: {
+        postText: string;
+        reason: string;
+        appealUrl: string;
+      }) => ({
         subject: "Your post was removed from MyTuums",
         text:
           `A moderator removed your post.\n\n` +
@@ -185,7 +193,15 @@ const copy = {
           `Your post:\n"${postText}"\n\n` +
           `If you believe this was a mistake, you can appeal the decision:\n${appealUrl}`,
       }),
-      fr: ({ postText, reason, appealUrl }: { postText: string; reason: string; appealUrl: string }) => ({
+      fr: ({
+        postText,
+        reason,
+        appealUrl,
+      }: {
+        postText: string;
+        reason: string;
+        appealUrl: string;
+      }) => ({
         subject: "Votre publication a été retirée de MyTuums",
         text:
           `Un modérateur a retiré votre publication.\n\n` +
@@ -205,14 +221,30 @@ const copy = {
       }),
     },
     suspension: {
-      en: ({ reason, expiresAt, appealUrl }: { reason: string; expiresAt: Date; appealUrl: string }) => ({
+      en: ({
+        reason,
+        expiresAt,
+        appealUrl,
+      }: {
+        reason: string;
+        expiresAt: Date;
+        appealUrl: string;
+      }) => ({
         subject: "Your account was suspended",
         text:
           `Your MyTuums account has been suspended until ${formatDateTime(expiresAt, "en")}.\n\n` +
           `Reason: ${reason}\n\n` +
           `If you believe this was a mistake, you can appeal the decision:\n${appealUrl}`,
       }),
-      fr: ({ reason, expiresAt, appealUrl }: { reason: string; expiresAt: Date; appealUrl: string }) => ({
+      fr: ({
+        reason,
+        expiresAt,
+        appealUrl,
+      }: {
+        reason: string;
+        expiresAt: Date;
+        appealUrl: string;
+      }) => ({
         subject: "Votre compte a été suspendu",
         text:
           `Votre compte MyTuums a été suspendu jusqu'au ${formatDateTime(expiresAt, "fr")}.\n\n` +

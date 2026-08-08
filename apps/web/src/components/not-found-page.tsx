@@ -15,11 +15,11 @@ import { m } from "@/paraglide/messages.js";
  */
 export function NotFoundPage() {
   return (
-    <div className="container max-w-md mx-auto px-4 py-16">
-      <PageCard className="text-center space-y-4">
-        <p className="text-5xl font-bold tracking-tight text-primary">404</p>
+    <div className="container mx-auto max-w-md px-4 py-16">
+      <PageCard className="space-y-4 text-center">
+        <p className="text-primary text-5xl font-bold tracking-tight">404</p>
         <h1 className="text-xl font-bold tracking-tight">{m.notfound_title()}</h1>
-        <p className="text-sm text-muted-foreground">{m.notfound_body()}</p>
+        <p className="text-muted-foreground text-sm">{m.notfound_body()}</p>
         <Button nativeButton={false} render={<Link to="/" className="gap-1.5" />}>
           <Home className="h-4 w-4" />
           <span>{m.common_back_to_home()}</span>

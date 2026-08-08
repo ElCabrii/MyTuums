@@ -28,7 +28,13 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     content: "hello",
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     parentId: null,
-    author: { id: "author-1", name: "Author", username: "author", displayUsername: "Author", image: null },
+    author: {
+      id: "author-1",
+      name: "Author",
+      username: "author",
+      displayUsername: "Author",
+      image: null,
+    },
     likeCount: 0,
     replyCount: 0,
     viewerHasLiked: false,
@@ -103,7 +109,10 @@ describe("toggleLikeAtomFamily", () => {
 
     let resolveLike!: (value: unknown) => void;
     fakeClient.post.like.mockImplementation(
-      () => new Promise((resolve) => { resolveLike = resolve; }),
+      () =>
+        new Promise((resolve) => {
+          resolveLike = resolve;
+        }),
     );
     fakeClient.post.unlike.mockImplementation(() => new Promise(() => {}));
 
@@ -137,7 +146,10 @@ describe("toggleLikeAtomFamily", () => {
 
     store.set(toggleLikeAtomFamily("post-1"));
 
-    const scopeIds = queryClient.getMutationCache().getAll().map((m) => m.options.scope?.id);
+    const scopeIds = queryClient
+      .getMutationCache()
+      .getAll()
+      .map((m) => m.options.scope?.id);
     expect(scopeIds).toEqual(["post-like:post-1"]);
   });
 

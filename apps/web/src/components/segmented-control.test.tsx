@@ -4,7 +4,13 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 
-function Fixture({ active, onChange }: { active: "for-you" | "following"; onChange: (next: "for-you" | "following") => void }) {
+function Fixture({
+  active,
+  onChange,
+}: {
+  active: "for-you" | "following";
+  onChange: (next: "for-you" | "following") => void;
+}) {
   return (
     <SegmentedControl label="Feed">
       <SegmentedControlItem active={active === "for-you"} onClick={() => onChange("for-you")}>
@@ -28,7 +34,10 @@ describe("SegmentedControl", () => {
     expect(group).toBeInTheDocument();
 
     expect(screen.getByRole("button", { name: "For you" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Following" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Following" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("invokes the change handler with the clicked option's value", async () => {

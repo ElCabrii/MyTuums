@@ -91,9 +91,7 @@ export function createRateLimiter(
       const at = now();
       const existing = buckets.get(key);
       const bucket =
-        existing && existing.resetAt > at
-          ? existing
-          : { count: 0, resetAt: at + policy.windowMs };
+        existing && existing.resetAt > at ? existing : { count: 0, resetAt: at + policy.windowMs };
 
       if (!existing || existing.resetAt <= at) {
         // Only sweep when adding a key, and only once the map has actually

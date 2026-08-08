@@ -22,16 +22,13 @@ test.use({ storageState: { cookies: [], origins: [] } });
  * the bucket name is.
  */
 function storageBucketConfigured(): boolean {
-  return ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"].every(
-    (key) => Boolean(process.env[key]),
+  return ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"].every((key) =>
+    Boolean(process.env[key]),
   );
 }
 
 /** Signs up a fresh account through the UI and lands on its profile. */
-async function signUpFresh(
-  page: import("@playwright/test").Page,
-  prefix: string,
-) {
+async function signUpFresh(page: import("@playwright/test").Page, prefix: string) {
   const account = uniqueUser(prefix);
 
   await page.goto("/register");

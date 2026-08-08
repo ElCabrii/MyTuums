@@ -15,15 +15,15 @@ export function SignOutSection() {
   const isBusy = useAtomValue(authPendingAtom);
 
   return (
-    <section className="rounded-3xl border border-border/50 bg-card/60 backdrop-blur-xl p-6 flex items-center justify-between gap-4">
+    <section className="border-border/50 bg-card/60 flex items-center justify-between gap-4 rounded-3xl border p-6 backdrop-blur-xl">
       <div className="space-y-1">
         <h2 className="font-semibold">{m.auth_sign_out()}</h2>
-        <p className="text-xs text-muted-foreground">{m.settings_sign_out_description()}</p>
+        <p className="text-muted-foreground text-xs">{m.settings_sign_out_description()}</p>
       </div>
       <Button
         variant="destructive"
         size="sm"
-        className="rounded-full gap-2 shrink-0"
+        className="shrink-0 gap-2 rounded-full"
         disabled={isBusy}
         onClick={() => {
           // `signOutAtom` waits for the session store to actually empty before

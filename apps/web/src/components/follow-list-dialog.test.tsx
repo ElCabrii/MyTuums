@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createTestQueryClient, makeUserSummary, renderWithProviders, seedUserListPages } from "@/test/render";
+import {
+  createTestQueryClient,
+  makeUserSummary,
+  renderWithProviders,
+  seedUserListPages,
+} from "@/test/render";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { m } from "@/paraglide/messages.js";
 
@@ -9,11 +14,19 @@ describe("FollowListDialog", () => {
   it("mounts the list only while open, and unmounts it on close", async () => {
     const queryClient = createTestQueryClient();
     seedUserListPages(queryClient, "alexmercer", "followers", [
-      { items: [makeUserSummary({ name: "Jamie Rivera", username: "jamierivera" })], nextCursor: null },
+      {
+        items: [makeUserSummary({ name: "Jamie Rivera", username: "jamierivera" })],
+        nextCursor: null,
+      },
     ]);
 
     await renderWithProviders(
-      <FollowListDialog username="alexmercer" handle="alexmercer" direction="followers" count={2} />,
+      <FollowListDialog
+        username="alexmercer"
+        handle="alexmercer"
+        direction="followers"
+        count={2}
+      />,
       { queryClient, signedInAs: true },
     );
 

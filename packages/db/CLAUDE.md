@@ -25,7 +25,7 @@ Subpath exports (all source `.ts` — no build step; consumers compile or tsup-i
 - `packages/api` — every procedure's `Context` carries the `db` handle; procedures query tables from `./schema` (see `src/posts.ts`, `src/users.ts`).
 - `packages/auth` — better-auth is configured over the same `db` handle (`src/index.ts`, and `src/testing.ts` for its tests).
 - `apps/server` — `index.ts` wires `closeDb`/`pingDb` into graceful shutdown and `/health`; the pre-deploy entry `src/migrate.ts` calls `runMigrations` with `MIGRATIONS_DIR` (default `packages/db/drizzle`).
-- Vitest configs (`packages/api/vitest.config.ts`) and Playwright (`e2e/`) import from `./testing` to compute the test URL *before* anything imports the root subpath, which throws without `DATABASE_URL`.
+- Vitest configs (`packages/api/vitest.config.ts`) and Playwright (`e2e/`) import from `./testing` to compute the test URL _before_ anything imports the root subpath, which throws without `DATABASE_URL`.
 
 ## Load-bearing decisions — do not break
 

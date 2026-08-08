@@ -4,7 +4,7 @@
  * links stay stable even when the two differ in casing.
  */
 export function handleOf(
-  user: { username?: string | null; displayUsername?: string | null } | null | undefined
+  user: { username?: string | null; displayUsername?: string | null } | null | undefined,
 ): string | null {
   return user?.username ?? user?.displayUsername ?? null;
 }

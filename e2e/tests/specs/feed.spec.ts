@@ -31,10 +31,9 @@ test.describe("home feed scope", () => {
 
     // feedScopeAtom persists to localStorage (lib/feed-scope.ts) — the choice
     // survives, but `/` never grows a search param for it.
-    await expect(page.getByRole("group", { name: "Feed" }).getByRole("button", { name: "Following" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await expect(
+      page.getByRole("group", { name: "Feed" }).getByRole("button", { name: "Following" }),
+    ).toHaveAttribute("aria-pressed", "true");
     await expect(page).toHaveURL("/");
   });
 

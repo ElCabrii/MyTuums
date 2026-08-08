@@ -162,11 +162,7 @@ export const resetTwoFactorChallengeAtom = atom(null, (_get, set) => {
  * `ReturnType` extraction). The inferred union of the three returns is what
  * the original chain produced — `res.error` below stays type-safe.
  */
-function verifyTwoFactor(
-  method: TwoFactorMethod,
-  code: string,
-  trustDevice: boolean,
-) {
+function verifyTwoFactor(method: TwoFactorMethod, code: string, trustDevice: boolean) {
   if (method === "totp") return authClient.twoFactor.verifyTotp({ code, trustDevice });
   if (method === "otp") return authClient.twoFactor.verifyOtp({ code, trustDevice });
   return authClient.twoFactor.verifyBackupCode({ code, trustDevice });

@@ -176,9 +176,7 @@ vi.mock("@/lib/auth-client", () => ({
     },
     signUp: { email: vi.fn(() => Promise.resolve({ data: {}, error: null })) },
     signOut: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-    requestPasswordReset: vi.fn(() =>
-      Promise.resolve({ data: { status: true }, error: null }),
-    ),
+    requestPasswordReset: vi.fn(() => Promise.resolve({ data: { status: true }, error: null })),
     resetPassword: vi.fn(() => Promise.resolve({ data: { status: true }, error: null })),
     updateUser: vi.fn(() => Promise.resolve({ data: {}, error: null })),
     // `/settings/account`'s password section. Like every other namespace here,
@@ -523,7 +521,9 @@ export function postListQueryKey(): QueryKey {
 export function seedPostListPages(queryClient: QueryClient, pages: PostListPage[]): void {
   queryClient.setQueryData(postListQueryKey(), {
     pages,
-    pageParams: pages.map((_page, index) => (index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined))),
+    pageParams: pages.map((_page, index) =>
+      index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
+    ),
   });
 }
 
@@ -565,7 +565,9 @@ export function seedSearchUsersPages(
 ): void {
   queryClient.setQueryData(searchUsersQueryKey(q), {
     pages,
-    pageParams: pages.map((_page, index) => (index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined))),
+    pageParams: pages.map((_page, index) =>
+      index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
+    ),
   });
 }
 
@@ -577,7 +579,9 @@ export function seedSearchPostsPages(
 ): void {
   queryClient.setQueryData(searchPostsQueryKey(q), {
     pages,
-    pageParams: pages.map((_page, index) => (index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined))),
+    pageParams: pages.map((_page, index) =>
+      index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
+    ),
   });
 }
 
@@ -590,7 +594,9 @@ export function seedUserListPages(
 ): void {
   queryClient.setQueryData(userListQueryKey(username, direction), {
     pages,
-    pageParams: pages.map((_page, index) => (index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined))),
+    pageParams: pages.map((_page, index) =>
+      index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
+    ),
   });
 }
 

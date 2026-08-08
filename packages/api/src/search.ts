@@ -1,11 +1,7 @@
 import { and, desc, eq, ilike, isNull, like, not, or, sql } from "drizzle-orm";
 import { post, user } from "@my-tuums/db/schema";
 import { z } from "zod";
-import {
-  SEARCH_PAGE_SIZE,
-  SEARCH_PAGE_SIZE_MAX,
-  SEARCH_QUERY_MAX_LENGTH,
-} from "./constants.js";
+import { SEARCH_PAGE_SIZE, SEARCH_PAGE_SIZE_MAX, SEARCH_QUERY_MAX_LENGTH } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { postSelection } from "./posts.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";

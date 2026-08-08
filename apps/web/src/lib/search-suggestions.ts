@@ -2,9 +2,7 @@ import type { Post, SearchTypeahead, SearchUser } from "@/lib/orpc";
 
 /** One row the search dropdown renders, discriminated on `kind`. */
 export type SuggestionRow =
-  | { kind: "user"; user: SearchUser }
-  | { kind: "post"; post: Post }
-  | { kind: "see-all" };
+  { kind: "user"; user: SearchUser } | { kind: "post"; post: Post } | { kind: "see-all" };
 
 /**
  * The dropdown's rows for a typeahead payload: user rows first, then post

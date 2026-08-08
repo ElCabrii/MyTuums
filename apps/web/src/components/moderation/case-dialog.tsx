@@ -64,24 +64,31 @@ export function CaseDialog({ target, onClose }: { target: CaseRef; onClose: () =
   const caseQuery = useAtomValue(caseAtom(target));
 
   return (
-    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
       <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{m.moderation_case_title()}</DialogTitle>
           <DialogDescription>
-            {target.targetType === "post" ? m.moderation_case_target_post() : m.moderation_case_target_user()}
+            {target.targetType === "post"
+              ? m.moderation_case_target_post()
+              : m.moderation_case_target_user()}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5 px-6 pb-6">
           {caseQuery.isPending ? (
             <div className="flex justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin motion-reduce:animate-none text-primary" />
+              <Loader2 className="text-primary h-6 w-6 animate-spin motion-reduce:animate-none" />
             </div>
           ) : caseQuery.isError ? (
             <div
               role="alert"
-              className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive"
+              className="border-destructive/20 bg-destructive/10 text-destructive flex items-start gap-3 rounded-xl border p-4 text-sm"
             >
               <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
               <div className="space-y-2">
@@ -124,12 +131,6 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
   const targetPost = detail.target.kind === "post" ? detail.target : null;
   const targetUser = detail.target.kind === "user" ? detail.target : null;
   const appeal = detail.appeal;
-  // The queue also surfaces appeal-only cases (a removed post whose author
-  // appealed), which have zero open reports. Dismissing is resolving the
-  // open reports — with none, the action would just write an empty
-  // `case_resolved` audit row (issue #59), so the form is swapped for an
-  // explicit notice.
-  const openReportCount = detail.reports.filter((report) => !report.resolvedAt).length;
 
   return (
     <div className="space-y-5">
@@ -140,7 +141,7 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
       <ReportsSection reports={detail.reports} />
 
       {appeal && (
-        <section className="space-y-2 rounded-xl border border-border p-3">
+        <section className="border-border space-y-2 rounded-xl border p-3">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold">{m.moderation_case_appeal_title()}</h3>
             {appeal.status !== "open" && (
@@ -151,13 +152,16 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
               </Badge>
             )}
           </div>
-          <p className="break-words whitespace-pre-line text-sm">{appeal.reason}</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm break-words whitespace-pre-line">{appeal.reason}</p>
+          <p className="text-muted-foreground text-xs">
             {formatRelativeTime(appeal.createdAt, getLocale(), m.post_just_now())}
           </p>
           {appeal.status === "open" && (
             <div className="space-y-2 pt-1">
-              <label htmlFor="case-review-note" className="text-xs font-medium text-muted-foreground">
+              <label
+                htmlFor="case-review-note"
+                className="text-muted-foreground text-xs font-medium"
+              >
                 {m.moderation_case_appeal_note_label()}
               </label>
               <Textarea
@@ -168,7 +172,7 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
                 className="min-h-16"
               />
               {appealReview.isError && (
-                <p role="alert" className="text-xs text-destructive">
+                <p role="alert" className="text-destructive text-xs">
                   {appealReview.error?.message ?? m.moderation_case_appeal_error()}
                 </p>
               )}
@@ -221,7 +225,10 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
             </Button>
           ) : (
             <div className="space-y-2">
-              <label htmlFor="case-remove-reason" className="text-xs font-medium text-muted-foreground">
+              <label
+                htmlFor="case-remove-reason"
+                className="text-muted-foreground text-xs font-medium"
+              >
                 {m.moderation_remove_reason_label()}
               </label>
               <Textarea
@@ -232,7 +239,7 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
                 className="min-h-16"
               />
               {removePost.isError && (
-                <p role="alert" className="text-xs text-destructive">
+                <p role="alert" className="text-destructive text-xs">
                   {removePost.error?.message ?? m.moderation_remove_error()}
                 </p>
               )}
@@ -262,7 +269,10 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
               </Button>
             ) : (
               <>
-                <label htmlFor="case-suspend-duration" className="text-xs font-medium text-muted-foreground">
+                <label
+                  htmlFor="case-suspend-duration"
+                  className="text-muted-foreground text-xs font-medium"
+                >
                   {m.moderation_duration_label()}
                 </label>
                 <Select
@@ -280,7 +290,10 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
                     ))}
                   </SelectContent>
                 </Select>
-                <label htmlFor="case-suspend-reason" className="text-xs font-medium text-muted-foreground">
+                <label
+                  htmlFor="case-suspend-reason"
+                  className="text-muted-foreground text-xs font-medium"
+                >
                   {m.moderation_suspend_reason_label()}
                 </label>
                 <Textarea
@@ -291,7 +304,7 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
                   className="min-h-16"
                 />
                 {suspendUser.isError && (
-                  <p role="alert" className="text-xs text-destructive">
+                  <p role="alert" className="text-destructive text-xs">
                     {suspendUser.error?.message ?? m.moderation_suspend_error()}
                   </p>
                 )}
@@ -310,8 +323,11 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
                   {m.moderation_suspend()}
                 </Button>
                 {isStaff && (
-                  <div className="space-y-2 border-t border-border/50 pt-3">
-                    <label htmlFor="case-ban-reason" className="text-xs font-medium text-muted-foreground">
+                  <div className="border-border/50 space-y-2 border-t pt-3">
+                    <label
+                      htmlFor="case-ban-reason"
+                      className="text-muted-foreground text-xs font-medium"
+                    >
                       {m.moderation_ban_reason_label()}
                     </label>
                     <Textarea
@@ -322,7 +338,7 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
                       className="min-h-16"
                     />
                     {banUser.isError && (
-                      <p role="alert" className="text-xs text-destructive">
+                      <p role="alert" className="text-destructive text-xs">
                         {banUser.error?.message ?? m.moderation_ban_error()}
                       </p>
                     )}
@@ -330,7 +346,9 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
                       variant="destructive"
                       className="w-full"
                       disabled={!banReason.trim() || banUser.isPending}
-                      onClick={() => banUser.mutate({ userId: targetUser.id, reason: banReason.trim() })}
+                      onClick={() =>
+                        banUser.mutate({ userId: targetUser.id, reason: banReason.trim() })
+                      }
                     >
                       {m.moderation_ban()}
                     </Button>
@@ -341,59 +359,59 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
           </div>
         )}
 
-        {openReportCount === 0 ? (
-          <p className="text-xs text-muted-foreground">{m.moderation_dismiss_no_open()}</p>
-        ) : (
-          <div className="space-y-2">
-            <label htmlFor="case-dismiss-note" className="text-xs font-medium text-muted-foreground">
-              {m.moderation_dismiss_note_label()}
-            </label>
-            <Textarea
-              id="case-dismiss-note"
-              value={dismissNote}
-              onChange={(event) => setDismissNote(event.target.value)}
-              maxLength={MODERATION_NOTE_MAX_LENGTH}
-              className="min-h-16"
-            />
-            {resolve.isError && (
-              <p role="alert" className="text-xs text-destructive">
-                {resolve.error?.message ?? m.moderation_dismiss_error()}
-              </p>
-            )}
-            <Button
-              variant="outline"
-              className="w-full"
-              disabled={resolve.isPending}
-              onClick={() =>
-                resolve.mutate({
-                  targetType: detail.target.kind,
-                  targetId: detail.target.id,
-                  outcome: "dismissed",
-                  note: dismissNote.trim() || undefined,
-                })
-              }
-            >
-              {m.moderation_dismiss()}
-            </Button>
-          </div>
-        )}
+        <div className="space-y-2">
+          <label htmlFor="case-dismiss-note" className="text-muted-foreground text-xs font-medium">
+            {m.moderation_dismiss_note_label()}
+          </label>
+          <Textarea
+            id="case-dismiss-note"
+            value={dismissNote}
+            onChange={(event) => setDismissNote(event.target.value)}
+            maxLength={MODERATION_NOTE_MAX_LENGTH}
+            className="min-h-16"
+          />
+          {resolve.isError && (
+            <p role="alert" className="text-destructive text-xs">
+              {resolve.error?.message ?? m.moderation_dismiss_error()}
+            </p>
+          )}
+          <Button
+            variant="outline"
+            className="w-full"
+            disabled={resolve.isPending}
+            onClick={() =>
+              resolve.mutate({
+                targetType: detail.target.kind,
+                targetId: detail.target.id,
+                outcome: "dismissed",
+                note: dismissNote.trim() || undefined,
+              })
+            }
+          >
+            {m.moderation_dismiss()}
+          </Button>
+        </div>
       </section>
     </div>
   );
 }
 
 /** The post being moderated: author, raw content, moderation timestamps. */
-function TargetPostCard({ target }: { target: Extract<ModerationCaseDetail["target"], { kind: "post" }> }) {
+function TargetPostCard({
+  target,
+}: {
+  target: Extract<ModerationCaseDetail["target"], { kind: "post" }>;
+}) {
   const authorHandle = handleOf(target.author);
   return (
-    <div className="space-y-1.5 rounded-xl border border-border p-3">
+    <div className="border-border space-y-1.5 rounded-xl border p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="truncate text-sm font-bold">{target.author.name || m.user_unknown()}</span>
-        {authorHandle && <span className="text-xs text-muted-foreground">@{authorHandle}</span>}
+        {authorHandle && <span className="text-muted-foreground text-xs">@{authorHandle}</span>}
         {target.removedAt && <Badge variant="secondary">{m.moderation_case_removed_badge()}</Badge>}
       </div>
-      <p className="break-words whitespace-pre-line text-sm">{target.content}</p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm break-words whitespace-pre-line">{target.content}</p>
+      <p className="text-muted-foreground text-xs">
         {formatRelativeTime(target.createdAt, getLocale(), m.post_just_now())}
       </p>
     </div>
@@ -401,24 +419,30 @@ function TargetPostCard({ target }: { target: Extract<ModerationCaseDetail["targ
 }
 
 /** The user being moderated: role, ban state, and the suspension deadline when there is one. */
-function TargetUserCard({ target }: { target: Extract<ModerationCaseDetail["target"], { kind: "user" }> }) {
+function TargetUserCard({
+  target,
+}: {
+  target: Extract<ModerationCaseDetail["target"], { kind: "user" }>;
+}) {
   const userHandle = handleOf(target);
   return (
-    <div className="space-y-1.5 rounded-xl border border-border p-3">
+    <div className="border-border space-y-1.5 rounded-xl border p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="truncate text-sm font-bold">{target.name || m.user_unknown()}</span>
-        {userHandle && <span className="text-xs text-muted-foreground">@{userHandle}</span>}
+        {userHandle && <span className="text-muted-foreground text-xs">@{userHandle}</span>}
         <Badge variant="outline">{roleLabel(target.role ?? "user")}</Badge>
         {target.banned &&
           (target.banExpires ? (
             <Badge variant="destructive">
-              {m.moderation_case_suspended_until({ date: formatDateTime(target.banExpires, getLocale()) })}
+              {m.moderation_case_suspended_until({
+                date: formatDateTime(target.banExpires, getLocale()),
+              })}
             </Badge>
           ) : (
             <Badge variant="destructive">{m.moderation_case_banned_badge()}</Badge>
           ))}
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-muted-foreground text-xs">
         {formatRelativeTime(target.createdAt, getLocale(), m.post_just_now())}
       </p>
     </div>
@@ -431,7 +455,7 @@ function ReportsSection({ reports }: { reports: ModerationCaseDetail["reports"] 
     return (
       <section className="space-y-2">
         <h3 className="text-sm font-semibold">{m.moderation_case_reports_title()}</h3>
-        <p className="text-xs text-muted-foreground">{m.moderation_case_reports_empty()}</p>
+        <p className="text-muted-foreground text-xs">{m.moderation_case_reports_empty()}</p>
       </section>
     );
   }
@@ -441,14 +465,14 @@ function ReportsSection({ reports }: { reports: ModerationCaseDetail["reports"] 
       <ul className="space-y-2">
         {reports.map((report) => (
           <li key={report.reporterId} className="flex items-start gap-2 text-sm">
-            <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium">
+            <span className="bg-muted rounded px-1.5 py-0.5 text-xs font-medium">
               {reasonLabel(report.reason)}
             </span>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-muted-foreground text-xs">
               {formatRelativeTime(report.createdAt, getLocale(), m.post_just_now())}
             </span>
             {report.resolvedAt && (
-              <span className="ml-auto text-xs text-muted-foreground">
+              <span className="text-muted-foreground ml-auto text-xs">
                 {report.resolvedOutcome === "actioned"
                   ? m.moderation_report_resolved_actioned()
                   : m.moderation_report_resolved_dismissed()}

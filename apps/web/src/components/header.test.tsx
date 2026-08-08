@@ -40,7 +40,9 @@ describe("Header account menu", () => {
 
     // Base-UI mounts the popup asynchronously on open — findBy* like the
     // follow-list-dialog test's, not getBy* straight after the click.
-    expect(await screen.findByRole("menuitem", { name: m.menu_view_profile() })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("menuitem", { name: m.menu_view_profile() }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: m.profile_settings() })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: m.auth_sign_out() })).toBeInTheDocument();
   });

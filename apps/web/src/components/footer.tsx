@@ -9,7 +9,7 @@ import { APP_VERSION } from "@/lib/app-version";
 // is safe here because the footer's legal row has no fixed-size element —
 // unlike the header's icon button, nothing shifts when the chunk mounts.
 const FooterLocaleMenu = lazy(() =>
-  import("@/components/footer-locale-menu").then((mod) => ({ default: mod.FooterLocaleMenu }))
+  import("@/components/footer-locale-menu").then((mod) => ({ default: mod.FooterLocaleMenu })),
 );
 
 /**
@@ -18,8 +18,8 @@ const FooterLocaleMenu = lazy(() =>
  */
 export function Footer() {
   return (
-    <footer className="w-full border-t bg-background py-6 md:py-8 mt-auto">
-      <div className="w-full flex flex-col md:flex-row items-center justify-between gap-4 px-4 sm:px-8 text-sm text-muted-foreground">
+    <footer className="bg-background mt-auto w-full border-t py-6 md:py-8">
+      <div className="text-muted-foreground flex w-full flex-col items-center justify-between gap-4 px-4 text-sm sm:px-8 md:flex-row">
         <div className="flex items-center gap-2">
           <img
             src="/mytuums.svg"
@@ -28,24 +28,24 @@ export function Footer() {
             height={2048}
             className="h-5 w-auto"
           />
-          <span className="font-semibold text-foreground">MyTuums</span>
+          <span className="text-foreground font-semibold">MyTuums</span>
           <span className="text-xs">{`v${APP_VERSION}`}</span>
           <span>{m.footer_copyright({ year: String(new Date().getFullYear()) })}</span>
         </div>
         <div className="flex flex-wrap items-center gap-4 sm:gap-6">
-          <Link to="/" className="hover:underline hover:text-foreground">
+          <Link to="/" className="hover:text-foreground hover:underline">
             {m.nav_home()}
           </Link>
-          <Link to="/discover" className="hover:underline hover:text-foreground">
+          <Link to="/discover" className="hover:text-foreground hover:underline">
             {m.nav_discover()}
           </Link>
-          <Link to="/privacy" className="hover:underline hover:text-foreground">
+          <Link to="/privacy" className="hover:text-foreground hover:underline">
             {m.legal_privacy_policy()}
           </Link>
-          <Link to="/terms" className="hover:underline hover:text-foreground">
+          <Link to="/terms" className="hover:text-foreground hover:underline">
             {m.legal_terms_of_service()}
           </Link>
-          <Link to="/mentions-legales" className="hover:underline hover:text-foreground">
+          <Link to="/mentions-legales" className="hover:text-foreground hover:underline">
             {m.legal_notice()}
           </Link>
           <Suspense fallback={null}>

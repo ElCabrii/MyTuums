@@ -31,10 +31,7 @@ export function SegmentedControl({
       role="group"
       aria-label={label}
       data-slot="segmented-control"
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full bg-muted/50 p-0.5",
-        className,
-      )}
+      className={cn("bg-muted/50 inline-flex items-center gap-1 rounded-full p-0.5", className)}
     >
       {children}
     </div>

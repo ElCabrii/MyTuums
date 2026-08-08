@@ -2,11 +2,7 @@ import { atom } from "jotai";
 import { atomWithReset, RESET } from "jotai/utils";
 import { authClient } from "@/lib/auth-client";
 import { waitForCompletion } from "@/lib/session-sync";
-import {
-  dateOfBirthToIso,
-  validateDateOfBirth,
-  validateUsername,
-} from "@/lib/auth-validation";
+import { dateOfBirthToIso, validateDateOfBirth, validateUsername } from "@/lib/auth-validation";
 import { needsDobAtom, needsHandleAtom } from "@/atoms/session";
 import { authErrorAtom, authPendingAtom } from "@/atoms/auth";
 import { m } from "@/paraglide/messages.js";

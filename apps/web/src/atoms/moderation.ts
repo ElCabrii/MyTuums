@@ -1,7 +1,12 @@
 import { atom } from "jotai";
 import { atomFamily } from "jotai-family";
 import { atomEffect } from "jotai-effect";
-import { atomWithInfiniteQuery, atomWithMutation, atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
+import {
+  atomWithInfiniteQuery,
+  atomWithMutation,
+  atomWithQuery,
+  queryClientAtom,
+} from "jotai-tanstack-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { MODERATION_PAGE_SIZE } from "@my-tuums/api/constants";
 import { store } from "@/lib/store";
@@ -81,7 +86,8 @@ const caseFamily = atomFamily((key: string) =>
     // variants — a bare `targetType: "post" | "user"` is assignable to
     // neither branch, so the literal is resolved here, at the only site that
     // knows the key was built by `encodeCaseKey`.
-    const input: { targetType: "post"; targetId: string } | { targetType: "user"; targetId: string } =
+    const input:
+      { targetType: "post"; targetId: string } | { targetType: "user"; targetId: string } =
       ref.targetType === "post"
         ? { targetType: "post", targetId: ref.targetId }
         : { targetType: "user", targetId: ref.targetId };
@@ -100,9 +106,7 @@ export const teamAtom = atomWithQuery(() => orpc.moderation.team.queryOptions())
  * "Blocked users" section renders. Not a family: one list per viewer, wiped
  * with the QueryClient on sign-out like every other non-family query.
  */
-export const blockedUsersAtom = atomWithQuery(() =>
-  orpc.moderation.listBlocked.queryOptions(),
-);
+export const blockedUsersAtom = atomWithQuery(() => orpc.moderation.listBlocked.queryOptions());
 
 /**
  * Which moderation case dialog is open, app-wide — at most one. Same
