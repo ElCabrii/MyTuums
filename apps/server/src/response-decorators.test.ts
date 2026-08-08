@@ -81,6 +81,49 @@ function expectSecurityHeaders(headers: RawResponse["headers"]): void {
   expect(headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
   expect(headers["x-frame-options"]).toBe("DENY");
   expect(headers["strict-transport-security"]).toBe("max-age=31536000; includeSubDomains");
+  expectContentSecurityPolicy(headers);
+}
+
+/**
+ * Asserts the CSP header is present and every directive this policy is
+ * derived from (see `response-decorators.ts`'s doc comment) actually shows up
+ * — a well-formed, single-value header covering the directives the app's own
+ * code requires, not just "some string got sent".
+ */
+function expectContentSecurityPolicy(headers: RawResponse["headers"]): void {
+  const csp = headers["content-security-policy"];
+  expect(typeof csp).toBe("string");
+  const policy = csp as string;
+
+  // One value per header, semicolon-separated directives, no stray
+  // duplicate — Node folds duplicate `setHeader` calls into an array, so a
+  // string here also proves `applyDefaults` never sets this header twice.
+  expect(Array.isArray(csp)).toBe(false);
+
+  const directives = policy.split("; ");
+  expect(directives).toContain("default-src 'self'");
+  expect(directives).toContain("base-uri 'self'");
+  expect(directives).toContain("object-src 'none'");
+  expect(directives).toContain("img-src 'self' https:");
+  expect(directives).toContain("font-src 'self'");
+  expect(directives).toContain("style-src 'self' 'unsafe-inline'");
+  expect(directives).toContain("connect-src 'self' https://accounts.google.com");
+  expect(directives).toContain("frame-src https://accounts.google.com");
+  expect(directives).toContain("form-action 'self'");
+  expect(directives).toContain("frame-ancestors 'none'");
+
+  // script-src carries a hash whose exact value is an implementation detail
+  // (it moves if the shared onload-handler constant ever changes) — assert
+  // the fixed parts and the shape of the hash-source rather than a literal.
+  const scriptSrc = directives.find((d) => d.startsWith("script-src "));
+  expect(scriptSrc).toBeDefined();
+  expect(scriptSrc).toContain("'self'");
+  expect(scriptSrc).toContain("https://accounts.google.com");
+  expect(scriptSrc).toContain("'unsafe-hashes'");
+  expect(scriptSrc).toMatch(/'sha256-[\w+/]+=*'/);
+
+  // Never report-only — issue #61 requires this enforced, not observed.
+  expect(headers["content-security-policy-report-only"]).toBeUndefined();
 }
 
 const BIG_JSON = JSON.stringify({ payload: "x".repeat(5000) });
@@ -388,6 +431,22 @@ describe("decorateResponse", () => {
         expect(r.status).toBe(200);
         expect(r.headers["content-encoding"]).toBe("gzip");
         expect(gunzipSync(r.body).toString()).toBe(BIG_JSON);
+      },
+    );
+  });
+
+  it("lets a handler override the Content-Security-Policy — inner wins", async () => {
+    await withServer(
+      (_req, res) => {
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Content-Security-Policy": "default-src 'none'",
+        });
+        res.end(SMALL_JSON);
+      },
+      async (raw) => {
+        const r = await raw("/");
+        expect(r.headers["content-security-policy"]).toBe("default-src 'none'");
       },
     );
   });

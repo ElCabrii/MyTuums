@@ -1,5 +1,6 @@
 import { posix } from "node:path";
 import type { Plugin } from "vite";
+import { NONBLOCKING_STYLESHEET_ONLOAD_HANDLER } from "@my-tuums/api/constants";
 
 /**
  * Post-build surgery on `dist/index.html`, registered in vite.config.ts.
@@ -83,7 +84,11 @@ export function preloadInjectionPlugin(): Plugin {
         const attrs = stylesheetTags[0][1];
         source = source.replace(
           stylesheetTags[0][0],
-          `<!-- Loaded non-blocking (see build-inject-plugin.ts): the inline splash\n     covers first paint, and the sheet still starts downloading with the HTML.\n     The <noscript> twin keeps the blocking behaviour for no-JS visitors. -->\n<link rel="stylesheet" media="print" onload="this.media='all'"${attrs}>\n<noscript><link rel="stylesheet"${attrs}></noscript>`,
+          // The `onload` value is the shared constant, not a literal, so the
+          // server's CSP (apps/server/src/response-decorators.ts) can allow
+          // this exact inline handler by hash — see the constant's doc
+          // comment for why that has to stay in sync rather than hand-copied.
+          `<!-- Loaded non-blocking (see build-inject-plugin.ts): the inline splash\n     covers first paint, and the sheet still starts downloading with the HTML.\n     The <noscript> twin keeps the blocking behaviour for no-JS visitors. -->\n<link rel="stylesheet" media="print" onload="${NONBLOCKING_STYLESHEET_ONLOAD_HANDLER}"${attrs}>\n<noscript><link rel="stylesheet"${attrs}></noscript>`,
         );
       }
       // More than one stylesheet (or none) is unexpected for this app's build

@@ -269,3 +269,20 @@ export const SIGNED_OUT_PATHS = new Set([
   // appeal) before it will submit.
   "/appeal",
 ]);
+
+/**
+ * The exact inline `onload` handler body the built `index.html`'s deferred
+ * stylesheet `<link>` carries (`apps/web/build-inject-plugin.ts`), shared so
+ * the server's Content-Security-Policy can allow *this one* inline event
+ * handler by hash instead of weakening `script-src` with `'unsafe-inline'`.
+ *
+ * `apps/server/src/response-decorators.ts` hashes this constant into the
+ * `'unsafe-hashes' 'sha256-…'` source it adds to `script-src` — computed at
+ * module load, never hand-copied — so the two sides cannot drift: change the
+ * handler here (or in the build plugin) and the header's hash updates with
+ * it, instead of silently going stale and leaving the production stylesheet
+ * stuck at `media="print"` (the exact failure a hard-coded hash would risk,
+ * and one that would ship invisibly — there is no console to watch for it in
+ * production).
+ */
+export const NONBLOCKING_STYLESHEET_ONLOAD_HANDLER = "this.media='all'";

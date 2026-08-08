@@ -1,6 +1,8 @@
 import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from "node:http";
+import { createHash } from "node:crypto";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { bestEncoding, type Compression } from "./compression.js";
+import { NONBLOCKING_STYLESHEET_ONLOAD_HANDLER } from "@my-tuums/api/constants";
 
 /**
  * One place to add per-response headers and compress JSON bodies, applied to
@@ -11,10 +13,12 @@ import { bestEncoding, type Compression } from "./compression.js";
  *
  * Two behaviours live here:
  *
- * 1. Security headers. Applied via `setHeader` guarded by `hasHeader`, so a
- *    handler that sets one itself keeps its value (inner wins). That guard is
- *    what makes this safe for better-auth, which writes headers through
- *    `setHeader` rather than the `writeHead` headers argument.
+ * 1. Security headers, including the Content-Security-Policy (see its own
+ *    doc comment below for the directive-by-directive derivation — issue
+ *    #61). Applied via `setHeader` guarded by `hasHeader`, so a handler that
+ *    sets one itself keeps its value (inner wins). That guard is what makes
+ *    this safe for better-auth, which writes headers through `setHeader`
+ *    rather than the `writeHead` headers argument.
  *
  * 2. gzip/brotli for JSON responses. oRPC's own CompressionPlugin is NOT
  *    mounted (index.ts mounts only CORS + CSRF), so this is the only JSON
@@ -38,6 +42,117 @@ import { bestEncoding, type Compression } from "./compression.js";
  */
 
 /**
+ * The sha256 hash of the ONE inline event-handler attribute this app's built
+ * `index.html` ships (`apps/web/build-inject-plugin.ts`'s stylesheet-swap
+ * `onload`). CSP's `script-src` governs inline `onload=`/`onclick=`/etc. by
+ * default, same as it governs `<script>` bodies, and there is no nonce path
+ * for an attribute baked into a static build artefact the server merely
+ * serves unmodified — a nonce has to be minted per-response and echoed into
+ * the HTML at serve time, which would mean templating `index.html` on every
+ * request instead of serving the prebuilt file as-is (`static-files.ts`).
+ *
+ * A hash-source is the documented alternative for exactly this shape, gated
+ * behind `'unsafe-hashes'` (CSP3) because hash-sources apply to attributes
+ * only with that keyword present. Computed from the shared constant rather
+ * than pasted as a literal so the two sides cannot drift silently — see the
+ * constant's doc comment.
+ */
+const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
+  .update(NONBLOCKING_STYLESHEET_ONLOAD_HANDLER, "utf8")
+  .digest("base64")}`;
+
+/**
+ * Enforced (not report-only — issue #61) on every response. Derived from what
+ * the app actually loads and renders, not a generic template:
+ *
+ * - `default-src 'self'`, `base-uri 'self'`, `object-src 'none'`: the
+ *   standard zero-cost hardening trio. `object-src none` closes the
+ *   `<object>`/`<embed>` plugin-content vector Flash-era CSP guides call out;
+ *   `base-uri` stops an injected `<base>` tag from rewriting every relative
+ *   URL on the page (script `src`, form actions, links) to an attacker's
+ *   origin.
+ * - `img-src 'self' https:`: images come from two places, and neither is a
+ *   single origin that can be pinned. Own uploads are served from this
+ *   origin as `/media/<key>`, which 302s the BROWSER to a presigned URL on
+ *   the storage bucket's endpoint (`S3_ENDPOINT`) — a value that is
+ *   per-environment, has already changed once (see `packages/api/src/
+ *   storage.ts`'s `StorageConfig.endpoint` doc), and is not threaded into
+ *   this module. Separately, `user.image`/`bannerImage` (packages/auth) hold
+ *   an OAuth provider's own avatar URL verbatim until someone uploads a
+ *   replacement (`apps/web/src/components/user-avatar.tsx` renders
+ *   `user.image` unmodified) — Google, Discord and Twitch avatar CDNs, none
+ *   of which this app controls or should enumerate. `https:` is the honest
+ *   statement of that: no bare-HTTP or non-network scheme, everything else is
+ *   already scoped by same-origin session checks before it ever reaches an
+ *   `<img>` tag.
+ * - `font-src 'self'`: `@fontsource-variable/inter` ships the font files
+ *   through the build; nothing is fetched from a font CDN.
+ * - `script-src 'self' https://accounts.google.com 'unsafe-hashes'
+ *   '<STYLESHEET_SWAP_HANDLER_HASH>'`: the app's own bundle is same-origin
+ *   module scripts only — no other inline `<script>` exists. Google One Tap
+ *   (`packages/auth`'s `oneTap()` plugin, wired client-side in
+ *   `apps/web/src/lib/one-tap.ts`) loads `https://accounts.google.com/gsi/
+ *   client` via a dynamically injected `<script>` tag (better-auth's
+ *   `loadGoogleScript`), so the host has to be allowed; the classic OAuth
+ *   redirect flows (Google without One Tap, Discord, Twitch — `atoms/
+ *   auth.ts`'s `signInWithProviderAtom`) are plain top-level navigations
+ *   (`window.location.href = <authorize URL>`), which CSP does not gate at
+ *   all, so they need nothing here. The hash-source is the one inline
+ *   handler covered above.
+ * - `style-src 'self' 'unsafe-inline'`: unavoidable, not an oversight. Base UI
+ *   (`@base-ui/react`, what shadcn's `base-maia` style in this repo is built
+ *   on — see `apps/web/components.json`) positions every popover/menu/select/
+ *   dialog with Floating UI under the hood, which writes the computed
+ *   position as a React `style` prop (`useAnchorPositioning`'s
+ *   `positionerStyles`) — an inline `style=""` attribute, recomputed on every
+ *   reposition. `style-src` (absent a split `style-src-attr`) governs inline
+ *   style attributes exactly like it governs inline `<style>` blocks, and
+ *   there is no hash or nonce path for a value that changes on every scroll
+ *   and resize. The cold-load splash's inline `<style>` block
+ *   (`apps/web/index.html`) rides the same allowance. Locking this down would
+ *   mean dropping Floating UI–based positioning app-wide — out of scope here.
+ * - `connect-src 'self' https://accounts.google.com`: `'self'` covers `/rpc`,
+ *   `/api/auth` and `/media`, the app's entire fetch surface. One Tap's
+ *   loaded script makes its own requests (credential fetch, FedCM
+ *   `.well-known` discovery) back to Google from the page's origin context,
+ *   so it needs the same host as `script-src`.
+ * - `frame-src https://accounts.google.com`: One Tap's prompt UI itself
+ *   renders in a Google-hosted iframe the loaded script creates. Nothing
+ *   else in this app frames anything.
+ * - `form-action 'self'`: every `<form>` in the app (`apps/web/src/routes/
+ *   **`, `components/settings/**`, `components/composer-form.tsx`) submits
+ *   via a JS `onSubmit` handler (fetch/oRPC/better-auth client), never a
+ *   native `action=` attribute — so this costs nothing and closes off a
+ *   form-based exfiltration vector an injected `<form>` could otherwise use.
+ * - `frame-ancestors 'none'`: the CSP3 successor to `X-Frame-Options: DENY`
+ *   above. Kept alongside it rather than replacing it — older
+ *   browsers/crawlers that predate `frame-ancestors` (or a proxy that strips
+ *   CSP but not legacy headers) still get the protection from the older
+ *   header, and the two never disagree (both mean "never frame this").
+ *
+ * What a human should watch after deploy, because it cannot be verified from
+ * here: whether Google ever serves GSI/FedCM assets from a *different*
+ * `accounts.google.com` subpath or a second host (their docs recommend the
+ * bare host over enumerating `/gsi/...` paths for exactly this churn risk,
+ * which is why this policy already uses the bare host) — and whether a
+ * future `S3_ENDPOINT` migration needs `img-src` narrowed again once a stable
+ * per-environment origin is worth threading into this module.
+ */
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "img-src 'self' https:",
+  "font-src 'self'",
+  `script-src 'self' https://accounts.google.com 'unsafe-hashes' '${STYLESHEET_SWAP_HANDLER_HASH}'`,
+  "style-src 'self' 'unsafe-inline'",
+  "connect-src 'self' https://accounts.google.com",
+  "frame-src https://accounts.google.com",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+/**
  * The per-response security headers, applied to every response that does not
  * already set one (inner wins — see `applyDefaults`).
  */
@@ -49,6 +164,15 @@ const SECURITY_HEADERS: Record<string, string> = {
   // localhost and the e2e suite, and effective once the Railway edge (which
   // terminates TLS) forwards it to a browser.
   "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+  // Applied unconditionally, not just in production: this server never serves
+  // HTML except when `WEB_DIST` is set (`index.ts`), and every other response
+  // it ever sends — JSON, redirects, plain-text errors — is fetched via
+  // XHR/fetch or followed as a subresource, contexts CSP response headers do
+  // not police. Sending it in dev too (where Vite proxies `/rpc`, `/api/auth`
+  // and `/media` here, but serves the actual document itself) is inert, not
+  // risky, and keeps this module's output identical across environments —
+  // see the directive-by-directive reasoning above.
+  "Content-Security-Policy": CONTENT_SECURITY_POLICY,
 };
 
 /** Bodies smaller than this are sent identity — compressing them costs CPU for nothing. */
