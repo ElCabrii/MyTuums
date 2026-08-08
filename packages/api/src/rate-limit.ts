@@ -61,16 +61,26 @@ export function createRateLimiter(
     /** Injectable so tests can advance time without sleeping. */
     now?: () => number;
     /**
-     * Upper bound on tracked keys. Every caller is a signed-in user keyed on
-     * `user:<id>` — there is no anonymous surface left to key on IP — so the
-     * map grows with the number of distinct users hitting the API inside the
-     * longest tracked window. The hard bound keeps that growth from turning
-     * the rate limiter itself into the denial-of-service vector it exists to
-     * prevent.
+     * Soft ceiling on tracked keys, kept as a memory backstop rather than an
+     * admission gate. Every caller is a signed-in user keyed on
+     * `${policy.name}:user:<id>` (issue #36 removed the anonymous surface and
+     * its IP keying), so the keyspace is bounded by registered users times
+     * the 9 policies in `RATE_LIMITS` — it can no longer be grown without
+     * limit by an attacker spraying requests from many addresses. What
+     * `maxKeys` now guards against is a leak: if some caller shape ever kept
+     * producing distinct keys that never expire, this is what would surface
+     * it (see below) before the map grows unbounded.
      *
-     * At capacity, a brand-new key is refused (`allowed: false`) until a
-     * tracked window expires; a returning caller whose own window expired
-     * recycles its slot.
+     * At capacity, a brand-new key is let through anyway (`allowed` still
+     * follows the caller's own policy limit, just like any other key) — see
+     * issue #60. Refusing it, as this used to do, punished exactly the wrong
+     * caller: it turned "the map is full" into "brand-new sessions get 429
+     * on every single request," indistinguishable from a bug to the person
+     * hitting it, to defend a keyspace nothing can grow on purpose anymore.
+     * The limiter's job is bounding one client's damage, not gatekeeping who
+     * gets to make requests at all. A returning caller whose own window
+     * expired still recycles its slot without touching the ceiling either
+     * way.
      */
     maxKeys?: number;
   } = {},
@@ -78,6 +88,18 @@ export function createRateLimiter(
   const now = options.now ?? Date.now;
   const maxKeys = options.maxKeys ?? 10_000;
   const buckets = new Map<string, { count: number; resetAt: number }>();
+  // Latches the capacity warning so a sustained episode logs once instead of
+  // once per request — see the log call below for why it fires at all.
+  //
+  // It re-arms (sets back to false) the moment the map is observed below
+  // maxKeys again, rather than staying latched for the rest of the process.
+  // Sweeping only ever runs from inside a full-map insert attempt, so a real
+  // capacity episode can only recur at roughly the pace of the longest
+  // tracked window — re-arming can't turn this into a flood. Latching
+  // permanently instead would mean the first episode after boot is the only
+  // one anyone ever hears about; every later one (arguably the more
+  // worrying case — a leak getting worse, not better) would log nothing.
+  let capacityWarned = false;
 
   /** Drops windows that have already rolled over. */
   function sweep(at: number): void {
@@ -97,12 +119,24 @@ export function createRateLimiter(
         // Only sweep when adding a key, and only once the map has actually
         // grown — an O(n) scan on every request would be worse than the leak.
         if (buckets.size >= maxKeys) sweep(at);
-        // Hard bound: at capacity with live windows, a brand-new key is refused
-        // rather than growing the map. A returning caller whose window expired
-        // just recycles its own slot — sweep is guaranteed to have removed it
-        // (resetAt <= at), so the set below cannot grow the map either.
-        if (buckets.size >= maxKeys && existing === undefined) {
-          return { allowed: false, remaining: 0, retryAfterSeconds: 1 };
+
+        if (buckets.size >= maxKeys) {
+          // Still at capacity after sweeping. Fail OPEN: let a brand-new key
+          // through rather than refusing it (issue #60) — `maxKeys` is a
+          // memory backstop, not an admission gate, and there is no longer
+          // an attacker who can grow this keyspace on purpose (issue #36).
+          // A returning caller (`existing !== undefined`) was never refused
+          // either way, so it gets no log line of its own.
+          if (existing === undefined && !capacityWarned) {
+            capacityWarned = true;
+            console.warn(
+              `[rate-limit] at capacity (${maxKeys} keys) — allowing new keys through unthrottled instead of refusing them; investigate for a leak or raise maxKeys`,
+            );
+          }
+        } else {
+          // Below capacity again: rearm so a future episode gets its own
+          // log line instead of silence (see the comment on `capacityWarned`).
+          capacityWarned = false;
         }
         buckets.set(key, bucket);
       }

@@ -42,7 +42,7 @@ the root — see `src/constants.ts` for why.
 ## Load-bearing decisions — do not break
 
 - **Rate limiter and storage are threaded on `Context`, never module globals** — tests substitute both; one suite's rate-limit state must not bleed into another's.
-- **Fixed-window, in-memory limits** reset on deploy and multiply per replica; right for bounding one client, wrong for billing. If that changes, keep the `consume` interface. `maxKeys` is a hard bound — at capacity a brand-new key is refused.
+- **Fixed-window, in-memory limits** reset on deploy and multiply per replica; right for bounding one client, wrong for billing. If that changes, keep the `consume` interface. `maxKeys` is a memory backstop, not an admission gate: since issue #36 removed the anonymous surface, the keyspace is bounded by registered users x 9 policies, so at capacity a brand-new key is now let through and logged once (latched, re-arms below capacity), never refused (issue #60 — refusing here used to 429 every request from a brand-new session, indistinguishable from a bug).
 - **`like` / `follow` are separate idempotent procedures**, not a `toggle`: ordering and retry safety.
 - **Replies are a mode of `post.list` (`parentId`)**, not a separate procedure — the web app's optimistic like sweep covers every cached `post.list` by key prefix, so a separate procedure would miss reply likes.
 - **`publicUserColumns` is a privacy boundary**: email, `twoFactorEnabled`, `lastLoginMethod` and preferences must never be added (`users.int.test.ts` pins the exact shape).

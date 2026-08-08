@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createRateLimiter, RATE_LIMITS, type RateLimitPolicy } from "./rate-limit.js";
 
 function policy(overrides: Partial<RateLimitPolicy> = {}): RateLimitPolicy {
@@ -116,7 +116,7 @@ describe("createRateLimiter", () => {
   });
 
   describe("maxKeys", () => {
-    it("refuses a brand-new key when the map is at capacity with live windows", () => {
+    it("allows a brand-new key through when the map is at capacity with live windows", () => {
       // The clock never moves here: every window must stay live for the map
       // to be genuinely at capacity when the third key arrives.
       const clock = 0;
@@ -127,12 +127,62 @@ describe("createRateLimiter", () => {
       expect(limiter.consume("b", p).allowed).toBe(true);
       expect(limiter.size).toBe(2);
 
-      // "c" would be a third tracked key; every window is live, so it is
-      // refused rather than growing the map past maxKeys.
+      // "c" is a third tracked key arriving while every window is still
+      // live. Issue #60: fail OPEN instead of refusing it — the map is
+      // allowed to grow past maxKeys, and "c" gets judged on its own
+      // policy limit like any other key (1 of 3 used, so allowed).
       const third = limiter.consume("c", p);
-      expect(third.allowed).toBe(false);
-      expect(third.remaining).toBe(0);
+      expect(third.allowed).toBe(true);
+      expect(third.remaining).toBe(2);
+      expect(limiter.size).toBe(3);
+    });
+
+    it("logs the capacity warning once per episode, not once per request", () => {
+      const clock = 0;
+      const limiter = createRateLimiter({ now: () => clock, maxKeys: 2 });
+      const p = policy({ limit: 10 });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      limiter.consume("a", p);
+      limiter.consume("b", p);
+      expect(warn).not.toHaveBeenCalled();
+
+      // Map is at capacity now; every further brand-new key logs, but only
+      // the first one of this episode.
+      limiter.consume("c", p);
+      limiter.consume("d", p);
+      limiter.consume("e", p);
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      warn.mockRestore();
+    });
+
+    it("re-arms the capacity warning once the map drains back below maxKeys", () => {
+      let clock = 0;
+      const limiter = createRateLimiter({ now: () => clock, maxKeys: 2 });
+      const p = policy({ limit: 10 });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      limiter.consume("a", p); // resetAt 1000
+      limiter.consume("b", p); // resetAt 1000
+      limiter.consume("c", p); // at capacity -> logs once, map grows to 3
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      // Every window rolls over; the next insert sweeps them all out, so the
+      // map is observed well below maxKeys again.
+      clock = 1000;
+      limiter.consume("d", p);
+      expect(limiter.size).toBe(1);
+
+      // A second, independent capacity episode must log again — a latch
+      // that never re-armed would go silent for the rest of the process
+      // after the very first episode.
+      limiter.consume("e", p);
       expect(limiter.size).toBe(2);
+      limiter.consume("f", p);
+      expect(warn).toHaveBeenCalledTimes(2);
+
+      warn.mockRestore();
     });
 
     it("recycles a returning caller's expired slot even when the map holds a live window", () => {
@@ -145,8 +195,8 @@ describe("createRateLimiter", () => {
       limiter.consume("b", p); // resetAt 1500
 
       clock = 1200; // "a" expired, "b" still live, map at capacity
-      // The refusal must apply only to brand-new keys: "a" replaces its own
-      // expired entry, which never grows the map.
+      // "a" replaces its own expired entry, which never grows the map —
+      // recycling isn't the fail-open path at all, it just doesn't need it.
       expect(limiter.consume("a", p).allowed).toBe(true);
       expect(limiter.size).toBe(2);
     });
