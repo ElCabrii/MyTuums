@@ -1,11 +1,7 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { Link2 } from "lucide-react";
 import { authPendingAtom } from "@/atoms/auth";
-import {
-  linkProviderAtom,
-  linkedAccountsAtom,
-  unlinkProviderAtom,
-} from "@/atoms/linked-accounts";
+import { linkProviderAtom, linkedAccountsAtom, unlinkProviderAtom } from "@/atoms/linked-accounts";
 import { socialProviders } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Section } from "@/components/settings/section";
@@ -37,7 +33,7 @@ export function LinkedAccountsSection() {
       icon={<Link2 className="h-5 w-5" />}
     >
       {isPending ? (
-        <p className="text-xs text-muted-foreground">{m.settings_linked_loading()}</p>
+        <p className="text-muted-foreground text-xs">{m.settings_linked_loading()}</p>
       ) : (
         <ul className="space-y-2">
           {socialProviders.map((provider) => {
@@ -45,14 +41,14 @@ export function LinkedAccountsSection() {
             return (
               <li
                 key={provider.id}
-                className="flex items-center gap-2 rounded-2xl border border-border/50 bg-background/40 px-4 py-2.5"
+                className="border-border/50 bg-background/40 flex items-center gap-2 rounded-2xl border px-4 py-2.5"
               >
                 <span className="flex-1 text-sm">{provider.label}</span>
                 {account ? (
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="text-xs text-destructive"
+                    className="text-destructive text-xs"
                     disabled={isBusy || isLastMethod}
                     title={isLastMethod ? m.settings_linked_last_method() : undefined}
                     onClick={() =>

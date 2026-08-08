@@ -64,9 +64,13 @@ export const postSelection = (viewerId: string) => ({
   // author, so a removed post can say why to the person it happened to and
   // nothing to anyone else. The moderation case view reads a separate
   // raw-content projection (moderator-gated), never this one.
-  content: sql<string | null>`case when ${post.removedAt} is not null then null else ${post.content} end`,
+  content: sql<
+    string | null
+  >`case when ${post.removedAt} is not null then null else ${post.content} end`,
   removed: sql<boolean>`${post.removedAt} is not null`,
-  removedReason: sql<string | null>`case when ${post.removedAt} is not null and ${post.authorId} = ${viewerId} then ${post.removedReason} else null end`,
+  removedReason: sql<
+    string | null
+  >`case when ${post.removedAt} is not null and ${post.authorId} = ${viewerId} then ${post.removedReason} else null end`,
   createdAt: post.createdAt,
   // Null for a top-level post. The web app reads it to decide whether a card
   // needs a "Replying to" line, so it belongs in the shared selection rather
@@ -131,7 +135,9 @@ export const postRouter = {
           .limit(1);
 
         if (!parent) {
-          throw new ORPCError("NOT_FOUND", { message: "The post you replied to no longer exists." });
+          throw new ORPCError("NOT_FOUND", {
+            message: "The post you replied to no longer exists.",
+          });
         }
       }
 
@@ -364,9 +370,7 @@ export const postRouter = {
       // `inArray` has no ordering of its own, so the CTE's depth ordering is
       // reapplied here rather than trusted from the second query.
       const byId = new Map(rows.map((row) => [row.id, row]));
-      const ancestors = ancestorIds
-        .map((id) => byId.get(id))
-        .filter((row) => row !== undefined);
+      const ancestors = ancestorIds.map((id) => byId.get(id)).filter((row) => row !== undefined);
 
       return {
         post: focused,

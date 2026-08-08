@@ -9,13 +9,7 @@
  */
 import type { CSSProperties } from "react";
 
-export function DiscordIcon({
-  className,
-  style,
-}: {
-  className?: string;
-  style?: CSSProperties;
-}) {
+export function DiscordIcon({ className, style }: { className?: string; style?: CSSProperties }) {
   return (
     <svg
       viewBox="0 0 126.644 96"

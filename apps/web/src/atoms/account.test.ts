@@ -7,8 +7,8 @@ type AuthClientResult = { data: unknown; error: unknown };
 
 const { updateUser, changePassword } = vi.hoisted(() => ({
   updateUser: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
-  changePassword: vi.fn(
-    (): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null }),
+  changePassword: vi.fn((): Promise<AuthClientResult> =>
+    Promise.resolve({ data: {}, error: null }),
   ),
 }));
 
@@ -92,7 +92,12 @@ describe("changeHandleAtom", () => {
       // plugin lower-cases `username`; `displayUsername` keeps what was typed.
       setSession({
         data: {
-          user: { id: "u1", name: "Alex Mercer", username: "alexmercer2", displayUsername: "AlexMercer2" },
+          user: {
+            id: "u1",
+            name: "Alex Mercer",
+            username: "alexmercer2",
+            displayUsername: "AlexMercer2",
+          },
         },
         isPending: false,
       });

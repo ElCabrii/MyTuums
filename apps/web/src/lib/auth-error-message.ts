@@ -30,8 +30,7 @@ const validationMessages: Record<string, () => string> = {
   // produces the same three strings from its own pre-checks in
   // `atoms/profile-edit.ts`, so both sides land on one entry each.
   "That image is too large.": () => m.validation_image_too_large(),
-  "That image format isn't supported. Use a PNG, JPEG or WebP.": () =>
-    m.validation_image_type(),
+  "That image format isn't supported. Use a PNG, JPEG or WebP.": () => m.validation_image_type(),
   "That file doesn't look like an image.": () => m.validation_image_unreadable(),
 };
 

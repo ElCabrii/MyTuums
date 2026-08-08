@@ -28,7 +28,11 @@ describe("UserList", () => {
 
   it("shows a retryable error when the list fails to load", async () => {
     const queryClient = createTestQueryClient();
-    await seedInfiniteError(queryClient, userListQueryKey("alexmercer", "followers"), "Could not load followers.");
+    await seedInfiniteError(
+      queryClient,
+      userListQueryKey("alexmercer", "followers"),
+      "Could not load followers.",
+    );
 
     await renderWithProviders(
       <UserList username="alexmercer" direction="followers" emptyMessage="No followers yet." />,
@@ -59,11 +63,19 @@ describe("UserList", () => {
 
   it("renders one row per person, each linking to their profile by normalised handle", async () => {
     const queryClient = createTestQueryClient();
-    const jamie = makeUserSummary({ name: "Jamie Rivera", username: "jamierivera", displayUsername: "JamieRivera" });
+    const jamie = makeUserSummary({
+      name: "Jamie Rivera",
+      username: "jamierivera",
+      displayUsername: "JamieRivera",
+    });
     // `displayUsername` differs in casing from the normalised `username` —
     // the link must use the normalised one (see CLAUDE.md on handleOf), or
     // it would fragment the `byUsername` cache across casings.
-    const casey = makeUserSummary({ name: "Casey Nolan", username: "caseynolan", displayUsername: "CaseyNolan" });
+    const casey = makeUserSummary({
+      name: "Casey Nolan",
+      username: "caseynolan",
+      displayUsername: "CaseyNolan",
+    });
     seedUserListPages(queryClient, "alexmercer", "followers", [
       { items: [jamie, casey], nextCursor: null },
     ]);
@@ -73,8 +85,14 @@ describe("UserList", () => {
       { queryClient, signedInAs: true },
     );
 
-    expect(screen.getByRole("link", { name: /Jamie Rivera/ })).toHaveAttribute("href", "/@jamierivera");
-    expect(screen.getByRole("link", { name: /Casey Nolan/ })).toHaveAttribute("href", "/@caseynolan");
+    expect(screen.getByRole("link", { name: /Jamie Rivera/ })).toHaveAttribute(
+      "href",
+      "/@jamierivera",
+    );
+    expect(screen.getByRole("link", { name: /Casey Nolan/ })).toHaveAttribute(
+      "href",
+      "/@caseynolan",
+    );
   });
 
   it("shows Load more only when there is a next page", async () => {

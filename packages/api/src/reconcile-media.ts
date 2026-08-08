@@ -73,20 +73,13 @@ export async function reconcileMedia({
 
   const referenced = new Set<string>();
   for (const row of rows) {
-    for (const value of [
-      row.image,
-      row.bannerImage,
-      row.imageOriginal,
-      row.bannerImageOriginal,
-    ]) {
+    for (const value of [row.image, row.bannerImage, row.imageOriginal, row.bannerImageOriginal]) {
       const key = objectKeyFromMediaPath(value);
       if (key) referenced.add(key);
     }
   }
 
-  console.log(
-    `scanning ${rows.length} user rows; ${referenced.size} referenced objects`,
-  );
+  console.log(`scanning ${rows.length} user rows; ${referenced.size} referenced objects`);
 
   // Step 3: delete `listed \ referenced`.
   let deleted = 0;

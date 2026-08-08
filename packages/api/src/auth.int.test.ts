@@ -203,7 +203,10 @@ describe("two-factor enrolment", () => {
       .where(eq(user.username, username));
     expect(row?.twoFactorEnabled).toBe(false);
 
-    const secrets = await db.select().from(twoFactor).where(eq(twoFactor.userId, row?.id ?? ""));
+    const secrets = await db
+      .select()
+      .from(twoFactor)
+      .where(eq(twoFactor.userId, row?.id ?? ""));
     expect(secrets).toHaveLength(0);
   });
 });
@@ -240,9 +243,7 @@ describe("password policy", () => {
     // A password that is certainly in Have I Been Pwned. If this ever starts
     // passing, the plugin has stopped reaching the API — which fails open, and
     // is worth knowing about.
-    await expect(
-      signUp({ password: "password123" }),
-    ).rejects.toThrow();
+    await expect(signUp({ password: "password123" })).rejects.toThrow();
   });
 
   it("enforces the 8-character minimum the web validator also applies", async () => {
@@ -315,9 +316,7 @@ describe("date of birth requirement", () => {
       })
       .catch((error: unknown) => error);
 
-    expect(String(result)).toContain(
-      "You must be at least 15 years old to create an account.",
-    );
+    expect(String(result)).toContain("You must be at least 15 years old to create an account.");
 
     const rows = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
     expect(rows).toHaveLength(0);
@@ -508,9 +507,7 @@ describe("password reset", () => {
     await expect(
       auth.api.signInEmail({ body: { email, password: NEW_PASSWORD } }),
     ).resolves.toBeDefined();
-    await expect(
-      auth.api.signInEmail({ body: { email, password: PASSWORD } }),
-    ).rejects.toThrow();
+    await expect(auth.api.signInEmail({ body: { email, password: PASSWORD } })).rejects.toThrow();
   });
 
   it("consumes a reset token so a second reset with it fails", async () => {

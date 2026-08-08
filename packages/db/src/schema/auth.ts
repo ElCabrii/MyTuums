@@ -5,15 +5,7 @@
 // header explains what it changes and why). Application tables live in
 // ./app.ts so regeneration never clobbers them.
 import { relations } from "drizzle-orm";
-import {
-  pgTable,
-  text,
-  bigint,
-  timestamp,
-  boolean,
-  integer,
-  index,
-} from "drizzle-orm/pg-core";
+import { pgTable, text, bigint, timestamp, boolean, integer, index } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),

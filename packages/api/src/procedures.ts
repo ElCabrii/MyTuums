@@ -50,20 +50,18 @@ type SessionUser = NonNullable<Context["session"]>["user"];
  * `rateLimitCapability` below.
  */
 export function rateLimit(policy: RateLimitPolicy) {
-  return os
-    .$context<Context & { user: SessionUser }>()
-    .middleware(({ context, next }) => {
-      const result = context.rateLimiter.consume(`${policy.name}:user:${context.user.id}`, policy);
+  return os.$context<Context & { user: SessionUser }>().middleware(({ context, next }) => {
+    const result = context.rateLimiter.consume(`${policy.name}:user:${context.user.id}`, policy);
 
-      if (!result.allowed) {
-        throw new ORPCError("TOO_MANY_REQUESTS", {
-          message: "You're doing that too fast. Try again in a moment.",
-          data: { retryAfterSeconds: result.retryAfterSeconds },
-        });
-      }
+    if (!result.allowed) {
+      throw new ORPCError("TOO_MANY_REQUESTS", {
+        message: "You're doing that too fast. Try again in a moment.",
+        data: { retryAfterSeconds: result.retryAfterSeconds },
+      });
+    }
 
-      return next();
-    });
+    return next();
+  });
 }
 
 /**

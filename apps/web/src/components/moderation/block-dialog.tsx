@@ -49,7 +49,7 @@ function BlockDialogBody({ target }: { target: { userId: string; handle: string 
       </DialogHeader>
       <div className="px-6 pb-6">
         {block.isError && (
-          <p role="alert" className="text-xs text-destructive mb-2">
+          <p role="alert" className="text-destructive mb-2 text-xs">
             {m.moderation_block_error()}
           </p>
         )}

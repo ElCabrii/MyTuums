@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { APPEAL_TOKEN_TTL_MS, createAppealTokenSigner, type AppealTokenPayload } from "./appeal-token.js";
+import {
+  APPEAL_TOKEN_TTL_MS,
+  createAppealTokenSigner,
+  type AppealTokenPayload,
+} from "./appeal-token.js";
 
 const SECRET = "test-secret-with-at-least-32-chars-1234";
 
@@ -122,8 +126,14 @@ describe("createAppealTokenSigner", () => {
 
     it("rejects a token at the TTL boundary and beyond — the expiry check is `iat + TTL <= now`", () => {
       const { sign, verify } = createAppealTokenSigner(SECRET);
-      const atBoundary = sign({ ...payload(), iat: Math.floor((now - APPEAL_TOKEN_TTL_MS) / 1000) });
-      const expired = sign({ ...payload(), iat: Math.floor((now - APPEAL_TOKEN_TTL_MS - 10_000) / 1000) });
+      const atBoundary = sign({
+        ...payload(),
+        iat: Math.floor((now - APPEAL_TOKEN_TTL_MS) / 1000),
+      });
+      const expired = sign({
+        ...payload(),
+        iat: Math.floor((now - APPEAL_TOKEN_TTL_MS - 10_000) / 1000),
+      });
       expect(verify(atBoundary, now)).toBeNull();
       expect(verify(expired, now)).toBeNull();
     });

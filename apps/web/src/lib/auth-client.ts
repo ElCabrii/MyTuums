@@ -1,9 +1,5 @@
 import { createAuthClient } from "better-auth/react";
-import {
-  lastLoginMethodClient,
-  twoFactorClient,
-  usernameClient,
-} from "better-auth/client/plugins";
+import { lastLoginMethodClient, twoFactorClient, usernameClient } from "better-auth/client/plugins";
 import { passkeyClient } from "@better-auth/passkey/client";
 import type { WritableAtom } from "better-auth/react";
 
@@ -117,9 +113,8 @@ type SessionWithDeclaredFields = ReturnType<typeof useSession> & {
   } | null;
 };
 
-export const sessionStore = authClient.$store.atoms.session as WritableAtom<
-  SessionWithDeclaredFields
->;
+export const sessionStore = authClient.$store.atoms
+  .session as WritableAtom<SessionWithDeclaredFields>;
 
 /** Providers this app knows how to render, in display order. */
 const KNOWN_SOCIAL_PROVIDERS = [

@@ -195,7 +195,9 @@ async function walkAllQueuePages(
     cursor = page.nextCursor ?? undefined;
     pages += 1;
     if (pages > 500) {
-      throw new Error("walkAllQueuePages: exceeded 500 pages — pagination looks like it's looping.");
+      throw new Error(
+        "walkAllQueuePages: exceeded 500 pages — pagination looks like it's looping.",
+      );
     }
   } while (cursor);
   return keys;
@@ -216,7 +218,9 @@ async function walkAllAuditPages(context: Context, limit?: number): Promise<stri
     cursor = page.nextCursor ?? undefined;
     pages += 1;
     if (pages > 500) {
-      throw new Error("walkAllAuditPages: exceeded 500 pages — pagination looks like it's looping.");
+      throw new Error(
+        "walkAllAuditPages: exceeded 500 pages — pagination looks like it's looping.",
+      );
     }
   } while (cursor);
   return ids;
@@ -366,14 +370,20 @@ describe("report", () => {
         { targetType: "post", targetId: randomUUID(), reason: "spam" },
         { context: contextFor(a) },
       ),
-    ).rejects.toMatchObject({ code: "NOT_FOUND", message: "The thing you reported doesn't exist." });
+    ).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "The thing you reported doesn't exist.",
+    });
     await expect(
       call(
         appRouter.moderation.report,
         { targetType: "user", targetId: randomUUID(), reason: "spam" },
         { context: contextFor(a) },
       ),
-    ).rejects.toMatchObject({ code: "NOT_FOUND", message: "The thing you reported doesn't exist." });
+    ).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "The thing you reported doesn't exist.",
+    });
 
     await call(appRouter.moderation.block, { userId: b.id }, { context: contextFor(a) });
     await expect(
@@ -828,7 +838,11 @@ describe("queue", () => {
   it("rejects a malformed cursor", async () => {
     const mod = await moderatorUser();
     await expect(
-      call(appRouter.moderation.queue, { cursor: "%%%not-a-cursor%%%" }, { context: contextFor(mod) }),
+      call(
+        appRouter.moderation.queue,
+        { cursor: "%%%not-a-cursor%%%" },
+        { context: contextFor(mod) },
+      ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Malformed pagination cursor." });
   });
 });
@@ -1031,13 +1045,21 @@ describe("removePost and restorePost", () => {
     );
     expect(result).toEqual({ postId: postRow.id, removed: true });
 
-    const viewerFeed = await call(appRouter.post.list, { feed: "global" }, { context: contextFor(viewer) });
+    const viewerFeed = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(viewer) },
+    );
     const viewerItem = viewerFeed.items.find((p) => p.id === postRow.id);
     expect(viewerItem?.removed).toBe(true);
     expect(viewerItem?.content).toBeNull();
     expect(viewerItem?.removedReason).toBeNull();
 
-    const authorFeed = await call(appRouter.post.list, { feed: "global" }, { context: contextFor(author) });
+    const authorFeed = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(author) },
+    );
     const authorItem = authorFeed.items.find((p) => p.id === postRow.id);
     expect(authorItem?.removed).toBe(true);
     expect(authorItem?.content).toBeNull();
@@ -1133,7 +1155,11 @@ describe("removePost and restorePost", () => {
     const restoreAction = await latestAction("post_restored", "post", postRow.id);
     expect(restoreAction?.note).toBe("appeal won");
 
-    const feed = await call(appRouter.post.list, { feed: "global" }, { context: contextFor(author) });
+    const feed = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(author) },
+    );
     const item = feed.items.find((p) => p.id === postRow.id);
     expect(item?.removed).toBe(false);
     expect(item?.content).toBe("round trip");
@@ -1183,7 +1209,11 @@ describe("removePost and restorePost", () => {
     const mods = await Promise.all(Array.from({ length: 5 }, () => moderatorUser()));
     const results = await Promise.all(
       mods.map((mod) =>
-        call(appRouter.moderation.restorePost, { postId: postRow.id }, { context: contextFor(mod) }),
+        call(
+          appRouter.moderation.restorePost,
+          { postId: postRow.id },
+          { context: contextFor(mod) },
+        ),
       ),
     );
     expect(results).toHaveLength(mods.length);
@@ -1216,7 +1246,11 @@ describe("removePost and restorePost", () => {
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND", message: "This post doesn't exist." });
     await expect(
-      call(appRouter.moderation.restorePost, { postId: randomUUID() }, { context: contextFor(mod) }),
+      call(
+        appRouter.moderation.restorePost,
+        { postId: randomUUID() },
+        { context: contextFor(mod) },
+      ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
@@ -1391,12 +1425,11 @@ describe("banUser and unbanUser", () => {
     const victim = await createTestUser();
     const staff = await staffUser();
     await expect(
-      call(
-        appRouter.moderation.unbanUser,
-        { userId: victim.id },
-        { context: contextFor(staff) },
-      ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "This account isn't banned or suspended." });
+      call(appRouter.moderation.unbanUser, { userId: victim.id }, { context: contextFor(staff) }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This account isn't banned or suspended.",
+    });
   });
 
   it("unbanUser carries the same rank guard as the sentence — staff cannot lift an admin's ban on a staff peer", async () => {
@@ -1625,7 +1658,10 @@ describe("setRole, team, auditLog", () => {
         { userId: bob.id, role: "staff" },
         { context: contextFor(admin) },
       ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "This account already has that role." });
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This account already has that role.",
+    });
   });
 
   it("the promoted user's next session opens the moderator surface", async () => {
@@ -1800,7 +1836,10 @@ describe("appeal flow", () => {
         { token, reason: "replaying the same link" },
         { context: anonContext },
       ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "This appeal link has already been used." });
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This appeal link has already been used.",
+    });
 
     // The actor of the original action cannot review their own work.
     await expect(
@@ -1830,7 +1869,11 @@ describe("appeal flow", () => {
 
     // The case leaves the queue, and the author's feed shows the post again.
     expect(await walkAllQueuePages(contextFor(mod2), 1)).toHaveLength(0);
-    const feed = await call(appRouter.post.list, { feed: "global" }, { context: contextFor(author) });
+    const feed = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(author) },
+    );
     const item = feed.items.find((p) => p.id === postRow.id);
     expect(item?.removed).toBe(false);
     expect(item?.content).toBe("appeal me please");
@@ -1842,7 +1885,10 @@ describe("appeal flow", () => {
         { appealId: opened.appealId, outcome: "upheld" },
         { context: contextFor(mod2) },
       ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "This appeal has already been reviewed." });
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This appeal has already been reviewed.",
+    });
   });
 
   it("upholding leaves the action in force", async () => {
@@ -1896,7 +1942,10 @@ describe("appeal flow", () => {
         { token: appealLink(removal!.id, stranger.id), reason: "This link is not for me" },
         { context: anonContext },
       ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "This appeal link is no longer valid." });
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This appeal link is no longer valid.",
+    });
 
     const expired = appealLink(removal!.id, author.id, {
       iat: Math.floor(Date.now() / 1000) - 8 * 24 * 60 * 60,
@@ -1907,7 +1956,10 @@ describe("appeal flow", () => {
         { token: expired, reason: "This link is stale" },
         { context: anonContext },
       ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "This appeal link is invalid or has expired." });
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This appeal link is invalid or has expired.",
+    });
 
     await expect(
       call(
@@ -1915,7 +1967,10 @@ describe("appeal flow", () => {
         { token: "garbage-not-a-token", reason: "This link is nonsense" },
         { context: anonContext },
       ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "This appeal link is invalid or has expired." });
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This appeal link is invalid or has expired.",
+    });
   });
 
   it("an action that can't be appealed, or one already undone, is refused", async () => {
@@ -1980,7 +2035,10 @@ describe("appeal flow", () => {
         { token: appealLink(removal!.id, author.id), reason: "Second appeal" },
         { context: anonContext },
       ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "There's already an open appeal for this action." });
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "There's already an open appeal for this action.",
+    });
 
     await clearQueueFixtures();
   });
@@ -2048,7 +2106,11 @@ describe("appeal flow", () => {
     // governs the post's state, and overturning it would clear the NEWER
     // tombstone — the live-state currency check cannot see this, the action
     // log can.
-    await call(appRouter.moderation.restorePost, { postId: postRow.id }, { context: contextFor(mod) });
+    await call(
+      appRouter.moderation.restorePost,
+      { postId: postRow.id },
+      { context: contextFor(mod) },
+    );
     await call(
       appRouter.moderation.removePost,
       { postId: postRow.id, reason: "second offense" },
@@ -2189,7 +2251,10 @@ describe("appeal flow", () => {
         { reason: "No identifier at all" },
         { context: anonContext },
       ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Provide either an appeal link or the removed post." });
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Provide either an appeal link or the removed post.",
+    });
     await expect(
       call(
         appRouter.moderation.appealOpen,
@@ -2200,7 +2265,10 @@ describe("appeal flow", () => {
         },
         { context: anonContext },
       ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Provide either an appeal link or the removed post." });
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Provide either an appeal link or the removed post.",
+    });
 
     const author = await createTestUser();
     const postRow = await seedPostContent(author.id, "reason bounds");
@@ -2448,7 +2516,11 @@ describe("gates", () => {
       ),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(
-      call(appRouter.moderation.restorePost, { postId: postRow.id }, { context: contextFor(plain) }),
+      call(
+        appRouter.moderation.restorePost,
+        { postId: postRow.id },
+        { context: contextFor(plain) },
+      ),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(
       call(
@@ -2592,7 +2664,10 @@ function capturingDb(
  * planner's choice depends on the query's shape, not on parameterisation,
  * and the values are this test's own.
  */
-async function explainPlan(db: Database, query: { sql: string; params: unknown[] }): Promise<string> {
+async function explainPlan(
+  db: Database,
+  query: { sql: string; params: unknown[] },
+): Promise<string> {
   const literal = (value: unknown): string => {
     if (value === null) return "null";
     if (value instanceof Date) return `'${value.toISOString()}'`;

@@ -48,7 +48,13 @@ describe("INVERSE_ACTION", () => {
   });
 
   it("the non-appealable actions (restores, resolutions) have no inverse by construction", () => {
-    for (const code of ["post_restored", "user_unsuspended", "user_unbanned", "case_resolved", "appeal_resolved"]) {
+    for (const code of [
+      "post_restored",
+      "user_unsuspended",
+      "user_unbanned",
+      "case_resolved",
+      "appeal_resolved",
+    ]) {
       expect(Object.keys(INVERSE_ACTION)).not.toContain(code);
     }
   });

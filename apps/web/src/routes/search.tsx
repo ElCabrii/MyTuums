@@ -9,6 +9,7 @@ export const Route = createFileRoute("/search")({
    * trusted: anything that isn't a string is dropped, and the page renders
    * its "type something" prompt instead of a raw value.
    */
-  validateSearch: (search: Record<string, unknown>): { q?: string } =>
-    ({ ...(typeof search.q === "string" ? { q: search.q } : {}) }),
+  validateSearch: (search: Record<string, unknown>): { q?: string } => ({
+    ...(typeof search.q === "string" ? { q: search.q } : {}),
+  }),
 });

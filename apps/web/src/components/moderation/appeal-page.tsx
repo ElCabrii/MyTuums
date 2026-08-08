@@ -49,7 +49,7 @@ function AppealCard({ token, postId }: { token?: string; postId?: string }) {
     cardContent = (
       <>
         <h1 className="text-xl font-bold tracking-tight">{m.appeal_success_title()}</h1>
-        <p className="text-sm text-muted-foreground">{m.appeal_success_body()}</p>
+        <p className="text-muted-foreground text-sm">{m.appeal_success_body()}</p>
       </>
     );
   } else if (hasIdentifier && appealOpen.isError) {
@@ -63,11 +63,11 @@ function AppealCard({ token, postId }: { token?: string; postId?: string }) {
         {appealOpen.error instanceof ORPCError &&
         appealOpen.error.code === "UNAUTHORIZED" &&
         isSignedIn ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             {appealOpen.error?.message ?? m.appeal_error_body()}
           </p>
         ) : (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             {appealOpen.error instanceof ORPCError &&
             appealOpen.error.code === "UNAUTHORIZED" &&
             !isSignedIn ? (
@@ -78,7 +78,7 @@ function AppealCard({ token, postId }: { token?: string; postId?: string }) {
                 </Link>
               </>
             ) : (
-              appealOpen.error?.message ?? m.appeal_error_body()
+              (appealOpen.error?.message ?? m.appeal_error_body())
             )}
           </p>
         )}
@@ -88,7 +88,7 @@ function AppealCard({ token, postId }: { token?: string; postId?: string }) {
     cardContent = (
       <>
         <h1 className="text-xl font-bold tracking-tight">{m.appeal_title()}</h1>
-        <p className="text-sm text-muted-foreground">{m.appeal_subtitle()}</p>
+        <p className="text-muted-foreground text-sm">{m.appeal_subtitle()}</p>
         <div className="space-y-2 text-left">
           <label htmlFor="appeal-reason" className="text-sm font-medium">
             {m.appeal_field_reason()}
@@ -101,7 +101,7 @@ function AppealCard({ token, postId }: { token?: string; postId?: string }) {
             minLength={APPEAL_REASON_MIN_LENGTH}
             className="min-h-32"
           />
-          <p className="text-xs text-muted-foreground">{m.appeal_reason_hint()}</p>
+          <p className="text-muted-foreground text-xs">{m.appeal_reason_hint()}</p>
         </div>
         <Button
           className="w-full"
@@ -116,7 +116,7 @@ function AppealCard({ token, postId }: { token?: string; postId?: string }) {
     cardContent = (
       <>
         <h1 className="text-xl font-bold tracking-tight">{m.appeal_missing_title()}</h1>
-        <p className="text-sm text-muted-foreground">{m.appeal_missing_body()}</p>
+        <p className="text-muted-foreground text-sm">{m.appeal_missing_body()}</p>
         <Button nativeButton={false} render={<Link to="/" className="gap-1.5" />}>
           {m.common_back_to_home()}
         </Button>
@@ -126,7 +126,7 @@ function AppealCard({ token, postId }: { token?: string; postId?: string }) {
 
   return (
     <div className="container mx-auto max-w-md px-4 py-16">
-      <div className="rounded-3xl border border-border/50 bg-card/60 p-6 text-center shadow-2xl backdrop-blur-xl space-y-4 sm:p-8">
+      <div className="border-border/50 bg-card/60 space-y-4 rounded-3xl border p-6 text-center shadow-2xl backdrop-blur-xl sm:p-8">
         {cardContent}
       </div>
     </div>

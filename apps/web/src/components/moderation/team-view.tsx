@@ -61,13 +61,25 @@ export function TeamView() {
     >
       {members.map((member) => {
         const memberHandle = handleOf(member);
-        const canManage = member.id !== viewer?.id && roleRank(member.role ?? "user") < roleRank(viewerRole);
+        const canManage =
+          member.id !== viewer?.id && roleRank(member.role ?? "user") < roleRank(viewerRole);
         return (
-          <div key={member.id} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3">
-            <UserAvatar user={member} alt={member.name || memberHandle || m.user_unknown()} className="h-9 w-9" />
+          <div
+            key={member.id}
+            className="border-border bg-card flex items-center gap-3 rounded-xl border p-3"
+          >
+            <UserAvatar
+              user={member}
+              alt={member.name || memberHandle || m.user_unknown()}
+              className="h-9 w-9"
+            />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">{member.name || memberHandle || m.user_unknown()}</p>
-              {memberHandle && <p className="truncate text-xs text-muted-foreground">@{memberHandle}</p>}
+              <p className="truncate text-sm font-semibold">
+                {member.name || memberHandle || m.user_unknown()}
+              </p>
+              {memberHandle && (
+                <p className="text-muted-foreground truncate text-xs">@{memberHandle}</p>
+              )}
             </div>
             <Badge variant={member.role === "admin" ? "destructive" : "outline"}>
               {roleLabel(member.role ?? "user")}
@@ -78,7 +90,10 @@ export function TeamView() {
                 size="sm"
                 className="rounded-full"
                 onClick={() =>
-                  setOpenTarget({ userId: member.id, handle: memberHandle ?? member.username ?? m.user_unknown() })
+                  setOpenTarget({
+                    userId: member.id,
+                    handle: memberHandle ?? member.username ?? m.user_unknown(),
+                  })
                 }
               >
                 {m.moderation_team_change_role()}
@@ -105,11 +120,15 @@ function SetRoleDialog() {
   const viewerRole = useAtomValue(viewerRoleAtom);
   const setRole = useAtomValue(setRoleAtom);
   const [role, setRolePick] = useAtom(roleSelectAtom);
-  const grantable: readonly string[] =
-    viewerRole === "admin" ? ALL_ROLES : ["user", "moderator"];
+  const grantable: readonly string[] = viewerRole === "admin" ? ALL_ROLES : ["user", "moderator"];
 
   return (
-    <Dialog open={target !== null} onOpenChange={(next) => { if (!next) setOpenTarget(null); }}>
+    <Dialog
+      open={target !== null}
+      onOpenChange={(next) => {
+        if (!next) setOpenTarget(null);
+      }}
+    >
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{m.moderation_set_role_title({ handle: target?.handle ?? "" })}</DialogTitle>
@@ -132,7 +151,7 @@ function SetRoleDialog() {
             </SelectContent>
           </Select>
           {setRole.isError && (
-            <p role="alert" className="text-xs text-destructive">
+            <p role="alert" className="text-destructive text-xs">
               {setRole.error?.message ?? m.moderation_set_role_error()}
             </p>
           )}

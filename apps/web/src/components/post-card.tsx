@@ -39,13 +39,7 @@ type PostCardVariant = "feed" | "ancestor" | "focused";
  * like/reply actions — in the `feed`, `ancestor` or `focused` variants (see
  * `PostCardVariant`).
  */
-export function PostCard({
-  post,
-  variant = "feed",
-}: {
-  post: Post;
-  variant?: PostCardVariant;
-}) {
+export function PostCard({ post, variant = "feed" }: { post: Post; variant?: PostCardVariant }) {
   const navigate = useNavigate();
   const isSignedIn = useAtomValue(isSignedInAtom);
   const viewer = useAtomValue(viewerAtom);
@@ -94,7 +88,7 @@ export function PostCard({
     <UserAvatar
       user={post.author}
       alt={authorName}
-      className="h-10 w-10 bg-background"
+      className="bg-background h-10 w-10"
       fallbackClassName="bg-primary text-primary-foreground font-bold text-xs"
     />
   );
@@ -106,7 +100,7 @@ export function PostCard({
           <Link
             to="/@{$username}"
             params={{ username: authorHandle }}
-            className="shrink-0 rounded-full hover:opacity-90 transition-opacity"
+            className="shrink-0 rounded-full transition-opacity hover:opacity-90"
             onClick={(e) => e.stopPropagation()}
           >
             {authorAvatar}
@@ -114,8 +108,8 @@ export function PostCard({
         ) : (
           authorAvatar
         )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap mb-1">
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex flex-wrap items-center gap-1.5">
             {authorHandle ? (
               <Link
                 to="/@{$username}"
@@ -123,13 +117,13 @@ export function PostCard({
                 className="flex items-center gap-1.5 hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
-                <span className="font-bold text-sm text-foreground truncate">{authorName}</span>
-                <span className="text-xs text-muted-foreground">@{authorHandle}</span>
+                <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
+                <span className="text-muted-foreground text-xs">@{authorHandle}</span>
               </Link>
             ) : (
-              <span className="font-bold text-sm text-foreground truncate">{authorName}</span>
+              <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
             )}
-            <span className="text-xs text-muted-foreground">• {timestamp}</span>
+            <span className="text-muted-foreground text-xs">• {timestamp}</span>
 
             {/* Report / Block live in the shared dialogs mounted at the root
                 (identity atoms — see `atoms/moderation.ts`), so this menu only
@@ -146,7 +140,7 @@ export function PostCard({
                   // the card, the kebab must not let its click bubble there,
                   // or "More" would also navigate.
                   onClick={(e) => e.stopPropagation()}
-                  className="ml-auto flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  className="text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring ml-auto flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors outline-none focus-visible:ring-2"
                 >
                   <MoreHorizontal className="h-4 w-4" />
                 </DropdownMenuTrigger>
@@ -161,17 +155,30 @@ export function PostCard({
                   // its own click, see above).
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <DropdownMenuItem className="cursor-pointer" onClick={() => setReportDialog({ targetType: "post", targetId: post.id })}>
+                  <DropdownMenuItem
+                    className="cursor-pointer"
+                    onClick={() => setReportDialog({ targetType: "post", targetId: post.id })}
+                  >
                     {m.moderation_kebab_report_post()}
                   </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer" onClick={() => setReportDialog({ targetType: "user", targetId: post.author.id })}>
+                  <DropdownMenuItem
+                    className="cursor-pointer"
+                    onClick={() =>
+                      setReportDialog({ targetType: "user", targetId: post.author.id })
+                    }
+                  >
                     {m.moderation_kebab_report_author()}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="cursor-pointer"
                     variant="destructive"
-                    onClick={() => setBlockDialog({ userId: post.author.id, handle: authorHandle ?? m.user_unknown() })}
+                    onClick={() =>
+                      setBlockDialog({
+                        userId: post.author.id,
+                        handle: authorHandle ?? m.user_unknown(),
+                      })
+                    }
                   >
                     {m.moderation_kebab_block()}
                   </DropdownMenuItem>
@@ -184,10 +191,10 @@ export function PostCard({
             /* The stub. `removedReason` is author-only (the server nulls it
                 for everyone else), so its presence is also what gates the
                 appeal link — only the author can appeal from here. */
-            <div className="mb-3 space-y-1.5 rounded-lg border border-border/60 bg-muted/30 p-3">
-              <p className="text-sm text-muted-foreground">{m.moderation_post_removed_stub()}</p>
+            <div className="border-border/60 bg-muted/30 mb-3 space-y-1.5 rounded-lg border p-3">
+              <p className="text-muted-foreground text-sm">{m.moderation_post_removed_stub()}</p>
               {post.removedReason && (
-                <p className="text-sm text-foreground/80">
+                <p className="text-foreground/80 text-sm">
                   {m.moderation_post_removed_reason({ reason: post.removedReason })}
                 </p>
               )}
@@ -195,7 +202,7 @@ export function PostCard({
                 <Link
                   to="/appeal"
                   search={{ postId: post.id }}
-                  className="inline-block text-xs text-primary hover:underline"
+                  className="text-primary inline-block text-xs hover:underline"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {m.moderation_post_removed_appeal()}
@@ -204,7 +211,7 @@ export function PostCard({
             </div>
           ) : (
             <p
-              className={`text-foreground/90 whitespace-pre-line mb-3 leading-relaxed break-words ${
+              className={`text-foreground/90 mb-3 leading-relaxed break-words whitespace-pre-line ${
                 isFocused ? "text-base" : "text-sm"
               }`}
             >
@@ -215,43 +222,43 @@ export function PostCard({
           )}
 
           {!post.removed && (
-          <div className="flex items-center gap-6 max-w-md text-xs text-muted-foreground">
-            {/* Replying is a navigation, not a mutation — the composer lives
+            <div className="text-muted-foreground flex max-w-md items-center gap-6 text-xs">
+              {/* Replying is a navigation, not a mutation — the composer lives
                 on the thread page — so this is a link, and the focused post
                 (whose composer is directly below) degrades it to plain text
                 rather than linking to the page you are on. */}
-            {isFocused ? (
-              <span className="flex items-center gap-1.5">{replyContent}</span>
-            ) : (
-              <Link
-                to="/post/$postId"
-                params={{ postId: post.id }}
-                title={m.reply_to_post({ count: String(post.replyCount) })}
-                aria-label={m.reply_to_post({ count: String(post.replyCount) })}
-                className={replyLinkClass}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {replyContent}
-              </Link>
-            )}
+              {isFocused ? (
+                <span className="flex items-center gap-1.5">{replyContent}</span>
+              ) : (
+                <Link
+                  to="/post/$postId"
+                  params={{ postId: post.id }}
+                  title={m.reply_to_post({ count: String(post.replyCount) })}
+                  aria-label={m.reply_to_post({ count: String(post.replyCount) })}
+                  className={replyLinkClass}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {replyContent}
+                </Link>
+              )}
 
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleLike();
-              }}
-              aria-pressed={post.viewerHasLiked}
-              aria-label={
-                post.viewerHasLiked
-                  ? m.post_unlike({ count: String(post.likeCount) })
-                  : m.post_like({ count: String(post.likeCount) })
-              }
-              className={likeButtonClass}
-            >
-              {likeContent}
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleLike();
+                }}
+                aria-pressed={post.viewerHasLiked}
+                aria-label={
+                  post.viewerHasLiked
+                    ? m.post_unlike({ count: String(post.likeCount) })
+                    : m.post_like({ count: String(post.likeCount) })
+                }
+                className={likeButtonClass}
+              >
+                {likeContent}
+              </button>
+            </div>
           )}
         </div>
       </div>

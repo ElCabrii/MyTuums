@@ -40,10 +40,7 @@ const original = readFileSync(schemaPath, "utf8");
 // Drop whatever header is currently there, so re-running doesn't stack them.
 const body = original.slice(original.indexOf("import "));
 
-let patched = body.replace(
-  /timestamp\("([a-z_]+)"\)/g,
-  'timestamp("$1", { withTimezone: true })',
-);
+let patched = body.replace(/timestamp\("([a-z_]+)"\)/g, 'timestamp("$1", { withTimezone: true })');
 
 patched = HEADER + patched;
 

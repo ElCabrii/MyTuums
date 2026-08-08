@@ -3,11 +3,7 @@ import { call } from "@orpc/server";
 import { closeDb } from "@my-tuums/db";
 import { post, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-  SEARCH_PAGE_SIZE,
-  SEARCH_PAGE_SIZE_MAX,
-  SEARCH_QUERY_MAX_LENGTH,
-} from "./constants.js";
+import { SEARCH_PAGE_SIZE, SEARCH_PAGE_SIZE_MAX, SEARCH_QUERY_MAX_LENGTH } from "./constants.js";
 import type { Context } from "./context.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { appRouter } from "./router.js";
@@ -221,37 +217,30 @@ describe("search input validation", () => {
 });
 
 describe("search.typeahead", () => {
-  it(
-    "ranks username prefix matches above substring-only matches — even a newer one — and breaks ties deterministically",
-    async () => {
-      const viewer = await createTestUser();
-      // Direct inserts so the tie-break is fully controlled: alpha and albert
-      // share one instant (both prefix matches for "al"); beta matches only
-      // via its name (a substring) but is NEWER — ranking must still put it
-      // last, or the case expression isn't doing its job.
-      const old = new Date("2025-06-01T12:00:00.000Z");
-      const newer = new Date("2025-06-02T12:00:00.000Z");
-      const seeded = await seedUsers([
-        { username: "alpha", name: "Alpha", createdAt: old },
-        { username: "albert", name: "Albert", createdAt: old },
-        { username: "beta", name: "Alpha Fan", createdAt: newer },
-      ]);
+  it("ranks username prefix matches above substring-only matches — even a newer one — and breaks ties deterministically", async () => {
+    const viewer = await createTestUser();
+    // Direct inserts so the tie-break is fully controlled: alpha and albert
+    // share one instant (both prefix matches for "al"); beta matches only
+    // via its name (a substring) but is NEWER — ranking must still put it
+    // last, or the case expression isn't doing its job.
+    const old = new Date("2025-06-01T12:00:00.000Z");
+    const newer = new Date("2025-06-02T12:00:00.000Z");
+    const seeded = await seedUsers([
+      { username: "alpha", name: "Alpha", createdAt: old },
+      { username: "albert", name: "Albert", createdAt: old },
+      { username: "beta", name: "Alpha Fan", createdAt: newer },
+    ]);
 
-      const result = await call(
-        appRouter.search.typeahead,
-        { q: "al" },
-        { context: contextFor(viewer) },
-      );
+    const result = await call(
+      appRouter.search.typeahead,
+      { q: "al" },
+      { context: contextFor(viewer) },
+    );
 
-      // alpha/albert tie on the timestamp, so the id is the whole tie-break.
-      const prefixUsers = [seeded[0], seeded[1]].sort((a, b) => b.id.localeCompare(a.id));
-      expect(result.users.map((u) => u.id)).toEqual([
-        ...prefixUsers.map((u) => u.id),
-        seeded[2].id,
-      ]);
-    },
-    20_000,
-  );
+    // alpha/albert tie on the timestamp, so the id is the whole tie-break.
+    const prefixUsers = [seeded[0], seeded[1]].sort((a, b) => b.id.localeCompare(a.id));
+    expect(result.users.map((u) => u.id)).toEqual([...prefixUsers.map((u) => u.id), seeded[2].id]);
+  }, 20_000);
 
   it("caps users at 5 even when more match — the newest five win", async () => {
     const viewer = await createTestUser();
@@ -270,9 +259,7 @@ describe("search.typeahead", () => {
 
     expect(result.users).toHaveLength(5);
     // cap0 is the oldest — excluded by the cap, not by the filter.
-    const expected = seeded
-      .slice(1)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const expected = seeded.slice(1).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     expect(result.users.map((u) => u.id)).toEqual(expected.map((u) => u.id));
   });
 
@@ -344,11 +331,7 @@ describe("search.typeahead", () => {
     const root = await seedPostContent(author.id, `${tag} root`);
     await seedPostContent(author.id, `${tag} reply`, { parentId: root.id });
 
-    const posts = await call(
-      appRouter.search.posts,
-      { q: tag },
-      { context: contextFor(author) },
-    );
+    const posts = await call(appRouter.search.posts, { q: tag }, { context: contextFor(author) });
     expect(posts.items.map((p) => p.id)).toEqual([root.id]);
 
     const typeahead = await call(
@@ -392,54 +375,46 @@ describe("search.typeahead", () => {
 });
 
 describe("search.users", () => {
-  it(
-    "keyset walk never repeats or skips a row across every page",
-    async () => {
-      const viewer = await createTestUser();
-      const tag = uniqueTag();
-      const count = SEARCH_PAGE_SIZE * 2 + 7; // guarantees at least 3 pages at the default page size
-      const base = Date.now();
-      const seeded = await seedUsers(
-        Array.from({ length: count }, (_, i) => ({
-          username: `${tag}${i}`,
-          createdAt: new Date(base + i * 17),
-        })),
-      );
+  it("keyset walk never repeats or skips a row across every page", async () => {
+    const viewer = await createTestUser();
+    const tag = uniqueTag();
+    const count = SEARCH_PAGE_SIZE * 2 + 7; // guarantees at least 3 pages at the default page size
+    const base = Date.now();
+    const seeded = await seedUsers(
+      Array.from({ length: count }, (_, i) => ({
+        username: `${tag}${i}`,
+        createdAt: new Date(base + i * 17),
+      })),
+    );
 
-      const ids = await walkAllUserPages(tag, contextFor(viewer));
+    const ids = await walkAllUserPages(tag, contextFor(viewer));
 
-      expect(ids).toHaveLength(count);
-      expect(new Set(ids).size).toBe(count); // no duplicates
-      expect(new Set(ids)).toEqual(new Set(seeded.map((u) => u.id))); // exactly the seeded set
-    },
-    20_000,
-  );
+    expect(ids).toHaveLength(count);
+    expect(new Set(ids).size).toBe(count); // no duplicates
+    expect(new Set(ids)).toEqual(new Set(seeded.map((u) => u.id))); // exactly the seeded set
+  }, 20_000);
 
-  it(
-    "rows sharing a millisecond are still traversed exactly once — the silent-skip hazard posts.int.test.ts pins for posts, here on BetterAuth's text-id tie-break",
-    async () => {
-      const viewer = await createTestUser();
-      const tag = uniqueTag();
-      const tiedAt = new Date("2025-06-01T12:00:00.000Z");
-      const tieCount = SEARCH_PAGE_SIZE + 5; // more than a small page, all sharing one createdAt
-      const seeded = await seedUsers(
-        Array.from({ length: tieCount }, (_, i) => ({
-          username: `${tag}${i}`,
-          createdAt: tiedAt,
-        })),
-      );
+  it("rows sharing a millisecond are still traversed exactly once — the silent-skip hazard posts.int.test.ts pins for posts, here on BetterAuth's text-id tie-break", async () => {
+    const viewer = await createTestUser();
+    const tag = uniqueTag();
+    const tiedAt = new Date("2025-06-01T12:00:00.000Z");
+    const tieCount = SEARCH_PAGE_SIZE + 5; // more than a small page, all sharing one createdAt
+    const seeded = await seedUsers(
+      Array.from({ length: tieCount }, (_, i) => ({
+        username: `${tag}${i}`,
+        createdAt: tiedAt,
+      })),
+    );
 
-      // A small explicit limit forces the walk to cross the tied-timestamp
-      // boundary several times, which is where a lost fractional-millisecond
-      // cursor would silently drop every row in the current window.
-      const ids = await walkAllUserPages(tag, contextFor(viewer), 10);
+    // A small explicit limit forces the walk to cross the tied-timestamp
+    // boundary several times, which is where a lost fractional-millisecond
+    // cursor would silently drop every row in the current window.
+    const ids = await walkAllUserPages(tag, contextFor(viewer), 10);
 
-      expect(ids).toHaveLength(tieCount);
-      expect(new Set(ids).size).toBe(tieCount);
-      expect(new Set(ids)).toEqual(new Set(seeded.map((u) => u.id)));
-    },
-    20_000,
-  );
+    expect(ids).toHaveLength(tieCount);
+    expect(new Set(ids).size).toBe(tieCount);
+    expect(new Set(ids)).toEqual(new Set(seeded.map((u) => u.id)));
+  }, 20_000);
 
   it("nextCursor is null on the last page", async () => {
     const viewer = await createTestUser();
@@ -528,70 +503,58 @@ describe("search.users", () => {
 });
 
 describe("search.posts", () => {
-  it(
-    "keyset walk never repeats or skips a row across every page",
-    async () => {
-      const author = await createTestUser();
-      const tag = uniqueTag();
-      const count = SEARCH_PAGE_SIZE * 2 + 7;
-      const base = Date.now();
-      const seeded = await seedPostContentMany(author.id, count, tag, (i) => new Date(base + i * 17));
+  it("keyset walk never repeats or skips a row across every page", async () => {
+    const author = await createTestUser();
+    const tag = uniqueTag();
+    const count = SEARCH_PAGE_SIZE * 2 + 7;
+    const base = Date.now();
+    const seeded = await seedPostContentMany(author.id, count, tag, (i) => new Date(base + i * 17));
 
-      const ids = await walkAllPostPages(tag, contextFor(author));
+    const ids = await walkAllPostPages(tag, contextFor(author));
 
-      expect(ids).toHaveLength(count);
-      expect(new Set(ids).size).toBe(count);
-      expect(new Set(ids)).toEqual(new Set(seeded.map((p) => p.id)));
-    },
-    20_000,
-  );
+    expect(ids).toHaveLength(count);
+    expect(new Set(ids).size).toBe(count);
+    expect(new Set(ids)).toEqual(new Set(seeded.map((p) => p.id)));
+  }, 20_000);
 
-  it(
-    "rows sharing a millisecond are still traversed exactly once",
-    async () => {
-      const author = await createTestUser();
-      const tag = uniqueTag();
-      const tiedAt = new Date("2025-06-01T12:00:00.000Z");
-      const tieCount = SEARCH_PAGE_SIZE + 5;
-      const seeded = await seedPostContentMany(author.id, tieCount, tag, tiedAt);
+  it("rows sharing a millisecond are still traversed exactly once", async () => {
+    const author = await createTestUser();
+    const tag = uniqueTag();
+    const tiedAt = new Date("2025-06-01T12:00:00.000Z");
+    const tieCount = SEARCH_PAGE_SIZE + 5;
+    const seeded = await seedPostContentMany(author.id, tieCount, tag, tiedAt);
 
-      const ids = await walkAllPostPages(tag, contextFor(author), 10);
+    const ids = await walkAllPostPages(tag, contextFor(author), 10);
 
-      expect(ids).toHaveLength(tieCount);
-      expect(new Set(ids).size).toBe(tieCount);
-      expect(new Set(ids)).toEqual(new Set(seeded.map((p) => p.id)));
-    },
-    20_000,
-  );
+    expect(ids).toHaveLength(tieCount);
+    expect(new Set(ids).size).toBe(tieCount);
+    expect(new Set(ids)).toEqual(new Set(seeded.map((p) => p.id)));
+  }, 20_000);
 
-  it(
-    "a row inserted mid-walk never duplicates or drops a seeded row — the cursor is a position, not a snapshot",
-    async () => {
-      const author = await createTestUser();
-      const tag = uniqueTag();
-      const count = SEARCH_PAGE_SIZE * 2 + 7;
-      const base = Date.now();
-      const seeded = await seedPostContentMany(author.id, count, tag, (i) => new Date(base + i * 17));
+  it("a row inserted mid-walk never duplicates or drops a seeded row — the cursor is a position, not a snapshot", async () => {
+    const author = await createTestUser();
+    const tag = uniqueTag();
+    const count = SEARCH_PAGE_SIZE * 2 + 7;
+    const base = Date.now();
+    const seeded = await seedPostContentMany(author.id, count, tag, (i) => new Date(base + i * 17));
 
-      // First page at a small limit, then a matching row lands strictly
-      // *between* that page's boundary row and the rows the next page will
-      // return — the worst case for a cursor that had already walked past
-      // this point.
-      await call(appRouter.search.posts, { q: tag, limit: 10 }, { context: contextFor(author) });
-      const midWalk = await seedPostContent(author.id, `${tag} mid-walk`, {
-        createdAt: new Date(base + (count - 10) * 17 - 8),
-      });
+    // First page at a small limit, then a matching row lands strictly
+    // *between* that page's boundary row and the rows the next page will
+    // return — the worst case for a cursor that had already walked past
+    // this point.
+    await call(appRouter.search.posts, { q: tag, limit: 10 }, { context: contextFor(author) });
+    const midWalk = await seedPostContent(author.id, `${tag} mid-walk`, {
+      createdAt: new Date(base + (count - 10) * 17 - 8),
+    });
 
-      const ids = await walkAllPostPages(tag, contextFor(author), 10);
+    const ids = await walkAllPostPages(tag, contextFor(author), 10);
 
-      // The mid-walk row sorts inside the not-yet-visited range, so the walk
-      // must pick it up without disturbing the seeded rows.
-      expect(ids).toHaveLength(count + 1);
-      expect(new Set(ids).size).toBe(count + 1);
-      expect(new Set(ids)).toEqual(new Set([...seeded.map((p) => p.id), midWalk.id]));
-    },
-    20_000,
-  );
+    // The mid-walk row sorts inside the not-yet-visited range, so the walk
+    // must pick it up without disturbing the seeded rows.
+    expect(ids).toHaveLength(count + 1);
+    expect(new Set(ids).size).toBe(count + 1);
+    expect(new Set(ids)).toEqual(new Set([...seeded.map((p) => p.id), midWalk.id]));
+  }, 20_000);
 
   it("items match post.list's projection exactly — proof both go through postSelection", async () => {
     const author = await createTestUser();
@@ -631,11 +594,7 @@ describe("search.posts", () => {
 
     // The phrase exists ONLY in the removed post — a result here would prove
     // the searcher can probe removed content (the substring oracle).
-    const posts = await call(
-      appRouter.search.posts,
-      { q: tag },
-      { context: contextFor(stranger) },
-    );
+    const posts = await call(appRouter.search.posts, { q: tag }, { context: contextFor(stranger) });
     expect(posts.items).toEqual([]);
 
     const typeahead = await call(
@@ -688,32 +647,28 @@ describe("search viewer context", () => {
 });
 
 describe("search rate limiting", () => {
-  it(
-    "exhausting the search budget rejects further search calls while post.list still succeeds — namespaces don't share",
-    async () => {
-      const viewer = await createTestUser();
-      const tag = uniqueTag();
-      await seedPostContent(viewer.id, `${tag} content`);
+  it("exhausting the search budget rejects further search calls while post.list still succeeds — namespaces don't share", async () => {
+    const viewer = await createTestUser();
+    const tag = uniqueTag();
+    await seedPostContent(viewer.id, `${tag} content`);
 
-      // The whole search budget, burned through `search.users` — the cheapest
-      // of the three procedures, and proof that all three share one namespace.
-      const attempts = Array.from({ length: RATE_LIMITS.search.limit }, () =>
-        call(appRouter.search.users, { q: tag }, { context: contextFor(viewer) }),
-      );
-      await Promise.all(attempts);
+    // The whole search budget, burned through `search.users` — the cheapest
+    // of the three procedures, and proof that all three share one namespace.
+    const attempts = Array.from({ length: RATE_LIMITS.search.limit }, () =>
+      call(appRouter.search.users, { q: tag }, { context: contextFor(viewer) }),
+    );
+    await Promise.all(attempts);
 
-      await expect(
-        call(appRouter.search.users, { q: tag }, { context: contextFor(viewer) }),
-      ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
-      await expect(
-        call(appRouter.search.typeahead, { q: tag }, { context: contextFor(viewer) }),
-      ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    await expect(
+      call(appRouter.search.users, { q: tag }, { context: contextFor(viewer) }),
+    ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    await expect(
+      call(appRouter.search.typeahead, { q: tag }, { context: contextFor(viewer) }),
+    ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
 
-      // The read tier is a different namespace: a search abuser must not be
-      // able to take the feeds down with them.
-      const list = await call(appRouter.post.list, {}, { context: contextFor(viewer) });
-      expect(list.items).toBeDefined();
-    },
-    20_000,
-  );
+    // The read tier is a different namespace: a search abuser must not be
+    // able to take the feeds down with them.
+    const list = await call(appRouter.post.list, {}, { context: contextFor(viewer) });
+    expect(list.items).toBeDefined();
+  }, 20_000);
 });

@@ -19,28 +19,26 @@ export function UserRow({ user }: { user: UserSummary | SearchUser }) {
   const displayName = user.name || handle || m.user_unknown();
 
   return (
-    <div className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card shadow-sm hover:border-primary/30 transition-colors">
+    <div className="border-border bg-card hover:border-primary/30 flex items-center gap-3 rounded-xl border p-4 shadow-sm transition-colors">
       <UserAvatar
         user={user}
         alt={displayName}
-        className="h-11 w-11 bg-background shrink-0"
+        className="bg-background h-11 w-11 shrink-0"
         fallbackClassName="bg-primary text-primary-foreground font-bold text-xs"
       />
 
-      <div className="flex-1 min-w-0">
+      <div className="min-w-0 flex-1">
         {handle ? (
           <Link
             to="/@{$username}"
             params={{ username: handle }}
             className="block min-w-0 hover:underline"
           >
-            <span className="block font-bold text-sm text-foreground truncate">
-              {displayName}
-            </span>
-            <span className="block text-xs text-muted-foreground truncate">@{handle}</span>
+            <span className="text-foreground block truncate text-sm font-bold">{displayName}</span>
+            <span className="text-muted-foreground block truncate text-xs">@{handle}</span>
           </Link>
         ) : (
-          <span className="block font-bold text-sm text-foreground truncate">{displayName}</span>
+          <span className="text-foreground block truncate text-sm font-bold">{displayName}</span>
         )}
       </div>
 

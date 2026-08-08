@@ -73,62 +73,62 @@ function ReportDialogBody({ target }: { target: CaseRef }) {
         <DialogDescription>{m.moderation_report_choose()}</DialogDescription>
       </DialogHeader>
       <div className="space-y-4 px-6 pb-6">
-          <Select value={reason} onValueChange={(value) => setReason(value ?? "")}>
-            {/* The trigger's only text is the placeholder rendered inside the
+        <Select value={reason} onValueChange={(value) => setReason(value ?? "")}>
+          {/* The trigger's only text is the placeholder rendered inside the
                 combobox, which is content, not a label — without this the
                 picker would have no accessible name at all. */}
-            <SelectTrigger aria-label={m.moderation_report_choose()} className="w-full">
-              <SelectValue placeholder={m.moderation_report_choose()} />
-            </SelectTrigger>
-            <SelectContent>
-              {reasons.map((code) => (
-                <SelectItem key={code} value={code}>
-                  {reasonLabel(code)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SelectTrigger aria-label={m.moderation_report_choose()} className="w-full">
+            <SelectValue placeholder={m.moderation_report_choose()} />
+          </SelectTrigger>
+          <SelectContent>
+            {reasons.map((code) => (
+              <SelectItem key={code} value={code}>
+                {reasonLabel(code)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-          {report.isSuccess ? (
-            <p className="text-sm text-muted-foreground">{m.moderation_report_done()}</p>
-          ) : (
-            <>
-              {report.isError && (
-                <p role="alert" className="text-xs text-destructive">
-                  {m.moderation_report_error()}
-                </p>
-              )}
-              <Button
-                className="w-full"
-                disabled={!reason || report.isPending}
-                onClick={() => {
-                  if (!target) return;
-                  // Narrow the target onto one of the schema's discriminated
-                  // variants — each carries its own reason-code set (the same
-                  // literal-resolution the case family does). The value came
-                  // from the Select items, so the cast is the schema's own
-                  // union, not a coercion.
-                  const trimmed = reason.trim();
-                  if (target.targetType === "post") {
-                    report.mutate({
-                      targetType: "post",
-                      targetId: target.targetId,
-                      reason: trimmed as (typeof POST_REPORT_REASONS)[number],
-                    });
-                  } else {
-                    report.mutate({
-                      targetType: "user",
-                      targetId: target.targetId,
-                      reason: trimmed as (typeof USER_REPORT_REASONS)[number],
-                    });
-                  }
-                }}
-              >
-                {report.isPending ? m.moderation_report_submitting() : m.moderation_report_submit()}
-              </Button>
-            </>
-          )}
-        </div>
-      </DialogContent>
+        {report.isSuccess ? (
+          <p className="text-muted-foreground text-sm">{m.moderation_report_done()}</p>
+        ) : (
+          <>
+            {report.isError && (
+              <p role="alert" className="text-destructive text-xs">
+                {m.moderation_report_error()}
+              </p>
+            )}
+            <Button
+              className="w-full"
+              disabled={!reason || report.isPending}
+              onClick={() => {
+                if (!target) return;
+                // Narrow the target onto one of the schema's discriminated
+                // variants — each carries its own reason-code set (the same
+                // literal-resolution the case family does). The value came
+                // from the Select items, so the cast is the schema's own
+                // union, not a coercion.
+                const trimmed = reason.trim();
+                if (target.targetType === "post") {
+                  report.mutate({
+                    targetType: "post",
+                    targetId: target.targetId,
+                    reason: trimmed as (typeof POST_REPORT_REASONS)[number],
+                  });
+                } else {
+                  report.mutate({
+                    targetType: "user",
+                    targetId: target.targetId,
+                    reason: trimmed as (typeof USER_REPORT_REASONS)[number],
+                  });
+                }
+              }}
+            >
+              {report.isPending ? m.moderation_report_submitting() : m.moderation_report_submit()}
+            </Button>
+          </>
+        )}
+      </div>
+    </DialogContent>
   );
 }

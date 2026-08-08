@@ -8,13 +8,7 @@
  */
 import type { CSSProperties } from "react";
 
-export function TwitchIcon({
-  className,
-  style,
-}: {
-  className?: string;
-  style?: CSSProperties;
-}) {
+export function TwitchIcon({ className, style }: { className?: string; style?: CSSProperties }) {
   return (
     <svg
       viewBox="0 0 2400 2800"

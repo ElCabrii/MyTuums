@@ -52,14 +52,14 @@ export function ComposerForm({
         if (!canSubmit) return;
         onSubmit(trimmed);
       }}
-      className="p-4 rounded-xl border border-border bg-card shadow-sm space-y-3"
+      className="border-border bg-card space-y-3 rounded-xl border p-4 shadow-sm"
     >
       {header}
 
       <div className="flex gap-3">
         <UserAvatar
           user={author}
-          className="h-10 w-10 bg-background"
+          className="bg-background h-10 w-10"
           fallbackClassName="bg-primary text-primary-foreground font-bold text-xs"
         />
         <textarea
@@ -68,21 +68,21 @@ export function ComposerForm({
           value={value}
           onChange={(event) => onValueChange(event.target.value)}
           disabled={isPending}
-          className="w-full resize-none border-none bg-transparent p-0 text-sm focus:outline-none focus:ring-0 placeholder:text-muted-foreground disabled:opacity-60"
+          className="placeholder:text-muted-foreground w-full resize-none border-none bg-transparent p-0 text-sm focus:ring-0 focus:outline-none disabled:opacity-60"
         />
       </div>
 
       {errorMessage && (
         <div
           role="alert"
-          className="flex items-start gap-2 rounded-lg bg-destructive/10 border border-destructive/20 p-2.5 text-xs text-destructive"
+          className="bg-destructive/10 border-destructive/20 text-destructive flex items-start gap-2 rounded-lg border p-2.5 text-xs"
         >
-          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{errorMessage}</span>
         </div>
       )}
 
-      <div className="flex items-center justify-between border-t border-border pt-3">
+      <div className="border-border flex items-center justify-between border-t pt-3">
         <span
           className={`text-xs tabular-nums ${
             isTooLong

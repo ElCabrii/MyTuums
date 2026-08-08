@@ -78,7 +78,9 @@ for (const user of FIXTURE_USERS) {
     // row), the failure would otherwise surface as confusing FORBIDDEN
     // errors in moderation.spec.ts instead of here at setup.
     const session = await request.get(`${E2E.webUrl}/api/auth/get-session`);
-    expect(session.ok(), `get-session should succeed once signed in as ${user.username}`).toBe(true);
+    expect(session.ok(), `get-session should succeed once signed in as ${user.username}`).toBe(
+      true,
+    );
     const body = (await session.json()) as { user?: { username?: string; role?: string } } | null;
     expect(body?.user?.username, `session user should be ${user.username}`).toBe(user.username);
     if (user.username === ALICE.username) {

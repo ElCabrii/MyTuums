@@ -34,9 +34,7 @@ export const profileEditValidationAtom = atom((get) => {
 });
 
 /** Characters left in the bio, for the counter under the field. */
-export const bioRemainingAtom = atom(
-  (get) => BIO_MAX_LENGTH - get(profileBioDraftAtom).length,
-);
+export const bioRemainingAtom = atom((get) => BIO_MAX_LENGTH - get(profileBioDraftAtom).length);
 
 /**
  * Which image slot has an upload in flight, or null.
@@ -170,25 +168,22 @@ export const uploadImageAtom = atom(
  * Removes an image slot — avatar or banner — then refreshes the session and
  * the cached profile so the header and the profile page agree immediately.
  */
-export const removeImageAtom = atom(
-  null,
-  async (_get, set, kind: ImageKind): Promise<boolean> => {
-    set(authErrorAtom, null);
-    set(imageUploadingAtom, kind);
-    try {
-      await client.user.removeImage({ kind });
+export const removeImageAtom = atom(null, async (_get, set, kind: ImageKind): Promise<boolean> => {
+  set(authErrorAtom, null);
+  set(imageUploadingAtom, kind);
+  try {
+    await client.user.removeImage({ kind });
 
-      await refreshSession();
-      set(invalidateOwnProfileAtom);
-      return true;
-    } catch (err) {
-      set(authErrorAtom, messageForUploadError(err));
-      return false;
-    } finally {
-      set(imageUploadingAtom, null);
-    }
-  },
-);
+    await refreshSession();
+    set(invalidateOwnProfileAtom);
+    return true;
+  } catch (err) {
+    set(authErrorAtom, messageForUploadError(err));
+    return false;
+  } finally {
+    set(imageUploadingAtom, null);
+  }
+});
 
 /**
  * Turns whatever went wrong into copy.

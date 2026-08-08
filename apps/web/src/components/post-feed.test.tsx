@@ -37,9 +37,12 @@ describe("PostFeed", () => {
     const queryClient = createTestQueryClient();
     await seedInfiniteError(queryClient, postListQueryKey(), "Could not load posts.");
 
-    await renderWithProviders(<PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />, {
-      queryClient,
-    });
+    await renderWithProviders(
+      <PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />,
+      {
+        queryClient,
+      },
+    );
 
     // `findByRole`, not `getByRole`: `atomWithInfiniteQuery`'s value only
     // reflects the query observer's CURRENT result once its subscription has
@@ -79,9 +82,12 @@ describe("PostFeed", () => {
       { items: [second], nextCursor: null },
     ]);
 
-    await renderWithProviders(<PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />, {
-      queryClient,
-    });
+    await renderWithProviders(
+      <PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />,
+      {
+        queryClient,
+      },
+    );
 
     expect(screen.getByText("First post")).toBeInTheDocument();
     expect(screen.getByText("Second post")).toBeInTheDocument();
@@ -90,17 +96,23 @@ describe("PostFeed", () => {
   it("shows Load more only when there is a next page", async () => {
     const withNextPage = createTestQueryClient();
     seedPostListPages(withNextPage, [{ items: [makePost()], nextCursor: "cursor-1" }]);
-    const more = await renderWithProviders(<PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />, {
-      queryClient: withNextPage,
-    });
+    const more = await renderWithProviders(
+      <PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />,
+      {
+        queryClient: withNextPage,
+      },
+    );
     expect(screen.getByRole("button", { name: m.common_load_more() })).toBeInTheDocument();
     more.unmount();
 
     const withoutNextPage = createTestQueryClient();
     seedPostListPages(withoutNextPage, [{ items: [makePost()], nextCursor: null }]);
-    await renderWithProviders(<PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />, {
-      queryClient: withoutNextPage,
-    });
+    await renderWithProviders(
+      <PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />,
+      {
+        queryClient: withoutNextPage,
+      },
+    );
     expect(screen.queryByRole("button", { name: m.common_load_more() })).not.toBeInTheDocument();
   });
 });

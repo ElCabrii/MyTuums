@@ -48,9 +48,7 @@ describe("parseEnv", () => {
       ["DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET"],
       ["TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET"],
     ])("rejects %s without %s", (idKey, secretKey) => {
-      expect(() => parseEnv({ ...required, [idKey]: "id" })).toThrow(
-        secretKey,
-      );
+      expect(() => parseEnv({ ...required, [idKey]: "id" })).toThrow(secretKey);
     });
 
     it.each([
@@ -92,20 +90,16 @@ describe("parseEnv", () => {
   describe("AUTH_RATE_LIMIT", () => {
     it("is optional and accepts only true/false", () => {
       expect(parseEnv({ ...required }).AUTH_RATE_LIMIT).toBeUndefined();
-      expect(
-        parseEnv({ ...required, AUTH_RATE_LIMIT: "false" }).AUTH_RATE_LIMIT,
-      ).toBe("false");
-      expect(() =>
-        parseEnv({ ...required, AUTH_RATE_LIMIT: "off" }),
-      ).toThrow();
+      expect(parseEnv({ ...required, AUTH_RATE_LIMIT: "false" }).AUTH_RATE_LIMIT).toBe("false");
+      expect(() => parseEnv({ ...required, AUTH_RATE_LIMIT: "off" })).toThrow();
     });
   });
 
   describe("pre-existing required variables", () => {
     it("still rejects a short BETTER_AUTH_SECRET", () => {
-      expect(() =>
-        parseEnv({ ...required, BETTER_AUTH_SECRET: "too-short" }),
-      ).toThrow("BETTER_AUTH_SECRET");
+      expect(() => parseEnv({ ...required, BETTER_AUTH_SECRET: "too-short" })).toThrow(
+        "BETTER_AUTH_SECRET",
+      );
     });
 
     it("still rejects a missing DATABASE_URL", () => {

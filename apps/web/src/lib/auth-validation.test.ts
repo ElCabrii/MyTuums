@@ -136,29 +136,64 @@ describe("validateRegister", () => {
     const cases: readonly (readonly [string, RegisterFields, string])[] = [
       [
         "empty username beats everything",
-        { username: "", name: "", email: "bad", password: "1", confirmPassword: "2", dateOfBirth: "" },
+        {
+          username: "",
+          name: "",
+          email: "bad",
+          password: "1",
+          confirmPassword: "2",
+          dateOfBirth: "",
+        },
         USERNAME_REQUIRED,
       ],
       [
         "username length beats charset, name and email",
         // Too short AND invalid characters.
-        { username: "a!", name: "", email: "bad", password: "1", confirmPassword: "2", dateOfBirth: "" },
+        {
+          username: "a!",
+          name: "",
+          email: "bad",
+          password: "1",
+          confirmPassword: "2",
+          dateOfBirth: "",
+        },
         USERNAME_LENGTH,
       ],
       [
         "username charset beats name and email",
         // Right length, wrong characters.
-        { username: "has space", name: "", email: "bad", password: "1", confirmPassword: "2", dateOfBirth: "" },
+        {
+          username: "has space",
+          name: "",
+          email: "bad",
+          password: "1",
+          confirmPassword: "2",
+          dateOfBirth: "",
+        },
         USERNAME_CHARS,
       ],
       [
         "display name beats email and password",
-        { username: "alice", name: "", email: "bad", password: "1", confirmPassword: "2", dateOfBirth: "" },
+        {
+          username: "alice",
+          name: "",
+          email: "bad",
+          password: "1",
+          confirmPassword: "2",
+          dateOfBirth: "",
+        },
         NAME_REQUIRED,
       ],
       [
         "email beats password length and mismatch",
-        { username: "alice", name: "Alice", email: "bad", password: "1", confirmPassword: "2", dateOfBirth: "" },
+        {
+          username: "alice",
+          name: "Alice",
+          email: "bad",
+          password: "1",
+          confirmPassword: "2",
+          dateOfBirth: "",
+        },
         EMAIL_INVALID,
       ],
       [
@@ -217,7 +252,9 @@ describe("validateLogin", () => {
     expect(validateLogin({ identifier: "   ", password: "whatever" })).toBe(
       "Please enter your username or email address.",
     );
-    expect(validateLogin({ identifier: "alice", password: "" })).toBe("Please enter your password.");
+    expect(validateLogin({ identifier: "alice", password: "" })).toBe(
+      "Please enter your password.",
+    );
   });
 });
 
@@ -267,8 +304,7 @@ describe("validateResetPassword", () => {
         // Length beats mismatch — the rule a person would fix first surfaces first.
         [["short", "different"], PASSWORD_LENGTH],
       ] as const,
-      ([newPassword, confirmPassword]) =>
-        validateResetPassword({ newPassword, confirmPassword }),
+      ([newPassword, confirmPassword]) => validateResetPassword({ newPassword, confirmPassword }),
     );
   });
 
@@ -278,9 +314,9 @@ describe("validateResetPassword", () => {
     expect(
       validateResetPassword({ newPassword: eightSpaces, confirmPassword: eightSpaces }),
     ).toBeNull();
-    expect(
-      validateResetPassword({ newPassword: "password1", confirmPassword: "password1 " }),
-    ).toBe(PASSWORD_MISMATCH);
+    expect(validateResetPassword({ newPassword: "password1", confirmPassword: "password1 " })).toBe(
+      PASSWORD_MISMATCH,
+    );
   });
 });
 

@@ -17,14 +17,14 @@ export function ProfileMessage({
   children: ReactNode;
 }) {
   return (
-    <div className="container max-w-md mx-auto py-16 px-4">
-      <div className="rounded-xl border bg-card p-6 shadow-sm text-center">
-        <div className="flex justify-center mb-4">
-          <div className="p-3 rounded-full bg-primary/10 text-primary">
+    <div className="container mx-auto max-w-md px-4 py-16">
+      <div className="bg-card rounded-xl border p-6 text-center shadow-sm">
+        <div className="mb-4 flex justify-center">
+          <div className="bg-primary/10 text-primary rounded-full p-3">
             <Icon className="h-8 w-8" />
           </div>
         </div>
-        <h1 className="text-2xl font-bold tracking-tight mb-1">{title}</h1>
+        <h1 className="mb-1 text-2xl font-bold tracking-tight">{title}</h1>
         {children}
       </div>
     </div>

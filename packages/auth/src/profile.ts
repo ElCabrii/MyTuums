@@ -45,8 +45,7 @@ export const LOCALE_PREFERENCE_INVALID_MESSAGE = "Please choose a valid language
 export const MANAGED_IMAGE_MESSAGE = "Profile images are set by uploading a file.";
 
 /** Absent in the sense every one of these rules means: nothing to check. */
-const isBlank = (value: unknown): boolean =>
-  value === undefined || value === null || value === "";
+const isBlank = (value: unknown): boolean => value === undefined || value === null || value === "";
 
 /**
  * `image` and `bannerImage` hold one of exactly two things: an absolute URL an

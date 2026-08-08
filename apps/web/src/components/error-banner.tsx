@@ -19,15 +19,15 @@ export function ErrorBanner({
   return (
     <div
       role="alert"
-      className={`flex items-start gap-3 rounded-2xl bg-destructive/10 border border-destructive/20 p-4 text-sm text-destructive ${
+      className={`bg-destructive/10 border-destructive/20 text-destructive flex items-start gap-3 rounded-2xl border p-4 text-sm ${
         className ?? ""
       }`}
     >
-      <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+      <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
       {title ? (
         <div>
           <p className="font-medium">{title}</p>
-          <p className="text-destructive/90 text-xs mt-0.5">{message}</p>
+          <p className="text-destructive/90 mt-0.5 text-xs">{message}</p>
         </div>
       ) : (
         <p>{message}</p>

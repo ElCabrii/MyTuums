@@ -45,7 +45,9 @@ test.describe("follow", () => {
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole("link", { name: new RegExp(follower.username, "i") })).toBeVisible();
+    await expect(
+      dialog.getByRole("link", { name: new RegExp(follower.username, "i") }),
+    ).toBeVisible();
     // A modal, not a route — the counts are dialog triggers, not links.
     expect(page.url()).toBe(startUrl);
 
@@ -65,7 +67,10 @@ test.describe("follow", () => {
     if (!targetPost) throw new Error("seedPosts returned no row");
 
     await page.goto("/");
-    await page.getByRole("group", { name: "Feed" }).getByRole("button", { name: "Following" }).click();
+    await page
+      .getByRole("group", { name: "Feed" })
+      .getByRole("button", { name: "Following" })
+      .click();
     await expect(page.getByText(targetPost.content, { exact: true })).not.toBeVisible();
 
     await page.goto(`/@${target.username}`);
@@ -77,7 +82,10 @@ test.describe("follow", () => {
     // no way to synthesise that client-side, so the feed has to actually
     // refetch rather than just patch a cached copy.
     await page.goto("/");
-    await page.getByRole("group", { name: "Feed" }).getByRole("button", { name: "Following" }).click();
+    await page
+      .getByRole("group", { name: "Feed" })
+      .getByRole("button", { name: "Following" })
+      .click();
     await expect(page.getByText(targetPost.content, { exact: true })).toBeVisible();
   });
 
@@ -103,7 +111,10 @@ test.describe("follow", () => {
     await expect(followersTrigger).toContainText("0");
 
     await page.goto("/");
-    await page.getByRole("group", { name: "Feed" }).getByRole("button", { name: "Following" }).click();
+    await page
+      .getByRole("group", { name: "Feed" })
+      .getByRole("button", { name: "Following" })
+      .click();
     await expect(page.getByText(targetPost.content, { exact: true })).not.toBeVisible();
   });
 });

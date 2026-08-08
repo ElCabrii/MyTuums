@@ -56,10 +56,10 @@ function AccountSettingsPage() {
   if (!viewer) return null;
 
   return (
-    <div className="container max-w-2xl mx-auto px-4 py-12 space-y-6">
+    <div className="container mx-auto max-w-2xl space-y-6 px-4 py-12">
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">{m.settings_title()}</h1>
-        <p className="text-sm text-muted-foreground">{m.settings_subtitle()}</p>
+        <p className="text-muted-foreground text-sm">{m.settings_subtitle()}</p>
       </div>
 
       {/* One banner for the whole page. Every section's action atom writes the

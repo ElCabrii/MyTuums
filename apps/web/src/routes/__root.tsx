@@ -6,11 +6,7 @@ import { Footer } from "@/components/footer";
 import { NotFoundPage } from "@/components/not-found-page";
 import { themeClassEffect } from "@/atoms/theme";
 import { localeDocumentEffect, localePreferenceEffect } from "@/atoms/locale";
-import {
-  isSignedInAtom,
-  sessionSettledAtom,
-  sessionSettledEffect,
-} from "@/atoms/session";
+import { isSignedInAtom, sessionSettledAtom, sessionSettledEffect } from "@/atoms/session";
 import { useRequireHandle } from "@/hooks/use-require-handle";
 import { useRequireSignedIn } from "@/hooks/use-require-signed-in";
 
@@ -23,10 +19,10 @@ import { useRequireSignedIn } from "@/hooks/use-require-signed-in";
 // paint. The named exports are mapped to `default` so the dynamic modules can
 // render as lazy components.
 const ReportDialog = lazy(() =>
-  import("@/components/moderation/report-dialog").then((mod) => ({ default: mod.ReportDialog }))
+  import("@/components/moderation/report-dialog").then((mod) => ({ default: mod.ReportDialog })),
 );
 const BlockDialog = lazy(() =>
-  import("@/components/moderation/block-dialog").then((mod) => ({ default: mod.BlockDialog }))
+  import("@/components/moderation/block-dialog").then((mod) => ({ default: mod.BlockDialog })),
 );
 
 export const Route = createRootRoute({
@@ -81,7 +77,7 @@ function RootLayout() {
   // header.tsx, which narrows `viewerAtom` rather than branching on it.
 
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground antialiased">
+    <div className="bg-background text-foreground flex min-h-screen flex-col antialiased">
       {signedIn && <Header />}
       <main className="flex-1">
         <Outlet />

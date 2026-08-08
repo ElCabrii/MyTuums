@@ -56,9 +56,7 @@ type SignInArgs = { identifier: string; password: string };
  * `lib/auth-client.ts` for why the plugin's own redirect options aren't used.
  */
 export type SignInOutcome =
-  | { status: "signed-in" }
-  | { status: "two-factor"; methods: string[] }
-  | { status: "failed" };
+  { status: "signed-in" } | { status: "two-factor"; methods: string[] } | { status: "failed" };
 
 /** What BetterAuth returns in place of a session when it issues a 2FA challenge. */
 interface TwoFactorChallengeResponse {
@@ -232,51 +230,50 @@ type SignUpArgs = {
  * Registers a new account with email and password.
  * Trims username/name/email the same way `lib/auth-validation.ts` checks them; the password is sent as typed.
  */
-export const signUpAtom = atom(
-  null,
-  async (_get, set, fields: SignUpArgs): Promise<boolean> => {
-    set(authErrorAtom, null);
-    set(authPendingAtom, true);
-    try {
-      const res = await authClient.signUp.email({
-        email: fields.email.trim(),
-        password: fields.password,
-        name: fields.name.trim(),
-        username: fields.username.trim(),
-        // The server accepts this field (see user.additionalFields in
-        // packages/auth/src/index.ts); better-auth 1.6.25's client types just
-        // don't surface it on the sign-up body, so the spread carries it past
-        // the type boundary — see lib/auth-client.ts's sessionStore cast.
-        ...({ dateOfBirth: dateOfBirthToIso(fields.dateOfBirth) } as Record<string, string>),
-      });
+export const signUpAtom = atom(null, async (_get, set, fields: SignUpArgs): Promise<boolean> => {
+  set(authErrorAtom, null);
+  set(authPendingAtom, true);
+  try {
+    const res = await authClient.signUp.email({
+      email: fields.email.trim(),
+      password: fields.password,
+      name: fields.name.trim(),
+      username: fields.username.trim(),
+      // The server accepts this field (see user.additionalFields in
+      // packages/auth/src/index.ts); better-auth 1.6.25's client types just
+      // don't surface it on the sign-up body, so the spread carries it past
+      // the type boundary — see lib/auth-client.ts's sessionStore cast.
+      ...({ dateOfBirth: dateOfBirthToIso(fields.dateOfBirth) } as Record<string, string>),
+    });
 
-      if (res.error) {
-        set(authErrorAtom, res.error.message || m.common_something_went_wrong());
-        return false;
-      }
-
-      // Raised here rather than in the route because this is the one path that
-      // produces an account with a password, which `twoFactor.enable` requires
-      // — a social sign-up never runs this atom and so never sees the offer.
-      // `useRedirectWhenSignedIn` reads the flag and routes accordingly; this
-      // still does not navigate. See atoms/onboarding.ts.
-      set(offerTwoFactorAtom, true);
-      return true;
-    } catch (err) {
-      console.error("Registration error:", err);
-      set(authErrorAtom, m.common_something_went_wrong());
+    if (res.error) {
+      set(authErrorAtom, res.error.message || m.common_something_went_wrong());
       return false;
-    } finally {
-      set(authPendingAtom, false);
     }
-  },
-);
+
+    // Raised here rather than in the route because this is the one path that
+    // produces an account with a password, which `twoFactor.enable` requires
+    // — a social sign-up never runs this atom and so never sees the offer.
+    // `useRedirectWhenSignedIn` reads the flag and routes accordingly; this
+    // still does not navigate. See atoms/onboarding.ts.
+    set(offerTwoFactorAtom, true);
+    return true;
+  } catch (err) {
+    console.error("Registration error:", err);
+    set(authErrorAtom, m.common_something_went_wrong());
+    return false;
+  } finally {
+    set(authPendingAtom, false);
+  }
+});
 
 /** Sweeps every family's `remove()` across all params it has ever created. */
-function clearFamily<Param>(family: { getParams(): Iterable<Param>; remove(p: Param): void }): void {
+function clearFamily<Param>(family: {
+  getParams(): Iterable<Param>;
+  remove(p: Param): void;
+}): void {
   for (const param of [...family.getParams()]) family.remove(param);
 }
-
 
 /**
  * Signs the viewer out and sweeps every viewer-dependent cache.
@@ -401,9 +398,7 @@ export const requestPasswordResetAtom = atom(
 
 /** What a password-reset attempt ended in; the route renders a panel per outcome. */
 export type ResetPasswordOutcome =
-  | { status: "success" }
-  | { status: "invalid-token" }
-  | { status: "failed" };
+  { status: "success" } | { status: "invalid-token" } | { status: "failed" };
 
 /**
  * Resets the password with a single-use token.

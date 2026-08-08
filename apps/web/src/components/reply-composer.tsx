@@ -33,20 +33,18 @@ export function ReplyComposer({
       }}
       isPending={createReply.isPending}
       errorMessage={
-        createReply.isError
-          ? createReply.error.message || m.reply_publish_error()
-          : null
+        createReply.isError ? createReply.error.message || m.reply_publish_error() : null
       }
       placeholder={m.reply_placeholder()}
       submitLabel={m.reply_action()}
       header={
         replyingTo ? (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-muted-foreground text-xs">
             {m.reply_replying_to()}{" "}
             <Link
               to="/@{$username}"
               params={{ username: replyingTo }}
-              className="text-link hover:underline font-medium"
+              className="text-link font-medium hover:underline"
             >
               @{replyingTo}
             </Link>

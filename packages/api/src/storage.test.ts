@@ -58,7 +58,9 @@ describe("signedGetUrl", () => {
 describe("secondsUntilWindowEnd", () => {
   it("counts down to the window boundary", () => {
     expect(secondsUntilWindowEnd(0)).toBe(MEDIA_SIGNING_WINDOW_MS / 1000);
-    expect(secondsUntilWindowEnd(MEDIA_SIGNING_WINDOW_MS / 2)).toBe(MEDIA_SIGNING_WINDOW_MS / 2 / 1000);
+    expect(secondsUntilWindowEnd(MEDIA_SIGNING_WINDOW_MS / 2)).toBe(
+      MEDIA_SIGNING_WINDOW_MS / 2 / 1000,
+    );
     expect(secondsUntilWindowEnd(MEDIA_SIGNING_WINDOW_MS - 1)).toBe(1);
   });
 });

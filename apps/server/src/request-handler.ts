@@ -30,9 +30,7 @@ export interface RequestHandlerDeps {
    * not need object storage, credentials or a network. The real implementation
    * is `createMediaResolver` in `@my-tuums/api`.
    */
-  resolveMediaUrl: (
-    key: string,
-  ) => Promise<{ url: string; cacheSeconds: number } | null>;
+  resolveMediaUrl: (key: string) => Promise<{ url: string; cacheSeconds: number } | null>;
   /**
    * Serves the built web app, when this deployment bundles it.
    *
@@ -84,15 +82,13 @@ const SESSION_COOKIE_NAME = "better-auth.session_token";
 
 function hasSessionCookie(cookieHeader: string | undefined): boolean {
   return (
-    cookieHeader
-      ?.split(";")
-      .some((part) => {
-        const name = part.trim();
-        return (
-          name.startsWith(`${SESSION_COOKIE_NAME}=`) ||
-          name.startsWith(`__Secure-${SESSION_COOKIE_NAME}=`)
-        );
-      }) ?? false
+    cookieHeader?.split(";").some((part) => {
+      const name = part.trim();
+      return (
+        name.startsWith(`${SESSION_COOKIE_NAME}=`) ||
+        name.startsWith(`__Secure-${SESSION_COOKIE_NAME}=`)
+      );
+    }) ?? false
   );
 }
 
@@ -343,7 +339,10 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not found");
     } catch (error) {
-      console.error(`Unhandled error while handling ${req.method ?? "?"} ${req.url ?? "?"}:`, error);
+      console.error(
+        `Unhandled error while handling ${req.method ?? "?"} ${req.url ?? "?"}:`,
+        error,
+      );
 
       if (res.headersSent) {
         // Response already started; we cannot send a fresh status/body.

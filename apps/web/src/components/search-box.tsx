@@ -38,7 +38,7 @@ type BaseUiMergedEvent = SyntheticEvent & { preventBaseUIHandler?: () => void };
  */
 function destinationOf(
   row: SuggestionRowData,
-  query: string
+  query: string,
 ):
   | { to: "/@{$username}"; params: { username: string } }
   | { to: "/post/$postId"; params: { postId: string } }
@@ -112,7 +112,7 @@ function SuggestionRow({
     "aria-selected": isActive,
     className: cn(
       "flex items-center gap-3 px-2.5 py-2 rounded-lg cursor-pointer",
-      isActive && "bg-muted/60"
+      isActive && "bg-muted/60",
     ),
   };
 
@@ -134,12 +134,8 @@ function SuggestionRow({
           fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
         />
         <span className="min-w-0">
-          <span className="block truncate text-sm font-medium text-foreground">
-            {displayName}
-          </span>
-          <span className="block truncate text-xs text-muted-foreground">
-            @{handle}
-          </span>
+          <span className="text-foreground block truncate text-sm font-medium">{displayName}</span>
+          <span className="text-muted-foreground block truncate text-xs">@{handle}</span>
         </span>
       </Link>
     ) : (
@@ -150,9 +146,7 @@ function SuggestionRow({
           className="h-8 w-8 shrink-0"
           fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
         />
-        <span className="block truncate text-sm font-medium text-foreground">
-          {displayName}
-        </span>
+        <span className="text-foreground block truncate text-sm font-medium">{displayName}</span>
       </div>
     );
   }
@@ -174,10 +168,8 @@ function SuggestionRow({
           fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
         />
         <span className="min-w-0">
-          <span className="block truncate text-sm font-medium text-foreground">
-            {authorName}
-          </span>
-          <span className="block line-clamp-1 text-xs text-muted-foreground">
+          <span className="text-foreground block truncate text-sm font-medium">{authorName}</span>
+          <span className="text-muted-foreground line-clamp-1 block text-xs">
             {/* Null only for removed posts (see post-card.tsx). */}
             {row.post.content ?? ""}
           </span>
@@ -193,9 +185,9 @@ function SuggestionRow({
       {...rowProps}
       onMouseEnter={() => onSelect(index)}
       onClick={onDismiss}
-      className={cn(rowProps.className, "mt-1.5 border-t border-border/60 pt-1.5")}
+      className={cn(rowProps.className, "border-border/60 mt-1.5 border-t pt-1.5")}
     >
-      <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <Search className="text-muted-foreground h-4 w-4 shrink-0" />
       <span className="text-sm font-medium">{m.search_see_all()}</span>
     </Link>
   );
@@ -232,7 +224,7 @@ function SuggestionList({
 
   if (typeahead.isError) {
     return (
-      <div role="option" className="px-2.5 py-2 text-sm text-muted-foreground">
+      <div role="option" className="text-muted-foreground px-2.5 py-2 text-sm">
         {m.search_load_error()}
       </div>
     );
@@ -240,7 +232,7 @@ function SuggestionList({
 
   if (rows.length === 0) {
     return (
-      <div role="option" className="px-2.5 py-2 text-sm text-muted-foreground">
+      <div role="option" className="text-muted-foreground px-2.5 py-2 text-sm">
         {m.search_no_results({ query })}
       </div>
     );
@@ -295,7 +287,7 @@ function SearchField({
 
   return (
     <div className="relative">
-      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+      <Search className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
       <PopoverTrigger
         render={
           <Input
@@ -320,7 +312,7 @@ function SearchField({
             // cancel is hidden: it is unstylable (the native glyph shows up
             // in accent color and answers the cursor with a default arrow),
             // so the app draws the button it can style instead.
-            className="w-full pl-9 pr-9 bg-muted/50 focus-visible:bg-background [&::-webkit-search-cancel-button]:hidden"
+            className="bg-muted/50 focus-visible:bg-background w-full pr-9 pl-9 [&::-webkit-search-cancel-button]:hidden"
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
             onFocus={onFocus}
@@ -342,9 +334,9 @@ function SearchField({
             onClear("");
             inputRef.current?.focus();
           }}
-          className="absolute right-2 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-full cursor-pointer text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+          className="text-muted-foreground hover:bg-muted/60 hover:text-foreground absolute top-1/2 right-2 flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full transition-colors"
         >
-          <X className="h-3.5 w-3.5 pointer-events-none" />
+          <X className="pointer-events-none h-3.5 w-3.5" />
         </button>
       )}
     </div>
@@ -386,7 +378,7 @@ function SuggestionPopover(props: {
       // surface + backdrop blur behind a pseudo-element): the plain
       // `bg-popover` from the wrapper would render the panel opaque, which
       // reads as a different material than the rest of the navbar.
-      className="w-96 max-w-[calc(100vw-2rem)] p-1.5 gap-0.5 relative bg-popover/70 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-2xl before:backdrop-saturate-150 dark:ring-foreground/10"
+      className="bg-popover/70 dark:ring-foreground/10 relative w-96 max-w-[calc(100vw-2rem)] gap-0.5 p-1.5 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-2xl before:backdrop-saturate-150"
     >
       <SuggestionList {...props} />
     </PopoverContent>

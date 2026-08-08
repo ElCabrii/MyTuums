@@ -61,20 +61,20 @@ function ForgotPasswordPage() {
   };
 
   return (
-    <div className="container max-w-md mx-auto px-4 py-12">
+    <div className="container mx-auto max-w-md px-4 py-12">
       <PageCard className="space-y-6">
         {sent ? (
           <>
-            <div className="text-center space-y-2">
-              <CheckCircle2 className="h-8 w-8 mx-auto text-primary" />
+            <div className="space-y-2 text-center">
+              <CheckCircle2 className="text-primary mx-auto h-8 w-8" />
               <h1 className="text-2xl font-bold tracking-tight">
                 {m.auth_forgot_check_email_title()}
               </h1>
-              <p className="text-sm text-muted-foreground">{m.auth_forgot_check_email_hint()}</p>
+              <p className="text-muted-foreground text-sm">{m.auth_forgot_check_email_hint()}</p>
             </div>
 
             <Button
-              className="w-full h-11 text-base font-medium rounded-2xl gap-2"
+              className="h-11 w-full gap-2 rounded-2xl text-base font-medium"
               nativeButton={false}
               render={<Link to="/login" className="gap-2" />}
             >
@@ -84,10 +84,10 @@ function ForgotPasswordPage() {
           </>
         ) : (
           <>
-            <div className="text-center space-y-2">
-              <Mail className="h-8 w-8 mx-auto text-primary" />
+            <div className="space-y-2 text-center">
+              <Mail className="text-primary mx-auto h-8 w-8" />
               <h1 className="text-2xl font-bold tracking-tight">{m.auth_forgot_title()}</h1>
-              <p className="text-sm text-muted-foreground">{m.auth_forgot_subtitle()}</p>
+              <p className="text-muted-foreground text-sm">{m.auth_forgot_subtitle()}</p>
             </div>
 
             {error && (
@@ -98,19 +98,19 @@ function ForgotPasswordPage() {
               <div className="space-y-2">
                 <label
                   htmlFor="email"
-                  className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                  className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
                 >
                   {m.auth_field_email()}
                 </label>
                 <div className="relative">
-                  <Mail className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+                  <Mail className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
                   <Input
                     id="email"
                     type="email"
                     placeholder={m.auth_field_email_placeholder()}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10 h-10 bg-background/50"
+                    className="bg-background/50 h-10 pl-10"
                     autoComplete="email"
                     required
                   />
@@ -119,7 +119,7 @@ function ForgotPasswordPage() {
 
               <Button
                 type="submit"
-                className="w-full h-11 text-base font-medium rounded-2xl gap-2 mt-2"
+                className="mt-2 h-11 w-full gap-2 rounded-2xl text-base font-medium"
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (
@@ -136,8 +136,8 @@ function ForgotPasswordPage() {
               </Button>
             </form>
 
-            <div className="text-center text-xs text-muted-foreground pt-2 border-t border-border/40">
-              <Link to="/login" className="font-medium text-link hover:underline">
+            <div className="text-muted-foreground border-border/40 border-t pt-2 text-center text-xs">
+              <Link to="/login" className="text-link font-medium hover:underline">
                 {m.auth_forgot_back_to_login()}
               </Link>
             </div>

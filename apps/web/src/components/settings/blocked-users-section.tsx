@@ -26,14 +26,14 @@ export function BlockedUsersSection() {
       icon={<UserX className="h-5 w-5" />}
     >
       {blocked.isPending ? (
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+        <p className="text-muted-foreground flex items-center gap-2 text-xs">
           <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
           {m.settings_blocked_loading()}
         </p>
       ) : blocked.isError ? (
         <div
           role="alert"
-          className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive"
+          className="border-destructive/20 bg-destructive/10 text-destructive flex items-start gap-3 rounded-xl border p-3 text-sm"
         >
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="space-y-2">
@@ -44,7 +44,7 @@ export function BlockedUsersSection() {
           </div>
         </div>
       ) : blocked.data.items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{m.settings_blocked_empty()}</p>
+        <p className="text-muted-foreground text-sm">{m.settings_blocked_empty()}</p>
       ) : (
         <ul className="space-y-2">
           {blocked.data.items.map((user) => {
@@ -53,12 +53,12 @@ export function BlockedUsersSection() {
             return (
               <li
                 key={user.id}
-                className="flex items-center gap-3 rounded-2xl border border-border/50 bg-background/40 px-4 py-2.5"
+                className="border-border/50 bg-background/40 flex items-center gap-3 rounded-2xl border px-4 py-2.5"
               >
                 <UserAvatar
                   user={user}
                   alt={displayName}
-                  className="h-9 w-9 shrink-0 bg-background"
+                  className="bg-background h-9 w-9 shrink-0"
                   fallbackClassName="bg-primary text-primary-foreground font-bold text-xs"
                 />
                 <div className="min-w-0 flex-1">
@@ -68,15 +68,15 @@ export function BlockedUsersSection() {
                       params={{ username: handle }}
                       className="block min-w-0 hover:underline"
                     >
-                      <span className="block truncate text-sm font-medium text-foreground">
+                      <span className="text-foreground block truncate text-sm font-medium">
                         {displayName}
                       </span>
-                      <span className="block truncate text-xs text-muted-foreground">
+                      <span className="text-muted-foreground block truncate text-xs">
                         @{handle}
                       </span>
                     </Link>
                   ) : (
-                    <span className="block truncate text-sm font-medium text-foreground">
+                    <span className="text-foreground block truncate text-sm font-medium">
                       {displayName}
                     </span>
                   )}
@@ -86,7 +86,7 @@ export function BlockedUsersSection() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="text-xs text-destructive"
+                  className="text-destructive text-xs"
                   disabled={unblock.isPending}
                   onClick={() => void unblock.mutate({ userId: user.id })}
                 >

@@ -115,7 +115,10 @@ describe("blockedUsersAtom", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.user.byUsername.key() });
     // The transport call carries the input first and an oRPC operation
     // context second — the input is the contract, the context is plumbing.
-    expect(fakeClient.moderation.unblock).toHaveBeenCalledWith({ userId: "blocked-1" }, expect.anything());
+    expect(fakeClient.moderation.unblock).toHaveBeenCalledWith(
+      { userId: "blocked-1" },
+      expect.anything(),
+    );
 
     // And the invalidation actually refetches the mounted list — the row the
     // settings page renders is gone without any manual refresh.
@@ -195,7 +198,9 @@ describe("moderation action cache sweeps", () => {
 
     const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
     const mutationUnsub = singletonStore.sub(reportAtom, () => {});
-    singletonStore.get(reportAtom).mutate({ targetType: "post", targetId: "post-1", reason: "spam" });
+    singletonStore
+      .get(reportAtom)
+      .mutate({ targetType: "post", targetId: "post-1", reason: "spam" });
 
     await waitFor(() =>
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.queue.key() }),

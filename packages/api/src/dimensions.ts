@@ -23,11 +23,23 @@ function be16(bytes: Uint8Array, offset: number): number {
 }
 
 function be32(bytes: Uint8Array, offset: number): number {
-  return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
+  return (
+    ((bytes[offset] << 24) |
+      (bytes[offset + 1] << 16) |
+      (bytes[offset + 2] << 8) |
+      bytes[offset + 3]) >>>
+    0
+  );
 }
 
 function le32(bytes: Uint8Array, offset: number): number {
-  return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0;
+  return (
+    (bytes[offset] |
+      (bytes[offset + 1] << 8) |
+      (bytes[offset + 2] << 16) |
+      (bytes[offset + 3] << 24)) >>>
+    0
+  );
 }
 
 /**
@@ -46,7 +58,9 @@ function pngDimensions(bytes: Uint8Array): ImageDimensions | null {
  * DHT, COM — is skipped by length. A file that reaches SOS or EOI without an
  * SOF is not a JPEG we can size.
  */
-const SOF_MARKERS = new Set<number>([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+const SOF_MARKERS = new Set<number>([
+  0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
+]);
 
 function jpegDimensions(bytes: Uint8Array): ImageDimensions | null {
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
@@ -98,7 +112,8 @@ function jpegDimensions(bytes: Uint8Array): ImageDimensions | null {
 function webpDimensions(bytes: Uint8Array): ImageDimensions | null {
   if (bytes.length < 16) return null;
   if (bytes[0] !== 0x52 || bytes[1] !== 0x49 || bytes[2] !== 0x46 || bytes[3] !== 0x46) return null;
-  if (bytes[8] !== 0x57 || bytes[9] !== 0x45 || bytes[10] !== 0x42 || bytes[11] !== 0x50) return null;
+  if (bytes[8] !== 0x57 || bytes[9] !== 0x45 || bytes[10] !== 0x42 || bytes[11] !== 0x50)
+    return null;
 
   const fourcc = String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15]);
 
@@ -107,7 +122,10 @@ function webpDimensions(bytes: Uint8Array): ImageDimensions | null {
     // Payload: frame tag at 20-22, start code at 23-25, then the dimensions.
     if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) return null;
     // 14-bit little-endian words; the top two bits of each hold a scale flag.
-    return { width: (bytes[26] | (bytes[27] << 8)) & 0x3fff, height: (bytes[28] | (bytes[29] << 8)) & 0x3fff };
+    return {
+      width: (bytes[26] | (bytes[27] << 8)) & 0x3fff,
+      height: (bytes[28] | (bytes[29] << 8)) & 0x3fff,
+    };
   }
 
   if (fourcc === "VP8L") {

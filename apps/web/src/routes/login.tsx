@@ -110,36 +110,32 @@ function LoginPage() {
   };
 
   return (
-    <div className="container max-w-md mx-auto px-4 py-12">
+    <div className="container mx-auto max-w-md px-4 py-12">
       <PageCard className="space-y-6">
-        <div className="text-center space-y-2">
+        <div className="space-y-2 text-center">
           <h1 className="text-2xl font-bold tracking-tight">{m.auth_login_title()}</h1>
-          <p className="text-sm text-muted-foreground">
-            {m.auth_login_subtitle()}
-          </p>
+          <p className="text-muted-foreground text-sm">{m.auth_login_subtitle()}</p>
         </div>
 
-        {error && (
-          <ErrorBanner title={m.auth_login_failed()} message={localizeAuthError(error)} />
-        )}
+        {error && <ErrorBanner title={m.auth_login_failed()} message={localizeAuthError(error)} />}
 
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           <div className="space-y-2">
             <label
               htmlFor="identifier"
-              className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
             >
               {m.auth_field_identifier()}
             </label>
             <div className="relative">
-              <User className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+              <User className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
               <Input
                 id="identifier"
                 type="text"
                 placeholder={m.auth_field_identifier_placeholder()}
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                className="pl-10 h-10 bg-background/50"
+                className="bg-background/50 h-10 pl-10"
                 // The `webauthn` token must come last, and enables the
                 // browser's conditional-UI passkey suggestion in this field.
                 autoComplete="username webauthn"
@@ -152,26 +148,23 @@ function LoginPage() {
             <div className="flex items-center justify-between">
               <label
                 htmlFor="password"
-                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
               >
                 {m.auth_field_password()}
               </label>
-              <Link
-                to="/forgot-password"
-                className="text-xs font-medium text-link hover:underline"
-              >
+              <Link to="/forgot-password" className="text-link text-xs font-medium hover:underline">
                 {m.auth_forgot_password_link()}
               </Link>
             </div>
             <div className="relative">
-              <Lock className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
+              <Lock className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
               <Input
                 id="password"
                 type="password"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="pl-10 h-10 bg-background/50"
+                className="bg-background/50 h-10 pl-10"
                 autoComplete="current-password"
                 required
               />
@@ -180,7 +173,7 @@ function LoginPage() {
 
           <Button
             type="submit"
-            className="w-full h-11 text-base font-medium rounded-2xl gap-2 mt-2"
+            className="mt-2 h-11 w-full gap-2 rounded-2xl text-base font-medium"
             disabled={isSubmitting}
           >
             {isSubmitting ? (
@@ -199,12 +192,12 @@ function LoginPage() {
 
         <SignInOptions />
 
-        <div className="text-center text-xs text-muted-foreground pt-2 border-t border-border/40">
+        <div className="text-muted-foreground border-border/40 border-t pt-2 text-center text-xs">
           {m.auth_dont_have_account()}{" "}
           <Link
             to="/register"
             search={redirectFromSearch ? { redirect: redirectFromSearch } : {}}
-            className="font-medium text-link hover:underline"
+            className="text-link font-medium hover:underline"
           >
             {m.auth_register_link()}
           </Link>

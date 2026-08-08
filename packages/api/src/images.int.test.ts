@@ -29,10 +29,30 @@ afterAll(async () => {
  * header, not just a magic number.
  */
 const PNG_BODY = new Uint8Array([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-  0x00, 0x00, 0x01, 0x00, // width: 256
-  0x00, 0x00, 0x00, 0x80, // height: 128
+  0x89,
+  0x50,
+  0x4e,
+  0x47,
+  0x0d,
+  0x0a,
+  0x1a,
+  0x0a,
+  0x00,
+  0x00,
+  0x00,
+  0x0d,
+  0x49,
+  0x48,
+  0x44,
+  0x52,
+  0x00,
+  0x00,
+  0x01,
+  0x00, // width: 256
+  0x00,
+  0x00,
+  0x00,
+  0x80, // height: 128
 ]);
 
 /** A PNG header declaring arbitrary dimensions, for the bound tests. */
@@ -57,7 +77,10 @@ function pngFile(name = "avatar.png"): File {
 }
 
 /** The two-object input every upload procedure call needs. */
-function uploadInput(kind: "avatar" | "banner", overrides: Partial<{ original: File; display: File }> = {}) {
+function uploadInput(
+  kind: "avatar" | "banner",
+  overrides: Partial<{ original: File; display: File }> = {},
+) {
   return {
     kind,
     original: pngFile("original.png"),
@@ -66,9 +89,12 @@ function uploadInput(kind: "avatar" | "banner", overrides: Partial<{ original: F
   };
 }
 
-async function storedImage(
-  person: TestUser,
-): Promise<{ image: string | null; bannerImage: string | null; imageOriginal: string | null; bannerImageOriginal: string | null }> {
+async function storedImage(person: TestUser): Promise<{
+  image: string | null;
+  bannerImage: string | null;
+  imageOriginal: string | null;
+  bannerImageOriginal: string | null;
+}> {
   const [row] = await person.context.db
     .select({
       image: user.image,
@@ -86,11 +112,9 @@ describe("user.uploadImage", () => {
   it("stores both objects and points both columns at their /media paths", async () => {
     const alice = await createTestUser();
 
-    const result = await call(
-      appRouter.user.uploadImage,
-      uploadInput("avatar"),
-      { context: contextFor(alice) },
-    );
+    const result = await call(appRouter.user.uploadImage, uploadInput("avatar"), {
+      context: contextFor(alice),
+    });
 
     expect(result.url).toMatch(/^\/media\/avatars\/[^/]+\/[a-f0-9-]{36}\.png$/);
     // The original shares the display object's uuid, differing only in the
@@ -102,22 +126,20 @@ describe("user.uploadImage", () => {
     expect(stored.imageOriginal).toBe(result.originalUrl);
 
     // The bytes actually reached storage, under the keys the row now names.
-    expect(testStorageObjects.get(result.url.replace("/media/", ""))?.contentType).toBe("image/png");
-    expect(testStorageObjects.get(result.originalUrl.replace("/media/", ""))?.contentType).toBe("image/png");
+    expect(testStorageObjects.get(result.url.replace("/media/", ""))?.contentType).toBe(
+      "image/png",
+    );
+    expect(testStorageObjects.get(result.originalUrl.replace("/media/", ""))?.contentType).toBe(
+      "image/png",
+    );
   });
 
   it("writes the banner to its own columns, leaving the avatar alone", async () => {
     const alice = await createTestUser();
-    await call(
-      appRouter.user.uploadImage,
-      uploadInput("avatar"),
-      { context: contextFor(alice) },
-    );
-    const banner = await call(
-      appRouter.user.uploadImage,
-      uploadInput("banner"),
-      { context: contextFor(alice) },
-    );
+    await call(appRouter.user.uploadImage, uploadInput("avatar"), { context: contextFor(alice) });
+    const banner = await call(appRouter.user.uploadImage, uploadInput("banner"), {
+      context: contextFor(alice),
+    });
 
     const stored = await storedImage(alice);
     expect(stored.bannerImage).toBe(banner.url);
@@ -128,16 +150,12 @@ describe("user.uploadImage", () => {
 
   it("deletes the objects it replaced, so uploads do not accumulate forever", async () => {
     const alice = await createTestUser();
-    const first = await call(
-      appRouter.user.uploadImage,
-      uploadInput("avatar"),
-      { context: contextFor(alice) },
-    );
-    const second = await call(
-      appRouter.user.uploadImage,
-      uploadInput("avatar"),
-      { context: contextFor(alice) },
-    );
+    const first = await call(appRouter.user.uploadImage, uploadInput("avatar"), {
+      context: contextFor(alice),
+    });
+    const second = await call(appRouter.user.uploadImage, uploadInput("avatar"), {
+      context: contextFor(alice),
+    });
 
     for (const key of [first.url, first.originalUrl ?? ""].map((p) => p.replace("/media/", ""))) {
       expect(testStorageObjects.has(key)).toBe(false);
@@ -206,30 +224,22 @@ describe("user.uploadImage", () => {
     const wide = new File([pngWithDimensions(600, 300)], "wide.png", { type: "image/png" });
 
     await expect(
-      call(
-        appRouter.user.uploadImage,
-        uploadInput("avatar", { display: wide }),
-        { context: contextFor(alice) },
-      ),
+      call(appRouter.user.uploadImage, uploadInput("avatar", { display: wide }), {
+        context: contextFor(alice),
+      }),
     ).rejects.toThrow(/too large/);
   });
 
   it("rejects an original beyond the megapixel ceiling, even with tiny bytes", async () => {
     // ~400 MP in 24 bytes: the byte cap never sees it; the megapixel rule does.
     const alice = await createTestUser();
-    const bomb = new File(
-      [pngWithDimensions(20_000, 20_000)],
-      "bomb.png",
-      { type: "image/png" },
-    );
+    const bomb = new File([pngWithDimensions(20_000, 20_000)], "bomb.png", { type: "image/png" });
     expect(MAX_IMAGE_MEGAPIXELS * 1_000_000).toBeLessThan(20_000 * 20_000);
 
     await expect(
-      call(
-        appRouter.user.uploadImage,
-        uploadInput("avatar", { original: bomb }),
-        { context: contextFor(alice) },
-      ),
+      call(appRouter.user.uploadImage, uploadInput("avatar", { original: bomb }), {
+        context: contextFor(alice),
+      }),
     ).rejects.toThrow(/too large/);
     expect(testStorageObjects.size).toBe(0);
   });
@@ -237,11 +247,7 @@ describe("user.uploadImage", () => {
   it("refuses an anonymous caller", async () => {
     const { anonContext } = await import("./testing/harness.js");
     await expect(
-      call(
-        appRouter.user.uploadImage,
-        uploadInput("avatar"),
-        { context: anonContext },
-      ),
+      call(appRouter.user.uploadImage, uploadInput("avatar"), { context: anonContext }),
     ).rejects.toThrow();
   });
 
@@ -261,11 +267,9 @@ describe("user.uploadImage", () => {
 describe("user.removeImage", () => {
   it("clears both columns and deletes both objects", async () => {
     const alice = await createTestUser();
-    const uploaded = await call(
-      appRouter.user.uploadImage,
-      uploadInput("avatar"),
-      { context: contextFor(alice) },
-    );
+    const uploaded = await call(appRouter.user.uploadImage, uploadInput("avatar"), {
+      context: contextFor(alice),
+    });
 
     const result = await call(
       appRouter.user.removeImage,

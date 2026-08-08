@@ -1,11 +1,7 @@
 import type { ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Fingerprint } from "lucide-react";
-import {
-  authPendingAtom,
-  signInWithPasskeyAtom,
-  signInWithProviderAtom,
-} from "@/atoms/auth";
+import { authPendingAtom, signInWithPasskeyAtom, signInWithProviderAtom } from "@/atoms/auth";
 import { authClient, socialProviders, type SocialProviderId } from "@/lib/auth-client";
 import { DiscordIcon } from "@/components/icons/discord-icon";
 import { GoogleIcon } from "@/components/icons/google-icon";
@@ -49,10 +45,10 @@ export function SignInOptions() {
     <div className="space-y-3">
       <div className="relative">
         <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t border-border/40" />
+          <span className="border-border/40 w-full border-t" />
         </div>
         <div className="relative flex justify-center">
-          <span className="bg-card px-3 text-xs uppercase tracking-wider text-muted-foreground">
+          <span className="bg-card text-muted-foreground px-3 text-xs tracking-wider uppercase">
             {m.auth_or_continue_with()}
           </span>
         </div>
@@ -72,7 +68,7 @@ export function SignInOptions() {
 
         {supportsPasskeys && (
           <NeutralButton disabled={isBusy} onClick={() => void signInWithPasskey()}>
-            <Fingerprint className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <Fingerprint className="text-muted-foreground h-4 w-4 shrink-0" />
             <span>{m.auth_continue_with_passkey()}</span>
             {lastUsed === "passkey" && <LastUsedBadge />}
           </NeutralButton>
@@ -90,7 +86,7 @@ export function SignInOptions() {
  */
 function LastUsedBadge() {
   return (
-    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+    <span className="bg-primary/10 text-primary rounded-full px-2 py-0.5 text-[10px] font-medium">
       {m.auth_last_used()}
     </span>
   );
@@ -127,10 +123,7 @@ function NeutralButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="flex h-10 w-full items-center justify-center gap-2.5 rounded-2xl border pl-3 pr-3 text-sm font-medium
-        border-[#747775] bg-white text-[#1F1F1F] hover:bg-[#F8F9FA]
-        dark:border-[#8E918F] dark:bg-[#131314] dark:text-[#E3E3E3] dark:hover:bg-[#1E1F20]
-        disabled:pointer-events-none disabled:opacity-60"
+      className="flex h-10 w-full items-center justify-center gap-2.5 rounded-2xl border border-[#747775] bg-white pr-3 pl-3 text-sm font-medium text-[#1F1F1F] hover:bg-[#F8F9FA] disabled:pointer-events-none disabled:opacity-60 dark:border-[#8E918F] dark:bg-[#131314] dark:text-[#E3E3E3] dark:hover:bg-[#1E1F20]"
     >
       {children}
     </button>

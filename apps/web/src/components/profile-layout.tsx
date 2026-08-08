@@ -19,7 +19,18 @@ import { UserAvatar } from "@/components/user-avatar";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
-import { UserX, Mail, Calendar, LogOut, Loader2, AlertCircle, Settings, MoreHorizontal, ShieldAlert, ShieldCheck } from "lucide-react";
+import {
+  UserX,
+  Mail,
+  Calendar,
+  LogOut,
+  Loader2,
+  AlertCircle,
+  Settings,
+  MoreHorizontal,
+  ShieldAlert,
+  ShieldCheck,
+} from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 import { getLocale } from "@/paraglide/runtime.js";
 
@@ -61,7 +72,7 @@ export function ProfileLayout() {
   if (profileQuery.isPending) {
     return (
       <div className="flex h-[70vh] items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin motion-reduce:animate-none text-primary" />
+        <Loader2 className="text-primary h-8 w-8 animate-spin motion-reduce:animate-none" />
       </div>
     );
   }
@@ -72,16 +83,14 @@ export function ProfileLayout() {
 
     return notFound ? (
       <ProfileMessage icon={UserX} title={`@${username}`}>
-        <p className="text-muted-foreground text-sm mb-6">
-          {m.profile_not_found()}
-        </p>
+        <p className="text-muted-foreground mb-6 text-sm">{m.profile_not_found()}</p>
         <Button nativeButton={false} render={<Link to="/" className="w-full justify-center" />}>
           {m.common_back_to_home()}
         </Button>
       </ProfileMessage>
     ) : (
       <ProfileMessage icon={AlertCircle} title={m.profile_load_error()}>
-        <p className="text-muted-foreground text-sm mb-6">
+        <p className="text-muted-foreground mb-6 text-sm">
           {profileQuery.error.message || m.common_something_went_wrong()}
         </p>
         <Button variant="outline" onClick={() => void profileQuery.refetch()} className="w-full">
@@ -110,11 +119,11 @@ export function ProfileLayout() {
   if (profile.suspended) {
     return (
       <ProfileMessage icon={ShieldAlert} title={`@${handle}`}>
-        <p className="text-muted-foreground text-sm mb-6">{m.profile_suspended_body()}</p>
+        <p className="text-muted-foreground mb-6 text-sm">{m.profile_suspended_body()}</p>
         {isStaff && (
-          <div className="space-y-2 mb-6">
+          <div className="mb-6 space-y-2">
             {unbanUser.isError && (
-              <p role="alert" className="text-xs text-destructive">
+              <p role="alert" className="text-destructive text-xs">
                 {unbanUser.error?.message || m.common_something_went_wrong()}
               </p>
             )}
@@ -141,11 +150,11 @@ export function ProfileLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-background pb-12">
+    <div className="bg-background min-h-screen pb-12">
       {/* The plain `bg-muted` plate is the fallback, not a placeholder: most
           profiles have no banner, and it is what the avatar's negative margin
           and the border below are laid out against either way. */}
-      <div className="w-full h-48 sm:h-64 relative bg-muted border-b border-border overflow-hidden">
+      <div className="bg-muted border-border relative h-48 w-full overflow-hidden border-b sm:h-64">
         {profile.bannerImage && (
           <img
             src={profile.bannerImage}
@@ -155,18 +164,18 @@ export function ProfileLayout() {
         )}
       </div>
 
-      <div className="max-w-[1500px] mx-auto px-4 sm:px-8">
+      <div className="mx-auto max-w-[1500px] px-4 sm:px-8">
         {/* Avatar & Action buttons */}
-        <div className="relative flex justify-between items-end -mt-16 sm:-mt-20 mb-4">
+        <div className="relative -mt-16 mb-4 flex items-end justify-between sm:-mt-20">
           <UserAvatar
             user={profile}
             alt={displayName}
-            className="h-28 w-28 sm:h-36 sm:w-36 border-4 border-background shadow-xl ring-2 ring-primary/20 bg-background"
+            className="border-background ring-primary/20 bg-background h-28 w-28 border-4 shadow-xl ring-2 sm:h-36 sm:w-36"
             fallbackClassName="text-2xl sm:text-3xl font-bold bg-primary text-primary-foreground"
           />
 
           {isOwnProfile ? (
-            <div className="flex gap-2.5 mb-2">
+            <div className="mb-2 flex gap-2.5">
               {/* Was a dead button — now the way into /settings/account, where
                   two-factor and passkeys live. The header's account menu
                   (header.tsx) is the other entry point; this one stays so the
@@ -175,7 +184,7 @@ export function ProfileLayout() {
               <Button
                 variant="outline"
                 size="sm"
-                className="gap-2 rounded-full border-muted-foreground/30"
+                className="border-muted-foreground/30 gap-2 rounded-full"
                 nativeButton={false}
                 render={<Link to="/settings/account" />}
               >
@@ -189,7 +198,11 @@ export function ProfileLayout() {
                 disabled={isSigningOut}
                 className="gap-2 rounded-full"
               >
-                {isSigningOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                {isSigningOut ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <LogOut className="h-4 w-4" />
+                )}
                 <span>{m.auth_sign_out()}</span>
               </Button>
             </div>
@@ -202,7 +215,7 @@ export function ProfileLayout() {
                 <DropdownMenuTrigger
                   aria-label={m.moderation_kebab()}
                   title={m.moderation_kebab()}
-                  className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  className="text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring flex h-9 w-9 cursor-pointer items-center justify-center rounded-full transition-colors outline-none focus-visible:ring-2"
                 >
                   <MoreHorizontal className="h-4 w-4" />
                 </DropdownMenuTrigger>
@@ -228,10 +241,10 @@ export function ProfileLayout() {
         </div>
 
         {/* Profile Info */}
-        <div className="space-y-3 mb-6">
+        <div className="mb-6 space-y-3">
           <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{displayName}</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{displayName}</h1>
             </div>
             <p className="text-muted-foreground text-sm font-medium">@{handle}</p>
           </div>
@@ -241,7 +254,7 @@ export function ProfileLayout() {
               linkification — which is what keeps it free of any escaping
               question. */}
           {profile.bio && (
-            <p className="text-sm leading-relaxed whitespace-pre-line max-w-2xl">{profile.bio}</p>
+            <p className="max-w-2xl text-sm leading-relaxed whitespace-pre-line">{profile.bio}</p>
           )}
 
           <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
@@ -259,10 +272,12 @@ export function ProfileLayout() {
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
+          <div className="text-muted-foreground flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
             <div className="flex items-center gap-1.5">
               <Calendar className="h-3.5 w-3.5" />
-              <span>{m.profile_joined({ date: formatJoinDate(profile.createdAt, getLocale()) })}</span>
+              <span>
+                {m.profile_joined({ date: formatJoinDate(profile.createdAt, getLocale()) })}
+              </span>
             </div>
             {/* Email is the caller's own, out of the session — `byUsername` is
                 a public endpoint and deliberately never returns it. */}

@@ -224,7 +224,10 @@ describe("post-cache", () => {
       }));
 
       // Sanity: the mutation actually changed something before restoring.
-      expect(queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items[0]?.likeCount).toBe(6);
+      expect(
+        queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items[0]
+          ?.likeCount,
+      ).toBe(6);
 
       restorePosts(queryClient, snapshot!);
 

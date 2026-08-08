@@ -32,10 +32,30 @@ function file(type: string, size = 16): File {
 /** A file whose first bytes are a real PNG header declaring `dims`. */
 function pngFileWithHeader(width: number, height: number): File {
   const bytes = new Uint8Array([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-    (width >>> 24) & 0xff, (width >>> 16) & 0xff, (width >>> 8) & 0xff, width & 0xff,
-    (height >>> 24) & 0xff, (height >>> 16) & 0xff, (height >>> 8) & 0xff, height & 0xff,
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+    0x00,
+    0x00,
+    0x00,
+    0x0d,
+    0x49,
+    0x48,
+    0x44,
+    0x52,
+    (width >>> 24) & 0xff,
+    (width >>> 16) & 0xff,
+    (width >>> 8) & 0xff,
+    width & 0xff,
+    (height >>> 24) & 0xff,
+    (height >>> 16) & 0xff,
+    (height >>> 8) & 0xff,
+    height & 0xff,
   ]);
   return new File([bytes], "pic.png", { type: "image/png" });
 }
@@ -61,8 +81,8 @@ function stubEncodePath({
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
     drawImage: vi.fn(),
   } as unknown as CanvasRenderingContext2D);
-  vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(
-    (callback: BlobCallback) => callback(toBlob),
+  vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback: BlobCallback) =>
+    callback(toBlob),
   );
 }
 
@@ -106,7 +126,9 @@ describe("createDisplayVariant", () => {
     // 400 MP in 24 bytes: the byte cap never sees it, but the header parse
     // does — the browser should not pay for decoding a gigabyte of pixels it
     // is about to be told it may not upload.
-    await expect(createDisplayVariant(pngFileWithHeader(20_000, 20_000), "avatar")).rejects.toMatchObject({
+    await expect(
+      createDisplayVariant(pngFileWithHeader(20_000, 20_000), "avatar"),
+    ).rejects.toMatchObject({
       problem: "size",
     });
     expect(decode).not.toHaveBeenCalled();
@@ -123,7 +145,9 @@ describe("createDisplayVariant", () => {
   });
 
   it("throws ImageError, which is what profile-edit.ts branches on", async () => {
-    await expect(createDisplayVariant(file("text/html"), "avatar")).rejects.toBeInstanceOf(ImageError);
+    await expect(createDisplayVariant(file("text/html"), "avatar")).rejects.toBeInstanceOf(
+      ImageError,
+    );
   });
 
   it("declares the type the canvas actually produced, not webp by assertion", async () => {

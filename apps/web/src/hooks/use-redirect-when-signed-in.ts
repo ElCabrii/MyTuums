@@ -1,11 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import {
-  isSignedInAtom,
-  needsDobAtom,
-  viewerHandleAtom,
-} from "@/atoms/session";
+import { isSignedInAtom, needsDobAtom, viewerHandleAtom } from "@/atoms/session";
 import { offerTwoFactorAtom } from "@/atoms/onboarding";
 import { sanitizeRedirect } from "@/lib/redirect";
 

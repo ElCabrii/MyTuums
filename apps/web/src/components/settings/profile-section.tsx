@@ -71,7 +71,7 @@ export function ProfileSection() {
           preview={
             <UserAvatar
               user={viewer}
-              className="h-16 w-16 bg-background shrink-0"
+              className="bg-background h-16 w-16 shrink-0"
               fallbackClassName="bg-primary text-primary-foreground font-bold"
             />
           }
@@ -83,7 +83,7 @@ export function ProfileSection() {
           hint={m.settings_banner_hint()}
           hasImage={Boolean(viewer?.bannerImage)}
           preview={
-            <div className="h-16 w-28 shrink-0 overflow-hidden rounded-xl border border-border/50 bg-muted">
+            <div className="border-border/50 bg-muted h-16 w-28 shrink-0 overflow-hidden rounded-xl border">
               {viewer?.bannerImage && (
                 <img
                   src={viewer.bannerImage}
@@ -97,7 +97,7 @@ export function ProfileSection() {
       </div>
 
       <form
-        className="space-y-4 border-t border-border/50 pt-4"
+        className="border-border/50 space-y-4 border-t pt-4"
         onSubmit={(e) => {
           e.preventDefault();
           void save();
@@ -106,7 +106,7 @@ export function ProfileSection() {
         <div className="space-y-2">
           <label
             htmlFor="profile-name"
-            className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+            className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
           >
             {m.auth_field_display_name()}
           </label>
@@ -115,7 +115,7 @@ export function ProfileSection() {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="h-10 bg-background/50"
+            className="bg-background/50 h-10"
             autoComplete="name"
             required
           />
@@ -124,7 +124,7 @@ export function ProfileSection() {
         <div className="space-y-2">
           <label
             htmlFor="profile-bio"
-            className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+            className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
           >
             {m.auth_field_bio()}
           </label>
@@ -137,12 +137,12 @@ export function ProfileSection() {
             value={bio}
             onChange={(e) => setBio(e.target.value)}
             placeholder={m.auth_field_bio_placeholder()}
-            className="w-full rounded-md border border-input bg-background/50 px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="border-input bg-background/50 focus-visible:ring-ring w-full resize-none rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
           />
           {/* Mirrors the composer's counter: only turns destructive once over,
               so it reads as information rather than a warning while typing. */}
           <p
-            className={`text-xs text-right ${
+            className={`text-right text-xs ${
               bioRemaining < 0 ? "text-destructive font-medium" : "text-muted-foreground"
             }`}
           >
@@ -150,8 +150,12 @@ export function ProfileSection() {
           </p>
         </div>
 
-        <Button type="submit" size="sm" className="rounded-full gap-2" disabled={isBusy}>
-          {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+        <Button type="submit" size="sm" className="gap-2 rounded-full" disabled={isBusy}>
+          {isBusy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
           {m.common_save()}
         </Button>
       </form>
@@ -197,10 +201,10 @@ function ImageRow({
       {preview}
 
       <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
           {label}
         </p>
-        <p className="text-xs text-muted-foreground">{hint}</p>
+        <p className="text-muted-foreground text-xs">{hint}</p>
       </div>
 
       <div className="flex shrink-0 gap-1.5">
@@ -223,7 +227,7 @@ function ImageRow({
           type="button"
           size="sm"
           variant="outline"
-          className="rounded-full gap-2"
+          className="gap-2 rounded-full"
           disabled={isBusy}
           onClick={() => inputRef.current?.click()}
         >
@@ -246,7 +250,7 @@ function ImageRow({
             disabled={isBusy}
             onClick={() => void remove(kind)}
           >
-            <Trash2 className="h-4 w-4 text-destructive" />
+            <Trash2 className="text-destructive h-4 w-4" />
           </Button>
         )}
       </div>

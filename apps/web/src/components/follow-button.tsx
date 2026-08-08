@@ -43,7 +43,7 @@ export function FollowButton({
       onClick={toggleFollow}
       aria-pressed
       aria-label={m.follow_unfollow()}
-      className={`group gap-1.5 rounded-full hover:border-destructive/40 hover:text-destructive ${className ?? ""}`}
+      className={`group hover:border-destructive/40 hover:text-destructive gap-1.5 rounded-full ${className ?? ""}`}
     >
       {/* Pure CSS label swap — the button already has a mutation queue, and
           adding hover state to it in React invites the two disagreeing. */}

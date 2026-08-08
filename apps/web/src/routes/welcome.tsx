@@ -149,15 +149,15 @@ function WelcomePage() {
     : m.welcome_2fa_subtitle();
 
   return (
-    <div className="container max-w-md mx-auto px-4 py-12">
+    <div className="container mx-auto max-w-md px-4 py-12">
       <PageCard className="space-y-6">
-        <div className="text-center space-y-2">
+        <div className="space-y-2 text-center">
           {/* An account that already has its handle (it predates the 15+ rule)
               is here for the date of birth alone, and "Pick your handle" would
               describe a field the page does not render. The same applies once
               both are in and only the two-factor offer is left. */}
           <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
-          <p className="text-sm text-muted-foreground">{subtitle}</p>
+          <p className="text-muted-foreground text-sm">{subtitle}</p>
         </div>
 
         {error && (
@@ -170,75 +170,75 @@ function WelcomePage() {
         {!needsFields && <TwoFactorOffer />}
 
         {needsFields && (
-        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
-          {needsHandle && (
-            <div className="space-y-2">
-              <label
-                htmlFor="handle"
-                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-              >
-                {m.auth_field_username()}
-              </label>
-              <div className="relative">
-                <AtSign className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="handle"
-                  type="text"
-                  placeholder={m.auth_field_username_placeholder()}
-                  value={handle}
-                  onChange={(e) => setHandle(e.target.value)}
-                  className="pl-10 h-10 bg-background/50"
-                  autoComplete="username"
-                  autoFocus
-                  required
-                />
+          <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+            {needsHandle && (
+              <div className="space-y-2">
+                <label
+                  htmlFor="handle"
+                  className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
+                >
+                  {m.auth_field_username()}
+                </label>
+                <div className="relative">
+                  <AtSign className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
+                  <Input
+                    id="handle"
+                    type="text"
+                    placeholder={m.auth_field_username_placeholder()}
+                    value={handle}
+                    onChange={(e) => setHandle(e.target.value)}
+                    className="bg-background/50 h-10 pl-10"
+                    autoComplete="username"
+                    autoFocus
+                    required
+                  />
+                </div>
+                <p className="text-muted-foreground text-xs">{m.welcome_handle_hint()}</p>
               </div>
-              <p className="text-xs text-muted-foreground">{m.welcome_handle_hint()}</p>
-            </div>
-          )}
-
-          {needsDob && (
-            <div className="space-y-2">
-              <label
-                htmlFor="dateOfBirth"
-                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-              >
-                {m.auth_field_date_of_birth()}
-              </label>
-              <div className="relative">
-                <Calendar className="absolute left-3.5 top-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="dateOfBirth"
-                  type="date"
-                  value={dateOfBirth}
-                  onChange={(e) => setDateOfBirth(e.target.value)}
-                  className="pl-10 h-10 bg-background/50"
-                  autoComplete="bday"
-                  required
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">{m.welcome_dob_hint()}</p>
-            </div>
-          )}
-
-          <Button
-            type="submit"
-            className="w-full h-11 text-base font-medium rounded-2xl gap-2 mt-2"
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>{m.welcome_claiming()}</span>
-              </>
-            ) : (
-              <>
-                <Check className="h-4 w-4" />
-                <span>{needsHandle ? m.welcome_claim() : m.welcome_dob_claim()}</span>
-              </>
             )}
-          </Button>
-        </form>
+
+            {needsDob && (
+              <div className="space-y-2">
+                <label
+                  htmlFor="dateOfBirth"
+                  className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
+                >
+                  {m.auth_field_date_of_birth()}
+                </label>
+                <div className="relative">
+                  <Calendar className="text-muted-foreground absolute top-3 left-3.5 h-4 w-4" />
+                  <Input
+                    id="dateOfBirth"
+                    type="date"
+                    value={dateOfBirth}
+                    onChange={(e) => setDateOfBirth(e.target.value)}
+                    className="bg-background/50 h-10 pl-10"
+                    autoComplete="bday"
+                    required
+                  />
+                </div>
+                <p className="text-muted-foreground text-xs">{m.welcome_dob_hint()}</p>
+              </div>
+            )}
+
+            <Button
+              type="submit"
+              className="mt-2 h-11 w-full gap-2 rounded-2xl text-base font-medium"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>{m.welcome_claiming()}</span>
+                </>
+              ) : (
+                <>
+                  <Check className="h-4 w-4" />
+                  <span>{needsHandle ? m.welcome_claim() : m.welcome_dob_claim()}</span>
+                </>
+              )}
+            </Button>
+          </form>
         )}
       </PageCard>
     </div>
@@ -293,13 +293,13 @@ function TwoFactorOffer() {
     <div className="space-y-4">
       {panel === "idle" && (
         <div className="space-y-3">
-          <div className="flex items-start gap-3 rounded-2xl border border-border/50 bg-background/40 p-4">
-            <ShieldCheck className="h-5 w-5 shrink-0 text-primary mt-0.5" />
-            <p className="text-xs text-muted-foreground">{m.twofa_section_off()}</p>
+          <div className="border-border/50 bg-background/40 flex items-start gap-3 rounded-2xl border p-4">
+            <ShieldCheck className="text-primary mt-0.5 h-5 w-5 shrink-0" />
+            <p className="text-muted-foreground text-xs">{m.twofa_section_off()}</p>
           </div>
           <Button
             type="button"
-            className="w-full h-11 text-base font-medium rounded-2xl gap-2"
+            className="h-11 w-full gap-2 rounded-2xl text-base font-medium"
             onClick={() => openPanel("enable")}
           >
             <ShieldCheck className="h-4 w-4" />
@@ -308,12 +308,7 @@ function TwoFactorOffer() {
           {/* A real button, not a muted link: skipping is a legitimate,
               expected answer, and burying it would make this a gate rather
               than an offer. */}
-          <Button
-            type="button"
-            variant="ghost"
-            className="w-full rounded-2xl"
-            onClick={finish}
-          >
+          <Button type="button" variant="ghost" className="w-full rounded-2xl" onClick={finish}>
             {m.welcome_2fa_skip()}
           </Button>
         </div>
@@ -330,7 +325,7 @@ function TwoFactorOffer() {
           <div className="space-y-2">
             <label
               htmlFor="welcome-twofa-password"
-              className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
             >
               {m.auth_field_password()}
             </label>
@@ -340,15 +335,15 @@ function TwoFactorOffer() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
-              className="h-10 bg-background/50"
+              className="bg-background/50 h-10"
               autoFocus
               required
             />
-            <p className="text-xs text-muted-foreground">{m.twofa_password_hint()}</p>
+            <p className="text-muted-foreground text-xs">{m.twofa_password_hint()}</p>
           </div>
           <Button
             type="submit"
-            className="w-full h-11 text-base font-medium rounded-2xl gap-2"
+            className="h-11 w-full gap-2 rounded-2xl text-base font-medium"
             disabled={isBusy}
           >
             {isBusy && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -362,19 +357,19 @@ function TwoFactorOffer() {
 
       {panel === "verify" && setup && (
         <div className="space-y-4">
-          <p className="text-xs text-muted-foreground">{m.twofa_scan_hint()}</p>
+          <p className="text-muted-foreground text-xs">{m.twofa_scan_hint()}</p>
           {/* White plate regardless of theme — scanners need the light modules
               lighter than the dark ones, same as /settings/account. */}
-          <div className="bg-white p-4 rounded-2xl w-fit mx-auto">
+          <div className="mx-auto w-fit rounded-2xl bg-white p-4">
             <QRCode value={setup.totpURI} size={160} />
           </div>
 
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
               {m.twofa_backup_codes()}
             </p>
-            <p className="text-xs text-muted-foreground">{m.twofa_backup_codes_hint()}</p>
-            <ul className="grid grid-cols-2 gap-1.5 font-mono text-xs bg-muted/40 rounded-2xl p-4">
+            <p className="text-muted-foreground text-xs">{m.twofa_backup_codes_hint()}</p>
+            <ul className="bg-muted/40 grid grid-cols-2 gap-1.5 rounded-2xl p-4 font-mono text-xs">
               {setup.backupCodes.map((backupCode) => (
                 <li key={backupCode}>{backupCode}</li>
               ))}
@@ -391,7 +386,7 @@ function TwoFactorOffer() {
             <div className="space-y-2">
               <label
                 htmlFor="welcome-twofa-code"
-                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
               >
                 {m.twofa_field_code()}
               </label>
@@ -402,17 +397,21 @@ function TwoFactorOffer() {
                 onChange={(e) => setCode(e.target.value)}
                 autoComplete="one-time-code"
                 inputMode="numeric"
-                className="h-10 bg-background/50 font-mono tracking-[0.3em]"
+                className="bg-background/50 h-10 font-mono tracking-[0.3em]"
                 autoFocus
                 required
               />
             </div>
             <Button
               type="submit"
-              className="w-full h-11 text-base font-medium rounded-2xl gap-2"
+              className="h-11 w-full gap-2 rounded-2xl text-base font-medium"
               disabled={isBusy}
             >
-              {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              {isBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
               <span>{m.twofa_confirm()}</span>
             </Button>
           </form>

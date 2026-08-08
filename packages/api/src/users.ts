@@ -273,7 +273,9 @@ export const userRouter = {
           suspended: effectivelyBanned,
         })
         .from(user)
-        .where(and(eq(user.username, input.username.toLowerCase()), not(invisibleUser(context.user.id))))
+        .where(
+          and(eq(user.username, input.username.toLowerCase()), not(invisibleUser(context.user.id))),
+        )
         .limit(1);
 
       if (!found) {
@@ -311,7 +313,12 @@ export const userRouter = {
       // original is bounded by megapixels because it is served from a public
       // path. See ./image.ts.
       const originalBytes = new Uint8Array(await input.original.arrayBuffer());
-      const originalVerdict = acceptImage(originalBytes, input.original.type, input.kind, "original");
+      const originalVerdict = acceptImage(
+        originalBytes,
+        input.original.type,
+        input.kind,
+        "original",
+      );
       if (!originalVerdict.ok || !originalVerdict.type) {
         throw new ORPCError("BAD_REQUEST", {
           message: IMAGE_REJECTIONS[originalVerdict.reason ?? "type"],
@@ -329,8 +336,20 @@ export const userRouter = {
       // One uuid for both objects, so the pair is obvious in the bucket —
       // `<uuid>.webp` and `<uuid>.orig.jpg` (see imageObjectKey).
       const id = randomUUID();
-      const displayKey = imageObjectKey(input.kind, context.user.id, displayVerdict.type, "display", id);
-      const originalKey = imageObjectKey(input.kind, context.user.id, originalVerdict.type, "original", id);
+      const displayKey = imageObjectKey(
+        input.kind,
+        context.user.id,
+        displayVerdict.type,
+        "display",
+        id,
+      );
+      const originalKey = imageObjectKey(
+        input.kind,
+        context.user.id,
+        originalVerdict.type,
+        "original",
+        id,
+      );
 
       await storage.put(displayKey, displayBytes, displayVerdict.type);
       await storage.put(originalKey, originalBytes, originalVerdict.type);
@@ -454,9 +473,7 @@ export const userRouter = {
 
       await context.db
         .delete(follow)
-        .where(
-          and(eq(follow.followerId, context.user.id), eq(follow.followingId, input.userId)),
-        );
+        .where(and(eq(follow.followerId, context.user.id), eq(follow.followingId, input.userId)));
 
       return {
         userId: input.userId,

@@ -1,7 +1,17 @@
 import { lazy, Suspense } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { MessageSquare, Bell, Compass, Home, Settings, LogOut, Loader2, User, Shield } from "lucide-react";
+import {
+  MessageSquare,
+  Bell,
+  Compass,
+  Home,
+  Settings,
+  LogOut,
+  Loader2,
+  User,
+  Shield,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -24,7 +34,7 @@ import { m } from "@/paraglide/messages.js";
 // export is mapped to `default` so the dynamic module can be rendered as a
 // lazy component.
 const ModeToggle = lazy(() =>
-  import("@/components/mode-toggle").then((mod) => ({ default: mod.ModeToggle }))
+  import("@/components/mode-toggle").then((mod) => ({ default: mod.ModeToggle })),
 );
 
 /**
@@ -64,8 +74,8 @@ export function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="w-full flex h-16 items-center justify-between gap-2 sm:gap-4 px-4 sm:px-8">
+    <header className="bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 w-full border-b backdrop-blur">
+      <div className="flex h-16 w-full items-center justify-between gap-2 px-4 sm:gap-4 sm:px-8">
         {/* Left Section: Logo & Nav Links.
             `min-w-0` (rather than `shrink-0`) is what keeps the header from
             overflowing the viewport on narrow screens: the right-hand actions
@@ -79,8 +89,11 @@ export function Header() {
             happen to be equally wide, which they never are. Below `xl` the
             bar keeps taking the leftover room, where the sides would not fit
             in equal thirds anyway. */}
-        <div className="flex items-center gap-6 min-w-0 xl:flex-1">
-          <Link to="/" className="flex items-center gap-2 font-bold text-xl tracking-tight text-primary dark:text-foreground min-w-0">
+        <div className="flex min-w-0 items-center gap-6 xl:flex-1">
+          <Link
+            to="/"
+            className="text-primary dark:text-foreground flex min-w-0 items-center gap-2 text-xl font-bold tracking-tight"
+          >
             <img
               src="/mytuums.svg"
               alt={m.app_logo_alt()}
@@ -94,17 +107,29 @@ export function Header() {
                 so the wordmark's truncate can never swallow it. */}
             <VersionTag />
           </Link>
-          <nav className="hidden md:flex items-center gap-1">
-            <Button variant="ghost" nativeButton={false} render={<Link to="/" className="flex items-center gap-2" />}>
+          <nav className="hidden items-center gap-1 md:flex">
+            <Button
+              variant="ghost"
+              nativeButton={false}
+              render={<Link to="/" className="flex items-center gap-2" />}
+            >
               <Home className="h-4 w-4" />
               <span>{m.nav_home()}</span>
             </Button>
-            <Button variant="ghost" nativeButton={false} render={<Link to="/discover" className="flex items-center gap-2" />}>
+            <Button
+              variant="ghost"
+              nativeButton={false}
+              render={<Link to="/discover" className="flex items-center gap-2" />}
+            >
               <Compass className="h-4 w-4" />
               <span>{m.nav_discover()}</span>
             </Button>
             {isModerator && (
-              <Button variant="ghost" nativeButton={false} render={<Link to="/moderation" className="flex items-center gap-2" />}>
+              <Button
+                variant="ghost"
+                nativeButton={false}
+                render={<Link to="/moderation" className="flex items-center gap-2" />}
+              >
                 <Shield className="h-4 w-4" />
                 <span>{m.moderation_nav()}</span>
               </Button>
@@ -118,12 +143,12 @@ export function Header() {
             brand wordmark to truncate. `min-w-0` lets it shrink once shown (a
             `flex-1` item defaults to `min-width: auto`, so without it the
             input's intrinsic width becomes a hard floor). */}
-        <div className="hidden lg:block flex-1 min-w-0 max-w-md mx-2 sm:mx-4">
+        <div className="mx-2 hidden max-w-md min-w-0 flex-1 sm:mx-4 lg:block">
           <SearchBox />
         </div>
 
         {/* Right Section: Messages, Notifications, Theme Toggle, Auth / Profile */}
-        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0 xl:flex-1 xl:justify-end">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-3 xl:flex-1 xl:justify-end">
           {/* Not shipped yet — kept as disabled stubs rather than inert-looking
               buttons so nobody mistakes them for live controls. */}
           <Button
@@ -146,7 +171,7 @@ export function Header() {
           >
             <Bell className="h-5 w-5" />
           </Button>
-          
+
           {/* The fallback is a plain, non-focusable div sized to the icon
               button (size-9) so the sticky header row doesn't shift while the
               lazy chunk loads. */}
@@ -167,15 +192,15 @@ export function Header() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 title={m.user_view_profile({ name: nameDisplay })}
-                className="flex items-center gap-2.5 p-1 rounded-full hover:bg-muted/60 transition-colors ml-1 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="hover:bg-muted/60 focus-visible:ring-ring ml-1 flex cursor-pointer items-center gap-2.5 rounded-full p-1 transition-colors outline-none focus-visible:ring-2"
               >
                 <UserAvatar
                   user={user}
                   alt={user.name || m.user_avatar_alt()}
-                  className="h-8 w-8 border border-primary/20"
+                  className="border-primary/20 h-8 w-8 border"
                   fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
                 />
-                <span className="hidden sm:inline text-sm font-medium pr-1 text-foreground max-w-[140px] truncate">
+                <span className="text-foreground hidden max-w-[140px] truncate pr-1 text-sm font-medium sm:inline">
                   {nameDisplay}
                 </span>
               </DropdownMenuTrigger>
@@ -220,16 +245,16 @@ export function Header() {
           ) : (
             <Link
               to="/welcome"
-              className="flex items-center gap-2.5 p-1 rounded-full hover:bg-muted/60 transition-colors ml-1"
+              className="hover:bg-muted/60 ml-1 flex items-center gap-2.5 rounded-full p-1 transition-colors"
               title={m.welcome_finish_setup()}
             >
               <UserAvatar
                 user={user}
                 alt={user.name || m.user_avatar_alt()}
-                className="h-8 w-8 border border-primary/20"
+                className="border-primary/20 h-8 w-8 border"
                 fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
               />
-              <span className="hidden sm:inline text-sm font-medium pr-1 text-foreground max-w-[140px] truncate">
+              <span className="text-foreground hidden max-w-[140px] truncate pr-1 text-sm font-medium sm:inline">
                 {nameDisplay}
               </span>
             </Link>

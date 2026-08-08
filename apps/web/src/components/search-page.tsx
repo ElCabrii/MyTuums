@@ -28,10 +28,10 @@ export function SearchPage() {
 
   if (!q) {
     return (
-      <div className="max-w-2xl mx-auto px-4 py-8">
-        <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center">
-          <Search className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
-          <p className="text-sm text-muted-foreground">{m.search_empty_query()}</p>
+      <div className="mx-auto max-w-2xl px-4 py-8">
+        <div className="border-border bg-card/40 rounded-xl border border-dashed p-10 text-center">
+          <Search className="text-muted-foreground/60 mx-auto mb-3 h-8 w-8" />
+          <p className="text-muted-foreground text-sm">{m.search_empty_query()}</p>
         </div>
       </div>
     );
@@ -50,7 +50,7 @@ function SearchResultsBody({ q }: { q: string }) {
   const postsFeed = useAtomValue(searchPostsAtom(q));
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8 space-y-8">
+    <div className="mx-auto max-w-2xl space-y-8 px-4 py-8">
       <h1 className="text-lg font-bold tracking-tight">{m.search_results_for({ query: q })}</h1>
 
       <SearchResultsSection
@@ -104,7 +104,7 @@ function SearchResultsSection<T>({
 
   return (
     <section aria-labelledby={headingId} className={listClassName}>
-      <h2 id={headingId} className="text-sm font-bold text-foreground">
+      <h2 id={headingId} className="text-foreground text-sm font-bold">
         {headingLabel}
       </h2>
       <PaginatedState

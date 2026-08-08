@@ -42,13 +42,13 @@ export function PasskeySection() {
       icon={<Fingerprint className="h-5 w-5" />}
     >
       {isPending ? (
-        <p className="text-xs text-muted-foreground">{m.passkey_loading()}</p>
+        <p className="text-muted-foreground text-xs">{m.passkey_loading()}</p>
       ) : passkeys && passkeys.length > 0 ? (
         <ul className="space-y-2">
           {passkeys.map((passkey) => (
             <li
               key={passkey.id}
-              className="flex items-center gap-2 rounded-2xl border border-border/50 bg-background/40 px-4 py-2.5"
+              className="border-border/50 bg-background/40 flex items-center gap-2 rounded-2xl border px-4 py-2.5"
             >
               {editingId === passkey.id ? (
                 <form
@@ -64,10 +64,16 @@ export function PasskeySection() {
                     value={nameDraft}
                     onChange={(e) => setNameDraft(e.target.value)}
                     aria-label={m.passkey_name_label()}
-                    className="h-8 bg-background/50"
+                    className="bg-background/50 h-8"
                     autoFocus
                   />
-                  <Button type="submit" size="icon" variant="ghost" aria-label={m.common_save()} disabled={isBusy}>
+                  <Button
+                    type="submit"
+                    size="icon"
+                    variant="ghost"
+                    aria-label={m.common_save()}
+                    disabled={isBusy}
+                  >
                     <Check className="h-4 w-4" />
                   </Button>
                   <Button
@@ -82,7 +88,7 @@ export function PasskeySection() {
                 </form>
               ) : (
                 <>
-                  <span className="flex-1 text-sm truncate">
+                  <span className="flex-1 truncate text-sm">
                     {passkey.name || m.passkey_unnamed()}
                   </span>
                   <Button
@@ -96,11 +102,13 @@ export function PasskeySection() {
                   <Button
                     size="icon"
                     variant="ghost"
-                    aria-label={m.passkey_delete_label({ name: passkey.name || m.passkey_unnamed() })}
+                    aria-label={m.passkey_delete_label({
+                      name: passkey.name || m.passkey_unnamed(),
+                    })}
                     disabled={isBusy}
                     onClick={() => void deletePasskey(passkey.id)}
                   >
-                    <Trash2 className="h-4 w-4 text-destructive" />
+                    <Trash2 className="text-destructive h-4 w-4" />
                   </Button>
                 </>
               )}
@@ -108,7 +116,7 @@ export function PasskeySection() {
           ))}
         </ul>
       ) : (
-        <p className="text-xs text-muted-foreground">{m.passkey_empty()}</p>
+        <p className="text-muted-foreground text-xs">{m.passkey_empty()}</p>
       )}
 
       <form
@@ -123,10 +131,14 @@ export function PasskeySection() {
           onChange={(e) => setNewName(e.target.value)}
           placeholder={m.passkey_name_placeholder()}
           aria-label={m.passkey_name_label()}
-          className="h-9 bg-background/50"
+          className="bg-background/50 h-9"
         />
-        <Button type="submit" size="sm" className="rounded-full gap-2 shrink-0" disabled={isBusy}>
-          {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+        <Button type="submit" size="sm" className="shrink-0 gap-2 rounded-full" disabled={isBusy}>
+          {isBusy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Plus className="h-3.5 w-3.5" />
+          )}
           {m.passkey_add()}
         </Button>
       </form>

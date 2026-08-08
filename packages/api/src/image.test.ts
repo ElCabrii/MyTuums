@@ -23,27 +23,95 @@ import {
  * so an offset shift fails loudly.
  */
 const PNG = new Uint8Array([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-  0x00, 0x00, 0x01, 0x00, // width: 256
-  0x00, 0x00, 0x00, 0x80, // height: 128
+  0x89,
+  0x50,
+  0x4e,
+  0x47,
+  0x0d,
+  0x0a,
+  0x1a,
+  0x0a,
+  0x00,
+  0x00,
+  0x00,
+  0x0d,
+  0x49,
+  0x48,
+  0x44,
+  0x52,
+  0x00,
+  0x00,
+  0x01,
+  0x00, // width: 256
+  0x00,
+  0x00,
+  0x00,
+  0x80, // height: 128
 ]);
 const JPEG = new Uint8Array([
-  0xff, 0xd8,
-  0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-  0xff, 0xc0, 0x00, 0x11, 0x08, // SOF0
-  0x01, 0x2c, // height: 300
-  0x01, 0x90, // width: 400
+  0xff,
+  0xd8,
+  0xff,
+  0xe0,
+  0x00,
+  0x10,
+  0x4a,
+  0x46,
+  0x49,
+  0x46,
+  0x00,
+  0x01,
+  0x01,
+  0x00,
+  0x00,
+  0x01,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0xff,
+  0xc0,
+  0x00,
+  0x11,
+  0x08, // SOF0
+  0x01,
+  0x2c, // height: 300
+  0x01,
+  0x90, // width: 400
 ]);
 // The "VP8 " payload opens with a 3-byte frame tag; the start code follows it.
 // See the layout note in `./dimensions.ts`.
 const WEBP = new Uint8Array([
-  0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
-  0x56, 0x50, 0x38, 0x20, 0x00, 0x00, 0x00, 0x00, // "VP8 "
-  0xb0, 0x5f, 0x00, // frame tag
-  0x9d, 0x01, 0x2a, // start code
-  0x00, 0x02, // width: 512
-  0x00, 0x01, // height: 256
+  0x52,
+  0x49,
+  0x46,
+  0x46,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x57,
+  0x45,
+  0x42,
+  0x50,
+  0x56,
+  0x50,
+  0x38,
+  0x20,
+  0x00,
+  0x00,
+  0x00,
+  0x00, // "VP8 "
+  0xb0,
+  0x5f,
+  0x00, // frame tag
+  0x9d,
+  0x01,
+  0x2a, // start code
+  0x00,
+  0x02, // width: 512
+  0x00,
+  0x01, // height: 256
 ]);
 
 describe("sniffImageType", () => {
@@ -71,12 +139,21 @@ describe("sniffImageType", () => {
 
 describe("acceptImage", () => {
   it("accepts a well-formed image and reports the sniffed type", () => {
-    expect(acceptImage(PNG, "image/png", "avatar", "display")).toEqual({ ok: true, type: "image/png" });
+    expect(acceptImage(PNG, "image/png", "avatar", "display")).toEqual({
+      ok: true,
+      type: "image/png",
+    });
   });
 
   it("rejects a type that is not on the allowlist", () => {
-    expect(acceptImage(PNG, "image/svg+xml", "avatar", "display")).toMatchObject({ ok: false, reason: "type" });
-    expect(acceptImage(PNG, "text/html", "avatar", "display")).toMatchObject({ ok: false, reason: "type" });
+    expect(acceptImage(PNG, "image/svg+xml", "avatar", "display")).toMatchObject({
+      ok: false,
+      reason: "type",
+    });
+    expect(acceptImage(PNG, "text/html", "avatar", "display")).toMatchObject({
+      ok: false,
+      reason: "type",
+    });
   });
 
   it("rejects bytes whose content disagrees with the declared type", () => {
@@ -131,12 +208,36 @@ describe("acceptImage", () => {
     // name a 600px-wide image "the avatar's display object" and expect it to
     // ride along. The bound is what stops it.
     const wide = new Uint8Array([
-      0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
-      0x56, 0x50, 0x38, 0x20, 0x00, 0x00, 0x00, 0x00, // "VP8 "
-      0xb0, 0x5f, 0x00, // frame tag
-      0x9d, 0x01, 0x2a, // start code
-      0x58, 0x02, // width: 600
-      0x2c, 0x01, // height: 300
+      0x52,
+      0x49,
+      0x46,
+      0x46,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x57,
+      0x45,
+      0x42,
+      0x50,
+      0x56,
+      0x50,
+      0x38,
+      0x20,
+      0x00,
+      0x00,
+      0x00,
+      0x00, // "VP8 "
+      0xb0,
+      0x5f,
+      0x00, // frame tag
+      0x9d,
+      0x01,
+      0x2a, // start code
+      0x58,
+      0x02, // width: 600
+      0x2c,
+      0x01, // height: 300
     ]);
 
     expect(acceptImage(wide, "image/webp", "avatar", "display")).toMatchObject({
@@ -152,10 +253,30 @@ describe("acceptImage", () => {
     // The byte cap does not bound pixels: a 20000x20000 flat-colour PNG is
     // ~200 KB and 400 MP. Build a PNG header declaring exactly that.
     const bomb = new Uint8Array([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-      0x4e, 0x20, 0x00, 0x00, // width: 20000
-      0x4e, 0x20, 0x00, 0x00, // height: 20000
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      0x00,
+      0x00,
+      0x00,
+      0x0d,
+      0x49,
+      0x48,
+      0x44,
+      0x52,
+      0x4e,
+      0x20,
+      0x00,
+      0x00, // width: 20000
+      0x4e,
+      0x20,
+      0x00,
+      0x00, // height: 20000
     ]);
     expect(bomb.byteLength).toBeLessThan(IMAGE_LIMITS.avatar.maxOriginalBytes);
 
@@ -164,7 +285,6 @@ describe("acceptImage", () => {
       reason: "size",
     });
   });
-
 });
 
 describe("object keys", () => {
@@ -172,7 +292,9 @@ describe("object keys", () => {
     const a = imageObjectKey("avatar", "user-1", "image/webp", "display");
     const b = imageObjectKey("avatar", "user-1", "image/webp", "display");
 
-    expect(a).toMatch(/^avatars\/user-1\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.webp$/);
+    expect(a).toMatch(
+      /^avatars\/user-1\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.webp$/,
+    );
     // Never derived from the upload's filename, so one upload cannot overwrite
     // another — including someone else's.
     expect(a).not.toBe(b);

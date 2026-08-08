@@ -15,7 +15,7 @@ nothing else — no routes, no UI, no queries beyond the adapter.
   comments before changing anything (see "Pinned settings" below).
 - `src/env.ts` — env resolution, deliberately non-throwing. Anything missing
   makes a provider or feature absent, never the process crash — `apps/server/
-  src/env.ts` is the loud boot-time validator, this package is the quiet one.
+src/env.ts` is the loud boot-time validator, this package is the quiet one.
 - `src/social.ts` — OAuth providers (google/discord/twitch), each registered
   only when both credential halves exist; plus `trustedProviders`, the security
   control for automatic account linking.
@@ -26,7 +26,7 @@ nothing else — no routes, no UI, no queries beyond the adapter.
   server errors.
 - `src/dob.ts` / `src/profile.ts` — the two `databaseHooks` user-validation
   rules (15+ age rule; profile-field rules). Both are pure, tested separately,
-  and deliberately *not* applied in the test instance (fixtures may mint rows
+  and deliberately _not_ applied in the test instance (fixtures may mint rows
   the rules reject).
 - `src/testing.ts` — a second better-auth instance with the privileged
   `testUtils` helpers (session minting, OTP capture). Reachable only as
@@ -37,7 +37,7 @@ nothing else — no routes, no UI, no queries beyond the adapter.
 - `apps/server/src/index.ts` mounts `auth` at `/api/auth` (`toNodeHandler`).
 - `packages/api/src/context.ts` resolves every request's session with
   `auth.api.getSession`.
-- `packages/api/src/auth.int.test.ts` exercises the *production* instance;
+- `packages/api/src/auth.int.test.ts` exercises the _production_ instance;
   `auth-constants.int.test.ts` imports `@my-tuums/auth/profile`.
 - Error and DOB message strings are byte-identical with the client's
   `apps/web/src/lib/auth-validation.ts`; change one side alone and server

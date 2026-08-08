@@ -28,7 +28,7 @@ export function ThreadPage() {
   if (threadQuery.isPending) {
     return (
       <div className="flex h-[70vh] items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin motion-reduce:animate-none text-primary" />
+        <Loader2 className="text-primary h-8 w-8 animate-spin motion-reduce:animate-none" />
       </div>
     );
   }
@@ -47,16 +47,14 @@ export function ThreadPage() {
 
     return unreachable ? (
       <ProfileMessage icon={FileQuestion} title={m.post_not_found()}>
-        <p className="text-sm text-muted-foreground mb-4">
-          {m.post_not_found_hint()}
-        </p>
+        <p className="text-muted-foreground mb-4 text-sm">{m.post_not_found_hint()}</p>
         <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/" />}>
           {m.common_back_to_home()}
         </Button>
       </ProfileMessage>
     ) : (
       <ProfileMessage icon={AlertCircle} title={m.post_load_error()}>
-        <p className="text-sm text-muted-foreground mb-4">
+        <p className="text-muted-foreground mb-4 text-sm">
           {threadQuery.error.message || m.common_something_went_wrong()}
         </p>
         <Button variant="outline" size="sm" onClick={() => void threadQuery.refetch()}>
@@ -70,8 +68,8 @@ export function ThreadPage() {
   const authorHandle = handleOf(post.author);
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8 space-y-4">
-      <div className="flex items-center gap-2 pb-2 border-b border-border">
+    <div className="mx-auto max-w-2xl space-y-4 px-4 py-8">
+      <div className="border-border flex items-center gap-2 border-b pb-2">
         <Button
           variant="ghost"
           size="icon"
@@ -86,15 +84,13 @@ export function ThreadPage() {
       {ancestors.length > 0 && (
         <div className="space-y-0">
           {truncated && (
-            <p className="px-1 pb-2 text-xs text-muted-foreground flex items-center gap-1.5">
+            <p className="text-muted-foreground flex items-center gap-1.5 px-1 pb-2 text-xs">
               <MoreHorizontal className="h-4 w-4" />
-              <span>
-                {m.thread_truncated({ count: String(THREAD_ANCESTOR_MAX) })}
-              </span>
+              <span>{m.thread_truncated({ count: String(THREAD_ANCESTOR_MAX) })}</span>
             </p>
           )}
           {/* Twitter style connecting line for ancestors */}
-          <div className="space-y-0 border-l-2 border-border/80 pl-4 ml-6 my-1 divide-y divide-border/40">
+          <div className="border-border/80 divide-border/40 my-1 ml-6 space-y-0 divide-y border-l-2 pl-4">
             {ancestors.map((ancestor) => (
               <PostCard key={ancestor.id} post={ancestor} variant="ancestor" />
             ))}
@@ -105,9 +101,9 @@ export function ThreadPage() {
       <PostCard post={post} variant="focused" />
 
       {/* Twitter-style reply section header & composer */}
-      <div className="pt-4 space-y-4 border-t border-border/60">
+      <div className="border-border/60 space-y-4 border-t pt-4">
         <div className="flex items-center gap-2 pb-1">
-          <h2 className="text-sm font-semibold text-foreground">
+          <h2 className="text-foreground text-sm font-semibold">
             {post.replyCount === 1
               ? m.reply_count_one({ count: String(post.replyCount) })
               : m.reply_count_many({ count: String(post.replyCount) })}
@@ -117,7 +113,7 @@ export function ThreadPage() {
         <ReplyComposer parentId={post.id} replyingTo={authorHandle} />
 
         {/* Reply feed container */}
-        <div className="pt-2 divide-y divide-border/50">
+        <div className="divide-border/50 divide-y pt-2">
           <PostFeed
             feedAtom={postFeedAtom({ feed: "global", parentId: post.id })}
             emptyMessage={m.reply_empty()}

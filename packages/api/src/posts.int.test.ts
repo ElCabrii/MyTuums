@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
 import { closeDb } from "@my-tuums/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { POST_MAX_LENGTH, POST_PAGE_SIZE, POST_PAGE_SIZE_MAX, THREAD_ANCESTOR_MAX } from "./constants.js";
+import {
+  POST_MAX_LENGTH,
+  POST_PAGE_SIZE,
+  POST_PAGE_SIZE_MAX,
+  THREAD_ANCESTOR_MAX,
+} from "./constants.js";
 import type { Context } from "./context.js";
 import { appRouter } from "./router.js";
 import {
@@ -137,44 +142,36 @@ describe("post.create", () => {
 });
 
 describe("post.list", () => {
-  it(
-    "keyset pagination never repeats or skips a row across every page — the single most important test in this file",
-    async () => {
-      const author = await createTestUser();
-      const count = POST_PAGE_SIZE * 2 + 7; // guarantees at least 3 pages at the default page size
-      const base = Date.now();
-      const seeded = await seedPosts(author.id, count, {
-        createdAt: (i) => new Date(base + i * 17),
-      });
+  it("keyset pagination never repeats or skips a row across every page — the single most important test in this file", async () => {
+    const author = await createTestUser();
+    const count = POST_PAGE_SIZE * 2 + 7; // guarantees at least 3 pages at the default page size
+    const base = Date.now();
+    const seeded = await seedPosts(author.id, count, {
+      createdAt: (i) => new Date(base + i * 17),
+    });
 
-      const ids = await walkAllPostPages({ authorId: author.id }, contextFor(author));
+    const ids = await walkAllPostPages({ authorId: author.id }, contextFor(author));
 
-      expect(ids).toHaveLength(count);
-      expect(new Set(ids).size).toBe(count); // no duplicates
-      expect(new Set(ids)).toEqual(new Set(seeded.map((p) => p.id))); // exactly the seeded set
-    },
-    20_000,
-  );
+    expect(ids).toHaveLength(count);
+    expect(new Set(ids).size).toBe(count); // no duplicates
+    expect(new Set(ids)).toEqual(new Set(seeded.map((p) => p.id))); // exactly the seeded set
+  }, 20_000);
 
-  it(
-    "rows sharing a millisecond are still traversed exactly once — the precision: 3 silent-skip bug CLAUDE.md describes",
-    async () => {
-      const author = await createTestUser();
-      const tiedAt = new Date("2025-06-01T12:00:00.000Z");
-      const tieCount = POST_PAGE_SIZE + 5; // more than a small page, all sharing one createdAt
-      const seeded = await seedPosts(author.id, tieCount, { createdAt: tiedAt });
+  it("rows sharing a millisecond are still traversed exactly once — the precision: 3 silent-skip bug CLAUDE.md describes", async () => {
+    const author = await createTestUser();
+    const tiedAt = new Date("2025-06-01T12:00:00.000Z");
+    const tieCount = POST_PAGE_SIZE + 5; // more than a small page, all sharing one createdAt
+    const seeded = await seedPosts(author.id, tieCount, { createdAt: tiedAt });
 
-      // A small explicit limit forces the walk to cross the tied-timestamp
-      // boundary several times, which is where a lost fractional-millisecond
-      // cursor would silently drop every row in the current window.
-      const ids = await walkAllPostPages({ authorId: author.id, limit: 10 }, contextFor(author));
+    // A small explicit limit forces the walk to cross the tied-timestamp
+    // boundary several times, which is where a lost fractional-millisecond
+    // cursor would silently drop every row in the current window.
+    const ids = await walkAllPostPages({ authorId: author.id, limit: 10 }, contextFor(author));
 
-      expect(ids).toHaveLength(tieCount);
-      expect(new Set(ids).size).toBe(tieCount);
-      expect(new Set(ids)).toEqual(new Set(seeded.map((p) => p.id)));
-    },
-    20_000,
-  );
+    expect(ids).toHaveLength(tieCount);
+    expect(new Set(ids).size).toBe(tieCount);
+    expect(new Set(ids)).toEqual(new Set(seeded.map((p) => p.id)));
+  }, 20_000);
 
   it("nextCursor is null on the last page", async () => {
     const author = await createTestUser();
@@ -242,9 +239,9 @@ describe("post.list", () => {
   });
 
   it("rejects an anonymous caller — every mode of list requires a session now, not just 'following' (issue #36)", async () => {
-    await expect(
-      call(appRouter.post.list, {}, { context: anonContext }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(call(appRouter.post.list, {}, { context: anonContext })).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+    });
   });
 
   it("feed: 'following' returns posts from people you follow, plus your own unconditionally, excluding a stranger's", async () => {
@@ -340,48 +337,40 @@ describe("post.thread", () => {
     expect(idsInPayload).not.toContain(childReply.id);
   });
 
-  it(
-    "caps a chain longer than THREAD_ANCESTOR_MAX and marks it truncated",
-    async () => {
-      const author = await createTestUser();
-      const depth = THREAD_ANCESTOR_MAX + 5;
-      const chain = await buildChain(author.id, depth);
-      const focusedId = chain.at(-1)!;
+  it("caps a chain longer than THREAD_ANCESTOR_MAX and marks it truncated", async () => {
+    const author = await createTestUser();
+    const depth = THREAD_ANCESTOR_MAX + 5;
+    const chain = await buildChain(author.id, depth);
+    const focusedId = chain.at(-1)!;
 
-      const result = await call(
-        appRouter.post.thread,
-        { postId: focusedId },
-        { context: contextFor(author) },
-      );
+    const result = await call(
+      appRouter.post.thread,
+      { postId: focusedId },
+      { context: contextFor(author) },
+    );
 
-      expect(result.ancestors).toHaveLength(THREAD_ANCESTOR_MAX);
-      expect(result.truncated).toBe(true);
-      // Root-first order: the THREAD_ANCESTOR_MAX ancestors nearest the focused post.
-      const expectedIds = chain.slice(chain.length - 1 - THREAD_ANCESTOR_MAX, chain.length - 1);
-      expect(result.ancestors.map((a) => a.id)).toEqual(expectedIds);
-    },
-    20_000,
-  );
+    expect(result.ancestors).toHaveLength(THREAD_ANCESTOR_MAX);
+    expect(result.truncated).toBe(true);
+    // Root-first order: the THREAD_ANCESTOR_MAX ancestors nearest the focused post.
+    const expectedIds = chain.slice(chain.length - 1 - THREAD_ANCESTOR_MAX, chain.length - 1);
+    expect(result.ancestors.map((a) => a.id)).toEqual(expectedIds);
+  }, 20_000);
 
-  it(
-    "a chain exactly at THREAD_ANCESTOR_MAX is not truncated",
-    async () => {
-      const author = await createTestUser();
-      const chain = await buildChain(author.id, THREAD_ANCESTOR_MAX);
-      const focusedId = chain.at(-1)!;
+  it("a chain exactly at THREAD_ANCESTOR_MAX is not truncated", async () => {
+    const author = await createTestUser();
+    const chain = await buildChain(author.id, THREAD_ANCESTOR_MAX);
+    const focusedId = chain.at(-1)!;
 
-      const result = await call(
-        appRouter.post.thread,
-        { postId: focusedId },
-        { context: contextFor(author) },
-      );
+    const result = await call(
+      appRouter.post.thread,
+      { postId: focusedId },
+      { context: contextFor(author) },
+    );
 
-      expect(result.ancestors).toHaveLength(THREAD_ANCESTOR_MAX);
-      expect(result.truncated).toBe(false);
-      expect(result.ancestors.map((a) => a.id)).toEqual(chain.slice(0, -1));
-    },
-    20_000,
-  );
+    expect(result.ancestors).toHaveLength(THREAD_ANCESTOR_MAX);
+    expect(result.truncated).toBe(false);
+    expect(result.ancestors.map((a) => a.id)).toEqual(chain.slice(0, -1));
+  }, 20_000);
 
   it("reports the same likeCount/replyCount/viewerHasLiked as post.list for the same post — proof both share postSelection", async () => {
     const author = await createTestUser();

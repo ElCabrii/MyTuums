@@ -75,11 +75,7 @@ export function validateDateOfBirth(rawDateOfBirth: string): string | null {
   // March 2. Round-tripping through Date.UTC and reading back UTC parts is
   // what catches impossible dates without any timezone involved.
   const check = new Date(Date.UTC(y, m - 1, d));
-  if (
-    check.getUTCFullYear() !== y ||
-    check.getUTCMonth() !== m - 1 ||
-    check.getUTCDate() !== d
-  ) {
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== m - 1 || check.getUTCDate() !== d) {
     return "Please enter a valid date of birth.";
   }
 
@@ -193,7 +189,6 @@ export function dateOfBirthInputValue(value: Date | string | null | undefined): 
   const d = String(parsed.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
-
 
 /** The login form's two fields. */
 export type LoginFields = {

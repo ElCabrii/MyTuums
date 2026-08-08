@@ -59,7 +59,7 @@ export function PasswordSection() {
         <div className="space-y-2">
           <label
             htmlFor="current-password"
-            className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+            className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
           >
             {m.auth_field_current_password()}
           </label>
@@ -69,7 +69,7 @@ export function PasswordSection() {
             value={current}
             onChange={(e) => setCurrent(e.target.value)}
             autoComplete="current-password"
-            className="h-10 bg-background/50"
+            className="bg-background/50 h-10"
             required
           />
         </div>
@@ -77,7 +77,7 @@ export function PasswordSection() {
         <div className="space-y-2">
           <label
             htmlFor="new-password"
-            className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+            className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
           >
             {m.auth_field_new_password()}
           </label>
@@ -87,7 +87,7 @@ export function PasswordSection() {
             value={next}
             onChange={(e) => setNext(e.target.value)}
             autoComplete="new-password"
-            className="h-10 bg-background/50"
+            className="bg-background/50 h-10"
             required
           />
         </div>
@@ -95,7 +95,7 @@ export function PasswordSection() {
         <div className="space-y-2">
           <label
             htmlFor="confirm-new-password"
-            className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+            className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
           >
             {m.auth_field_confirm_new_password()}
           </label>
@@ -105,7 +105,7 @@ export function PasswordSection() {
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             autoComplete="new-password"
-            className="h-10 bg-background/50"
+            className="bg-background/50 h-10"
             required
           />
         </div>
@@ -113,15 +113,19 @@ export function PasswordSection() {
         {/* `role="status"` rather than `role="alert"`: this is a confirmation,
             and alert is for the failure banner the page already owns. */}
         {changed && (
-          <p role="status" className="text-xs text-link">
+          <p role="status" className="text-link text-xs">
             {m.settings_password_changed()}
           </p>
         )}
 
-        <p className="text-xs text-muted-foreground">{m.settings_password_revoke_hint()}</p>
+        <p className="text-muted-foreground text-xs">{m.settings_password_revoke_hint()}</p>
 
-        <Button type="submit" size="sm" className="rounded-full gap-2" disabled={isBusy}>
-          {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+        <Button type="submit" size="sm" className="gap-2 rounded-full" disabled={isBusy}>
+          {isBusy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
           {m.settings_password_submit()}
         </Button>
       </form>

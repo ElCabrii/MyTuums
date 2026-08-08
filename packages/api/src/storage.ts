@@ -125,10 +125,7 @@ export function secondsUntilWindowEnd(now = Date.now()): number {
  * The production factory. Returns plain `Storage`, so the recursive mass-delete
  * is unreachable to every caller that threads this through a `Context`.
  */
-export function createStorage(
-  config: StorageConfig,
-  now: () => number = Date.now,
-): Storage {
+export function createStorage(config: StorageConfig, now: () => number = Date.now): Storage {
   return createStorageImpl(config, now);
 }
 
@@ -237,7 +234,9 @@ function createStorageImpl(config: StorageConfig, now: () => number): Destructiv
       // of (key, window) — byte-identical for every viewer within the window,
       // which is exactly what `secondsUntilWindowEnd` budgets the redirect
       // cache against. `now` is injectable so this determinism is testable.
-      const signingDate = new Date(Math.floor(now() / MEDIA_SIGNING_WINDOW_MS) * MEDIA_SIGNING_WINDOW_MS);
+      const signingDate = new Date(
+        Math.floor(now() / MEDIA_SIGNING_WINDOW_MS) * MEDIA_SIGNING_WINDOW_MS,
+      );
       return getSignedUrl(client, new GetObjectCommand({ Bucket: config.bucket, Key: key }), {
         expiresIn: expiresInSeconds,
         signingDate,

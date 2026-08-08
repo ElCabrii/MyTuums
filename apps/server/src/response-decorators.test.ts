@@ -1,7 +1,13 @@
 import { createServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { brotliCompressSync, brotliDecompressSync, constants, gunzipSync, gzipSync } from "node:zlib";
+import {
+  brotliCompressSync,
+  brotliDecompressSync,
+  constants,
+  gunzipSync,
+  gzipSync,
+} from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { decorateResponse } from "./response-decorators.js";
 
@@ -53,7 +59,9 @@ function rawRequest(
 /** Boots a server whose responses all flow through `decorateResponse`, then runs `run`. */
 async function withServer(
   handler: (req: IncomingMessage, res: ServerResponse) => void,
-  run: (raw: (path: string, init?: Parameters<typeof rawRequest>[2]) => Promise<RawResponse>) => Promise<void>,
+  run: (
+    raw: (path: string, init?: Parameters<typeof rawRequest>[2]) => Promise<RawResponse>,
+  ) => Promise<void>,
 ): Promise<void> {
   const server = createServer((req, res) => {
     decorateResponse(req, res);

@@ -31,8 +31,7 @@ export const fr: TranslationDictionary = {
   CREDENTIAL_ACCOUNT_NOT_FOUND:
     "Ce compte n'a pas de mot de passe : connectez-vous avec le service que vous avez utilisé à l'inscription.",
   SESSION_EXPIRED: "Session expirée. Reconnectez-vous pour effectuer cette action.",
-  SESSION_NOT_FRESH:
-    "Reconnectez-vous pour confirmer votre identité avant de modifier ce réglage.",
+  SESSION_NOT_FRESH: "Reconnectez-vous pour confirmer votre identité avant de modifier ce réglage.",
   EMAIL_NOT_VERIFIED: "Adresse e-mail non vérifiée.",
   EMAIL_ALREADY_VERIFIED: "Cette adresse e-mail est déjà vérifiée.",
   INVALID_TOKEN: "Lien invalide ou déjà utilisé.",
@@ -40,8 +39,7 @@ export const fr: TranslationDictionary = {
 
   // Sign-up
   USER_ALREADY_EXISTS: "Un compte existe déjà avec ces informations.",
-  USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL:
-    "Un compte existe déjà avec cette adresse e-mail.",
+  USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "Un compte existe déjà avec cette adresse e-mail.",
   PASSWORD_TOO_SHORT: "Mot de passe trop court.",
   PASSWORD_TOO_LONG: "Mot de passe trop long.",
   PASSWORD_COMPROMISED:
@@ -59,8 +57,7 @@ export const fr: TranslationDictionary = {
   TWO_FACTOR_NOT_ENABLED: "La double authentification n'est pas activée.",
   TOTP_NOT_ENABLED: "L'application d'authentification n'est pas configurée.",
   OTP_NOT_ENABLED: "L'envoi de code par e-mail n'est pas activé.",
-  INVALID_TWO_FACTOR_COOKIE:
-    "Votre demande de connexion a expiré. Recommencez la connexion.",
+  INVALID_TWO_FACTOR_COOKIE: "Votre demande de connexion a expiré. Recommencez la connexion.",
   INVALID_OTP: "Code incorrect.",
   OTP_EXPIRED: "Ce code a expiré. Demandez-en un nouveau.",
   OTP_HAS_EXPIRED: "Ce code a expiré. Demandez-en un nouveau.",
@@ -83,8 +80,7 @@ export const fr: TranslationDictionary = {
   // Account linking
   SOCIAL_ACCOUNT_ALREADY_LINKED: "Ce compte est déjà lié à un autre utilisateur.",
   LINKED_ACCOUNT_ALREADY_EXISTS: "Ce compte est déjà lié.",
-  FAILED_TO_UNLINK_LAST_ACCOUNT:
-    "Impossible de délier votre dernière méthode de connexion.",
+  FAILED_TO_UNLINK_LAST_ACCOUNT: "Impossible de délier votre dernière méthode de connexion.",
   PROVIDER_NOT_FOUND: "Ce service de connexion n'est pas disponible.",
   EMAIL_MISMATCH: "L'adresse e-mail ne correspond pas à celle du compte.",
 };
