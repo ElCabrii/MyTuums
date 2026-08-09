@@ -24,12 +24,13 @@ export function suggestionRows(typeahead: SearchTypeahead | undefined): Suggesti
 }
 
 /**
- * Moves the highlighted row by `delta` (ArrowDown +1, ArrowUp -1), clamped to
- * `[-1, length - 1]` and never wrapping: Escape already closes the dropdown,
- * so wrapping the highlight around would buy nothing and only land it on the
- * wrong side of the screen. -1 means "nothing highlighted", and an empty row
- * list stays there.
+ * Moves the highlighted row by `delta` (ArrowDown +1, ArrowUp -1), wrapping
+ * from the final row to the first and vice versa. From no highlight, Down
+ * starts at the first row and Up starts at the last. -1 means "nothing
+ * highlighted", and an empty row list stays there.
  */
 export function nextHighlight(current: number, delta: number, length: number): number {
-  return Math.min(Math.max(current + delta, -1), length - 1);
+  if (length <= 0) return -1;
+  if (current < 0) return delta > 0 ? 0 : length - 1;
+  return (current + delta + length) % length;
 }

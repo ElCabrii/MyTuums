@@ -289,6 +289,7 @@ function SearchField({
     <div className="relative">
       <Search className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
       <PopoverTrigger
+        nativeButton={false}
         render={
           <Input
             ref={inputRef}

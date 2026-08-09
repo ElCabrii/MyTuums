@@ -40,7 +40,7 @@ export const Route = createFileRoute("/settings/account")({
  * signed-in gate lives at the root — `__root.tsx` renders nothing until the
  * session settles — so the page needs no guard of its own.)
  */
-function AccountSettingsPage() {
+export function AccountSettingsPage() {
   const viewer = useAtomValue(viewerAtom);
   const error = useAtomValue(authErrorAtom);
 
