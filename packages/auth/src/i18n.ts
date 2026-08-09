@@ -56,12 +56,10 @@ export const fr: TranslationDictionary = {
   // Two-factor
   TWO_FACTOR_NOT_ENABLED: "La double authentification n'est pas activée.",
   TOTP_NOT_ENABLED: "L'application d'authentification n'est pas configurée.",
-  OTP_NOT_ENABLED: "L'envoi de code par e-mail n'est pas activé.",
   INVALID_TWO_FACTOR_COOKIE: "Votre demande de connexion a expiré. Recommencez la connexion.",
-  INVALID_OTP: "Code incorrect.",
-  OTP_EXPIRED: "Ce code a expiré. Demandez-en un nouveau.",
+  INVALID_CODE: "Code incorrect.",
   OTP_HAS_EXPIRED: "Ce code a expiré. Demandez-en un nouveau.",
-  OTP_NOT_FOUND: "Aucun code en attente. Demandez-en un nouveau.",
+  TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE: "Trop de tentatives. Demandez un nouveau code.",
   INVALID_BACKUP_CODE: "Code de secours incorrect ou déjà utilisé.",
   BACKUP_CODES_NOT_ENABLED: "Aucun code de secours n'a été généré.",
   ACCOUNT_TEMPORARILY_LOCKED:

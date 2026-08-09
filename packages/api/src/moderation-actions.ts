@@ -163,6 +163,12 @@ export async function stampReports(
  * Sends one moderation email to a user, in their stored language when they
  * have one ("en" or "fr"), otherwise in the request's language — the same
  * `PARAGLIDE_LOCALE` cookie the web app sets.
+ *
+ * A failed send is logged and swallowed: every caller mails *after* the
+ * action's transaction has committed, so surfacing the error would turn a
+ * done deal into a failed moderation call — the moderator retries, and gets
+ * the "already removed" class of errors while the notice never goes out.
+ * The action stands; the log is for operators.
  */
 export async function emailUser(
   db: DbLike,
@@ -185,7 +191,11 @@ export async function emailUser(
       ? target.localePreference
       : localeFromRequest(headers);
 
-  await sendEmail({ to: target.email, ...build(locale) });
+  try {
+    await sendEmail({ to: target.email, ...build(locale) });
+  } catch (error) {
+    console.error("Moderation email failed to send", { to: target.email, userId }, error);
+  }
 }
 
 /**

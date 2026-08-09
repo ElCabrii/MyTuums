@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IMAGE_LIMITS } from "./constants.js";
+import { IMAGE_LIMITS, RPC_MAX_BODY_BYTES } from "./constants.js";
 import {
   acceptImage,
   imageObjectKey,
@@ -284,6 +284,18 @@ describe("acceptImage", () => {
       ok: false,
       reason: "size",
     });
+  });
+});
+
+describe("RPC_MAX_BODY_BYTES", () => {
+  it("clears the largest slot TOTAL — an upload carries both objects in one request", () => {
+    // The bug this pins: the ceiling used to clear only the bigger *cap*, so a
+    // max-size banner upload (8 MB original + 2 MB display) was refused by its
+    // own limit. The request carries both objects, so the ceiling must clear
+    // the slot's sum.
+    for (const slot of Object.values(IMAGE_LIMITS)) {
+      expect(RPC_MAX_BODY_BYTES).toBeGreaterThan(slot.maxOriginalBytes + slot.maxDisplayBytes);
+    }
   });
 });
 

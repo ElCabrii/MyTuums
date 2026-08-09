@@ -13,7 +13,7 @@ import {
   user,
   userBlock,
 } from "@my-tuums/db/schema";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { appealToken } from "./appeal-token.js";
 import { isActionLatest, unbanEffect, type DbLike } from "./moderation-actions.js";
 import type { Context } from "./context.js";
@@ -1035,6 +1035,13 @@ describe("resolve", () => {
 });
 
 describe("removePost and restorePost", () => {
+  // A failed assertion must not leak state into the next test: the email
+  // failure test installs a console.error spy and a one-shot sendEmail
+  // rejection, and neither survives a mid-test failure without this
+  // (mockClear in the file's beforeEach only clears call records).
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   it("tombstones the post: feeds keep a bare stub, only the author sees the reason", async () => {
     const author = await createTestUser();
     const viewer = await createTestUser();
@@ -1076,6 +1083,38 @@ describe("removePost and restorePost", () => {
     );
     if (caseResult.target.kind !== "post") throw new Error("expected a post target");
     expect(caseResult.target.content).toBe("remove me please");
+  });
+
+  it("a failed notice email does not fail the action — the removal stands", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "email may fail");
+
+    // The notice goes out after the transaction commits, so a dead email
+    // service must not turn a done removal into an error the moderator
+    // retries (and gets "already removed" for). The loud log is for
+    // operators; the action is the truth.
+    vi.mocked(sendEmail).mockRejectedValueOnce(new Error("resend is down"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "spam" },
+      { context: contextFor(mod) },
+    );
+    expect(result).toEqual({ postId: postRow.id, removed: true });
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/Moderation email failed to send/),
+      expect.anything(),
+      expect.any(Error),
+    );
+
+    const [row] = await anonContext.db
+      .select({ removedAt: post.removedAt })
+      .from(post)
+      .where(eq(post.id, postRow.id));
+    expect(row?.removedAt).not.toBeNull();
+    errorSpy.mockRestore();
   });
 
   it("replies to a removed post stay visible and creatable", async () => {
@@ -1359,6 +1398,37 @@ describe("suspendUser", () => {
         { context: contextFor(mod) },
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND", message: "This account doesn't exist." });
+  });
+
+  it("refuses a permanently banned account — the sentence stays permanent", async () => {
+    const victim = await createTestUser();
+    const staff = await staffUser();
+    const mod = await moderatorUser();
+    await call(
+      appRouter.moderation.banUser,
+      { userId: victim.id, reason: "permanent spam" },
+      { context: contextFor(staff) },
+    );
+
+    // A suspension would replace `banExpires: null` with a lapsing expiry —
+    // one moderator click silently downgrading a staff-issued permanent ban.
+    await expect(
+      call(
+        appRouter.moderation.suspendUser,
+        { userId: victim.id, reason: "spam", durationSeconds: 3600 },
+        { context: contextFor(mod) },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This account is permanently banned. Unban it before suspending.",
+    });
+
+    const [row] = await anonContext.db
+      .select({ banned: user.banned, banExpires: user.banExpires })
+      .from(user)
+      .where(eq(user.id, victim.id));
+    expect(row?.banned).toBe(true);
+    expect(row?.banExpires).toBeNull();
   });
 });
 
