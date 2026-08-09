@@ -83,9 +83,12 @@ export const configuredSocialProviders = Object.keys(socialProviders);
  * signing in through it.
  *
  * Google and Discord both expose a trustworthy verification signal. Twitch is
- * excluded on purpose — its sign-in still works, but the first time an existing
- * account's email matches, the person has to link it deliberately from
- * `/settings/account` instead of it happening silently.
+ * excluded on purpose: the exclusion makes a matching-email sign-in require
+ * the provider's own email to be verified — when it is not, the attempt is
+ * REFUSED ("account not linked" — better-auth's oauth2/link-account.mjs)
+ * rather than silently linked. When BOTH the Twitch email and the local
+ * account's email are verified, the link still happens silently, exactly as
+ * it would for a trusted provider.
  *
  * Being on this list does not mean the link happens silently for everyone:
  * `accountLinking.requireLocalEmailVerified` defaults to `true`, so an

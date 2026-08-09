@@ -54,15 +54,21 @@ export const auth = betterAuth({
     provider: "pg",
   }),
 
-  // No `session.cookieCache`. It is deliberately OFF, and the reason is the
-  // security property `revokeSessionsOnPasswordReset` above (and the
-  // integration test that pins it): the cached `GET /get-session` path serves
-  // the signed `session_data` cookie WITHOUT re-validating the session token
-  // against the database (better-auth/api/routes/session.mjs), so a revoked
-  // session would keep authenticating for up to `maxAge` — exactly the window
-  // `revokeSessionsOnPasswordReset` exists to close. The cold-load splash the
-  // cache would shorten is already solved client-side by the static splash in
-  // apps/web/index.html.
+  // The session cookie cache is pinned OFF explicitly. It happens to be the
+  // upstream default (`enabled: false`), but the guarantee is load-bearing:
+  // the cached `GET /get-session` path serves the signed `session_data` cookie
+  // WITHOUT re-validating the session token against the database
+  // (better-auth/api/routes/session.mjs), so a revoked session would keep
+  // authenticating for up to the cache cookie's lifetime — 5 minutes by
+  // default (`cookieCache.maxAge`) — exactly the window
+  // `revokeSessionsOnPasswordReset` below (and the moderation ban flow) exists
+  // to close. Pinning it makes the config carry the guarantee rather than
+  // inheriting it, so a future tweak here cannot silently re-enable the cache.
+  // The cold-load splash the cache would shorten is already solved client-side
+  // by the static splash in apps/web/index.html.
+  session: {
+    cookieCache: { enabled: false },
+  },
 
   emailAndPassword: {
     enabled: true,
@@ -176,9 +182,15 @@ export const auth = betterAuth({
     // The roles and ban fields the moderation system runs on (issue #38).
     //
     // `defaultRole` is what makes every account `user` until someone is
-    // promoted — the column lands in `user` and `session.user.role` is typed
-    // from this plugin, so `packages/api`'s role-gated procedures read it off
-    // the session without any `additionalFields` wiring.
+    // promoted — the admin plugin's `user.create.before` hook injects the
+    // default into the insert, so the column does land in `user` for every
+    // account created through Better Auth. It is NOT a database default: the
+    // column is bare nullable text, so a row written outside the auth flow
+    // (a direct Drizzle insert) holds NULL — which is why `packages/api`'s
+    // gates and `setRole`'s audit trail read `role ?? "user"`.
+    // `session.user.role` is typed from this plugin, so `packages/api`'s
+    // role-gated procedures read it off the session without any
+    // `additionalFields` wiring.
     //
     // Two deliberate non-uses, both covered elsewhere:
     // - The plugin's own `/api/auth/admin/*` endpoints are unreachable —

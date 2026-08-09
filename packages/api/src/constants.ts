@@ -199,11 +199,11 @@ export const MAX_IMAGE_MEGAPIXELS = 50;
  * The largest request body the RPC endpoint will accept.
  *
  * Derived from the image caps rather than written as a literal, so raising a
- * slot's limit can never silently leave the ceiling behind. The headroom above
- * the largest byte cap covers the multipart framing oRPC's file encoding adds
- * around the payload (boundaries and part headers) — and an upload carries
- * two objects, so the ceiling must clear the bigger of the two caps, not the
- * slot total.
+ * slot's limit can never silently leave the ceiling behind. An upload carries
+ * BOTH objects of a slot in one request — the original and the display copy —
+ * so the ceiling must clear the slot's total, not just its bigger cap. The
+ * headroom above the largest slot total covers the multipart framing oRPC's
+ * file encoding adds around the payload (boundaries and part headers).
  *
  * Enforced in `apps/server/src/request-handler.ts`, which is the one chokepoint
  * that runs before oRPC buffers a body in memory. Chunked (`Transfer-Encoding`)
@@ -212,7 +212,7 @@ export const MAX_IMAGE_MEGAPIXELS = 50;
  */
 export const RPC_MAX_BODY_BYTES =
   Math.max(
-    ...Object.values(IMAGE_LIMITS).flatMap((slot) => [slot.maxOriginalBytes, slot.maxDisplayBytes]),
+    ...Object.values(IMAGE_LIMITS).map((slot) => slot.maxOriginalBytes + slot.maxDisplayBytes),
   ) +
   1024 * 1024;
 

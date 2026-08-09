@@ -722,7 +722,9 @@ export const moderationRouter = {
    * deletes every session (the account locks immediately), stamps open
    * user-target reports actioned, logs `user_suspended`, emails with the
    * expiry and the appeal link. Re-suspending an already-suspended account
-   * just extends the clock.
+   * just extends the clock. A permanently banned account (no expiry) is
+   * refused instead: the suspension would replace that sentence with a
+   * lapsing one, silently undoing a staff decision.
    */
   suspendUser: moderatorProcedure
     .use(rateLimit(RATE_LIMITS.moderate))
@@ -730,7 +732,7 @@ export const moderationRouter = {
     .handler(async ({ input, context }) => {
       const result = await context.db.transaction(async (tx) => {
         const [target] = await tx
-          .select({ id: user.id, role: user.role })
+          .select({ id: user.id, role: user.role, banned: user.banned, banExpires: user.banExpires })
           .from(user)
           .where(eq(user.id, input.userId))
           .for("update")
@@ -740,6 +742,14 @@ export const moderationRouter = {
         // suspend themselves (an actor always holds their own rank).
         if (!canManageRole(context.user.role ?? "user", target.role ?? "user")) {
           throw new ORPCError("FORBIDDEN");
+        }
+        // A suspension replaces the expiry, so it must never land on a
+        // permanent ban — one click would turn a staff sentence into a
+        // lapsing one. Lifting the ban first is the explicit path.
+        if (target.banned && !target.banExpires) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "This account is permanently banned. Unban it before suspending.",
+          });
         }
 
         await tx

@@ -22,10 +22,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@better-auth/i18n": "1.6.25",
-    "@better-auth/passkey": "1.6.25",
+    "@better-auth/i18n": "catalog:",
+    "@better-auth/passkey": "catalog:",
     "@my-tuums/db": "workspace:*",
-    "better-auth": "^1.2.9",
+    "better-auth": "catalog:",
     "resend": "^6.18.1"
   },
   "devDependencies": {
