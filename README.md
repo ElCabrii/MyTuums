@@ -80,8 +80,9 @@ per-package deep-dive (file map, load-bearing decisions, commands).
 
 GitHub Actions (`ci.yml`): lint & typecheck, unit (deliberately no DB),
 integration (Postgres service), e2e (Postgres + ci-bucket S3), Docker image
-build. **Security:** a weekly agentic scan (`security-scan.yml`, DeepSeek)
-uploads SARIF to GitHub code scanning — see [SECURITY.md](SECURITY.md).
+build (which boots the image and probes it over HTTP). A scheduled production
+smoke check (`smoke.yml`) probes the live domain. Security policy:
+[SECURITY.md](SECURITY.md).
 
 ## Deployment
 

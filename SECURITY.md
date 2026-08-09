@@ -1,8 +1,8 @@
 # Security policy
 
 MyTuums is a Twitter-style social app (posts, likes, follows, profiles, auth).
-This document also serves as policy context for the agentic security scanner
-(cyberseek) — keep the attack-surface notes factual.
+The attack-surface notes below are kept factual and current — they are the
+first thing an external security reviewer should read.
 
 ## Reporting
 

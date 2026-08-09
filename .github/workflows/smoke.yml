@@ -1,0 +1,65 @@
+name: Production smoke check
+
+# The standing replacement for a post-deploy check. CI never deploys — Railway
+# builds its own image from the Dockerfile — so a broken Railway config, a bad
+# service variable, or a deploy that half-failed was previously invisible
+# until a real user hit it. This workflow probes the live production domain
+# with the same three checks the CI docker job's boot step runs against the
+# image: the DB-backed health endpoint, a signed-out page (static SPA shell),
+# and the page gate's redirect.
+#
+# Run it manually right after a deploy (workflow_dispatch); the schedule is
+# the standing safety net for deploys nobody remembered to check.
+on:
+  schedule:
+    # Every 6 hours at :17 — an arbitrary minute keeps it clear of
+    # top-of-the-hour traffic from other scheduled jobs.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+# No checkout, no secrets, no repo writes — the job only curls the public
+# domain. contents: read is the least this workflow needs.
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke-check production
+    runs-on: ubuntu-latest
+    steps:
+      # The production domain, from the Railway production environment's
+      # mytuums-server service (custom domain, port 3001, syncStatus ACTIVE).
+      # If a second domain is ever added, keep this in step with it.
+      - name: Health endpoint (DB + server)
+        run: |
+          body=$(curl -fsS --max-time 30 https://mytuums.com/health) || {
+            echo "::error::https://mytuums.com/health failed - is the server up?";
+            exit 1; }
+          echo "$body" | grep -q '"status":"ok"' || {
+            echo "::error::unexpected health body: $body";
+            exit 1; }
+          echo "Health ok."
+
+      - name: Login page serves the SPA shell
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 https://mytuums.com/login)
+          [ "$code" = "200" ] || {
+            echo "::error::/login returned $code instead of 200";
+            exit 1; }
+          type=$(curl -s -o /dev/null -w '%{content_type}' --max-time 30 https://mytuums.com/login)
+          echo "$type" | grep -q 'text/html' || {
+            echo "::error::/login served content-type $type instead of text/html";
+            exit 1; }
+          echo "SPA shell served."
+
+      - name: Page gate redirects signed-out visitors
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 https://mytuums.com/)
+          [ "$code" = "302" ] || {
+            echo "::error::/ returned $code instead of 302 - the page gate is not live";
+            exit 1; }
+          target=$(curl -s -o /dev/null -w '%{redirect_url}' --max-time 30 https://mytuums.com/)
+          echo "$target" | grep -q '/login?redirect=' || {
+            echo "::error::/ redirected to $target instead of /login?redirect=...";
+            exit 1; }
+          echo "Page gate redirects."
