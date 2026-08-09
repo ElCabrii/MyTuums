@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "bench:media-session": "dotenv -e ../../.env -- tsx scripts/bench-media-session-lookup.mjs"
   },
   "dependencies": {
     "@my-tuums/api": "workspace:*",
@@ -27,6 +28,8 @@
     "@my-tuums/tsconfig": "workspace:*",
     "@types/node": "catalog:",
     "dotenv-cli": "^11.0.0",
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.7",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",
     "typescript": "catalog:",
