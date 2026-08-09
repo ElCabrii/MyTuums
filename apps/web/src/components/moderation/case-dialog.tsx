@@ -259,14 +259,20 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
         {targetUser && (
           <div className="space-y-2">
             {targetUser.banned ? (
-              <Button
-                variant="outline"
-                className="w-full"
-                disabled={unbanUser.isPending}
-                onClick={() => unbanUser.mutate({ userId: targetUser.id })}
-              >
-                {targetUser.banExpires ? m.moderation_unsuspend() : m.moderation_unban()}
-              </Button>
+              // Staff-only, matching `unbanUser`'s `staffProcedure` gate
+              // server-side (`packages/api/src/moderation.ts`) — same
+              // reasoning as the Ban section below: a moderator who saw this
+              // button would have it 403 on click.
+              isStaff && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  disabled={unbanUser.isPending}
+                  onClick={() => unbanUser.mutate({ userId: targetUser.id })}
+                >
+                  {targetUser.banExpires ? m.moderation_unsuspend() : m.moderation_unban()}
+                </Button>
+              )
             ) : (
               <>
                 <label
