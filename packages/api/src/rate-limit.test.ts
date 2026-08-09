@@ -1,9 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRateLimiter, RATE_LIMITS, type RateLimitPolicy } from "./rate-limit.js";
 
 function policy(overrides: Partial<RateLimitPolicy> = {}): RateLimitPolicy {
   return { name: "t", limit: 3, windowMs: 1000, ...overrides };
 }
+
+// House convention (see apps/web/src/lib/media.test.ts,
+// apps/web/src/atoms/moderation.test.ts): restore in `afterEach`, not as the
+// last line of the test body. A spy stubbed inline and only restored at the
+// end of a passing test stays stubbed for every test that runs after a
+// failing assertion throws before that line.
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("createRateLimiter", () => {
   it("allows exactly `limit` requests per window and denies the next", () => {
@@ -153,36 +162,93 @@ describe("createRateLimiter", () => {
       limiter.consume("d", p);
       limiter.consume("e", p);
       expect(warn).toHaveBeenCalledTimes(1);
-
-      warn.mockRestore();
     });
 
-    it("re-arms the capacity warning once the map drains back below maxKeys", () => {
+    it("does not re-log when the map merely wobbles below maxKeys and back within the cooldown", () => {
+      // Regression for a real bug: an earlier version re-armed the warning
+      // the moment ANY insert observed `buckets.size` dip under `maxKeys`
+      // after a sweep. Sweeping only ever runs from inside a full-map insert
+      // attempt, so under real traffic sitting near the ceiling, one key
+      // expiring is enough to cross that threshold for a single call before
+      // the very next insert crosses back — which turned "once per episode"
+      // into a flood keyed on map-size noise, not on anything resembling an
+      // episode boundary. This test drives exactly that wobble — a clock
+      // that ADVANCES, a window that expires mid-episode and drops the map
+      // one entry below `maxKeys` — and pins that a single warning survives
+      // it as long as the cooldown hasn't elapsed. Under the old
+      // size-latched implementation this assertion fails (it logs twice).
       let clock = 0;
-      const limiter = createRateLimiter({ now: () => clock, maxKeys: 2 });
-      const p = policy({ limit: 10 });
+      const limiter = createRateLimiter({
+        now: () => clock,
+        maxKeys: 2,
+        capacityWarnCooldownMs: 10_000,
+      });
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const long = policy({ limit: 10, windowMs: 1000 });
+      // A short-lived bucket, so it alone expires while `long` keys don't —
+      // that is what produces a dip of exactly the keys that rolled over,
+      // rather than a full drain of everything at once.
+      const short = policy({ limit: 10, windowMs: 10 });
 
-      limiter.consume("a", p); // resetAt 1000
-      limiter.consume("b", p); // resetAt 1000
-      limiter.consume("c", p); // at capacity -> logs once, map grows to 3
+      limiter.consume("a", short); // resetAt 10
+      limiter.consume("b", short); // resetAt 10
+      expect(limiter.size).toBe(2);
+
+      // Map is at capacity (2 >= maxKeys 2): first warning of the episode.
+      limiter.consume("c", long); // resetAt 1000
+      expect(limiter.size).toBe(3);
       expect(warn).toHaveBeenCalledTimes(1);
 
-      // Every window rolls over; the next insert sweeps them all out, so the
-      // map is observed well below maxKeys again.
-      clock = 1000;
+      // "a" and "b" roll over; the next insert's sweep drops both, leaving
+      // only "c" — the map dips to 1, one below maxKeys (2).
+      clock = 15;
+      limiter.consume("d", long); // resetAt 1015
+      expect(limiter.size).toBe(2); // {c, d} — genuinely below capacity for
+      // this call (size was 1 pre-insert), not just "at" it.
+
+      // The very next brand-new key puts the map back at capacity. Under the
+      // old size-latched behaviour this would log a second time immediately
+      // (16ms after the first), because the dip above reset the latch. The
+      // cooldown (10s) has not elapsed, so it must not log again.
+      clock = 16;
+      limiter.consume("e", long);
+      expect(limiter.size).toBe(3);
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it("logs again once the cooldown elapses, even if the map never dips at all", () => {
+      // Flip side of the test above: recurrence is tied to elapsed time, not
+      // to `buckets.size` ever dropping. A monotonically growing leak — the
+      // exact case the original comment worried a permanent latch would go
+      // silent on — must still get a fresh log line every cooldown window,
+      // even though the map here only ever grows and never dips below
+      // maxKeys even once.
+      let clock = 0;
+      const limiter = createRateLimiter({
+        now: () => clock,
+        maxKeys: 2,
+        capacityWarnCooldownMs: 1000,
+      });
+      // windowMs far longer than the whole test, so nothing ever expires —
+      // the map's growth is the leak, not window turnover.
+      const p = policy({ limit: 10, windowMs: 1_000_000 });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      limiter.consume("a", p);
+      limiter.consume("b", p);
+      limiter.consume("c", p); // at capacity (2 >= 2): first warning
+      expect(limiter.size).toBe(3);
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      clock = 500; // still within the 1000ms cooldown
       limiter.consume("d", p);
-      expect(limiter.size).toBe(1);
+      expect(limiter.size).toBe(4);
+      expect(warn).toHaveBeenCalledTimes(1);
 
-      // A second, independent capacity episode must log again — a latch
-      // that never re-armed would go silent for the rest of the process
-      // after the very first episode.
+      clock = 1000; // cooldown has now fully elapsed since t=0
       limiter.consume("e", p);
-      expect(limiter.size).toBe(2);
-      limiter.consume("f", p);
+      expect(limiter.size).toBe(5); // never dipped once — only grew
       expect(warn).toHaveBeenCalledTimes(2);
-
-      warn.mockRestore();
     });
 
     it("recycles a returning caller's expired slot even when the map holds a live window", () => {
