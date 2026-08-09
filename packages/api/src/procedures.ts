@@ -115,9 +115,10 @@ export const protectedProcedure = base.use(({ context, next }) => {
  * Built on `protectedProcedure`, so the session requirement is inherited.
  * The role arrives typed on `session.user.role` from the admin plugin
  * (packages/auth/src/index.ts) — no `additionalFields` wiring. The
- * `?? "user"` is defensive: the column has a database default, so a missing
- * value can only mean a row written before the plugin landed, and the
- * weakest role is the safe read for it.
+ * `?? "user"` is defensive: the plugin's create hook writes `user` into every
+ * row created through Better Auth, but the column itself is bare nullable
+ * text, so a row written outside that flow (a direct Drizzle insert) holds
+ * NULL, and the weakest role is the safe read for it.
  *
  * These are the only three gates the moderation router uses; every procedure
  * in packages/api/src/moderation.ts is built from one of them plus
