@@ -11,7 +11,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { vi } from "vitest";
+import { afterEach, vi } from "vitest";
 import {
   FOLLOW_PAGE_SIZE,
   MODERATION_PAGE_SIZE,
@@ -27,13 +27,17 @@ import {
   type ModerationQueuePage,
   type Post,
   type PostListPage,
+  type Profile,
   type SearchPostsPage,
   type SearchUsersPage,
   type TeamMember,
+  type Thread,
   type UserListPage,
   type UserSummary,
 } from "@/lib/orpc";
 import type { CaseRef } from "@/atoms/moderation";
+import type { PostFeedParams } from "@/atoms/post-feed";
+import type { SocialProviderId } from "@/lib/auth-client";
 
 /**
  * The shared harness every component test in this directory renders through.
@@ -96,6 +100,7 @@ type JotaiStore = ReturnType<typeof createStore>;
 export interface TestSessionUser {
   id: string;
   name: string;
+  email?: string | null;
   username?: string | null;
   displayUsername?: string | null;
   image?: string | null;
@@ -161,6 +166,9 @@ let currentSession: TestSessionValue = {
   refetch: vi.fn(() => Promise.resolve()),
 };
 const sessionListeners = new Set<(value: TestSessionValue) => void>();
+
+type TestSocialProvider = { id: SocialProviderId; label: string };
+const testSocialProviders: TestSocialProvider[] = [];
 
 vi.mock("@/lib/auth-client", () => ({
   sessionStore: {
@@ -229,8 +237,17 @@ vi.mock("@/lib/auth-client", () => ({
   // off by default so component tests don't render provider buttons unless
   // they mean to.
   shouldOfferOneTap: false,
-  socialProviders: [],
+  socialProviders: testSocialProviders,
 }));
+
+/** Configures the OAuth buttons exposed by the mocked auth client for one test. */
+export function setTestSocialProviders(providers: readonly TestSocialProvider[]): void {
+  testSocialProviders.splice(0, testSocialProviders.length, ...providers);
+}
+
+afterEach(() => {
+  testSocialProviders.splice(0);
+});
 
 /**
  * jsdom doesn't implement `window.scrollTo`, and TanStack Router's
@@ -267,12 +284,27 @@ function signedOutSession(): TestSessionValue {
   };
 }
 
+/** Transitions the mocked session store to its settled signed-out state. */
+export function setTestSignedOut(): void {
+  setTestSession(signedOutSession());
+}
+
+/** Merges fields into the current signed-in user and notifies every session observer. */
+export function patchTestSessionUser(patch: Partial<TestSessionUser>): void {
+  if (!currentSession.data) throw new Error("patchTestSessionUser requires a signed-in session");
+  setTestSession({
+    ...currentSession,
+    data: { user: { ...currentSession.data.user, ...patch } },
+  });
+}
+
 function signedInSession(user: Partial<TestSessionUser> = {}): TestSessionValue {
   return {
     data: {
       user: {
         id: crypto.randomUUID(),
         name: "Alex Mercer",
+        email: "alex@example.com",
         username: "alexmercer",
         displayUsername: "AlexMercer",
         image: null,
@@ -345,6 +377,25 @@ function createTestRouteTree(ui: ReactNode) {
       component: () => <p>Stub route: {path}</p>,
     });
 
+  // The real profile is a layout plus an index child. Both route ids are
+  // consumed through getRouteApi(), by ProfileLayout and ProfilePosts
+  // respectively, so a single flat stub cannot satisfy both components.
+  const profileRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/@{$username}",
+    component: () => (
+      <>
+        <p>Stub route: /@{"{$username}"}</p>
+        <Outlet />
+      </>
+    ),
+  });
+  const profileIndexRoute = createRoute({
+    getParentRoute: () => profileRoute,
+    path: "/",
+    component: () => <p>Stub route: /@{"{$username}"}/</p>,
+  });
+
   return rootRoute.addChildren([
     stubRoute("/"),
     stubRoute("/login"),
@@ -376,7 +427,7 @@ function createTestRouteTree(ui: ReactNode) {
     stubRoute("/terms"),
     stubRoute("/mentions-legales"),
     // Literal-prefix syntax — kept byte-identical to src/routes/@{$username}.tsx.
-    stubRoute("/@{$username}"),
+    profileRoute.addChildren([profileIndexRoute]),
     // Header-test targets: the account menu's View profile / Settings items
     // and the handle-less avatar's /welcome link (header.test.tsx).
     stubRoute("/welcome"),
@@ -516,6 +567,35 @@ export function makeUserSummary(overrides: Partial<UserSummary> = {}): UserSumma
     createdAt: new Date(),
     followedAt: new Date(),
     viewerIsFollowing: false,
+    ...overrides,
+  };
+}
+
+/** A complete public profile fixture, including counts and suspension state. */
+export function makeProfile(overrides: Partial<Profile> = {}): Profile {
+  return {
+    id: crypto.randomUUID(),
+    name: "Alex Mercer",
+    username: "alexmercer",
+    displayUsername: "AlexMercer",
+    image: null,
+    bio: null,
+    bannerImage: null,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    followerCount: 0,
+    followingCount: 0,
+    viewerIsFollowing: false,
+    suspended: false,
+    ...overrides,
+  };
+}
+
+/** A focused thread fixture with no ancestors and no truncation by default. */
+export function makeThread(overrides: Partial<Thread> = {}): Thread {
+  return {
+    post: makePost(),
+    ancestors: [],
+    truncated: false,
     ...overrides,
   };
 }
@@ -674,21 +754,52 @@ export function makeTeamMember(overrides: Partial<TeamMember> = {}): TeamMember 
  * in the key, so an unconditional field forks the cache); if that atom's
  * input shape ever changes, this needs the matching update.
  */
-export function postListQueryKey(): QueryKey {
+export function postListQueryKey(params: PostFeedParams = { feed: "global" }): QueryKey {
+  const { authorId, feed, parentId, includeReplies } = params;
   return orpc.post.list.infiniteKey({
-    input: () => ({ limit: POST_PAGE_SIZE }),
+    input: () => ({
+      limit: POST_PAGE_SIZE,
+      ...(authorId ? { authorId } : {}),
+      ...(parentId ? { parentId } : {}),
+      ...(includeReplies ? { includeReplies: true } : {}),
+      ...(feed === "following" ? { feed } : {}),
+    }),
     initialPageParam: undefined as string | undefined,
   });
 }
 
 /** Seeds a `post.list` infinite query with the given pages, bypassing the network. */
-export function seedPostListPages(queryClient: QueryClient, pages: PostListPage[]): void {
-  queryClient.setQueryData(postListQueryKey(), {
+export function seedPostListPages(
+  queryClient: QueryClient,
+  pages: PostListPage[],
+  params: PostFeedParams = { feed: "global" },
+): void {
+  queryClient.setQueryData(postListQueryKey(params), {
     pages,
     pageParams: pages.map((_page, index) =>
       index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
     ),
   });
+}
+
+/** The exact query key `profileAtomFamily(username)` produces. */
+export function profileQueryKey(username: string): QueryKey {
+  return orpc.user.byUsername.queryKey({ input: { username } });
+}
+
+/** Seeds one public profile query, bypassing the network. */
+export function seedProfile(queryClient: QueryClient, username: string, profile: Profile): void {
+  queryClient.setQueryData(profileQueryKey(username), profile);
+}
+
+/** The exact query key `threadAtomFamily(postId)` produces. */
+export function threadQueryKey(postId: string): QueryKey {
+  return orpc.post.thread.queryKey({ input: { postId } });
+}
+
+/** Seeds one focused thread query, bypassing the network. */
+export function seedThread(queryClient: QueryClient, postId: string, thread: Thread): void {
+  queryClient.setQueryData(threadQueryKey(postId), thread);
 }
 
 /** The exact queryKey `userListAtom(username, direction)` produces. */
@@ -846,6 +957,24 @@ export function seedInfiniteLoading(queryClient: QueryClient, queryKey: QueryKey
     initialPageParam: undefined as string | undefined,
     getNextPageParam: () => undefined,
   });
+}
+
+/** Drives a plain query into a permanent loading state, without a network call. */
+export function seedQueryLoading(queryClient: QueryClient, queryKey: QueryKey): void {
+  void queryClient.fetchQuery({ queryKey, queryFn: () => new Promise<never>(() => {}) });
+}
+
+/** Drives a plain query into an error state before its observer mounts. */
+export async function seedQueryError(
+  queryClient: QueryClient,
+  queryKey: QueryKey,
+  error: Error,
+): Promise<void> {
+  try {
+    await queryClient.fetchQuery({ queryKey, queryFn: () => Promise.reject(error) });
+  } catch {
+    // The cache state is the result this helper exists to produce.
+  }
 }
 
 /**

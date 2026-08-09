@@ -89,12 +89,12 @@ describe("suggestionRows", () => {
 
 describe("nextHighlight", () => {
   // current, delta, length, expected — the table is the whole contract:
-  // clamps at both ends, never wraps.
+  // both ends wrap and an initial arrow picks the corresponding edge.
   it.each([
     [-1, 1, 3, 0], // ArrowDown from "nothing" lands on the first row
-    [2, 1, 3, 2], // ArrowDown on the last row: clamped, no wrap
-    [0, -1, 3, -1], // ArrowUp from the first row back to "nothing"
-    [-1, -1, 3, -1], // ArrowUp from "nothing" stays there
+    [2, 1, 3, 0], // ArrowDown on the last row wraps to the first
+    [0, -1, 3, 2], // ArrowUp on the first row wraps to the last
+    [-1, -1, 3, 2], // ArrowUp from "nothing" starts at the last row
     [0, 1, 3, 1], // moving through the middle
     [1, 1, 3, 2],
     [2, -1, 3, 1],

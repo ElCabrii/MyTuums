@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { act, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { createStore } from "jotai";
 import { SearchBox } from "@/components/search-box";
-import { debouncedSearchQueryAtom, searchInputAtom } from "@/atoms/search";
+import {
+  debounceMs,
+  debouncedSearchQueryAtom,
+  searchHighlightAtom,
+  searchInputAtom,
+} from "@/atoms/search";
 import { orpc, type SearchTypeahead } from "@/lib/orpc";
 import {
   createTestQueryClient,
@@ -61,6 +66,7 @@ describe("SearchBox suggestions", () => {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
       posts: [],
     });
+    const input = screen.getByRole("combobox");
 
     await user.click(screen.getByRole("option", { name: /Alex Mercer/ }));
 
@@ -68,6 +74,13 @@ describe("SearchBox suggestions", () => {
     // The row's click contract: dismiss sets the focus-return guard and
     // closes the popup before the row's own navigation runs.
     expect(screen.queryByRole("option")).not.toBeInTheDocument();
+
+    // Base UI has already returned focus by this point; the closed assertion
+    // above proves that focus did not resurrect the list. A later genuine
+    // focus opens it again.
+    act(() => input.blur());
+    act(() => input.focus());
+    expect(screen.getByRole("option", { name: /Alex Mercer/ })).toBeInTheDocument();
   });
 
   it("shows the no-results line instead of a lone see-all row for an empty payload", async () => {
@@ -112,5 +125,134 @@ describe("SearchBox suggestions", () => {
     expect(input).toHaveValue("");
     expect(input).toHaveFocus();
     expect(store.get(searchInputAtom)).toBe("");
+  });
+});
+
+describe("SearchBox debounce and keyboard contract", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("updates the input immediately but lands only the final debounced query after 300 ms", async () => {
+    const store = createStore();
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(orpc.search.typeahead.queryKey({ input: { q: "ab" } }), {
+      users: [makeUserSummary({ name: "Able User", username: "able" })],
+      posts: [],
+    });
+    await renderWithProviders(<SearchBox />, { store, queryClient });
+    vi.useFakeTimers();
+    const input = screen.getByRole("combobox");
+
+    fireEvent.change(input, { target: { value: "a" } });
+    expect(input).toHaveValue("a");
+    expect(store.get(searchInputAtom)).toBe("a");
+    expect(store.get(debouncedSearchQueryAtom)).toBe("");
+
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    fireEvent.change(input, { target: { value: "ab" } });
+    expect(input).toHaveValue("ab");
+    expect(store.get(debouncedSearchQueryAtom)).toBe("");
+
+    act(() => {
+      vi.advanceTimersByTime(debounceMs - 1);
+    });
+    expect(store.get(debouncedSearchQueryAtom)).toBe("");
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+
+    expect(store.get(debouncedSearchQueryAtom)).toBe("ab");
+    expect(screen.getByRole("option", { name: /Able User/ })).toBeInTheDocument();
+  });
+
+  it("wraps the shared highlight and exposes it through combobox ARIA state", async () => {
+    const { store } = await openSuggestions("hello", {
+      users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      posts: [makePost({ id: "post-1", content: "Hello post" })],
+    });
+    const press = (key: "ArrowDown" | "ArrowUp") => {
+      // Base UI may replace its trigger element while reconciling the open
+      // popup, so always dispatch to the currently rendered combobox rather
+      // than retaining a stale element reference across updates.
+      fireEvent.keyDown(screen.getByRole("combobox"), { key });
+    };
+    const expectActive = (index: number) => {
+      expect(screen.getByRole("combobox")).toHaveAttribute(
+        "aria-activedescendant",
+        `search-suggestion-${index}`,
+      );
+      expect(screen.getAllByRole("option")[index]).toHaveAttribute("aria-selected", "true");
+    };
+
+    press("ArrowDown");
+    expect(store.get(searchHighlightAtom)).toBe(0);
+    expectActive(0);
+
+    press("ArrowDown");
+    expectActive(1);
+
+    press("ArrowDown");
+    expectActive(2);
+
+    press("ArrowDown");
+    expect(store.get(searchHighlightAtom)).toBe(0);
+    expectActive(0);
+
+    press("ArrowUp");
+    expectActive(2);
+  });
+
+  it.each([
+    { label: "user", arrows: "{ArrowDown}", pathname: "/@alexmercer" },
+    { label: "post", arrows: "{ArrowDown}{ArrowDown}", pathname: "/post/post-1" },
+    {
+      label: "see-all",
+      arrows: "{ArrowDown}{ArrowDown}{ArrowDown}",
+      pathname: "/search",
+    },
+  ])("Enter follows the highlighted $label row", async ({ arrows, pathname }) => {
+    const { router, user } = await openSuggestions("hello", {
+      users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      posts: [makePost({ id: "post-1", content: "Hello post" })],
+    });
+
+    await user.keyboard(`${arrows}{Enter}`);
+
+    expect(router.state.location.pathname).toBe(pathname);
+    if (pathname === "/search") {
+      expect(router.state.location.search).toMatchObject({ q: "hello" });
+    }
+  });
+
+  it("Enter without a highlight opens the full search page", async () => {
+    const { router, user } = await openSuggestions("hello", {
+      users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      posts: [],
+    });
+
+    await user.keyboard("{Enter}");
+
+    expect(router.state.location.pathname).toBe("/search");
+    expect(router.state.location.search).toMatchObject({ q: "hello" });
+  });
+
+  it("Escape preserves the query, clears the highlight, and stays dismissed through focus return", async () => {
+    const { store, user } = await openSuggestions("hello", {
+      users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      posts: [],
+    });
+    const input = screen.getByRole("combobox");
+    await user.keyboard("{ArrowDown}{Escape}");
+
+    expect(input).toHaveValue("hello");
+    expect(store.get(searchHighlightAtom)).toBe(-1);
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+
+    act(() => input.blur());
+    act(() => input.focus());
+    expect(screen.getByRole("option", { name: /Alex Mercer/ })).toBeInTheDocument();
   });
 });

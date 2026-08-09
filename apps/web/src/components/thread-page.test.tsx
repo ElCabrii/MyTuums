@@ -1,0 +1,162 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { ORPCError } from "@orpc/client";
+import { THREAD_ANCESTOR_MAX } from "@my-tuums/api/constants";
+import {
+  createTestQueryClient,
+  makePost,
+  makeThread,
+  renderWithProviders,
+  seedPostListPages,
+  seedQueryError,
+  seedQueryLoading,
+  seedThread,
+  threadQueryKey,
+} from "@/test/render";
+import { ThreadPage } from "@/components/thread-page";
+import { m } from "@/paraglide/messages.js";
+
+const { fakeClient } = vi.hoisted(() => ({
+  fakeClient: {
+    post: {
+      thread: vi.fn(),
+      list: vi.fn(),
+      create: vi.fn(),
+      like: vi.fn(),
+      unlike: vi.fn(),
+    },
+  },
+}));
+
+vi.mock("@/lib/orpc", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/orpc")>();
+  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
+  return { ...actual, orpc: createTanstackQueryUtils(fakeClient) };
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("ThreadPage query states", () => {
+  it("renders a loading shell while the focused thread is pending", async () => {
+    const queryClient = createTestQueryClient();
+    seedQueryLoading(queryClient, threadQueryKey("pending-post"));
+
+    await renderWithProviders(<ThreadPage />, {
+      queryClient,
+      initialPath: "/post/pending-post",
+      signedInAs: true,
+    });
+
+    expect(screen.queryByRole("heading", { name: m.post_title() })).not.toBeInTheDocument();
+    expect(fakeClient.post.thread).not.toHaveBeenCalled();
+  });
+
+  it.each(["BAD_REQUEST", "NOT_FOUND"] as const)(
+    "renders the unavailable card without a retry action for %s",
+    async (code) => {
+      const queryClient = createTestQueryClient();
+      await seedQueryError(queryClient, threadQueryKey("missing-post"), new ORPCError(code));
+
+      await renderWithProviders(<ThreadPage />, {
+        queryClient,
+        initialPath: "/post/missing-post",
+        signedInAs: true,
+      });
+
+      expect(screen.getByRole("heading", { name: m.post_not_found() })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: m.common_back_to_home() })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: m.common_try_again() })).not.toBeInTheDocument();
+    },
+  );
+
+  it("retries a transient error and renders the recovered thread", async () => {
+    const post = makePost({ id: "network-post", content: "Recovered thread", replyCount: 0 });
+    const recovered = makeThread({ post });
+    fakeClient.post.thread.mockResolvedValue(recovered);
+    const queryClient = createTestQueryClient();
+    await seedQueryError(
+      queryClient,
+      threadQueryKey("network-post"),
+      new Error("network unavailable"),
+    );
+    seedPostListPages(queryClient, [{ items: [], nextCursor: null }], {
+      feed: "global",
+      parentId: post.id,
+    });
+    await renderWithProviders(<ThreadPage />, {
+      queryClient,
+      initialPath: "/post/network-post",
+      signedInAs: true,
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: m.common_try_again() }));
+
+    expect(await screen.findByText("Recovered thread")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(fakeClient.post.thread).toHaveBeenCalledWith(
+        { postId: "network-post" },
+        expect.anything(),
+      ),
+    );
+  });
+});
+
+describe("ThreadPage successful rendering", () => {
+  it("renders the ancestor chain, truncation notice, focused post, composer and reply feed", async () => {
+    const ancestorA = makePost({ id: "ancestor-a", content: "Oldest ancestor" });
+    const ancestorB = makePost({ id: "ancestor-b", content: "Nearest ancestor" });
+    const focused = makePost({
+      id: "focused-post",
+      content: "Focused body",
+      replyCount: 2,
+    });
+    const reply = makePost({ id: "reply-1", parentId: focused.id, content: "A direct reply" });
+    const queryClient = createTestQueryClient();
+    seedThread(
+      queryClient,
+      focused.id,
+      makeThread({ post: focused, ancestors: [ancestorA, ancestorB], truncated: true }),
+    );
+    seedPostListPages(queryClient, [{ items: [reply], nextCursor: null }], {
+      feed: "global",
+      parentId: focused.id,
+    });
+
+    await renderWithProviders(<ThreadPage />, {
+      queryClient,
+      initialPath: `/post/${focused.id}`,
+      signedInAs: true,
+    });
+
+    expect(screen.getByText("Oldest ancestor")).toBeInTheDocument();
+    expect(screen.getByText("Nearest ancestor")).toBeInTheDocument();
+    expect(
+      screen.getByText(m.thread_truncated({ count: String(THREAD_ANCESTOR_MAX) })),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Focused body")).toBeInTheDocument();
+    expect(screen.getByText(m.reply_count_many({ count: "2" }))).toBeInTheDocument();
+    expect(screen.getByText("A direct reply")).toBeInTheDocument();
+  });
+
+  it("uses the singular reply label for exactly one reply", async () => {
+    const focused = makePost({ id: "single-reply-post", replyCount: 1 });
+    const queryClient = createTestQueryClient();
+    seedThread(queryClient, focused.id, makeThread({ post: focused }));
+    seedPostListPages(queryClient, [{ items: [], nextCursor: null }], {
+      feed: "global",
+      parentId: focused.id,
+    });
+
+    await renderWithProviders(<ThreadPage />, {
+      queryClient,
+      initialPath: `/post/${focused.id}`,
+      signedInAs: true,
+    });
+
+    expect(screen.getByText(m.reply_count_one({ count: "1" }))).toBeInTheDocument();
+  });
+});
