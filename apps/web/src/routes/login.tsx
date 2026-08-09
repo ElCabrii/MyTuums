@@ -59,7 +59,13 @@ export const Route = createFileRoute("/login")({
  * the `?error=` banner that surfaces a failed OAuth round trip. `?redirect=`
  * carries the pre-login destination (see `validateSearch` above).
  */
-function LoginPage() {
+/**
+ * Exported (rather than kept file-private like most route bodies) so
+ * `login.test.tsx` can mount it directly and drive the two banned-account
+ * navigate sites it owns — the house pattern used by every other tested page
+ * (see `not-found-page.test.tsx`).
+ */
+export function LoginPage() {
   // Both search params arrive from *outside* (see `validateSearch` above) —
   // read once, destructured.
   const { redirect: redirectFromSearch, error: oauthError } = Route.useSearch();

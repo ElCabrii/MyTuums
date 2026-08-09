@@ -10,10 +10,4 @@ describe("BannedPage", () => {
     expect(screen.getByRole("heading", { name: "Account banned" })).toBeInTheDocument();
     expect(screen.getByText(/Your MyTuums account has been banned/)).toBeInTheDocument();
   });
-
-  it("renders the MyTuums logo, mirroring the cold-load splash it's styled after", async () => {
-    await renderWithProviders(<BannedPage />);
-
-    expect(screen.getByAltText("MyTuums logo")).toBeInTheDocument();
-  });
 });

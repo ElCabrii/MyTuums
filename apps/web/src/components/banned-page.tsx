@@ -13,6 +13,10 @@ import { m } from "@/paraglide/messages.js";
  * the header/footer chrome `__root.tsx` still renders underneath (the footer
  * mounts on every route, signed in or not) — a banned visitor should see
  * nothing but this screen, the same way the splash hides everything before it.
+ * The `z-[9999]` matches the splash's own stacking value (`#app-splash` in
+ * `index.html`) rather than an arbitrary `z-10`: the header is `sticky top-0
+ * z-50` (`header.tsx`) in the same stacking context, so anything lower than
+ * that would render this screen *underneath* the header instead of over it.
  *
  * Reached from exactly two places, both of which navigate here instead of
  * rendering the generic sign-in-failed banner: the OAuth callback's
@@ -23,7 +27,7 @@ import { m } from "@/paraglide/messages.js";
  */
 export function BannedPage() {
   return (
-    <div className="bg-background fixed inset-0 z-10 flex flex-col items-center justify-center gap-6 px-4 text-center">
+    <div className="bg-background fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-6 px-4 text-center">
       <img
         src="/mytuums.svg"
         alt={m.app_logo_alt()}
