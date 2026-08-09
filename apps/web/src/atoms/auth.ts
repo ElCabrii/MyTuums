@@ -54,9 +54,19 @@ type SignInArgs = { identifier: string; password: string };
  * unless the outcome is reported back to the caller, which is why the route
  * navigates on this value. See the note on `twoFactorClient()` in
  * `lib/auth-client.ts` for why the plugin's own redirect options aren't used.
+ *
+ * `"banned"` is the same shape of exception for a different reason (issue
+ * #74): the admin plugin's `session.create.before` hook throws `BANNED_USER`
+ * instead of returning a session, so this is also not something
+ * `useRedirectWhenSignedIn` can react to. `/login` navigates to `/banned` on
+ * this value instead of setting `authErrorAtom` — a banned account isn't
+ * "try again", it's a different screen.
  */
 export type SignInOutcome =
-  { status: "signed-in" } | { status: "two-factor"; methods: string[] } | { status: "failed" };
+  | { status: "signed-in" }
+  | { status: "two-factor"; methods: string[] }
+  | { status: "banned" }
+  | { status: "failed" };
 
 /** What BetterAuth returns in place of a session when it issues a 2FA challenge. */
 interface TwoFactorChallengeResponse {
@@ -104,6 +114,11 @@ export const signInAtom = atom(
         : await authClient.signIn.username({ username: identifier.trim(), password });
 
       if (res.error) {
+        // See the `"banned"` case's docblock on `SignInOutcome` above: the
+        // route navigates on this instead of showing it in the banner.
+        if (errorCodeOf(res.error) === "BANNED_USER") {
+          return { status: "banned" };
+        }
         set(authErrorAtom, res.error.message || m.common_something_went_wrong());
         return { status: "failed" };
       }
@@ -186,6 +201,13 @@ export const signInWithProviderAtom = atom(
 );
 
 /**
+ * What a passkey sign-in attempt ended in. `SignInOptions` navigates to
+ * `/banned` on `"banned"`, the same reaction `SignInOutcome`'s case gets on
+ * the password/username path — see that type's docblock (issue #74).
+ */
+export type PasskeySignInOutcome = "signed-in" | "banned" | "failed";
+
+/**
  * Signs in with a passkey.
  *
  * The passkey plugin never rejects and never sets `throw` — a cancelled or
@@ -196,26 +218,36 @@ export const signInWithProviderAtom = atom(
  * sheet is a normal way to change your mind, and surfacing "Auth cancelled" in
  * the form's alert would read as a malfunction.
  */
-export const signInWithPasskeyAtom = atom(null, async (_get, set): Promise<boolean> => {
-  set(authErrorAtom, null);
-  set(authPendingAtom, true);
-  try {
-    const res = await authClient.signIn.passkey();
-    if (res?.error) {
-      if (errorCodeOf(res.error) !== "AUTH_CANCELLED") {
-        set(authErrorAtom, res.error.message || m.common_something_went_wrong());
+export const signInWithPasskeyAtom = atom(
+  null,
+  async (_get, set): Promise<PasskeySignInOutcome> => {
+    set(authErrorAtom, null);
+    set(authPendingAtom, true);
+    try {
+      const res = await authClient.signIn.passkey();
+      if (res?.error) {
+        // The `session.create.before` hook throws this for a banned account
+        // regardless of sign-in method (issue #74) — a passkey is no
+        // exception, so this gets the same navigate-away treatment as
+        // `signInAtom`'s `"banned"` case rather than the generic banner.
+        if (errorCodeOf(res.error) === "BANNED_USER") {
+          return "banned";
+        }
+        if (errorCodeOf(res.error) !== "AUTH_CANCELLED") {
+          set(authErrorAtom, res.error.message || m.common_something_went_wrong());
+        }
+        return "failed";
       }
-      return false;
+      return "signed-in";
+    } catch (err) {
+      console.error("Passkey sign-in error:", err);
+      set(authErrorAtom, m.common_something_went_wrong());
+      return "failed";
+    } finally {
+      set(authPendingAtom, false);
     }
-    return true;
-  } catch (err) {
-    console.error("Passkey sign-in error:", err);
-    set(authErrorAtom, m.common_something_went_wrong());
-    return false;
-  } finally {
-    set(authPendingAtom, false);
-  }
-});
+  },
+);
 
 type SignUpArgs = {
   username: string;

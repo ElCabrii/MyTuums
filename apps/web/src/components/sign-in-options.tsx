@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { useNavigate } from "@tanstack/react-router";
 import { Fingerprint } from "lucide-react";
 import { authPendingAtom, signInWithPasskeyAtom, signInWithProviderAtom } from "@/atoms/auth";
 import { authClient, socialProviders, type SocialProviderId } from "@/lib/auth-client";
@@ -21,9 +22,23 @@ import { m } from "@/paraglide/messages.js";
  * a blank row is worse than no divider.
  */
 export function SignInOptions() {
+  const navigate = useNavigate();
   const isBusy = useAtomValue(authPendingAtom);
   const signInWithProvider = useSetAtom(signInWithProviderAtom);
   const signInWithPasskey = useSetAtom(signInWithPasskeyAtom);
+
+  /**
+   * Rendered on both `/login` and `/register` (see the docblock below), so
+   * unlike the OAuth path — whose `errorCallbackURL` always points at
+   * `/login`, wherever the flow started — a banned passkey sign-in has to
+   * navigate from right here rather than relying on `/login`'s own effect.
+   */
+  const handlePasskeySignIn = async () => {
+    const outcome = await signInWithPasskey();
+    if (outcome === "banned") {
+      void navigate({ to: "/banned", replace: true });
+    }
+  };
 
   /**
    * Read straight from the plugin rather than held in an atom.
@@ -67,7 +82,7 @@ export function SignInOptions() {
         ))}
 
         {supportsPasskeys && (
-          <NeutralButton disabled={isBusy} onClick={() => void signInWithPasskey()}>
+          <NeutralButton disabled={isBusy} onClick={() => void handlePasskeySignIn()}>
             <Fingerprint className="text-muted-foreground h-4 w-4 shrink-0" />
             <span>{m.auth_continue_with_passkey()}</span>
             {lastUsed === "passkey" && <LastUsedBadge />}

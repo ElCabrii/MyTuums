@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localizeAuthError } from "@/lib/auth-error-message";
+import { localizeAuthError, localizeOAuthError } from "@/lib/auth-error-message";
 import { m } from "@/paraglide/messages.js";
 
 describe("localizeAuthError", () => {
@@ -19,6 +19,14 @@ describe("localizeAuthError", () => {
     ["Date of Birth is required.", m.validation_dob_required],
     ["Please enter a valid date of birth.", m.validation_dob_invalid],
     ["You must be at least 15 years old to create an account.", m.validation_dob_age],
+    // The admin plugin's default `bannedUserMessage`, thrown verbatim on the
+    // password/username/passkey paths — the stopgap for issue #74's "any
+    // path that still falls through to the banner" (`signInAtom`/
+    // `signInWithPasskeyAtom` navigate away from it before it gets here).
+    [
+      "You have been banned from this application. Please contact support if you believe this is an error.",
+      m.auth_oauth_banned,
+    ],
   ];
 
   it.each(knownMessages)("translates %s", (raw, expected) => {
@@ -35,5 +43,18 @@ describe("localizeAuthError", () => {
 
   it("passes an empty string through verbatim", () => {
     expect(localizeAuthError("")).toBe("");
+  });
+});
+
+describe("localizeOAuthError", () => {
+  // The stopgap mapping (issue #74): `/login` navigates to `/banned` on this
+  // code rather than ever calling this function with it (see login.tsx), but
+  // the mapping still has to be correct for any path that hasn't migrated.
+  it("maps BANNED_USER to the localized banned-account copy", () => {
+    expect(localizeOAuthError("BANNED_USER")).toBe(m.auth_oauth_banned());
+  });
+
+  it("falls back to the generic failure copy for an unknown code", () => {
+    expect(localizeOAuthError("something_unrecognized")).toBe(m.auth_oauth_failed());
   });
 });

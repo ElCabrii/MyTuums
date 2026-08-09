@@ -327,6 +327,9 @@ function createTestRouteTree(ui: ReactNode) {
     stubRoute("/"),
     stubRoute("/login"),
     stubRoute("/register"),
+    // The banned-account screen (issue #74) — a signed-in-gate exemption like
+    // the legal pages below, so navigate-on-BANNED_USER tests can land here.
+    stubRoute("/banned"),
     // Signed-in-gate exemptions like the legal pages below — tests for the
     // gate need them reachable without a redirect.
     stubRoute("/forgot-password"),

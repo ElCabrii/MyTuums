@@ -32,6 +32,14 @@ const validationMessages: Record<string, () => string> = {
   "That image is too large.": () => m.validation_image_too_large(),
   "That image format isn't supported. Use a PNG, JPEG or WebP.": () => m.validation_image_type(),
   "That file doesn't look like an image.": () => m.validation_image_unreadable(),
+  // The admin plugin's default `bannedUserMessage`, thrown verbatim by the
+  // `session.create.before` hook on the password/username/passkey paths
+  // (packages/auth/src/index.ts's `admin()` registration takes no override).
+  // `signInAtom`/`signInWithPasskeyAtom` navigate to `/banned` on this code
+  // before it ever reaches a banner (see atoms/auth.ts) — this entry is the
+  // stopgap for any path that still falls through to one, per issue #74.
+  "You have been banned from this application. Please contact support if you believe this is an error.":
+    () => m.auth_oauth_banned(),
 };
 
 /** Translates the known client-side validation messages without hiding server errors. */
@@ -68,6 +76,11 @@ const oauthErrorMessages: Record<string, () => string> = {
   state_mismatch: () => m.auth_oauth_expired(),
   state_not_found: () => m.auth_oauth_expired(),
   state_invalid: () => m.auth_oauth_expired(),
+  // The stopgap for issue #74: `/login` navigates straight to `/banned` on
+  // this code (see `login.tsx`) rather than ever calling `localizeOAuthError`
+  // with it, so this entry only fires if some future path still falls
+  // through to the generic banner instead of navigating.
+  BANNED_USER: () => m.auth_oauth_banned(),
 };
 
 /**

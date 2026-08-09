@@ -268,4 +268,8 @@ export const SIGNED_OUT_PATHS = new Set([
   // still requires the `?token=` capability (or a session for a post-stub
   // appeal) before it will submit.
   "/appeal",
+  // The banned-account screen (issue #74): a banned sign-in attempt never
+  // produces a session, so whoever lands here is signed out by definition —
+  // exempt for the same reason /appeal is.
+  "/banned",
 ]);
