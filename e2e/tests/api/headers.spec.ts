@@ -41,7 +41,7 @@ function expectContentSecurityPolicy(headers: Record<string, string | string[] |
   expect(directives).toContain("base-uri 'self'");
   expect(directives).toContain("object-src 'none'");
   expect(directives).toContain("img-src 'self' https:");
-  expect(directives).toContain("style-src 'self' 'unsafe-inline'");
+  expect(directives).toContain("style-src 'self' 'unsafe-inline' https://accounts.google.com");
   expect(directives).toContain("connect-src 'self' https://accounts.google.com");
   expect(directives).toContain("frame-src https://accounts.google.com");
   expect(directives).toContain("frame-ancestors 'none'");
@@ -97,7 +97,7 @@ function rawRequest(
 }
 
 test.describe("security headers", () => {
-  test("GET /health carries all four, on the health-check path", async ({ request }) => {
+  test("GET /health carries all five, on the health-check path", async ({ request }) => {
     const response = await request.get("/health");
 
     expect(response.status()).toBe(200);
