@@ -1,5 +1,6 @@
 import { posix } from "node:path";
 import type { Plugin } from "vite";
+import { NONBLOCKING_STYLESHEET_ONLOAD_HANDLER } from "@my-tuums/api/constants";
 
 /**
  * Post-build surgery on `dist/index.html`, registered in vite.config.ts.
@@ -48,6 +49,22 @@ export function preloadInjectionPlugin(): Plugin {
       // double the prefix.
       const urlOf = (fileName: string): string => posix.join("/", fileName);
 
+      // `NONBLOCKING_STYLESHEET_ONLOAD_HANDLER` is interpolated into a
+      // double-quoted HTML attribute below (raw, not templated by a proper
+      // HTML serialiser), so it needs the same two escapes any attribute
+      // value needs: a literal `"` would close the attribute early and leak
+      // the rest of the string into the tag as bare attributes, and a
+      // literal `&` would let the browser's attribute-value parsing treat
+      // whatever follows as a character reference — either way, the parsed
+      // `onload` value would silently stop matching the constant this
+      // module hashed the CSP source from (`response-decorators.ts`), which
+      // is exactly the drift the shared-constant design exists to prevent.
+      // The handler is a fixed literal today with neither character, but
+      // escaping here makes that a property of the code, not a fact someone
+      // has to remember when it next changes.
+      const escapeAttr = (value: string): string =>
+        value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+
       const tags: string[] = [];
 
       // The TanStack Router route chunk. The fileName regex is the reliable
@@ -83,7 +100,15 @@ export function preloadInjectionPlugin(): Plugin {
         const attrs = stylesheetTags[0][1];
         source = source.replace(
           stylesheetTags[0][0],
-          `<!-- Loaded non-blocking (see build-inject-plugin.ts): the inline splash\n     covers first paint, and the sheet still starts downloading with the HTML.\n     The <noscript> twin keeps the blocking behaviour for no-JS visitors. -->\n<link rel="stylesheet" media="print" onload="this.media='all'"${attrs}>\n<noscript><link rel="stylesheet"${attrs}></noscript>`,
+          // The `onload` value is the shared constant, not a literal, so the
+          // server's CSP (apps/server/src/response-decorators.ts) can allow
+          // this exact inline handler by hash — see the constant's doc
+          // comment for why that has to stay in sync rather than hand-copied.
+          // `escapeAttr` keeps the *parsed* attribute value equal to the
+          // constant even if it ever gains a `"` or `&` — the server hashes
+          // the raw constant, which is what the browser hands back after
+          // decoding entities, not the escaped source text.
+          `<!-- Loaded non-blocking (see build-inject-plugin.ts): the inline splash\n     covers first paint, and the sheet still starts downloading with the HTML.\n     The <noscript> twin keeps the blocking behaviour for no-JS visitors. -->\n<link rel="stylesheet" media="print" onload="${escapeAttr(NONBLOCKING_STYLESHEET_ONLOAD_HANDLER)}"${attrs}>\n<noscript><link rel="stylesheet"${attrs}></noscript>`,
         );
       }
       // More than one stylesheet (or none) is unexpected for this app's build

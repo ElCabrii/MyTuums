@@ -20,6 +20,39 @@ function expectSecurityHeaders(headers: Record<string, string | string[] | undef
   expect(headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
   expect(headers["x-frame-options"]).toBe("DENY");
   expect(headers["strict-transport-security"]).toBe("max-age=31536000; includeSubDomains");
+  expectContentSecurityPolicy(headers);
+}
+
+/**
+ * Asserts the enforced (not report-only — issue #61) CSP header is present
+ * and carries the directives `apps/server/src/response-decorators.ts`
+ * derives from what the app actually loads: same-origin by default, `https:`
+ * images (own uploads via the `/media` redirect, plus OAuth avatar URLs
+ * rendered verbatim), and the `accounts.google.com` allowance Google One Tap
+ * needs. The script-src hash is asserted by shape, not by literal value — it
+ * moves whenever the shared onload-handler constant does.
+ */
+function expectContentSecurityPolicy(headers: Record<string, string | string[] | undefined>): void {
+  const csp = headers["content-security-policy"];
+  expect(typeof csp).toBe("string");
+  const directives = (csp as string).split("; ");
+
+  expect(directives).toContain("default-src 'self'");
+  expect(directives).toContain("base-uri 'self'");
+  expect(directives).toContain("object-src 'none'");
+  expect(directives).toContain("img-src 'self' https:");
+  expect(directives).toContain("style-src 'self' 'unsafe-inline' https://accounts.google.com");
+  expect(directives).toContain("connect-src 'self' https://accounts.google.com");
+  expect(directives).toContain("frame-src https://accounts.google.com");
+  expect(directives).toContain("frame-ancestors 'none'");
+
+  const scriptSrc = directives.find((d) => d.startsWith("script-src "));
+  expect(scriptSrc).toContain("'self'");
+  expect(scriptSrc).toContain("https://accounts.google.com");
+  expect(scriptSrc).toContain("'unsafe-hashes'");
+  expect(scriptSrc).toMatch(/'sha256-[\w+/]+=*'/);
+
+  expect(headers["content-security-policy-report-only"]).toBeUndefined();
 }
 
 /**
@@ -64,7 +97,7 @@ function rawRequest(
 }
 
 test.describe("security headers", () => {
-  test("GET /health carries all four, on the health-check path", async ({ request }) => {
+  test("GET /health carries all five, on the health-check path", async ({ request }) => {
     const response = await request.get("/health");
 
     expect(response.status()).toBe(200);
