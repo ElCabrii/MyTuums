@@ -47,7 +47,7 @@ Each package — and the CI directory — carries its own `AGENTS.md`: the autho
 - `packages/auth/AGENTS.md` — the better-auth composition: pinned settings, providers, email, testing.
 - `packages/db/AGENTS.md` — schema, TLS rule, migrations, test helpers.
 - `e2e/AGENTS.md` — the Playwright suite: projects, fixtures, stack env, invariants.
-- `.github/AGENTS.md` — CI/CD pipeline and the security scan.
+- `.github/AGENTS.md` — CI/CD pipeline.
 
 ## Architecture
 
@@ -98,7 +98,7 @@ In production the API serves the built SPA (`WEB_DIST` set by the Dockerfile), b
 
 ### CI (`.github/workflows/ci.yml`)
 
-`check` (build → lint → typecheck), `unit` (deliberately no Postgres), `integration` (Postgres service; `db:check` catches schema drift), `e2e` (Postgres + ci-bucket S3 secrets), `docker` (builds the image and asserts the VITE_* ARGs landed in the bundle and the migration runner/SQL shipped).
+`check` (build → lint → typecheck; turbo cache persisted via actions/cache), `unit` (deliberately no Postgres), `integration` (Postgres service; `db:check` catches schema drift), `e2e` (Postgres + ci-bucket S3 secrets, 60-min cap), `docker` (builds the image, asserts the VITE_* ARGs landed in the bundle and the migration runner/SQL shipped, then BOOTS it with its real CMD against a Postgres service and probes /health, /login and the page gate). The production smoke check (`smoke.yml`) re-runs those probes against the live `mytuums.com` every 6 hours — the standing replacement for a post-deploy check, since CI never deploys.
 
 ## Env gotchas
 

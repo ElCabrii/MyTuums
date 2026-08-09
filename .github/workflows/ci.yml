@@ -53,6 +53,20 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # Turbo's local cache lives at `.turbo/cache` (the 2.x default, already
+      # gitignored), so caching the parent directory persists it between runs.
+      # Turbo hashes task inputs itself, so a restored cache can never replay
+      # a stale result — a hit is only used when the inputs match byte for
+      # byte. The per-commit key writes a fresh save each run; the prefix
+      # restores the previous run's cache when the exact key misses, which is
+      # most of the time (deps and sources change every commit).
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
       # --frozen-lockfile: the committed lockfile is authoritative — any
       # drift between it and a package.json fails here rather than
       # installing something different from what CI will run.
@@ -144,6 +158,9 @@ jobs:
   e2e:
     name: E2E tests
     runs-on: ubuntu-latest
+    # The default job timeout is 6 hours — far past what this suite can take.
+    # A hung spec would otherwise burn runner time before failing on its own.
+    timeout-minutes: 60
 
     services:
       # Same ephemeral Postgres as the integration job.
@@ -241,11 +258,38 @@ jobs:
   # shipped a bundle with no OAuth buttons, and a static-file rule that 404'd
   # the whole site — because neither is reachable without building the image.
   #
+  # Beyond the static assertions below, the image is now BOOTED with its real
+  # CMD (`node apps/server/dist/index.js` — the exact process Railway starts)
+  # against a real Postgres, and probed over HTTP. The E2E suite runs the dev
+  # server; only this job ever starts the production artifact, so a broken
+  # one-origin setup or a boot-time env failure would otherwise first be seen
+  # by a real user.
+  #
   # Build only, no push: Railway builds its own image on deploy. This exists to
   # fail the commit, not to produce an artifact.
   docker:
     name: Docker image builds
     runs-on: ubuntu-latest
+
+    services:
+      # Same ephemeral Postgres as the integration and e2e jobs. The image's
+      # ports are published to the runner's localhost, which the container
+      # reaches through `--network host` (the runner is a native Linux VM, so
+      # host networking shares the runner's namespace).
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_DB: mytuums
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d mytuums"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -327,3 +371,79 @@ jobs:
           docker run --rm --entrypoint sh mytuums-server:ci -c             'test ! -d apps/web/node_modules'             || { echo "::error::apps/web dependencies were installed into the runner - prune the runner to @my-tuums/server alone"; exit 1; }
           docker run --rm --entrypoint sh mytuums-server:ci -c             'test -d apps/server/node_modules/better-auth'             || { echo "::error::the server's production dependencies are missing from the runner"; exit 1; }
           echo "Runner holds the server's prod deps and nothing from apps/web."
+
+      # Everything above inspects the image; this step RUNS it. The pre-deploy
+      # migration is the exact one-shot Railway runs before starting the app,
+      # and the boot below uses the image's real CMD with no overrides — the
+      # same process a deployed container runs.
+      #
+      # `--network host` is required here, not optional: the Postgres service
+      # port is published on the RUNNER's loopback, and a plain `docker run`
+      # puts the container on the default bridge where `localhost` is the
+      # container's own loopback — the migrate process could not reach the
+      # database at all.
+      - name: Run the pre-deploy migration
+        run: |
+          docker run --rm --network host -e "DATABASE_URL=${DATABASE_URL}" \
+            mytuums-server:ci node apps/server/dist/migrate.js
+
+      # The production smoke: boot the image (real CMD), then probe the same
+      # three surfaces a deployed app must serve — the DB-backed health
+      # endpoint, a signed-out page (static SPA shell through the real file
+      # handler), and the page gate's redirect. A failure anywhere here means
+      # the artifact is broken even though every assertion above passed.
+      #
+      # Every curl carries `--max-time`: a Postgres that accepts TCP but never
+      # answers a query has no other bound (postgres.js has no default query
+      # timeout), so without it a half-open health probe would pin the loop
+      # until the job's default 6-hour timeout.
+      - name: Boot the image and probe it over HTTP
+        run: |
+          docker run -d --name ci-smoke-server --network host \
+            -e "DATABASE_URL=${DATABASE_URL}" \
+            -e "BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}" \
+            -e "BETTER_AUTH_URL=${BETTER_AUTH_URL}" \
+            -e "WEB_ORIGIN=${WEB_ORIGIN}" \
+            -e PORT=3001 -e HOST=0.0.0.0 -e NODE_ENV=production \
+            mytuums-server:ci || {
+            echo "::error::docker run failed - the image could not be started";
+            exit 1; }
+
+          for _ in $(seq 1 30); do
+            curl -f --max-time 10 http://localhost:3001/health > /tmp/health.json 2>/dev/null && break
+            sleep 2
+          done
+
+          curl -fsS --max-time 10 http://localhost:3001/health > /tmp/health.json || {
+            echo "::error::the image's CMD did not become healthy after 30 attempts - the production process does not boot";
+            docker logs ci-smoke-server;
+            exit 1; }
+          grep -q '"status":"ok"' /tmp/health.json || {
+            echo "::error::health endpoint did not report ok: $(cat /tmp/health.json)";
+            docker logs ci-smoke-server;
+            exit 1; }
+
+          login_code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://localhost:3001/login)
+          [ "$login_code" = "200" ] || {
+            echo "::error::/login returned $login_code instead of 200 - the static SPA is not being served";
+            docker logs ci-smoke-server;
+            exit 1; }
+          login_type=$(curl -s --max-time 10 -o /dev/null -w '%{content_type}' http://localhost:3001/login)
+          echo "$login_type" | grep -q 'text/html' || {
+            echo "::error::/login served content-type $login_type instead of text/html";
+            docker logs ci-smoke-server;
+            exit 1; }
+
+          root_code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://localhost:3001/)
+          [ "$root_code" = "302" ] || {
+            echo "::error::/ returned $root_code instead of 302 - the page gate is not live";
+            docker logs ci-smoke-server;
+            exit 1; }
+          root_target=$(curl -s --max-time 10 -o /dev/null -w '%{redirect_url}' http://localhost:3001/)
+          echo "$root_target" | grep -q '/login?redirect=' || {
+            echo "::error::/ redirected to $root_target instead of /login?redirect=...";
+            docker logs ci-smoke-server;
+            exit 1; }
+
+          docker rm -f ci-smoke-server >/dev/null || true
+          echo "Image boots with its real CMD: health ok, SPA served, page gate redirects."
