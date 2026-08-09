@@ -283,6 +283,10 @@ export const SIGNED_OUT_PATHS = new Set([
  * it, instead of silently going stale and leaving the production stylesheet
  * stuck at `media="print"` (the exact failure a hard-coded hash would risk,
  * and one that would ship invisibly — there is no console to watch for it in
- * production).
+ * production). That guarantee relies on `build-inject-plugin.ts` HTML-escaping
+ * this value before it interpolates it into the `onload="..."` attribute —
+ * without that, a future value containing a `"` or `&` would change what the
+ * browser parses the attribute to versus what got hashed here, reintroducing
+ * the same silent `media="print"` failure through the back door.
  */
 export const NONBLOCKING_STYLESHEET_ONLOAD_HANDLER = "this.media='all'";

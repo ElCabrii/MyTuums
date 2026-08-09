@@ -99,7 +99,8 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   (`window.location.href = <authorize URL>`), which CSP does not gate at
  *   all, so they need nothing here. The hash-source is the one inline
  *   handler covered above.
- * - `style-src 'self' 'unsafe-inline'`: unavoidable, not an oversight. Base UI
+ * - `style-src 'self' 'unsafe-inline' https://accounts.google.com`:
+ *   `'unsafe-inline'` is unavoidable, not an oversight. Base UI
  *   (`@base-ui/react`, what shadcn's `base-maia` style in this repo is built
  *   on — see `apps/web/components.json`) positions every popover/menu/select/
  *   dialog with Floating UI under the hood, which writes the computed
@@ -111,6 +112,16 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   and resize. The cold-load splash's inline `<style>` block
  *   (`apps/web/index.html`) rides the same allowance. Locking this down would
  *   mean dropping Floating UI–based positioning app-wide — out of scope here.
+ *   The Google host is the fourth One Tap allowance, alongside `script-src`,
+ *   `connect-src` and `frame-src` above: the GSI script this app loads
+ *   injects its own stylesheet link (documented at
+ *   `https://accounts.google.com/gsi/style`), and without this host that
+ *   `<link>` is blocked by this same policy — a CSP violation on every
+ *   sign-in page load, and an unstyled One Tap prompt on the non-FedCM
+ *   fallback path. The bare host (not the `/gsi/style` path) matches this
+ *   policy's `script-src`/`connect-src`/`frame-src` entries and covers the
+ *   documented path, since a CSP source with no path component matches every
+ *   path on that origin.
  * - `connect-src 'self' https://accounts.google.com`: `'self'` covers `/rpc`,
  *   `/api/auth` and `/media`, the app's entire fetch surface. One Tap's
  *   loaded script makes its own requests (credential fetch, FedCM
@@ -145,7 +156,7 @@ const CONTENT_SECURITY_POLICY = [
   "img-src 'self' https:",
   "font-src 'self'",
   `script-src 'self' https://accounts.google.com 'unsafe-hashes' '${STYLESHEET_SWAP_HANDLER_HASH}'`,
-  "style-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://accounts.google.com",
   "connect-src 'self' https://accounts.google.com",
   "frame-src https://accounts.google.com",
   "form-action 'self'",

@@ -6,7 +6,14 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Provider } from "jotai";
 import { queryClient } from "@/lib/query-client";
 import { store } from "@/lib/store";
+import { promotePrintStylesheet } from "@/lib/promote-print-stylesheet";
 import { routeTree } from "./routeTree.gen";
+
+// Boot-time fallback for the non-blocking stylesheet trick — see the
+// function's own doc comment for why this cannot be left to the `onload`
+// handler alone. A plain call, not an atom or effect: this runs once, before
+// React even mounts, on a `document` global no store or component owns.
+promotePrintStylesheet();
 
 // The single router for the app, built from the Vite-generated route tree.
 const router = createRouter({ routeTree });
