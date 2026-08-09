@@ -58,8 +58,7 @@ export const Route = createFileRoute("/login")({
  * The sign-in page: identifier + password form, the OAuth/passkey options, and
  * the `?error=` banner that surfaces a failed OAuth round trip. `?redirect=`
  * carries the pre-login destination (see `validateSearch` above).
- */
-/**
+ *
  * Exported (rather than kept file-private like most route bodies) so
  * `login.test.tsx` can mount it directly and drive the two banned-account
  * navigate sites it owns — the house pattern used by every other tested page
