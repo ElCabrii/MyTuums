@@ -29,15 +29,14 @@ manage.
 - **Production:** Railway in the EU — Postgres and S3-compatible object
   storage in the same region as the app.
 - **CI:** GitHub Actions — lint, unit, integration, Playwright e2e, Docker
-  build, and a weekly agentic security scan whose findings land in GitHub
-  code scanning.
+  build (which boots the image and probes it), plus a scheduled production
+  smoke check against the live domain.
 
 ## Security posture
 
 - One-origin architecture (no cross-origin API surface)
 - Environment validated at boot — a partial OAuth or S3 credential pair
   refuses to start the server
-- Weekly agentic security scan (DeepSeek-powered) + a written policy in
-  [SECURITY.md](SECURITY.md)
+- A written security policy in [SECURITY.md](SECURITY.md)
 - Environments are separated: non-production tooling never touches the
   production bucket (the e2e suite deletes objects by prefix during cleanup)
