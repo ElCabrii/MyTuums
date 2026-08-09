@@ -55,29 +55,75 @@ export interface RateLimiter {
   readonly size: number;
 }
 
+const MINUTE = 60_000;
+
 /** Creates an in-memory fixed-window rate limiter. */
 export function createRateLimiter(
   options: {
     /** Injectable so tests can advance time without sleeping. */
     now?: () => number;
     /**
-     * Upper bound on tracked keys. Every caller is a signed-in user keyed on
-     * `user:<id>` — there is no anonymous surface left to key on IP — so the
-     * map grows with the number of distinct users hitting the API inside the
-     * longest tracked window. The hard bound keeps that growth from turning
-     * the rate limiter itself into the denial-of-service vector it exists to
-     * prevent.
+     * Threshold past which the map is considered "at capacity" — a leak
+     * alarm, not an admission gate, and (see below) not a memory bound
+     * either: crossing it does not stop the map from growing, it only makes
+     * the limiter log about it.
      *
-     * At capacity, a brand-new key is refused (`allowed: false`) until a
-     * tracked window expires; a returning caller whose own window expired
-     * recycles its slot.
+     * Nearly every caller is a signed-in user keyed on
+     * `${policy.name}:user:<id>` (issue #36 removed the anonymous surface and
+     * its IP keying). The one exception is `moderation.appealOpen`, which
+     * runs signed out and calls `rateLimitCapability`
+     * (packages/api/src/procedures.ts) to key on `appeal:<nonce>` or
+     * `appeal:<actionId>` instead — a capability the server itself mints and
+     * HMAC-signs (`appeal-token.ts`), never one an outside caller can choose.
+     * So the keyspace is bounded by registered users times the 9 policies in
+     * `RATE_LIMITS`, plus however many appeal capabilities happen to be
+     * outstanding at once — all server-issued, none of it grown on purpose by
+     * an attacker spraying requests from many addresses. What `maxKeys`
+     * guards against is a leak: if some caller shape ever kept producing
+     * distinct keys that never expire, crossing this threshold is what would
+     * surface it (see below).
+     *
+     * At capacity, a brand-new key is let through anyway (`allowed` still
+     * follows the caller's own policy limit, just like any other key) — see
+     * issue #60. Refusing it, as this used to do, punished exactly the wrong
+     * caller: it turned "the map is full" into "brand-new sessions get 429
+     * on every single request," indistinguishable from a bug to the person
+     * hitting it, to defend a keyspace nothing can grow on purpose anymore.
+     * The limiter's job is bounding one client's damage, not gatekeeping who
+     * gets to make requests at all. A returning caller whose own window
+     * expired still recycles its slot without touching the ceiling either
+     * way. The consequence worth stating plainly: nothing now caps how far
+     * past `maxKeys` the map can grow — a real leak just keeps growing, this
+     * only makes it visible.
      */
     maxKeys?: number;
+    /**
+     * Minimum time between capacity-warning log lines. Time-based rather than
+     * tied to `buckets.size` dipping back under `maxKeys`, because size is
+     * noisy right at the threshold: sweeping only ever runs from inside a
+     * full-map insert attempt, so under sustained near-capacity traffic one
+     * key expiring can put the map momentarily under `maxKeys` and the very
+     * next insert can put it right back over — a size-based latch re-arms on
+     * that dip and fires again a moment later, which is a flood, not "once
+     * per episode". A cooldown keyed on elapsed time instead doesn't care how
+     * the size wobbles: it logs again only once this much wall-clock time has
+     * passed, whether or not the map ever dipped at all — which also means a
+     * leak that only ever grows (never dips) still gets a fresh log line
+     * every cooldown window, instead of warning once at boot and then falling
+     * silent for good. Defaults to a minute: long enough that a busy episode
+     * doesn't spam the log, short enough that a new one is heard from soon
+     * after it starts.
+     */
+    capacityWarnCooldownMs?: number;
   } = {},
 ): RateLimiter {
   const now = options.now ?? Date.now;
   const maxKeys = options.maxKeys ?? 10_000;
+  const capacityWarnCooldownMs = options.capacityWarnCooldownMs ?? MINUTE;
   const buckets = new Map<string, { count: number; resetAt: number }>();
+  // -Infinity so the very first capacity episode always logs immediately,
+  // regardless of what `now()` returns at boot.
+  let lastCapacityWarnAt = -Infinity;
 
   /** Drops windows that have already rolled over. */
   function sweep(at: number): void {
@@ -97,12 +143,22 @@ export function createRateLimiter(
         // Only sweep when adding a key, and only once the map has actually
         // grown — an O(n) scan on every request would be worse than the leak.
         if (buckets.size >= maxKeys) sweep(at);
-        // Hard bound: at capacity with live windows, a brand-new key is refused
-        // rather than growing the map. A returning caller whose window expired
-        // just recycles its own slot — sweep is guaranteed to have removed it
-        // (resetAt <= at), so the set below cannot grow the map either.
-        if (buckets.size >= maxKeys && existing === undefined) {
-          return { allowed: false, remaining: 0, retryAfterSeconds: 1 };
+
+        if (buckets.size >= maxKeys) {
+          // Still at capacity after sweeping. Fail OPEN: let a brand-new key
+          // through rather than refusing it (issue #60) — `maxKeys` is a
+          // leak alarm, not an admission gate or a memory bound, and there
+          // is no longer an attacker who can grow this keyspace on purpose
+          // (issue #36; see the `maxKeys` doc comment above for the
+          // appeal-capability exception). A returning caller
+          // (`existing !== undefined`) was never refused either way, so it
+          // gets no log line of its own.
+          if (existing === undefined && at - lastCapacityWarnAt >= capacityWarnCooldownMs) {
+            lastCapacityWarnAt = at;
+            console.warn(
+              `[rate-limit] at capacity (${maxKeys} keys) — allowing new keys through unthrottled instead of refusing them; investigate for a leak or raise maxKeys`,
+            );
+          }
         }
         buckets.set(key, bucket);
       }
@@ -127,8 +183,6 @@ export function createRateLimiter(
     },
   };
 }
-
-const MINUTE = 60_000;
 
 /**
  * Per-caller budgets, tiered by what the call costs us rather than one
