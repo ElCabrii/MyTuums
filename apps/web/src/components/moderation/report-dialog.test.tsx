@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
+import { POST_REPORT_REASONS, USER_REPORT_REASONS } from "@my-tuums/api/constants";
 import { reportDialogAtom, reportReasonAtom, type CaseRef } from "@/atoms/moderation";
 import { renderWithProviders } from "@/test/render";
 import { ReportDialog } from "@/components/moderation/report-dialog";
+import { reasonLabel } from "@/components/moderation/labels";
 import { m } from "@/paraglide/messages.js";
 
 const { fakeClient } = vi.hoisted(() => ({
@@ -85,6 +87,38 @@ describe("ReportDialog", () => {
         expect.anything(),
       ),
     );
+  });
+
+  it("offers USER_REPORT_REASONS and the user-target title for a user target", async () => {
+    // Both reason tests above bypass this picker (`act(() => store.set(...))`),
+    // so they'd stay green even if `report-dialog.tsx`'s target-type branch
+    // (line 63) always returned POST_REPORT_REASONS — this is the one place
+    // that actually looks at what the reporter is offered.
+    await openReportDialog({ targetType: "user", targetId: "user-1" });
+
+    expect(
+      await screen.findByRole("heading", { name: m.moderation_report_title_user() }),
+    ).toBeInTheDocument();
+    const listbox = await screen.findByRole("listbox", { hidden: true });
+    expect(
+      within(listbox)
+        .getAllByRole("option", { hidden: true })
+        .map((option) => option.textContent),
+    ).toEqual(USER_REPORT_REASONS.map((code) => reasonLabel(code)));
+  });
+
+  it("offers POST_REPORT_REASONS and the post-target title for a post target", async () => {
+    await openReportDialog({ targetType: "post", targetId: "post-1" });
+
+    expect(
+      await screen.findByRole("heading", { name: m.moderation_report_title_post() }),
+    ).toBeInTheDocument();
+    const listbox = await screen.findByRole("listbox", { hidden: true });
+    expect(
+      within(listbox)
+        .getAllByRole("option", { hidden: true })
+        .map((option) => option.textContent),
+    ).toEqual(POST_REPORT_REASONS.map((code) => reasonLabel(code)));
   });
 
   it("shows the thank-you copy and hides the submit button once the report succeeds", async () => {

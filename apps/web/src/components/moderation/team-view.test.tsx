@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { roleSelectAtom } from "@/atoms/moderation";
 import {
@@ -59,7 +59,13 @@ describe("TeamView — rank gating on Change role", () => {
 
   it("never offers Change role on the viewer's own row", async () => {
     const queryClient = createTestQueryClient();
-    seedTeam(queryClient, [makeTeamMember({ id: "admin-1", name: "Self Admin", role: "admin" })]);
+    // The seeded own row is ranked BELOW the viewer's session role
+    // (moderator < admin) so the rank clause alone would pass `canManage` —
+    // only the `member.id !== viewer?.id` guard can suppress the button
+    // here. If that guard were deleted, this row would show Change role.
+    seedTeam(queryClient, [
+      makeTeamMember({ id: "admin-1", name: "Self Admin", role: "moderator" }),
+    ]);
     await renderWithProviders(<TeamView />, {
       queryClient,
       signedInAs: { id: "admin-1", role: "admin" },
@@ -143,5 +149,43 @@ describe("TeamView — set-role dialog", () => {
 
     expect(screen.getByRole("button", { name: m.moderation_set_role_submit() })).toBeDisabled();
     expect(fakeClient.moderation.setRole).not.toHaveBeenCalled();
+  });
+
+  it("offers a staff viewer only user and moderator — never staff or admin", async () => {
+    // Mirrors the server rule this dialog is a client mirror of
+    // (`packages/api/src/moderation.ts`'s `setRole`: granting staff or above
+    // requires admin, else FORBIDDEN). A staff viewer outranks this
+    // moderator target, so Change role is offered, but the granted set must
+    // stop at moderator — reverting `grantable` to always `ALL_ROLES` would
+    // leave a staff viewer able to hand out staff/admin and this test is the
+    // only place that would notice.
+    const queryClient = createTestQueryClient();
+    seedTeam(queryClient, [
+      makeTeamMember({
+        id: "mod-1",
+        name: "Mod One",
+        username: "mod1",
+        displayUsername: "Mod1",
+        role: "moderator",
+      }),
+    ]);
+    await renderWithProviders(<TeamView />, {
+      queryClient,
+      signedInAs: { id: "staff-1", role: "staff" },
+    });
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: m.moderation_team_change_role() }));
+
+    // The Select popup stays mounted (just visually hidden) whether or not
+    // it's open, so its offered options can be read without driving the
+    // pointer-based open gesture team-view.test.tsx avoids elsewhere — but
+    // base-ui's floating positioner mounts it a tick after the trigger
+    // itself appears, so this waits rather than asserting synchronously.
+    const listbox = await screen.findByRole("listbox", { hidden: true });
+    const offered = within(listbox)
+      .getAllByRole("option", { hidden: true })
+      .map((option) => option.textContent);
+    expect(offered).toEqual([m.moderation_role_user(), m.moderation_role_moderator()]);
   });
 });
