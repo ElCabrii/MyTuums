@@ -63,7 +63,7 @@ pnpm dev
 - **`e2e`** — Playwright: `setup` (signs up alice/bob once), `api`
   (transport-level, no browser), `chromium` (browser specs). Single worker.
 
-Each package also carries its own `CLAUDE.md` — the authoritative
+Each package also carries its own `AGENTS.md` - the authoritative
 per-package deep-dive (file map, load-bearing decisions, commands).
 
 ## Conventions (hard rules)
