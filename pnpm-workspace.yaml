@@ -14,3 +14,10 @@ catalog:
   zod: ^4.4.3
   typescript: ^5.8.3
   "@types/node": ^22.20.1
+  # The better-auth family, pinned exact as one unit: the plugins and the core
+  # must never resolve to different majors, and packages/api verifies its
+  # behavior against these internals. Bump all four together.
+  better-auth: 1.6.25
+  "@better-auth/i18n": 1.6.25
+  "@better-auth/passkey": 1.6.25
+  "@better-auth/utils": 0.4.2

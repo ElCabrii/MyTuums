@@ -20,7 +20,7 @@
     "@my-tuums/auth": "workspace:*",
     "@my-tuums/db": "workspace:*",
     "@orpc/server": "^1.5.0",
-    "better-auth": "^1.2.9",
+    "better-auth": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

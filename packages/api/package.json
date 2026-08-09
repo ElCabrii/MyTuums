@@ -39,7 +39,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@better-auth/utils": "0.4.2",
+    "@better-auth/utils": "catalog:",
     "@my-tuums/tsconfig": "workspace:*",
     "@types/node": "catalog:",
     "dotenv": "^17.2.3",
