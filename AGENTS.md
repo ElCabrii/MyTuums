@@ -98,7 +98,7 @@ In production the API serves the built SPA (`WEB_DIST` set by the Dockerfile), b
 
 ### CI (`.github/workflows/ci.yml`)
 
-`check` (build → lint → typecheck; turbo cache persisted via actions/cache), `unit` (deliberately no Postgres), `integration` (Postgres service; `db:check` catches schema drift), `e2e` (Postgres + ci-bucket S3 secrets, 60-min cap), `docker` (builds the image, asserts the VITE_* ARGs landed in the bundle and the migration runner/SQL shipped, then BOOTS it with its real CMD against a Postgres service and probes /health, /login and the page gate). The production smoke check (`smoke.yml`) re-runs those probes against the live `mytuums.com` every 6 hours — the standing replacement for a post-deploy check, since CI never deploys.
+`check` (build → lint → typecheck; turbo cache persisted via actions/cache), `unit` (deliberately no Postgres), `integration` (Postgres service; `db:check` catches schema drift), `e2e` (Postgres + ci-bucket S3 secrets, 60-min cap), `docker` (builds the image, asserts the VITE_* ARGs landed in the bundle and the migration runner/SQL shipped, then BOOTS it with its real CMD against a Postgres service and probes /health, /login, the page gate, and that the server registers the same social providers the bundle offers — dummy OAuth credentials in, both halves of the mirror asserted). The production smoke check (`smoke.yml`) re-runs those probes against the live `mytuums.com` every 6 hours — the standing replacement for a post-deploy check, since CI never deploys.
 
 ## Env gotchas
 

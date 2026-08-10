@@ -395,17 +395,35 @@ jobs:
       # handler), and the page gate's redirect. A failure anywhere here means
       # the artifact is broken even though every assertion above passed.
       #
+      # The social-provider probes at the end close the other half of the
+      # OAuth mirror: the bundle grep above proves the client list shipped,
+      # these prove the server registers exactly the same providers. That is
+      # why the boot carries dummy OAuth credential pairs (same philosophy as
+      # the dummy build args — proves the wiring without real client ids).
+      #
       # Every curl carries `--max-time`: a Postgres that accepts TCP but never
       # answers a query has no other bound (postgres.js has no default query
       # timeout), so without it a half-open health probe would pin the loop
       # until the job's default 6-hour timeout.
       - name: Boot the image and probe it over HTTP
         run: |
+          # One IP drives all four social probes, and better-auth's default
+          # budget for /sign-in* is 3 per 10 seconds — the same reason the E2E
+          # stack sets this. It disables better-auth's own limiter only; the
+          # oRPC rate limits (packages/api) are a separate mechanism and stay
+          # on.
           docker run -d --name ci-smoke-server --network host \
             -e "DATABASE_URL=${DATABASE_URL}" \
             -e "BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}" \
             -e "BETTER_AUTH_URL=${BETTER_AUTH_URL}" \
             -e "WEB_ORIGIN=${WEB_ORIGIN}" \
+            -e "GOOGLE_CLIENT_ID=ci-placeholder.apps.googleusercontent.com" \
+            -e "GOOGLE_CLIENT_SECRET=ci-placeholder-google-client-secret" \
+            -e "DISCORD_CLIENT_ID=ci-placeholder-discord-client-id" \
+            -e "DISCORD_CLIENT_SECRET=ci-placeholder-discord-client-secret" \
+            -e "TWITCH_CLIENT_ID=ci-placeholder-twitch-client-id" \
+            -e "TWITCH_CLIENT_SECRET=ci-placeholder-twitch-client-secret" \
+            -e "AUTH_RATE_LIMIT=false" \
             -e PORT=3001 -e HOST=0.0.0.0 -e NODE_ENV=production \
             mytuums-server:ci || {
             echo "::error::docker run failed - the image could not be started";
@@ -446,6 +464,40 @@ jobs:
             echo "::error::/ redirected to $root_target instead of /login?redirect=...";
             docker logs ci-smoke-server;
             exit 1; }
+
+          # The server half of the provider mirror (the client half is the
+          # bundle grep above). The image carries dummy OAuth credential
+          # pairs, so each provider the bundle offers must answer the social
+          # sign-in endpoint with its own authorize URL. A provider the
+          # server has no credentials for 404s here; a credential the client
+          # never offers is caught by the bundle grep. The github probe is
+          # the control: a provider the config does NOT register must be
+          # refused, or every positive probe above could pass vacuously.
+          social_probe_failed() {
+            echo "::error::$1";
+            docker logs ci-smoke-server;
+            exit 1;
+          }
+          for entry in "google accounts.google.com" "discord discord.com" "twitch id.twitch.tv"; do
+            set -- $entry
+            provider=$1
+            host=$2
+            code=$(curl -s --max-time 10 -o "/tmp/social-$provider.json" -w '%{http_code}' \
+              -X POST -H 'Content-Type: application/json' \
+              -d "{\"provider\":\"$provider\"}" \
+              http://localhost:3001/api/auth/sign-in/social)
+            [ "$code" = "200" ] || social_probe_failed "social sign-in for $provider returned $code - the server does not hold that provider's credentials"
+            grep -q '"redirect":true' "/tmp/social-$provider.json" || social_probe_failed "social sign-in for $provider did not offer a redirect"
+            grep -q "$host" "/tmp/social-$provider.json" || social_probe_failed "social sign-in for $provider did not target $host (authorize URL mismatch)"
+          done
+
+          github_code=$(curl -s --max-time 10 -o /tmp/social-github.json -w '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' \
+            -d '{"provider":"github"}' \
+            http://localhost:3001/api/auth/sign-in/social)
+          [ "$github_code" = "404" ] || social_probe_failed "unregistered provider github returned $github_code instead of 404 - the registration check is vacuous"
+          grep -q 'PROVIDER_NOT_FOUND' /tmp/social-github.json || social_probe_failed "unregistered provider github did not report PROVIDER_NOT_FOUND"
+          echo "Social providers agree: server registers google, discord, twitch; unregistered providers are refused."
 
           docker rm -f ci-smoke-server >/dev/null || true
           echo "Image boots with its real CMD: health ok, SPA served, page gate redirects."
