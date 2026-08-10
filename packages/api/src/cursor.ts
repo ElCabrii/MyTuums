@@ -19,6 +19,9 @@ import { z } from "zod";
  * codec built for one will reject the other's cursors as malformed, which is
  * the intent — a cursor from one feed is meaningless in another.
  */
+/** The codec `createCursorCodec` returns — what `keysetPage` in ./pagination.ts takes. */
+export type CursorCodec = ReturnType<typeof createCursorCodec>;
+
 export function createCursorCodec(idSchema: z.ZodType<string>) {
   const payloadSchema = z.object({
     createdAt: z.iso.datetime(),

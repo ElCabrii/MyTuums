@@ -11,6 +11,7 @@ import {
   type ImageKind,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
+import { keysetPage } from "./pagination.js";
 import {
   acceptImage,
   imageObjectKey,
@@ -500,46 +501,40 @@ export const userRouter = {
     )
     .handler(async ({ input, context }) => {
       const targetId = await requireUserIdByUsername(context.db, input.username);
-      const cursor = input.cursor ? followCursor.decode(input.cursor) : undefined;
 
       const filters = [
         eq(follow.followingId, targetId),
         // Banned and blocked accounts drop out of the list — a follower you
         // can't see (or who can't see you) is not a follower to list.
         visibleUser(context.user.id),
-        // Row-value comparison against the same (created_at, follower_id) DESC
-        // ordering `follow_following_created_idx` provides, so Postgres seeks
-        // straight to the cursor position. The bound values must go through
-        // `sql.param` with their column as the encoder — interpolating the
-        // Date directly hands postgres.js a value it cannot serialise.
-        cursor
-          ? sql`(${follow.createdAt}, ${follow.followerId}) < (${sql.param(cursor.createdAt, follow.createdAt)}, ${sql.param(cursor.id, follow.followerId)})`
-          : undefined,
-      ].filter((f) => f !== undefined);
+      ];
 
-      const rows = await context.db
-        .select({
-          ...publicUserColumns,
-          followedAt: follow.createdAt,
-          viewerIsFollowing: viewerIsFollowing(context.user.id),
-        })
-        .from(follow)
-        // The join is on follower_id: these are the people following the
-        // target. `following` below joins the other column — that one line is
-        // the whole difference between the two procedures.
-        .innerJoin(user, eq(user.id, follow.followerId))
-        .where(and(...filters))
-        .orderBy(desc(follow.createdAt), desc(follow.followerId))
-        .limit(input.limit + 1);
-
-      const hasMore = rows.length > input.limit;
-      const items = hasMore ? rows.slice(0, input.limit) : rows;
-      const last = items.at(-1);
-
-      return {
-        items,
-        nextCursor: hasMore && last ? followCursor.encode(last.followedAt, last.id) : null,
+      const selection = {
+        ...publicUserColumns,
+        followedAt: follow.createdAt,
+        viewerIsFollowing: viewerIsFollowing(context.user.id),
       };
+      return keysetPage({
+        codec: followCursor,
+        cursor: input.cursor,
+        limit: input.limit,
+        selection,
+        createdAt: follow.createdAt,
+        createdAtField: "followedAt",
+        id: follow.followerId,
+        idField: "id",
+        query: (cursorFilter) =>
+          context.db
+            .select(selection)
+            .from(follow)
+            // The join is on follower_id: these are the people following the
+            // target. `following` below joins the other column — that one line
+            // is the whole difference between the two procedures.
+            .innerJoin(user, eq(user.id, follow.followerId))
+            .where(and(...filters, cursorFilter))
+            .orderBy(desc(follow.createdAt), desc(follow.followerId))
+            .limit(input.limit + 1),
+      });
     }),
 
   /** Pages the users a person follows, newest first. Requires a session. Same `username`-keyed contract as `followers`. */
@@ -554,41 +549,40 @@ export const userRouter = {
     )
     .handler(async ({ input, context }) => {
       const targetId = await requireUserIdByUsername(context.db, input.username);
-      const cursor = input.cursor ? followCursor.decode(input.cursor) : undefined;
 
       const filters = [
         eq(follow.followerId, targetId),
         // Banned and blocked accounts drop out of the list — same filter as
         // `followers`, which is what keeps the two lists symmetric.
         visibleUser(context.user.id),
-        // Note the tie-breaker is `following_id` here, matching both the
-        // ORDER BY below and `follow_follower_created_idx`. Copying the
-        // `followers` predicate without swapping this column yields a cursor
-        // that only misbehaves when two rows share a timestamp.
-        cursor
-          ? sql`(${follow.createdAt}, ${follow.followingId}) < (${sql.param(cursor.createdAt, follow.createdAt)}, ${sql.param(cursor.id, follow.followingId)})`
-          : undefined,
-      ].filter((f) => f !== undefined);
+      ];
 
-      const rows = await context.db
-        .select({
-          ...publicUserColumns,
-          followedAt: follow.createdAt,
-          viewerIsFollowing: viewerIsFollowing(context.user.id),
-        })
-        .from(follow)
-        .innerJoin(user, eq(user.id, follow.followingId))
-        .where(and(...filters))
-        .orderBy(desc(follow.createdAt), desc(follow.followingId))
-        .limit(input.limit + 1);
-
-      const hasMore = rows.length > input.limit;
-      const items = hasMore ? rows.slice(0, input.limit) : rows;
-      const last = items.at(-1);
-
-      return {
-        items,
-        nextCursor: hasMore && last ? followCursor.encode(last.followedAt, last.id) : null,
+      const selection = {
+        ...publicUserColumns,
+        followedAt: follow.createdAt,
+        viewerIsFollowing: viewerIsFollowing(context.user.id),
       };
+      return keysetPage({
+        codec: followCursor,
+        cursor: input.cursor,
+        limit: input.limit,
+        selection,
+        createdAt: follow.createdAt,
+        createdAtField: "followedAt",
+        // The tie-breaker is `following_id` here, matching both the ORDER BY
+        // below and `follow_follower_created_idx`. Copying the `followers`
+        // call without swapping this column yields a cursor that only
+        // misbehaves when two rows share a timestamp.
+        id: follow.followingId,
+        idField: "id",
+        query: (cursorFilter) =>
+          context.db
+            .select(selection)
+            .from(follow)
+            .innerJoin(user, eq(user.id, follow.followingId))
+            .where(and(...filters, cursorFilter))
+            .orderBy(desc(follow.createdAt), desc(follow.followingId))
+            .limit(input.limit + 1),
+      });
     }),
 };
