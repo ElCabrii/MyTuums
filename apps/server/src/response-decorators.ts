@@ -373,13 +373,15 @@ class DecoratedResponse {
       // (oRPC's CORS plugin passes Vary: Origin exactly this way). Strip
       // both from a copy.
       rest = this.stripHeaders(rest, ["content-length", "vary"]);
-      // The exact size is known at this point, and Node only auto-sets
-      // Content-Length for a single-call end(body) — a write()-then-end()
-      // compressed response would otherwise go out chunked. This replaces the
-      // handler's stale value with the compressed size.
-      if (contentLength !== undefined) {
-        this.res.setHeader("Content-Length", String(contentLength));
-      }
+    }
+    // The exact size is known at this point, and Node only auto-sets
+    // Content-Length for a single-call end(body) — a write()-then-end()
+    // response would otherwise go out chunked. Compressed, this replaces the
+    // handler's stale value with the compressed size; uncompressed, it
+    // labels small responses (me/like/follow) so they travel with a size
+    // instead of piece by piece.
+    if (this.candidate && contentLength !== undefined) {
+      this.res.setHeader("Content-Length", String(contentLength));
     }
     this.stashed = null;
     // Forwarded untouched — preserves the (status), (status, headers),
@@ -495,7 +497,7 @@ class DecoratedResponse {
     } else {
       payload = body;
     }
-    this.flush(compress, compress ? payload.length : undefined);
+    this.flush(compress, payload.length);
 
     if (payload.length > 0) this.originalWrite(payload);
     for (const writeCb of this.writeCallbacks) writeCb();

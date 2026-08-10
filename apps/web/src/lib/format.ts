@@ -8,9 +8,24 @@ const DIVISIONS: { amount: number; unit: Intl.RelativeTimeFormatUnit }[] = [
   { amount: Number.POSITIVE_INFINITY, unit: "year" },
 ];
 
+// One formatter per locale, created once and shared: a feed of 50 posts
+// would otherwise build 50 `Intl.RelativeTimeFormat` instances per render,
+// and every re-render starts over. Formatters are stateless and reusable.
+const relativeFormatters = new Map<string, Intl.RelativeTimeFormat>();
+
+function relativeFormatterFor(locale?: string): Intl.RelativeTimeFormat {
+  const key = locale ?? "";
+  let formatter = relativeFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+    relativeFormatters.set(key, formatter);
+  }
+  return formatter;
+}
+
 /** "just now", "3 minutes ago", "2 days ago" — for post timestamps. */
 export function formatRelativeTime(date: Date, locale?: string, justNow = "just now"): string {
-  const relativeFormatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const relativeFormatter = relativeFormatterFor(locale);
   let duration = (date.getTime() - Date.now()) / 1000;
 
   if (Math.abs(duration) < 30) return justNow;

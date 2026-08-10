@@ -5,7 +5,7 @@ import { Heart, MessageCircle, MoreHorizontal } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
-import { isSignedInAtom, viewerAtom } from "@/atoms/session";
+import { isSignedInAtom, viewerIdAtom } from "@/atoms/session";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,13 +42,16 @@ type PostCardVariant = "feed" | "ancestor" | "focused";
 export function PostCard({ post, variant = "feed" }: { post: Post; variant?: PostCardVariant }) {
   const navigate = useNavigate();
   const isSignedIn = useAtomValue(isSignedInAtom);
-  const viewer = useAtomValue(viewerAtom);
+  // `viewerIdAtom`, not `viewerAtom`: the card only needs "is this my post?",
+  // and the full user object gets a new identity on every session refresh —
+  // reading it would re-render every visible card for nothing.
+  const viewerId = useAtomValue(viewerIdAtom);
   const toggleLike = useSetAtom(toggleLikeAtomFamily(post.id));
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
   const authorHandle = handleOf(post.author);
   const authorName = post.author.name || authorHandle || m.user_unknown();
-  const isOwnPost = viewer?.id === post.author.id;
+  const isOwnPost = viewerId === post.author.id;
   const isFocused = variant === "focused";
 
   const handleCardClick = (e: MouseEvent<HTMLDivElement>) => {

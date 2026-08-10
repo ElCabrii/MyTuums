@@ -144,6 +144,25 @@ describe("decorateResponse", () => {
     );
   });
 
+  it("labels a small JSON body with Content-Length when compression is skipped", async () => {
+    // Browsers always send `accept-encoding: gzip`, so small responses
+    // (me/like/follow) are compression candidates that end up uncompressed —
+    // they must still travel with a size label instead of chunked.
+    await withServer(
+      (_req, res) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(SMALL_JSON);
+      },
+      async (raw) => {
+        const r = await raw("/", { headers: { "accept-encoding": "gzip" } });
+        expect(r.headers["content-encoding"]).toBeUndefined();
+        expect(r.headers["transfer-encoding"]).toBeUndefined();
+        expect(Number(r.headers["content-length"])).toBe(Buffer.byteLength(SMALL_JSON));
+        expect(r.body.toString()).toBe(SMALL_JSON);
+      },
+    );
+  });
+
   it("adds them to a 302 too, without clobbering the handler's Location", async () => {
     await withServer(
       (_req, res) => {
