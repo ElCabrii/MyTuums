@@ -21,7 +21,7 @@ the root — see `src/constants.ts` for why.
 - `src/appeal-token.ts` — the HMAC-SHA256 signed-out appeal link signer/verifier (constant-time, zod re-parse, 7-day TTL); `BETTER_AUTH_SECRET`-keyed.
 - `src/roles.ts` — `USER_ROLES`, `roleRank`, `roleAtLeast`, `canManageRole` (strictly-greater) — the hierarchy every gate and rank guard runs on.
 - `src/visibility.ts` — `effectivelyBanned` / `invisibleAuthor` / `invisibleUser` / `visibleUser`: the one filter every surface applies so banned/blocked content cannot leak. `invisibleUser` is the stricter of the two per-user filters — what `users.byUsername` filters on so a banned-but-not-blocked profile still resolves to its suspended stub instead of 404ing.
-- `src/context.ts` — the `Context` shape and `createContext`; owns the one process-wide rate limiter and storage client.
+- `src/context.ts` — the `Context` shape and `createContext`; owns the one process-wide rate limiter and storage client. `Context.requestId` is the server's per-request id (from the `x-request-id` header — `apps/server` generates it), threaded so the oRPC error interceptor can tag API-layer errors with the same id the access log and the HTTP response carry.
 - `src/cursor.ts` — opaque base64url keyset cursors, parameterised on the tie-breaker's id schema.
 - `src/rate-limit.ts` — in-memory fixed-window limiter and the `RATE_LIMITS` tiers (read/like/follow/write/upload/search/report/block/moderate).
 - `src/storage.ts` — S3 factory; `Storage` vs `DestructiveStorage` split; windowed presigned URLs.

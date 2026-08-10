@@ -14,6 +14,9 @@ function resStub() {
     statusCode: undefined as number | undefined,
     headers: undefined as unknown,
     body: "",
+    // The setHeader state, keyed lowercase — `getHeader` reads it back, the
+    // same contract Node's `ServerResponse` has (case-insensitive).
+    headersSet: {} as Record<string, string>,
   };
   let destroyed = false;
 
@@ -33,6 +36,10 @@ function resStub() {
     destroy: vi.fn(() => {
       destroyed = true;
     }),
+    setHeader: vi.fn((name: string, value: string) => {
+      calls.headersSet[name.toLowerCase()] = value;
+    }),
+    getHeader: vi.fn((name: string) => calls.headersSet[name.toLowerCase()]),
   };
 
   return { res: res as unknown as ServerResponse, calls, isDestroyed: () => destroyed };
@@ -533,7 +540,95 @@ describe("createRequestHandler", () => {
     await handle(reqStub("/rpc/post.create", "POST"), res);
 
     expect(calls.statusCode).toBe(500);
-    expect(JSON.parse(calls.body)).toEqual({ error: "Internal Server Error" });
+    expect(JSON.parse(calls.body)).toEqual({
+      error: "Internal Server Error",
+      // The requestId rides the error body so the user (or their support
+      // ticket) can cite the exact request that failed.
+      requestId: calls.headersSet["x-request-id"],
+    });
+  });
+
+  it("gives every request an x-request-id before any routing branch runs", async () => {
+    // The identity is generated at the top of the tree, so every response —
+    // health, auth, rpc, media, page, 404 — carries the same id its log
+    // lines and the access log do. Asserted here on the health path, which
+    // is the earliest branch in the tree.
+    const { res, calls } = resStub();
+    const handle = createRequestHandler(deps());
+
+    await handle(reqStub("/health"), res);
+
+    expect(calls.headersSet["x-request-id"]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it("prefixes the safety net's log line with the request id", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { res, calls } = resStub();
+      const handle = createRequestHandler(
+        deps({ handleRpc: vi.fn().mockRejectedValue(new Error("boom")) }),
+      );
+
+      await handle(reqStub("/rpc/post.create", "POST"), res);
+
+      expect(errorSpy).toHaveBeenCalledOnce();
+      expect(String(errorSpy.mock.calls[0][0])).toBe(
+        `[${calls.headersSet["x-request-id"]}] Unhandled error while handling POST /rpc/post.create:`,
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("notifies the injected observer of an unhandled error with its request id", async () => {
+    // The routing tree's console.error and 500 response stay here; the
+    // observer (wired to Sentry in index.ts) is how the crash leaves this
+    // module without it importing an error-tracking SDK.
+    const { res, calls } = resStub();
+    const onUnhandledError = vi.fn();
+    const boom = new Error("boom");
+    const handle = createRequestHandler(
+      deps({ handleRpc: vi.fn().mockRejectedValue(boom), onUnhandledError }),
+    );
+    const req = reqStub("/rpc/post.create", "POST");
+
+    await handle(req, res);
+
+    expect(onUnhandledError).toHaveBeenCalledOnce();
+    expect(onUnhandledError).toHaveBeenCalledWith(boom, calls.headersSet["x-request-id"], req);
+  });
+
+  it("still writes the 500 when the observer itself throws", async () => {
+    // The observer (Sentry in index.ts) is a report channel, not part of
+    // the response path — its failure must be logged and ignored, never
+    // allowed to replace the 500 the client is owed.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { res, calls } = resStub();
+      const handle = createRequestHandler(
+        deps({
+          handleRpc: vi.fn().mockRejectedValue(new Error("boom")),
+          onUnhandledError: vi.fn().mockImplementation(() => {
+            throw new Error("observer exploded");
+          }),
+        }),
+      );
+
+      await handle(reqStub("/rpc/post.create", "POST"), res);
+
+      expect(calls.statusCode).toBe(500);
+      expect(JSON.parse(calls.body)).toEqual({
+        error: "Internal Server Error",
+        requestId: calls.headersSet["x-request-id"],
+      });
+      expect(
+        errorSpy.mock.calls.some((call) => String(call[0]).includes("Error observer threw:")),
+      ).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("destroys the socket instead of double-writing when headers are already sent", async () => {

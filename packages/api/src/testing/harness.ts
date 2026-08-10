@@ -206,7 +206,13 @@ export async function createTestUser(overrides?: {
     // tests (not for making rate-limited calls — those go through
     // `contextFor`), so the forwarding limiter is a formality here, not a
     // behaviour anything actually exercises.
-    context: { db, session, rateLimiter: forwardingRateLimiter, storage: testStorage },
+    context: {
+      db,
+      session,
+      requestId: "test-request-id",
+      rateLimiter: forwardingRateLimiter,
+      storage: testStorage,
+    },
   };
 }
 
@@ -214,6 +220,7 @@ export async function createTestUser(overrides?: {
 export const anonContext: Context = {
   db,
   session: null,
+  requestId: "test-request-id",
   rateLimiter: forwardingRateLimiter,
   storage: testStorage,
 };
@@ -229,7 +236,7 @@ export function contextFor(
   rateLimiter: RateLimiter = forwardingRateLimiter,
   storage: Storage | null = testStorage,
 ): Context {
-  return { db, session: user.session, rateLimiter, storage };
+  return { db, session: user.session, requestId: "test-request-id", rateLimiter, storage };
 }
 
 /**
@@ -320,7 +327,13 @@ export async function freshSessionFor(testUser: TestUser): Promise<TestUser> {
     // token or its signature, so the same value keeps re-presenting the same
     // session until a suspension deletes the row.
     sessionCookie: testUser.sessionCookie,
-    context: { db, session, rateLimiter: forwardingRateLimiter, storage: testStorage },
+    context: {
+      db,
+      session,
+      requestId: "test-request-id",
+      rateLimiter: forwardingRateLimiter,
+      storage: testStorage,
+    },
   };
 }
 

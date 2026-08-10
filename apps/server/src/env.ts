@@ -27,6 +27,11 @@ const envSchema = z
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
 
+    // Sentry error tracking (apps/server/src/sentry.ts). Optional: without it
+    // the server runs with no error-tracking client — the dev/CI state. The
+    // SDK's capture calls are no-ops then, so nothing gates on this.
+    SENTRY_DSN: z.string().optional(),
+
     // Defaults to WEB_ORIGIN's hostname in packages/auth. Only set this when the
     // browser origin and the intended WebAuthn Relying Party differ.
     PASSKEY_RP_ID: z.string().optional(),

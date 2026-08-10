@@ -13,6 +13,16 @@ export interface Context {
   db: Database;
   session: Session;
   /**
+   * The request identity from the server's `x-request-id` header
+   * (`apps/server/src/request-handler.ts` generates it at the top of every
+   * request). Threaded onto the Context so API-layer failures can be tied
+   * to the same id the HTTP response, the access log and Sentry carry —
+   * the oRPC `onError` interceptor in `apps/server/src/index.ts` reads it
+   * from here. Required, not optional: every Context is built from a real
+   * request (or a test that supplies one), same as `rateLimiter`.
+   */
+  requestId: string;
+  /**
    * Where `./procedures.ts`'s `rateLimit()` middleware consumes budget.
    *
    * Required, not optional: every `Context` has to come from somewhere, and
@@ -90,17 +100,20 @@ const defaultStorage: Storage | null =
  */
 export async function createContext({
   headers,
+  requestId,
   rateLimiter = defaultRateLimiter,
   storage = defaultStorage,
 }: {
   headers: Headers;
+  /** The server's per-request identity — see `Context.requestId`. */
+  requestId: string;
   /** Override for tests that want to build a context without a real request. */
   rateLimiter?: RateLimiter;
   /** Override so a test can supply a fake bucket instead of reaching a real one. */
   storage?: Storage | null;
 }): Promise<Context> {
   const session = await auth.api.getSession({ headers });
-  return { db, session, rateLimiter, storage, headers };
+  return { db, session, requestId, rateLimiter, storage, headers };
 }
 
 /** The process-wide storage client, for callers outside a procedure (the `/media` route). */
