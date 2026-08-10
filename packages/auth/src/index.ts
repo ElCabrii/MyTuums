@@ -221,11 +221,17 @@ export const auth = betterAuth({
     // Deliberate decision (code review, priority #5): a passkey IS the second
     // factor. A 2FA-enabled account signing in with a passkey skips the
     // TOTP/OTP challenge on purpose — the passkey itself is the second factor,
-    // so a code challenge would be a second second factor. That is why
-    // `userVerification` is "required" rather than the plugin default
-    // "preferred": the authenticator must prove the person (fingerprint/PIN),
-    // not just that the device is present. The alternative — blocking passkey
-    // registration for 2FA-enabled accounts — was considered and rejected.
+    // so a code challenge would be a second second factor. The alternative —
+    // blocking passkey registration for 2FA-enabled accounts — was considered
+    // and rejected.
+    //
+    // `userVerification: "required"` (vs the plugin default "preferred") is
+    // requested at REGISTRATION: the browser refuses to create a passkey on
+    // an authenticator that cannot prove the person (fingerprint/PIN). That is
+    // the whole enforcement — the plugin's sign-in side never re-checks the
+    // uv flag (it hardcodes "preferred" and `requireUserVerification: false`),
+    // so the guarantee is "requested at registration, trusted thereafter".
+    // Passkeys registered before this option shipped are not upgraded.
     passkey({
       rpID: passkeyRpId,
       rpName: "MyTuums",
