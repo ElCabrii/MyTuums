@@ -2,7 +2,6 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import {
   admin,
-  haveIBeenPwned,
   lastLoginMethod,
   oneTap,
   twoFactor,
@@ -254,11 +253,6 @@ export const auth = betterAuth({
     // (packages/api/src/users.ts) — which provider someone signs in with is
     // reconnaissance, not public profile data.
     lastLoginMethod({ storeInDatabase: true }),
-
-    // Rejects passwords found in known breach corpora, at sign-up and at every
-    // password change. Checked via k-anonymity — only a 5-character hash prefix
-    // ever leaves the server, never the password.
-    haveIBeenPwned(),
 
     // Translates Better Auth's own error messages, which the web app's
     // catalogue cannot reach. `PARAGLIDE_LOCALE` is the cookie the web app

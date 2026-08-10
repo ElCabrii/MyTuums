@@ -72,7 +72,7 @@ In production the API serves the built SPA (`WEB_DIST` set by the Dockerfile), b
 
 ### packages/auth — better-auth
 
-- Plugins: username, twoFactor, passkey, oneTap, lastLoginMethod, haveIBeenPwned, i18n. `trustedOrigins: [webOrigin]`.
+- Plugins: username, twoFactor, passkey, oneTap, lastLoginMethod, i18n. `trustedOrigins: [webOrigin]`.
 - Social providers register only when both halves of a credential pair exist (`social.ts`); email goes through Resend with a console fallback in dev and a loud failure in prod.
 - The `i18n` plugin reads the `PARAGLIDE_LOCALE` cookie — the same cookie the web app sets — so one locale governs both client copy and server error messages.
 - Better-auth's own rate limiting is stored in Postgres; the E2E stack sets `AUTH_RATE_LIMIT=false` because one IP drives the whole suite.

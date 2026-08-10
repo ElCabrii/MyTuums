@@ -55,8 +55,8 @@ pnpm dev
   rate limiting keyed on the signed-in user; feeds keyset-paginated on
   `(created_at, id)`; presigned S3 uploads with WebP dimension parsing.
 - **`packages/auth`** — better-auth with username, two-factor, passkey,
-  oneTap, last-login-method, have-I-been-pwned, i18n; social providers only
-  register when the full credential pair exists.
+  oneTap, last-login-method, i18n; social providers only register when the
+  full credential pair exists.
 - **`packages/db`** — Drizzle schema (`src/schema/`) + committed migrations
   (`drizzle/`, shipped in the Docker image); destructive test helpers refuse
   to run against databases whose name doesn't end in `_test`.
