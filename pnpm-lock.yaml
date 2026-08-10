@@ -251,6 +251,9 @@ importers:
       '@axe-core/playwright':
         specifier: ^4.10.1
         version: 4.12.1(playwright-core@1.62.1)
+      '@better-auth/utils':
+        specifier: 'catalog:'
+        version: 0.4.2
       '@my-tuums/auth':
         specifier: workspace:*
         version: link:../packages/auth

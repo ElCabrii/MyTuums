@@ -45,7 +45,7 @@ export const Route = createFileRoute("/welcome")({
  * incomplete session here and keeps it here; this is the page that lets it
  * leave. Each field renders only when that half of the session is missing.
  */
-function WelcomePage() {
+export function WelcomePage() {
   const navigate = useNavigate();
   const isSignedIn = useAtomValue(isSignedInAtom);
   const isSessionPending = useAtomValue(sessionPendingAtom);
@@ -162,7 +162,13 @@ function WelcomePage() {
 
         {error && (
           <ErrorBanner
-            title={needsHandle ? m.welcome_claim_failed() : m.welcome_dob_claim_failed()}
+            title={
+              needsHandle
+                ? m.welcome_claim_failed()
+                : needsDob
+                  ? m.welcome_dob_claim_failed()
+                  : m.welcome_2fa_setup_failed()
+            }
             message={localizeAuthError(error)}
           />
         )}

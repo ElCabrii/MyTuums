@@ -140,6 +140,7 @@
   "welcome_2fa_subtitle": "Ajoutez une deuxième étape à votre connexion. Vous pourrez toujours le faire plus tard.",
   "welcome_2fa_setup": "Activer la double authentification",
   "welcome_2fa_skip": "Passer pour l’instant",
+  "welcome_2fa_setup_failed": "Impossible d'activer la double authentification",
   "twofa_section_title": "Double authentification",
   "twofa_section_on": "Activée. Un code vous sera demandé à la connexion.",
   "twofa_section_off": "Désactivée. Ajoutez une étape pour protéger votre compte.",

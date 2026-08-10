@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.1",
+    "@better-auth/utils": "catalog:",
     "@my-tuums/auth": "workspace:*",
     "@my-tuums/db": "workspace:*",
     "@my-tuums/tsconfig": "workspace:*",
