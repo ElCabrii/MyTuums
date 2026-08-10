@@ -52,7 +52,15 @@ index.js`, no overrides — the exact process Railway starts) on
   reaches the published service ports on localhost), and three probes
   must pass: `/health` returns `{"status":"ok"}` (DB-backed), `/login`
   serves the static SPA shell, and `/` 302s to `/login?redirect=...` (the
-  page gate is live).
+  page gate is live). The boot then closes the second half of the OAuth
+  provider mirror (the bundle grep is the first): the container carries
+  dummy OAuth credential pairs and `AUTH_RATE_LIMIT=false` (one IP drives
+  the probes, same escape hatch as the E2E stack), and `/api/auth/
+sign-in/social` must offer a redirect for exactly `google`, `discord`
+  and `twitch` — with `github` as the control probe, which must be
+  refused — so a provider the client offers but the server has no
+  credentials for (or the reverse) fails here instead of silently
+  breaking a button in production.
 
 ## Workflows — `workflows/smoke.yml`
 
