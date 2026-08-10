@@ -14,8 +14,8 @@
  * behaviour), so an untranslated internal failure degrades to English rather
  * than to a bare code — and adding a translation later is additive.
  *
- * Codes come from Better Auth core plus the `username`, `two-factor`,
- * `haveIBeenPwned` and `passkey` plugins.
+ * Codes come from Better Auth core plus the `username`, `two-factor` and
+ * `passkey` plugins.
  */
 import type { TranslationDictionary } from "@better-auth/i18n";
 

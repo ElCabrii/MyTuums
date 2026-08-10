@@ -239,13 +239,6 @@ describe("backup codes", () => {
 });
 
 describe("password policy", () => {
-  it("refuses a password found in a known breach corpus", async () => {
-    // A password that is certainly in Have I Been Pwned. If this ever starts
-    // passing, the plugin has stopped reaching the API — which fails open, and
-    // is worth knowing about.
-    await expect(signUp({ password: "password123" })).rejects.toThrow();
-  });
-
   it("enforces the 8-character minimum the web validator also applies", async () => {
     await expect(signUp({ password: "Sh0rt!" })).rejects.toThrow();
   });
@@ -522,27 +515,6 @@ describe("password reset", () => {
     await expect(
       auth.api.resetPassword({ body: { newPassword: "another-Pass-1", token } }),
     ).rejects.toThrow();
-  });
-
-  it("rejects a breached password — and consumes the token in the process", async () => {
-    const { email } = await signUp();
-    const userId = await userIdFor(email);
-    const token = await insertResetToken(userId);
-
-    // `password123` is certainly in Have I Been Pwned; the plugin hooks the
-    // reset route like it does sign-up (see the "password policy" describe).
-    await expect(
-      auth.api.resetPassword({ body: { newPassword: "password123", token } }),
-    ).rejects.toThrow();
-
-    // The token is gone anyway: consumption happens before the breach check,
-    // so an attacker cannot probe the breach corpus with one token repeatedly.
-    await expect(
-      db
-        .select({ id: verification.id })
-        .from(verification)
-        .where(eq(verification.identifier, `reset-password:${token}`)),
-    ).resolves.toEqual([]);
   });
 
   it("does not reveal whether an email exists", async () => {
