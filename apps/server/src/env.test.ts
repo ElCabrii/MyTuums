@@ -95,6 +95,15 @@ describe("parseEnv", () => {
     });
   });
 
+  describe("SENTRY_DSN", () => {
+    it("is optional and passed through as-is", () => {
+      expect(parseEnv({ ...required }).SENTRY_DSN).toBeUndefined();
+      expect(
+        parseEnv({ ...required, SENTRY_DSN: "https://abc@example.ingest.sentry.io/1" }).SENTRY_DSN,
+      ).toBe("https://abc@example.ingest.sentry.io/1");
+    });
+  });
+
   describe("pre-existing required variables", () => {
     it("still rejects a short BETTER_AUTH_SECRET", () => {
       expect(() => parseEnv({ ...required, BETTER_AUTH_SECRET: "too-short" })).toThrow(

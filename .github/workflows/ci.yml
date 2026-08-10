@@ -370,6 +370,8 @@ jobs:
         run: |
           docker run --rm --entrypoint sh mytuums-server:ci -c             'test ! -d apps/web/node_modules'             || { echo "::error::apps/web dependencies were installed into the runner - prune the runner to @my-tuums/server alone"; exit 1; }
           docker run --rm --entrypoint sh mytuums-server:ci -c             'test -d apps/server/node_modules/better-auth'             || { echo "::error::the server's production dependencies are missing from the runner"; exit 1; }
+          docker run --rm --entrypoint sh mytuums-server:ci -c             'test -d apps/server/node_modules/@sentry/node'             || { echo "::error::@sentry/node is missing from the runner"; exit 1; }
+          docker run --rm --entrypoint sh mytuums-server:ci -c             'test -d apps/server/node_modules/@opentelemetry/core'             || { echo "::error::@opentelemetry/core is missing from the runner"; exit 1; }
           echo "Runner holds the server's prod deps and nothing from apps/web."
 
       # Everything above inspects the image; this step RUNS it. The pre-deploy

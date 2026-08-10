@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { RPC_MAX_BODY_BYTES, SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
+import { createRequestId, pathnameOf } from "./observability.js";
 
 /**
  * The stand-ins `createRequestHandler` routes through, injected so the
@@ -55,6 +56,15 @@ export interface RequestHandlerDeps {
    * a mass sign-out or every avatar in the app breaking at once.
    */
   hasValidSession: (req: IncomingMessage) => Promise<boolean>;
+  /**
+   * Called when the top-level safety net catches an unhandled exception,
+   * with the request identity in hand. The routing tree's console.error and
+   * 500 response stay here — this callback exists so the *notification* of
+   * the crash can leave this module: `index.ts` wires it to Sentry, and the
+   * unit tests leave it out (or spy on it) without any of them importing an
+   * error-tracking SDK.
+   */
+  onUnhandledError?: (error: unknown, requestId: string, req: IncomingMessage) => void;
 }
 
 const MEDIA_PREFIX = "/media/";
@@ -153,6 +163,16 @@ function pageGatePathname(rawUrl: string): string | null {
  */
 export function createRequestHandler(deps: RequestHandlerDeps) {
   return async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Every request gets an identity before any routing branch runs, so
+    // whatever the tree serves — health, auth, rpc, media, page, 404, or
+    // the 500 safety net — carries the same `x-request-id` on the way out
+    // that its log lines carry, and the access log (observability.ts) reads
+    // the header back when the response finishes. The injected handlers
+    // (auth, rpc, static) write their own responses, but the header was
+    // already set here, so it lands on theirs too.
+    const requestId = createRequestId();
+    res.setHeader("x-request-id", requestId);
+
     try {
       // Checked first, above /rpc and /api/auth, so probes don't pay for
       // oRPC route matching or a session lookup. Exact match rather than a
@@ -164,7 +184,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ status: "ok" }));
         } catch (error) {
-          console.error("Health check failed: database unreachable:", error);
+          console.error(`[${requestId}] Health check failed: database unreachable:`, error);
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ status: "error", reason: "database unreachable" }));
         }
@@ -339,10 +359,23 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not found");
     } catch (error) {
+      // The pathname only, never the raw `req.url` — the same rule the
+      // access log lives by (observability.ts): query strings are where
+      // tokens ride (the appeal link's `?token=`, the password-reset
+      // link's `?token=`), and this line is written to the same logs.
       console.error(
-        `Unhandled error while handling ${req.method ?? "?"} ${req.url ?? "?"}:`,
+        `[${requestId}] Unhandled error while handling ${req.method ?? "?"} ${pathnameOf(req.url) ?? "?"}:`,
         error,
       );
+      // The observer (Sentry in index.ts) is a report channel, not part of
+      // the response path — a throw inside it must not turn this catch into
+      // a second failure that skips the 500 below (or, worse, escapes the
+      // tree and hits unhandledRejection, taking the whole process down).
+      try {
+        deps.onUnhandledError?.(error, requestId, req);
+      } catch (observerError) {
+        console.error(`[${requestId}] Error observer threw:`, observerError);
+      }
 
       if (res.headersSent) {
         // Response already started; we cannot send a fresh status/body.
@@ -351,8 +384,11 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         return;
       }
 
+      // The requestId rides the error body so a user (or their support
+      // ticket) can cite the exact request that failed — it is a random
+      // UUID, revealing nothing about the system.
       res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Internal Server Error" }));
+      res.end(JSON.stringify({ error: "Internal Server Error", requestId }));
     }
   };
 }
