@@ -3,6 +3,7 @@ import { post, user } from "@my-tuums/db/schema";
 import { z } from "zod";
 import { SEARCH_PAGE_SIZE, SEARCH_PAGE_SIZE_MAX, SEARCH_QUERY_MAX_LENGTH } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
+import { keysetPage } from "./pagination.js";
 import { postSelection } from "./posts.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
@@ -163,7 +164,6 @@ export const searchRouter = {
     )
     .handler(async ({ input, context }) => {
       const viewerId = context.user.id;
-      const cursor = input.cursor ? searchUserCursor.decode(input.cursor) : undefined;
 
       const filters = [
         or(
@@ -174,33 +174,26 @@ export const searchRouter = {
         // The visibility filter (issue #38): banned and blocked accounts are
         // not search results, same as the typeahead above.
         visibleUser(viewerId),
-        // Row-value comparison: strictly "older than the cursor" under the
-        // same (created_at DESC, id DESC) ordering, so Postgres can seek
-        // straight to the cursor position. The bound values must go through
-        // `sql.param` with their column as the encoder — interpolating a raw
-        // JS `Date` hands postgres.js a value it cannot serialise.
-        cursor
-          ? sql`(${user.createdAt}, ${user.id}) < (${sql.param(cursor.createdAt, user.createdAt)}, ${sql.param(cursor.id, user.id)})`
-          : undefined,
-      ].filter((f) => f !== undefined);
+      ];
 
-      // One row beyond the page, purely to learn whether another page exists
-      // without a second COUNT query. It's dropped before returning.
-      const rows = await context.db
-        .select(searchUserSelection(viewerId))
-        .from(user)
-        .where(and(...filters))
-        .orderBy(desc(user.createdAt), desc(user.id))
-        .limit(input.limit + 1);
-
-      const hasMore = rows.length > input.limit;
-      const items = hasMore ? rows.slice(0, input.limit) : rows;
-      const last = items.at(-1);
-
-      return {
-        items,
-        nextCursor: hasMore && last ? searchUserCursor.encode(last.createdAt, last.id) : null,
-      };
+      const selection = searchUserSelection(viewerId);
+      return keysetPage({
+        codec: searchUserCursor,
+        cursor: input.cursor,
+        limit: input.limit,
+        selection,
+        createdAt: user.createdAt,
+        createdAtField: "createdAt",
+        id: user.id,
+        idField: "id",
+        query: (cursorFilter) =>
+          context.db
+            .select(selection)
+            .from(user)
+            .where(and(...filters, cursorFilter))
+            .orderBy(desc(user.createdAt), desc(user.id))
+            .limit(input.limit + 1),
+      });
     }),
 
   /**
@@ -219,7 +212,6 @@ export const searchRouter = {
     )
     .handler(async ({ input, context }) => {
       const viewerId = context.user.id;
-      const cursor = input.cursor ? searchPostCursor.decode(input.cursor) : undefined;
 
       const filters = [
         ilike(post.content, containsPattern(input.q)),
@@ -236,28 +228,26 @@ export const searchRouter = {
         // The visibility filter (issue #38), same as `post.list`: a banned or
         // blocked author's posts are not search results.
         not(invisibleAuthor(viewerId)),
-        // Row-value comparison against the same (created_at DESC, id DESC)
-        // ordering — see the identical comment in the `users` procedure above.
-        cursor
-          ? sql`(${post.createdAt}, ${post.id}) < (${sql.param(cursor.createdAt, post.createdAt)}, ${sql.param(cursor.id, post.id)})`
-          : undefined,
-      ].filter((f) => f !== undefined);
+      ];
 
-      const rows = await context.db
-        .select(postSelection(viewerId))
-        .from(post)
-        .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(...filters))
-        .orderBy(desc(post.createdAt), desc(post.id))
-        .limit(input.limit + 1);
-
-      const hasMore = rows.length > input.limit;
-      const items = hasMore ? rows.slice(0, input.limit) : rows;
-      const last = items.at(-1);
-
-      return {
-        items,
-        nextCursor: hasMore && last ? searchPostCursor.encode(last.createdAt, last.id) : null,
-      };
+      const selection = postSelection(viewerId);
+      return keysetPage({
+        codec: searchPostCursor,
+        cursor: input.cursor,
+        limit: input.limit,
+        selection,
+        createdAt: post.createdAt,
+        createdAtField: "createdAt",
+        id: post.id,
+        idField: "id",
+        query: (cursorFilter) =>
+          context.db
+            .select(selection)
+            .from(post)
+            .innerJoin(user, eq(user.id, post.authorId))
+            .where(and(...filters, cursorFilter))
+            .orderBy(desc(post.createdAt), desc(post.id))
+            .limit(input.limit + 1),
+      });
     }),
 };

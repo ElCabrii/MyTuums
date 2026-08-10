@@ -10,6 +10,7 @@ import {
   THREAD_ANCESTOR_MAX,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
+import { keysetPage } from "./pagination.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { invisibleAuthor } from "./visibility.js";
@@ -230,8 +231,6 @@ export const postRouter = {
     .handler(async ({ input, context }) => {
       const viewerId = context.user.id;
 
-      const cursor = input.cursor ? postCursor.decode(input.cursor) : undefined;
-
       const filters = [
         input.authorId ? eq(post.authorId, input.authorId) : undefined,
         // Three-way, in priority order: an explicit `parentId` asks for one
@@ -268,37 +267,31 @@ export const postRouter = {
         // someone blocked in either direction drop out of every feed. This
         // does NOT drop removed posts — removal is not invisibility.
         not(invisibleAuthor(viewerId)),
-        // Row-value comparison: strictly "older than the cursor" under the
-        // same (created_at DESC, id DESC) ordering `post_created_idx`
-        // provides, so Postgres can seek straight to the cursor position.
-        //
-        // The bound values must go through `sql.param` with their column as
-        // the encoder. Interpolating them directly hands postgres.js a raw
-        // JS `Date`, which it cannot serialise — `mapToDriverValue` on the
-        // column is what turns it into the ISO string Postgres expects.
-        cursor
-          ? sql`(${post.createdAt}, ${post.id}) < (${sql.param(cursor.createdAt, post.createdAt)}, ${sql.param(cursor.id, post.id)})`
-          : undefined,
-      ].filter((f) => f !== undefined);
+      ];
 
-      // One row beyond the page, purely to learn whether another page exists
-      // without a second COUNT query. It's dropped before returning.
-      const rows = await context.db
-        .select(postSelection(viewerId))
-        .from(post)
-        .innerJoin(user, eq(user.id, post.authorId))
-        .where(filters.length > 0 ? and(...filters) : undefined)
-        .orderBy(desc(post.createdAt), desc(post.id))
-        .limit(input.limit + 1);
-
-      const hasMore = rows.length > input.limit;
-      const items = hasMore ? rows.slice(0, input.limit) : rows;
-      const last = items.at(-1);
-
-      return {
-        items,
-        nextCursor: hasMore && last ? postCursor.encode(last.createdAt, last.id) : null,
-      };
+      // The cursor filter, the hasMore decision and the next-cursor anchor
+      // live in keysetPage (./pagination.ts) — the house skeleton every feed
+      // shares. The ORDER BY and the +1 lookahead stay here, on the same
+      // columns as the cursor comparison.
+      const selection = postSelection(viewerId);
+      return keysetPage({
+        codec: postCursor,
+        cursor: input.cursor,
+        limit: input.limit,
+        selection,
+        createdAt: post.createdAt,
+        createdAtField: "createdAt",
+        id: post.id,
+        idField: "id",
+        query: (cursorFilter) =>
+          context.db
+            .select(selection)
+            .from(post)
+            .innerJoin(user, eq(user.id, post.authorId))
+            .where(and(...filters, cursorFilter))
+            .orderBy(desc(post.createdAt), desc(post.id))
+            .limit(input.limit + 1),
+      });
     }),
 
   /**
