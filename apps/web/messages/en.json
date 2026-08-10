@@ -140,6 +140,7 @@
   "welcome_2fa_subtitle": "Add a second step to your sign-in. You can always do this later.",
   "welcome_2fa_setup": "Set up two-factor",
   "welcome_2fa_skip": "Skip for now",
+  "welcome_2fa_setup_failed": "Couldn't set up two-factor",
   "twofa_section_title": "Two-factor authentication",
   "twofa_section_on": "On. You'll be asked for a code when you sign in.",
   "twofa_section_off": "Off. Add a second step to protect your account.",

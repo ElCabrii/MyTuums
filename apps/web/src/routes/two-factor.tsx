@@ -42,7 +42,7 @@ export const Route = createFileRoute("/two-factor")({
  * viewer, and `useRedirectWhenSignedIn` below is what finally moves on once a
  * real session is issued.
  */
-function TwoFactorPage() {
+export function TwoFactorPage() {
   const { redirect: redirectFromSearch } = Route.useSearch();
   // The session only exists after a correct code, so this fires exactly once,
   // on success — the same effect that ends a normal sign-in.
