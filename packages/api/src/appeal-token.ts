@@ -34,6 +34,17 @@ export type AppealTokenPayload = z.infer<typeof payloadSchema>;
 export const APPEAL_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
+ * Maximum encoded length accepted for an appeal capability.
+ *
+ * App-generated links are compact (three UUID-sized identifiers, a purpose,
+ * an epoch timestamp, and a 43-character base64url HMAC-SHA256 signature),
+ * but Better Auth stores user ids as text. A 4 KiB ceiling leaves generous
+ * room for a legitimate text id while keeping malformed input far below the
+ * RPC upload ceiling before it reaches base64 decoding or HMAC work.
+ */
+export const APPEAL_TOKEN_MAX_LENGTH = 4 * 1024;
+
+/**
  * An HMAC-SHA256 capability signer for the signed-out appeal links.
  *
  * Format is `base64url(payload).base64url(hmac)` — two base64url halves with
@@ -54,8 +65,14 @@ export function createAppealTokenSigner(secret: string) {
   }
 
   function verify(raw: string, now: number = Date.now()): AppealTokenPayload | null {
-    const dot = raw.lastIndexOf(".");
-    if (dot <= 0) return null;
+    // Reject attacker-sized capabilities before slicing, decoding, or doing
+    // synchronous cryptographic work. The public appeal procedure shares the
+    // much larger RPC body ceiling with image uploads, so this boundary must
+    // live here as well as at the procedure input.
+    if (raw.length > APPEAL_TOKEN_MAX_LENGTH) return null;
+
+    const dot = raw.indexOf(".");
+    if (dot <= 0 || dot === raw.length - 1 || dot !== raw.lastIndexOf(".")) return null;
 
     const body = raw.slice(0, dot);
     const provided = Buffer.from(raw.slice(dot + 1), "base64url");

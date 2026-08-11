@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  APPEAL_TOKEN_MAX_LENGTH,
   APPEAL_TOKEN_TTL_MS,
   createAppealTokenSigner,
   type AppealTokenPayload,
@@ -33,6 +34,14 @@ describe("createAppealTokenSigner", () => {
 
     const decoded = verify(token);
     expect(decoded).toEqual(original);
+  });
+
+  it("rejects a validly signed token beyond the encoded format limit", () => {
+    const { sign, verify } = createAppealTokenSigner(SECRET);
+    const oversized = sign({ ...payload(), userId: "a".repeat(APPEAL_TOKEN_MAX_LENGTH) });
+
+    expect(oversized.length).toBeGreaterThan(APPEAL_TOKEN_MAX_LENGTH);
+    expect(verify(oversized)).toBeNull();
   });
 
   it("encodes as two base64url halves joined by a dot — opaque, unpadded", () => {
