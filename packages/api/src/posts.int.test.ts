@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
 import { closeDb } from "@my-tuums/db";
+import { post } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   POST_MAX_LENGTH,
@@ -138,6 +139,35 @@ describe("post.create", () => {
         { context: contextFor(author) },
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("post content length — the post_content_length CHECK constraint", () => {
+  it("the DB bound is the more permissive gate: char_length counts code points, while zod's max counts UTF-16 code units", async () => {
+    const author = await createTestUser();
+    const astral = "😀".repeat(200);
+    const created = await call(
+      appRouter.post.create,
+      { content: astral },
+      { context: contextFor(author) },
+    );
+    expect(created.content).toBe(astral);
+  });
+
+  it("the CHECK constraint rejects a row over the bound even when the zod gate is bypassed entirely", async () => {
+    const author = await createTestUser();
+    await expect(
+      author.context.db.insert(post).values({ authorId: author.id, content: "a".repeat(501) }),
+    ).rejects.toThrow();
+  });
+
+  it("the constraint accepts exactly the length POST_MAX_LENGTH does — the hardcoded 500 in the schema stays in step", async () => {
+    const author = await createTestUser();
+    const [created] = await author.context.db
+      .insert(post)
+      .values({ authorId: author.id, content: "a".repeat(POST_MAX_LENGTH) })
+      .returning({ id: post.id });
+    expect(created).toBeDefined();
   });
 });
 
