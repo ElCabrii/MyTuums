@@ -144,14 +144,16 @@ describe("post.create", () => {
 
 describe("post content length — the post_content_length CHECK constraint", () => {
   it("the DB bound is the more permissive gate: char_length counts code points, while zod's max counts UTF-16 code units", async () => {
+    // 300 astral emoji = 600 UTF-16 code units (zod's `.max(500)` would
+    // reject) but 300 code points (Postgres `char_length` accepts). If the
+    // schema's hardcoded 500 ever drifts to unit-counting, this insert
+    // fails — pinning the deliberate asymmetry, not just the shared bound.
     const author = await createTestUser();
-    const astral = "😀".repeat(200);
-    const created = await call(
-      appRouter.post.create,
-      { content: astral },
-      { context: contextFor(author) },
-    );
-    expect(created.content).toBe(astral);
+    const [created] = await author.context.db
+      .insert(post)
+      .values({ authorId: author.id, content: "😀".repeat(300) })
+      .returning({ content: post.content });
+    expect(created.content).toBe("😀".repeat(300));
   });
 
   it("the CHECK constraint rejects a row over the bound even when the zod gate is bypassed entirely", async () => {
