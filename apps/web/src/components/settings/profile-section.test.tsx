@@ -67,7 +67,8 @@ describe("ProfileSection", () => {
     const user = userEvent.setup();
     const overLimit = "x".repeat(BIO_MAX_LENGTH + 1);
     const bio = screen.getByLabelText(m.auth_field_bio());
-    await user.type(bio, overLimit);
+    await user.click(bio);
+    await user.paste(overLimit);
 
     expect(screen.getByText("-1")).toHaveClass("text-destructive");
     await user.click(screen.getByRole("button", { name: m.common_save() }));
