@@ -8,9 +8,10 @@ import { CORSPlugin, SimpleCsrfProtectionHandlerPlugin } from "@orpc/server/plug
 import { ORPCError, onError } from "@orpc/server";
 import { appRouter, createContext, createMediaResolver, defaultStorage } from "@my-tuums/api";
 import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
-import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
+import { fromNodeHeaders } from "better-auth/node";
 import { auth } from "@my-tuums/auth";
 import { closeDb, pingDb } from "@my-tuums/db";
+import { createAuthNodeHandler } from "./auth-node-handler.js";
 import { attachAccessLog } from "./observability.js";
 import { flushSentry, initSentry, reportError } from "./sentry.js";
 
@@ -37,7 +38,7 @@ if (env.SENTRY_DSN) {
   initSentry(env.SENTRY_DSN, env.NODE_ENV);
 }
 
-const authNodeHandler = toNodeHandler(auth);
+const authNodeHandler = createAuthNodeHandler(auth.handler);
 
 const handler = new RPCHandler(appRouter, {
   plugins: [
