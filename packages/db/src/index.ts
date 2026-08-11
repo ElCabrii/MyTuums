@@ -35,13 +35,32 @@ function requiresTls(url: string): boolean {
   return hostname.includes(".");
 }
 
+/**
+ * TLS mode for dotted/external hosts. We deliberately do NOT use `'require'`:
+ * in postgres.js (verified against the locked 3.4.9 source) `'require'`,
+ * `'allow'`, and `'prefer'` all set `rejectUnauthorized = false` on the
+ * underlying `tls.connect` options, so the socket is encrypted but the server
+ * certificate and hostname are never authenticated — a MITM could impersonate
+ * the database. `'verify-full'` is the current officially supported mode that
+ * leaves Node's TLS default `rejectUnauthorized: true` in place, so the
+ * server certificate is validated against the system CA store and, because
+ * postgres.js passes `servername: host`, the hostname is checked against the
+ * certificate too. Deployment impact: a dotted production host (e.g.
+ * Railway's Postgres proxy) must present a certificate the OS trust store
+ * validates for its hostname. If a deployment terminates TLS with a private
+ * CA instead, switch this to an `ssl` options object carrying `ca`
+ * (postgres.js forwards arbitrary `tls.connect` options) — never loosen it
+ * back to `'require'`.
+ */
+const sslMode = requiresTls(connectionString) ? "verify-full" : false;
+
 // One pool for the whole process (10 connections, 10s connect timeout): the
 // API procedures, the migration runner, and the test helpers all go through
 // this same client.
 const client = postgres(connectionString, {
   max: 10,
   connect_timeout: 10,
-  ssl: requiresTls(connectionString) ? "require" : false,
+  ssl: sslMode,
 });
 
 /**
