@@ -1,0 +1,1 @@
+ALTER TABLE "post" ADD CONSTRAINT "post_content_length" CHECK (char_length("post"."content") <= 500);

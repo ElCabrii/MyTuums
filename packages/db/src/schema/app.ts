@@ -73,6 +73,16 @@ export const post = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
   },
   (t) => [
+    // Defense in depth for `post.create`'s zod gate — the last of the
+    // app's length limits to be enforced here as well. The bound is 500,
+    // hardcoded because `packages/db` must not depend on `@my-tuums/api`;
+    // keep it in step with `POST_MAX_LENGTH` in
+    // packages/api/src/constants.ts. Deliberately the more permissive
+    // gate: zod's `.max(500)` counts UTF-16 code units while Postgres
+    // `char_length` counts code points, so an emoji-heavy post that zod
+    // rejects (500 units of astral chars) is under this bound. The API
+    // trims before checking, so the stored value is what this bounds.
+    check("post_content_length", sql`char_length(${t.content}) <= 500`),
     // All three indexes are ordered to match the keyset pagination in
     // packages/api/src/posts.ts: newest first, with `id` breaking ties
     // between posts sharing a timestamp so the cursor is a total order.
