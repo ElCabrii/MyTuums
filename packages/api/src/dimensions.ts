@@ -157,5 +157,9 @@ const PARSERS: Record<string, (bytes: Uint8Array) => ImageDimensions | null> = {
  * bytes are too short or malformed to say.
  */
 export function imageDimensions(bytes: Uint8Array, type: string): ImageDimensions | null {
-  return PARSERS[type]?.(bytes) ?? null;
+  const dimensions = PARSERS[type]?.(bytes);
+  // Every supported raster format must describe at least one pixel. Keeping
+  // this invariant at the shared boundary means a newly added parser cannot
+  // accidentally make a zero-sized image acceptable to `acceptImage`.
+  return dimensions && dimensions.width > 0 && dimensions.height > 0 ? dimensions : null;
 }

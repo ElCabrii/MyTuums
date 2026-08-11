@@ -1,6 +1,69 @@
 import { describe, expect, it } from "vitest";
 import { imageDimensions } from "./dimensions.js";
 
+function pngHeader(width: number, height: number): Uint8Array {
+  return new Uint8Array([
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+    0x00,
+    0x00,
+    0x00,
+    0x0d,
+    0x49,
+    0x48,
+    0x44,
+    0x52,
+    (width >>> 24) & 0xff,
+    (width >>> 16) & 0xff,
+    (width >>> 8) & 0xff,
+    width & 0xff,
+    (height >>> 24) & 0xff,
+    (height >>> 16) & 0xff,
+    (height >>> 8) & 0xff,
+    height & 0xff,
+  ]);
+}
+
+function jpegHeader(width: number, height: number): Uint8Array {
+  return new Uint8Array([
+    0xff,
+    0xd8,
+    0xff,
+    0xe0,
+    0x00,
+    0x10,
+    0x4a,
+    0x46,
+    0x49,
+    0x46,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x01,
+    0x00,
+    0x01,
+    0x00,
+    0x00,
+    0xff,
+    0xc0,
+    0x00,
+    0x11,
+    0x08,
+    (height >>> 8) & 0xff,
+    height & 0xff,
+    (width >>> 8) & 0xff,
+    width & 0xff,
+  ]);
+}
+
 /**
  * Hand-crafted headers, not real files: the parser reads only the leading
  * bytes, so a synthetic header IS the file, as far as it is concerned. Each
@@ -76,6 +139,19 @@ describe("imageDimensions", () => {
     ]);
 
     expect(imageDimensions(jpeg, "image/jpeg")).toEqual({ width: 400, height: 300 });
+  });
+
+  it("rejects zero width or height in PNG and JPEG headers", () => {
+    const cases = [
+      [pngHeader(0, 128), "image/png"],
+      [pngHeader(256, 0), "image/png"],
+      [jpegHeader(0, 300), "image/jpeg"],
+      [jpegHeader(400, 0), "image/jpeg"],
+    ] as const;
+
+    for (const [bytes, type] of cases) expect(imageDimensions(bytes, type)).toBeNull();
+    expect(imageDimensions(pngHeader(1, 1), "image/png")).toEqual({ width: 1, height: 1 });
+    expect(imageDimensions(jpegHeader(1, 1), "image/jpeg")).toEqual({ width: 1, height: 1 });
   });
 
   it("returns null for a JPEG that reaches the scan without an SOF", () => {

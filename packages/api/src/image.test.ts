@@ -190,9 +190,35 @@ describe("acceptImage", () => {
     });
   });
 
+  it("rejects zero-dimension PNG and JPEG headers as malformed content", () => {
+    const zeroWidthPng = PNG.slice();
+    zeroWidthPng.fill(0, 16, 20);
+    const zeroHeightPng = PNG.slice();
+    zeroHeightPng.fill(0, 20, 24);
+    const zeroWidthJpeg = JPEG.slice();
+    zeroWidthJpeg.fill(0, 27, 29);
+    const zeroHeightJpeg = JPEG.slice();
+    zeroHeightJpeg.fill(0, 25, 27);
+
+    for (const [bytes, type] of [
+      [zeroWidthPng, "image/png"],
+      [zeroHeightPng, "image/png"],
+      [zeroWidthJpeg, "image/jpeg"],
+      [zeroHeightJpeg, "image/jpeg"],
+    ] as const) {
+      expect(acceptImage(bytes, type, "avatar", "display")).toMatchObject({
+        ok: false,
+        reason: "content",
+      });
+    }
+    expect(acceptImage(PNG, "image/png", "avatar", "display")).toMatchObject({ ok: true });
+  });
+
   it("enforces the per-slot display byte cap, which differs between avatar and banner", () => {
     const overAvatar = new Uint8Array(IMAGE_LIMITS.avatar.maxDisplayBytes + 1);
-    overAvatar.set(PNG.slice(0, 8));
+    // Keep the payload parseable so this test isolates the byte-cap difference
+    // rather than relying on a zero-dimension header.
+    overAvatar.set(PNG);
 
     expect(acceptImage(overAvatar, "image/png", "avatar", "display")).toMatchObject({
       ok: false,
