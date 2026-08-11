@@ -224,13 +224,12 @@ export const auth = betterAuth({
     // blocking passkey registration for 2FA-enabled accounts — was considered
     // and rejected.
     //
-    // `userVerification: "required"` (vs the plugin default "preferred") is
-    // requested at REGISTRATION: the browser refuses to create a passkey on
-    // an authenticator that cannot prove the person (fingerprint/PIN). That is
-    // the whole enforcement — the plugin's sign-in side never re-checks the
-    // uv flag (it hardcodes "preferred" and `requireUserVerification: false`),
-    // so the guarantee is "requested at registration, trusted thereafter".
-    // Passkeys registered before this option shipped are not upgraded.
+    // `userVerification: "required"` asks the browser to require a
+    // person-verifying gesture (fingerprint/PIN) for registration and sign-in.
+    // The tracked pnpm patch supplies the missing authentication-side option
+    // and makes both Better Auth verification calls require the UV flag; the
+    // public plugin options only cover registration preferences. Passkeys
+    // created before this control shipped must prove UV at sign-in as well.
     passkey({
       rpID: passkeyRpId,
       rpName: "MyTuums",

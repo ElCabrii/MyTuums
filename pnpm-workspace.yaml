@@ -21,3 +21,6 @@ catalog:
   "@better-auth/i18n": 1.6.25
   "@better-auth/passkey": 1.6.25
   "@better-auth/utils": 0.4.2
+
+patchedDependencies:
+  "@better-auth/passkey": patches/@better-auth__passkey.patch
