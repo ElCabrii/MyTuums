@@ -35,6 +35,8 @@ export default defineConfig({
     tanstackRouter({
       target: "react",
       autoCodeSplitting: true,
+      // Route tests live beside file routes but do not export a Route.
+      routeFileIgnorePattern: "\\.(test|spec)\\.[cm]?[jt]sx?$",
     }),
     react(),
     paraglideVitePlugin({
