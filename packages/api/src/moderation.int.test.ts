@@ -1311,9 +1311,11 @@ describe("suspendUser", () => {
 
     expect(await auth.api.getSession({ headers: sessionHeaders(victim) })).toBeNull();
     const [victimRow] = await anonContext.db
-      .select({ email: user.email })
+      .select({ email: user.email, banExpires: user.banExpires })
       .from(user)
       .where(eq(user.id, victim.id));
+    expect(victimRow.banExpires).toBeInstanceOf(Date);
+    expect(result.banExpires).toEqual(victimRow.banExpires);
     await expect(
       auth.api.signInEmail({
         body: { email: victimRow.email, password: "vitest-Sup3rSecret!" },

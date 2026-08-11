@@ -375,14 +375,21 @@ export const moderationRouter = {
           });
         }
 
-        await tx
+        // Use the database's clock for the value returned to the API and email;
+        // a separate Date.now() calculation can drift from the stored expiry.
+        const [updated] = await tx
           .update(user)
           .set({
             banned: true,
             banReason: input.reason,
             banExpires: sql`now() + ${input.durationSeconds} * interval '1 second'`,
           })
-          .where(eq(user.id, input.userId));
+          .where(eq(user.id, input.userId))
+          .returning({ banExpires: user.banExpires });
+        const expiresAt = updated?.banExpires;
+        if (!(expiresAt instanceof Date) || Number.isNaN(expiresAt.getTime())) {
+          throw new Error("suspendUser: database did not return a valid ban expiry");
+        }
         // Every session dies with the suspension — the account is locked
         // until the clock runs out or a moderator lifts it.
         await tx.delete(session).where(eq(session.userId, input.userId));
@@ -403,7 +410,7 @@ export const moderationRouter = {
         });
         return {
           actionId: action.id,
-          expiresAt: new Date(Date.now() + input.durationSeconds * 1000),
+          expiresAt,
         };
       });
 
