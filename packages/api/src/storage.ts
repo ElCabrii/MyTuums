@@ -80,10 +80,40 @@ export interface Storage {
 export interface DestructiveStorage extends Storage {
   /** Every object key under a prefix. Used by the reconcile script. */
   listByPrefix(prefix: string): Promise<string[]>;
-  /** Deletes specific keys in batches. Used by the reconcile script. */
+  /**
+   * Deletes specific keys in batches. Used by the reconcile script. Throws
+   * `StorageDeleteError` when S3 reports per-key failures, even if some keys
+   * in the request were deleted.
+   */
   removeMany(keys: string[]): Promise<number>;
   /** Deletes every object under a prefix. Used by the E2E suite's cleanup. */
   removeByPrefix(prefix: string): Promise<number>;
+}
+
+/** One key S3 could not delete from a bulk request. */
+export interface StorageDeleteFailure {
+  key?: string;
+  code?: string;
+  message?: string;
+}
+
+/**
+ * Raised when S3 accepts a DeleteObjects request but reports per-key errors.
+ * The request may have deleted some keys, so `deletedCount` is retained for
+ * logs and retry diagnostics; callers must treat the operation as incomplete
+ * rather than using a partial count as a successful cleanup total.
+ */
+export class StorageDeleteError extends Error {
+  constructor(
+    public readonly failures: readonly StorageDeleteFailure[],
+    public readonly deletedCount: number,
+  ) {
+    const details = failures
+      .map(({ key, code }) => `${key ?? "<unknown key>"} (${code ?? "unknown error"})`)
+      .join(", ");
+    super(`S3 could not delete ${failures.length} object(s): ${details}`);
+    this.name = "StorageDeleteError";
+  }
 }
 
 /** One hour. Long enough to be cacheable, far short of the 90-day maximum. */
@@ -210,13 +240,25 @@ function createStorageImpl(config: StorageConfig, now: () => number): Destructiv
       // DeleteObjects takes at most 1000 keys per call.
       for (let i = 0; i < keys.length; i += 1000) {
         const batch = keys.slice(i, i + 1000);
-        await client.send(
+        const result = await client.send(
           new DeleteObjectsCommand({
             Bucket: config.bucket,
             Delete: { Objects: batch.map((Key) => ({ Key })) },
           }),
         );
-        removed += batch.length;
+
+        // DeleteObjects returns HTTP 200 even when one or more keys fail;
+        // those failures are carried in `Errors`, while successful keys are
+        // listed in `Deleted`. Never report the submitted batch as removed.
+        const failures = (result.Errors ?? []).map(({ Key, Code, Message }) => ({
+          key: Key,
+          code: Code,
+          message: Message,
+        }));
+        removed += result.Deleted?.length ?? 0;
+        if (failures.length > 0) {
+          throw new StorageDeleteError(failures, removed);
+        }
       }
 
       return removed;
