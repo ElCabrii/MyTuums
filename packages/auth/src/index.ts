@@ -12,7 +12,7 @@ import { i18n } from "@better-auth/i18n";
 import { db } from "@my-tuums/db";
 import { authRateLimitEnabled, passkeyRpId, webOrigin } from "./env.js";
 import { validateDateOfBirthHook } from "./dob.js";
-import { validateProfileFieldsHook } from "./profile.js";
+import { validateProfileFieldsOnCreateHook, validateProfileFieldsOnUpdateHook } from "./profile.js";
 import {
   localeFromRequest,
   otpEmail,
@@ -24,17 +24,24 @@ import { fr } from "./i18n.js";
 import { socialProviders, trustedProviders } from "./social.js";
 
 /**
- * Every rule that must hold before a user row is written, in one hook because
- * Better Auth takes exactly one `before` per operation.
+ * Every rule that must hold before a user row is written. Better Auth exposes
+ * separate lifecycle hooks, which matters for profile images: a provider URL
+ * is legitimate while creating an OAuth user, but no client-driven update is
+ * allowed to introduce a remote or cross-user media URL.
  *
  * Composed rather than merged into a single function so each rule stays
  * separately readable and separately testable — `./dob.ts` and `./profile.ts`
  * are both pure and neither knows about the other. Order does not matter: they
  * validate disjoint fields, and the first violation throws.
  */
-const validateUserWrite = async (user: Record<string, unknown>): Promise<void> => {
+const validateUserCreate = async (user: Record<string, unknown>): Promise<void> => {
   await validateDateOfBirthHook(user);
-  await validateProfileFieldsHook(user);
+  await validateProfileFieldsOnCreateHook(user);
+};
+
+const validateUserUpdate = async (user: Record<string, unknown>): Promise<void> => {
+  await validateDateOfBirthHook(user);
+  await validateProfileFieldsOnUpdateHook(user);
 };
 
 /**
@@ -160,14 +167,14 @@ export const auth = betterAuth({
 
   databaseHooks: {
     user: {
-      // Both creation paths — email/password and OAuth — run these. Each rule
-      // returns early on an absent value, so a sign-up that supplies none of
-      // these fields passes through untouched.
-      create: { before: validateUserWrite },
-      // updateUser is how the /welcome claim and every settings edit arrive;
-      // same rules, and this is the only place they actually hold — the
-      // columns are bare `text` and the client's checks are skippable.
-      update: { before: validateUserWrite },
+      // Both creation paths — email/password and OAuth — run these. Provider
+      // image URLs are allowed here because they are supplied by the trusted
+      // OAuth profile mapping, while absent optional fields pass untouched.
+      create: { before: validateUserCreate },
+      // updateUser is client-writable and receives partial data. Its image
+      // policy is deliberately stricter: only the Drizzle upload procedure may
+      // write `/media/<key>` values, so a non-blank image update is rejected.
+      update: { before: validateUserUpdate },
     },
   },
 

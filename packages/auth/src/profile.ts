@@ -7,7 +7,9 @@
  * client can put any string in any of them through `updateUser`. Nothing else
  * validates them: the column types are all bare `text`, and the web app's
  * checks are a courtesy that anyone can skip by calling the endpoint directly.
- * This hook is the only place the rules actually hold.
+ * The lifecycle-specific hooks below are the only place the rules actually
+ * hold: creation accepts provider image URLs, while ordinary updates do not
+ * accept any client-managed image value.
  *
  * The messages are English literals on purpose, exactly as in `./dob.ts`: they
  * are what the API throws, and `apps/web/src/lib/auth-error-message.ts` maps
@@ -95,20 +97,41 @@ function assertOneOf(value: unknown, allowed: readonly string[], message: string
  * rule. They are declared `input: false` in the auth config, and Better Auth's
  * own input parser rejects `input: false` fields before they ever reach a
  * hook — so this check is defense-in-depth against an upstream change, not a
- * second line against a current bypass. The hook sees *every* user write, and
- * any non-blank value here is illegitimate by construction, because the only
- * legitimate writer is the upload procedure, which writes through Drizzle and
- * skips these hooks.
+ * second line against a current bypass. The update hook uses the same helper
+ * for `image` and `bannerImage`: their only legitimate writer is the upload
+ * procedure, which writes through Drizzle and skips these hooks.
  */
-function assertNoClientOriginalImageWrite(value: unknown): void {
+function assertNoClientManagedImageWrite(value: unknown): void {
   if (!isBlank(value)) {
     throw new APIError("BAD_REQUEST", { message: MANAGED_IMAGE_MESSAGE });
   }
 }
 
+/** The profile fields this hook may see; update hooks receive only a partial row. */
+type ProfileFields = Record<string, unknown> & {
+  bio?: unknown;
+  image?: unknown;
+  bannerImage?: unknown;
+  imageOriginal?: unknown;
+  bannerImageOriginal?: unknown;
+  themePreference?: unknown;
+  localePreference?: unknown;
+};
+
+/** Rules shared by both lifecycle hooks, excluding the image policy. */
+function validateEditableProfileFields(user: ProfileFields): void {
+  if (!isBlank(user.bio)) {
+    if (typeof user.bio !== "string" || user.bio.length > BIO_MAX_LENGTH) {
+      throw new APIError("BAD_REQUEST", { message: BIO_TOO_LONG_MESSAGE });
+    }
+  }
+
+  assertOneOf(user.themePreference, THEME_PREFERENCES, THEME_PREFERENCE_INVALID_MESSAGE);
+  assertOneOf(user.localePreference, LOCALE_PREFERENCES, LOCALE_PREFERENCE_INVALID_MESSAGE);
+}
+
 /**
- * The rule Better Auth runs before a user row is created or updated, beside
- * `validateDateOfBirthHook`.
+ * The profile rules Better Auth runs beside `validateDateOfBirthHook`.
  *
  * Every check returns early on an absent value, because this hook sees *partial*
  * updates: someone changing only their display name arrives here with `bio`,
@@ -121,31 +144,41 @@ function assertNoClientOriginalImageWrite(value: unknown): void {
  * await. The index-signature intersection dodges TypeScript's weak-type check
  * for the same reason it does there.
  */
-export function validateProfileFieldsHook(
-  user: Record<string, unknown> & {
-    bio?: unknown;
-    image?: unknown;
-    bannerImage?: unknown;
-    imageOriginal?: unknown;
-    bannerImageOriginal?: unknown;
-    themePreference?: unknown;
-    localePreference?: unknown;
-  },
-): Promise<void> {
-  if (!isBlank(user.bio)) {
-    if (typeof user.bio !== "string" || user.bio.length > BIO_MAX_LENGTH) {
-      throw new APIError("BAD_REQUEST", { message: BIO_TOO_LONG_MESSAGE });
-    }
-  }
+export function validateProfileFieldsOnCreateHook(user: ProfileFields): Promise<void> {
+  validateEditableProfileFields(user);
 
+  // OAuth providers are the only legitimate source of an absolute image URL.
   assertProviderImage(user.image);
   assertProviderImage(user.bannerImage);
-  // No legitimate client write ever touches these — see the helper's comment.
-  assertNoClientOriginalImageWrite(user.imageOriginal);
-  assertNoClientOriginalImageWrite(user.bannerImageOriginal);
-
-  assertOneOf(user.themePreference, THEME_PREFERENCES, THEME_PREFERENCE_INVALID_MESSAGE);
-  assertOneOf(user.localePreference, LOCALE_PREFERENCES, LOCALE_PREFERENCE_INVALID_MESSAGE);
+  assertNoClientManagedImageWrite(user.imageOriginal);
+  assertNoClientManagedImageWrite(user.bannerImageOriginal);
 
   return Promise.resolve();
 }
+
+/**
+ * The update-side image policy is intentionally stricter than creation.
+ * `updateUser` is client-writable, while the upload procedure writes the
+ * `/media/<key>` values through Drizzle and bypasses Better Auth hooks. A
+ * non-blank image value here therefore has no legitimate caller: accepting an
+ * absolute URL would let a signed-in user make every profile viewer contact an
+ * attacker-controlled tracking origin, and accepting a media path would let
+ * them point at another user's object key. Empty or absent values remain valid
+ * so partial updates and explicit clears keep their existing semantics.
+ */
+export function validateProfileFieldsOnUpdateHook(user: ProfileFields): Promise<void> {
+  validateEditableProfileFields(user);
+
+  assertNoClientManagedImageWrite(user.image);
+  assertNoClientManagedImageWrite(user.bannerImage);
+  assertNoClientManagedImageWrite(user.imageOriginal);
+  assertNoClientManagedImageWrite(user.bannerImageOriginal);
+
+  return Promise.resolve();
+}
+
+/**
+ * Backwards-compatible name for callers that imported the original creation
+ * validator. Production wiring uses the lifecycle-specific exports above.
+ */
+export const validateProfileFieldsHook = validateProfileFieldsOnCreateHook;
