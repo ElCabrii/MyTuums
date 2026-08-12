@@ -269,26 +269,136 @@ if (exists("docs/architecture.md")) {
 }
 
 // --------------------------------------------------------------------------
-// 2. Relative Markdown links
+// 2. Relative Markdown links, and the anchors they point at
 // --------------------------------------------------------------------------
 
 const LINK = /\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 
+/**
+ * Heading text with the inline markup GitHub strips before slugging: link and
+ * image syntax collapse to their text, code spans and emphasis markers go.
+ */
+function headingText(raw) {
+  return raw
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/[`*]/g, "")
+    .trim();
+}
+
+/**
+ * GitHub's heading anchor: lowercase, punctuation dropped, whitespace to
+ * hyphens. Letters, digits, `_` and `-` survive — everything else does not.
+ */
+function slugify(text) {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+    .replace(/\s+/g, "-");
+}
+
+/**
+ * Every anchor a Markdown body defines, in GitHub's scheme. Fenced blocks are
+ * skipped: a `# comment` inside a shell example is not a heading, and treating
+ * it as one would invent anchors that GitHub never renders.
+ *
+ * Repeated headings get the `-1`, `-2`, … suffixes GitHub appends, with the
+ * first occurrence keeping the bare slug.
+ */
+function anchorsFromMarkdown(body) {
+  const anchors = new Set();
+  const seen = new Map();
+  let fence = null;
+
+  for (const line of body.split("\n")) {
+    const marker = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (marker) {
+      const char = marker[1][0];
+      if (fence === null) fence = char;
+      else if (fence === char) fence = null;
+      continue;
+    }
+    if (fence !== null) continue;
+
+    const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (!heading) continue;
+
+    const slug = slugify(headingText(heading[2]));
+    if (!slug) continue;
+
+    const count = seen.get(slug) ?? 0;
+    seen.set(slug, count + 1);
+    anchors.add(count === 0 ? slug : `${slug}-${String(count)}`);
+  }
+
+  return anchors;
+}
+
+const anchorCache = new Map();
+
+/** `anchorsFromMarkdown` for a repository-relative Markdown file, memoised. */
+function anchorsOf(rel) {
+  let anchors = anchorCache.get(rel);
+  if (!anchors) {
+    anchors = anchorsFromMarkdown(read(rel));
+    anchorCache.set(rel, anchors);
+  }
+  return anchors;
+}
+
+/** The fragment as an anchor: percent-decoded when it decodes cleanly. */
+function decodeFragment(fragment) {
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
+
+/**
+ * The verdict on one link: `null` when it is fine, otherwise the failure to
+ * report. Pure — the filesystem arrives through `fileExists`/`anchorsFor` — so
+ * the self-tests below can exercise every branch without touching disk.
+ */
+function linkProblem(doc, target, { fileExists, anchorsFor }) {
+  if (/^(https?:|mailto:)/.test(target)) return null;
+
+  const hash = target.indexOf("#");
+  const pathPart = hash === -1 ? target : target.slice(0, hash);
+  const fragment = hash === -1 ? "" : decodeFragment(target.slice(hash + 1));
+
+  // A bare `#fragment` points into the document it is written in.
+  const targetDoc = pathPart ? posix.normalize(posix.join(posix.dirname(doc), pathPart)) : doc;
+
+  if (pathPart && !fileExists(targetDoc)) {
+    return {
+      message: `broken relative link "${target}"`,
+      fix: `point it at a file that exists (resolved to ${targetDoc})`,
+    };
+  }
+
+  // Anchors only mean something in Markdown; anything else is opaque here.
+  if (!fragment || !targetDoc.endsWith(".md")) return null;
+
+  if (!anchorsFor(targetDoc).has(fragment)) {
+    const where = pathPart ? targetDoc : "this document";
+    return {
+      message: `link "${target}" points at "#${fragment}", which is not a heading in ${where}`,
+      fix: "use one of its headings, or fix the heading it should match",
+    };
+  }
+
+  return null;
+}
+
+const liveLinkDeps = { fileExists: exists, anchorsFor: anchorsOf };
+
 for (const doc of markdownFiles) {
   const body = read(doc);
   for (const match of body.matchAll(LINK)) {
-    const target = match[1];
-    if (/^(https?:|mailto:|#)/.test(target)) continue;
-    const [pathPart] = target.split("#");
-    if (!pathPart) continue;
-    const resolved = posix.normalize(posix.join(posix.dirname(doc), pathPart));
-    if (!exists(resolved)) {
-      fail(
-        doc,
-        `broken relative link "${target}"`,
-        `point it at a file that exists (resolved to ${resolved})`,
-      );
-    }
+    const problem = linkProblem(doc, match[1], liveLinkDeps);
+    if (problem) fail(doc, problem.message, problem.fix);
   }
 }
 
@@ -440,13 +550,18 @@ for (const guide of agentGuides) {
 // 6. Root agent guide size budget
 // --------------------------------------------------------------------------
 
-const rootAgentsBytes = statSync(join(ROOT, "AGENTS.md")).size;
-if (rootAgentsBytes > ROOT_AGENTS_MAX_BYTES) {
-  fail(
-    "AGENTS.md",
-    `is ${String(rootAgentsBytes)} bytes, over the ${String(ROOT_AGENTS_MAX_BYTES)}-byte routing budget`,
-    "move implementation detail into a subtree AGENTS.md or docs/",
-  );
+// Guarded: a missing AGENTS.md is already reported by the required-document
+// phase above. Calling statSync unconditionally threw ENOENT here and killed
+// the run before any of the accumulated failures could be printed.
+if (exists("AGENTS.md")) {
+  const rootAgentsBytes = statSync(join(ROOT, "AGENTS.md")).size;
+  if (rootAgentsBytes > ROOT_AGENTS_MAX_BYTES) {
+    fail(
+      "AGENTS.md",
+      `is ${String(rootAgentsBytes)} bytes, over the ${String(ROOT_AGENTS_MAX_BYTES)}-byte routing budget`,
+      "move implementation detail into a subtree AGENTS.md or docs/",
+    );
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -567,6 +682,93 @@ for (const doc of markdownFiles) {
       );
     }
   });
+}
+
+// --------------------------------------------------------------------------
+// 11. Self-tests for the anchor logic
+// --------------------------------------------------------------------------
+//
+// The anchor rules are the one part of this checker with enough logic to be
+// wrong in a way the repository's own documents would not reveal — they only
+// prove the cases they happen to contain. These run on every invocation
+// (they are pure and take microseconds), so a regression fails CI here rather
+// than by quietly accepting a dead link.
+
+function selfTestFailures() {
+  const problems = [];
+  const check = (name, actual, expected) => {
+    if (actual !== expected) problems.push(`${name}: expected ${expected}, got ${actual}`);
+  };
+
+  const SAME_FILE = [
+    "# Title",
+    "## Generated files",
+    "## HTTP route order and access gates",
+    "```bash",
+    "# not a heading — inside a fence",
+    "```",
+    "## Notes",
+    "## Notes",
+    "## Notes",
+  ].join("\n");
+
+  const OTHER_FILE = ["# Other", "## Router groups", "### Deep heading"].join("\n");
+
+  const anchors = anchorsFromMarkdown(SAME_FILE);
+
+  // Slugging: lowercase, spaces to hyphens, punctuation dropped.
+  check("slug: spaces", anchors.has("generated-files"), true);
+  check("slug: long heading", anchors.has("http-route-order-and-access-gates"), true);
+  check("slug: punctuation dropped", slugify("Posts, replies, likes!"), "posts-replies-likes");
+  check("slug: code span stripped", slugify(headingText("`docs:check` runs")), "docscheck-runs");
+
+  // Fenced blocks are not headings. Asserted against the identical text
+  // outside a fence, so this cannot pass merely because the slug is wrong.
+  check("fence: bare heading counts", anchorsFromMarkdown("# Fenced").has("fenced"), true);
+  check("fence: fenced heading ignored", anchorsFromMarkdown("```\n# Fenced\n```").size, 0);
+  check("fence: tilde fence ignored", anchorsFromMarkdown("~~~\n# Fenced\n~~~").size, 0);
+
+  // Duplicate headings take GitHub's -1/-2 suffixes.
+  check("duplicate: first is bare", anchors.has("notes"), true);
+  check("duplicate: second is -1", anchors.has("notes-1"), true);
+  check("duplicate: third is -2", anchors.has("notes-2"), true);
+  check("duplicate: no -3", anchors.has("notes-3"), false);
+
+  const deps = {
+    fileExists: (rel) => rel === "docs/other.md" || rel === "docs/diagram.svg",
+    anchorsFor: (rel) =>
+      rel === "docs/other.md" ? anchorsFromMarkdown(OTHER_FILE) : anchorsFromMarkdown(SAME_FILE),
+  };
+  const problemFor = (target) => linkProblem("docs/self.md", target, deps);
+
+  // Same-file anchors.
+  check("same-file valid", problemFor("#generated-files"), null);
+  check("same-file invalid", problemFor("#no-such-heading") !== null, true);
+
+  // Cross-file anchors.
+  check("cross-file valid", problemFor("other.md#router-groups"), null);
+  check("cross-file invalid", problemFor("other.md#nope") !== null, true);
+  check("cross-file missing file", problemFor("missing.md#router-groups") !== null, true);
+
+  // Percent-encoded fragments resolve to the same anchor.
+  check("encoded fragment", problemFor("other.md#router%2Dgroups"), null);
+
+  // Untouched behaviour: external links and non-Markdown targets.
+  check("external http", problemFor("https://example.com#anything"), null);
+  check("external mailto", problemFor("mailto:a@b.c"), null);
+  // A fragment on a non-Markdown target is not ours to validate: the file
+  // exists, and the anchor is opaque, so this must stay silent.
+  check("non-markdown fragment ignored", problemFor("diagram.svg#layer1"), null);
+
+  return problems;
+}
+
+for (const problem of selfTestFailures()) {
+  fail(
+    SELF,
+    `self-test failed — ${problem}`,
+    "the anchor rules regressed; fix them before trusting this run",
+  );
 }
 
 // --------------------------------------------------------------------------
