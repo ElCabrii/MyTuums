@@ -326,7 +326,7 @@ describe("report", () => {
       .where(eq(report.reporterId, reporter.id));
 
     // Re-report while the case is still OPEN: the upsert refreshes the
-    // row's clock (CONTEXT.md's "a repeat report refreshes the row's
+    // row's clock (docs/product.md's "a repeat report refreshes the row's
     // timestamp without creating a new one") instead of doing nothing, and
     // the FIRST reason is the one moderators keep seeing. Before the
     // transactional fix, the `where resolvedAt is not null` guard made this

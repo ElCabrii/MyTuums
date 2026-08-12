@@ -22,7 +22,7 @@ import { m } from "@/paraglide/messages.js";
 export const Route = createFileRoute("/login")({
   component: LoginPage,
   /**
-   * Two search params, and together they prove the rule CLAUDE.md states:
+   * Two search params, and together they prove the rule AGENTS.md states:
    * view state belongs in an atom because a URL nobody can link to is the
    * cost. Neither of these is view state — each arrives from *outside*.
    *

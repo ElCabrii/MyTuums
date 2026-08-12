@@ -23,7 +23,7 @@ import {
  *
  * An `.int.test.ts` rather than a unit test because importing `@my-tuums/auth`
  * pulls in `@my-tuums/db`, whose module-scope `DATABASE_URL` check throws in the
- * unit project (see CLAUDE.md).
+ * unit project (see packages/api/AGENTS.md).
  */
 describe("shared validation constants", () => {
   it("keeps the bio limit identical across the api and auth packages", () => {

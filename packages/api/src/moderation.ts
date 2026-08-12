@@ -41,12 +41,7 @@ import {
 import { noteInput, queueInput } from "./moderation-inputs.js";
 import { queueRouter } from "./moderation-queue.js";
 import { keysetPage } from "./pagination.js";
-import {
-  moderatorProcedure,
-  protectedProcedure,
-  rateLimit,
-  staffProcedure,
-} from "./procedures.js";
+import { moderatorProcedure, protectedProcedure, rateLimit, staffProcedure } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { canManageRole, roleAtLeast, roleRank, USER_ROLES } from "./roles.js";
 import { publicUserColumns } from "./users.js";
@@ -163,8 +158,8 @@ export const moderationRouter = {
             resolvedOutcome: null,
             resolutionNote: null,
             // A repeat report refreshes the case's clock whether the row is
-            // open or resolved (CONTEXT.md: "a repeat report refreshes the
-            // row's timestamp without creating a new one"). `reason` is
+            // open or resolved (docs/product.md: "a repeat report refreshes
+            // the row's timestamp without creating a new one"). `reason` is
             // deliberately NOT in the set: the first reason is the one the
             // moderators saw (moderation.int.test.ts pins "reason is fixed
             // at first report").
@@ -355,7 +350,12 @@ export const moderationRouter = {
     .handler(async ({ input, context }) => {
       const result = await context.db.transaction(async (tx) => {
         const [target] = await tx
-          .select({ id: user.id, role: user.role, banned: user.banned, banExpires: user.banExpires })
+          .select({
+            id: user.id,
+            role: user.role,
+            banned: user.banned,
+            banExpires: user.banExpires,
+          })
           .from(user)
           .where(eq(user.id, input.userId))
           .for("update")

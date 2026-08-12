@@ -76,9 +76,9 @@ export default tseslint.config(
       },
     },
     rules: {
-      // These three are the point of turning typed linting on at all —
-      // Step 3 fixed a floating-promise bug in apps/server/src/index.ts by
-      // hand; these make sure it can't come back unnoticed.
+      // These three are the point of turning typed linting on at all: they
+      // caught a real floating-promise bug in apps/server/src/index.ts, and
+      // they are what stops it coming back unnoticed.
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-misused-promises": "error",
       "@typescript-eslint/require-await": "error",

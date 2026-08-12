@@ -7,9 +7,9 @@ import { PostCard } from "@/components/post-card";
 import { m } from "@/paraglide/messages.js";
 
 // PostCard's like button is a write-only atom (`useSetAtom`, never
-// `useAtom`) — see CLAUDE.md on `atoms/like.ts`. Mocking the family lets
-// these tests assert "clicking the button asks to toggle this exact post"
-// without also exercising the real mutation's network round trip, which
+// `useAtom`) — see `atoms/like.ts`. Mocking the family lets these tests
+// assert "clicking the button asks to toggle this exact post" without also
+// exercising the real mutation's network round trip, which
 // jsdom has no server to answer.
 const toggleLikeSpy = vi.fn();
 vi.mock("@/atoms/like", () => ({

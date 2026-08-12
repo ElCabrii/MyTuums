@@ -1,39 +1,113 @@
-# AGENTS.md
+# e2e — agent guide
 
-This file guides Claude Code when working in `e2e` — the Playwright suite that proves the whole MyTuums stack over real HTTP: the real server, real Postgres, and (when `S3_*` is configured) the real Storage Bucket. It is its own workspace package (see `pnpm-workspace.yaml`) so it can depend on `@my-tuums/db` and `@my-tuums/api` without pulling Playwright into the root manifest.
+## Responsibility
 
-## Layout
+Playwright coverage of the whole stack over real HTTP: the real server, the
+real Postgres, and — when the `S3_*` group is present — a real bucket. Its own
+workspace package so Playwright never enters the root manifest.
 
-The config defines three projects over `testDir: ./tests`:
+The suite is slow (browser install, real sign-ups, two servers). Reach for
+`pnpm test:unit` or `pnpm test:integration` first; CI runs this on every push
+regardless. Add a spec here only for a journey no cheaper layer can prove.
 
-- `setup` — signs up the fixture accounts (alice/bob) once via the real auth endpoint and saves their cookies to `.auth/*.json`.
-- `api` — transport-level contract (health, CORS, security headers, the oRPC error envelope, compression, rate limiting). No browser; `baseURL` is the server.
-- `chromium` — the browser journeys, signed in as alice by default; specs override `storageState` per-file to go signed out or to use the `bobPage`/`signedOutPage` fixtures.
+## Start here
 
-## Key files
+| File                   | Why                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| `playwright.config.ts` | The three projects, both `webServer` entries, `stackEnv`, the `E2E` constants. |
+| `global-setup.ts`      | The once-per-run truncate, and the canonical `DATABASE_URL` fix-up.            |
+| `support/db.ts`        | Every seeding helper, plus `truncateAll()` and the bucket purge.               |
+| `support/fixtures.ts`  | The extended `test` handle: `bobPage`, `signedOutPage`, `db`.                  |
+| `tests/auth.setup.ts`  | How alice and bob come to exist, and how alice becomes the moderator.          |
 
-- `playwright.config.ts` — the projects, both `webServer` entries with `stackEnv` (test DB, `BETTER_AUTH_URL`, blanked `RESEND_API_KEY`, `AUTH_RATE_LIMIT=false`, all-or-nothing `S3_*`), and the `E2E` constants (ports 3101/5273, storage-state paths) every other module imports.
-- `global-setup.ts` — truncates every table and purges the suite's uploaded bucket objects once per run (delegating to `truncateAll` in `support/db.ts`), and is the canonical example of the `DATABASE_URL` fix-up (see below).
-- `support/users.ts` — `ALICE`/`BOB` fixture accounts, `uniqueUser()` for throwaway accounts, `dateOfBirthUnder15()`.
-- `support/db.ts` — seeding helpers (`createUser`, `seedPosts`, `seedReply`, `seedFollow`, `seedLike`, `getUserId`, `passwordResetTokenFor`) plus `setUserRole` (direct row update — the admin plugin's endpoints are 404'd, so this is the only way a spec gets a moderator fixture), `truncateAll()` and the bucket purge.
-- `support/fixtures.ts` — the extended `test` handle: `bobPage`, `signedOutPage`, and `db`.
-- `support/post-card.ts` — structural post-card locators (`postCardWithText`, like/reply controls); there is a no-`data-testid` policy, so this is where the deepest-div heuristic lives.
-- `tests/auth.setup.ts` — the `setup` project: signs up alice/bob over HTTP (through `E2E.webUrl`, so the session cookie is scoped to the origin the browser will use) and writes their storage state. Alice is also promoted to `moderator` here (via `setUserRole`, idempotent for `--project setup` re-runs) — she is the suite's moderator fixture.
-- `tests/api/*.spec.ts` — transport-level specs; `tests/specs/*.spec.ts` — browser journeys. `moderation.spec.ts` walks report → queue → remove → appeal as alice (moderator) and bob, and deliberately stops at "appeal submitted": the `appealReview` reviewer-exclusion invariant means overturning needs a second moderator fixture, so uphold/overturn stay covered by `moderation.int.test.ts`.
+## Change map
 
-## Load-bearing decisions — do not break
+| Intent                              | Primary                                         | Also touch                                        |
+| ----------------------------------- | ----------------------------------------------- | ------------------------------------------------- |
+| Add a browser journey               | `tests/specs/<name>.spec.ts`                    | `support/db.ts` if it needs new seed data         |
+| Add a transport-level assertion     | `tests/api/<name>.spec.ts`                      | — (no browser, no auth state)                     |
+| Add a fixture account or seed shape | `support/users.ts`, `support/db.ts`             | `tests/auth.setup.ts` when it needs storage state |
+| Add a page-scoped locator helper    | `support/post-card.ts` or a new `support/` file | —                                                 |
+| Change ports or stack env           | `playwright.config.ts`                          | `../docs/operations.md`                           |
+| Add a shared browser context        | `support/fixtures.ts`                           | —                                                 |
 
-- **`workers: 1`.** Every spec shares one Postgres and one in-process server rate limiter; parallel workers would 429 one another and fight over fixtures. Consequence: the database is truncated exactly once (in `global-setup.ts`), so specs must seed unique content and never assume a clean database.
-- **Storage state is cookies only.** `auth.setup.ts` captures it via an `APIRequestContext`, which has no page and therefore no localStorage. Any spec asserting "nothing stored" must use a fresh `browser.newContext` explicitly.
-- **The `DATABASE_URL` fix-up.** `@my-tuums/db` reads `DATABASE_URL` at module scope, and the `e2e` script loads `../.env` (the dev database) into `process.env`. `global-setup.ts` and `support/db.ts` therefore re-derive the `_test` URL _before_ a dynamic `import("@my-tuums/db")` — a static import would hoist above the fix-up and hit the dev database. `assertTestDatabase()` guards every destructive helper: the target database name must end in `_test`.
-- **The `S3_*` group is all-or-nothing**, forwarded from the ambient env; upload specs skip themselves when it is absent. `global-setup.ts` calls `truncateAll()`, which purges uploaded objects by prefix at the start of every run — never point the suite at the production bucket (see `.env.example`).
-- **`RESEND_API_KEY` is blanked** in `stackEnv`: fixture sign-ups must never fire live Resend calls (it once exhausted a real quota and raced the /welcome session wait). Reset/verification tokens are read from the DB instead (`passwordResetTokenFor`).
-- **Locators are structural or accessibility-based** (`getByRole`, `getByLabel`, `getByTitle`) — `data-testid` is banned across the app.
-- **The `setup` project's file must live under `tests/`**: `testMatch` only filters files the `testDir` scan already found.
-- `@my-tuums/api` is a dependency (for the destructive-storage cleanup in `support/db.ts`); `@my-tuums/db` and `@my-tuums/auth` are devDependencies. Specs deliberately mirror `THREAD_ANCESTOR_MAX` rather than importing it — see the comment in `tests/specs/thread.spec.ts`.
+## Invariants
 
-## Commands
+- **`workers: 1`.** Every spec shares one Postgres and one in-process server
+  rate limiter; parallel workers 429 each other and fight over fixtures, and
+  the failure surfaces three specs away from its cause. Consequence: the
+  database is truncated exactly once, in `global-setup.ts`, so specs must seed
+  content unique enough to find and must never assume an empty database.
+- **Re-derive the `_test` database URL before importing `@my-tuums/db`.** That
+  package reads `DATABASE_URL` at module scope, and the `e2e` script loads the
+  repo `.env` — the _dev_ database. A static import hoists above the fix-up and
+  connects to the wrong database; `global-setup.ts` and `support/db.ts` both
+  use dynamic `import()` after the assignment. `assertTestDatabase()` is the
+  backstop: it refuses any database whose name does not end in `_test`.
+- **Never point the suite at the production bucket.** `truncateAll()` deletes
+  uploaded objects by prefix on every run. Use the `dev` bucket locally; CI
+  uses the `ci` bucket.
+- **The `S3_*` group is all-or-nothing.** `apps/server/src/env.ts` refuses to
+  boot on a partial group, so `s3Env()` forwards all of it or none; upload
+  specs skip themselves when it is absent (fork pull requests included).
+- **`RESEND_API_KEY` is blanked in `stackEnv`.** `webServer.env` merges over
+  `process.env`, so a developer with a real key had every fixture sign-up
+  firing a live send — which exhausts the quota and slows sign-up enough to
+  race the session-store wait on `/welcome`. Blanked rather than deleted,
+  because merging cannot remove a key; `packages/auth` treats `""` as absent
+  and logs the message, which is where reset and verification links are read.
+- **`AUTH_RATE_LIMIT=false` in `stackEnv` only.** One IP drives the whole run,
+  which is exactly the shape better-auth's `customRules` exist to stop. The
+  app's own `/rpc` limiter stays on and has its own spec.
+- **Locators are structural or accessibility-based.** `data-testid` is banned
+  across the app; use `getByRole`/`getByLabel`/`getByTitle`, or a helper in
+  `support/`. `postCardWithText` documents the deepest-div heuristic that
+  stands in for a missing role.
+- **Storage state is cookies only.** `auth.setup.ts` captures it through an
+  `APIRequestContext`, which has no page and therefore no `localStorage`. A
+  spec asserting "nothing stored" must open a fresh `browser.newContext`.
+- **The setup project's file must live under `tests/`.** `testMatch` only
+  filters files the `testDir` scan already found; it cannot reach outside it.
+- **Fixture sign-up goes through `E2E.webUrl`, not `E2E.serverUrl`.** The
+  session cookie has no explicit `Domain`, so it is scoped to the host that
+  received the request — which must be the origin the browser will later use.
 
-- `pnpm --filter @my-tuums/e2e e2e` (root alias `pnpm test:e2e`) — the suite. Needs a Postgres (docker or local) and, for the upload specs, the dev bucket's `S3_*` values in `.env`. CI runs it on push with the ci bucket.
-- `pnpm --filter @my-tuums/e2e e2e:ui` — the Playwright UI runner; `e2e:report` — reopen the last HTML report.
-- `pnpm --filter @my-tuums/e2e lint` / `typecheck` — ESLint and `tsc --noEmit` for this package alone.
+## Dependencies and boundaries
+
+- `@my-tuums/api` is a dependency (destructive storage cleanup in
+  `support/db.ts`); `@my-tuums/db` and `@my-tuums/auth` are devDependencies.
+- Specs mirror shared constants rather than importing them where importing
+  would make the spec agree with the code by construction — see the note on
+  `THREAD_ANCESTOR_MAX` in `tests/specs/thread.spec.ts`.
+- `setUserRole` writes the row directly. The better-auth admin plugin's
+  endpoints are 404'd by the server, so this is the only way a spec gets a
+  moderator; alice is promoted in `tests/auth.setup.ts`.
+- `moderation.spec.ts` stops at "appeal submitted" on purpose: reviewing an
+  appeal excludes the moderator who took the action, so uphold and overturn
+  need a second moderator fixture and stay covered by
+  `packages/api/src/moderation.int.test.ts`.
+
+## Generated files
+
+`.auth/*.json` (storage state), `test-results/`, `playwright-report/` — all
+git-ignored, all rebuilt by a run.
+
+## Verification
+
+| Command                                                        | Covers                      |
+| -------------------------------------------------------------- | --------------------------- |
+| `pnpm test:e2e`                                                | the whole suite             |
+| `pnpm --filter @my-tuums/e2e e2e -- tests/specs/theme.spec.ts` | one spec                    |
+| `pnpm --filter @my-tuums/e2e e2e:ui`                           | the interactive runner      |
+| `pnpm --filter @my-tuums/e2e e2e:report`                       | reopen the last HTML report |
+| `pnpm --filter @my-tuums/e2e lint` / `typecheck`               | this package alone          |
+
+Needs a reachable Postgres (`pnpm docker:up` or a local one) and, for the
+upload specs, the dev bucket's `S3_*` values in `.env`.
+
+## Further reading
+
+- [docs/architecture.md](../docs/architecture.md) — what the stack this suite
+  drives actually looks like.
+- [docs/operations.md](../docs/operations.md) — ports, buckets, environments.
+- [.github/AGENTS.md](../.github/AGENTS.md) — how CI runs this job.

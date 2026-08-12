@@ -90,10 +90,10 @@ export async function sendEmail({ to, subject, text }: OutgoingEmail): Promise<v
  * moderation emails lives here, keyed the same two ways.
  *
  * The locale comes off the same `PARAGLIDE_LOCALE` cookie the web app sets
- * (CLAUDE.md §i18n: resolution is `["cookie", "globalVariable", "baseLocale"]`,
- * with no URL segment), which is also what `i18n.ts` hands the Better Auth i18n
- * plugin for error messages. One cookie decides the language of everything the
- * server produces.
+ * (resolution is `["cookie", "globalVariable", "baseLocale"]`, with no URL
+ * segment), which is also what `i18n.ts` hands the Better Auth i18n plugin for
+ * error messages. One cookie decides the language of everything the server
+ * produces.
  */
 export type EmailLocale = "en" | "fr";
 

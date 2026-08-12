@@ -88,8 +88,8 @@ services:
       # treats as absent — so an unconfigured provider is simply not
       # registered rather than half-registered. Without these the container
       # silently has NO social providers, and an OAuth callback that reaches
-      # it fails with `state_mismatch` (see the port-conflict note in
-      # CLAUDE.md).
+      # it fails with `state_mismatch` (see the port note in
+      # docs/operations.md).
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}

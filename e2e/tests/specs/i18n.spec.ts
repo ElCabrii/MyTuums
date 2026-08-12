@@ -52,7 +52,6 @@ test.describe("locale", () => {
     await expect(page.getByRole("heading", { name: "Mentions légales" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "1. Éditeur du site" })).toBeVisible();
 
-    // Revert.
     await page.getByRole("button", { name: "Langue" }).click();
     await page.getByRole("menuitem", { name: "English" }).click();
   });

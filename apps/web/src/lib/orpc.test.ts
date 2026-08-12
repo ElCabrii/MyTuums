@@ -27,7 +27,7 @@ describe("retryUnlessClientError", () => {
 /**
  * oRPC embeds the whole input object in the query key, so an "always pass
  * `feed: 'global'`" cleanup would silently fork every cache entry the
- * optimistic-like sweeps in `lib/post-cache.ts` depend on (see CLAUDE.md).
+ * optimistic-like sweeps in `lib/post-cache.ts` depend on (see AGENTS.md).
  * These pin the exact shapes the conditional spreads in `atoms/post-feed.ts`
  * and `atoms/user-list.ts` are protecting.
  */

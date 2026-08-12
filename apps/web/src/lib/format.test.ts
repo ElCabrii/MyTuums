@@ -47,14 +47,12 @@ describe("formatRelativeTime", () => {
     // The cache is module-level, so "de" (unused elsewhere in this file)
     // starts uncached; three calls must construct exactly one formatter.
     const RealRelativeTimeFormat = Intl.RelativeTimeFormat;
-    const spy = vi
-      .spyOn(Intl, "RelativeTimeFormat")
-      .mockImplementation(function (
-        locales?: Intl.LocalesArgument,
-        options?: Intl.RelativeTimeFormatOptions,
-      ) {
-        return new RealRelativeTimeFormat(locales, options);
-      });
+    const spy = vi.spyOn(Intl, "RelativeTimeFormat").mockImplementation(function (
+      locales?: Intl.LocalesArgument,
+      options?: Intl.RelativeTimeFormatOptions,
+    ) {
+      return new RealRelativeTimeFormat(locales, options);
+    });
     try {
       const date = new Date(NOW.getTime() - 5 * 60_000);
       formatRelativeTime(date, "de");

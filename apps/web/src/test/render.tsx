@@ -43,8 +43,8 @@ import type { SocialProviderId } from "@/lib/auth-client";
  * The shared harness every component test in this directory renders through.
  * Two concerns live here because every test needs both: a Jotai store wired
  * up the way `src/lib/store.ts` wires the real one, and a memory router
- * standing in for `src/routeTree.gen.ts` (generated, git-ignored — see
- * CLAUDE.md, so tests can't depend on it).
+ * standing in for `src/routeTree.gen.ts` (generated, git-ignored, so tests
+ * can't depend on it).
  */
 
 // ---------------------------------------------------------------------------
@@ -740,9 +740,10 @@ export function makeTeamMember(overrides: Partial<TeamMember> = {}): TeamMember 
 // Infinite-query cache seeding
 //
 // `post.list` and `user.followers`/`user.following` are keyset-paginated
-// (see CLAUDE.md) behind `atomWithInfiniteQuery`. There's no server in this
-// test environment, so a component that finds nothing cached will actually
-// try to `fetch()` — a real, slow, environment-dependent network call.
+// (see packages/api/AGENTS.md) behind `atomWithInfiniteQuery`. There's no
+// server in this test environment, so a component that finds nothing cached
+// will actually try to `fetch()` — a real, slow, environment-dependent
+// network call.
 // Seeding the exact query key `setQueryData`/`fetchInfiniteQuery` bypasses
 // that entirely: `refetchOnMount: false` above means a query that already
 // has data (or has already been driven to an error state) is left alone
@@ -753,7 +754,7 @@ export function makeTeamMember(overrides: Partial<TeamMember> = {}): TeamMember 
  * The exact queryKey `postFeedAtom({ feed: "global" })` produces — mirrors
  * the conditional-spread input builder in `atoms/post-feed.ts`'s
  * `postFeedFamily` for the no-authorId/no-parentId/global-feed case, which
- * is the only shape `post-feed.test.tsx` needs. CLAUDE.md calls that
+ * is the only shape `post-feed.test.tsx` needs. AGENTS.md calls that
  * conditional-spread shape load-bearing (oRPC embeds the whole input object
  * in the key, so an unconditional field forks the cache); if that atom's
  * input shape ever changes, this needs the matching update.
