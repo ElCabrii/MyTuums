@@ -605,10 +605,14 @@ describe("search.posts", () => {
     expect(typeahead.posts).toEqual([]);
 
     // The same post still shows in the feed as a bare stub — search is
-    // different in kind from the feed, and this pins the distinction.
+    // different in kind from the feed, and this pins the distinction. The
+    // feed is scoped to the author rather than the global timeline: earlier
+    // pagination tests seed posts with future-dated `createdAt` values, so
+    // the global first page is not guaranteed to contain this post and the
+    // assertion would flake on it.
     const feed = await call(
       appRouter.post.list,
-      { feed: "global" },
+      { authorId: author.id },
       { context: contextFor(stranger) },
     );
     const stub = feed.items.find((p) => p.id === removed.id);

@@ -21,9 +21,7 @@ describe("TwoFactorPage", () => {
   it("renders the TOTP challenge by default and offers every method on a direct hit", async () => {
     await renderWithProviders(<TwoFactorPage />, { initialPath: "/two-factor" });
 
-    expect(
-      screen.getByRole("heading", { name: m.twofa_challenge_title() }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: m.twofa_challenge_title() })).toBeInTheDocument();
     expect(screen.getByLabelText(m.twofa_field_code())).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: m.twofa_trust_device() })).not.toBeChecked();
     expect(screen.getByRole("button", { name: m.twofa_verify() })).toBeInTheDocument();
@@ -132,14 +130,15 @@ describe("TwoFactorPage", () => {
       initialPath: "/two-factor?redirect=/settings/account",
     });
 
-    expect(
-      screen.getByRole("heading", { name: m.twofa_challenge_title() }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: m.twofa_challenge_title() })).toBeInTheDocument();
   });
 
   it("resets the challenge state on unmount", async () => {
     const store = createStore();
-    const result = await renderWithProviders(<TwoFactorPage />, { store, initialPath: "/two-factor" });
+    const result = await renderWithProviders(<TwoFactorPage />, {
+      store,
+      initialPath: "/two-factor",
+    });
     act(() => {
       store.set(twoFactorCodeAtom, "123456");
       store.set(trustDeviceAtom, true);

@@ -1,12 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import {
-  admin,
-  lastLoginMethod,
-  oneTap,
-  twoFactor,
-  username,
-} from "better-auth/plugins";
+import { admin, lastLoginMethod, oneTap, twoFactor, username } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
 import { i18n } from "@better-auth/i18n";
 import { db } from "@my-tuums/db";
@@ -256,9 +250,9 @@ export const auth = betterAuth({
 
     // Translates Better Auth's own error messages, which the web app's
     // catalogue cannot reach. `PARAGLIDE_LOCALE` is the cookie the web app
-    // already sets (CLAUDE.md §i18n), so one cookie decides the language of
-    // both client copy and server errors. Header detection is the fallback for
-    // a first visit, before any locale has been chosen.
+    // already sets (see docs/product.md), so one cookie decides the language
+    // of both client copy and server errors. Header detection is the fallback
+    // for a first visit, before any locale has been chosen.
     i18n({
       translations: { fr },
       detection: ["cookie", "header"],

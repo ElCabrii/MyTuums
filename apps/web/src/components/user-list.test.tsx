@@ -69,8 +69,9 @@ describe("UserList", () => {
       displayUsername: "JamieRivera",
     });
     // `displayUsername` differs in casing from the normalised `username` —
-    // the link must use the normalised one (see CLAUDE.md on handleOf), or
-    // it would fragment the `byUsername` cache across casings.
+    // the link must use the normalised one (see `handleOf` in
+    // lib/user.ts), or it would fragment the `byUsername` cache across
+    // casings.
     const casey = makeUserSummary({
       name: "Casey Nolan",
       username: "caseynolan",

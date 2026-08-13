@@ -1,62 +1,122 @@
-# AGENTS.md
+# apps/web — agent guide
 
-Guidance for Claude Code when working in `apps/web` — the MyTuums SPA.
+## Responsibility
 
-## What this is
+The React 19 + Vite SPA: every page, every piece of client state, and all
+translated copy. It talks to the API through the oRPC client and to
+better-auth through its React client. In production the server serves this
+app's build from the same origin.
 
-The React 19 + Vite client: TanStack Router file routes (`src/routes/`), shadcn UI (`src/components/ui/`, style base-maia / zinc / lucide), Paraglide i18n (`messages/` compiled to generated `src/paraglide/`), and Jotai for all client state. It talks to the API through the oRPC client and to BetterAuth through its React client; the server serves this built SPA in production (one origin is a requirement — see root AGENTS.md).
+## Start here
 
-## Key files
+| File                     | Why                                                                |
+| ------------------------ | ------------------------------------------------------------------ |
+| `src/lib/store.ts`       | The one Jotai store, and why it is hydrated at module scope.       |
+| `src/lib/orpc.ts`        | The oRPC client, the shared response types, the retry rule.        |
+| `src/atoms/post-feed.ts` | The house style for a server-data atom family.                     |
+| `src/routes/__root.tsx`  | App chrome, the session gate, and the no-flash first paint.        |
+| `src/main.tsx`           | Where the single router, store and QueryClient are wired together. |
 
-- `src/main.tsx` — entrypoint: the single router (created from the generated `routeTree.gen.ts`), wrapped in the single Jotai store and the single QueryClient.
-- `src/lib/store.ts` — the ONE Jotai store, hydrated with `queryClientAtom` at module scope. Two QueryClients would silently split mutation `scope` serialisation.
-- `src/lib/query-client.ts` — the ONE QueryClient every atom query runs on.
-- `src/lib/orpc.ts` — the oRPC client (absolute `/rpc` URL, CSRF header) + `createTanstackQueryUtils`; also the shared response types (`Post`, `Thread`, `Profile`, …) and `retryUnlessClientError` (no retries for 4xx).
-- `src/lib/auth-client.ts` — the BetterAuth client; the one cast that types the session store's `additionalFields`; `socialProviders` (mirrors the server's `VITE_SOCIAL_PROVIDERS`); `shouldOfferOneTap`.
-- `src/lib/session-sync.ts` — `waitFor*` / `refreshSession`: closes the gap between an auth call resolving and the session store catching up (the e2e-documented sign-out race). `refreshSession` goes through the store's `refetch`, never `getSession()` (which doesn't touch the store).
-- `src/lib/redirect.ts` — `sanitizeRedirect`, the open-redirect guard for the `?redirect=` param.
-- `src/lib/auth-validation.ts` — pure validation rules; the English strings are shared byte-for-byte with the server (`packages/auth`), so server rejections land on the same translated copy.
-- `src/lib/auth-error-message.ts` — `localizeAuthError`/`localizeOAuthError`: translate known strings, pass everything else through verbatim.
-- `src/lib/post-cache.ts` / `follow-cache.ts` — the optimistic like/follow sweep helpers covering both cache shapes (`post.list` infinite feeds + `post.thread`).
-- `src/lib/media.ts` — browser-side image re-encode: a display WebP variant plus the untouched original; server sniffs the bytes, this is the cooperative path.
-- `src/lib/returning-visitor.ts` — the first-party "has had a session" cookie One Tap keys on.
-- `src/atoms/` — all client state, one module per concern: auth flows, session derivations (incl. the client mirror of the role ordering), theme/locale, feed/thread/profile queries, like/follow/post/reply mutations, moderation (queue/case/report/block/appeal mutations + dialog identity atoms, `atoms/moderation.ts`), settings forms. Families key on primitive strings; mutation atoms wrap oRPC procedures.
-- `src/hooks/` — the router-touching gates and redirects atoms must never do (`use-require-signed-in`, `use-require-handle`, `use-redirect-when-signed-in`, `use-one-tap`). `use-require-role` gates the `/moderation` route client-side; the server re-checks every procedure.
-- `src/test/` — `setup.ts` (jsdom `localStorage`/`matchMedia` shims) and `render.tsx` (`renderWithProviders`: fresh store + memory router + mocked auth client + cache seeding; the `seedInfiniteError` helpers must be awaited).
+## Change map
 
-### src/routes/ and src/components/
+| Intent                       | Primary                                                         | Also touch                                                                        |
+| ---------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Add a page                   | `src/routes/<name>.tsx` (thin wrapper)                          | the page body in `src/components/`; `SIGNED_OUT_PATHS` if it must work signed out |
+| Add client state             | `src/atoms/<concern>.ts`                                        | its `.test.ts` sibling                                                            |
+| Read server data             | a new `atomWithQuery` / `atomWithInfiniteQuery` in `src/atoms/` | `src/lib/orpc.ts` if a new response type is needed                                |
+| Add a mutation with optimism | `src/atoms/<concern>.ts`                                        | `src/lib/post-cache.ts` or `follow-cache.ts` for the sweep                        |
+| Add a UI component           | `pnpm --filter @my-tuums/web exec shadcn add <component>`       | never hand-write into `src/components/ui`                                         |
+| Add or change copy           | `messages/en.json`, `messages/fr.json`                          | recompile; never touch `src/paraglide`                                            |
+| Router-touching behaviour    | `src/hooks/`                                                    | never an atom — see the invariants                                                |
+| Change an auth flow page     | `src/routes/` + `src/atoms/auth.ts`                             | `src/lib/auth-validation.ts` (strings shared with the server)                     |
+| Add a moderation surface     | `src/atoms/moderation.ts`, `src/components/moderation/`         | `src/hooks/use-require-role.ts`                                                   |
 
-- Routes are thin `createFileRoute` wrappers — the page bodies live in `src/components/`. `routeTree.gen.ts` is generated + git-ignored; build/dev must run before typecheck can resolve routes. Moderation routes: `/moderation` (queue/audit/team tabs, `components/moderation/`), `/appeal` (the app's one signed-out page — the HMAC capability link from the moderation email, or a signed-in author's removed-post stub), and the blocked-users section on `/settings/account`.
-- Layouts: `__root.tsx` (app chrome + session gate, load-bearing — see below) and `@{$username}.tsx` (profile chrome; the body is the nested `@{$username}.index.tsx` tab). Deliberately no `settings.tsx` layout: a layout without an index sibling makes `/settings` render empty chrome instead of 404.
-- `__root.tsx` mounts the theme/locale/session effects, the `useRequireHandle` and `useRequireSignedIn` gates, and renders nothing (static `#app-splash` in index.html stays up) until the first `/get-session` lands — that is the fix for the signed-out flash. New pages need no per-route gates; the header renders only for a real session, and `/welcome` keeps it (handle-less session).
-- Signed-in gate: any non-auth URL redirects a signed-out visitor to `/login?redirect=<path>`; `redirect` is sanitized in `lib/redirect.ts`. In production this is enforced twice — `apps/server/src/request-handler.ts` gates the initial page load with a real session check, and `useRequireSignedIn` covers everything the server can't see: client-side navigation and a session going stale mid-visit. Both read the same allowlist, `SIGNED_OUT_PATHS` from `@my-tuums/api/constants` — never duplicate it locally, or the two gates can disagree and loop. Auth pages call `useRedirectWhenSignedIn` and never navigate on success themselves — exactly one effect owns every redirect (double-navigation races were real bugs; see register.tsx and welcome.tsx comments).
-- Auth pages: `/login`, `/register`, `/forgot-password`, `/reset-password`, `/two-factor`, `/welcome` (handle + date-of-birth claim for incomplete sessions, then a one-time skippable 2FA offer). Search params arriving from external redirects (`?error=`, `?token=`, `?redirect=`) are narrowed to strings and never trusted.
-- Pages: home feed (`/`, home-page.tsx), thread (`/post/$postId`, thread-page.tsx), profile + posts tab, `/settings/account` (a flat page of `components/settings/` sections — composition, not layout), legal pages (`/privacy`, `/terms`, `/mentions-legales` — localized like everything else, prose lives in the message catalogs; the French text of `/mentions-legales` stays the legally authoritative LCEN filing), and `/discover` (a deliberate stub rendering null so nav links have a target).
-- Component map: structural (header, footer, home-page, profile-layout, thread-page), post chrome (post-card, post-feed, composer-form + post-composer/reply-composer bindings), social (follow-button, follow-list-dialog, user-list), settings sections, legal (legal-document wrapper + one component per document, each reading the message catalogs), brand icons, and small controls (segmented-control, mode-toggle, user-avatar, profile-message, not-found-page, sign-in-options, footer-locale-menu).
-- Gotchas: never edit `src/components/ui/**` — upstream shadcn primitives; add new ones via `pnpm --filter @my-tuums/web exec shadcn add <component>` so regenerations stay clean. Feed/list parameterisation lives entirely in atoms — `PostFeed` takes a `feedAtom` prop and never knows its own scope/author. Auth errors on settings/account all funnel through one `authErrorAtom` banner owned by the page.
+## Invariants
 
-## Connecting to the monorepo
+- **One Jotai store, one QueryClient, one router.** `src/lib/store.ts` is
+  hydrated with `queryClientAtom` at module scope, never through
+  `useHydrateAtoms` — that only applies on a component's first render, so any
+  earlier read locks in the package's default client. Two QueryClients means
+  two `MutationCache`s, and mutations sharing a `scope.id` silently stop
+  serialising against each other.
+- **Never wrap a page in its own Jotai `<Provider>`.** That creates a second
+  store and breaks every session read.
+- **Never import the router from an atom.** It cycles through `main.tsx`.
+  Gates and redirects live in `src/hooks/`.
+- **Atom families key on primitive strings only**, and never use
+  `setShouldRemove`. Object params force a linear-scan `areEqual`; lazy removal
+  can split a shared observer mid-scroll. Cleanup happens in
+  `src/atoms/sign-out-sweep.ts`, where nothing is mounted.
+- **The conditional spreads in `src/atoms/post-feed.ts` and
+  `src/atoms/user-list.ts` are load-bearing.** oRPC embeds the whole input
+  object in the query key; those spreads keep the global feed's key bare, and
+  the optimistic sweeps match on exactly those prefixes. "Cleaning them up"
+  forks every cache entry silently.
+- **Sign-out clears the QueryClient and sweeps every family.** Cached rows
+  carry viewer-relative fields (`viewerHasLiked`, `viewerIsFollowing`) under
+  viewer-less keys.
+- **Like and follow serialise per entity.** One `scope` id per entity,
+  per-entity intent atoms drop superseded responses, and rollback rides on
+  mutation-level `onError` — per-call callbacks never fire for write-only
+  atoms read with `useSetAtom`.
+- **Persisted atoms read `localStorage` as `unknown`, sanitise on read, and
+  set `getOnInit: true`** — without it the first render flashes the default.
+- **Exactly one effect owns each redirect.** Auth pages call
+  `useRedirectWhenSignedIn` and never navigate on success themselves;
+  double-navigation races were real bugs.
+- **Callback URLs given to better-auth must be absolute**
+  (`window.location.origin`). A relative one resolves against the API origin
+  and dead-ends in dev.
+- **`updateUser` goes through the auth client, never an oRPC procedure.**
+  `packages/auth`'s database hooks are the single enforcement point for
+  user-field rules.
+- **Never edit `src/components/ui`.** Those are upstream shadcn primitives;
+  add new ones with the CLI so regenerations stay clean.
+- **`data-testid` is banned** across the app — the E2E suite locates
+  structurally or by role.
+- **Feed and list parameterisation lives in atoms.** `PostFeed` takes a
+  `feedAtom` prop and never knows its own scope or author.
 
-- oRPC contract: `packages/api` (`@my-tuums/api`); shared constants (`POST_PAGE_SIZE`, `IMAGE_LIMITS`, `BIO_MAX_LENGTH`, …) come from `@my-tuums/api/constants`, image dimension parsing from `@my-tuums/api/dimensions`.
-- Auth server: `packages/auth` — the client mirrors its pinned settings (no session cookie cache, `requireEmailVerification: false`).
-- Generated and git-ignored: `src/routeTree.gen.ts` and `src/paraglide/` — build or dev must run before typecheck can resolve them.
-- In dev, Vite proxies `/rpc`, `/api/auth` and `/media` to the API on :3001.
+## Dependencies and boundaries
 
-## Load-bearing decisions — do not break
+- Import only `@my-tuums/api/constants` and `@my-tuums/api/dimensions` from the
+  API package. Those subpaths must stay free of `@my-tuums/db`, which throws at
+  module load in a browser.
+- The client mirrors pinned server settings: no session cookie cache,
+  `requireEmailVerification: false`. `src/lib/auth-validation.ts` shares its
+  English strings byte-for-byte with `packages/auth`; change one side alone and
+  server rejections render untranslated.
+- In dev, Vite proxies `/rpc`, `/api/auth` and `/media` to the API on `:3001`.
+- Only two `VITE_*` variables are read: `VITE_SOCIAL_PROVIDERS` and
+  `VITE_GOOGLE_CLIENT_ID`. Both are inlined at build time — see
+  [docs/operations.md](../../docs/operations.md).
 
-- One Jotai store, one QueryClient, one router; atoms never create their own.
-- Atoms for state, `atomEffect` for reactions. Never import the router from an atom (import cycle through `main.tsx`) — router-touching hooks live in `src/hooks/`.
-- oRPC embeds the whole input object in query keys: the conditional spreads in `atoms/post-feed.ts` / `atoms/user-list.ts` keep the global feed key bare, and the optimistic sweeps depend on those exact prefixes. "Cleaning up" those spreads forks every cache entry silently.
-- Atom families key on primitive strings only (object params force a linear-scan `areEqual`), and never `setShouldRemove` (lazy evaluation can split a shared observer mid-scroll). Cleanup happens in the sign-out sweep (`atoms/sign-out-sweep.ts`) where nothing is mounted.
-- Like/follow: one `scope` id per entity serialises mutations; per-entity intent atoms drop superseded responses; rollback rides on mutation-level `onError` (per-call callbacks never fire for write-only atoms read with `useSetAtom`).
-- Persisted atoms (`theme`, `feed-scope`, composer draft) read `localStorage` as `unknown`, sanitise on read, and need `getOnInit: true` to avoid a first-render flash.
-- Sign-out clears the QueryClient and sweeps every family: cached data carries viewer-relative fields (`viewerHasLiked`, `viewerIsFollowing`) under viewer-less query keys.
-- Form fields are module-scoped atoms reset on unmount; never wrap a page in its own Jotai `<Provider>` — that creates a separate store and breaks session reads.
-- Callback URLs given to BetterAuth must be absolute (`window.location.origin`); a relative one resolves against the API origin and dead-ends in dev.
-- `updateUser` calls go through the auth client, never an oRPC procedure — `packages/auth`'s database hook is the single enforcement point for user-field rules.
+## Generated files
 
-## Commands
+| Path                   | Generator                                                             | If it is missing                        |
+| ---------------------- | --------------------------------------------------------------------- | --------------------------------------- |
+| `src/routeTree.gen.ts` | the TanStack Router Vite plugin                                       | `tsc` cannot resolve a route            |
+| `src/paraglide`        | the Paraglide Vite plugin, or `pnpm --filter @my-tuums/web paraglide` | `tsc` cannot resolve a message function |
 
-- Single test: `pnpm --filter @my-tuums/web exec vitest run src/atoms/foo.test.ts` (the package's `test` script compiles `src/paraglide` first if it's missing).
-- `pnpm test:unit` / `pnpm lint` / `pnpm typecheck` from the repo root (turbo).
-- Add a component: `pnpm --filter @my-tuums/web exec shadcn add <component>`.
+Both are git-ignored, and both are why `lint` and `typecheck` depend on
+`build` in `turbo.json`. The package's own `test` script compiles Paraglide
+first.
+
+## Verification
+
+| Command                                                               | Covers                |
+| --------------------------------------------------------------------- | --------------------- |
+| `pnpm --filter @my-tuums/web test`                                    | the unit suites       |
+| `pnpm --filter @my-tuums/web exec vitest run src/atoms/theme.test.ts` | one file              |
+| `pnpm --filter @my-tuums/web lint` / `typecheck`                      | this package alone    |
+| `pnpm --filter @my-tuums/web build`                                   | the production bundle |
+
+`src/test/render.tsx` provides `renderWithProviders`: a fresh store, a memory
+router, a mocked auth client and cache seeding. The `seedInfiniteError`
+helpers must be awaited.
+
+## Further reading
+
+- [docs/architecture.md](../../docs/architecture.md) — state ownership, dev proxies.
+- [docs/product.md](../../docs/product.md) — what each screen is supposed to do.
+- [docs/security.md](../../docs/security.md) — the redirect guard and the gates.

@@ -7,12 +7,8 @@ type AuthClientResult = { data: unknown; error: unknown };
 
 const { addPasskey, updatePasskey, deletePasskey } = vi.hoisted(() => ({
   addPasskey: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
-  updatePasskey: vi.fn((): Promise<AuthClientResult> =>
-    Promise.resolve({ data: {}, error: null }),
-  ),
-  deletePasskey: vi.fn((): Promise<AuthClientResult> =>
-    Promise.resolve({ data: {}, error: null }),
-  ),
+  updatePasskey: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
+  deletePasskey: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
 }));
 
 vi.mock("@/lib/auth-client", () => ({
@@ -22,7 +18,12 @@ vi.mock("@/lib/auth-client", () => ({
 }));
 
 import { authErrorAtom } from "@/atoms/auth";
-import { addPasskeyAtom, deletePasskeyAtom, passkeysQueryKey, renamePasskeyAtom } from "@/atoms/passkey";
+import {
+  addPasskeyAtom,
+  deletePasskeyAtom,
+  passkeysQueryKey,
+  renamePasskeyAtom,
+} from "@/atoms/passkey";
 
 function freshStore() {
   const store = createStore();

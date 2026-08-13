@@ -56,8 +56,9 @@ export async function reconcileMedia({
   storage,
   readUserRows,
 }: ReconcileMediaDeps): Promise<ReconcileMediaResult> {
-  // Step 1: every object currently in the bucket. Anything not listed here
-  // is not a deletion candidate, no matter what the rows say a moment later.
+  // Order matters: list the bucket BEFORE reading the rows. Anything not
+  // listed here is not a deletion candidate, no matter what the rows say a
+  // moment later.
   const listedByPrefix = new Map<string, string[]>();
   let listed = 0;
   for (const prefix of PREFIXES) {
@@ -66,9 +67,9 @@ export async function reconcileMedia({
     listed += keys.length;
   }
 
-  // Step 2: the rows. Read after the listing so the snapshot postdates it:
-  // an upload that lands between the two steps is in `referenced` and kept
-  // (see the header comment — this order is what issue #52 was about).
+  // Read after the listing so the snapshot postdates it: an upload that
+  // lands between the two steps is in `referenced` and kept. Reversing the
+  // two deletes an object whose row points at it (issue #52).
   const rows = await readUserRows();
 
   const referenced = new Set<string>();
@@ -81,7 +82,6 @@ export async function reconcileMedia({
 
   console.log(`scanning ${rows.length} user rows; ${referenced.size} referenced objects`);
 
-  // Step 3: delete `listed \ referenced`.
   let deleted = 0;
   for (const prefix of PREFIXES) {
     const keys = listedByPrefix.get(prefix)!;

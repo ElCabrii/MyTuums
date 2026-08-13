@@ -77,6 +77,11 @@ jobs:
       # The repo is formatted by Prettier (root .prettierrc); a stray
       # unformatted file fails the check rather than silently drifting.
       - run: pnpm exec prettier --check .
+      # The agent-facing docs are checked against the code they describe:
+      # dead links, paths and scripts that no longer exist, and documented
+      # facts (router groups, Docker VITE_* args) that have drifted from
+      # their source. Dependency-free, so it costs nothing to run here.
+      - run: pnpm docs:check
 
   unit:
     name: Unit tests

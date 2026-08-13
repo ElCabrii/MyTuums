@@ -249,7 +249,6 @@ class DecoratedResponse {
   private defaultsApplied = false;
   // The writeHead call being deferred for compression candidates.
   private stashed: { status: number; rest: unknown[] } | null = null;
-  // True when this response would be compressed if the body is big enough.
   private candidate = false;
   private pendingEncoding: Compression = null;
   // Body bytes (and write callbacks) accumulated while the header block waits.

@@ -38,12 +38,12 @@ describe("createCursorCodec", () => {
   });
 
   it("preserves millisecond precision through the round trip", () => {
-    // This is the invariant `precision: 3` on the app tables (CLAUDE.md)
-    // exists to protect: a cursor can only ever carry what a JS Date can
-    // hold, which is milliseconds. If encode/decode lost or truncated the ms
-    // component here, a row stored at finer precision would silently fall
-    // out of every subsequent page, the same "skip" the schema comment
-    // describes for the DB side.
+    // This is the invariant `precision: 3` on the app tables (see
+    // packages/db/AGENTS.md) exists to protect: a cursor can only ever carry
+    // what a JS Date can hold, which is milliseconds. If encode/decode lost
+    // or truncated the ms component here, a row stored at finer precision
+    // would silently fall out of every subsequent page, the same "skip" the
+    // schema comment describes for the DB side.
     const codec = createCursorCodec(z.uuid());
     const createdAt = new Date("2026-08-02T12:34:56.789Z");
     const cursor = codec.encode(createdAt, VALID_UUID);

@@ -11,7 +11,7 @@ import {
 
 /**
  * A unit suite, not an integration one — none of this touches Postgres or a
- * bucket, which is the point of `image.ts` being pure. See CLAUDE.md: a
+ * bucket, which is the point of `image.ts` being pure. See AGENTS.md: a
  * `*.test.ts` must not import `@my-tuums/db`, and this file is careful to pull
  * only from `./image.js` and `./constants.js`.
  */

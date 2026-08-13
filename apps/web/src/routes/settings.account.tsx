@@ -28,7 +28,7 @@ export const Route = createFileRoute("/settings/account")({
  * TanStack's file routing would make a `settings.tsx` a *layout* rendering an
  * `<Outlet/>`, and without a `settings.index.tsx` sibling `/settings` would
  * then render a chrome with an empty body rather than 404 — the same trap
- * `@{$username}.tsx` documents in CLAUDE.md. One file, one URL, no empty state
+ * `@{$username}.tsx` documents in AGENTS.md. One file, one URL, no empty state
  * to explain.
  *
  * The sections themselves live in `components/settings/`. This file owns the

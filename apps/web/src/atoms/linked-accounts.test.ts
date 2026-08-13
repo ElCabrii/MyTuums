@@ -7,9 +7,7 @@ type AuthClientResult = { data: unknown; error: unknown };
 
 const { linkSocial, unlinkAccount } = vi.hoisted(() => ({
   linkSocial: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
-  unlinkAccount: vi.fn((): Promise<AuthClientResult> =>
-    Promise.resolve({ data: {}, error: null }),
-  ),
+  unlinkAccount: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
 }));
 
 vi.mock("@/lib/auth-client", () => ({

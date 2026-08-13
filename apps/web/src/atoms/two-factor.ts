@@ -132,7 +132,7 @@ export type TwoFactorMethod = "totp" | "otp" | "backup";
 /**
  * Which challenge form is on screen.
  *
- * An atom rather than `useState` — the app has none, by policy (CLAUDE.md) —
+ * An atom rather than `useState` — the app has none, by policy (AGENTS.md) —
  * and it earns it: switching method has to clear the half-typed code and the
  * previous error too, which `selectTwoFactorMethodAtom` does in one place
  * instead of at each of the three buttons.

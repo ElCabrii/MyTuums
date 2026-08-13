@@ -1,106 +1,101 @@
 # MyTuums
 
-A Twitter-style social app — posts, likes, follows, profiles, auth. React 19 +
-Vite SPA, Node 22 + oRPC API, Postgres + Drizzle, hosted on Railway.
+A Twitter-style social app — posts, replies, likes, follows, profiles, search,
+and a full moderation system with appeals. React 19 + Vite SPA, Node 22 + oRPC
+API, Postgres + Drizzle, deployed on Railway in the EU.
 
-**What the product is → [PRODUCT.md](PRODUCT.md)** · this README is about
-developing it. Claude Code's own guidance lives in [CLAUDE.md](CLAUDE.md).
+This README is about developing it. What the product _does_ is
+[docs/product.md](docs/product.md); if you are an AI coding agent, start at
+[AGENTS.md](AGENTS.md).
 
 ## Stack
 
-| Layer                  | Tech                                                                                              |
-| ---------------------- | ------------------------------------------------------------------------------------------------- |
-| Monorepo               | pnpm 10 + Turborepo, Node 22, TypeScript strict everywhere                                        |
-| Web (`apps/web`)       | React 19, Vite, TanStack Router, Jotai atoms, Paraglide i18n, shadcn/ui (base-maia, zinc, lucide) |
-| Server (`apps/server`) | Node `http` server: `/api/auth` (better-auth) → `/rpc` (oRPC) → `/media` → static SPA             |
-| Packages               | `api` (oRPC contract), `auth` (better-auth composition), `db` (Drizzle + postgres.js)             |
-| Hosting                | Railway, EU region — production serves the built SPA from the API (one origin)                    |
+| Layer    | Tech                                                                         |
+| -------- | ---------------------------------------------------------------------------- |
+| Monorepo | pnpm 10 + Turborepo, Node 22, TypeScript strict everywhere                   |
+| Web      | React 19, Vite, TanStack Router, Jotai, TanStack Query, Paraglide, shadcn/ui |
+| Server   | `node:http`, no framework — auth, RPC, media and the SPA on one origin       |
+| API      | oRPC procedures over Drizzle, keyset pagination, S3 presigned uploads        |
+| Auth     | better-auth: password, OAuth, two-factor, passkeys, One Tap                  |
+| Data     | Postgres 16, Drizzle ORM, committed migrations                               |
+| Hosting  | Railway (EU), Docker image built from `apps/server/Dockerfile`               |
 
-## Quick start
+## Prerequisites
 
-Requires Node 22 and pnpm 10. Copy `.env.example` → `.env` first — it is the
-single source of env for every host-side process.
+- Node 22 (`.nvmrc`) and pnpm 10
+- Docker, for Postgres and for running the production image locally
+
+## Setup
 
 ```bash
+cp .env.example .env      # the single source of env for every host-side process
 pnpm install
-pnpm docker:up   # Postgres :5432 + server image :3001 (migrations applied before the server starts)
-# or, for host-side dev (API :3001, Vite :5173 — ports clash, run one):
-pnpm dev
+pnpm docker:up            # Postgres :5432 + the server image :3001, migrations applied first
 ```
+
+Then either keep the Docker stack, or stop it and develop host-side:
+
+```bash
+pnpm dev                  # API :3001, Vite :5173
+```
+
+`pnpm dev` and `pnpm docker:up` both want ports 3001 and 5173 — run one, not
+both. `.env.example` explains every variable and what happens when it is
+unset; the traps worth knowing are collected in
+[docs/operations.md](docs/operations.md).
 
 ## Common commands
 
-| Command                                                                    | What                                                                                  |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `pnpm build` / `pnpm lint` / `pnpm typecheck`                              | turbo across the workspace                                                            |
-| `pnpm test:unit`                                                           | vitest unit suites (pure logic, no DB)                                                |
-| `pnpm db:test:setup && pnpm test:integration`                              | API integration against real Postgres                                                 |
-| `pnpm test:e2e`                                                            | Playwright (slow; own ports :3101/:5273)                                              |
-| `pnpm db:generate` / `db:push` / `db:promote`                              | migration from schema changes / apply / role grant (root aliases into `@my-tuums/db`) |
-| `pnpm --filter @my-tuums/db db:migrate` / `db:studio` / `db:generate:auth` | the rest of the Drizzle toolbox, package-level                                        |
-| `pnpm --filter @my-tuums/api exec vitest run src/foo.int.test.ts`          | single test (same pattern for web)                                                    |
+| Command                                                         | What it does                                        |
+| --------------------------------------------------------------- | --------------------------------------------------- |
+| `pnpm build` · `pnpm lint` · `pnpm typecheck`                   | turbo, across the workspace                         |
+| `pnpm test:unit`                                                | vitest unit suites — pure logic, no database needed |
+| `pnpm db:test:setup` then `pnpm test:integration`               | API integration suites against real Postgres        |
+| `pnpm test:e2e`                                                 | Playwright; slow, own ports (`:3101` / `:5273`)     |
+| `pnpm db:generate` · `pnpm db:push` · `pnpm db:promote`         | new migration · apply it · grant a moderation role  |
+| `pnpm docs:check`                                               | validate the docs against the code                  |
+| `pnpm docker:up` · `pnpm docker:down`                           | the full local stack                                |
+| `pnpm --filter @my-tuums/api exec vitest run src/image.test.ts` | one test file (same shape for web)                  |
+
+The rest of the Drizzle toolbox is package-level:
+`pnpm --filter @my-tuums/db db:migrate` · `db:check` · `db:studio` ·
+`db:generate:auth`.
 
 ## Repository layout
 
-- **`apps/web`** — the SPA. TanStack file routes in `src/routes/`; client
-  state in `src/atoms/` as Jotai atoms (never `useState` for shared state);
-  i18n messages in `messages/` compiled by Paraglide (never hand-edit
-  `src/paraglide/**`). The route tree and Paraglide output are git-ignored
-  generated files — build once before typecheck.
-- **`apps/server`** — the routing tree in `request-handler.ts` (health →
-  auth → rpc → media → SPA), zod-validated env in `env.ts` (a _partial_
-  OAuth or S3 pair refuses to boot), graceful shutdown that drains the DB
-  pool. Bundled with tsup.
-- **`packages/api`** — oRPC procedures (`me`, `post`, `user`) over Drizzle;
-  rate limiting keyed on the signed-in user; feeds keyset-paginated on
-  `(created_at, id)`; presigned S3 uploads with WebP dimension parsing.
-- **`packages/auth`** — better-auth with username, two-factor, passkey,
-  oneTap, last-login-method, i18n; social providers only register when the
-  full credential pair exists.
-- **`packages/db`** — Drizzle schema (`src/schema/`) + committed migrations
-  (`drizzle/`, shipped in the Docker image); destructive test helpers refuse
-  to run against databases whose name doesn't end in `_test`.
-- **`e2e`** — Playwright: `setup` (signs up alice/bob once), `api`
-  (transport-level, no browser), `chromium` (browser specs). Single worker.
+| Path            | What lives there                                                                     |
+| --------------- | ------------------------------------------------------------------------------------ |
+| `apps/web`      | the SPA: file routes in `src/routes`, Jotai state in `src/atoms`, i18n in `messages` |
+| `apps/server`   | the HTTP server: routing tree, env validation, static SPA, Dockerfile                |
+| `packages/api`  | oRPC procedures, business rules, moderation, media, rate limiting                    |
+| `packages/auth` | the single better-auth instance and its providers, email and hooks                   |
+| `packages/db`   | Drizzle schema, committed migrations, test-database guards                           |
+| `e2e`           | the Playwright suite                                                                 |
+| `docs`          | architecture, product, operations, security                                          |
+| `scripts`       | repository tooling (`check-docs.mjs`)                                                |
 
-Each package also carries its own `AGENTS.md` - the authoritative
-per-package deep-dive (file map, load-bearing decisions, commands).
+Each of those directories carries its own `AGENTS.md` — the authoritative
+guide for changing code inside it.
 
-## Conventions (hard rules)
+## Conventions
 
-- **UI: shadcn only.** Add components with the shadcn CLI; never another
-  component library or hand-rolled styled primitives.
-- **State: Jotai atoms, not hooks.** Server state via
-  `jotai-tanstack-query` atoms; reach for `useState`/`useEffect` only when
-  there is no atom-shaped way.
-- **Strict TS/ESLint configs are deliberate.** Fix the code, never weaken
-  the configs to make a check pass.
+Three rules are not negotiable, and a change that trips one should fix the
+code rather than the config:
 
-## Testing & CI
+- **UI is shadcn only** — add components with the shadcn CLI, never another
+  component library or a hand-rolled styled primitive.
+- **Shared client state is Jotai atoms**, not `useState`/`useEffect`.
+- **The strict TypeScript and ESLint configs are deliberate.**
 
-GitHub Actions (`ci.yml`): lint & typecheck, unit (deliberately no DB),
-integration (Postgres service), e2e (Postgres + ci-bucket S3), Docker image
-build (which boots the image and probes it over HTTP). A scheduled production
-smoke check (`smoke.yml`) probes the live domain. Security policy:
-[SECURITY.md](SECURITY.md).
+The full set, with the failure each one prevents, is in [AGENTS.md](AGENTS.md).
 
-## Deployment
+## Documentation
 
-Railway, always in a European region. The `production` environment owns the
-server, Postgres, and its bucket; `dev` and `ci` are buckets-only
-(Postgres and the monorepo run locally). Deploys build
-`apps/server/Dockerfile` (multi-stage: tsup bundle, Vite web build,
-migrations) and run migrations as a pre-deploy step. Railway must pass
-`VITE_SOCIAL_PROVIDERS` / `VITE_GOOGLE_CLIENT_ID` as Docker build args or the
-OAuth buttons silently don't ship (CI asserts this).
-
-## Env gotchas
-
-- `S3_BUCKET` is the bucket's **globally unique** name, not its display name;
-  `S3_ENDPOINT` must be the public endpoint (`storage.railway.internal` only
-  resolves inside Railway's network).
-- `VITE_SOCIAL_PROVIDERS` must agree with the providers that have
-  credentials server-side — the two lists are kept in agreement by hand.
-- `BETTER_AUTH_SECRET` must be ≥ 32 chars of real randomness.
-- `DATABASE_URL_TEST` is optional; when unset it is derived from
-  `DATABASE_URL` with a `_test` suffix.
+| Document                                     | Answers                                            |
+| -------------------------------------------- | -------------------------------------------------- |
+| [AGENTS.md](AGENTS.md)                       | where does this change go?                         |
+| [docs/architecture.md](docs/architecture.md) | how do the pieces fit and what happens at runtime? |
+| [docs/product.md](docs/product.md)           | what does the app do, and what do we call it?      |
+| [docs/operations.md](docs/operations.md)     | how do I run, deploy and maintain it?              |
+| [docs/security.md](docs/security.md)         | what is exposed, and what must not break?          |
+| [SECURITY.md](SECURITY.md)                   | how do I report a vulnerability?                   |
