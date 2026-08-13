@@ -105,6 +105,7 @@ function deps(overrides: Partial<RequestHandlerDeps> = {}): RequestHandlerDeps {
     // Defaults to "no session" — the tests that care about a signed-in
     // visitor override it.
     hasValidSession: vi.fn().mockResolvedValue(false),
+    observeError: vi.fn().mockReturnValue({ action: "continue" }),
     ...overrides,
   };
 }
@@ -640,72 +641,24 @@ describe("createRequestHandler", () => {
     );
   });
 
-  it("prefixes the safety net's log line with the request id", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const { res, calls } = resStub();
-      const handle = createRequestHandler(
-        deps({ handleRpc: vi.fn().mockRejectedValue(new Error("boom")) }),
-      );
-
-      await handle(reqStub("/rpc/post.create", "POST"), res);
-
-      expect(errorSpy).toHaveBeenCalledOnce();
-      expect(String(errorSpy.mock.calls[0][0])).toBe(
-        `[${calls.headersSet["x-request-id"]}] Unhandled error while handling POST /rpc/post.create:`,
-      );
-    } finally {
-      errorSpy.mockRestore();
-    }
-  });
-
-  it("notifies the injected observer of an unhandled error with its request id", async () => {
-    // The routing tree's console.error and 500 response stay here; the
-    // observer (wired to Sentry in index.ts) is how the crash leaves this
-    // module without it importing an error-tracking SDK.
+  it("notifies the injected observer of an unhandled request error", async () => {
     const { res, calls } = resStub();
-    const onUnhandledError = vi.fn();
+    const observeError = vi.fn().mockReturnValue({ action: "continue" });
     const boom = new Error("boom");
     const handle = createRequestHandler(
-      deps({ handleRpc: vi.fn().mockRejectedValue(boom), onUnhandledError }),
+      deps({ handleRpc: vi.fn().mockRejectedValue(boom), observeError }),
     );
-    const req = reqStub("/rpc/post.create", "POST");
 
-    await handle(req, res);
+    await handle(reqStub("/rpc/post.create?token=secret", "POST"), res);
 
-    expect(onUnhandledError).toHaveBeenCalledOnce();
-    expect(onUnhandledError).toHaveBeenCalledWith(boom, calls.headersSet["x-request-id"], req);
-  });
-
-  it("still writes the 500 when the observer itself throws", async () => {
-    // The observer (Sentry in index.ts) is a report channel, not part of
-    // the response path — its failure must be logged and ignored, never
-    // allowed to replace the 500 the client is owed.
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const { res, calls } = resStub();
-      const handle = createRequestHandler(
-        deps({
-          handleRpc: vi.fn().mockRejectedValue(new Error("boom")),
-          onUnhandledError: vi.fn().mockImplementation(() => {
-            throw new Error("observer exploded");
-          }),
-        }),
-      );
-
-      await handle(reqStub("/rpc/post.create", "POST"), res);
-
-      expect(calls.statusCode).toBe(500);
-      expect(JSON.parse(calls.body)).toEqual({
-        error: "Internal Server Error",
-        requestId: calls.headersSet["x-request-id"],
-      });
-      expect(
-        errorSpy.mock.calls.some((call) => String(call[0]).includes("Error observer threw:")),
-      ).toBe(true);
-    } finally {
-      errorSpy.mockRestore();
-    }
+    expect(observeError).toHaveBeenCalledOnce();
+    expect(observeError).toHaveBeenCalledWith({
+      source: "request",
+      error: boom,
+      requestId: calls.headersSet["x-request-id"],
+      method: "POST",
+      path: "/rpc/post.create",
+    });
   });
 
   it("destroys the socket instead of double-writing when headers are already sent", async () => {

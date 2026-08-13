@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { RPC_MAX_BODY_BYTES, SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
+import type { ErrorObserver } from "./error-observation.js";
 import { createRequestId, pathnameOf } from "./observability.js";
 
 /**
@@ -66,14 +67,11 @@ export interface RequestHandlerDeps {
    */
   hasValidSession: (req: IncomingMessage) => Promise<boolean>;
   /**
-   * Called when the top-level safety net catches an unhandled exception,
-   * with the request identity in hand. The routing tree's console.error and
-   * 500 response stay here — this callback exists so the *notification* of
-   * the crash can leave this module: `index.ts` wires it to Sentry, and the
-   * unit tests leave it out (or spy on it) without any of them importing an
-   * error-tracking SDK.
+   * Called when the top-level safety net catches an unhandled exception. The
+   * routing tree still owns the 500 response; the shared error-observation
+   * policy owns logging, client-abort filtering, and reporting.
    */
-  onUnhandledError?: (error: unknown, requestId: string, req: IncomingMessage) => void;
+  observeError: ErrorObserver;
 }
 
 const MEDIA_PREFIX = "/media/";
@@ -491,23 +489,15 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not found");
     } catch (error) {
-      // The pathname only, never the raw `req.url` — the same rule the
-      // access log lives by (observability.ts): query strings are where
-      // tokens ride (the appeal link's `?token=`, the password-reset
-      // link's `?token=`), and this line is written to the same logs.
-      console.error(
-        `[${requestId}] Unhandled error while handling ${req.method ?? "?"} ${pathnameOf(req.url) ?? "?"}:`,
+      // The error observer receives the pathname only, never the raw URL:
+      // query strings are where appeal and password-reset tokens ride.
+      deps.observeError({
+        source: "request",
         error,
-      );
-      // The observer (Sentry in index.ts) is a report channel, not part of
-      // the response path — a throw inside it must not turn this catch into
-      // a second failure that skips the 500 below (or, worse, escapes the
-      // tree and hits unhandledRejection, taking the whole process down).
-      try {
-        deps.onUnhandledError?.(error, requestId, req);
-      } catch (observerError) {
-        console.error(`[${requestId}] Error observer threw:`, observerError);
-      }
+        requestId,
+        method: req.method ?? "?",
+        path: pathnameOf(req.url) ?? "?",
+      });
 
       if (res.headersSent) {
         // Response already started; we cannot send a fresh status/body.

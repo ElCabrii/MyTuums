@@ -13,13 +13,14 @@ files, env validation, observability, shutdown. Business rules live in
 
 ## Start here
 
-| File                         | Why                                                                                |
-| ---------------------------- | ---------------------------------------------------------------------------------- |
-| `src/request-handler.ts`     | The routing decision tree — every gate, in order. Unit-tested with stand-ins.      |
-| `src/index.ts`               | The real entrypoint: wiring, Sentry, graceful shutdown, the one `process.exit(1)`. |
-| `src/env.ts`                 | Every variable the server reads, and the all-or-nothing group rules.               |
-| `Dockerfile`                 | How the production artefact is assembled.                                          |
-| `../../docs/architecture.md` | Route order and one-origin routing in prose.                                       |
+| File                         | Why                                                                           |
+| ---------------------------- | ----------------------------------------------------------------------------- |
+| `src/request-handler.ts`     | The routing decision tree — every gate, in order. Unit-tested with stand-ins. |
+| `src/index.ts`               | The real entrypoint: wiring, graceful shutdown, the one `process.exit(1)`.    |
+| `src/error-observation.ts`   | Which faults are logged, reported, ignored, or require shutdown.              |
+| `src/env.ts`                 | Every variable the server reads, and the all-or-nothing group rules.          |
+| `Dockerfile`                 | How the production artefact is assembled.                                     |
+| `../../docs/architecture.md` | Route order and one-origin routing in prose.                                  |
 
 `src/index.ts` is deliberately outside the vitest scope — module-scope env
 parsing and exit handlers would kill the runner. Its HTTP behaviour is covered
@@ -27,16 +28,17 @@ by the Playwright `api` project.
 
 ## Change map
 
-| Intent                            | Primary                                              | Also touch                                                                         |
-| --------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Add or reorder an HTTP route      | `src/request-handler.ts`                             | `src/request-handler.test.ts`, `../../e2e/tests/api`                               |
-| Change who may reach a page       | `packages/api/src/constants.ts` (`SIGNED_OUT_PATHS`) | never duplicate it — the client gate reads the same set                            |
-| Add an environment variable       | `src/env.ts`                                         | `../../.env.example`, `../../docker-compose.yml`, `Dockerfile` if it is a `VITE_*` |
-| Change security or cache headers  | `src/response-decorators.ts`, `src/static-files.ts`  | `../../e2e/tests/api/headers.spec.ts`                                              |
-| Change compression behaviour      | `src/compression.ts`                                 | both call sites: the decorator and static files                                    |
-| Change logging or error reporting | `src/observability.ts`, `src/sentry.ts`              | `src/index.ts` (the `onError` interceptor)                                         |
-| Change what ships in the image    | `Dockerfile`                                         | `.github/workflows/ci.yml` (`docker` job asserts it)                               |
-| Change the migration runner       | `src/migrate.ts`                                     | `../../docker-compose.yml`                                                         |
+| Intent                                | Primary                                              | Also touch                                                                         |
+| ------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Add or reorder an HTTP route          | `src/request-handler.ts`                             | `src/request-handler.test.ts`, `../../e2e/tests/api`                               |
+| Change who may reach a page           | `packages/api/src/constants.ts` (`SIGNED_OUT_PATHS`) | never duplicate it — the client gate reads the same set                            |
+| Add an environment variable           | `src/env.ts`                                         | `../../.env.example`, `../../docker-compose.yml`, `Dockerfile` if it is a `VITE_*` |
+| Change security or cache headers      | `src/response-decorators.ts`, `src/static-files.ts`  | `../../e2e/tests/api/headers.spec.ts`                                              |
+| Change compression behaviour          | `src/compression.ts`                                 | both call sites: the decorator and static files                                    |
+| Change access logging or request ids  | `src/observability.ts`                               | `src/request-handler.ts`                                                           |
+| Change error classification/reporting | `src/error-observation.ts`, `src/sentry.ts`          | `src/index.ts`                                                                     |
+| Change what ships in the image        | `Dockerfile`                                         | `.github/workflows/ci.yml` (`docker` job asserts it)                               |
+| Change the migration runner           | `src/migrate.ts`                                     | `../../docker-compose.yml`                                                         |
 
 ## Invariants
 
@@ -51,6 +53,11 @@ by the Playwright `api` project.
 - **The access log records the pathname only, never `req.url`.** Query strings
   are where tokens end up, and a log that stored them verbatim leaks on every
   dump.
+- **All Sentry decisions go through `src/error-observation.ts`.** oRPC 4xx
+  failures and request-level client-abort codes are logged but not reported;
+  process-level faults are reported and return a shutdown decision. A broken
+  logger or reporter must never replace the observed failure, response, or
+  shutdown.
 - **`/api/auth/admin/*` must 404 before the auth pass-through.** The admin
   plugin gates on its own `adminRoles` option, which cannot express this app's
   hierarchy. Blocking it keeps `/rpc` the only path to a moderation action, so

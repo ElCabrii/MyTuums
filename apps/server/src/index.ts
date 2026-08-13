@@ -11,6 +11,7 @@ import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "@my-tuums/auth";
 import { closeDb, pingDb } from "@my-tuums/db";
+import { createErrorObserver } from "./error-observation.js";
 import { attachAccessLog } from "./observability.js";
 import { flushSentry, initSentry, reportError } from "./sentry.js";
 
@@ -36,6 +37,11 @@ const PORT = env.PORT;
 if (env.SENTRY_DSN) {
   initSentry(env.SENTRY_DSN, env.NODE_ENV);
 }
+
+const observeError = createErrorObserver({
+  report: reportError,
+  log: (message, error) => console.error(message, error),
+});
 
 const authNodeHandler = toNodeHandler(auth);
 
@@ -65,27 +71,14 @@ const handler = new RPCHandler(appRouter, {
   ],
   interceptors: [
     onError((error, { context }) => {
-      try {
-        // The requestId makes the line grep-able back to the x-request-id of
-        // the response the client actually saw.
-        console.error(`[${context.requestId}] oRPC error:`, error);
-
-        // Only 500-class faults (and unknown errors, which oRPC maps to
-        // INTERNAL_SERVER_ERROR) belong in Sentry: a 4xx is the caller's
-        // mistake — validation, not-found, unauthorized — expected by the
-        // client and handled there. An unknown thrown error, though, is a
-        // crash inside a procedure, and this interceptor is the only place
-        // it surfaces (oRPC catches it before it can reach the routing
-        // tree's safety net).
-        const status = error instanceof ORPCError ? error.status : 500;
-        if (status >= 500) reportError(error, context.requestId);
-      } catch (reportFailure) {
-        // A throwing reporter must not replace the original procedure error
-        // the client is about to receive — the interceptor re-throws what
-        // this callback lets escape, so an unguarded throw here would send
-        // the client the reporter's error instead of the real one.
-        console.error(`[${context.requestId}] Error reporter threw:`, reportFailure);
-      }
+      observeError({
+        source: "orpc",
+        error,
+        requestId: context.requestId,
+        // Unknown errors become INTERNAL_SERVER_ERROR inside oRPC; this
+        // interceptor is the only place they surface before that mapping.
+        status: error instanceof ORPCError ? error.status : 500,
+      });
     }),
   ],
 });
@@ -137,39 +130,7 @@ const handleRequest = createRequestHandler({
       return true;
     }
   },
-  // The safety net's crash notification leaves the routing tree through
-  // this callback — Sentry, with the requestId the tree generated attached.
-  // The routing tree itself keeps doing its own console.error; this is
-  // the report to the aggregator, not a replacement for the log.
-  onUnhandledError: (error, requestId) => {
-    // A client that hangs up mid-response is expected traffic on a public
-    // app, not a server fault — and unlike the oRPC interceptor's 500-class
-    // filter, this path never sees the status: the rejection escapes the
-    // handler and lands here unfiltered. Skip those, so the "only 500-class
-    // faults reach Sentry" invariant holds here too. ECONNRESET/EPIPE are
-    // the client-abort codes; ERR_STREAM_DESTROYED is the same class of
-    // write failure (the socket gone before the response finished) wearing
-    // a different name.
-    //
-    // The tradeoff, accepted: a database fault that surfaces AS a socket
-    // error (e.g. postgres.js rejecting with the underlying ECONNRESET)
-    // is skipped too. It is still console-logged and access-logged with
-    // its 500, so the event is recoverable — this filter only decides
-    // what reaches the aggregator, and a heuristic that silences the
-    // common expected noise is worth missing the rare misattributed
-    // fault.
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error.code === "ECONNRESET" ||
-        error.code === "EPIPE" ||
-        error.code === "ERR_STREAM_DESTROYED")
-    ) {
-      return;
-    }
-    reportError(error, requestId);
-  },
+  observeError,
 });
 
 // `createServer`'s callback type is `(req, res) => void`; passing an async
@@ -258,27 +219,13 @@ function shutdown(reason: string, code: number) {
 }
 
 process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled promise rejection:", reason);
-  // Process-level faults have no request to belong to — the event goes to
-  // Sentry with no requestId tag, and the flush inside `shutdown` carries
-  // it out before the exit. A throwing reporter must not crash the process
-  // a second time with the wrong error, or skip the graceful shutdown.
-  try {
-    reportError(reason);
-  } catch (error) {
-    console.error("Failed to report to Sentry:", error);
-  }
-  shutdown("unhandledRejection", 1);
+  const decision = observeError({ source: "process", event: "unhandledRejection", error: reason });
+  if (decision.action === "shutdown") shutdown(decision.reason, decision.exitCode);
 });
 
 process.on("uncaughtException", (error) => {
-  console.error("Uncaught exception:", error);
-  try {
-    reportError(error);
-  } catch (reportFailure) {
-    console.error("Failed to report to Sentry:", reportFailure);
-  }
-  shutdown("uncaughtException", 1);
+  const decision = observeError({ source: "process", event: "uncaughtException", error });
+  if (decision.action === "shutdown") shutdown(decision.reason, decision.exitCode);
 });
 
 // Orchestrators (Docker, k8s, `docker compose stop`) send SIGTERM; Ctrl+C
