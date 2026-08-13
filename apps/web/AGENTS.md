@@ -23,7 +23,7 @@ app's build from the same origin.
 | ---------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | Add a page                   | `src/routes/<name>.tsx` (thin wrapper)                          | the page body in `src/components/`; `SIGNED_OUT_PATHS` if it must work signed out |
 | Add client state             | `src/atoms/<concern>.ts`                                        | its `.test.ts` sibling                                                            |
-| Read server data             | a new `atomWithQuery` / `atomWithInfiniteQuery` in `src/atoms/` | `src/lib/orpc.ts` if a new response type is needed                                |
+| Read server data             | a new `atomWithQuery` / `atomWithInfiniteQuery` in `src/atoms/` | `src/lib/query-definitions.ts`; `src/lib/orpc.ts` for response types              |
 | Add a mutation with optimism | `src/atoms/<concern>.ts`                                        | `src/lib/post-cache.ts` or `follow-cache.ts` for the sweep                        |
 | Add a UI component           | `pnpm --filter @my-tuums/web exec shadcn add <component>`       | never hand-write into `src/components/ui`                                         |
 | Add or change copy           | `messages/en.json`, `messages/fr.json`                          | recompile; never touch `src/paraglide`                                            |
@@ -47,8 +47,8 @@ app's build from the same origin.
   `setShouldRemove`. Object params force a linear-scan `areEqual`; lazy removal
   can split a shared observer mid-scroll. Cleanup happens in
   `src/atoms/sign-out-sweep.ts`, where nothing is mounted.
-- **The conditional spreads in `src/atoms/post-feed.ts` and
-  `src/atoms/user-list.ts` are load-bearing.** oRPC embeds the whole input
+- **The conditional spreads in `src/lib/query-definitions.ts` are
+  load-bearing.** oRPC embeds the whole input
   object in the query key; those spreads keep the global feed's key bare, and
   the optimistic sweeps match on exactly those prefixes. "Cleaning them up"
   forks every cache entry silently.
@@ -112,8 +112,9 @@ first.
 | `pnpm --filter @my-tuums/web build`                                   | the production bundle |
 
 `src/test/render.tsx` provides `renderWithProviders`: a fresh store, a memory
-router, a mocked auth client and cache seeding. The `seedInfiniteError`
-helpers must be awaited.
+router and a mocked auth client. `src/test/query-fixtures.ts` owns query-cache
+seeding through `queryFixtures(queryClient)`; its error operations must be
+awaited.
 
 ## Further reading
 

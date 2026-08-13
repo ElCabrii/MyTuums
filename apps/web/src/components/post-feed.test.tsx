@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
-import {
-  createTestQueryClient,
-  makePost,
-  postListQueryKey,
-  renderWithProviders,
-  seedInfiniteError,
-  seedInfiniteLoading,
-  seedPostListPages,
-} from "@/test/render";
+import { createTestQueryClient, makePost, queryFixtures, renderWithProviders } from "@/test/render";
 import { PostFeed } from "@/components/post-feed";
 import { postFeedAtom } from "@/atoms/post-feed";
 import { m } from "@/paraglide/messages.js";
@@ -22,7 +14,7 @@ const globalFeed = () => postFeedAtom({ feed: "global" });
 describe("PostFeed", () => {
   it("shows a loading spinner while the feed is pending", async () => {
     const queryClient = createTestQueryClient();
-    seedInfiniteLoading(queryClient, postListQueryKey());
+    queryFixtures(queryClient).postList.loading();
 
     const { container } = await renderWithProviders(
       <PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />,
@@ -35,7 +27,7 @@ describe("PostFeed", () => {
 
   it("shows a retryable error when the feed fails to load", async () => {
     const queryClient = createTestQueryClient();
-    await seedInfiniteError(queryClient, postListQueryKey(), "Could not load posts.");
+    await queryFixtures(queryClient).postList.error("Could not load posts.");
 
     await renderWithProviders(
       <PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />,
@@ -58,7 +50,7 @@ describe("PostFeed", () => {
 
   it("shows the empty message and action when there are no posts", async () => {
     const queryClient = createTestQueryClient();
-    seedPostListPages(queryClient, [{ items: [], nextCursor: null }]);
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }]);
 
     await renderWithProviders(
       <PostFeed
@@ -77,7 +69,7 @@ describe("PostFeed", () => {
     const queryClient = createTestQueryClient();
     const first = makePost({ content: "First post" });
     const second = makePost({ content: "Second post" });
-    seedPostListPages(queryClient, [
+    queryFixtures(queryClient).postList.data([
       { items: [first], nextCursor: "cursor-1" },
       { items: [second], nextCursor: null },
     ]);
@@ -95,7 +87,7 @@ describe("PostFeed", () => {
 
   it("shows Load more only when there is a next page", async () => {
     const withNextPage = createTestQueryClient();
-    seedPostListPages(withNextPage, [{ items: [makePost()], nextCursor: "cursor-1" }]);
+    queryFixtures(withNextPage).postList.data([{ items: [makePost()], nextCursor: "cursor-1" }]);
     const more = await renderWithProviders(
       <PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />,
       {
@@ -106,7 +98,7 @@ describe("PostFeed", () => {
     more.unmount();
 
     const withoutNextPage = createTestQueryClient();
-    seedPostListPages(withoutNextPage, [{ items: [makePost()], nextCursor: null }]);
+    queryFixtures(withoutNextPage).postList.data([{ items: [makePost()], nextCursor: null }]);
     await renderWithProviders(
       <PostFeed feedAtom={globalFeed()} emptyMessage="Nothing here yet." />,
       {

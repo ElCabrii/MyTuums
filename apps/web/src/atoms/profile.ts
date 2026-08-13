@@ -1,6 +1,6 @@
 import { atomFamily } from "jotai-family";
 import { atomWithQuery } from "jotai-tanstack-query";
-import { orpc, retryUnlessClientError } from "@/lib/orpc";
+import { profileQueryOptions } from "@/lib/query-definitions";
 
 /**
  * One query atom per handle, shared by every component that reads that
@@ -28,12 +28,5 @@ import { orpc, retryUnlessClientError } from "@/lib/orpc";
  * instead happens at sign-out, where nothing is mounted to split.
  */
 export const profileAtomFamily = atomFamily((username: string) =>
-  atomWithQuery(() => ({
-    // oRPC's `queryOptions` returns `{ queryFn, ...optionsIn, queryKey }` —
-    // `retry` must be spread in after it, or that trailing spread of
-    // `optionsIn` would clobber it back to oRPC's default. This is what
-    // stops a 404'd handle from being retried.
-    ...orpc.user.byUsername.queryOptions({ input: { username } }),
-    retry: retryUnlessClientError,
-  })),
+  atomWithQuery(() => profileQueryOptions(username)),
 );

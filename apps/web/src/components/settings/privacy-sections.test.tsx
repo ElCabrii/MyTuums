@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createTestQueryClient,
+  queryFixtures,
   renderWithProviders,
-  seedQueryError,
-  seedQueryLoading,
   setTestSocialProviders,
 } from "@/test/render";
 import { screen, waitFor } from "@testing-library/react";
@@ -70,7 +69,7 @@ describe("LinkedAccountsSection", () => {
   it("shows the provider loading state", async () => {
     setTestSocialProviders([{ id: "google", label: "Google" }]);
     const queryClient = createTestQueryClient();
-    seedQueryLoading(queryClient, linkedAccountsQueryKey);
+    queryFixtures(queryClient).query.loading(linkedAccountsQueryKey);
     await renderWithProviders(<LinkedAccountsSection />, { queryClient, signedInAs: true });
 
     expect(screen.getByText(m.settings_linked_loading())).toBeInTheDocument();
@@ -143,7 +142,7 @@ describe("LinkedAccountsSection", () => {
 describe("BlockedUsersSection", () => {
   it("renders loading, a retryable error, and the empty result", async () => {
     const loadingClient = createTestQueryClient();
-    seedQueryLoading(loadingClient, orpc.moderation.listBlocked.queryKey());
+    queryFixtures(loadingClient).query.loading(orpc.moderation.listBlocked.queryKey());
     const loading = await renderWithProviders(<BlockedUsersSection />, {
       queryClient: loadingClient,
       signedInAs: true,
@@ -153,8 +152,7 @@ describe("BlockedUsersSection", () => {
 
     fakeClient.moderation.listBlocked.mockResolvedValueOnce({ items: [] });
     const errorClient = createTestQueryClient();
-    await seedQueryError(
-      errorClient,
+    await queryFixtures(errorClient).query.error(
       orpc.moderation.listBlocked.queryKey(),
       new Error("temporary failure"),
     );

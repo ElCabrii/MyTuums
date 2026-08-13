@@ -5,9 +5,8 @@ import {
   createTestQueryClient,
   makeModerationCase,
   makeModerationCaseDetail,
+  queryFixtures,
   renderWithProviders,
-  seedModerationCase,
-  seedModerationQueuePages,
 } from "@/test/render";
 import { QueueView } from "@/components/moderation/queue-view";
 import { m } from "@/paraglide/messages.js";
@@ -46,7 +45,7 @@ beforeEach(() => {
 describe("QueueView", () => {
   it("shows an open appeal with a badge, and a report count in the right plural form", async () => {
     const queryClient = createTestQueryClient();
-    seedModerationQueuePages(queryClient, [
+    queryFixtures(queryClient).moderation.queue([
       {
         items: [
           makeModerationCase({
@@ -71,7 +70,7 @@ describe("QueueView", () => {
 
   it("uses the singular report count for exactly one report, and no appeal badge without an open appeal", async () => {
     const queryClient = createTestQueryClient();
-    seedModerationQueuePages(queryClient, [
+    queryFixtures(queryClient).moderation.queue([
       {
         items: [
           makeModerationCase({
@@ -95,7 +94,7 @@ describe("QueueView", () => {
 
   it("opens the case dialog for the clicked row's exact target", async () => {
     const queryClient = createTestQueryClient();
-    seedModerationQueuePages(queryClient, [
+    queryFixtures(queryClient).moderation.queue([
       {
         items: [
           makeModerationCase({ targetType: "post", targetId: "post-42", reasons: ["spam"] }),
@@ -106,8 +105,7 @@ describe("QueueView", () => {
         nextCursor: null,
       },
     ]);
-    seedModerationCase(
-      queryClient,
+    queryFixtures(queryClient).moderation.case(
       { targetType: "post", targetId: "post-42" },
       makeModerationCaseDetail({ id: "post-42", content: "The flagged post" }),
     );

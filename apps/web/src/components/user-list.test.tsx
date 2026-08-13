@@ -3,11 +3,8 @@ import { screen } from "@testing-library/react";
 import {
   createTestQueryClient,
   makeUserSummary,
+  queryFixtures,
   renderWithProviders,
-  seedInfiniteError,
-  seedInfiniteLoading,
-  seedUserListPages,
-  userListQueryKey,
 } from "@/test/render";
 import { UserList } from "@/components/user-list";
 import { m } from "@/paraglide/messages.js";
@@ -15,7 +12,7 @@ import { m } from "@/paraglide/messages.js";
 describe("UserList", () => {
   it("shows a loading spinner while the list is pending", async () => {
     const queryClient = createTestQueryClient();
-    seedInfiniteLoading(queryClient, userListQueryKey("alexmercer", "followers"));
+    queryFixtures(queryClient).userList.loading("alexmercer", "followers");
 
     const { container } = await renderWithProviders(
       <UserList username="alexmercer" direction="followers" emptyMessage="No followers yet." />,
@@ -28,9 +25,9 @@ describe("UserList", () => {
 
   it("shows a retryable error when the list fails to load", async () => {
     const queryClient = createTestQueryClient();
-    await seedInfiniteError(
-      queryClient,
-      userListQueryKey("alexmercer", "followers"),
+    await queryFixtures(queryClient).userList.error(
+      "alexmercer",
+      "followers",
       "Could not load followers.",
     );
 
@@ -51,7 +48,9 @@ describe("UserList", () => {
 
   it("shows the empty message when there are no people in the list", async () => {
     const queryClient = createTestQueryClient();
-    seedUserListPages(queryClient, "alexmercer", "followers", [{ items: [], nextCursor: null }]);
+    queryFixtures(queryClient).userList.data("alexmercer", "followers", [
+      { items: [], nextCursor: null },
+    ]);
 
     await renderWithProviders(
       <UserList username="alexmercer" direction="followers" emptyMessage="No followers yet." />,
@@ -77,7 +76,7 @@ describe("UserList", () => {
       username: "caseynolan",
       displayUsername: "CaseyNolan",
     });
-    seedUserListPages(queryClient, "alexmercer", "followers", [
+    queryFixtures(queryClient).userList.data("alexmercer", "followers", [
       { items: [jamie, casey], nextCursor: null },
     ]);
 
@@ -98,7 +97,7 @@ describe("UserList", () => {
 
   it("shows Load more only when there is a next page", async () => {
     const withNextPage = createTestQueryClient();
-    seedUserListPages(withNextPage, "alexmercer", "followers", [
+    queryFixtures(withNextPage).userList.data("alexmercer", "followers", [
       { items: [makeUserSummary()], nextCursor: "cursor-1" },
     ]);
     const more = await renderWithProviders(
@@ -109,7 +108,7 @@ describe("UserList", () => {
     more.unmount();
 
     const withoutNextPage = createTestQueryClient();
-    seedUserListPages(withoutNextPage, "alexmercer", "followers", [
+    queryFixtures(withoutNextPage).userList.data("alexmercer", "followers", [
       { items: [makeUserSummary()], nextCursor: null },
     ]);
     await renderWithProviders(

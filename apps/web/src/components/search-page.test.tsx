@@ -6,8 +6,7 @@ import {
   makePost,
   makeUserSummary,
   renderWithProviders,
-  seedSearchPostsPages,
-  seedSearchUsersPages,
+  queryFixtures,
 } from "@/test/render";
 
 describe("SearchPage", () => {
@@ -47,10 +46,10 @@ describe("SearchPage", () => {
     // refetchOnMount: false means the seeded pages render as-is, with no
     // network call), so the assertion below is "both sections rendered their
     // rows" and not "both sections rendered their error alerts".
-    seedSearchUsersPages(queryClient, "hello", [
+    queryFixtures(queryClient).search.users("hello", [
       { items: [makeUserSummary({ name: "Alex Mercer" })], nextCursor: null },
     ]);
-    seedSearchPostsPages(queryClient, "hello", [
+    queryFixtures(queryClient).search.posts("hello", [
       // Distinct author name — `makePost`'s default author is also Alex
       // Mercer, which would trip the name assertion below twice.
       {

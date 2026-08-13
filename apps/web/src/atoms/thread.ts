@@ -1,6 +1,6 @@
 import { atomFamily } from "jotai-family";
 import { atomWithQuery } from "jotai-tanstack-query";
-import { orpc, retryUnlessClientError } from "@/lib/orpc";
+import { threadQueryOptions } from "@/lib/query-definitions";
 
 /**
  * One query atom per post id — the focused post plus its ancestor chain, as
@@ -17,14 +17,7 @@ import { orpc, retryUnlessClientError } from "@/lib/orpc";
  * feed cache the optimistic-like sweep already covers.
  */
 export const threadAtomFamily = atomFamily((postId: string) =>
-  atomWithQuery(() => ({
-    // `retry` is spread in after `queryOptions()` for the same reason as in
-    // `atoms/profile.ts`: oRPC's trailing spread of its own options would
-    // otherwise clobber it back to the default, and a deleted post would be
-    // retried on its way to a 404.
-    ...orpc.post.thread.queryOptions({ input: { postId } }),
-    retry: retryUnlessClientError,
-  })),
+  atomWithQuery(() => threadQueryOptions(postId)),
 );
 
 /**

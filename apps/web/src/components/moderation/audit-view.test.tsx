@@ -3,8 +3,8 @@ import { screen } from "@testing-library/react";
 import {
   createTestQueryClient,
   makeAuditEntry,
+  queryFixtures,
   renderWithProviders,
-  seedAuditLogPages,
 } from "@/test/render";
 import { AuditView } from "@/components/moderation/audit-view";
 import { m } from "@/paraglide/messages.js";
@@ -18,7 +18,7 @@ import { m } from "@/paraglide/messages.js";
 describe("AuditView", () => {
   it("renders an actioned entry with its actor and target", async () => {
     const queryClient = createTestQueryClient();
-    seedAuditLogPages(queryClient, [
+    queryFixtures(queryClient).moderation.auditLog([
       {
         items: [
           makeAuditEntry({
@@ -55,7 +55,7 @@ describe("AuditView", () => {
 
   it("renders a system actor and a post target as the dash and the truncated post id", async () => {
     const queryClient = createTestQueryClient();
-    seedAuditLogPages(queryClient, [
+    queryFixtures(queryClient).moderation.auditLog([
       {
         items: [
           makeAuditEntry({
@@ -87,7 +87,7 @@ describe("AuditView", () => {
 
   it("renders the empty state when the log has no entries", async () => {
     const queryClient = createTestQueryClient();
-    seedAuditLogPages(queryClient, [{ items: [], nextCursor: null }]);
+    queryFixtures(queryClient).moderation.auditLog([{ items: [], nextCursor: null }]);
     await renderWithProviders(<AuditView />, { queryClient, signedInAs: { role: "staff" } });
 
     expect(await screen.findByText(m.moderation_audit_empty())).toBeInTheDocument();

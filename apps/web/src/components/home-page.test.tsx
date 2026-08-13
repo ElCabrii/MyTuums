@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { feedScopeAtom } from "@/lib/feed-scope";
-import { createTestQueryClient, renderWithProviders, seedPostListPages } from "@/test/render";
+import { createTestQueryClient, queryFixtures, renderWithProviders } from "@/test/render";
 import { HomePage } from "@/components/home-page";
 import { m } from "@/paraglide/messages.js";
 
@@ -34,7 +34,7 @@ describe("HomePage", () => {
     const store = createStore();
     store.set(feedScopeAtom, "global");
     const queryClient = createTestQueryClient();
-    seedPostListPages(queryClient, [{ items: [], nextCursor: null }]);
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }]);
 
     await renderWithProviders(<HomePage />, { store, queryClient, signedInAs: true });
 
@@ -50,8 +50,10 @@ describe("HomePage", () => {
     const store = createStore();
     store.set(feedScopeAtom, "global");
     const queryClient = createTestQueryClient();
-    seedPostListPages(queryClient, [{ items: [], nextCursor: null }]);
-    seedPostListPages(queryClient, [{ items: [], nextCursor: null }], { feed: "following" });
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }]);
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }], {
+      feed: "following",
+    });
     const { router } = await renderWithProviders(<HomePage />, {
       store,
       queryClient,
@@ -75,7 +77,9 @@ describe("HomePage", () => {
     const store = createStore();
     store.set(feedScopeAtom, "following");
     const queryClient = createTestQueryClient();
-    seedPostListPages(queryClient, [{ items: [], nextCursor: null }], { feed: "following" });
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }], {
+      feed: "following",
+    });
 
     await renderWithProviders(<HomePage />, { store, queryClient, signedInAs: true });
 

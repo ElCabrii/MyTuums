@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createTestQueryClient,
   patchTestSessionUser,
+  queryFixtures,
   renderWithProviders,
-  seedQueryLoading,
   setTestSignedOut,
 } from "@/test/render";
 import { act, screen, waitFor } from "@testing-library/react";
@@ -71,7 +71,7 @@ describe("HandleSection", () => {
 describe("PasswordSection", () => {
   it("stays hidden while linked accounts load and for OAuth-only accounts", async () => {
     const loadingClient = createTestQueryClient();
-    seedQueryLoading(loadingClient, linkedAccountsQueryKey);
+    queryFixtures(loadingClient).query.loading(linkedAccountsQueryKey);
     const loading = await renderWithProviders(<PasswordSection />, {
       queryClient: loadingClient,
       signedInAs: true,

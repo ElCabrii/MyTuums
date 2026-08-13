@@ -7,11 +7,8 @@ import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import {
   createTestQueryClient,
   makeProfile,
-  profileQueryKey,
+  queryFixtures,
   renderWithProviders,
-  seedProfile,
-  seedQueryError,
-  seedQueryLoading,
 } from "@/test/render";
 import { ProfileLayout } from "@/components/profile-layout";
 import { m } from "@/paraglide/messages.js";
@@ -40,7 +37,7 @@ beforeEach(() => {
 describe("ProfileLayout query states", () => {
   it("renders only the loading shell while the profile is pending", async () => {
     const queryClient = createTestQueryClient();
-    seedQueryLoading(queryClient, profileQueryKey("pending"));
+    queryFixtures(queryClient).profile.loading("pending");
 
     await renderWithProviders(<ProfileLayout />, {
       queryClient,
@@ -54,7 +51,7 @@ describe("ProfileLayout query states", () => {
 
   it("renders the not-found stub for a missing handle", async () => {
     const queryClient = createTestQueryClient();
-    await seedQueryError(queryClient, profileQueryKey("missing"), new ORPCError("NOT_FOUND"));
+    await queryFixtures(queryClient).profile.error("missing", new ORPCError("NOT_FOUND"));
 
     await renderWithProviders(<ProfileLayout />, {
       queryClient,
@@ -75,7 +72,7 @@ describe("ProfileLayout query states", () => {
     });
     fakeClient.user.byUsername.mockResolvedValue(recovered);
     const queryClient = createTestQueryClient();
-    await seedQueryError(queryClient, profileQueryKey("recovered"), new Error("temporary failure"));
+    await queryFixtures(queryClient).profile.error("recovered", new Error("temporary failure"));
     await renderWithProviders(<ProfileLayout />, {
       queryClient,
       initialPath: "/@recovered",
@@ -98,8 +95,7 @@ describe("ProfileLayout query states", () => {
 describe("ProfileLayout role and ownership gates", () => {
   it("shows a suspended stub but no unban action to a plain user", async () => {
     const queryClient = createTestQueryClient();
-    seedProfile(
-      queryClient,
+    queryFixtures(queryClient).profile.data(
       "suspended",
       makeProfile({ username: "suspended", displayUsername: "Suspended", suspended: true }),
     );
@@ -125,7 +121,7 @@ describe("ProfileLayout role and ownership gates", () => {
     fakeClient.moderation.unbanUser.mockResolvedValue({ userId: suspended.id, unbanned: true });
     fakeClient.user.byUsername.mockResolvedValue(recovered);
     const queryClient = createTestQueryClient();
-    seedProfile(queryClient, "suspended", suspended);
+    queryFixtures(queryClient).profile.data("suspended", suspended);
     await renderWithProviders(<ProfileLayout />, {
       queryClient,
       initialPath: "/@suspended",
@@ -146,7 +142,7 @@ describe("ProfileLayout role and ownership gates", () => {
   it("shows settings, sign-out and private email only on the viewer's own profile", async () => {
     const own = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
     const queryClient = createTestQueryClient();
-    seedProfile(queryClient, "alex", own);
+    queryFixtures(queryClient).profile.data("alex", own);
 
     await renderWithProviders(<ProfileLayout />, {
       queryClient,
@@ -164,7 +160,7 @@ describe("ProfileLayout role and ownership gates", () => {
     const other = makeProfile({ id: "other-1", username: "other", displayUsername: "Other" });
     const store = createStore();
     const queryClient = createTestQueryClient();
-    seedProfile(queryClient, "other", other);
+    queryFixtures(queryClient).profile.data("other", other);
     await renderWithProviders(<ProfileLayout />, {
       store,
       queryClient,
