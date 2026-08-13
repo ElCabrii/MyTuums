@@ -167,6 +167,9 @@ Destructive helpers refuse to touch anything else.
   server simply has no error-tracking client. When set, unhandled request
   errors are reported with the request id attached, 4xx responses deliberately
   are not, process crashes are reported, and the queue is flushed on shutdown.
+  `apps/server/src/error-observation.ts` owns those classification decisions;
+  `apps/server/src/sentry.ts` is the reporting adapter, while `index.ts` owns
+  the actual shutdown and flush.
 - **Health.** `GET /health` is DB-backed and returns `{"status":"ok"}`.
 
 ## CI and smoke checks
