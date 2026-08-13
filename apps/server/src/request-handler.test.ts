@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 import { RPC_MAX_BODY_BYTES, SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
-import { createRequestHandler, type RequestHandlerDeps } from "./request-handler.js";
+import {
+  AUTH_MAX_BODY_BYTES,
+  createRequestHandler,
+  type RequestHandlerDeps,
+} from "./request-handler.js";
 
 /**
  * A response double that records what was written, matching only the
@@ -51,6 +56,23 @@ function reqStub(
   headers: Record<string, string> = {},
 ): IncomingMessage {
   return { url, method, headers } as unknown as IncomingMessage;
+}
+
+function streamReqStub(
+  url: string,
+  body: Buffer,
+  method = "POST",
+  headers: Record<string, string> = {},
+): IncomingMessage {
+  const request = Readable.from([body]);
+  Object.assign(request, {
+    url,
+    method,
+    headers: { ...headers, "transfer-encoding": "chunked" },
+    httpVersionMajor: 1,
+    socket: { encrypted: false },
+  });
+  return request as unknown as IncomingMessage;
 }
 
 /** A representative media hit: a URL plus the signing-window cache budget. */
@@ -273,6 +295,61 @@ describe("createRequestHandler", () => {
 
     expect(authNodeHandler).toHaveBeenCalledOnce();
     expect(handleRpc).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized declared auth body before Better Auth runs", async () => {
+    const { res, calls } = resStub();
+    const authNodeHandler = vi.fn();
+    const handle = createRequestHandler(deps({ authNodeHandler }));
+
+    await handle(
+      reqStub("/api/auth/sign-in/email", "POST", {
+        "content-length": String(AUTH_MAX_BODY_BYTES + 1),
+      }),
+      res,
+    );
+
+    expect(authNodeHandler).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(413);
+    expect(calls.body).toBe("Payload too large");
+  });
+
+  it("rejects a chunked auth body when streamed bytes cross the limit", async () => {
+    const { res, calls } = resStub();
+    const authNodeHandler = vi.fn();
+    const handle = createRequestHandler(deps({ authNodeHandler }));
+
+    await handle(
+      streamReqStub("/api/auth/sign-in/email", Buffer.alloc(AUTH_MAX_BODY_BYTES + 1)),
+      res,
+    );
+
+    expect(authNodeHandler).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(413);
+    expect(calls.body).toBe("Payload too large");
+  });
+
+  it("replays a chunked auth body at exactly the limit to Better Auth", async () => {
+    const { res, calls } = resStub();
+    const received: Buffer[] = [];
+    const authNodeHandler = vi.fn(async (req: IncomingMessage, response: ServerResponse) => {
+      for await (const chunk of req) {
+        received.push(Buffer.from(chunk as Uint8Array));
+      }
+      response.writeHead(200);
+      response.end("ok");
+    });
+    const handle = createRequestHandler(deps({ authNodeHandler }));
+    const body = Buffer.alloc(AUTH_MAX_BODY_BYTES, 0x61);
+
+    await handle(streamReqStub("/api/auth/sign-in/email", body), res);
+
+    expect(authNodeHandler).toHaveBeenCalledOnce();
+    // Native Buffer comparison avoids Vitest recursively walking one million
+    // numeric properties, which can exceed the default timeout when workspace
+    // test packages run concurrently.
+    expect(Buffer.concat(received).equals(body)).toBe(true);
+    expect(calls.statusCode).toBe(200);
   });
 
   it("404s /api/auth/admin/* without reaching the BetterAuth handler", async () => {

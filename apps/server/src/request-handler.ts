@@ -1,7 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { RPC_MAX_BODY_BYTES, SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
 import { createRequestId, pathnameOf } from "./observability.js";
+
+/**
+ * Authentication payloads are small JSON/form requests, never media uploads.
+ * Keep this budget well below the RPC upload ceiling so an unauthenticated
+ * caller cannot make Better Auth buffer an upload-sized body before it can
+ * apply endpoint validation or rate limiting.
+ */
+export const AUTH_MAX_BODY_BYTES = 1024 * 1024;
 
 /**
  * The stand-ins `createRequestHandler` routes through, injected so the
@@ -100,6 +109,109 @@ function hasSessionCookie(cookieHeader: string | undefined): boolean {
       );
     }) ?? false
   );
+}
+
+function declaredContentLength(req: IncomingMessage): number | null {
+  const raw = req.headers["content-length"];
+  const value: string | undefined =
+    typeof raw === "string"
+      ? raw
+      : Array.isArray(raw) && typeof raw[0] === "string"
+        ? raw[0]
+        : undefined;
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const length = Number(value);
+  return Number.isSafeInteger(length) && length >= 0 ? length : null;
+}
+
+function isReadableRequest(req: IncomingMessage): req is IncomingMessage & NodeJS.ReadableStream {
+  return (
+    typeof req.on === "function" &&
+    typeof req.resume === "function" &&
+    typeof req[Symbol.asyncIterator] === "function"
+  );
+}
+
+/**
+ * Drain a rejected request without retaining its bytes. Keeping the socket
+ * readable lets Node finish the response cleanly on keep-alive connections;
+ * the one-shot error listener prevents a late client disconnect from becoming
+ * an unhandled process-level error after we have already sent 413.
+ */
+function drainRejectedRequest(req: IncomingMessage): void {
+  if (!isReadableRequest(req)) return;
+  req.once("error", () => undefined);
+  req.resume();
+}
+
+/**
+ * Read an auth request once, retaining at most `limit` bytes. Better Auth's
+ * Node adapter consumes the IncomingMessage itself, so attaching a counting
+ * listener and then handing the same stream to it would create competing
+ * consumers. Reading first and replaying a bounded buffer through a
+ * PassThrough gives the adapter one ordinary stream to consume.
+ */
+async function readAuthBody(
+  req: IncomingMessage,
+  limit: number,
+): Promise<{ body: Buffer; exceeded: boolean } | null> {
+  if (req.method === "GET" || req.method === "HEAD" || !isReadableRequest(req)) return null;
+
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onEnd = () => {
+      cleanup();
+      resolve({ body: Buffer.concat(chunks, total), exceeded: false });
+    };
+    const onData = (chunk: Buffer | string) => {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += bytes.length;
+      if (total <= limit) {
+        chunks.push(bytes);
+        return;
+      }
+
+      // The limit is known to have been crossed; do not wait for an attacker
+      // to finish sending the rest of an unbounded chunked body. Remove the
+      // retaining listener, keep draining in flowing mode, and resolve now so
+      // the caller can send 413 immediately. The error listener remains until
+      // the socket finishes so an abort during the drain is harmless.
+      req.off("data", onData);
+      req.off("end", onEnd);
+      req.once("error", () => undefined);
+      req.resume();
+      resolve({ body: Buffer.concat(chunks, limit), exceeded: true });
+    };
+    const cleanup = () => {
+      req.off("data", onData);
+      req.off("end", onEnd);
+      req.off("error", onError);
+    };
+
+    req.on("error", onError);
+    req.on("end", onEnd);
+    req.on("data", onData);
+  });
+}
+
+/** Replays a bounded body while preserving the request metadata Better Auth reads. */
+function requestWithBody(req: IncomingMessage, body: Buffer): IncomingMessage {
+  const replay = new PassThrough();
+  Object.assign(replay, {
+    headers: req.headers,
+    method: req.method,
+    url: req.url,
+    socket: req.socket,
+    httpVersionMajor: req.httpVersionMajor,
+  });
+  replay.end(body);
+  return replay as unknown as IncomingMessage;
 }
 
 /**
@@ -212,7 +324,26 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       }
 
       if (req.url?.startsWith("/api/auth")) {
-        await deps.authNodeHandler(req, res);
+        const declared = declaredContentLength(req);
+        if (declared !== null && declared > AUTH_MAX_BODY_BYTES) {
+          drainRejectedRequest(req);
+          res.writeHead(413, { "Content-Type": "text/plain" });
+          res.end("Payload too large");
+          return;
+        }
+
+        // Better Auth's public Node adapter does not expose its internal
+        // `bodySizeLimit` option. Read the request once and replay the bounded
+        // bytes through a fresh stream so chunked requests are capped too,
+        // without two consumers racing over the same IncomingMessage.
+        const limited = await readAuthBody(req, AUTH_MAX_BODY_BYTES);
+        if (limited?.exceeded) {
+          res.writeHead(413, { "Content-Type": "text/plain" });
+          res.end("Payload too large");
+          return;
+        }
+
+        await deps.authNodeHandler(limited ? requestWithBody(req, limited.body) : req, res);
         return;
       }
 

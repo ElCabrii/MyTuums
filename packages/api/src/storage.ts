@@ -86,6 +86,34 @@ export interface DestructiveStorage extends Storage {
   removeByPrefix(prefix: string): Promise<number>;
 }
 
+/** A per-key failure returned inside an otherwise successful S3 delete response. */
+export interface StorageDeleteFailure {
+  key: string | null;
+  code: string | null;
+  message: string | null;
+}
+
+/**
+ * Raised after a DeleteObjects batch completes with one or more failed keys.
+ *
+ * S3 reports these failures in a 200 response, so treating `send()` returning
+ * normally as success leaves orphaned media behind and makes reconciliation
+ * claim work it did not do. The count is retained for callers that want to
+ * report confirmed progress, while throwing makes the partial failure visible
+ * to the reconcile script and its operator.
+ */
+export class StorageDeleteError extends Error {
+  readonly removed: number;
+  readonly failures: readonly StorageDeleteFailure[];
+
+  constructor(removed: number, failures: StorageDeleteFailure[]) {
+    super(`Failed to delete ${failures.length} media object(s).`);
+    this.name = "StorageDeleteError";
+    this.removed = removed;
+    this.failures = failures;
+  }
+}
+
 /** One hour. Long enough to be cacheable, far short of the 90-day maximum. */
 export const DEFAULT_SIGNED_URL_TTL = 3600;
 
@@ -206,19 +234,56 @@ function createStorageImpl(config: StorageConfig, now: () => number): Destructiv
 
     async removeMany(keys) {
       let removed = 0;
+      const failures: StorageDeleteFailure[] = [];
 
       // DeleteObjects takes at most 1000 keys per call.
       for (let i = 0; i < keys.length; i += 1000) {
         const batch = keys.slice(i, i + 1000);
-        await client.send(
+        const result = await client.send(
           new DeleteObjectsCommand({
             Bucket: config.bucket,
             Delete: { Objects: batch.map((Key) => ({ Key })) },
           }),
         );
-        removed += batch.length;
+
+        // Quiet mode is not enabled, so every submitted key must be confirmed
+        // by either `Deleted` or `Errors`. Reconcile against the request rather
+        // than trusting response counts: an incomplete S3-compatible response
+        // must not make reconciliation report an orphan as removed.
+        const deletedKeys = new Set(
+          (result.Deleted ?? []).flatMap(({ Key }) => (typeof Key === "string" ? [Key] : [])),
+        );
+        const failuresByKey = new Map<string, StorageDeleteFailure>();
+        for (const failure of result.Errors ?? []) {
+          const normalized = {
+            key: failure.Key ?? null,
+            code: failure.Code ?? null,
+            message: failure.Message ?? null,
+          };
+          if (typeof failure.Key === "string" && batch.includes(failure.Key)) {
+            failuresByKey.set(failure.Key, normalized);
+          } else {
+            failures.push(normalized);
+          }
+        }
+
+        for (const key of batch) {
+          const reportedFailure = failuresByKey.get(key);
+          if (reportedFailure) {
+            failures.push(reportedFailure);
+          } else if (deletedKeys.has(key)) {
+            removed += 1;
+          } else {
+            failures.push({
+              key,
+              code: "UnconfirmedDelete",
+              message: "The storage provider did not confirm deletion.",
+            });
+          }
+        }
       }
 
+      if (failures.length > 0) throw new StorageDeleteError(removed, failures);
       return removed;
     },
 

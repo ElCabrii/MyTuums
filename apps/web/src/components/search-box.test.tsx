@@ -225,6 +225,10 @@ describe("SearchBox debounce and keyboard contract", () => {
     if (pathname === "/search") {
       expect(router.state.location.search).toMatchObject({ q: "hello" });
     }
+    // Enter closes the popover before navigating. Base UI returns focus to
+    // the trigger as part of that close; the destination must stay clear
+    // rather than reopening the non-empty query on focus return.
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
   });
 
   it("Enter without a highlight opens the full search page", async () => {
@@ -237,6 +241,22 @@ describe("SearchBox debounce and keyboard contract", () => {
 
     expect(router.state.location.pathname).toBe("/search");
     expect(router.state.location.search).toMatchObject({ q: "hello" });
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+  });
+
+  it("reopens suggestions on the first real focus after Enter navigation", async () => {
+    const { user } = await openSuggestions("hello", {
+      users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      posts: [],
+    });
+    const input = screen.getByRole("combobox");
+
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+
+    act(() => input.blur());
+    act(() => input.focus());
+    expect(screen.getByRole("option", { name: /Alex Mercer/ })).toBeInTheDocument();
   });
 
   it("Escape preserves the query, clears the highlight, and stays dismissed through focus return", async () => {

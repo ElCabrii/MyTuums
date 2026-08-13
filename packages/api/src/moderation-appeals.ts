@@ -5,7 +5,7 @@ import { z } from "zod";
 import { moderationResolutionEmail } from "@my-tuums/auth";
 import type { Database } from "@my-tuums/db";
 import { appeal, moderationAction, post } from "@my-tuums/db/schema";
-import { appealToken } from "./appeal-token.js";
+import { APPEAL_TOKEN_MAX_LENGTH, appealToken } from "./appeal-token.js";
 import {
   APPEALABLE_ACTIONS,
   APPEAL_REASON_MAX_LENGTH,
@@ -70,7 +70,7 @@ export const appealsRouter = {
   appealOpen: baseProcedure
     .input(
       z.object({
-        token: z.string().min(1).optional(),
+        token: z.string().min(1).max(APPEAL_TOKEN_MAX_LENGTH).optional(),
         postId: z.uuid().optional(),
         reason: z.string().trim().min(APPEAL_REASON_MIN_LENGTH).max(APPEAL_REASON_MAX_LENGTH),
       }),

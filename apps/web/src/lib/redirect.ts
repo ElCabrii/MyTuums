@@ -23,7 +23,10 @@ export function sanitizeRedirect(raw: string | null | undefined): string | null 
   if (!raw) return null;
   if (raw.length > 2048) return null;
   if (/\s/.test(raw)) return null;
-  if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+  // Browsers treat backslashes as forward slashes while resolving special
+  // URLs. Without this check, `/\\evil.example` is parsed as the
+  // protocol-relative URL `//evil.example` and escapes the origin.
+  if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return null;
   // `raw.split(/[?#]/, 1)[0]` is the pathname only, and an invalid character
   // can only appear in a part of the URL the browser never resolves as a host.
   const pathname = raw.split(/[?#]/, 1)[0];

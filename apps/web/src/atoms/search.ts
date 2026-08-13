@@ -28,10 +28,14 @@ let debounceTimer: ReturnType<typeof setTimeout> | undefined;
  */
 export const setSearchQueryAtom = atom(null, (_get, set, q: string) => {
   set(searchInputAtom, q);
+  // The API trims its validated query before searching. Canonicalising here
+  // keeps whitespace-only input disabled (rather than sending a request the
+  // server must reject) and makes equivalent queries share one cache key.
+  const normalized = q.trim();
   // A later keystroke cancels the earlier one's timer, so a burst of typing
   // issues exactly one query, for the final value.
   clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => set(debouncedSearchQueryAtom, q), debounceMs);
+  debounceTimer = setTimeout(() => set(debouncedSearchQueryAtom, normalized), debounceMs);
 });
 
 /** Clears the pending debounce and both search values — SearchBox unmount and the sign-out sweep. */
@@ -58,7 +62,7 @@ export const typeaheadAtom = atomWithQuery((get) => {
   const q = get(debouncedSearchQueryAtom);
   return {
     ...orpc.search.typeahead.queryOptions({ input: { q } }),
-    enabled: q.length > 0,
+    enabled: q.trim().length > 0,
     retry: retryUnlessClientError,
   };
 });
@@ -88,7 +92,7 @@ export const searchUsersFamily = atomFamily((q: string) =>
       // on the first page would fork every entry and "Load more" pages would
       // never join it.
       input: (cursor: string | undefined) => ({
-        q,
+        q: q.trim(),
         limit: SEARCH_PAGE_SIZE,
         ...(cursor ? { cursor } : {}),
       }),
@@ -97,7 +101,7 @@ export const searchUsersFamily = atomFamily((q: string) =>
     }),
     // Same gate as `typeaheadAtom`: an empty query is rejected by the
     // procedure, so the query must not fire until the first keystroke lands.
-    enabled: q.length > 0,
+    enabled: q.trim().length > 0,
   })),
 );
 
@@ -106,22 +110,22 @@ export const searchPostsFamily = atomFamily((q: string) =>
   atomWithInfiniteQuery(() => ({
     ...orpc.search.posts.infiniteOptions({
       input: (cursor: string | undefined) => ({
-        q,
+        q: q.trim(),
         limit: SEARCH_PAGE_SIZE,
         ...(cursor ? { cursor } : {}),
       }),
       initialPageParam: undefined as string | undefined,
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     }),
-    enabled: q.length > 0,
+    enabled: q.trim().length > 0,
   })),
 );
 
 /** The infinite-query atom for one query's user results — components read this, not the family. */
-export const searchUsersAtom = (q: string) => searchUsersFamily(q);
+export const searchUsersAtom = (q: string) => searchUsersFamily(q.trim());
 
 /** The infinite-query atom for one query's post results — components read this, not the family. */
-export const searchPostsAtom = (q: string) => searchPostsFamily(q);
+export const searchPostsAtom = (q: string) => searchPostsFamily(q.trim());
 
 /**
  * Removes every entry both search families have ever created. Same reasoning

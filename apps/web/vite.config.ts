@@ -35,6 +35,10 @@ export default defineConfig({
     tanstackRouter({
       target: "react",
       autoCodeSplitting: true,
+      // Route tests live beside their route modules, but they do not export a
+      // `Route`. Ignoring them up front keeps the generator from warning on
+      // every build while preserving the colocated test layout.
+      routeFileIgnorePattern: "\\.test\\.tsx$",
     }),
     react(),
     paraglideVitePlugin({

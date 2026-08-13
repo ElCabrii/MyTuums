@@ -14,7 +14,7 @@ import {
   userBlock,
 } from "@my-tuums/db/schema";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { appealToken } from "./appeal-token.js";
+import { APPEAL_TOKEN_MAX_LENGTH, appealToken } from "./appeal-token.js";
 import { isActionLatest, unbanEffect, type DbLike } from "./moderation-actions.js";
 import type { Context } from "./context.js";
 import { RATE_LIMITS } from "./rate-limit.js";
@@ -1307,6 +1307,11 @@ describe("suspendUser", () => {
       { context: contextFor(mod) },
     );
     expect(result.suspended).toBe(true);
+    const [stored] = await anonContext.db
+      .select({ banExpires: user.banExpires })
+      .from(user)
+      .where(eq(user.id, victim.id));
+    expect(stored?.banExpires).toEqual(result.banExpires);
     expect(Math.abs(result.banExpires.getTime() - (Date.now() + 3600_000))).toBeLessThan(60_000);
 
     expect(await auth.api.getSession({ headers: sessionHeaders(victim) })).toBeNull();
@@ -2008,6 +2013,17 @@ describe("appeal flow", () => {
       { context: contextFor(mod) },
     );
     const removal = await latestAction("post_removed", "post", postRow.id);
+
+    await expect(
+      call(
+        appRouter.moderation.appealOpen,
+        {
+          token: "x".repeat(APPEAL_TOKEN_MAX_LENGTH + 1),
+          reason: "This token is too large",
+        },
+        { context: anonContext },
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
     await expect(
       call(

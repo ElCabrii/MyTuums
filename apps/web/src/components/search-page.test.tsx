@@ -17,6 +17,14 @@ describe("SearchPage", () => {
     expect(screen.getByText("Type something to search people and posts.")).toBeInTheDocument();
   });
 
+  it("treats a whitespace-only URL query as empty instead of leaving disabled searches pending", async () => {
+    await renderWithProviders(<SearchPage />, { initialPath: "/search?q=%20%20" });
+
+    expect(screen.getByText("Type something to search people and posts.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "People" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Posts" })).not.toBeInTheDocument();
+  });
+
   /**
    * Regression for issue #49: the results body used to call its two
    * `useAtomValue`s inside JSX attribute expressions *after* an `if (!q)`

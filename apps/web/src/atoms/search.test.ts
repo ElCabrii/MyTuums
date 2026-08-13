@@ -73,6 +73,25 @@ describe("search input debounce", () => {
     expect(store.get(debouncedSearchQueryAtom)).toBe("ab");
   });
 
+  it("trims the query before it reaches the request atoms", () => {
+    const store = freshStore();
+    store.set(setSearchQueryAtom, "  alice  ");
+
+    vi.advanceTimersByTime(debounceMs);
+
+    expect(store.get(searchInputAtom)).toBe("  alice  ");
+    expect(store.get(debouncedSearchQueryAtom)).toBe("alice");
+  });
+
+  it("turns whitespace-only input into an empty, disabled query", () => {
+    const store = freshStore();
+    store.set(setSearchQueryAtom, "   \t");
+
+    vi.advanceTimersByTime(debounceMs);
+
+    expect(store.get(debouncedSearchQueryAtom)).toBe("");
+  });
+
   it("resetSearchAtomsAtom clears a pending timer and both values", () => {
     const store = freshStore();
     store.set(setSearchQueryAtom, "a");
@@ -132,5 +151,10 @@ describe("clearSearchFamilies", () => {
 
     expect(searchUsersAtom("x")).not.toBe(usersBefore);
     expect(searchPostsAtom("x")).not.toBe(postsBefore);
+  });
+
+  it("canonicalizes equivalent queries to the same family atoms", () => {
+    expect(searchUsersAtom(" alice ")).toBe(searchUsersAtom("alice"));
+    expect(searchPostsAtom(" alice ")).toBe(searchPostsAtom("alice"));
   });
 });

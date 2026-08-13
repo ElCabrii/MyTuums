@@ -80,6 +80,18 @@ over HTTP and imports only its browser-safe subpaths.
 - **Presigned URLs are windowed** (`MEDIA_SIGNING_WINDOW_MS`): byte-identical
   within a window, which is what makes object caching work. Redirects must not
   be cached past `secondsUntilWindowEnd()`.
+- **Signed appeal tokens have a 4 KiB input ceiling and a canonical signature.**
+  Reject oversized or malformed base64url input before decoding or hashing so
+  the one anonymous procedure cannot turn attacker-controlled strings into
+  unbounded work.
+- **Bulk deletion trusts only provider-confirmed `Deleted` entries.** An HTTP
+  success may still include per-key S3 failures or omit an acknowledgement;
+  preserve the confirmed count and throw `StorageDeleteError` for every
+  requested key not confirmed as deleted.
+- **PostgreSQL owns suspension expiry time.** `suspendUser` returns the
+  `banExpires` value from the update and uses that exact timestamp in both the
+  response and notification; do not calculate a second application-clock
+  value.
 - **Fixed-window, in-memory limits** reset on deploy and multiply per replica —
   right for bounding one client, wrong for billing. `maxKeys` is a leak alarm,
   not an admission gate: at capacity a brand-new key is let through, never

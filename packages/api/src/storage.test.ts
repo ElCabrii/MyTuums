@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { S3Client } from "@aws-sdk/client-s3";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_SIGNED_URL_TTL,
   MEDIA_SIGNING_WINDOW_MS,
-  createStorage,
+  createDestructiveStorage,
   secondsUntilWindowEnd,
+  StorageDeleteError,
 } from "./storage.js";
 
 /**
@@ -15,7 +17,7 @@ import {
  */
 
 function storageAt(nowMs: number) {
-  return createStorage(
+  return createDestructiveStorage(
     {
       endpoint: "http://storage.invalid",
       bucket: "test-bucket",
@@ -26,6 +28,10 @@ function storageAt(nowMs: number) {
     () => nowMs,
   );
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /** A millisecond instant near the start of the current window, for determinism. */
 const WINDOW_START = Math.floor(Date.now() / MEDIA_SIGNING_WINDOW_MS) * MEDIA_SIGNING_WINDOW_MS;
@@ -62,5 +68,60 @@ describe("secondsUntilWindowEnd", () => {
       MEDIA_SIGNING_WINDOW_MS / 2 / 1000,
     );
     expect(secondsUntilWindowEnd(MEDIA_SIGNING_WINDOW_MS - 1)).toBe(1);
+  });
+});
+
+describe("removeMany", () => {
+  it("surfaces per-key DeleteObjects failures and reports only confirmed progress", async () => {
+    const send = vi.spyOn(S3Client.prototype, "send").mockResolvedValue({
+      Deleted: [{ Key: "avatars/u/ok.webp" }],
+      Errors: [{ Key: "avatars/u/failed.webp", Code: "AccessDenied", Message: "denied" }],
+    } as never);
+    const storage = storageAt(WINDOW_START);
+
+    const promise = storage.removeMany(["avatars/u/ok.webp", "avatars/u/failed.webp"]);
+    await expect(promise).rejects.toBeInstanceOf(StorageDeleteError);
+
+    try {
+      await promise;
+    } catch (error) {
+      expect(error).toMatchObject({
+        name: "StorageDeleteError",
+        removed: 1,
+        failures: [{ key: "avatars/u/failed.webp", code: "AccessDenied", message: "denied" }],
+      });
+    }
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a requested key omitted from the response as an unconfirmed failure", async () => {
+    vi.spyOn(S3Client.prototype, "send").mockResolvedValue({
+      Deleted: [{ Key: "avatars/u/confirmed.webp" }],
+      Errors: [],
+    } as never);
+    const storage = storageAt(WINDOW_START);
+
+    await expect(
+      storage.removeMany(["avatars/u/confirmed.webp", "avatars/u/omitted.webp"]),
+    ).rejects.toMatchObject({
+      name: "StorageDeleteError",
+      removed: 1,
+      failures: [
+        {
+          key: "avatars/u/omitted.webp",
+          code: "UnconfirmedDelete",
+          message: "The storage provider did not confirm deletion.",
+        },
+      ],
+    });
+  });
+
+  it("returns the submitted count when every key succeeds", async () => {
+    vi.spyOn(S3Client.prototype, "send").mockResolvedValue({
+      Deleted: [{ Key: "avatars/u/one.webp" }, { Key: "avatars/u/two.webp" }],
+    } as never);
+    const storage = storageAt(WINDOW_START);
+
+    await expect(storage.removeMany(["avatars/u/one.webp", "avatars/u/two.webp"])).resolves.toBe(2);
   });
 });
