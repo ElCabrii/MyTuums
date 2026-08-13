@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from "react";
 import { act, render, type RenderResult } from "@testing-library/react";
-import { QueryClient, QueryClientProvider, type QueryKey } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createStore, Provider } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import {
@@ -13,31 +13,18 @@ import {
 } from "@tanstack/react-router";
 import { afterEach, vi } from "vitest";
 import {
-  FOLLOW_PAGE_SIZE,
-  MODERATION_PAGE_SIZE,
-  POST_PAGE_SIZE,
-  SEARCH_PAGE_SIZE,
-} from "@my-tuums/api/constants";
-import {
-  orpc,
   type AuditEntry,
-  type AuditLogPage,
   type ModerationCase,
   type ModerationCaseDetail,
-  type ModerationQueuePage,
   type Post,
-  type PostListPage,
   type Profile,
-  type SearchPostsPage,
-  type SearchUsersPage,
   type TeamMember,
   type Thread,
-  type UserListPage,
   type UserSummary,
 } from "@/lib/orpc";
-import type { CaseRef } from "@/atoms/moderation";
-import type { PostFeedParams } from "@/atoms/post-feed";
 import type { SocialProviderId } from "@/lib/auth-client";
+
+export { queryFixtures } from "@/test/query-fixtures";
 
 /**
  * The shared harness every component test in this directory renders through.
@@ -52,7 +39,7 @@ import type { SocialProviderId } from "@/lib/auth-client";
 // ---------------------------------------------------------------------------
 
 /**
- * `retry: false` so a seeded error state (see `seedInfiniteError` below)
+ * `retry: false` so an error state seeded by `queryFixtures` below
  * surfaces immediately instead of a test waiting out retry backoff.
  * `refetchOnMount: false` so a query that already has data seeded via
  * `queryClient.setQueryData` stays exactly as seeded when a component mounts
@@ -67,7 +54,7 @@ import type { SocialProviderId } from "@/lib/auth-client";
  * own mount-fetch decision treats that case as "never actually got data yet"
  * — it fetches on mount REGARDLESS of `refetchOnMount`, unless
  * `retryOnMount` says not to. Without this, `PostFeed`'s/`UserList`'s
- * observer mounting against a query `seedInfiniteError` already drove to
+ * observer mounting against a query the fixture already drove to
  * "error" immediately fires one more real (and here, doomed) network fetch,
  * landing back on "error" but with a generic "fetch failed" message instead
  * of the one that was seeded — confirmed by instrumenting the actual `Query`
@@ -734,282 +721,4 @@ export function makeTeamMember(overrides: Partial<TeamMember> = {}): TeamMember 
     role: "moderator",
     ...overrides,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Infinite-query cache seeding
-//
-// `post.list` and `user.followers`/`user.following` are keyset-paginated
-// (see packages/api/AGENTS.md) behind `atomWithInfiniteQuery`. There's no
-// server in this test environment, so a component that finds nothing cached
-// will actually try to `fetch()` — a real, slow, environment-dependent
-// network call.
-// Seeding the exact query key `setQueryData`/`fetchInfiniteQuery` bypasses
-// that entirely: `refetchOnMount: false` above means a query that already
-// has data (or has already been driven to an error state) is left alone
-// when the real observer mounts, instead of being refetched over it.
-// ---------------------------------------------------------------------------
-
-/**
- * The exact queryKey `postFeedAtom({ feed: "global" })` produces — mirrors
- * the conditional-spread input builder in `atoms/post-feed.ts`'s
- * `postFeedFamily` for the no-authorId/no-parentId/global-feed case, which
- * is the only shape `post-feed.test.tsx` needs. AGENTS.md calls that
- * conditional-spread shape load-bearing (oRPC embeds the whole input object
- * in the key, so an unconditional field forks the cache); if that atom's
- * input shape ever changes, this needs the matching update.
- */
-export function postListQueryKey(params: PostFeedParams = { feed: "global" }): QueryKey {
-  const { authorId, feed, parentId, includeReplies } = params;
-  return orpc.post.list.infiniteKey({
-    input: () => ({
-      limit: POST_PAGE_SIZE,
-      ...(authorId ? { authorId } : {}),
-      ...(parentId ? { parentId } : {}),
-      ...(includeReplies ? { includeReplies: true } : {}),
-      ...(feed === "following" ? { feed } : {}),
-    }),
-    initialPageParam: undefined as string | undefined,
-  });
-}
-
-/** Seeds a `post.list` infinite query with the given pages, bypassing the network. */
-export function seedPostListPages(
-  queryClient: QueryClient,
-  pages: PostListPage[],
-  params: PostFeedParams = { feed: "global" },
-): void {
-  queryClient.setQueryData(postListQueryKey(params), {
-    pages,
-    pageParams: pages.map((_page, index) =>
-      index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
-    ),
-  });
-}
-
-/** The exact query key `profileAtomFamily(username)` produces. */
-export function profileQueryKey(username: string): QueryKey {
-  return orpc.user.byUsername.queryKey({ input: { username } });
-}
-
-/** Seeds one public profile query, bypassing the network. */
-export function seedProfile(queryClient: QueryClient, username: string, profile: Profile): void {
-  queryClient.setQueryData(profileQueryKey(username), profile);
-}
-
-/** The exact query key `threadAtomFamily(postId)` produces. */
-export function threadQueryKey(postId: string): QueryKey {
-  return orpc.post.thread.queryKey({ input: { postId } });
-}
-
-/** Seeds one focused thread query, bypassing the network. */
-export function seedThread(queryClient: QueryClient, postId: string, thread: Thread): void {
-  queryClient.setQueryData(threadQueryKey(postId), thread);
-}
-
-/** The exact queryKey `userListAtom(username, direction)` produces. */
-export function userListQueryKey(username: string, direction: "followers" | "following"): QueryKey {
-  const procedure = direction === "followers" ? orpc.user.followers : orpc.user.following;
-  return procedure.infiniteKey({
-    input: () => ({ username, limit: FOLLOW_PAGE_SIZE }),
-    initialPageParam: undefined as string | undefined,
-  });
-}
-
-/**
- * The exact queryKey `searchUsersAtom(q)` produces — mirrors the input
- * builder in `atoms/search.ts`'s `searchUsersFamily` for the first page (no
- * cursor). `q` is embedded in the key, so the seed only satisfies the
- * section for that one query string.
- */
-export function searchUsersQueryKey(q: string): QueryKey {
-  return orpc.search.users.infiniteKey({
-    input: () => ({ q, limit: SEARCH_PAGE_SIZE }),
-    initialPageParam: undefined as string | undefined,
-  });
-}
-
-/** The exact queryKey `searchPostsAtom(q)` produces — the `posts` twin of {@link searchUsersQueryKey}. */
-export function searchPostsQueryKey(q: string): QueryKey {
-  return orpc.search.posts.infiniteKey({
-    input: () => ({ q, limit: SEARCH_PAGE_SIZE }),
-    initialPageParam: undefined as string | undefined,
-  });
-}
-
-/** Seeds a `search.users` infinite query with the given pages, bypassing the network. */
-export function seedSearchUsersPages(
-  queryClient: QueryClient,
-  q: string,
-  pages: SearchUsersPage[],
-): void {
-  queryClient.setQueryData(searchUsersQueryKey(q), {
-    pages,
-    pageParams: pages.map((_page, index) =>
-      index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
-    ),
-  });
-}
-
-/** Seeds a `search.posts` infinite query with the given pages, bypassing the network. */
-export function seedSearchPostsPages(
-  queryClient: QueryClient,
-  q: string,
-  pages: SearchPostsPage[],
-): void {
-  queryClient.setQueryData(searchPostsQueryKey(q), {
-    pages,
-    pageParams: pages.map((_page, index) =>
-      index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
-    ),
-  });
-}
-
-/** Seeds a follower/following infinite query with the given pages, bypassing the network. */
-export function seedUserListPages(
-  queryClient: QueryClient,
-  username: string,
-  direction: "followers" | "following",
-  pages: UserListPage[],
-): void {
-  queryClient.setQueryData(userListQueryKey(username, direction), {
-    pages,
-    pageParams: pages.map((_page, index) =>
-      index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
-    ),
-  });
-}
-
-/** The exact queryKey `moderationQueueAtom` produces — mirrors `queueFamily`'s input builder in `atoms/moderation.ts` for the first page (no cursor). */
-export function moderationQueueQueryKey(): QueryKey {
-  return orpc.moderation.queue.infiniteKey({
-    input: () => ({ limit: MODERATION_PAGE_SIZE }),
-    initialPageParam: undefined as string | undefined,
-  });
-}
-
-/** Seeds `moderation.queue` with the given pages, bypassing the network. */
-export function seedModerationQueuePages(
-  queryClient: QueryClient,
-  pages: ModerationQueuePage[],
-): void {
-  queryClient.setQueryData(moderationQueueQueryKey(), {
-    pages,
-    pageParams: pages.map((_page, index) =>
-      index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
-    ),
-  });
-}
-
-/** The exact queryKey `moderationQueueAtom` produces for the audit log — the `auditLog` twin of {@link moderationQueueQueryKey}. */
-export function auditLogQueryKey(): QueryKey {
-  return orpc.moderation.auditLog.infiniteKey({
-    input: () => ({ limit: MODERATION_PAGE_SIZE }),
-    initialPageParam: undefined as string | undefined,
-  });
-}
-
-/** Seeds `moderation.auditLog` with the given pages, bypassing the network. */
-export function seedAuditLogPages(queryClient: QueryClient, pages: AuditLogPage[]): void {
-  queryClient.setQueryData(auditLogQueryKey(), {
-    pages,
-    pageParams: pages.map((_page, index) =>
-      index === 0 ? undefined : (pages[index - 1]?.nextCursor ?? undefined),
-    ),
-  });
-}
-
-/**
- * The exact queryKey `caseAtom(ref)` produces — a plain (non-infinite) query,
- * unlike the queue/audit families above. `moderation.case`'s input is a
- * discriminated union, so the narrow — same fix as `caseFamily` in
- * `atoms/moderation.ts` — is needed here too: a bare `CaseRef` (whose
- * `targetType` is the *union* `"post" | "user"`) isn't assignable to either
- * branch on its own.
- */
-export function moderationCaseQueryKey(target: CaseRef): QueryKey {
-  const input =
-    target.targetType === "post"
-      ? { targetType: "post" as const, targetId: target.targetId }
-      : { targetType: "user" as const, targetId: target.targetId };
-  return orpc.moderation.case.queryKey({ input });
-}
-
-/** Seeds `moderation.case` for one target, bypassing the network. */
-export function seedModerationCase(
-  queryClient: QueryClient,
-  target: CaseRef,
-  detail: ModerationCaseDetail,
-): void {
-  queryClient.setQueryData(moderationCaseQueryKey(target), detail);
-}
-
-/** The exact queryKey `teamAtom` produces — no input, unlike every other moderation query. */
-export function teamQueryKey(): QueryKey {
-  return orpc.moderation.team.queryKey();
-}
-
-/** Seeds `moderation.team` with the given roster, bypassing the network. */
-export function seedTeam(queryClient: QueryClient, items: TeamMember[]): void {
-  queryClient.setQueryData(teamQueryKey(), { items });
-}
-
-/** Drives an infinite query at `queryKey` into a permanent loading state, without a network call. */
-export function seedInfiniteLoading(queryClient: QueryClient, queryKey: QueryKey): void {
-  void queryClient.fetchInfiniteQuery({
-    queryKey,
-    queryFn: () => new Promise<never>(() => {}),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: () => undefined,
-  });
-}
-
-/** Drives a plain query into a permanent loading state, without a network call. */
-export function seedQueryLoading(queryClient: QueryClient, queryKey: QueryKey): void {
-  void queryClient.fetchQuery({ queryKey, queryFn: () => new Promise<never>(() => {}) });
-}
-
-/** Drives a plain query into an error state before its observer mounts. */
-export async function seedQueryError(
-  queryClient: QueryClient,
-  queryKey: QueryKey,
-  error: Error,
-): Promise<void> {
-  try {
-    await queryClient.fetchQuery({ queryKey, queryFn: () => Promise.reject(error) });
-  } catch {
-    // The cache state is the result this helper exists to produce.
-  }
-}
-
-/**
- * Drives an infinite query at `queryKey` into an error state, without a
- * network call. Callers MUST `await` this — unlike `seedInfiniteLoading`
- * (whose query-core status is set the instant the fetch starts, and which
- * can't be awaited to completion anyway, since it never settles),
- * `fetchInfiniteQuery` here only finishes writing `status: "error"` into the
- * cache once its rejection has propagated through query-core's retry
- * machinery. A caller that renders right after calling this without
- * awaiting it is racing that write: fast enough locally that it reliably
- * wins, not guaranteed on every CI runner — this is exactly the race that
- * intermittently failed `post-feed.test.tsx` and `user-list.test.tsx` in CI
- * while passing every time in local runs.
- */
-export async function seedInfiniteError(
-  queryClient: QueryClient,
-  queryKey: QueryKey,
-  message = "Something went wrong",
-): Promise<void> {
-  try {
-    await queryClient.fetchInfiniteQuery({
-      queryKey,
-      queryFn: () => Promise.reject(new Error(message)),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: () => undefined,
-    });
-  } catch {
-    // The rejection is the point: it lands the query in an `error` state
-    // in the cache before the component under test mounts an observer.
-    // Nothing here needs to see it again.
-  }
 }

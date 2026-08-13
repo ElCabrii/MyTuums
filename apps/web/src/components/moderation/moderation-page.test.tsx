@@ -5,10 +5,8 @@ import {
   createTestQueryClient,
   makeAuditEntry,
   makeTeamMember,
+  queryFixtures,
   renderWithProviders,
-  seedAuditLogPages,
-  seedModerationQueuePages,
-  seedTeam,
 } from "@/test/render";
 import { ModerationPage } from "@/components/moderation/moderation-page";
 import { m } from "@/paraglide/messages.js";
@@ -47,9 +45,10 @@ beforeEach(() => {
 
 /** Seeds an empty first page for every query the page's three tabs can mount. */
 function seedEmptyEverything(queryClient: ReturnType<typeof createTestQueryClient>) {
-  seedModerationQueuePages(queryClient, [{ items: [], nextCursor: null }]);
-  seedAuditLogPages(queryClient, [{ items: [], nextCursor: null }]);
-  seedTeam(queryClient, []);
+  const fixtures = queryFixtures(queryClient);
+  fixtures.moderation.queue([{ items: [], nextCursor: null }]);
+  fixtures.moderation.auditLog([{ items: [], nextCursor: null }]);
+  fixtures.moderation.team([]);
 }
 
 describe("ModerationPage — role gate", () => {
@@ -83,10 +82,12 @@ describe("ModerationPage — tab gating", () => {
   it("shows Audit log and Team to staff, and each renders its own seeded rows on click", async () => {
     const queryClient = createTestQueryClient();
     seedEmptyEverything(queryClient);
-    seedAuditLogPages(queryClient, [
+    queryFixtures(queryClient).moderation.auditLog([
       { items: [makeAuditEntry({ action: "user_banned" })], nextCursor: null },
     ]);
-    seedTeam(queryClient, [makeTeamMember({ name: "Sam Staff", role: "staff" })]);
+    queryFixtures(queryClient).moderation.team([
+      makeTeamMember({ name: "Sam Staff", role: "staff" }),
+    ]);
     await renderWithProviders(<ModerationPage />, { queryClient, signedInAs: { role: "staff" } });
 
     const user = userEvent.setup();

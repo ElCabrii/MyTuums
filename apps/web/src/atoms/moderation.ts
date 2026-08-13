@@ -8,16 +8,22 @@ import {
   queryClientAtom,
 } from "jotai-tanstack-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { MODERATION_PAGE_SIZE } from "@my-tuums/api/constants";
 import { store } from "@/lib/store";
 import { orpc } from "@/lib/orpc";
+import {
+  auditLogQueryOptions,
+  type CaseRef,
+  moderationCaseQueryOptions,
+  moderationQueueQueryOptions,
+  teamQueryOptions,
+} from "@/lib/query-definitions";
+
+export type { CaseRef } from "@/lib/query-definitions";
 
 /**
  * A reference to a moderation case target — what the queue rows hold, what the
  * dialogs carry, and the payload of `moderation.case`.
  */
-export type CaseRef = { targetType: "post" | "user"; targetId: string };
-
 /** Encodes a case ref into a family key — the id LAST, so it may contain the delimiter (same layout as `encode` in `atoms/post-feed.ts`). */
 export const encodeCaseKey = (ref: CaseRef): string => `${ref.targetType}|${ref.targetId}`;
 
@@ -34,21 +40,7 @@ export const decodeCaseKey = (key: string): CaseRef => {
  * always `""`; the family exists so the sign-out sweep and a future filter
  * (post vs user cases) do not require a migration.
  */
-const queueFamily = atomFamily(() =>
-  atomWithInfiniteQuery(() =>
-    orpc.moderation.queue.infiniteOptions({
-      input: (cursor: string | undefined) => ({
-        limit: MODERATION_PAGE_SIZE,
-        // Conditional for the same reason as every cursor spread in this
-        // codebase: oRPC embeds the whole input object in the query key, so
-        // an unconditional `cursor: undefined` would fork the cache entry.
-        ...(cursor ? { cursor } : {}),
-      }),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    }),
-  ),
-);
+const queueFamily = atomFamily(() => atomWithInfiniteQuery(() => moderationQueueQueryOptions()));
 
 /** The infinite-query atom for the moderation queue — components read this, not the family. */
 export const moderationQueueAtom = queueFamily("");
@@ -57,18 +49,7 @@ export const moderationQueueAtom = queueFamily("");
  * One infinite-query atom per audit-log scope — same reasoning as
  * `queueFamily`; the key is always `""` today.
  */
-const auditLogFamily = atomFamily(() =>
-  atomWithInfiniteQuery(() =>
-    orpc.moderation.auditLog.infiniteOptions({
-      input: (cursor: string | undefined) => ({
-        limit: MODERATION_PAGE_SIZE,
-        ...(cursor ? { cursor } : {}),
-      }),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    }),
-  ),
-);
+const auditLogFamily = atomFamily(() => atomWithInfiniteQuery(() => auditLogQueryOptions()));
 
 /** The infinite-query atom for the audit log — components read this, not the family. */
 export const auditLogAtom = auditLogFamily("");
@@ -80,26 +61,14 @@ export const auditLogAtom = auditLogFamily("");
  * open case.
  */
 const caseFamily = atomFamily((key: string) =>
-  atomWithQuery(() => {
-    const ref = decodeCaseKey(key);
-    // Narrow the decoded ref back onto one of the schema's discriminated
-    // variants — a bare `targetType: "post" | "user"` is assignable to
-    // neither branch, so the literal is resolved here, at the only site that
-    // knows the key was built by `encodeCaseKey`.
-    const input:
-      { targetType: "post"; targetId: string } | { targetType: "user"; targetId: string } =
-      ref.targetType === "post"
-        ? { targetType: "post", targetId: ref.targetId }
-        : { targetType: "user", targetId: ref.targetId };
-    return orpc.moderation.case.queryOptions({ input });
-  }),
+  atomWithQuery(() => moderationCaseQueryOptions(decodeCaseKey(key))),
 );
 
 /** The query atom for one moderation case — components read this, not the family. */
 export const caseAtom = (ref: CaseRef) => caseFamily(encodeCaseKey(ref));
 
 /** The moderation team roster, for the staff-only Team tab. */
-export const teamAtom = atomWithQuery(() => orpc.moderation.team.queryOptions());
+export const teamAtom = atomWithQuery(() => teamQueryOptions());
 
 /**
  * The viewer's blocked users, newest block first — what the settings page's

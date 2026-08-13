@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestQueryClient, renderWithProviders, seedQueryLoading } from "@/test/render";
+import { createTestQueryClient, queryFixtures, renderWithProviders } from "@/test/render";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
@@ -88,7 +88,7 @@ describe("TwoFactorSection", () => {
 describe("PasskeySection", () => {
   it("renders loading, empty, and populated list states", async () => {
     const loadingClient = createTestQueryClient();
-    seedQueryLoading(loadingClient, passkeysQueryKey);
+    queryFixtures(loadingClient).query.loading(passkeysQueryKey);
     const loading = await renderWithProviders(<PasskeySection />, {
       queryClient: loadingClient,
       signedInAs: true,

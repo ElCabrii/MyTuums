@@ -4,8 +4,7 @@ import {
   createTestQueryClient,
   makeProfile,
   renderWithProviders,
-  seedPostListPages,
-  seedProfile,
+  queryFixtures,
 } from "@/test/render";
 import { ProfilePosts } from "@/components/profile-posts";
 import { m } from "@/paraglide/messages.js";
@@ -27,8 +26,8 @@ describe("ProfilePosts", () => {
   it("shows the composer and owner-specific empty copy on the viewer's profile", async () => {
     const profile = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
     const queryClient = createTestQueryClient();
-    seedProfile(queryClient, "alex", profile);
-    seedPostListPages(queryClient, [{ items: [], nextCursor: null }], {
+    queryFixtures(queryClient).profile.data("alex", profile);
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }], {
       authorId: profile.id,
       feed: "global",
       includeReplies: true,
@@ -48,8 +47,8 @@ describe("ProfilePosts", () => {
   it("hides the composer and uses handle-specific copy for another profile", async () => {
     const profile = makeProfile({ id: "other-1", username: "other", displayUsername: "Other" });
     const queryClient = createTestQueryClient();
-    seedProfile(queryClient, "other", profile);
-    seedPostListPages(queryClient, [{ items: [], nextCursor: null }], {
+    queryFixtures(queryClient).profile.data("other", profile);
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }], {
       authorId: profile.id,
       feed: "global",
       includeReplies: true,

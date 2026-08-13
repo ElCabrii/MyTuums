@@ -1,8 +1,8 @@
 import { atom } from "jotai";
 import { atomFamily } from "jotai-family";
 import { atomWithInfiniteQuery, atomWithQuery } from "jotai-tanstack-query";
-import { SEARCH_PAGE_SIZE } from "@my-tuums/api/constants";
 import { orpc, retryUnlessClientError } from "@/lib/orpc";
+import { searchPostsQueryOptions, searchUsersQueryOptions } from "@/lib/query-definitions";
 
 /** How long a keystroke may sit before its query fires, in milliseconds. */
 export const debounceMs = 300;
@@ -84,41 +84,12 @@ export const typeaheadAtom = atomWithQuery((get) => {
  * is mounted to split.
  */
 export const searchUsersFamily = atomFamily((q: string) =>
-  atomWithInfiniteQuery(() => ({
-    ...orpc.search.users.infiniteOptions({
-      // Conditional spread for `cursor` only, like every other paginated
-      // input in this codebase: oRPC embeds the whole input object in the
-      // query key, so an absent cursor must stay absent — a `cursor: undefined`
-      // on the first page would fork every entry and "Load more" pages would
-      // never join it.
-      input: (cursor: string | undefined) => ({
-        q: q.trim(),
-        limit: SEARCH_PAGE_SIZE,
-        ...(cursor ? { cursor } : {}),
-      }),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    }),
-    // Same gate as `typeaheadAtom`: an empty query is rejected by the
-    // procedure, so the query must not fire until the first keystroke lands.
-    enabled: q.trim().length > 0,
-  })),
+  atomWithInfiniteQuery(() => searchUsersQueryOptions(q)),
 );
 
 /** Same shape as {@link searchUsersFamily}, over `search.posts` results. */
 export const searchPostsFamily = atomFamily((q: string) =>
-  atomWithInfiniteQuery(() => ({
-    ...orpc.search.posts.infiniteOptions({
-      input: (cursor: string | undefined) => ({
-        q: q.trim(),
-        limit: SEARCH_PAGE_SIZE,
-        ...(cursor ? { cursor } : {}),
-      }),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    }),
-    enabled: q.trim().length > 0,
-  })),
+  atomWithInfiniteQuery(() => searchPostsQueryOptions(q)),
 );
 
 /** The infinite-query atom for one query's user results — components read this, not the family. */

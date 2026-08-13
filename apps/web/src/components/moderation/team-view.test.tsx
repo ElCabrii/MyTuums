@@ -5,8 +5,8 @@ import { roleSelectAtom } from "@/atoms/moderation";
 import {
   createTestQueryClient,
   makeTeamMember,
+  queryFixtures,
   renderWithProviders,
-  seedTeam,
 } from "@/test/render";
 import { TeamView } from "@/components/moderation/team-view";
 import { m } from "@/paraglide/messages.js";
@@ -27,7 +27,9 @@ beforeEach(() => {
 describe("TeamView — rank gating on Change role", () => {
   it("lets an admin manage a staff member", async () => {
     const queryClient = createTestQueryClient();
-    seedTeam(queryClient, [makeTeamMember({ id: "staff-1", name: "Staff One", role: "staff" })]);
+    queryFixtures(queryClient).moderation.team([
+      makeTeamMember({ id: "staff-1", name: "Staff One", role: "staff" }),
+    ]);
     await renderWithProviders(<TeamView />, {
       queryClient,
       signedInAs: { id: "admin-1", role: "admin" },
@@ -40,7 +42,7 @@ describe("TeamView — rank gating on Change role", () => {
 
   it("hides Change role for a member at or above the viewer's own rank", async () => {
     const queryClient = createTestQueryClient();
-    seedTeam(queryClient, [
+    queryFixtures(queryClient).moderation.team([
       makeTeamMember({ id: "staff-1", name: "Staff One", role: "staff" }),
       makeTeamMember({ id: "admin-2", name: "Other Admin", role: "admin" }),
     ]);
@@ -63,7 +65,7 @@ describe("TeamView — rank gating on Change role", () => {
     // (moderator < admin) so the rank clause alone would pass `canManage` —
     // only the `member.id !== viewer?.id` guard can suppress the button
     // here. If that guard were deleted, this row would show Change role.
-    seedTeam(queryClient, [
+    queryFixtures(queryClient).moderation.team([
       makeTeamMember({ id: "admin-1", name: "Self Admin", role: "moderator" }),
     ]);
     await renderWithProviders(<TeamView />, {
@@ -86,7 +88,7 @@ describe("TeamView — set-role dialog", () => {
     // an unstubbed resolution here logs React Query's "query data cannot be undefined" warning.
     fakeClient.moderation.team.mockResolvedValue({ items: [] });
     const queryClient = createTestQueryClient();
-    seedTeam(queryClient, [
+    queryFixtures(queryClient).moderation.team([
       makeTeamMember({
         id: "mod-1",
         name: "Mod One",
@@ -130,7 +132,7 @@ describe("TeamView — set-role dialog", () => {
 
   it("keeps Save role disabled with no role picked yet", async () => {
     const queryClient = createTestQueryClient();
-    seedTeam(queryClient, [
+    queryFixtures(queryClient).moderation.team([
       makeTeamMember({
         id: "mod-1",
         name: "Mod One",
@@ -160,7 +162,7 @@ describe("TeamView — set-role dialog", () => {
     // leave a staff viewer able to hand out staff/admin and this test is the
     // only place that would notice.
     const queryClient = createTestQueryClient();
-    seedTeam(queryClient, [
+    queryFixtures(queryClient).moderation.team([
       makeTeamMember({
         id: "mod-1",
         name: "Mod One",

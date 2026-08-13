@@ -5,7 +5,7 @@ import {
   createTestQueryClient,
   makeUserSummary,
   renderWithProviders,
-  seedUserListPages,
+  queryFixtures,
 } from "@/test/render";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { m } from "@/paraglide/messages.js";
@@ -13,7 +13,7 @@ import { m } from "@/paraglide/messages.js";
 describe("FollowListDialog", () => {
   it("mounts the list only while open, and unmounts it on close", async () => {
     const queryClient = createTestQueryClient();
-    seedUserListPages(queryClient, "alexmercer", "followers", [
+    queryFixtures(queryClient).userList.data("alexmercer", "followers", [
       {
         items: [makeUserSummary({ name: "Jamie Rivera", username: "jamierivera" })],
         nextCursor: null,

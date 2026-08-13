@@ -1,11 +1,9 @@
 import { atom } from "jotai";
 import { atomFamily } from "jotai-family";
 import { atomWithInfiniteQuery } from "jotai-tanstack-query";
-import { FOLLOW_PAGE_SIZE } from "@my-tuums/api/constants";
-import { orpc } from "@/lib/orpc";
+import { type FollowDirection, userListQueryOptions } from "@/lib/query-definitions";
 
-/** "followers" = people following them; "following" = people they follow. */
-export type FollowDirection = "followers" | "following";
+export type { FollowDirection } from "@/lib/query-definitions";
 
 /**
  * The family key. Direction goes FIRST deliberately: it is a two-value union,
@@ -46,23 +44,7 @@ export const decode = (key: string): { username: string; direction: FollowDirect
 const userListFamily = atomFamily((key: string) =>
   atomWithInfiniteQuery(() => {
     const { username, direction } = decode(key);
-    const procedure = direction === "followers" ? orpc.user.followers : orpc.user.following;
-
-    return procedure.infiniteOptions({
-      // Kept byte-identical to what `UserList` passed before this migration.
-      // oRPC embeds the whole input object in the query key, and
-      // `lib/follow-cache.ts` sweeps the `orpc.user.followers.key()` /
-      // `orpc.user.following.key()` prefixes to patch follow state
-      // optimistically — changing the shape here would fork every cache entry
-      // and those sweeps would silently stop matching.
-      input: (cursor: string | undefined) => ({
-        username,
-        limit: FOLLOW_PAGE_SIZE,
-        ...(cursor ? { cursor } : {}),
-      }),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    });
+    return userListQueryOptions(username, direction);
   }),
 );
 

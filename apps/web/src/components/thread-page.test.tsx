@@ -7,12 +7,8 @@ import {
   createTestQueryClient,
   makePost,
   makeThread,
+  queryFixtures,
   renderWithProviders,
-  seedPostListPages,
-  seedQueryError,
-  seedQueryLoading,
-  seedThread,
-  threadQueryKey,
 } from "@/test/render";
 import { ThreadPage } from "@/components/thread-page";
 import { m } from "@/paraglide/messages.js";
@@ -42,7 +38,7 @@ beforeEach(() => {
 describe("ThreadPage query states", () => {
   it("renders a loading shell while the focused thread is pending", async () => {
     const queryClient = createTestQueryClient();
-    seedQueryLoading(queryClient, threadQueryKey("pending-post"));
+    queryFixtures(queryClient).thread.loading("pending-post");
 
     await renderWithProviders(<ThreadPage />, {
       queryClient,
@@ -58,7 +54,7 @@ describe("ThreadPage query states", () => {
     "renders the unavailable card without a retry action for %s",
     async (code) => {
       const queryClient = createTestQueryClient();
-      await seedQueryError(queryClient, threadQueryKey("missing-post"), new ORPCError(code));
+      await queryFixtures(queryClient).thread.error("missing-post", new ORPCError(code));
 
       await renderWithProviders(<ThreadPage />, {
         queryClient,
@@ -77,12 +73,8 @@ describe("ThreadPage query states", () => {
     const recovered = makeThread({ post });
     fakeClient.post.thread.mockResolvedValue(recovered);
     const queryClient = createTestQueryClient();
-    await seedQueryError(
-      queryClient,
-      threadQueryKey("network-post"),
-      new Error("network unavailable"),
-    );
-    seedPostListPages(queryClient, [{ items: [], nextCursor: null }], {
+    await queryFixtures(queryClient).thread.error("network-post", new Error("network unavailable"));
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }], {
       feed: "global",
       parentId: post.id,
     });
@@ -116,12 +108,11 @@ describe("ThreadPage successful rendering", () => {
     });
     const reply = makePost({ id: "reply-1", parentId: focused.id, content: "A direct reply" });
     const queryClient = createTestQueryClient();
-    seedThread(
-      queryClient,
+    queryFixtures(queryClient).thread.data(
       focused.id,
       makeThread({ post: focused, ancestors: [ancestorA, ancestorB], truncated: true }),
     );
-    seedPostListPages(queryClient, [{ items: [reply], nextCursor: null }], {
+    queryFixtures(queryClient).postList.data([{ items: [reply], nextCursor: null }], {
       feed: "global",
       parentId: focused.id,
     });
@@ -145,8 +136,8 @@ describe("ThreadPage successful rendering", () => {
   it("uses the singular reply label for exactly one reply", async () => {
     const focused = makePost({ id: "single-reply-post", replyCount: 1 });
     const queryClient = createTestQueryClient();
-    seedThread(queryClient, focused.id, makeThread({ post: focused }));
-    seedPostListPages(queryClient, [{ items: [], nextCursor: null }], {
+    queryFixtures(queryClient).thread.data(focused.id, makeThread({ post: focused }));
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }], {
       feed: "global",
       parentId: focused.id,
     });

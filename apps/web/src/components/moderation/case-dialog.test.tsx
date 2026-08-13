@@ -5,8 +5,8 @@ import {
   createTestQueryClient,
   makeModerationCaseDetail,
   makeUserModerationCaseDetail,
+  queryFixtures,
   renderWithProviders,
-  seedModerationCase,
 } from "@/test/render";
 import { CaseDialog } from "@/components/moderation/case-dialog";
 import { DEFAULT_SUSPENSION_SECONDS, type CaseRef } from "@/atoms/moderation";
@@ -14,7 +14,7 @@ import { m } from "@/paraglide/messages.js";
 
 /**
  * The mutation procedures the dialog's buttons call, plus `case` itself.
- * `case` is never actually invoked — `seedModerationCase` seeds its data
+ * `case` is never actually invoked — the query fixture seeds its data
  * straight into the query cache — but `createTanstackQueryUtils`'s proxy
  * still indexes into the fake client one path segment at a time to build
  * `.queryKey()`, so a MISSING segment (rather than a stubbed one) throws
@@ -49,7 +49,7 @@ beforeEach(() => {
 /** Renders the dialog with `detail` already seeded, so `CaseBody` mounts synchronously. */
 async function renderCase(target: CaseRef, detail: ReturnType<typeof makeModerationCaseDetail>) {
   const queryClient = createTestQueryClient();
-  seedModerationCase(queryClient, target, detail);
+  queryFixtures(queryClient).moderation.case(target, detail);
   return renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
     queryClient,
     signedInAs: { role: "moderator" },
@@ -61,7 +61,10 @@ describe("CaseDialog — role gating on user actions", () => {
 
   it("hides the Ban action from a moderator", async () => {
     const queryClient = createTestQueryClient();
-    seedModerationCase(queryClient, target, makeUserModerationCaseDetail({ id: "user-1" }));
+    queryFixtures(queryClient).moderation.case(
+      target,
+      makeUserModerationCaseDetail({ id: "user-1" }),
+    );
     await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
       queryClient,
       signedInAs: { role: "moderator" },
@@ -75,7 +78,10 @@ describe("CaseDialog — role gating on user actions", () => {
 
   it("shows the Ban action to staff", async () => {
     const queryClient = createTestQueryClient();
-    seedModerationCase(queryClient, target, makeUserModerationCaseDetail({ id: "user-1" }));
+    queryFixtures(queryClient).moderation.case(
+      target,
+      makeUserModerationCaseDetail({ id: "user-1" }),
+    );
     await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
       queryClient,
       signedInAs: { role: "staff" },
@@ -87,7 +93,10 @@ describe("CaseDialog — role gating on user actions", () => {
   it("staff clicking Ban submits the typed reason for the target user", async () => {
     fakeClient.moderation.banUser.mockResolvedValue({ userId: "user-1", banned: true });
     const queryClient = createTestQueryClient();
-    seedModerationCase(queryClient, target, makeUserModerationCaseDetail({ id: "user-1" }));
+    queryFixtures(queryClient).moderation.case(
+      target,
+      makeUserModerationCaseDetail({ id: "user-1" }),
+    );
     await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
       queryClient,
       signedInAs: { role: "staff" },
@@ -121,7 +130,10 @@ describe("CaseDialog — suspend flow", () => {
   it("keeps Suspend disabled until a reason is entered, then submits the trimmed reason with the default duration", async () => {
     fakeClient.moderation.suspendUser.mockResolvedValue({ userId: "user-1", suspended: true });
     const queryClient = createTestQueryClient();
-    seedModerationCase(queryClient, target, makeUserModerationCaseDetail({ id: "user-1" }));
+    queryFixtures(queryClient).moderation.case(
+      target,
+      makeUserModerationCaseDetail({ id: "user-1" }),
+    );
     await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
       queryClient,
       signedInAs: { role: "moderator" },
@@ -157,8 +169,7 @@ describe("CaseDialog — a banned target's actions", () => {
 
   it("offers Unsuspend (not Unban) for a time-limited suspension, and hides the suspend/ban forms", async () => {
     const queryClient = createTestQueryClient();
-    seedModerationCase(
-      queryClient,
+    queryFixtures(queryClient).moderation.case(
       target,
       makeUserModerationCaseDetail({
         id: "user-1",
@@ -182,8 +193,7 @@ describe("CaseDialog — a banned target's actions", () => {
   it("offers Unban (not Unsuspend) for a permanent ban, and submits the target's id", async () => {
     fakeClient.moderation.unbanUser.mockResolvedValue({ userId: "user-1", unbanned: true });
     const queryClient = createTestQueryClient();
-    seedModerationCase(
-      queryClient,
+    queryFixtures(queryClient).moderation.case(
       target,
       makeUserModerationCaseDetail({ id: "user-1", banned: true, banExpires: null }),
     );
@@ -213,8 +223,7 @@ describe("CaseDialog — a banned target's actions", () => {
   // 403 on click. This pins the fix, not just the current behaviour.
   it("hides Unban/Unsuspend from a moderator", async () => {
     const queryClient = createTestQueryClient();
-    seedModerationCase(
-      queryClient,
+    queryFixtures(queryClient).moderation.case(
       target,
       makeUserModerationCaseDetail({ id: "user-1", banned: true, banExpires: null }),
     );
@@ -322,8 +331,7 @@ describe("CaseDialog — appeal review", () => {
       status: "overturned",
     });
     const queryClient = createTestQueryClient();
-    seedModerationCase(
-      queryClient,
+    queryFixtures(queryClient).moderation.case(
       target,
       makeUserModerationCaseDetail(
         { id: "user-1" },
@@ -352,8 +360,7 @@ describe("CaseDialog — appeal review", () => {
 
   it("hides the review actions once the appeal is no longer open", async () => {
     const queryClient = createTestQueryClient();
-    seedModerationCase(
-      queryClient,
+    queryFixtures(queryClient).moderation.case(
       target,
       makeUserModerationCaseDetail(
         { id: "user-1" },

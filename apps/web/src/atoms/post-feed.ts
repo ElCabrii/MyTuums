@@ -1,21 +1,11 @@
 import { atom } from "jotai";
 import { atomFamily } from "jotai-family";
 import { atomWithInfiniteQuery } from "jotai-tanstack-query";
-import { POST_PAGE_SIZE } from "@my-tuums/api/constants";
 import { isSignedInAtom, sessionPendingAtom } from "@/atoms/session";
 import { feedScopeAtom, type FeedScope } from "@/lib/feed-scope";
-import { orpc } from "@/lib/orpc";
+import { postListQueryOptions, type PostFeedParams } from "@/lib/query-definitions";
 
-export type PostFeedParams = {
-  /** Omit for the global timeline; set to scope the feed to one author. */
-  authorId?: string;
-  /** "following" requires a signed-in viewer; the server rejects it otherwise. */
-  feed: FeedScope;
-  /** Set to list one post's direct replies — the thread page's reply list. */
-  parentId?: string;
-  /** Replies are excluded unless this is set; a profile feed opts in. */
-  includeReplies?: boolean;
-};
+export type { PostFeedParams } from "@/lib/query-definitions";
 
 /**
  * `atomFamily` keys off this string rather than the params object — same
@@ -65,36 +55,7 @@ export const decode = (key: string): PostFeedParams => {
  * sign-out instead, where nothing is mounted to split.
  */
 const postFeedFamily = atomFamily((key: string) =>
-  atomWithInfiniteQuery(() => {
-    const { authorId, feed: scope, parentId, includeReplies } = decode(key);
-    return orpc.post.list.infiniteOptions({
-      input: (cursor: string | undefined) => ({
-        limit: POST_PAGE_SIZE,
-        ...(authorId ? { authorId } : {}),
-        // Conditional for the same reason as every other input here: oRPC
-        // embeds the whole object in the query key, so unconditionally
-        // sending `parentId: undefined` / `includeReplies: false` gives the
-        // home timeline a different key than the one it has always used. The
-        // prefix sweeps in `lib/post-cache.ts` would still match both, which
-        // is the trap — nothing errors, the feed is simply cached twice and
-        // the copy a patch lands on need not be the copy on screen.
-        ...(parentId ? { parentId } : {}),
-        ...(includeReplies ? { includeReplies } : {}),
-        // Conditional spread, like `authorId` above: keeps `feed` out of the
-        // query key for the global timeline, so the cache entries the
-        // `orpc.post.list.key()` prefix sweeps in `lib/post-cache.ts` depend
-        // on for optimistic likes are unchanged, and the server's own
-        // `.default("global")` stays the single source of that default. Do
-        // not "clean up" by always passing `feed: scope` — oRPC embeds the
-        // whole input object in the query key, so that would fork every
-        // cache entry silently.
-        ...(scope === "following" ? { feed: scope } : {}),
-        ...(cursor ? { cursor } : {}),
-      }),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    });
-  }),
+  atomWithInfiniteQuery(() => postListQueryOptions(decode(key))),
 );
 
 /** The infinite-query atom for one (scope, author, parent) feed — components read this, not the family. */
