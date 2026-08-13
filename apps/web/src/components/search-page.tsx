@@ -25,8 +25,12 @@ const routeApi = getRouteApi("/search");
  */
 export function SearchPage() {
   const { q } = routeApi.useSearch();
+  // The production route validator already canonicalises `q`, but keeping the
+  // rendering boundary defensive prevents a whitespace-only value from
+  // mounting disabled infinite queries in a perpetual pending state.
+  const query = q?.trim();
 
-  if (!q) {
+  if (!query) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-8">
         <div className="border-border bg-card/40 rounded-xl border border-dashed p-10 text-center">
@@ -37,7 +41,7 @@ export function SearchPage() {
     );
   }
 
-  return <SearchResultsBody q={q} />;
+  return <SearchResultsBody q={query} />;
 }
 
 /**

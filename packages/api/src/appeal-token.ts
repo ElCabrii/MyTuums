@@ -34,6 +34,21 @@ export type AppealTokenPayload = z.infer<typeof payloadSchema>;
 export const APPEAL_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
+ * Upper bound for the opaque token accepted by the appeal endpoint.
+ *
+ * A valid token produced by this module is only a few hundred bytes. Four KiB
+ * leaves ample room for a future payload change while keeping an anonymous
+ * caller from making the verifier allocate and MAC an arbitrarily large
+ * string. The endpoint applies the same bound at its zod boundary; the
+ * verifier repeats it because it is also exported as a direct function.
+ */
+export const APPEAL_TOKEN_MAX_LENGTH = 4 * 1024;
+
+/** SHA-256 in unpadded base64url is always 43 ASCII characters. */
+const APPEAL_TOKEN_SIGNATURE_LENGTH = 43;
+const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+
+/**
  * An HMAC-SHA256 capability signer for the signed-out appeal links.
  *
  * Format is `base64url(payload).base64url(hmac)` — two base64url halves with
@@ -54,11 +69,31 @@ export function createAppealTokenSigner(secret: string) {
   }
 
   function verify(raw: string, now: number = Date.now()): AppealTokenPayload | null {
+    // Keep this check before `lastIndexOf`, slicing, decoding, or HMAC work:
+    // callers can invoke the verifier directly, outside the oRPC schema.
+    if (raw.length === 0 || raw.length > APPEAL_TOKEN_MAX_LENGTH) return null;
+
     const dot = raw.lastIndexOf(".");
     if (dot <= 0) return null;
 
     const body = raw.slice(0, dot);
-    const provided = Buffer.from(raw.slice(dot + 1), "base64url");
+    const encodedSignature = raw.slice(dot + 1);
+    // Reject implausible signatures before Buffer.from allocates a decoded
+    // buffer. Checking the alphabet also avoids Node's permissive base64
+    // decoder accepting punctuation as if it were padding.
+    if (
+      encodedSignature.length !== APPEAL_TOKEN_SIGNATURE_LENGTH ||
+      !BASE64URL_RE.test(encodedSignature)
+    ) {
+      return null;
+    }
+
+    const provided = Buffer.from(encodedSignature, "base64url");
+    // Node's decoder accepts non-zero unused pad bits, so distinct strings can
+    // decode to the same bytes. Capabilities have one textual representation:
+    // require the canonical unpadded base64url encoding before comparing it.
+    if (provided.toString("base64url") !== encodedSignature) return null;
+
     const expected = createHmac("sha256", secret).update(body).digest();
 
     if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {

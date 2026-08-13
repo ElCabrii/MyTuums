@@ -59,6 +59,10 @@ by the Playwright `api` project.
   body while routing — before auth, rate limiting or any payload check.
   Content-Length is checked here; chunked bodies are bounded at the same
   ceiling by oRPC's `BodyLimitPlugin`, wired in `src/index.ts`.
+- **The `/api/auth` body cap runs before Better Auth converts the request.**
+  Declared bodies above `AUTH_MAX_BODY_BYTES` are rejected immediately;
+  lengthless and chunked bodies use the bounded replay path so the adapter
+  never becomes an unbounded or competing stream consumer.
 - **`/media` checks the session before parsing the key.** An anonymous caller
   must not learn which keys are well-formed by watching the response differ.
   The rejection sets `Cache-Control: no-store`, or a cached 401 keeps an image

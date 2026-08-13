@@ -439,7 +439,12 @@ export function SearchBox() {
       case "Enter": {
         event.preventDefault();
         const highlightedRow = highlight >= 0 ? rows[highlight] : undefined;
+        // Enter originates on the input and leaves focus there, so closing does
+        // not need the return-focus guard used by pointer selection and Escape.
+        // Arming that guard here would swallow the user's first later keyboard
+        // focus after they tab away and return.
         setOpen(false);
+        setHighlight(-1);
         if (highlightedRow) {
           void navigate(destinationOf(highlightedRow, inputValue));
         } else {

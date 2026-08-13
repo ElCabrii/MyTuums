@@ -42,6 +42,8 @@ describe("sanitizeRedirect", () => {
       ["https://evil.example/", null],
       // The browser would resolve a protocol-relative URL as a different host.
       ["//evil.example/", null],
+      // URL parsing also treats backslashes as authority separators.
+      ["/\\evil.example/", null],
       ["evil.example/path", null],
       // The auth pages themselves, so a sign-in can't loop into a sign-in.
       ["/login", null],

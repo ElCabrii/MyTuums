@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   APPEAL_TOKEN_TTL_MS,
+  APPEAL_TOKEN_MAX_LENGTH,
   createAppealTokenSigner,
   type AppealTokenPayload,
 } from "./appeal-token.js";
@@ -76,6 +77,31 @@ describe("createAppealTokenSigner", () => {
       const signature = token.slice(token.lastIndexOf(".") + 1);
       expect(verify(`${body}.${signature.slice(0, 8)}`)).toBeNull();
       expect(verify(`${body}.${signature}extra`)).toBeNull();
+    });
+
+    it("rejects oversized input and implausible signature encodings before verification", () => {
+      const { sign, verify } = createAppealTokenSigner(SECRET);
+      const token = sign(payload());
+      const body = bodyOf(token);
+
+      expect(verify(`${"a".repeat(APPEAL_TOKEN_MAX_LENGTH)}.${"a".repeat(43)}`)).toBeNull();
+      expect(verify(`${body}.${"a".repeat(42)}`)).toBeNull();
+      expect(verify(`${body}.${"a".repeat(44)}`)).toBeNull();
+      expect(verify(`${body}.${"!".repeat(43)}`)).toBeNull();
+    });
+
+    it("rejects a noncanonical base64url signature with equivalent decoded bytes", () => {
+      const { sign, verify } = createAppealTokenSigner(SECRET);
+      const token = sign(payload());
+      const dot = token.lastIndexOf(".");
+      const signature = token.slice(dot + 1);
+      const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+      const finalIndex = alphabet.indexOf(signature.at(-1)!);
+      const alias = `${signature.slice(0, -1)}${alphabet[finalIndex + 1]}`;
+
+      expect(finalIndex % 4).toBe(0);
+      expect(Buffer.from(alias, "base64url")).toEqual(Buffer.from(signature, "base64url"));
+      expect(verify(`${token.slice(0, dot + 1)}${alias}`)).toBeNull();
     });
   });
 

@@ -375,14 +375,24 @@ export const moderationRouter = {
           });
         }
 
-        await tx
+        const [updated] = await tx
           .update(user)
           .set({
             banned: true,
             banReason: input.reason,
             banExpires: sql`now() + ${input.durationSeconds} * interval '1 second'`,
           })
-          .where(eq(user.id, input.userId));
+          .where(eq(user.id, input.userId))
+          .returning({ banExpires: user.banExpires });
+        // PostgreSQL is the authority for `now()`. Returning the stored value
+        // keeps the response and the notification aligned with the timestamp
+        // that actually controls visibility and sign-in expiry, even when the
+        // application and database clocks differ.
+        if (!updated?.banExpires) {
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: "Failed to set the suspension expiry.",
+          });
+        }
         // Every session dies with the suspension — the account is locked
         // until the clock runs out or a moderator lifts it.
         await tx.delete(session).where(eq(session.userId, input.userId));
@@ -403,7 +413,7 @@ export const moderationRouter = {
         });
         return {
           actionId: action.id,
-          expiresAt: new Date(Date.now() + input.durationSeconds * 1000),
+          expiresAt: updated.banExpires,
         };
       });
 

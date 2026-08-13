@@ -87,8 +87,9 @@ export async function reconcileMedia({
     const keys = listedByPrefix.get(prefix)!;
     const orphans = keys.filter((key) => !referenced.has(key));
     if (orphans.length > 0) {
-      deleted += await storage.removeMany(orphans);
-      console.log(`${prefix}: deleted ${orphans.length} of ${keys.length} objects`);
+      const removed = await storage.removeMany(orphans);
+      deleted += removed;
+      console.log(`${prefix}: deleted ${removed} of ${keys.length} objects`);
     } else if (keys.length > 0) {
       console.log(`${prefix}: all ${keys.length} objects referenced, nothing to do`);
     }

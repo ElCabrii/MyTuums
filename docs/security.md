@@ -56,6 +56,9 @@ procedure. It is not unguarded — it is **capability-gated**:
   first), re-parses the payload against its schema, and enforces a 7-day TTL.
   A tampered, malformed or expired token is indistinguishable from an invalid
   one.
+- The endpoint and verifier cap tokens at 4 KiB, and the verifier accepts only
+  the canonical unpadded base64url signature. Oversized or alternate textual
+  encodings are rejected before HMAC comparison or database work.
 - The signature check itself is deliberately unthrottled: it is a cheap HMAC
   comparison performed before any database work, and only a holder of a valid
   link can get past it to consume budget.
