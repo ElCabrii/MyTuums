@@ -16,6 +16,7 @@ import {
   isActionCurrent,
   isActionLatest,
   logAction,
+  sendPendingEmails,
   undoAction,
   type ActionRow,
   type PendingEmail,
@@ -358,9 +359,7 @@ export const appealsRouter = {
       });
 
       // Mail after the transaction commits — the review is final either way.
-      for (const pending of pendingEmails) {
-        await emailUser(context.db, context.headers, pending.userId, pending.build);
-      }
+      await sendPendingEmails(context.db, context.headers, pendingEmails);
       await emailUser(context.db, context.headers, row.appellantId, (locale) =>
         moderationResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
       );

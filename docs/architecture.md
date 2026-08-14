@@ -219,13 +219,18 @@ sides by CI. See [operations.md](operations.md).
    so a dual report-and-appeal case is never emitted twice.
 3. **Action.** Removals and suspensions are `moderatorProcedure`; bans, role
    changes, the team view and the audit log are `staffProcedure`. Every action
-   composes the shared effects in `packages/api/src/moderation-actions.ts`:
-   write the audit row, stamp the reports it resolves, email the affected user.
-4. **Audit.** `moderation_action` is append-only. The inverse effects
-   (`restorePostEffect`, `unbanEffect`) read their guard `FOR UPDATE` inside
-   their own transaction — an unlocked pre-read is a TOCTOU that two concurrent
-   restores both pass and both log, and a double log is a lie about what
-   happened.
+   is one effect in `packages/api/src/moderation-actions.ts`
+   (`removePostEffect`, `suspendUserEffect`, `banUserEffect`, `setRoleEffect`):
+   the effect owns its transaction, its `FOR UPDATE` guard read, the report
+   stamps, the audit row, and the notice it owes — the procedure sends that
+   notice only after the effect's transaction has committed.
+4. **Audit.** `moderation_action` is append-only. Every effect — forward and
+   inverse (`restorePostEffect`, `unbanEffect`) — reads its guard `FOR UPDATE`
+   inside its own transaction: an unlocked pre-read is a TOCTOU that two
+   concurrent restores both pass and both log, and a double log is a lie about
+   what happened. A rollback produces no audit row, no partial state change
+   and no email: the notices are returned, never sent from inside the
+   transaction.
 5. **Appeal.** `moderation.appealOpen` takes either an HMAC-signed token from
    the notification email (works signed out — a banned user cannot sign in) or
    a `postId` from a signed-in author's removed-post stub. `appealReview`

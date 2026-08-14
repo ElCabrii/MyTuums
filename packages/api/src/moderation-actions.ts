@@ -3,8 +3,11 @@ import { and, eq, sql } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import {
   localeFromRequest,
+  moderationBanEmail,
+  moderationRemovalEmail,
   moderationRestoreEmail,
   moderationRoleEmail,
+  moderationSuspensionEmail,
   moderationUnbanEmail,
   moderationUnsuspensionEmail,
   sendEmail,
@@ -13,18 +16,24 @@ import {
   type OutgoingEmail,
 } from "@my-tuums/auth";
 import type { Database } from "@my-tuums/db";
-import { moderationAction, post, report, user } from "@my-tuums/db/schema";
+import { moderationAction, post, report, session, user } from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
-import { canManageRole } from "./roles.js";
+import { canManageRole, type UserRole } from "./roles.js";
 
 /**
- * The shared effects every moderation procedure composes (issue #38).
+ * The shared effects every moderation procedure composes (issue #38) — the
+ * forward actions (`removePostEffect`, `suspendUserEffect`, `banUserEffect`,
+ * `setRoleEffect`) and their inverses (`restorePostEffect`, `unbanEffect`,
+ * `undoAction`).
  *
- * The invariants live here so no procedure can skip them: every effect logs a
- * `moderation_action` row (the audit log is append-only by construction — the
- * only writes to it are `logAction` calls), emails the affected user through
- * the same `sendEmail` pipe as the auth flows, and — for the appealable
- * actions — mints the signed-out appeal link the email points at.
+ * The invariants live here so no procedure can skip them: every effect runs
+ * its state change and its `moderation_action` row in ONE transaction (the
+ * audit log is append-only by construction — the only writes to it are
+ * `logAction` calls), reads its guard `FOR UPDATE` inside that transaction,
+ * and returns the email it owes as a `PendingEmail` rather than sending it —
+ * the caller sends after its own commit, so a rollback can never produce an
+ * email describing an action that never happened. The appealable actions mint
+ * the signed-out appeal link the email points at.
  */
 
 /**
@@ -160,6 +169,67 @@ export async function stampReports(
 }
 
 /**
+ * One email an effect owes, handed back by the effect and sent by the caller
+ * AFTER its transaction commits. Every effect returns these instead of sending:
+ * an email sent from inside a transaction that later aborts would describe an
+ * action that never happened.
+ */
+export type PendingEmail = {
+  userId: string;
+  build: (locale: EmailLocale) => Omit<OutgoingEmail, "to">;
+};
+
+/**
+ * Sends the emails an effect returned, after the caller's transaction has
+ * committed. A failed send is logged and swallowed — the action stands, and
+ * the log is for operators (see `emailUser`).
+ */
+export async function sendPendingEmails(
+  db: DbLike,
+  headers: Headers | undefined,
+  pending: PendingEmail[],
+): Promise<void> {
+  for (const email of pending) {
+    await emailUser(db, headers, email.userId, email.build);
+  }
+}
+
+/**
+ * The notice a restore owes — shared by `restorePostEffect` and the appeal
+ * overturn, so the copy decision lives in one place.
+ */
+export function restoreNotice(userId: string): PendingEmail {
+  return { userId, build: (locale) => moderationRestoreEmail(locale) };
+}
+
+/**
+ * The notice an unban or unsuspension owes — the copy follows the code the
+ * effect logged, shared by `unbanEffect` and the appeal overturn.
+ */
+export function unbanNotice(
+  userId: string,
+  code: "user_unbanned" | "user_unsuspended",
+): PendingEmail {
+  return {
+    userId,
+    build: (locale) =>
+      code === "user_unsuspended"
+        ? moderationUnsuspensionEmail(locale)
+        : moderationUnbanEmail(locale),
+  };
+}
+
+/**
+ * The notice a role change owes — the role is optional (a setRole without one).
+ */
+export function roleNotice(args: { userId: string; role: string; reason?: string }): PendingEmail {
+  return {
+    userId: args.userId,
+    build: (locale) => moderationRoleEmail({ role: args.role, reason: args.reason }, locale),
+  };
+}
+
+/**
  * Sends one moderation email to a user, in their stored language when they
  * have one ("en" or "fr"), otherwise in the request's language — the same
  * `PARAGLIDE_LOCALE` cookie the web app sets.
@@ -212,6 +282,290 @@ export function makeAppealUrl(actionId: string, userId: string): string {
     iat: Math.floor(Date.now() / 1000),
   });
   return `${webOrigin}/appeal?token=${token}`;
+}
+
+/**
+ * Removes a post — the forward half of `moderation.removePost`.
+ *
+ * The tombstone, the report stamps and the `post_removed` audit row commit
+ * in ONE transaction: a failure between any of them would otherwise leave
+ * the post removed with no trail of who removed it, or the reports stamped
+ * with no removal. The guard read (does the post exist, is it still up?)
+ * happens inside that transaction under a row lock, so two concurrent
+ * removals serialize instead of both passing the check and each logging.
+ *
+ * The author's notice is returned, not sent — the caller sends it after the
+ * transaction commits, so a failed send cannot roll the removal back and a
+ * rollback can never produce an email.
+ */
+export async function removePostEffect(
+  db: DbLike,
+  args: { postId: string; actorId: string; reason: string },
+): Promise<{ pending: PendingEmail }> {
+  return db.transaction(async (tx) => {
+    const [target] = await tx
+      .select({
+        id: post.id,
+        content: post.content,
+        authorId: post.authorId,
+        removedAt: post.removedAt,
+      })
+      .from(post)
+      .where(eq(post.id, args.postId))
+      .for("update")
+      .limit(1);
+    if (!target) throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
+    if (target.removedAt) {
+      throw new ORPCError("BAD_REQUEST", { message: "This post is already removed." });
+    }
+
+    await tx
+      .update(post)
+      .set({ removedAt: new Date(), removedBy: args.actorId, removedReason: args.reason })
+      .where(eq(post.id, args.postId));
+    await stampReports(tx, {
+      targetType: "post",
+      targetId: args.postId,
+      outcome: "actioned",
+      resolvedBy: args.actorId,
+      note: args.reason,
+    });
+    const action = await logAction(tx, {
+      action: "post_removed",
+      actorId: args.actorId,
+      targetType: "post",
+      targetPostId: args.postId,
+      reason: args.reason,
+    });
+    return {
+      pending: {
+        userId: target.authorId,
+        build: (locale) =>
+          moderationRemovalEmail(
+            {
+              postText: target.content,
+              reason: args.reason,
+              appealUrl: makeAppealUrl(action.id, target.authorId),
+            },
+            locale,
+          ),
+      },
+    };
+  });
+}
+
+/**
+ * Suspends a user for a bounded time — the forward half of
+ * `moderation.suspendUser`.
+ *
+ * The ban-with-expiry, the session sweep, the report stamps and the
+ * `user_suspended` audit row commit in ONE transaction: a failure between
+ * any of them would otherwise leave the account locked with no trail, or the
+ * sessions dead with the account still free. The guard read (does the
+ * account exist, is the actor allowed to manage it, is it not permanently
+ * banned?) happens inside that transaction under a row lock.
+ *
+ * PostgreSQL owns the expiry: the returned `banExpires` is the stored value
+ * from the update, and the caller uses that exact timestamp in both the
+ * response and the notice — never a second application-clock value.
+ *
+ * The notice is returned, not sent — the caller sends it after the
+ * transaction commits.
+ */
+export async function suspendUserEffect(
+  db: DbLike,
+  args: {
+    userId: string;
+    actorId: string;
+    actorRole: string;
+    reason: string;
+    durationSeconds: number;
+  },
+): Promise<{ banExpires: Date; pending: PendingEmail }> {
+  return db.transaction(async (tx) => {
+    const [target] = await tx
+      .select({
+        id: user.id,
+        role: user.role,
+        banned: user.banned,
+        banExpires: user.banExpires,
+      })
+      .from(user)
+      .where(eq(user.id, args.userId))
+      .for("update")
+      .limit(1);
+    if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
+    // Rank guard: a moderator cannot suspend a moderator; nobody can
+    // suspend themselves (an actor always holds their own rank).
+    if (!canManageRole(args.actorRole, target.role ?? "user")) {
+      throw new ORPCError("FORBIDDEN");
+    }
+    // A suspension replaces the expiry, so it must never land on a
+    // permanent ban — one click would turn a staff sentence into a
+    // lapsing one. Lifting the ban first is the explicit path.
+    if (target.banned && !target.banExpires) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "This account is permanently banned. Unban it before suspending.",
+      });
+    }
+
+    const [updated] = await tx
+      .update(user)
+      .set({
+        banned: true,
+        banReason: args.reason,
+        banExpires: sql`now() + ${args.durationSeconds} * interval '1 second'`,
+      })
+      .where(eq(user.id, args.userId))
+      .returning({ banExpires: user.banExpires });
+    // PostgreSQL is the authority for `now()`. Returning the stored value
+    // keeps the response and the notification aligned with the timestamp
+    // that actually controls visibility and sign-in expiry, even when the
+    // application and database clocks differ.
+    if (!updated?.banExpires) {
+      throw new ORPCError("INTERNAL_SERVER_ERROR", {
+        message: "Failed to set the suspension expiry.",
+      });
+    }
+    const banExpires: Date = updated.banExpires;
+    // Every session dies with the suspension — the account is locked
+    // until the clock runs out or a moderator lifts it.
+    await tx.delete(session).where(eq(session.userId, args.userId));
+    await stampReports(tx, {
+      targetType: "user",
+      targetId: args.userId,
+      outcome: "actioned",
+      resolvedBy: args.actorId,
+      note: args.reason,
+    });
+    const action = await logAction(tx, {
+      action: "user_suspended",
+      actorId: args.actorId,
+      targetType: "user",
+      targetUserId: args.userId,
+      reason: args.reason,
+      details: { durationSeconds: args.durationSeconds },
+    });
+    return {
+      banExpires,
+      pending: {
+        userId: args.userId,
+        build: (locale) =>
+          moderationSuspensionEmail(
+            {
+              reason: args.reason,
+              expiresAt: banExpires,
+              appealUrl: makeAppealUrl(action.id, args.userId),
+            },
+            locale,
+          ),
+      },
+    };
+  });
+}
+
+/**
+ * Bans a user permanently — a suspension without an expiry, the forward half
+ * of `moderation.banUser`. Same shape as `suspendUserEffect`, staff+ gate.
+ */
+export async function banUserEffect(
+  db: DbLike,
+  args: { userId: string; actorId: string; actorRole: string; reason: string },
+): Promise<{ pending: PendingEmail }> {
+  return db.transaction(async (tx) => {
+    const [target] = await tx
+      .select({ id: user.id, role: user.role })
+      .from(user)
+      .where(eq(user.id, args.userId))
+      .for("update")
+      .limit(1);
+    if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
+    if (!canManageRole(args.actorRole, target.role ?? "user")) {
+      throw new ORPCError("FORBIDDEN");
+    }
+
+    await tx
+      .update(user)
+      .set({ banned: true, banReason: args.reason, banExpires: null })
+      .where(eq(user.id, args.userId));
+    await tx.delete(session).where(eq(session.userId, args.userId));
+    await stampReports(tx, {
+      targetType: "user",
+      targetId: args.userId,
+      outcome: "actioned",
+      resolvedBy: args.actorId,
+      note: args.reason,
+    });
+    const action = await logAction(tx, {
+      action: "user_banned",
+      actorId: args.actorId,
+      targetType: "user",
+      targetUserId: args.userId,
+      reason: args.reason,
+    });
+    return {
+      pending: {
+        userId: args.userId,
+        build: (locale) =>
+          moderationBanEmail(
+            {
+              reason: args.reason,
+              appealUrl: makeAppealUrl(action.id, args.userId),
+            },
+            locale,
+          ),
+      },
+    };
+  });
+}
+
+/**
+ * Changes a user's role — the forward half of `moderation.setRole`.
+ *
+ * The role write and the `role_changed` audit row commit in ONE transaction.
+ * The guard read (does the account exist, is the actor allowed to manage it,
+ * is the role actually different?) happens inside that transaction under a
+ * row lock.
+ *
+ * The staff-gate check that oRPC cannot express at build time — granting
+ * staff or admin requires the actor to be admin — stays at the procedure
+ * seam: it is a gate on the caller, not a fact about the target, and the
+ * procedure already carries the staff gate.
+ */
+export async function setRoleEffect(
+  db: DbLike,
+  args: { userId: string; actorId: string; actorRole: string; role: UserRole },
+): Promise<{ pending: PendingEmail }> {
+  await db.transaction(async (tx) => {
+    const [target] = await tx
+      .select({ id: user.id, role: user.role })
+      .from(user)
+      .where(eq(user.id, args.userId))
+      .for("update")
+      .limit(1);
+    if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
+    if (!canManageRole(args.actorRole, target.role ?? "user")) {
+      throw new ORPCError("FORBIDDEN");
+    }
+    if (target.role === args.role) {
+      throw new ORPCError("BAD_REQUEST", { message: `This account already has that role.` });
+    }
+
+    await tx.update(user).set({ role: args.role }).where(eq(user.id, args.userId));
+    await logAction(tx, {
+      action: "role_changed",
+      actorId: args.actorId,
+      targetType: "user",
+      targetUserId: args.userId,
+      details: { oldRole: target.role ?? "user", newRole: args.role },
+    });
+  });
+  return {
+    pending: {
+      userId: args.userId,
+      build: (locale) => moderationRoleEmail({ role: args.role }, locale),
+    },
+  };
 }
 
 /**
@@ -333,23 +687,25 @@ export async function isActionLatest(
  * (moderation.appealReview), and an email sent from inside a transaction that
  * later aborts would describe an action that never happened.
  *
- * Returns the author's id, or `null` when there was nothing to restore (a race
- * with the appeal overturn or a manual restore already cleared the tombstone)
- * — the first restore's audit row exists, and a second one would lie about
- * what happened. Callers email only when non-null.
+ * Returns the author's notice, or an empty array when there was nothing to
+ * restore (a race with the appeal overturn or a manual restore already
+ * cleared the tombstone) — the first restore's audit row exists, and a
+ * second one would lie about what happened. Callers send the returned
+ * notices only after their own transaction commits.
  */
 export async function restorePostEffect(
   db: DbLike,
   args: { postId: string; actorId: string; note?: string },
-): Promise<{ authorId: string } | null> {
+): Promise<PendingEmail[]> {
   // The guard read lives INSIDE the transaction, under the same row lock the
   // forward paths take — a moderator's Restore racing the appeal overturn
   // must not both pass an unlocked "is it still removed?" check and each log
   // a `post_restored` row that lies about what happened (issue #51). The lock
   // serializes them: the loser's read observes the winner's commit and
-  // returns null below. The read also has to happen BEFORE the clear — a
-  // `returning` clause on the update would report the post-update value
-  // (always null) and make the already-restored check fire on every call.
+  // returns an empty array below. The read also has to happen BEFORE the
+  // clear — a `returning` clause on the update would report the post-update
+  // value (always null) and make the already-restored check fire on every
+  // call.
   return db.transaction(async (tx) => {
     const [target] = await tx
       .select({ id: post.id, authorId: post.authorId, removedAt: post.removedAt })
@@ -363,7 +719,7 @@ export async function restorePostEffect(
     // Already restored (a race with the appeal overturn or a manual restore):
     // nothing to log — the first restore's audit row exists, and a second one
     // would lie about what happened.
-    if (target.removedAt === null) return null;
+    if (target.removedAt === null) return [];
 
     await tx
       .update(post)
@@ -378,7 +734,7 @@ export async function restorePostEffect(
       note: args.note,
     });
 
-    return { authorId: target.authorId };
+    return [restoreNotice(target.authorId)];
   });
 }
 
@@ -397,10 +753,10 @@ export async function restorePostEffect(
  * staff member cannot undo an admin's sentence on a staff peer, any more
  * than they could have imposed it.
  *
- * Returns the logged code (`user_unbanned` for a ban, `user_unsuspended` for
- * a suspension) so the caller can email the matching copy, or `null` when
- * nothing was done — either the account was never banned (only reachable
- * with `tolerateNotBanned`) or a racing manual unban won the window between
+ * Returns the notice matching the logged code (`user_unbanned` for a ban,
+ * `user_unsuspended` for a suspension), or an empty array when nothing was
+ * done — either the account was never banned (only reachable with
+ * `tolerateNotBanned`) or a racing manual unban won the window between
  * the appeal's `isActionCurrent` pre-check and this read.
  */
 export async function unbanEffect(
@@ -420,7 +776,7 @@ export async function unbanEffect(
      */
     tolerateNotBanned?: boolean;
   },
-): Promise<"user_unbanned" | "user_unsuspended" | null> {
+): Promise<PendingEmail[]> {
   // Same shape as restorePostEffect (issue #51): the guard read happens
   // inside the transaction under a row lock, so two concurrent unbans cannot
   // both read "banned" and each write a `user_unbanned` row and email the
@@ -437,7 +793,7 @@ export async function unbanEffect(
 
     if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
     if (!target.banned) {
-      if (args.tolerateNotBanned) return null;
+      if (args.tolerateNotBanned) return [];
       throw new ORPCError("BAD_REQUEST", { message: "This account isn't banned or suspended." });
     }
     if (!canManageRole(args.actorRole, target.role ?? "user")) {
@@ -462,20 +818,9 @@ export async function unbanEffect(
       note: args.note,
     });
 
-    return code;
+    return [unbanNotice(args.userId, code)];
   });
 }
-
-/**
- * One email an overturn owes, handed back by {@link undoAction} and sent by
- * the caller AFTER its transaction commits. The appeal review's transaction
- * is the caller (moderation.appealReview); an email sent from inside it would
- * describe an action that might still abort.
- */
-export type PendingEmail = {
-  userId: string;
-  build: (locale: EmailLocale) => Omit<OutgoingEmail, "to">;
-};
 
 /**
  * Reverses an appealable action — the overturn half of `moderation.appealReview`.
@@ -484,10 +829,10 @@ export type PendingEmail = {
  * aspirational: the currency pre-check (`isActionCurrent`) is advisory, and
  * if the action was already undone between the check and here (another
  * reviewer, or a moderator acting manually), the effect becomes a no-op —
- * `restorePostEffect` returns null on an already-restored post, `unbanEffect`
- * with `tolerateNotBanned` returns null on an already-cleared sentence — so
- * the appeal still gets stamped and a legitimate overturn is never reported
- * as failed over a lost race.
+ * `restorePostEffect` returns an empty array on an already-restored post,
+ * `unbanEffect` with `tolerateNotBanned` returns an empty array on an
+ * already-cleared sentence — so the appeal still gets stamped and a
+ * legitimate overturn is never reported as failed over a lost race.
  *
  * The rank guard is NOT advisory: an overturn restores a state the reviewer
  * must be able to manage themselves — the same `canManageRole` rule as the
@@ -517,37 +862,26 @@ export async function undoAction(
 
   switch (action.action) {
     case "post_removed": {
-      const restored = await restorePostEffect(db, {
-        postId: action.targetPostId!,
-        actorId,
-        note,
-      });
-      if (restored) {
-        pending.push({
-          userId: restored.authorId,
-          build: (locale) => moderationRestoreEmail(locale),
-        });
-      }
+      pending.push(
+        ...(await restorePostEffect(db, {
+          postId: action.targetPostId!,
+          actorId,
+          note,
+        })),
+      );
       break;
     }
     case "user_suspended":
     case "user_banned": {
-      const code = await unbanEffect(db, {
-        userId: action.targetUserId!,
-        actorId,
-        actorRole,
-        note,
-        tolerateNotBanned: true,
-      });
-      if (code) {
-        pending.push({
+      pending.push(
+        ...(await unbanEffect(db, {
           userId: action.targetUserId!,
-          build: (locale) =>
-            code === "user_unsuspended"
-              ? moderationUnsuspensionEmail(locale)
-              : moderationUnbanEmail(locale),
-        });
-      }
+          actorId,
+          actorRole,
+          note,
+          tolerateNotBanned: true,
+        })),
+      );
       break;
     }
     case "role_changed": {
@@ -577,10 +911,7 @@ export async function undoAction(
         targetUserId: action.targetUserId!,
         details: { oldRole: target.role ?? "user", newRole: oldRole },
       });
-      pending.push({
-        userId: action.targetUserId!,
-        build: (locale) => moderationRoleEmail({ role: oldRole }, locale),
-      });
+      pending.push(roleNotice({ userId: action.targetUserId!, role: oldRole }));
       break;
     }
   }
