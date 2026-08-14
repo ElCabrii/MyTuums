@@ -299,14 +299,6 @@ export const signUpAtom = atom(null, async (_get, set, fields: SignUpArgs): Prom
   }
 });
 
-/** Sweeps every family's `remove()` across all params it has ever created. */
-function clearFamily<Param>(family: {
-  getParams(): Iterable<Param>;
-  remove(p: Param): void;
-}): void {
-  for (const param of [...family.getParams()]) family.remove(param);
-}
-
 /**
  * Signs the viewer out and sweeps every viewer-dependent cache.
  *
@@ -323,6 +315,14 @@ function clearFamily<Param>(family: {
  * `setShouldRemove` predicate those families explicitly avoid elsewhere —
  * there's nothing currently reading them that a mid-sweep removal could
  * split.
+ *
+ * The teardown itself — the QueryClient clear and the family sweep — lives in
+ * `atoms/sign-out-sweep.ts` behind `clearViewerState`, so this atom doesn't
+ * have to know which families exist. It is fetched on demand, not statically:
+ * those helpers live in the same modules as the feed/query machinery they
+ * sweep (postFeedAtom, the like/follow intent atoms, the thread family), and
+ * a static import dragged ~60 KB of that machinery into the login page's
+ * chunks for the sake of an action only a signed-in user can trigger.
  */
 export const signOutAtom = atom(null, async (get, set): Promise<void> => {
   set(authPendingAtom, true);
@@ -332,48 +332,8 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
     // it the caller navigates while the session store still reports the old
     // user, and `useRedirectWhenSignedIn` bounces them back.
     await waitForSignedOut();
-    get(queryClientAtom).clear();
-    // Dynamic import on purpose, not a static one at the top of this file:
-    // these helpers live in the same modules as the feed/query machinery they
-    // sweep (postFeedAtom, the like/follow intent atoms, the thread family),
-    // and a static import dragged ~60 KB of that machinery into the login
-    // page's chunks for the sake of an action only a signed-in user can
-    // trigger. Sign-out is also the one moment nothing is mounted against
-    // those families, which is what makes sweeping them safe — see
-    // `atoms/sign-out-sweep.ts`.
-    const {
-      profileAtomFamily,
-      clearPostFeedFamily,
-      clearUserListFamily,
-      clearThreadFamily,
-      clearReplyFamilies,
-      clearLikeFamilies,
-      clearFollowFamilies,
-      clearSearchFamilies,
-      clearModerationFamilies,
-    } = await import("@/atoms/sign-out-sweep");
-    clearFamily(profileAtomFamily);
-    clearPostFeedFamily();
-    clearUserListFamily();
-    clearThreadFamily();
-    // Reply drafts are per-post and in-memory; they belong to the person who
-    // typed them, not to the browser.
-    clearReplyFamilies();
-    // The like/follow families hold per-entity intent as well as mutation
-    // atoms, and intent is viewer-relative — a stale `true` would make the
-    // next viewer's first response look superseded and be dropped.
-    clearLikeFamilies();
-    clearFollowFamilies();
-    // Moderation families hold per-case query atoms and the dialogs' form
-    // atoms; the data was already wiped by `queryClient.clear()` above, but
-    // the family Maps would keep stale atom instances (and stale mutation
-    // results) per case ref for the next session.
-    clearModerationFamilies();
-    // Search families are swept like every other family — results keyed on
-    // the previous session's queries shouldn't outlive it. (The debounced
-    // query and popover state die with the SearchBox at unmount, which the
-    // session gate triggers right after this runs.)
-    clearSearchFamilies();
+    const { clearViewerState } = await import("@/atoms/sign-out-sweep");
+    clearViewerState(get(queryClientAtom));
     // Sign-in state that belongs to the session that just ended: a pending
     // challenge's methods would otherwise still be on screen for whoever signs
     // in next on this browser.
