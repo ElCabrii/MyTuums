@@ -2,25 +2,8 @@ import { asc, desc, eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import {
-  moderationBanEmail,
-  moderationRemovalEmail,
-  moderationRestoreEmail,
-  moderationRoleEmail,
-  moderationSuspensionEmail,
-  moderationUnbanEmail,
-  moderationUnsuspensionEmail,
-} from "@my-tuums/auth";
 import type { Database } from "@my-tuums/db";
-import {
-  follow,
-  moderationAction,
-  post,
-  report,
-  session,
-  user,
-  userBlock,
-} from "@my-tuums/db/schema";
+import { follow, moderationAction, post, report, user, userBlock } from "@my-tuums/db/schema";
 import {
   MODERATION_NOTE_MAX_LENGTH,
   POST_REPORT_REASONS,
@@ -31,11 +14,12 @@ import {
 import { createCursorCodec } from "./cursor.js";
 import { appealsRouter } from "./moderation-appeals.js";
 import {
-  emailUser,
-  logAction,
-  makeAppealUrl,
+  banUserEffect,
+  removePostEffect,
   restorePostEffect,
-  stampReports,
+  sendPendingEmails,
+  setRoleEffect,
+  suspendUserEffect,
   unbanEffect,
 } from "./moderation-actions.js";
 import { noteInput, queueInput } from "./moderation-inputs.js";
@@ -43,7 +27,7 @@ import { queueRouter } from "./moderation-queue.js";
 import { keysetPage } from "./pagination.js";
 import { moderatorProcedure, protectedProcedure, rateLimit, staffProcedure } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
-import { canManageRole, roleAtLeast, roleRank, USER_ROLES } from "./roles.js";
+import { roleAtLeast, roleRank, USER_ROLES } from "./roles.js";
 import { publicUserColumns } from "./users.js";
 
 /**
@@ -261,56 +245,14 @@ export const moderationRouter = {
       }),
     )
     .handler(async ({ input, context }) => {
-      const result = await context.db.transaction(async (tx) => {
-        const [target] = await tx
-          .select({
-            id: post.id,
-            content: post.content,
-            authorId: post.authorId,
-            removedAt: post.removedAt,
-          })
-          .from(post)
-          .where(eq(post.id, input.postId))
-          .for("update")
-          .limit(1);
-        if (!target) throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
-        if (target.removedAt) {
-          throw new ORPCError("BAD_REQUEST", { message: "This post is already removed." });
-        }
-
-        await tx
-          .update(post)
-          .set({ removedAt: new Date(), removedBy: context.user.id, removedReason: input.reason })
-          .where(eq(post.id, input.postId));
-        await stampReports(tx, {
-          targetType: "post",
-          targetId: input.postId,
-          outcome: "actioned",
-          resolvedBy: context.user.id,
-          note: input.reason,
-        });
-        const action = await logAction(tx, {
-          action: "post_removed",
-          actorId: context.user.id,
-          targetType: "post",
-          targetPostId: input.postId,
-          reason: input.reason,
-        });
-        return { authorId: target.authorId, content: target.content, actionId: action.id };
+      // The effect commits the tombstone + stamps + audit row, then the
+      // author is emailed — a failed send must not roll the removal back.
+      const { pending } = await removePostEffect(context.db, {
+        postId: input.postId,
+        actorId: context.user.id,
+        reason: input.reason,
       });
-
-      // Mail after the transaction commits: a failed send must not roll the
-      // removal back, and the mail itself needs no transaction.
-      await emailUser(context.db, context.headers, result.authorId, (locale) =>
-        moderationRemovalEmail(
-          {
-            postText: result.content,
-            reason: input.reason,
-            appealUrl: makeAppealUrl(result.actionId, result.authorId),
-          },
-          locale,
-        ),
-      );
+      await sendPendingEmails(context.db, context.headers, [pending]);
       return { postId: input.postId, removed: true };
     }),
 
@@ -319,19 +261,15 @@ export const moderationRouter = {
     .use(rateLimit(RATE_LIMITS.moderate))
     .input(z.object({ postId: z.uuid(), note: noteInput }))
     .handler(async ({ input, context }) => {
-      const restored = await restorePostEffect(context.db, {
+      // The effect commits the tombstone clear + audit row, then the author
+      // is emailed — and an already-restored post (a race with the appeal
+      // overturn) owes no email: nothing happened.
+      const pending = await restorePostEffect(context.db, {
         postId: input.postId,
         actorId: context.user.id,
         note: input.note,
       });
-      // The effect commits the tombstone clear + audit row, then the author
-      // is emailed — and an already-restored post (a race with the appeal
-      // overturn) gets no email: nothing happened.
-      if (restored) {
-        await emailUser(context.db, context.headers, restored.authorId, (locale) =>
-          moderationRestoreEmail(locale),
-        );
-      }
+      await sendPendingEmails(context.db, context.headers, pending);
       return { postId: input.postId, restored: true };
     }),
 
@@ -348,86 +286,17 @@ export const moderationRouter = {
     .use(rateLimit(RATE_LIMITS.moderate))
     .input(suspensionInput)
     .handler(async ({ input, context }) => {
-      const result = await context.db.transaction(async (tx) => {
-        const [target] = await tx
-          .select({
-            id: user.id,
-            role: user.role,
-            banned: user.banned,
-            banExpires: user.banExpires,
-          })
-          .from(user)
-          .where(eq(user.id, input.userId))
-          .for("update")
-          .limit(1);
-        if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
-        // Rank guard: a moderator cannot suspend a moderator; nobody can
-        // suspend themselves (an actor always holds their own rank).
-        if (!canManageRole(context.user.role ?? "user", target.role ?? "user")) {
-          throw new ORPCError("FORBIDDEN");
-        }
-        // A suspension replaces the expiry, so it must never land on a
-        // permanent ban — one click would turn a staff sentence into a
-        // lapsing one. Lifting the ban first is the explicit path.
-        if (target.banned && !target.banExpires) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: "This account is permanently banned. Unban it before suspending.",
-          });
-        }
-
-        const [updated] = await tx
-          .update(user)
-          .set({
-            banned: true,
-            banReason: input.reason,
-            banExpires: sql`now() + ${input.durationSeconds} * interval '1 second'`,
-          })
-          .where(eq(user.id, input.userId))
-          .returning({ banExpires: user.banExpires });
-        // PostgreSQL is the authority for `now()`. Returning the stored value
-        // keeps the response and the notification aligned with the timestamp
-        // that actually controls visibility and sign-in expiry, even when the
-        // application and database clocks differ.
-        if (!updated?.banExpires) {
-          throw new ORPCError("INTERNAL_SERVER_ERROR", {
-            message: "Failed to set the suspension expiry.",
-          });
-        }
-        // Every session dies with the suspension — the account is locked
-        // until the clock runs out or a moderator lifts it.
-        await tx.delete(session).where(eq(session.userId, input.userId));
-        await stampReports(tx, {
-          targetType: "user",
-          targetId: input.userId,
-          outcome: "actioned",
-          resolvedBy: context.user.id,
-          note: input.reason,
-        });
-        const action = await logAction(tx, {
-          action: "user_suspended",
-          actorId: context.user.id,
-          targetType: "user",
-          targetUserId: input.userId,
-          reason: input.reason,
-          details: { durationSeconds: input.durationSeconds },
-        });
-        return {
-          actionId: action.id,
-          expiresAt: updated.banExpires,
-        };
+      // The effect commits the ban + session sweep + stamps + audit row,
+      // then the user is emailed with the stored expiry.
+      const { banExpires, pending } = await suspendUserEffect(context.db, {
+        userId: input.userId,
+        actorId: context.user.id,
+        actorRole: context.user.role ?? "user",
+        reason: input.reason,
+        durationSeconds: input.durationSeconds,
       });
-
-      await emailUser(context.db, context.headers, input.userId, (locale) =>
-        moderationSuspensionEmail(
-          {
-            reason: input.reason,
-            expiresAt: result.expiresAt,
-            appealUrl: makeAppealUrl(result.actionId, input.userId),
-          },
-          locale,
-        ),
-      );
-      return { userId: input.userId, suspended: true, banExpires: result.expiresAt };
+      await sendPendingEmails(context.db, context.headers, [pending]);
+      return { userId: input.userId, suspended: true, banExpires };
     }),
 
   /** Bans a user permanently — a suspension without an expiry. Same shape, staff+ gate. */
@@ -440,49 +309,15 @@ export const moderationRouter = {
       }),
     )
     .handler(async ({ input, context }) => {
-      const result = await context.db.transaction(async (tx) => {
-        const [target] = await tx
-          .select({ id: user.id, role: user.role })
-          .from(user)
-          .where(eq(user.id, input.userId))
-          .for("update")
-          .limit(1);
-        if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
-        if (!canManageRole(context.user.role ?? "user", target.role ?? "user")) {
-          throw new ORPCError("FORBIDDEN");
-        }
-
-        await tx
-          .update(user)
-          .set({ banned: true, banReason: input.reason, banExpires: null })
-          .where(eq(user.id, input.userId));
-        await tx.delete(session).where(eq(session.userId, input.userId));
-        await stampReports(tx, {
-          targetType: "user",
-          targetId: input.userId,
-          outcome: "actioned",
-          resolvedBy: context.user.id,
-          note: input.reason,
-        });
-        const action = await logAction(tx, {
-          action: "user_banned",
-          actorId: context.user.id,
-          targetType: "user",
-          targetUserId: input.userId,
-          reason: input.reason,
-        });
-        return { actionId: action.id };
+      // The effect commits the ban + session sweep + stamps + audit row,
+      // then the user is emailed.
+      const { pending } = await banUserEffect(context.db, {
+        userId: input.userId,
+        actorId: context.user.id,
+        actorRole: context.user.role ?? "user",
+        reason: input.reason,
       });
-
-      await emailUser(context.db, context.headers, input.userId, (locale) =>
-        moderationBanEmail(
-          {
-            reason: input.reason,
-            appealUrl: makeAppealUrl(result.actionId, input.userId),
-          },
-          locale,
-        ),
-      );
+      await sendPendingEmails(context.db, context.headers, [pending]);
       return { userId: input.userId, banned: true };
     }),
 
@@ -496,7 +331,7 @@ export const moderationRouter = {
       // restricted as imposing one. Strict by default — an account that
       // isn't banned is the caller-facing error; the appeal path passes
       // `tolerateNotBanned` instead.
-      const code = await unbanEffect(context.db, {
+      const pending = await unbanEffect(context.db, {
         userId: input.userId,
         actorId: context.user.id,
         actorRole: context.user.role ?? "user",
@@ -504,13 +339,7 @@ export const moderationRouter = {
       });
       // The effect commits the clear + audit row, then the user is emailed
       // with the copy matching the sentence that was lifted.
-      if (code) {
-        await emailUser(context.db, context.headers, input.userId, (locale) =>
-          code === "user_unsuspended"
-            ? moderationUnsuspensionEmail(locale)
-            : moderationUnbanEmail(locale),
-        );
-      }
+      await sendPendingEmails(context.db, context.headers, pending);
       return { userId: input.userId, unbanned: true };
     }),
 
@@ -533,34 +362,15 @@ export const moderationRouter = {
         throw new ORPCError("FORBIDDEN");
       }
 
-      await context.db.transaction(async (tx) => {
-        const [target] = await tx
-          .select({ id: user.id, role: user.role })
-          .from(user)
-          .where(eq(user.id, input.userId))
-          .for("update")
-          .limit(1);
-        if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
-        if (!canManageRole(context.user.role ?? "user", target.role ?? "user")) {
-          throw new ORPCError("FORBIDDEN");
-        }
-        if (target.role === input.role) {
-          throw new ORPCError("BAD_REQUEST", { message: `This account already has that role.` });
-        }
-
-        await tx.update(user).set({ role: input.role }).where(eq(user.id, input.userId));
-        await logAction(tx, {
-          action: "role_changed",
-          actorId: context.user.id,
-          targetType: "user",
-          targetUserId: input.userId,
-          details: { oldRole: target.role ?? "user", newRole: input.role },
-        });
+      // The effect commits the role write + audit row, then the user is
+      // emailed.
+      const { pending } = await setRoleEffect(context.db, {
+        userId: input.userId,
+        actorId: context.user.id,
+        actorRole: context.user.role ?? "user",
+        role: input.role,
       });
-
-      await emailUser(context.db, context.headers, input.userId, (locale) =>
-        moderationRoleEmail({ role: input.role }, locale),
-      );
+      await sendPendingEmails(context.db, context.headers, [pending]);
       return { userId: input.userId, role: input.role };
     }),
 

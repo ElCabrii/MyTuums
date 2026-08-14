@@ -186,10 +186,14 @@ never existed, so the block itself does not leak.
   one may appoint or demote a peer.
 - The rank guard lives in `packages/api/src/moderation-actions.ts`, on the
   inverse paths as well as the forward ones, so no restore can skip it.
-- The audit log is **append-only**. The inverse effects read their guard
-  `FOR UPDATE` inside their own transaction: an unlocked pre-read is a TOCTOU
-  that two concurrent restores both pass and both log, and a double log is a
-  lie about what happened. Moving that read out of the transaction re-opens it.
+- The audit log is **append-only**. Every effect — forward and inverse —
+  reads its guard `FOR UPDATE` inside its own transaction: an unlocked
+  pre-read is a TOCTOU that two concurrent restores both pass and both log,
+  and a double log is a lie about what happened. The role overturn checks the
+  contested grant under that same lock (`restoreRoleEffect`), so a racing
+  `setRoleEffect` can never be clobbered by an appeal that already passed its
+  currency check. Moving any of these reads out of the transaction re-opens
+  the race.
 - Appeal review excludes the moderator who took the original action.
 
 ## Configuration and secrets
