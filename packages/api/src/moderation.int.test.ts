@@ -1617,7 +1617,7 @@ describe("unbanEffect", () => {
         actorRole: "staff",
         tolerateNotBanned: true,
       }),
-    ).resolves.toBeNull();
+    ).resolves.toEqual([]);
 
     // No audit row was written for either attempt — nothing was lifted.
     const rows = await anonContext.db
@@ -1627,18 +1627,19 @@ describe("unbanEffect", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("clears the sentence and returns the matching code when the account is banned", async () => {
+  it("clears the sentence and returns the matching notice when the account is banned", async () => {
     const target = await createTestUser();
     await setUserBan(target.id, { reason: "permanent spam", expiresAt: null });
     const actor = await staffUser();
 
-    await expect(
-      unbanEffect(anonContext.db, {
-        userId: target.id,
-        actorId: actor.id,
-        actorRole: "staff",
-      }),
-    ).resolves.toBe("user_unbanned");
+    const pending = await unbanEffect(anonContext.db, {
+      userId: target.id,
+      actorId: actor.id,
+      actorRole: "staff",
+    });
+    expect(pending).toHaveLength(1);
+    expect(pending[0].userId).toBe(target.id);
+    expect(pending[0].build("en").subject).toBe("Your account is no longer banned");
 
     const [row] = await anonContext.db
       .select({ banned: user.banned, banExpires: user.banExpires })
