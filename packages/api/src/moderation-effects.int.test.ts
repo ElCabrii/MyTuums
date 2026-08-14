@@ -267,6 +267,42 @@ describe("forward moderation effects", () => {
     expect(action?.details).toEqual({ oldRole: "staff", newRole: "user" });
   });
 
+  it("an overturn racing a concurrent setRole can never clobber the newer role — the promotion always wins the row lock", async () => {
+    const admin = await createTestUser();
+    await setUserRole(admin.id, "admin");
+    const bob = await createTestUser();
+    await setUserRole(bob.id, "staff");
+
+    // Two effects on the same row, started together. The row lock
+    // serializes their guard reads, and either order is safe: if the
+    // restore wins the lock first it restores and the promotion then
+    // supersedes it; if the promotion wins first the restore observes the
+    // committed grant no longer holding and no-ops. The final role is the
+    // newer sentence in every interleaving — the overturn can never
+    // clobber it.
+    await Promise.all([
+      setRoleEffect(anonContext.db, {
+        userId: bob.id,
+        actorId: admin.id,
+        actorRole: "admin",
+        role: "admin",
+      }),
+      restoreRoleEffect(anonContext.db, {
+        userId: bob.id,
+        actorId: admin.id,
+        actorRole: "admin",
+        grantedRole: "staff",
+        oldRole: "user",
+      }),
+    ]);
+
+    const [row] = await anonContext.db
+      .select({ role: user.role })
+      .from(user)
+      .where(eq(user.id, bob.id));
+    expect(row?.role).toBe("admin");
+  });
+
   it("suspendUserEffect commits the ban, the session sweep and the audit row, returning the stored expiry", async () => {
     const victim = await createTestUser();
     const mod = await createTestUser();

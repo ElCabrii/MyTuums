@@ -220,7 +220,7 @@ export function unbanNotice(
 }
 
 /**
- * The notice a role change owes — the role is optional (a setRole without one).
+ * The notice a role change owes — the reason is optional (a setRole without one).
  */
 export function roleNotice(args: { userId: string; role: string; reason?: string }): PendingEmail {
   return {
