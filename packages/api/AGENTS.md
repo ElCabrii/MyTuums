@@ -24,19 +24,19 @@ over HTTP and imports only its browser-safe subpaths.
 
 ## Change map
 
-| Intent                                | Primary                                                                                  | Also touch                                                                      |
-| ------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`) | `src/router.ts` if it is a new group; an `.int.test.ts`                         |
-| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                      | a matching index in `packages/db/src/schema/app.ts`                             |
-| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                      | `src/rate-limit.test.ts`                                                        |
-| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                     | `src/users.int.test.ts` pins it — read the invariant first                      |
-| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)         | `src/constants.ts` (action code), `docs/product.md` glossary                    |
-| Change the queue or a case view       | `src/moderation-queue.ts`                                                                | `src/moderation-inputs.ts` if the input shape moves                             |
-| Change the appeal flow                | `src/moderation-appeals.ts`, `src/appeal-token.ts`                                       | `docs/security.md` — this is the one anonymous surface                          |
-| Change upload rules                   | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                       |
-| Change the upload/remove lifecycle    | `src/profile-media.ts`                                                                   | `src/profile-media.test.ts`; `src/users.ts` only if the procedure shape changes |
-| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                            |
-| Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                |
+| Intent                                | Primary                                                                                  | Also touch                                                                          |
+| ------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`) | `src/router.ts` if it is a new group; an `.int.test.ts`                             |
+| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                      | a matching index in `packages/db/src/schema/app.ts`                                 |
+| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                      | `src/rate-limit.test.ts`                                                            |
+| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                     | `src/users.int.test.ts` pins it — read the invariant first                          |
+| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)         | `src/constants.ts` (action code), `docs/product.md` glossary                        |
+| Change the queue or a case view       | `src/moderation-queue.ts`                                                                | `src/moderation-inputs.ts` if the input shape moves                                 |
+| Change the appeal flow                | `src/moderation-appeals.ts`, `src/appeal-token.ts`                                       | `docs/security.md` — this is the one anonymous surface                              |
+| Change upload rules                   | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                           |
+| Change the upload/remove lifecycle    | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes |
+| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                |
+| Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                    |
 
 ## Invariants
 
@@ -70,7 +70,10 @@ over HTTP and imports only its browser-safe subpaths.
   avatar/banner pair-key mapping and the best-effort cleanup are the
   module's, so the two procedures cannot drift. The display and original
   variants share one uuid with an `.orig` infix, and `objectKeyFromMediaPath`
-  returns `null` for provider URLs — cleanup never touches them.
+  returns `null` for provider URLs — cleanup never touches them. Without the
+  row lock, two racing replacements could both read the same old keys and
+  each delete them after its own swap, orphaning the pair the first to
+  commit wrote.
 - **`scripts/reconcile-media.mjs` must list the bucket BEFORE reading the
   `user` rows.** The reverse order treats an upload landing between the two
   steps as an orphan and deletes an object whose row points at it (issue #52;

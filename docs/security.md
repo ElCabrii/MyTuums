@@ -149,14 +149,19 @@ used to 429 every request from a fresh session.
 - The lifecycle is one module: prepare/write the new objects, atomically swap
   the row references under a row lock, then best-effort delete the superseded
   pair. The row lock is what makes two concurrent replacements serialize —
-  without it, both could read the same old keys, both delete them, and leave
-  the winner's row pointing at objects that were removed.
+  without it, both could read the same old keys, and each would delete them
+  after its own swap, orphaning the pair the first to commit wrote (the
+  reconciliation script reaps it). The lock lets the loser observe the
+  winner's committed pair instead, so the leak never happens.
 - Cleanup only ever deletes keys derived from the _previous_ row values, and
   only when they are this app's own keys — never the pair the request just
   committed, and never a provider's absolute avatar URL.
-- A failed write or a rolled-back transaction leaves the profile untouched;
-  the freshly written objects are orphans, reaped by the reconciliation
-  script rather than by any request path.
+- A failed write or a rollback of the lifecycle's own swap transaction leaves
+  the profile untouched; the freshly written objects are orphans, reaped by
+  the reconciliation script rather than by any request path. The lifecycle's
+  transaction is the outermost one in production (the procedures pass the
+  bare `db` handle); wrapping it in a caller transaction that aborts later is
+  the caller's hazard to own.
 
 **Retrieval:**
 

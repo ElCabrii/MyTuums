@@ -67,10 +67,12 @@ export function requireStorage(context: { storage: Storage | null }): Storage {
  * previous values cannot come from `RETURNING` — that reports the row
  * *after* the update — so they have to be read first, and two bare
  * statements would race: two uploads landing together could both read the
- * same old keys, both delete them, and leave the objects the loser stored
- * orphaned while the winner's row points at keys that were never removed.
- * The row lock makes the read-then-write one step, which is exactly what
- * "replace" means here.
+ * same old keys, and each would then delete them after its own swap — the
+ * pair the first to commit wrote is left orphaned, its row reference
+ * overwritten by the second, until the reconciliation script reaps it. The
+ * row lock makes the read-then-write one step, so the second swap observes
+ * the first's committed pair and deletes THAT instead — the leak never
+ * happens.
  *
  * Returns `null` when no such user exists — nothing was written, and
  * whatever was prepared before the swap is left for reconciliation.
@@ -161,7 +163,7 @@ export interface ReplaceResult {
  *    second-object failure leaves one orphaned object behind — the row
  *    never pointed at it, and the reconciliation module reaps it.
  * 2. **Swap.** The row's columns move to the new paths in one locked
- *    transaction. If the transaction aborts, the row still points at the
+ *    transaction. If THAT transaction aborts, the row still points at the
  *    old pair — the profile renders correctly — and the freshly written
  *    objects are orphans for reconciliation, exactly like step 1's failure.
  *    Only the committed row swap makes them current.
@@ -169,12 +171,19 @@ export interface ReplaceResult {
  *    best-effort. Deleting before the swap could blank a profile on a
  *    failed update; this module never deletes the pair it just committed.
  *
+ * The swap's transaction is the outermost one, always: production callers
+ * pass the bare `db` handle, so the row update and the cleanup that follows
+ * it share the same commit point. Wrapping the lifecycle in a caller-owned
+ * transaction that later aborts is the caller's hazard to own — the row swap
+ * would be discarded while the already-executed cleanup is not (see
+ * `profile-media.int.test.ts`).
+ *
  * The session — not the keys — is what decides whose row is touched; callers
  * pass the session user's id, which is how a client cannot write another
  * user's row through this surface.
  */
 export async function replaceProfileMedia(
-  db: Database,
+  db: DbLike,
   storage: Storage,
   userId: string,
   input: ReplaceInput,
@@ -218,7 +227,7 @@ export interface RemoveResult {
  * `null` for it).
  */
 export async function removeProfileMedia(
-  db: Database,
+  db: DbLike,
   storage: Storage,
   userId: string,
   kind: ImageKind,
