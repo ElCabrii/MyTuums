@@ -220,7 +220,8 @@ sides by CI. See [operations.md](operations.md).
 
 **Source of truth:** `packages/api/src/moderation.ts`,
 `packages/api/src/moderation-queue.ts`, `packages/api/src/moderation-appeals.ts`,
-`packages/api/src/moderation-actions.ts`, `packages/db/src/schema/app.ts`
+`packages/api/src/appeal-intake.ts`, `packages/api/src/moderation-actions.ts`,
+`packages/db/src/schema/app.ts`
 
 1. **Report.** `moderation.report` writes a row keyed
    `(reporterId, targetType, targetId)`. A repeat report refreshes the
@@ -246,10 +247,14 @@ sides by CI. See [operations.md](operations.md).
    by an appeal that already passed its currency check. A rollback produces no
    audit row, no partial state change and no email: the notices are returned,
    never sent from inside the transaction.
-5. **Appeal.** `moderation.appealOpen` takes either an HMAC-signed token from
-   the notification email (works signed out — a banned user cannot sign in) or
-   a `postId` from a signed-in author's removed-post stub. `appealReview`
-   excludes the moderator who took the original action.
+5. **Appeal.** `moderation.appealOpen` is a thin transport: it validates
+   exactly-one-of `token`/`postId` and a session for the postId path, then
+   delegates the whole intake to `packages/api/src/appeal-intake.ts`. That
+   deep module owns the two source adapters — the HMAC-signed token from the
+   notification email (works signed out — a banned user cannot sign in) and
+   a signed-in author's removed-post stub — normalizes both into one internal
+   appeal target, and concentrates the validity, replay and persistence rules
+   there. `appealReview` excludes the moderator who took the original action.
 
 ## Schemas and migrations
 

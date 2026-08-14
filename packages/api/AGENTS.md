@@ -20,6 +20,7 @@ over HTTP and imports only its browser-safe subpaths.
 | `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                               |
 | `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                    |
 | `src/moderation-actions.ts` | The forward and inverse moderation effects: transaction, guards, audit, owed notices. |
+| `src/appeal-intake.ts`      | The deep appeal-intake module: the two source adapters, the normalized target, the validity/replay/persistence rules. |
 | `src/profile-media.ts`      | The avatar/banner lifecycle: replace/remove, the locked swap, best-effort cleanup.    |
 
 ## Change map
@@ -32,7 +33,7 @@ over HTTP and imports only its browser-safe subpaths.
 | Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                     | `src/users.int.test.ts` pins it — read the invariant first                          |
 | Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)         | `src/constants.ts` (action code), `docs/product.md` glossary                        |
 | Change the queue or a case view       | `src/moderation-queue.ts`                                                                | `src/moderation-inputs.ts` if the input shape moves                                 |
-| Change the appeal flow                | `src/moderation-appeals.ts`, `src/appeal-token.ts`                                       | `docs/security.md` — this is the one anonymous surface                              |
+| Change the appeal flow                | `src/appeal-intake.ts` (the intake module), `src/moderation-appeals.ts` (the thin procedure + review), `src/appeal-token.ts` | `docs/security.md` — this is the one anonymous surface |
 | Change upload rules                   | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                           |
 | Change the upload/remove lifecycle    | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes |
 | Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                |
@@ -51,6 +52,14 @@ over HTTP and imports only its browser-safe subpaths.
 - **`baseProcedure` has exactly one consumer.** `moderation.appealOpen` is the
   app's one anonymous surface, and it is HMAC-capability-gated because a
   banned user cannot sign in to appeal. Anything else built on it is a bug.
+- **The appeal-intake rules live in `src/appeal-intake.ts`, and only there.**
+  `moderation.appealOpen` is a thin transport: it validates exactly-one-of
+  `token`/`postId` and a session for the postId path, then delegates. The
+  module owns the two source adapters (the email token and the removed-post
+  stub), the normalized appeal target, the validity/replay/persistence rules
+  and the capability-keyed rate-limit consume. Do not reintroduce a business
+  rule into the procedure, and do not mix appeal review or moderation
+  reversal into intake.
 - **`publicUserColumns` is a privacy boundary.** Never add `email`,
   `twoFactorEnabled`, `lastLoginMethod`, `role` or a preference column; sign-in
   method is reconnaissance, not profile data. `src/users.int.test.ts` pins the
