@@ -182,9 +182,20 @@ sides by CI. See [operations.md](operations.md).
 
 ## Media — upload, retrieval, reconciliation
 
-**Source of truth:** `packages/api/src/image.ts`, `packages/api/src/storage.ts`,
+**Source of truth:** `packages/api/src/profile-media.ts`,
+`packages/api/src/image.ts`, `packages/api/src/storage.ts`,
 `packages/api/src/media.ts`, `packages/api/src/reconcile-media.ts`
 
+- **Lifecycle.** `user.uploadImage` and `user.removeImage` are thin
+  procedures over `packages/api/src/profile-media.ts`, which owns the whole
+  avatar/banner lifecycle: minting the object pair, the locked database
+  swap, and the best-effort cleanup of superseded objects. The ordering is
+  load-bearing — prepare/write the new objects, atomically swap the row
+  references under `FOR UPDATE`, then delete the old objects — and it lives
+  in exactly one place, so the two procedures cannot drift. A failed write
+  or a rolled-back transaction leaves the profile untouched and the fresh
+  objects orphaned for reconciliation; a failed cleanup is swallowed and the
+  stale objects are reaped the same way.
 - **Upload.** `user.uploadImage` accepts bytes, sniffs the actual type rather
   than trusting the declared one (`sniffImageType`), parses dimensions from the
   header (`packages/api/src/dimensions.ts`), and enforces per-slot byte and

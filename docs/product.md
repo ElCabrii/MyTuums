@@ -64,6 +64,10 @@ app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
   limits and a 50-megapixel ceiling.
 - The browser uploads a display-sized WebP variant plus the untouched
   original; both are stored and share one identifier.
+- Replacing or removing a profile image is atomic: the new objects are
+  written first, the profile's references swap in one locked database step,
+  and only then is the superseded pair deleted. A failed upload or removal
+  never leaves a profile pointing at missing media.
 - Images are stored as relative `/media/<key>` paths and served as a redirect
   to a short-lived presigned URL. Viewing one requires a session.
 
