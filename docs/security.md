@@ -144,6 +144,20 @@ used to 429 every request from a fresh session.
   **before** oRPC buffers a multipart body — which happens before auth or rate
   limiting would otherwise see the request.
 
+**Replacement and removal** (`packages/api/src/profile-media.ts`):
+
+- The lifecycle is one module: prepare/write the new objects, atomically swap
+  the row references under a row lock, then best-effort delete the superseded
+  pair. The row lock is what makes two concurrent replacements serialize —
+  without it, both could read the same old keys, both delete them, and leave
+  the winner's row pointing at objects that were removed.
+- Cleanup only ever deletes keys derived from the _previous_ row values, and
+  only when they are this app's own keys — never the pair the request just
+  committed, and never a provider's absolute avatar URL.
+- A failed write or a rolled-back transaction leaves the profile untouched;
+  the freshly written objects are orphans, reaped by the reconciliation
+  script rather than by any request path.
+
 **Retrieval:**
 
 - `/media` requires GET or HEAD, then a **live session, checked before the key

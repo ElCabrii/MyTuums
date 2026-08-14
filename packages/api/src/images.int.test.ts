@@ -318,3 +318,34 @@ describe("the injected storage fake", () => {
     expect(testStorageObjects.size).toBe(0);
   });
 });
+
+describe("concurrent replacements", () => {
+  it("serialize on the row lock: the loser's cleanup never deletes the winner's committed pair", async () => {
+    const alice = await createTestUser();
+
+    // Two uploads race the same slot. The row lock in the swap makes the
+    // read-then-write one step, so the loser's swap observes the winner's
+    // committed pair and deletes THAT — never the pair the winner just
+    // committed. Without the lock, both could read the same old keys, both
+    // delete them, and leave the winner's row pointing at objects that were
+    // removed (the exact race `swapImageColumns`'s `FOR UPDATE` in
+    // `src/profile-media.ts` exists for).
+    const [first, second] = await Promise.all([
+      call(appRouter.user.uploadImage, uploadInput("avatar"), { context: contextFor(alice) }),
+      call(appRouter.user.uploadImage, uploadInput("avatar"), { context: contextFor(alice) }),
+    ]);
+
+    const stored = await storedImage(alice);
+    const winner = stored.image === first.url ? first : second;
+    const loser = winner === first ? second : first;
+
+    // The row points at exactly one of the two pairs, and that pair is the
+    // only one left in the bucket.
+    expect(stored.image).toBe(winner.url);
+    expect(stored.imageOriginal).toBe(winner.originalUrl);
+    expect(testStorageObjects.has(winner.url.replace("/media/", ""))).toBe(true);
+    expect(testStorageObjects.has(winner.originalUrl.replace("/media/", ""))).toBe(true);
+    expect(testStorageObjects.has(loser.url.replace("/media/", ""))).toBe(false);
+    expect(testStorageObjects.has(loser.originalUrl.replace("/media/", ""))).toBe(false);
+  });
+});
