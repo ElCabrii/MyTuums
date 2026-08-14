@@ -25,16 +25,6 @@ import type { AllowedImageType, ImageKind } from "./constants.js";
 import { imageObjectKey, mediaPathFor, objectKeyFromMediaPath } from "./image.js";
 import type { Storage } from "./storage.js";
 
-/**
- * The database surface this module needs: a bare handle or a transaction.
- *
- * Drizzle's transaction type inherits the query builders but not the
- * driver's `$client`, so it is not assignable to `Database` — the same
- * narrowing `moderation-actions.ts` makes for its effects, so the same
- * helpers serve both `db` and a caller's `tx` with no casts.
- */
-type DbLike = Pick<Database, "transaction">;
-
 /** The two stored paths one slot held before a swap — `null` when never set. */
 interface PreviousPair {
   display: string | null;
@@ -78,7 +68,7 @@ export function requireStorage(context: { storage: Storage | null }): Storage {
  * whatever was prepared before the swap is left for reconciliation.
  */
 async function swapImageColumns(
-  db: DbLike,
+  db: Database,
   userId: string,
   kind: ImageKind,
   values: { display: string | null; original: string | null },
@@ -171,19 +161,17 @@ export interface ReplaceResult {
  *    best-effort. Deleting before the swap could blank a profile on a
  *    failed update; this module never deletes the pair it just committed.
  *
- * The swap's transaction is the outermost one, always: production callers
- * pass the bare `db` handle, so the row update and the cleanup that follows
- * it share the same commit point. Wrapping the lifecycle in a caller-owned
- * transaction that later aborts is the caller's hazard to own — the row swap
- * would be discarded while the already-executed cleanup is not (see
- * `profile-media.int.test.ts`).
+ * The interface requires the bare database handle so the swap's transaction
+ * is always the outermost one. Its commit therefore happens before cleanup;
+ * callers cannot accidentally wrap the lifecycle in a transaction that later
+ * rolls back after the superseded objects have already been deleted.
  *
  * The session — not the keys — is what decides whose row is touched; callers
  * pass the session user's id, which is how a client cannot write another
  * user's row through this surface.
  */
 export async function replaceProfileMedia(
-  db: DbLike,
+  db: Database,
   storage: Storage,
   userId: string,
   input: ReplaceInput,
@@ -227,7 +215,7 @@ export interface RemoveResult {
  * `null` for it).
  */
 export async function removeProfileMedia(
-  db: DbLike,
+  db: Database,
   storage: Storage,
   userId: string,
   kind: ImageKind,
