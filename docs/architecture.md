@@ -225,12 +225,14 @@ sides by CI. See [operations.md](operations.md).
    stamps, the audit row, and the notice it owes — the procedure sends that
    notice only after the effect's transaction has committed.
 4. **Audit.** `moderation_action` is append-only. Every effect — forward and
-   inverse (`restorePostEffect`, `unbanEffect`) — reads its guard `FOR UPDATE`
-   inside its own transaction: an unlocked pre-read is a TOCTOU that two
-   concurrent restores both pass and both log, and a double log is a lie about
-   what happened. A rollback produces no audit row, no partial state change
-   and no email: the notices are returned, never sent from inside the
-   transaction.
+   inverse (`restorePostEffect`, `unbanEffect`, `restoreRoleEffect`) — reads
+   its guard `FOR UPDATE` inside its own transaction: an unlocked pre-read is
+   a TOCTOU that two concurrent restores both pass and both log, and a double
+   log is a lie about what happened. The role overturn checks the contested
+   grant under that same lock, so a racing role change can never be clobbered
+   by an appeal that already passed its currency check. A rollback produces no
+   audit row, no partial state change and no email: the notices are returned,
+   never sent from inside the transaction.
 5. **Appeal.** `moderation.appealOpen` takes either an HMAC-signed token from
    the notification email (works signed out — a banned user cannot sign in) or
    a `postId` from a signed-in author's removed-post stub. `appealReview`

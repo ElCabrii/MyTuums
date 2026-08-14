@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import {
   banUserEffect,
   removePostEffect,
+  restoreRoleEffect,
   sendPendingEmails,
   setRoleEffect,
   suspendUserEffect,
@@ -194,6 +195,76 @@ describe("forward moderation effects", () => {
         and(eq(moderationAction.action, "role_changed"), eq(moderationAction.targetUserId, bob.id)),
       );
     expect(actions).toHaveLength(0);
+  });
+
+  it("restoreRoleEffect is a no-op when the contested grant no longer holds — a newer setRole wins, no audit row lies about it", async () => {
+    const admin = await createTestUser();
+    await setUserRole(admin.id, "admin");
+    const bob = await createTestUser();
+    await setUserRole(bob.id, "staff");
+
+    // The appeal contests the staff grant; before the overturn commits, an
+    // admin promotes bob to admin. The grant no longer holds, so the
+    // restore must not clobber the newer role or log a row describing a
+    // restore that never happened.
+    await setUserRole(bob.id, "admin");
+
+    const pending = await restoreRoleEffect(anonContext.db, {
+      userId: bob.id,
+      actorId: admin.id,
+      actorRole: "admin",
+      grantedRole: "staff",
+      oldRole: "user",
+    });
+
+    expect(pending).toEqual([]);
+
+    const [row] = await anonContext.db
+      .select({ role: user.role })
+      .from(user)
+      .where(eq(user.id, bob.id));
+    expect(row?.role).toBe("admin");
+
+    const actions = await anonContext.db
+      .select({ id: moderationAction.id })
+      .from(moderationAction)
+      .where(
+        and(eq(moderationAction.action, "role_changed"), eq(moderationAction.targetUserId, bob.id)),
+      );
+    expect(actions).toHaveLength(0);
+  });
+
+  it("restoreRoleEffect restores the contested role and returns the notice when the grant still holds", async () => {
+    const admin = await createTestUser();
+    await setUserRole(admin.id, "admin");
+    const bob = await createTestUser();
+    await setUserRole(bob.id, "staff");
+
+    const pending = await restoreRoleEffect(anonContext.db, {
+      userId: bob.id,
+      actorId: admin.id,
+      actorRole: "admin",
+      grantedRole: "staff",
+      oldRole: "user",
+    });
+
+    expect(pending).toHaveLength(1);
+    expect(pending[0].userId).toBe(bob.id);
+    expect(pending[0].build("en").subject).toBe("Your MyTuums role changed");
+
+    const [row] = await anonContext.db
+      .select({ role: user.role })
+      .from(user)
+      .where(eq(user.id, bob.id));
+    expect(row?.role).toBe("user");
+
+    const [action] = await anonContext.db
+      .select({ details: moderationAction.details })
+      .from(moderationAction)
+      .where(
+        and(eq(moderationAction.action, "role_changed"), eq(moderationAction.targetUserId, bob.id)),
+      );
+    expect(action?.details).toEqual({ oldRole: "staff", newRole: "user" });
   });
 
   it("suspendUserEffect commits the ban, the session sweep and the audit row, returning the stored expiry", async () => {

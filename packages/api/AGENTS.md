@@ -70,12 +70,14 @@ over HTTP and imports only its browser-safe subpaths.
   pinned by `src/reconcile-media.test.ts`).
 - **Every moderation effect reads its guard `FOR UPDATE`, inside its own
   transaction** (`removePostEffect`, `suspendUserEffect`, `banUserEffect`,
-  `setRoleEffect`, `restorePostEffect`, `unbanEffect`). The audit log is
-  append-only, so a double log is a lie about what happened; an unlocked
-  pre-read is a TOCTOU two concurrent restores both pass (issue #51). The
-  effects return the notices they owe (`PendingEmail`) instead of sending
-  them — the procedure sends after the commit, so a rollback produces no
-  audit row, no partial state and no email.
+  `setRoleEffect`, `restorePostEffect`, `unbanEffect`, `restoreRoleEffect`).
+  The audit log is append-only, so a double log is a lie about what happened;
+  an unlocked pre-read is a TOCTOU two concurrent restores both pass (issue
+  #51). The role overturn checks the contested grant under that same lock, so
+  a racing role change can never be clobbered by an appeal that already passed
+  its currency check. The effects return the notices they owe (`PendingEmail`)
+  instead of sending them — the procedure sends after the commit, so a
+  rollback produces no audit row, no partial state and no email.
 - **Cursor bounds go through `sql.param(value, column)`.** Interpolating a JS
   `Date` hands postgres.js something it cannot serialise.
 - **`keysetPage`'s `createdAtField` is type-tied to the `createdAt` column**, so

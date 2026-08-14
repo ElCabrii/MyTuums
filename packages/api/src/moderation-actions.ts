@@ -560,12 +560,82 @@ export async function setRoleEffect(
       details: { oldRole: target.role ?? "user", newRole: args.role },
     });
   });
-  return {
-    pending: {
-      userId: args.userId,
-      build: (locale) => moderationRoleEmail({ role: args.role }, locale),
-    },
-  };
+  return { pending: roleNotice({ userId: args.userId, role: args.role }) };
+}
+
+/**
+ * Restores a user's role to what a demotion appeal contests it was — the
+ * inverse of a role change, used by `undoAction`.
+ *
+ * The role write and its `role_changed` audit row commit in ONE transaction,
+ * and the guard read happens inside that transaction under a row lock, the
+ * same shape as `restorePostEffect` and `unbanEffect` (issue #51): the
+ * currency check ("is the granted role still the one held?") is what makes
+ * an overturn safe against a racing `setRoleEffect`. Without the lock, a
+ * concurrent promotion could commit between the appeal's `isActionLatest`
+ * check and this update, and the overturn would clobber the newer role while
+ * both audit rows remained.
+ *
+ * When the contested role no longer holds, the restore is a no-op (an empty
+ * array) — the race was lost to a newer sentence, and the appeal still gets
+ * stamped by its caller. The rank guard is NOT advisory: both ends of the
+ * swing must be manageable — the role currently held (what the reviewer
+ * would be acting on) and the role being restored — the same
+ * `canManageRole` rule as the sentence that created it.
+ *
+ * Returns the notice the restore owes, or an empty array when there was
+ * nothing to restore. Runs inside the caller's transaction (the appeal
+ * review's), so the state change and its audit row are not committed until
+ * the review commits; the notice is sent by the caller after that commit.
+ */
+export async function restoreRoleEffect(
+  db: DbLike,
+  args: {
+    userId: string;
+    actorId: string;
+    /** The actor's own role — the guards compare it against the target's. */
+    actorRole: string;
+    /** The role the contested action granted — must still be held for the restore to apply. */
+    grantedRole: string;
+    /** The role being restored. */
+    oldRole: string;
+  },
+): Promise<PendingEmail[]> {
+  return db.transaction(async (tx) => {
+    const [target] = await tx
+      .select({ role: user.role })
+      .from(user)
+      .where(eq(user.id, args.userId))
+      .for("update")
+      .limit(1);
+
+    if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
+
+    // The contested grant no longer holds — a newer role change (or an
+    // earlier overturn) won the window. Nothing to restore, and a second
+    // `role_changed` row would lie about what happened (issue #51).
+    if (target.role !== args.grantedRole) return [];
+
+    // Both ends of the swing must be manageable: the role currently held
+    // (what the reviewer would be acting on) and the role being restored.
+    if (
+      !canManageRole(args.actorRole, target.role ?? "user") ||
+      !canManageRole(args.actorRole, args.oldRole)
+    ) {
+      throw new ORPCError("FORBIDDEN");
+    }
+
+    await tx.update(user).set({ role: args.oldRole }).where(eq(user.id, args.userId));
+    await logAction(tx, {
+      action: "role_changed",
+      actorId: args.actorId,
+      targetType: "user",
+      targetUserId: args.userId,
+      details: { oldRole: target.role ?? "user", newRole: args.oldRole },
+    });
+
+    return [roleNotice({ userId: args.userId, role: args.oldRole })];
+  });
 }
 
 /**
@@ -885,33 +955,21 @@ export async function undoAction(
       break;
     }
     case "role_changed": {
-      const details = action.details as { oldRole?: string } | null;
+      const details = action.details as { oldRole?: string; newRole?: string } | null;
       const oldRole = details?.oldRole;
-      if (!oldRole) {
+      const grantedRole = details?.newRole;
+      if (!oldRole || !grantedRole) {
         throw new ORPCError("BAD_REQUEST", { message: "This action can't be overturned." });
       }
-      const [target] = await db
-        .select({ role: user.role })
-        .from(user)
-        .where(eq(user.id, action.targetUserId!))
-        .limit(1);
-      if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
-
-      // Both ends of the swing must be manageable: the role currently held
-      // (what the reviewer would be acting on) and the role being restored.
-      if (!canManageRole(actorRole, target.role ?? "user") || !canManageRole(actorRole, oldRole)) {
-        throw new ORPCError("FORBIDDEN");
-      }
-
-      await db.update(user).set({ role: oldRole }).where(eq(user.id, action.targetUserId!));
-      await logAction(db, {
-        action: "role_changed",
-        actorId,
-        targetType: "user",
-        targetUserId: action.targetUserId!,
-        details: { oldRole: target.role ?? "user", newRole: oldRole },
-      });
-      pending.push(roleNotice({ userId: action.targetUserId!, role: oldRole }));
+      pending.push(
+        ...(await restoreRoleEffect(db, {
+          userId: action.targetUserId!,
+          actorId,
+          actorRole,
+          grantedRole,
+          oldRole,
+        })),
+      );
       break;
     }
   }
