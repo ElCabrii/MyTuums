@@ -1,7 +1,7 @@
 import { call } from "@orpc/server";
 import { closeDb } from "@my-tuums/db";
 import { user } from "@my-tuums/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";
 import { MAX_IMAGE_MEGAPIXELS } from "./constants.js";
@@ -106,6 +106,40 @@ async function storedImage(person: TestUser): Promise<{
     .where(eq(user.id, person.id))
     .limit(1);
   return row ?? { image: null, bannerImage: null, imageOriginal: null, bannerImageOriginal: null };
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: (() => void) | undefined;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return {
+    promise,
+    resolve: () => {
+      if (!resolve) throw new Error("Deferred promise was not initialized");
+      resolve();
+    },
+  };
+}
+
+/** Waits until another connection is blocked on this test's user-row lock. */
+async function waitForProfileMediaLockWait(person: TestUser): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const rows = await person.context.db.execute<{ blocked: boolean }>(sql`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND state = 'active'
+          AND wait_event_type = 'Lock'
+          AND query LIKE '%"user"%'
+      ) AS blocked
+    `);
+    if (rows[0]?.blocked) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Profile-media swap never reached the held user-row lock");
 }
 
 describe("user.uploadImage", () => {
@@ -320,63 +354,74 @@ describe("the injected storage fake", () => {
 });
 
 describe("the row lock", () => {
-  it("holds a concurrent upload at the swap until the holder finishes, then serializes it", async () => {
+  it("reads the pair to discard only after the row lock is acquired", async () => {
     const alice = await createTestUser();
+    const stale = await call(appRouter.user.uploadImage, uploadInput("avatar"), {
+      context: contextFor(alice),
+    });
+    const intermediate = {
+      url: `/media/avatars/${alice.id}/00000000-0000-4000-8000-000000000001.png`,
+      originalUrl: `/media/avatars/${alice.id}/00000000-0000-4000-8000-000000000001.orig.png`,
+    };
+    for (const path of [intermediate.url, intermediate.originalUrl]) {
+      testStorageObjects.set(path.replace("/media/", ""), {
+        contentType: "image/png",
+        bytes: PNG_BODY,
+      });
+    }
 
-    // Deterministic contention: a test transaction takes the row lock the
-    // swap needs (the same `FOR UPDATE` `swapImageColumns` issues), so the
-    // upload is GUARANTEED to arrive at the competing read while the lock is
-    // held — `Promise.all` alone could pass with plain serialized scheduling.
-    // The upload's storage writes happen before its swap, so the bucket has
-    // the fresh pair while the upload is still blocked.
-    const uploads: Promise<unknown>[] = [];
-    await alice.context.db.transaction(async (tx) => {
+    const holderReady = deferred();
+    const releaseHolder = deferred();
+    const holder = alice.context.db.transaction(async (tx) => {
       await tx
         .select({ id: user.id })
         .from(user)
         .where(eq(user.id, alice.id))
         .for("update")
         .limit(1);
-
-      uploads.push(
-        call(appRouter.user.uploadImage, uploadInput("avatar"), {
-          context: contextFor(alice),
-        }),
-      );
-
-      // The upload cannot resolve while the lock is held — it is blocked at
-      // `SELECT ... FOR UPDATE` inside the swap. Wait for its storage writes
-      // to land (the puts precede the swap), then release by returning.
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(testStorageObjects.size).toBe(2);
-      const outcome = await Promise.race([
-        uploads[0].then(() => "resolved" as const),
-        new Promise<"still-blocked">((resolve) => setTimeout(() => resolve("still-blocked"), 250)),
-      ]);
-      expect(outcome).toBe("still-blocked");
+      await tx
+        .update(user)
+        .set({ image: intermediate.url, imageOriginal: intermediate.originalUrl })
+        .where(eq(user.id, alice.id));
+      holderReady.resolve();
+      await releaseHolder.promise;
     });
 
-    // With the lock released, the upload completes: the row swap lands and
-    // the pair the upload wrote is the pair the row references.
-    await uploads[0];
+    await holderReady.promise;
+    const upload = call(appRouter.user.uploadImage, uploadInput("avatar"), {
+      context: contextFor(alice),
+    });
+
+    // This observation is the latch: whether the upload is waiting at the
+    // guarded SELECT or (if the guard regresses) at its UPDATE, the holder is
+    // not released until the competing swap has reached Postgres.
+    try {
+      await waitForProfileMediaLockWait(alice);
+    } finally {
+      releaseHolder.resolve();
+    }
+    await holder;
+    const uploaded = await upload;
+
     const stored = await storedImage(alice);
-    expect(stored.image).toMatch(/^\/media\/avatars\//);
-    expect(stored.imageOriginal).toMatch(/\.orig\./);
-    // The bucket holds exactly the pair the row references, in the upload's
-    // write order — nothing was deleted by a concurrent cleanup.
-    expect([...testStorageObjects.keys()]).toEqual([
-      stored.image?.replace("/media/", ""),
-      stored.imageOriginal?.replace("/media/", ""),
-    ]);
+    expect(stored.image).toBe(uploaded.url);
+    expect(stored.imageOriginal).toBe(uploaded.originalUrl);
+    expect(testStorageObjects.has(intermediate.url.replace("/media/", ""))).toBe(false);
+    expect(testStorageObjects.has(intermediate.originalUrl.replace("/media/", ""))).toBe(false);
+    expect(testStorageObjects.has(uploaded.url.replace("/media/", ""))).toBe(true);
+    expect(testStorageObjects.has(uploaded.originalUrl.replace("/media/", ""))).toBe(true);
+    // The holder intentionally changed the row without running the lifecycle,
+    // so the pair it superseded is outside this upload's cleanup responsibility.
+    expect(testStorageObjects.has(stale.url.replace("/media/", ""))).toBe(true);
   });
 
   it("serializes two racing replacements: the loser's cleanup deletes only the superseded pair", async () => {
     const alice = await createTestUser();
 
     // Both uploads write their objects, then contend at the swap's row lock.
-    // The row lock makes the read-then-write one step: the loser's swap
-    // observes the winner's committed pair and deletes THAT — never the pair
-    // the winner just committed. Without the lock, both could read the same
+    // The row lock makes the read-then-write one step: the final winner's swap
+    // observes the first committer's pair and deletes THAT — never its own
+    // newly committed pair. Without the lock, both could read the same
     // old keys and each delete them after its own swap, orphaning the pair
     // the first to commit wrote (the race `swapImageColumns`'s `FOR UPDATE`
     // exists for).

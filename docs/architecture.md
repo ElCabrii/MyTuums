@@ -192,8 +192,10 @@ sides by CI. See [operations.md](operations.md).
   swap, and the best-effort cleanup of superseded objects. The ordering is
   load-bearing — prepare/write the new objects, atomically swap the row
   references under `FOR UPDATE`, then delete the old objects — and it lives
-  in exactly one place, so the two procedures cannot drift. A failed write
-  or a rolled-back transaction leaves the profile untouched and the fresh
+  in exactly one place, so the two procedures cannot drift. Its interface
+  accepts the bare database handle rather than a transaction handle, making
+  the swap transaction the outermost commit before cleanup begins. A failed
+  write or a rolled-back swap leaves the profile untouched and the fresh
   objects orphaned for reconciliation; a failed cleanup is swallowed and the
   stale objects are reaped the same way.
 - **Upload.** `user.uploadImage` accepts bytes, sniffs the actual type rather

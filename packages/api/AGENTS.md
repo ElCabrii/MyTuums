@@ -73,7 +73,8 @@ over HTTP and imports only its browser-safe subpaths.
   returns `null` for provider URLs — cleanup never touches them. Without the
   row lock, two racing replacements could both read the same old keys and
   each delete them after its own swap, orphaning the pair the first to
-  commit wrote.
+  commit wrote. The lifecycle interface accepts the bare `Database` handle,
+  not a transaction handle, so its swap commits before object cleanup begins.
 - **`scripts/reconcile-media.mjs` must list the bucket BEFORE reading the
   `user` rows.** The reverse order treats an upload landing between the two
   steps as an orphan and deletes an object whose row points at it (issue #52;

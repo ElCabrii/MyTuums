@@ -182,43 +182,6 @@ describe("replaceProfileMedia", () => {
     expect(newKeys[0]).toMatch(/^avatars\/[^/]+\/[a-f0-9-]{36}\.png$/);
   });
 
-  it("discards the swap when the enclosing transaction rolls back", async () => {
-    const alice = await createTestUser();
-    const old = await seedStoredPair(alice, "avatar");
-
-    let freshKeys: string[] = [];
-    await expect(
-      alice.context.db.transaction(async (tx) => {
-        const result = await replaceProfileMedia(tx, testStorage, alice.id, {
-          ...replaceInput("avatar"),
-        });
-        freshKeys = [result.url.replace("/media/", ""), result.originalUrl.replace("/media/", "")];
-        // Abort the transaction AFTER the lifecycle's own (nested) swap
-        // committed: Postgres discards the swap with the abort, so the row
-        // must keep pointing at the old pair — a real rollback of real row
-        // mutations, not a simulated one.
-        throw new Error("outer failure");
-      }),
-    ).rejects.toThrow("outer failure");
-
-    const stored = await storedImage(alice);
-    // The swap was discarded with the aborted transaction — the row never
-    // moved off the old pair.
-    expect(stored.image).toBe(old.display);
-    expect(stored.imageOriginal).toBe(old.original);
-    // The fresh pair is orphaned for reconciliation, exactly like a failed
-    // write.
-    expect(testStorageObjects.has(freshKeys[0])).toBe(true);
-    expect(testStorageObjects.has(freshKeys[1])).toBe(true);
-    // The superseded pair was already discarded by the lifecycle's cleanup,
-    // which ran after its own swap committed but before this caller's
-    // transaction aborted. That window is the caller's to own: production
-    // procedures pass the bare `db` handle, so the lifecycle's transaction
-    // is always the outermost one — the documented "profile renders the old
-    // pair" guarantee holds exactly there.
-    expect(testStorageObjects.has(old.display.replace("/media/", ""))).toBe(false);
-  });
-
   it("does not delete a provider's absolute avatar URL — it is not ours", async () => {
     const alice = await createTestUser();
     await alice.context.db
