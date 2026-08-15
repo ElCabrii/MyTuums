@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AppealPage } from "@/components/moderation/appeal-page";
+import { z } from "zod";
 
 export const Route = createFileRoute("/appeal")({
   component: AppealPage,
@@ -9,8 +10,12 @@ export const Route = createFileRoute("/appeal")({
    * trusted: anything else is dropped and the page renders its "missing
    * identifier" card instead of a raw value.
    */
-  validateSearch: (search: Record<string, unknown>): { token?: string; postId?: string } => ({
-    ...(typeof search.token === "string" ? { token: search.token } : {}),
-    ...(typeof search.postId === "string" ? { postId: search.postId } : {}),
-  }),
+  validateSearch: (search) => appealSearchSchema.parse(search),
 });
+
+const appealSearchSchema = z.object({
+  token: z.string().optional(),
+  postId: z.string().optional(),
+});
+
+/** The two identifiers the appeal page accepts from its URL, both optional. */

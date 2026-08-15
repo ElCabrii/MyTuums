@@ -104,11 +104,16 @@ export function parseDateOnlyParts(value: string): DateOfBirthParts | null {
  * *before* `new Date()` sees it. Without that, "1995-02-30T00:00:00.000Z"
  * would roll over and be stored as a day that never existed.
  */
-export function parseDateOfBirthParts(value: unknown): DateOfBirthParts | null {
+export function parseDateOfBirthParts<Value>(value: Value): DateOfBirthParts | null {
   if (value === null || value === undefined) return null;
 
-  if (typeof value === "string") {
-    const trimmed = value.trim();
+  const representation = Object.prototype.toString.call(value);
+  const stringValue =
+    representation === "[object String]" ? String.prototype.valueOf.call(value) : null;
+  const numberValue =
+    representation === "[object Number]" ? Number.prototype.valueOf.call(value) : null;
+  if (stringValue !== null) {
+    const trimmed = stringValue.trim();
     if (!trimmed) return null;
     const dateHalf = trimmed.split(/[T ]/, 1)[0] ?? trimmed;
     if (DATE_ONLY_RE.test(dateHalf)) {
@@ -123,9 +128,11 @@ export function parseDateOfBirthParts(value: unknown): DateOfBirthParts | null {
   const parsed =
     value instanceof Date
       ? value
-      : typeof value === "string" || typeof value === "number"
-        ? new Date(value)
-        : null;
+      : stringValue !== null
+        ? new Date(stringValue)
+        : numberValue !== null
+          ? new Date(numberValue)
+          : null;
   if (!parsed) return null;
   if (Number.isNaN(parsed.getTime())) return null;
   return {
@@ -242,13 +249,13 @@ export type ThemePreference = (typeof THEME_PREFERENCES)[number];
 export type LocalePreference = (typeof LOCALE_PREFERENCES)[number];
 
 /** Whether an untrusted value is one of the stored theme preferences. */
-export function isThemePreference(value: unknown): value is ThemePreference {
-  return typeof value === "string" && (THEME_PREFERENCES as readonly string[]).includes(value);
+export function isThemePreference<Value>(value: Value): value is Value & ThemePreference {
+  return THEME_PREFERENCES.some((preference) => Object.is(preference, value));
 }
 
 /** Whether an untrusted value is one of the stored locale preferences. */
-export function isLocalePreference(value: unknown): value is LocalePreference {
-  return typeof value === "string" && (LOCALE_PREFERENCES as readonly string[]).includes(value);
+export function isLocalePreference<Value>(value: Value): value is Value & LocalePreference {
+  return LOCALE_PREFERENCES.some((preference) => Object.is(preference, value));
 }
 
 /** Rejection for a theme outside {@link THEME_PREFERENCES}. */

@@ -9,28 +9,20 @@ import { authClient } from "@/lib/auth-client";
 import { createDisplayVariant } from "@/lib/media";
 import { ProfileSection } from "@/components/settings/profile-section";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestClient, installTestOrpc } from "@/lib/orpc";
+import { installTestDisplayVariant } from "@/lib/media";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: {
-    user: {
-      uploadImage: vi.fn(() => Promise.resolve()),
-      removeImage: vi.fn(() => Promise.resolve()),
-    },
+const fakeClient = {
+  user: {
+    uploadImage: vi.fn(() => Promise.resolve()),
+    removeImage: vi.fn(() => Promise.resolve()),
   },
-}));
+};
 
-vi.mock("@/lib/orpc", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/orpc")>();
-  return { ...actual, client: fakeClient };
-});
-
-vi.mock("@/lib/media", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/media")>();
-  return {
-    ...actual,
-    createDisplayVariant: vi.fn((file: File) => Promise.resolve(file)),
-  };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
+installTestClient(fakeClient);
+installTestDisplayVariant(vi.fn((file: File) => Promise.resolve(file)));
 
 beforeEach(() => {
   vi.clearAllMocks();

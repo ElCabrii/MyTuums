@@ -16,10 +16,12 @@ const MEDIA_QUERY = "(prefers-color-scheme: dark)";
  * throw just because nothing touched the DOM yet. Every read goes through
  * this rather than the bare global so the module stays importable anywhere.
  */
-const matchDarkScheme = (): MediaQueryList | undefined =>
-  typeof window !== "undefined" && typeof window.matchMedia === "function"
-    ? window.matchMedia(MEDIA_QUERY)
-    : undefined;
+const matchDarkScheme = (): MediaQueryList | undefined => {
+  // SAFETY: browsers carry matchMedia on globalThis; the optional shape keeps
+  // the module importable in tooling where the DOM global is absent.
+  const host = globalThis as { matchMedia?: (query: string) => MediaQueryList };
+  return host.matchMedia?.(MEDIA_QUERY);
+};
 
 /**
  * The raw persisted value — this device's own choice, or `null` if it has

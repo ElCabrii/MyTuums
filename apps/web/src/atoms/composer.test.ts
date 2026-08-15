@@ -2,14 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { waitFor } from "@testing-library/react";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: { post: { create: vi.fn(), list: vi.fn() } },
-}));
+const fakeClient = { post: { create: vi.fn(), list: vi.fn() } };
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import { composerDraftAtom, createPostAtom } from "@/atoms/composer";
 // `createPostAtom`'s `onSuccess` can't be handed a `set` — `atomWithMutation`'s
@@ -19,6 +14,8 @@ import { composerDraftAtom, createPostAtom } from "@/atoms/composer";
 // effect is actually observable.
 import { store as singletonStore } from "@/lib/store";
 import { queryClient as singletonQueryClient } from "@/lib/query-client";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
 const STORAGE_KEY = "my-tuums.composer-draft";
 
@@ -55,7 +52,7 @@ describe("createPostAtom", () => {
   it("tracks pending state and clears the draft on success", async () => {
     singletonStore.set(composerDraftAtom, "hello world");
 
-    let resolveCreate!: (value: unknown) => void;
+    let resolveCreate!: (value: { id: string; content: string }) => void;
     fakeClient.post.create.mockImplementation(
       () =>
         new Promise((resolve) => {

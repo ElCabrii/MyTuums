@@ -41,7 +41,7 @@ export class ImageError extends Error {
 }
 
 function isAllowedType(type: string): boolean {
-  return (ALLOWED_IMAGE_TYPES as readonly string[]).includes(type);
+  return ALLOWED_IMAGE_TYPES.some((allowed) => allowed === type);
 }
 
 /**
@@ -52,7 +52,8 @@ function isAllowedType(type: string): boolean {
 function readFirstBytes(file: File, max: number): Promise<Uint8Array | null> {
   return new Promise((resolve) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+    reader.onload = () =>
+      resolve(reader.result instanceof ArrayBuffer ? new Uint8Array(reader.result) : null);
     reader.onerror = () => resolve(null);
     reader.readAsArrayBuffer(file.slice(0, max));
   });
@@ -69,7 +70,7 @@ function readFirstBytes(file: File, max: number): Promise<Uint8Array | null> {
  * frame with `object-cover`, so cropping at encode time would permanently
  * discard pixels the display already hides.
  */
-export async function createDisplayVariant(file: File, kind: ImageKind): Promise<File> {
+export async function createDisplayVariantImpl(file: File, kind: ImageKind): Promise<File> {
   if (!isAllowedType(file.type)) throw new ImageError("type");
   // The original's cap, not the display's: this is what we are willing to
   // *read* before shrinking, and it is also the cap the original object is
@@ -135,6 +136,20 @@ export async function createDisplayVariant(file: File, kind: ImageKind): Promise
     // avatar preview loop would retain every image the user auditioned.
     bitmap.close();
   }
+}
+
+/**
+ * Live binding so test harnesses can substitute a no-op variant creator and
+ * exercise upload flows without running the real image pipeline.
+ */
+export let createDisplayVariant: (file: File, kind: ImageKind) => Promise<File> =
+  createDisplayVariantImpl;
+
+/** Test seam: swaps the variant creator the upload atoms call through. */
+export function installTestDisplayVariant<Creator>(creator: Creator): void {
+  // SAFETY: test creators implement the (file, kind) contract and resolve the
+  // display upload object the atoms forward to the transport boundary.
+  createDisplayVariant = creator as typeof createDisplayVariant;
 }
 
 async function decode(file: File): Promise<ImageBitmap> {

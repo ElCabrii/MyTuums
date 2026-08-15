@@ -13,11 +13,11 @@ import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-c
 import { Section } from "@/components/settings/section";
 import { m } from "@/paraglide/messages.js";
 
-const THEME_LABELS: Record<ThemePreference, () => string> = {
+const THEME_LABELS = {
   light: () => m.theme_light(),
   dark: () => m.theme_dark(),
   system: () => m.theme_system(),
-};
+} satisfies Record<ThemePreference, () => string>;
 
 const localeLabel = (locale: LocalePreference): string =>
   locale === "fr" ? m.locale_french() : m.locale_english();

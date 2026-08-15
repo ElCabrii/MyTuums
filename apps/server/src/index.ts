@@ -1,5 +1,5 @@
 import { parseEnv } from "./env.js";
-import { createRequestHandler } from "./request-handler.js";
+import { createRequestHandler, type RequestResponse } from "./request-handler.js";
 import { createStaticFileHandler, noStaticFiles } from "./static-files.js";
 import { decorateResponse } from "./response-decorators.js";
 import { createServer } from "node:http";
@@ -11,8 +11,8 @@ import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "@my-tuums/auth";
 import { closeDb, pingDb } from "@my-tuums/db";
-import { createErrorObserver } from "./error-observation.js";
-import { attachAccessLog } from "./observability.js";
+import { createErrorObserver, normalizeObservedError } from "./error-observation.js";
+import { attachAccessLog, responseHeaderText } from "./observability.js";
 import { flushSentry, initSentry, reportError } from "./sentry.js";
 
 // The one place `parseEnv`'s throw becomes `process.exit(1)`. Importing
@@ -45,6 +45,11 @@ const observeError = createErrorObserver({
 
 const authNodeHandler = toNodeHandler(auth);
 
+function nodeResponse(response: RequestResponse): import("node:http").ServerResponse {
+  // SAFETY: Production invokes the routing tree only from node:http's createServer callback.
+  return response as import("node:http").ServerResponse;
+}
+
 const handler = new RPCHandler(appRouter, {
   plugins: [
     new CORSPlugin({
@@ -73,7 +78,7 @@ const handler = new RPCHandler(appRouter, {
     onError((error, { context }) => {
       observeError({
         source: "orpc",
-        error,
+        error: normalizeObservedError(error),
         requestId: context.requestId,
         // Unknown errors become INTERNAL_SERVER_ERROR inside oRPC; this
         // interceptor is the only place they surface before that mapping.
@@ -91,7 +96,7 @@ const handler = new RPCHandler(appRouter, {
 // and a real session check for the page gate.
 const handleRequest = createRequestHandler({
   pingDb,
-  authNodeHandler,
+  authNodeHandler: (req, res) => authNodeHandler(req, nodeResponse(res)),
   handleRpc: async (req, res) => {
     const context = await createContext({
       headers: fromNodeHeaders(req.headers),
@@ -101,17 +106,20 @@ const handleRequest = createRequestHandler({
       // the Context's, and from there the oRPC error interceptor's Sentry
       // tag. The dash fallback mirrors observability.ts's — unreachable in
       // production, harmless if a future caller skips the routing tree.
-      requestId: (res.getHeader("x-request-id") as string | undefined) ?? "-",
+      requestId: responseHeaderText(res.getHeader("x-request-id")),
     });
 
-    return handler.handle(req, res, { prefix: "/rpc", context });
+    return handler.handle(req, nodeResponse(res), { prefix: "/rpc", context });
   },
   resolveMediaUrl: createMediaResolver(defaultStorage),
   // Only when this deployment bundles the built web app. Unset in dev, where
   // Vite serves it and proxies /rpc, /api/auth and /media back here — see
   // ./static-files.ts for why one origin is a requirement rather than a
   // preference.
-  serveStatic: env.WEB_DIST ? createStaticFileHandler(env.WEB_DIST) : noStaticFiles,
+  serveStatic: async (req, res) => {
+    const staticHandler = env.WEB_DIST ? createStaticFileHandler(env.WEB_DIST) : noStaticFiles;
+    return staticHandler(req, nodeResponse(res));
+  },
   // Deliberately fails OPEN (`true`) on any error — a database blip must
   // degrade to "the client gate decides", the behaviour every visitor already
   // had before this server-side gate existed, never to "every signed-in
@@ -219,7 +227,11 @@ function shutdown(reason: string, code: number) {
 }
 
 process.on("unhandledRejection", (reason) => {
-  const decision = observeError({ source: "process", event: "unhandledRejection", error: reason });
+  const decision = observeError({
+    source: "process",
+    event: "unhandledRejection",
+    error: normalizeObservedError(reason),
+  });
   if (decision.action === "shutdown") shutdown(decision.reason, decision.exitCode);
 });
 

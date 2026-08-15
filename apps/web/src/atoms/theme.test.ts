@@ -19,17 +19,21 @@ function installMatchMedia(matches: boolean) {
   const mql = {
     matches,
     media: "(prefers-color-scheme: dark)",
-    addEventListener: (_type: string, cb: EventListenerOrEventListenerObject) =>
-      void listeners.add(cb as (event: MediaQueryListEvent) => void),
-    removeEventListener: (_type: string, cb: EventListenerOrEventListenerObject) =>
-      void listeners.delete(cb as (event: MediaQueryListEvent) => void),
-  } as unknown as MediaQueryList;
+    addEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
+      if (cb instanceof Function) listeners.add(cb);
+    },
+    removeEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
+      if (cb instanceof Function) listeners.delete(cb);
+    },
+  };
 
   globalThis.matchMedia = vi.fn().mockReturnValue(mql);
 
   return {
     fireChange: (nextMatches: boolean) => {
       Object.assign(mql, { matches: nextMatches });
+      // SAFETY: listeners were registered through addEventListener above, so
+      // every one accepts the MediaQueryListEvent shape dispatched here.
       listeners.forEach((listener) => listener({ matches: nextMatches } as MediaQueryListEvent));
     },
   };
@@ -119,7 +123,7 @@ describe("onMount subscription", () => {
 describe("account theme preference", () => {
   function withPreference(themePreference: string | null) {
     const store = createStore();
-    // `as never`: the store's value type is the full nanostore session shape
+    // SAFETY: (`as never`) the store's value type is the full nanostore session shape
     // (isRefetching, refetch, ...) and a fixture has no business rebuilding it —
     // only the two fields `themeAtom` reads matter here.
     store.set(sessionAtom, {
@@ -161,6 +165,7 @@ describe("account theme preference", () => {
   it("leaves a signed-out visitor on 'system'", () => {
     installMatchMedia(false);
     const store = createStore();
+    // SAFETY: partial session fixture — only the signed-out shape matters here.
     store.set(sessionAtom, { data: null, isPending: false } as never);
     expect(store.get(themeAtom)).toBe("system");
   });

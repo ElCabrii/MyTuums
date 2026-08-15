@@ -30,22 +30,26 @@ import { sanitizeRedirect } from "@/lib/redirect";
  * `callbackURL`, which reloads the document and lets the main client read the
  * new session the ordinary way. Nothing has to be synchronised between them.
  */
+/**
+ * The quarantined One Tap plugin's type: its own inferred surface intersected
+ * with the plugin interface it does not *declare* itself compatible with
+ * (narrower `$fetch` param — the upstream bug the module header documents).
+ */
+type OneTapPlugin = BetterAuthClientPlugin & ReturnType<typeof oneTapClient>;
+
 const oneTapAuthClient = createAuthClient({
   plugins: [
+    // SAFETY: at runtime the object conforms to BetterAuthClientPlugin; only the
+    // declared $fetch narrowing keeps its own type from satisfying it directly.
     oneTapClient({
       clientId: import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "",
       // Google re-prompts on every dismissal by default, which turns "not
       // right now" into a prompt that reappears on each page. Two attempts is
       // enough to survive a mis-click without becoming an argument.
       promptOptions: { maxAttempts: 2 },
-    }) as unknown as BetterAuthClientPlugin,
+    }) as OneTapPlugin,
   ],
 });
-
-/** The one action we use, named explicitly because the cast above erased it. */
-interface OneTapCapableClient {
-  oneTap: (options?: { callbackURL?: string }) => Promise<unknown>;
-}
 
 /** Module-scope so the guard survives re-renders and effect re-runs. */
 let oneTapPrompted = false;
@@ -85,9 +89,7 @@ export function promptOneTap(): void {
   // gate recorded survives a One Tap sign-in too.
   const redirect = sanitizeRedirect(new URLSearchParams(window.location.search).get("redirect"));
 
-  void (oneTapAuthClient as unknown as OneTapCapableClient)
-    .oneTap({ callbackURL: redirect ?? "/" })
-    .catch((error: unknown) => {
-      console.debug("Google One Tap unavailable:", error);
-    });
+  void oneTapAuthClient.oneTap({ callbackURL: redirect ?? "/" }).catch((error) => {
+    console.debug("Google One Tap unavailable:", error);
+  });
 }

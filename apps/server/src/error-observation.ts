@@ -16,20 +16,20 @@ export type ProcessErrorSource = "unhandledRejection" | "uncaughtException";
 export type ErrorObservation =
   | {
       source: "orpc";
-      error: unknown;
+      error: Error;
       requestId: string;
       status: number;
     }
   | {
       source: "request";
-      error: unknown;
+      error: Error;
       requestId: string;
       method: string;
       path: string;
     }
   | {
       source: "process";
-      error: unknown;
+      error: Error;
       event: ProcessErrorSource;
     };
 
@@ -39,15 +39,22 @@ export type ErrorObservationDecision =
 export type ErrorObserver = (observation: ErrorObservation) => ErrorObservationDecision;
 
 export interface ErrorObserverAdapters {
-  report: (error: unknown, requestId?: string) => void;
-  log: (message: string, error: unknown) => void;
+  report: (error: Error, requestId?: string) => void;
+  log: (message: string, error: Error) => void;
 }
 
 const CONTINUE = { action: "continue" } as const;
 const CLIENT_ABORT_CODES = new Set(["ECONNRESET", "EPIPE", "ERR_STREAM_DESTROYED"]);
 
-function errorCode(error: unknown): unknown {
-  return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+export function normalizeObservedError<Value>(value: Value): Error {
+  return value instanceof Error
+    ? value
+    : new Error("A non-Error value was thrown", { cause: value });
+}
+
+function errorCode(error: Error): string | undefined {
+  const descriptor = Object.getOwnPropertyDescriptor(error, "code");
+  return descriptor && "value" in descriptor ? String(descriptor.value) : undefined;
 }
 
 function processLogMessage(event: ProcessErrorSource): string {
@@ -60,7 +67,7 @@ function processLogMessage(event: ProcessErrorSource): string {
  * failure replace the observed error or prevent a required shutdown.
  */
 export function createErrorObserver({ report, log }: ErrorObserverAdapters): ErrorObserver {
-  const safeLog = (message: string, error: unknown): void => {
+  const safeLog = (message: string, error: Error): void => {
     try {
       log(message, error);
     } catch {
@@ -71,14 +78,14 @@ export function createErrorObserver({ report, log }: ErrorObserverAdapters): Err
   };
 
   const safeReport = (
-    error: unknown,
+    error: Error,
     requestId: string | undefined,
     failureMessage: string,
   ): void => {
     try {
       report(error, requestId);
     } catch (reportFailure) {
-      safeLog(failureMessage, reportFailure);
+      safeLog(failureMessage, normalizeObservedError(reportFailure));
     }
   };
 

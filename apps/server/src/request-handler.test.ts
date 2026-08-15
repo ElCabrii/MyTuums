@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { Readable } from "node:stream";
+import { IncomingMessage, type OutgoingHttpHeaders } from "node:http";
+import { Socket } from "node:net";
 import { RPC_MAX_BODY_BYTES, SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
 import {
   AUTH_MAX_BODY_BYTES,
   createRequestHandler,
   type RequestHandlerDeps,
+  type RequestResponse,
 } from "./request-handler.js";
 
 /**
@@ -14,40 +15,61 @@ import {
  * `ServerResponse` objects are event-emitter-backed sockets — nothing this
  * module needs.
  */
-function resStub() {
-  const calls = {
-    statusCode: undefined as number | undefined,
-    headers: undefined as unknown,
+interface ResponseCalls {
+  statusCode: number | undefined;
+  headers: OutgoingHttpHeaders | undefined;
+  body: string;
+  headersSet: Record<string, string>;
+}
+
+class ResponseDouble implements RequestResponse {
+  readonly calls: ResponseCalls = {
+    statusCode: undefined,
+    headers: undefined,
     body: "",
     // The setHeader state, keyed lowercase — `getHeader` reads it back, the
     // same contract Node's `ServerResponse` has (case-insensitive).
-    headersSet: {} as Record<string, string>,
+    headersSet: {},
   };
-  let destroyed = false;
+  destroyedByHandler = false;
 
-  const res = {
-    get headersSent() {
-      return calls.statusCode !== undefined;
-    },
-    writeHead: vi.fn((status: number, headers?: unknown) => {
-      calls.statusCode = status;
-      calls.headers = headers;
-      return res;
-    }),
-    end: vi.fn((body?: string) => {
-      if (body) calls.body = body;
-      return res;
-    }),
-    destroy: vi.fn(() => {
-      destroyed = true;
-    }),
-    setHeader: vi.fn((name: string, value: string) => {
-      calls.headersSet[name.toLowerCase()] = value;
-    }),
-    getHeader: vi.fn((name: string) => calls.headersSet[name.toLowerCase()]),
+  get headersSent(): boolean {
+    return this.calls.statusCode !== undefined;
+  }
+
+  writeHead(statusCode: number, headers?: OutgoingHttpHeaders): this {
+    this.calls.statusCode = statusCode;
+    this.calls.headers = headers;
+    return this;
+  }
+
+  end(body?: string): this {
+    if (body) this.calls.body = body;
+    return this;
+  }
+
+  destroy(): this {
+    this.destroyedByHandler = true;
+    return this;
+  }
+
+  setHeader(name: string, value: number | string | readonly string[]): this {
+    this.calls.headersSet[name.toLowerCase()] = String(value);
+    return this;
+  }
+
+  getHeader(name: string): string | undefined {
+    return this.calls.headersSet[name.toLowerCase()];
+  }
+}
+
+function resStub() {
+  const res = new ResponseDouble();
+  return {
+    res,
+    calls: res.calls,
+    isDestroyed: () => res.destroyedByHandler,
   };
-
-  return { res: res as unknown as ServerResponse, calls, isDestroyed: () => destroyed };
 }
 
 function reqStub(
@@ -55,7 +77,13 @@ function reqStub(
   method = "GET",
   headers: Record<string, string> = {},
 ): IncomingMessage {
-  return { url, method, headers } as unknown as IncomingMessage;
+  const request = new IncomingMessage(new Socket());
+  request.url = url;
+  request.method = method;
+  request.headers = headers;
+  // A real stream that is already at EOF, so readAuthBody resolves immediately.
+  request.push(null);
+  return request;
 }
 
 function streamReqStub(
@@ -64,15 +92,13 @@ function streamReqStub(
   method = "POST",
   headers: Record<string, string> = {},
 ): IncomingMessage {
-  const request = Readable.from([body]);
-  Object.assign(request, {
-    url,
-    method,
-    headers: { ...headers, "transfer-encoding": "chunked" },
-    httpVersionMajor: 1,
-    socket: { encrypted: false },
-  });
-  return request as unknown as IncomingMessage;
+  const request = new IncomingMessage(new Socket());
+  request.url = url;
+  request.method = method;
+  request.headers = { ...headers, "transfer-encoding": "chunked" };
+  request.push(body);
+  request.push(null);
+  return request;
 }
 
 /** A representative media hit: a URL plus the signing-window cache budget. */
@@ -333,9 +359,9 @@ describe("createRequestHandler", () => {
   it("replays a chunked auth body at exactly the limit to Better Auth", async () => {
     const { res, calls } = resStub();
     const received: Buffer[] = [];
-    const authNodeHandler = vi.fn(async (req: IncomingMessage, response: ServerResponse) => {
+    const authNodeHandler = vi.fn(async (req: IncomingMessage, response: RequestResponse) => {
       for await (const chunk of req) {
-        received.push(Buffer.from(chunk as Uint8Array));
+        received.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
       }
       response.writeHead(200);
       response.end("ok");
@@ -397,7 +423,7 @@ describe("createRequestHandler", () => {
     // omit the header — so the router must not reject it. The byte-counting
     // cap for chunked bodies is oRPC's BodyLimitPlugin, wired in index.ts.
     const { res, calls } = resStub();
-    const handleRpc = vi.fn().mockImplementation((_req: unknown, r: ServerResponse) => {
+    const handleRpc = vi.fn().mockImplementation((_req: IncomingMessage, r: RequestResponse) => {
       r.writeHead(200, { "Content-Type": "application/json" });
       r.end("{}");
       return Promise.resolve({ matched: true });
@@ -417,7 +443,7 @@ describe("createRequestHandler", () => {
 
   it("accepts an RPC body at exactly the ceiling", async () => {
     const { res, calls } = resStub();
-    const handleRpc = vi.fn().mockImplementation((_req: unknown, r: ServerResponse) => {
+    const handleRpc = vi.fn().mockImplementation((_req: IncomingMessage, r: RequestResponse) => {
       r.writeHead(200, { "Content-Type": "application/json" });
       r.end("{}");
       return Promise.resolve({ matched: true });
@@ -437,7 +463,7 @@ describe("createRequestHandler", () => {
 
   it("dispatches /rpc* to handleRpc and returns when matched", async () => {
     const { res, calls } = resStub();
-    const handleRpc = vi.fn().mockImplementation((_req: unknown, r: ServerResponse) => {
+    const handleRpc = vi.fn().mockImplementation((_req: IncomingMessage, r: RequestResponse) => {
       r.writeHead(200, { "Content-Type": "application/json" });
       r.end("{}");
       return Promise.resolve({ matched: true });
@@ -667,7 +693,7 @@ describe("createRequestHandler", () => {
     const { res, isDestroyed } = resStub();
     const handle = createRequestHandler(
       deps({
-        handleRpc: vi.fn().mockImplementation((_req: unknown, r: ServerResponse) => {
+        handleRpc: vi.fn().mockImplementation((_req: IncomingMessage, r: RequestResponse) => {
           r.writeHead(200, { "Content-Type": "application/json" });
           throw new Error("boom after headers sent");
         }),

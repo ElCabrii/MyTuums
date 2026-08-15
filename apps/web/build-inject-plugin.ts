@@ -40,7 +40,7 @@ export function preloadInjectionPlugin(): Plugin {
     enforce: "post",
     generateBundle(_options, bundle) {
       const html = bundle["index.html"];
-      if (!html || html.type !== "asset" || typeof html.source !== "string") return;
+      if (!html || html.type !== "asset" || html.source instanceof Uint8Array) return;
 
       // A bundle entry's fileName already carries the `assets/` prefix
       // (`assets/login-<hash>.js`); the URL in the HTML is that joined onto

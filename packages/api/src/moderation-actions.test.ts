@@ -104,8 +104,8 @@ describe("report reason enums vs the schema's check constraint", () => {
     }
     for (const code of checkConstraintCodes) {
       expect(
-        (POST_REPORT_REASONS as readonly string[]).includes(code) ||
-          (USER_REPORT_REASONS as readonly string[]).includes(code),
+        POST_REPORT_REASONS.some((reason) => reason === code) ||
+          USER_REPORT_REASONS.some((reason) => reason === code),
       ).toBe(true);
     }
   });

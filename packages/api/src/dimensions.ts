@@ -146,16 +146,16 @@ function webpDimensions(bytes: Uint8Array): ImageDimensions | null {
   return null;
 }
 
-const PARSERS: Record<string, (bytes: Uint8Array) => ImageDimensions | null> = {
-  "image/png": pngDimensions,
-  "image/jpeg": jpegDimensions,
-  "image/webp": webpDimensions,
-};
+const PARSERS = new Map([
+  ["image/png", pngDimensions],
+  ["image/jpeg", jpegDimensions],
+  ["image/webp", webpDimensions],
+]);
 
 /**
  * The dimensions a file of `type` declares in its header, or `null` when the
  * bytes are too short or malformed to say.
  */
 export function imageDimensions(bytes: Uint8Array, type: string): ImageDimensions | null {
-  return PARSERS[type]?.(bytes) ?? null;
+  return PARSERS.get(type)?.(bytes) ?? null;
 }

@@ -36,7 +36,7 @@ export function initSentry(dsn: string, environment: string): void {
  * (unhandled rejections, uncaught exceptions) have no request to belong
  * to — those events get the error and nothing else.
  */
-export function reportError(error: unknown, requestId?: string): void {
+export function reportError(error: Error, requestId?: string): void {
   Sentry.withScope((scope) => {
     if (requestId) scope.setTag("requestId", requestId);
     Sentry.captureException(error);

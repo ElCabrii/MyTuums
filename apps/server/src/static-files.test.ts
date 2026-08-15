@@ -1,11 +1,11 @@
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage, OutgoingHttpHeaders } from "node:http";
 import { PassThrough } from "node:stream";
 import { brotliCompressSync, brotliDecompressSync, constants, gunzipSync } from "node:zlib";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createStaticFileHandler, noStaticFiles } from "./static-files.js";
+import { createStaticFileHandler, noStaticFiles, type StaticResponse } from "./static-files.js";
 
 /**
  * A real directory laid out like a Vite build, because the whole point of this
@@ -29,18 +29,23 @@ beforeAll(() => {
   writeFileSync(path.join(root, "mytuums.svg"), "<svg/>");
 });
 
+interface StaticResponseRecord {
+  statusCode: number;
+  headers: OutgoingHttpHeaders;
+}
+
 /** Captures status, headers and the piped body. */
 function resStub() {
   const sink = new PassThrough();
   const chunks: Buffer[] = [];
   sink.on("data", (chunk: Buffer) => chunks.push(chunk));
 
-  const calls = { statusCode: 0, headers: {} as Record<string, string> };
+  const calls: StaticResponseRecord = { statusCode: 0, headers: {} };
   // Only `writeHead` is added — a PassThrough already provides `end`, `pipe`
   // and `destroy`, and overriding `destroy` with one that calls `sink.destroy()`
   // makes it call itself.
   const res = Object.assign(sink, {
-    writeHead(status: number, headers?: Record<string, string>) {
+    writeHead(status: number, headers?: OutgoingHttpHeaders) {
       calls.statusCode = status;
       calls.headers = headers ?? {};
       return res;
@@ -48,7 +53,7 @@ function resStub() {
   });
 
   return {
-    res: res as unknown as ServerResponse,
+    res: res satisfies StaticResponse,
     calls,
     body: () => Buffer.concat(chunks).toString(),
     // Raw bytes, for the compression tests: `body()` runs the bytes through
@@ -64,7 +69,8 @@ const req = (
   accept = "text/html",
   extraHeaders: Record<string, string> = {},
 ): IncomingMessage =>
-  ({ url, method, headers: { accept, ...extraHeaders } }) as unknown as IncomingMessage;
+  // SAFETY: Static-file routing reads only url, method, and headers from the request fixture.
+  ({ url, method, headers: { accept, ...extraHeaders } }) as IncomingMessage;
 
 describe("noStaticFiles", () => {
   it("never serves — the dev configuration, where Vite owns the app", async () => {

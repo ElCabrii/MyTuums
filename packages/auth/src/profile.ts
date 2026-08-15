@@ -30,8 +30,27 @@ import {
 /** Message for any attempt to set an image field by hand — uploads are the only legitimate writer. */
 export const MANAGED_IMAGE_MESSAGE = "Profile images are set by uploading a file.";
 
+type BetterAuthFieldValue = string | number | boolean | Date | object | null | undefined;
+
+export interface ProfileFieldWrite {
+  bio?: BetterAuthFieldValue;
+  image?: BetterAuthFieldValue;
+  bannerImage?: BetterAuthFieldValue;
+  imageOriginal?: BetterAuthFieldValue;
+  bannerImageOriginal?: BetterAuthFieldValue;
+  themePreference?: BetterAuthFieldValue;
+  localePreference?: BetterAuthFieldValue;
+}
+
 /** Absent in the sense every one of these rules means: nothing to check. */
-const isBlank = (value: unknown): boolean => value === undefined || value === null || value === "";
+const isBlank = <Value>(value: Value): boolean =>
+  value === undefined || value === null || value === "";
+
+function stringFieldValue<Value>(value: Value): string | null {
+  return Object.prototype.toString.call(value) === "[object String]"
+    ? String.prototype.valueOf.call(value)
+    : null;
+}
 
 /**
  * `image` and `bannerImage` hold one of exactly two things: an absolute URL an
@@ -52,15 +71,16 @@ const isBlank = (value: unknown): boolean => value === undefined || value === nu
  * Both columns carry the same rule and deliberately the same message, so the
  * client's lookup needs one entry rather than two that say the same thing.
  */
-function assertProviderImage(value: unknown): void {
+function assertProviderImage<Value>(value: Value): void {
   if (isBlank(value)) return;
-  if (typeof value !== "string") {
+  const image = stringFieldValue(value);
+  if (image === null) {
     throw new APIError("BAD_REQUEST", { message: MANAGED_IMAGE_MESSAGE });
   }
 
   let parsed: URL;
   try {
-    parsed = new URL(value);
+    parsed = new URL(image);
   } catch {
     throw new APIError("BAD_REQUEST", { message: MANAGED_IMAGE_MESSAGE });
   }
@@ -69,9 +89,9 @@ function assertProviderImage(value: unknown): void {
   }
 }
 
-function assertPreference(
-  value: unknown,
-  isAllowed: (candidate: unknown) => boolean,
+function assertPreference<Value>(
+  value: Value,
+  isAllowed: (candidate: Value) => boolean,
   message: string,
 ): void {
   if (isBlank(value)) return;
@@ -90,7 +110,7 @@ function assertPreference(
  * legitimate writer is the upload procedure, which writes through Drizzle and
  * skips these hooks.
  */
-function assertNoClientOriginalImageWrite(value: unknown): void {
+function assertNoClientOriginalImageWrite<Value>(value: Value): void {
   if (!isBlank(value)) {
     throw new APIError("BAD_REQUEST", { message: MANAGED_IMAGE_MESSAGE });
   }
@@ -108,24 +128,15 @@ function assertNoClientOriginalImageWrite(value: unknown): void {
  * Not `async`, and returning `Promise.resolve()` explicitly — same reason as
  * `./dob.ts`: the rules are synchronous, Better Auth's hook type demands a
  * promise, and `require-await` forbids an `async` function with nothing to
- * await. The index-signature intersection dodges TypeScript's weak-type check
- * for the same reason it does there.
+ * await. The named write contract keeps the fields this module owns explicit;
+ * the index module composes it with the date-of-birth contract.
  */
-export function validateProfileFieldsHook(
-  user: Record<string, unknown> & {
-    bio?: unknown;
-    image?: unknown;
-    bannerImage?: unknown;
-    imageOriginal?: unknown;
-    bannerImageOriginal?: unknown;
-    themePreference?: unknown;
-    localePreference?: unknown;
-  },
-): Promise<void> {
+export function validateProfileFieldsHook(user: ProfileFieldWrite): Promise<void> {
   // Measured untrimmed, unlike the browser's counterpart: what this hook is
   // about to store is exactly what arrived, so that is what has to fit.
   if (!isBlank(user.bio)) {
-    if (typeof user.bio !== "string" || !isBioWithinLimit(user.bio)) {
+    const bio = stringFieldValue(user.bio);
+    if (bio === null || !isBioWithinLimit(bio)) {
       throw new APIError("BAD_REQUEST", { message: BIO_TOO_LONG_MESSAGE });
     }
   }

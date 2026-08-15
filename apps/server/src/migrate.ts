@@ -32,7 +32,7 @@ async function main(): Promise<void> {
 main()
   .then(() => closeDb())
   .then(() => process.exit(0))
-  .catch((error: unknown) => {
+  .catch((error) => {
     // Exiting non-zero is the point: Railway aborts the deploy, the previous
     // version keeps serving, and nothing ends up running against a schema it
     // does not match.

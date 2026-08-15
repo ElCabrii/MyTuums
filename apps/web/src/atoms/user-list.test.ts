@@ -3,15 +3,12 @@ import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: { user: { followers: vi.fn(), following: vi.fn() } },
-}));
+const fakeClient = { user: { followers: vi.fn(), following: vi.fn() } };
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import {
   clearUserListFamily,

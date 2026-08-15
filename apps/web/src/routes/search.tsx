@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { z } from "zod";
 import { SearchPage } from "@/components/search-page";
 
 export const Route = createFileRoute("/search")({
@@ -9,8 +10,10 @@ export const Route = createFileRoute("/search")({
    * trusted: anything that isn't a string is dropped, and the page renders
    * its "type something" prompt instead of a raw value.
    */
-  validateSearch: (search: Record<string, unknown>): { q?: string } => {
-    const q = typeof search.q === "string" ? search.q.trim() : "";
-    return q ? { q } : {};
+  validateSearch: (search) => {
+    const parsed = searchPageSchema.parse(search);
+    return parsed.q ? { q: parsed.q } : {};
   },
 });
+
+const searchPageSchema = z.object({ q: z.string().trim().optional() });

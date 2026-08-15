@@ -30,7 +30,11 @@ export const encodeCaseKey = (ref: CaseRef): string => `${ref.targetType}|${ref.
 /** Decodes a case family key back into a ref — the inverse of {@link encodeCaseKey}. */
 export const decodeCaseKey = (key: string): CaseRef => {
   const [targetType = "post", ...rest] = key.split("|");
-  return { targetType: targetType as CaseRef["targetType"], targetId: rest.join("|") };
+  return {
+    // SAFETY: encodeCaseKey only ever writes the two literal target types.
+    targetType: targetType as CaseRef["targetType"],
+    targetId: rest.join("|"),
+  };
 };
 
 /**
@@ -350,7 +354,7 @@ export const appealReviewAtom = atomWithMutation((get) => {
  * mounted against them.
  */
 export function clearModerationFamilies(): void {
-  for (const key of [...queueFamily.getParams()]) queueFamily.remove(key);
-  for (const key of [...auditLogFamily.getParams()]) auditLogFamily.remove(key);
-  for (const key of [...caseFamily.getParams()]) caseFamily.remove(key);
+  for (const key of queueFamily.getParams()) queueFamily.remove(key);
+  for (const key of auditLogFamily.getParams()) auditLogFamily.remove(key);
+  for (const key of caseFamily.getParams()) caseFamily.remove(key);
 }

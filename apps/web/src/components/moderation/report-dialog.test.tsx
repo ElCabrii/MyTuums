@@ -8,29 +8,26 @@ import { renderWithProviders } from "@/test/render";
 import { ReportDialog } from "@/components/moderation/report-dialog";
 import { reasonLabel } from "@/components/moderation/labels";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: {
-    moderation: {
-      report: vi.fn(),
-      // A successful report's `onSuccess` sweeps these three via
-      // `invalidateModerationQueries` (`atoms/moderation.ts`) — unstubbed,
-      // the fake client's proxy throws reading a property off `undefined`
-      // while building `.key()` (see case-dialog.test.tsx's fuller comment),
-      // which the mutation machinery reports back as the mutation itself
-      // having failed. The "success" test below needs these to actually
-      // observe success.
-      queue: vi.fn(),
-      case: vi.fn(),
-      auditLog: vi.fn(),
-    },
+const fakeClient = {
+  moderation: {
+    report: vi.fn(),
+    // A successful report's `onSuccess` sweeps these three via
+    // `invalidateModerationQueries` (`atoms/moderation.ts`) — unstubbed,
+    // the fake client's proxy throws reading a property off `undefined`
+    // while building `.key()` (see case-dialog.test.tsx's fuller comment),
+    // which the mutation machinery reports back as the mutation itself
+    // having failed. The "success" test below needs these to actually
+    // observe success.
+    queue: vi.fn(),
+    case: vi.fn(),
+    auditLog: vi.fn(),
   },
-}));
+};
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {
   vi.clearAllMocks();

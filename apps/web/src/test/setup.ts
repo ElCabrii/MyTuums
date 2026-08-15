@@ -49,10 +49,12 @@ if (!globalThis.matchMedia) {
       matches: false,
       media: query,
       onchange: null,
-      addEventListener: (_type: string, listener: EventListenerOrEventListenerObject) =>
-        void listeners.add(listener as (event: MediaQueryListEvent) => void),
-      removeEventListener: (_type: string, listener: EventListenerOrEventListenerObject) =>
-        void listeners.delete(listener as (event: MediaQueryListEvent) => void),
+      addEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
+        if (listener instanceof Function) listeners.add(listener);
+      },
+      removeEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
+        if (listener instanceof Function) listeners.delete(listener);
+      },
       addListener: (listener: ((event: MediaQueryListEvent) => void) | null) => {
         if (listener) listeners.add(listener);
       },
@@ -60,6 +62,8 @@ if (!globalThis.matchMedia) {
         if (listener) listeners.delete(listener);
       },
       dispatchEvent: (event: Event) => {
+        // SAFETY: every listener was added through the addEventListener above,
+        // so each accepts the MediaQueryListEvent shape dispatched here.
         listeners.forEach((listener) => listener(event as MediaQueryListEvent));
         return true;
       },

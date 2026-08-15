@@ -56,8 +56,8 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
 
   const handleCardClick = (e: MouseEvent<HTMLDivElement>) => {
     if (isFocused) return;
-    const target = e.target as HTMLElement;
-    if (target.closest("a, button, [role='button']")) return;
+    const target = e.target;
+    if (target instanceof Element && target.closest("a, button, [role='button']")) return;
     void navigate({ to: "/post/$postId", params: { postId: post.id } });
   };
 

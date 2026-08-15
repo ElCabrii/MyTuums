@@ -6,15 +6,12 @@ import { blockDialogAtom } from "@/atoms/moderation";
 import { renderWithProviders } from "@/test/render";
 import { BlockDialog } from "@/components/moderation/block-dialog";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: { moderation: { block: vi.fn() } },
-}));
+const fakeClient = { moderation: { block: vi.fn() } };
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {
   vi.clearAllMocks();

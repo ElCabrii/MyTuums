@@ -22,6 +22,7 @@ import { closeDb } from "@my-tuums/db";
 import { desc, eq } from "drizzle-orm";
 import { appeal, moderationAction, post } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { openAppeal } from "./appeal-intake.js";
 import { appealToken } from "./appeal-token.js";
 import { removePostEffect } from "./moderation-actions.js";
@@ -133,6 +134,7 @@ describe("appeal intake — one target from two sources", () => {
 });
 
 describe("appeal intake — the insert race", () => {
+  const refusalSchema = z.object({ code: z.string(), message: z.string() });
   /**
    * The refusals a loser may legitimately get. Which one it is depends on
    * whether it lost at the pre-read or at the constraint, and that is a real
@@ -146,10 +148,10 @@ describe("appeal intake — the insert race", () => {
     "There's already an open appeal for this action.",
   ];
 
-  function refusals(results: PromiseSettledResult<unknown>[]): { code: string; message: string }[] {
+  function refusals<Result>(results: PromiseSettledResult<Result>[]) {
     return results
       .filter((result) => result.status === "rejected")
-      .map((result) => result.reason as { code: string; message: string });
+      .map((result) => refusalSchema.parse(result.reason));
   }
 
   it("distinct links racing the same action: exactly one appeal, every loser a BAD_REQUEST", async () => {

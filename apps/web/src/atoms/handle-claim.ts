@@ -50,6 +50,12 @@ export const resetHandleClaimAtom = atom(null, (_get, set) => {
   set(authErrorAtom, null);
 });
 
+/** The two claim fields — username is surfaced by the client, dateOfBirth is server-only. */
+interface ClaimBody {
+  username?: string;
+  dateOfBirth?: string;
+}
+
 /**
  * Completes a sign-up: claims the handle and/or declares the date of birth —
  * whichever of the two this session is still missing — in one `updateUser`,
@@ -102,17 +108,12 @@ export const claimWelcomeFieldsAtom = atom(null, async (get, set): Promise<boole
   set(authErrorAtom, null);
   set(authPendingAtom, true);
   try {
-    const res = await authClient.updateUser({
-      ...(wantsHandle ? { username: get(handleDraftAtom).trim() } : {}),
-      // Same client-type boundary as the sign-up body in atoms/auth.ts —
-      // the server accepts the field, 1.6.25's client types don't surface it.
-      ...(wantsDob
-        ? ({ dateOfBirth: dateOfBirthToIso(get(dateOfBirthDraftAtom).trim()) } as Record<
-            string,
-            string
-          >)
-        : {}),
-    });
+    // Same client-type boundary as the sign-up body in atoms/auth.ts —
+    // the server accepts the field, 1.6.25's client types don't surface it.
+    const body: ClaimBody = {};
+    if (wantsHandle) body.username = get(handleDraftAtom).trim();
+    if (wantsDob) body.dateOfBirth = dateOfBirthToIso(get(dateOfBirthDraftAtom).trim());
+    const res = await authClient.updateUser(body);
     if (res.error) {
       set(authErrorAtom, res.error.message || m.common_something_went_wrong());
       return false;

@@ -20,6 +20,12 @@ import {
   parseDateOfBirthParts,
 } from "./rules.js";
 
+type DateOfBirthInput = string | number | Date | object | null | undefined;
+
+export interface DateOfBirthWrite {
+  dateOfBirth?: DateOfBirthInput;
+}
+
 /**
  * The rule Better Auth runs before a user row is created or updated.
  *
@@ -33,14 +39,10 @@ import {
  * Not `async` on purpose: the rule is synchronous, so the function returns
  * `Promise.resolve()` explicitly instead — Better Auth's hook type demands a
  * promise, and the linter's `require-await` forbids an `async` function with
- * nothing to await. The index-signature intersection is required too: a bare
- * `{ dateOfBirth?: unknown }` is a *weak type*, and TypeScript refuses to
- * assign the hook's real user object to it because the two share no property
- * names.
+ * nothing to await. The named write contract keeps the one field this module
+ * owns explicit; the index module composes it with the profile contract.
  */
-export function validateDateOfBirthHook(
-  user: Record<string, unknown> & { dateOfBirth?: unknown },
-): Promise<void> {
+export function validateDateOfBirthHook(user: DateOfBirthWrite): Promise<void> {
   const raw = user.dateOfBirth;
   if (raw === undefined || raw === null || raw === "") return Promise.resolve();
   const parts = parseDateOfBirthParts(raw);

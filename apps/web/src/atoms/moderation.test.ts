@@ -5,31 +5,26 @@ import { waitFor } from "@testing-library/react";
 // (`orpc.post.list.key()`, `orpc.search.*.key()`, …) — a fake that only stubs
 // `moderation` would leave those accessors undefined and the onSuccess would
 // throw, failing the mutation. The fake mirrors the full sweep surface.
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: {
-    post: { list: vi.fn(), thread: vi.fn() },
-    search: { posts: vi.fn(), users: vi.fn(), typeahead: vi.fn() },
-    user: { followers: vi.fn(), following: vi.fn(), byUsername: vi.fn() },
-    moderation: {
-      listBlocked: vi.fn(),
-      unblock: vi.fn(),
-      banUser: vi.fn(),
-      resolve: vi.fn(),
-      report: vi.fn(),
-      // The `invalidateModerationQueries` prefix keys (`queue`/`case`/
-      // `auditLog`) are read by the sweeps under test, so the fake must
-      // expose them like every other accessor the onSuccess paths touch.
-      queue: vi.fn(),
-      case: vi.fn(),
-      auditLog: vi.fn(),
-    },
+const fakeClient = {
+  post: { list: vi.fn(), thread: vi.fn() },
+  search: { posts: vi.fn(), users: vi.fn(), typeahead: vi.fn() },
+  user: { followers: vi.fn(), following: vi.fn(), byUsername: vi.fn() },
+  moderation: {
+    listBlocked: vi.fn(),
+    unblock: vi.fn(),
+    banUser: vi.fn(),
+    resolve: vi.fn(),
+    report: vi.fn(),
+    // The `invalidateModerationQueries` prefix keys (`queue`/`case`/
+    // `auditLog`) are read by the sweeps under test, so the fake must
+    // expose them like every other accessor the onSuccess paths touch.
+    queue: vi.fn(),
+    case: vi.fn(),
+    auditLog: vi.fn(),
   },
-}));
+};
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import { orpc, type BlockedUser } from "@/lib/orpc";
 import {
@@ -44,6 +39,8 @@ import {
 // wiring — same reasoning as reply-composer.test.ts.
 import { store as singletonStore } from "@/lib/store";
 import { queryClient as singletonQueryClient } from "@/lib/query-client";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
 function makeBlockedUser(overrides: Partial<BlockedUser> & { id: string }): BlockedUser {
   return {

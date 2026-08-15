@@ -136,11 +136,11 @@ async function requireUserIdByUsername(db: Database, username: string): Promise<
  * declared type. A caller probing what the sniffer accepts learns nothing from
  * it, and a legitimate user is served by the same advice either way.
  */
-const IMAGE_REJECTIONS: Record<ImageRejection, string> = {
+const IMAGE_REJECTIONS = {
   type: "That image format isn't supported. Use a PNG, JPEG or WebP.",
   size: "That image is too large.",
   content: "That file doesn't look like an image.",
-};
+} satisfies Record<ImageRejection, string>;
 
 /**
  * The `user` procedure group: byUsername, uploadImage, removeImage, follow,

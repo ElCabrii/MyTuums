@@ -83,8 +83,23 @@ interface TwoFactorChallengeResponse {
  * the three places that need to tell a user-cancelled WebAuthn ceremony apart
  * from a real failure.
  */
-export function errorCodeOf(error: object): string | undefined {
-  return "code" in error && typeof error.code === "string" ? error.code : undefined;
+/** The error members BetterAuth's client responses carry, when they carry them. */
+interface BetterAuthClientError {
+  code?: string;
+  message?: string;
+}
+
+export function errorCodeOf(error: BetterAuthClientError): string | undefined {
+  return error.code;
+}
+
+/** The sign-up body incl. the additional dateOfBirth field the server accepts. */
+interface SignUpEmailBody {
+  email: string;
+  password: string;
+  name: string;
+  username: string;
+  dateOfBirth?: string;
 }
 
 /**
@@ -130,6 +145,8 @@ export const signInAtom = atom(
       // docs call this out). Reading it through a local shape keeps the
       // assertion here rather than letting a cast on `res` leak an optimistic
       // type into everything downstream.
+      // SAFETY: twoFactorRedirect is substituted for the session shape at runtime
+      // (documented upstream); this local shape narrows exactly the fields read.
       const data = res.data as TwoFactorChallengeResponse;
       if (data.twoFactorRedirect) {
         const methods = data.twoFactorMethods ?? [];
@@ -267,17 +284,17 @@ export const signUpAtom = atom(null, async (_get, set, fields: SignUpArgs): Prom
   set(authErrorAtom, null);
   set(authPendingAtom, true);
   try {
-    const res = await authClient.signUp.email({
+    const body: SignUpEmailBody = {
       email: fields.email.trim(),
       password: fields.password,
       name: fields.name.trim(),
       username: fields.username.trim(),
-      // The server accepts this field (see user.additionalFields in
-      // packages/auth/src/index.ts); better-auth 1.6.25's client types just
-      // don't surface it on the sign-up body, so the spread carries it past
-      // the type boundary — see lib/auth-client.ts's sessionStore cast.
-      ...({ dateOfBirth: dateOfBirthToIso(fields.dateOfBirth) } as Record<string, string>),
-    });
+      dateOfBirth: dateOfBirthToIso(fields.dateOfBirth),
+    };
+    // SAFETY: The server accepts dateOfBirth (user.additionalFields in
+    // packages/auth/src/index.ts); better-auth 1.6.25's client types don't
+    // surface it on the sign-up body — see lib/auth-client.ts's sessionStore cast.
+    const res = await authClient.signUp.email(body);
 
     if (res.error) {
       set(authErrorAtom, res.error.message || m.common_something_went_wrong());

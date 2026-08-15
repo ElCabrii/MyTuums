@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AlertCircle, CheckCircle2, KeyRound, Loader2, Lock } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
+import { z } from "zod";
 
 export const Route = createFileRoute("/reset-password")({
   component: ResetPasswordPage,
@@ -32,11 +33,15 @@ export const Route = createFileRoute("/reset-password")({
    * the browser here. Same narrowing rule as /login's `?error=`: narrowed to a
    * string, never trusted.
    */
-  validateSearch: (search: Record<string, unknown>): { token?: string; error?: string } => ({
-    ...(typeof search.token === "string" ? { token: search.token } : {}),
-    ...(typeof search.error === "string" ? { error: search.error } : {}),
-  }),
+  validateSearch: (search) => resetPasswordSearchSchema.parse(search),
 });
+
+const resetPasswordSearchSchema = z.object({
+  token: z.string().optional(),
+  error: z.string().optional(),
+});
+
+/** The two params BetterAuth's reset-password redirect carries, both optional. */
 
 /**
  * The token stage of a password reset.

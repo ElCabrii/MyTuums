@@ -78,9 +78,8 @@ export async function keysetPage<S, C extends DateColumn, T>(args: {
 
   if (!hasMore || !last) return { items, nextCursor: null };
 
-  // The ColumnKey tie guarantees the field is the row-side of the createdAt
-  // column, so its value is a Date; the casts bridge the gap TS cannot close
-  // between the selection type S and the row type T.
+  // SAFETY: ColumnKey ties each selected field to its Drizzle column: the
+  // created-at column produces Date and StringKeys restricts the id to string.
   return {
     items,
     nextCursor: args.codec.encode(last[args.createdAtField] as Date, last[args.idField] as string),

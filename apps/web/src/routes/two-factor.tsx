@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { z } from "zod";
 import { useEffect, type FormEvent } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { authErrorAtom, authPendingAtom, twoFactorMethodsAtom } from "@/atoms/auth";
@@ -29,9 +30,10 @@ export const Route = createFileRoute("/two-factor")({
    * reads it back and finishes the trip to the page the gate had sent them
    * from. Direct hits have no param and behave as before.
    */
-  validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
-    typeof search.redirect === "string" ? { redirect: search.redirect } : {},
+  validateSearch: (search) => redirectSearchSchema.parse(search),
 });
+
+const redirectSearchSchema = z.object({ redirect: z.string().optional() });
 
 /**
  * The second-factor challenge.

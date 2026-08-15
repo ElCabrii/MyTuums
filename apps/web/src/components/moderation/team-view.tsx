@@ -160,6 +160,8 @@ function SetRoleDialog() {
             disabled={!role || setRole.isPending}
             onClick={() => {
               if (!target) return;
+              // SAFETY: the Select items are built off ALL_ROLES, so the value is
+              // one of its literals by construction.
               setRole.mutate({ userId: target.userId, role: role as (typeof ALL_ROLES)[number] });
               setOpenTarget(null);
             }}

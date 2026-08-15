@@ -5,15 +5,12 @@ import { ORPCError } from "@orpc/client";
 import { renderWithProviders } from "@/test/render";
 import { AppealPage } from "@/components/moderation/appeal-page";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: { moderation: { appealOpen: vi.fn(), queue: vi.fn() } },
-}));
+const fakeClient = { moderation: { appealOpen: vi.fn(), queue: vi.fn() } };
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {
   vi.clearAllMocks();

@@ -252,7 +252,7 @@ export const moderationRouter = {
         actorId: context.user.id,
         reason: input.reason,
       });
-      await sendPendingEmails(context.db, context.headers, [pending]);
+      await sendPendingEmails(context.db, context.headers, [pending], context.emailSender);
       return { postId: input.postId, removed: true };
     }),
 
@@ -269,7 +269,7 @@ export const moderationRouter = {
         actorId: context.user.id,
         note: input.note,
       });
-      await sendPendingEmails(context.db, context.headers, pending);
+      await sendPendingEmails(context.db, context.headers, pending, context.emailSender);
       return { postId: input.postId, restored: true };
     }),
 
@@ -295,7 +295,7 @@ export const moderationRouter = {
         reason: input.reason,
         durationSeconds: input.durationSeconds,
       });
-      await sendPendingEmails(context.db, context.headers, [pending]);
+      await sendPendingEmails(context.db, context.headers, [pending], context.emailSender);
       return { userId: input.userId, suspended: true, banExpires };
     }),
 
@@ -317,7 +317,7 @@ export const moderationRouter = {
         actorRole: context.user.role ?? "user",
         reason: input.reason,
       });
-      await sendPendingEmails(context.db, context.headers, [pending]);
+      await sendPendingEmails(context.db, context.headers, [pending], context.emailSender);
       return { userId: input.userId, banned: true };
     }),
 
@@ -339,7 +339,7 @@ export const moderationRouter = {
       });
       // The effect commits the clear + audit row, then the user is emailed
       // with the copy matching the sentence that was lifted.
-      await sendPendingEmails(context.db, context.headers, pending);
+      await sendPendingEmails(context.db, context.headers, pending, context.emailSender);
       return { userId: input.userId, unbanned: true };
     }),
 
@@ -370,7 +370,7 @@ export const moderationRouter = {
         actorRole: context.user.role ?? "user",
         role: input.role,
       });
-      await sendPendingEmails(context.db, context.headers, [pending]);
+      await sendPendingEmails(context.db, context.headers, [pending], context.emailSender);
       return { userId: input.userId, role: input.role };
     }),
 

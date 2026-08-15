@@ -222,12 +222,11 @@ export const saveThemePreferenceAtom = atom(
     set(authErrorAtom, null);
     set(authPendingAtom, true);
     try {
-      const res = await authClient.updateUser(
-        // Same client-type boundary as everywhere else these additionalFields
-        // are written — the server accepts them, 1.6.25's client types don't
-        // surface them. See lib/auth-client.ts.
-        { themePreference: preference } as Record<string, string>,
-      );
+      // SAFETY: themePreference is an additionalField the server accepts;
+      // better-auth 1.6.25's client types don't surface it (lib/auth-client.ts).
+      const res = await authClient.updateUser({ themePreference: preference } as Parameters<
+        typeof authClient.updateUser
+      >[0]);
       if (res.error) {
         set(authErrorAtom, res.error.message || m.common_something_went_wrong());
         return false;
@@ -258,10 +257,11 @@ export const saveLocalePreferenceAtom = atom(
     set(authErrorAtom, null);
     set(authPendingAtom, true);
     try {
-      const res = await authClient.updateUser({ localePreference: preference } as Record<
-        string,
-        string
-      >);
+      // SAFETY: localePreference is an additionalField the server accepts;
+      // better-auth 1.6.25's client types don't surface it (lib/auth-client.ts).
+      const res = await authClient.updateUser({ localePreference: preference } as Parameters<
+        typeof authClient.updateUser
+      >[0]);
       if (res.error) {
         set(authErrorAtom, res.error.message || m.common_something_went_wrong());
         return false;

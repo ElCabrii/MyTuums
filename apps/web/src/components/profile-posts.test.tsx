@@ -8,19 +8,15 @@ import {
 } from "@/test/render";
 import { ProfilePosts } from "@/components/profile-posts";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: {
-    user: { byUsername: vi.fn() },
-    post: { list: vi.fn(), create: vi.fn() },
-  },
-}));
+const fakeClient = {
+  user: { byUsername: vi.fn() },
+  post: { list: vi.fn(), create: vi.fn() },
+};
 
-vi.mock("@/lib/orpc", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/orpc")>();
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { ...actual, orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 describe("ProfilePosts", () => {
   it("shows the composer and owner-specific empty copy on the viewer's profile", async () => {

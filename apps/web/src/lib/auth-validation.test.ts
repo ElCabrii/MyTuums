@@ -438,7 +438,11 @@ describe("date-of-birth wire formats", () => {
         ["", ""],
         ["garbage", ""],
       ] as const,
-      (value) => dateOfBirthInputValue(value as never),
+      (value) => {
+        // SAFETY: the fixture table feeds every entry through the one parsing
+        // entry-point under test; the cast keeps the table heterogeneous.
+        return dateOfBirthInputValue(value);
+      },
     );
   });
 });

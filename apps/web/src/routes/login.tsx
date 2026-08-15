@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LogIn, Loader2, User, Lock } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
+import { z } from "zod";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -48,11 +49,19 @@ export const Route = createFileRoute("/login")({
    * server-controlled English string surfacing in the UI — for codes that
    * fall through to the generic `auth_oauth_failed` message anyway.
    */
-  validateSearch: (search: Record<string, unknown>): { error?: string; redirect?: string } => ({
-    ...(typeof search.error === "string" ? { error: search.error } : {}),
-    ...(typeof search.redirect === "string" ? { redirect: search.redirect } : {}),
-  }),
+  validateSearch: (search) => loginSearchSchema.parse(search),
 });
+
+const loginSearchSchema = z.object({
+  error: z.string().optional(),
+  redirect: z.string().optional(),
+});
+
+/** The destination `/login` navigates to when a challenge is issued. */
+interface TwoFactorDestination {
+  to: "/two-factor";
+  search?: { redirect: string };
+}
 
 /**
  * The sign-in page: identifier + password form, the OAuth/passkey options, and
@@ -127,10 +136,9 @@ export function LoginPage() {
       // The redirect param rides along so that after the challenge, when the
       // session finally appears, useRedirectWhenSignedIn (reading /two-factor's
       // own search) still knows where the person was heading.
-      void navigate({
-        to: "/two-factor",
-        ...(redirectFromSearch ? { search: { redirect: redirectFromSearch } } : {}),
-      });
+      const destination: TwoFactorDestination = { to: "/two-factor" };
+      if (redirectFromSearch) destination.search = { redirect: redirectFromSearch };
+      void navigate(destination);
       return;
     }
 

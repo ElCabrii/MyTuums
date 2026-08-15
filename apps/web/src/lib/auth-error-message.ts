@@ -1,6 +1,6 @@
 import { m } from "@/paraglide/messages.js";
 
-const validationMessages: Record<string, () => string> = {
+const validationMessages = {
   "Username is required.": () => m.validation_username_required(),
   "Username must be between 3 and 20 characters long.": () => m.validation_username_length(),
   "Username can only contain letters, numbers, underscores, and hyphens.": () =>
@@ -39,11 +39,14 @@ const validationMessages: Record<string, () => string> = {
   // stopgap for any path that still falls through to one, per issue #74.
   "You have been banned from this application. Please contact support if you believe this is an error.":
     () => m.auth_oauth_banned(),
-};
+} satisfies Record<string, () => string>;
 
 /** Translates the known client-side validation messages without hiding server errors. */
 export function localizeAuthError(error: string): string {
-  return validationMessages[error]?.() ?? error;
+  for (const [known, translate] of Object.entries(validationMessages)) {
+    if (known === error) return translate();
+  }
+  return error;
 }
 
 /**
@@ -58,7 +61,7 @@ export function localizeAuthError(error: string): string {
  * a failure at all but a deliberate refusal, and without an instruction it
  * reads as the app being broken.
  */
-const oauthErrorMessages: Record<string, () => string> = {
+const oauthErrorMessages = {
   // Raised when the provider's email matches an existing account whose own
   // email was never verified. BetterAuth's `requireLocalEmailVerified`
   // defaults to true and this is left on deliberately: it stops someone who
@@ -80,12 +83,15 @@ const oauthErrorMessages: Record<string, () => string> = {
   // with it, so this entry only fires if some future path still falls
   // through to the generic banner instead of navigating.
   BANNED_USER: () => m.auth_oauth_banned(),
-};
+} satisfies Record<string, () => string>;
 
 /**
  * Translates the `?error=<code>` a failed OAuth round trip returns; an unknown
  * code falls back to a generic sign-in-failed message rather than raw text.
  */
 export function localizeOAuthError(code: string): string {
-  return oauthErrorMessages[code]?.() ?? m.auth_oauth_failed();
+  for (const [known, translate] of Object.entries(oauthErrorMessages)) {
+    if (known === code) return translate();
+  }
+  return m.auth_oauth_failed();
 }

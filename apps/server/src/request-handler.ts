@@ -1,9 +1,19 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
+import { IncomingMessage, type OutgoingHttpHeader, type OutgoingHttpHeaders } from "node:http";
 import path from "node:path";
-import { PassThrough } from "node:stream";
+import { Readable } from "node:stream";
 import { RPC_MAX_BODY_BYTES, SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
-import type { ErrorObserver } from "./error-observation.js";
+import { normalizeObservedError, type ErrorObserver } from "./error-observation.js";
 import { createRequestId, pathnameOf } from "./observability.js";
+
+/** The response surface the routing tree itself uses. */
+export interface RequestResponse {
+  readonly headersSent: boolean;
+  writeHead(status: number, headers?: OutgoingHttpHeaders): this;
+  end(body?: string): this;
+  destroy(error?: Error): this;
+  setHeader(name: string, value: number | string | readonly string[]): this;
+  getHeader(name: string): OutgoingHttpHeader | undefined;
+}
 
 /**
  * Authentication payloads are small JSON/form requests, never media uploads.
@@ -19,9 +29,9 @@ export const AUTH_MAX_BODY_BYTES = 1024 * 1024;
  */
 export interface RequestHandlerDeps {
   /** `SELECT 1` — throws if Postgres is unreachable. */
-  pingDb: () => Promise<unknown>;
+  pingDb: () => Promise<void>;
   /** BetterAuth's node handler for everything under `/api/auth`. */
-  authNodeHandler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void;
+  authNodeHandler: (req: IncomingMessage, res: RequestResponse) => Promise<void> | void;
   /**
    * Resolves the oRPC context and dispatches to the router for everything
    * under `/rpc`. Bundled as one callback — rather than passed apart as
@@ -29,7 +39,7 @@ export interface RequestHandlerDeps {
    * about sessions, client IPs, or oRPC at all; it only needs to know whether
    * a `/rpc`-prefixed request was matched.
    */
-  handleRpc: (req: IncomingMessage, res: ServerResponse) => Promise<{ matched: boolean }>;
+  handleRpc: (req: IncomingMessage, res: RequestResponse) => Promise<{ matched: boolean }>;
   /**
    * Turns a `/media/<key>` object key into a redirect target and the cache
    * budget for that redirect, or `null` when it should 404. Only ever called
@@ -50,7 +60,7 @@ export interface RequestHandlerDeps {
    * over `WEB_DIST`. Reporting `{ served: false }` rather than writing a 404
    * itself keeps the 404 in one place.
    */
-  serveStatic: (req: IncomingMessage, res: ServerResponse) => Promise<{ served: boolean }>;
+  serveStatic: (req: IncomingMessage, res: RequestResponse) => Promise<{ served: boolean }>;
   /**
    * Whether `req` carries a live session — a real `auth.api.getSession` check,
    * not just "a cookie is present" (see `hasSessionCookie` below, which both
@@ -110,24 +120,12 @@ function hasSessionCookie(cookieHeader: string | undefined): boolean {
 }
 
 function declaredContentLength(req: IncomingMessage): number | null {
-  const raw = req.headers["content-length"];
-  const value: string | undefined =
-    typeof raw === "string"
-      ? raw
-      : Array.isArray(raw) && typeof raw[0] === "string"
-        ? raw[0]
-        : undefined;
-  if (typeof value !== "string" || value.trim() === "") return null;
+  // Content-Length is a non-repeatable header, so Node's types expose it as a
+  // single string (never an array) — no representation check is needed.
+  const value = req.headers["content-length"];
+  if (!value || value.trim() === "") return null;
   const length = Number(value);
   return Number.isSafeInteger(length) && length >= 0 ? length : null;
-}
-
-function isReadableRequest(req: IncomingMessage): req is IncomingMessage & NodeJS.ReadableStream {
-  return (
-    typeof req.on === "function" &&
-    typeof req.resume === "function" &&
-    typeof req[Symbol.asyncIterator] === "function"
-  );
 }
 
 /**
@@ -137,7 +135,7 @@ function isReadableRequest(req: IncomingMessage): req is IncomingMessage & NodeJ
  * an unhandled process-level error after we have already sent 413.
  */
 function drainRejectedRequest(req: IncomingMessage): void {
-  if (!isReadableRequest(req)) return;
+  if (!(req instanceof Readable)) return;
   req.once("error", () => undefined);
   req.resume();
 }
@@ -153,7 +151,7 @@ async function readAuthBody(
   req: IncomingMessage,
   limit: number,
 ): Promise<{ body: Buffer; exceeded: boolean } | null> {
-  if (req.method === "GET" || req.method === "HEAD" || !isReadableRequest(req)) return null;
+  if (req.method === "GET" || req.method === "HEAD" || !(req instanceof Readable)) return null;
 
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -200,16 +198,14 @@ async function readAuthBody(
 
 /** Replays a bounded body while preserving the request metadata Better Auth reads. */
 function requestWithBody(req: IncomingMessage, body: Buffer): IncomingMessage {
-  const replay = new PassThrough();
-  Object.assign(replay, {
-    headers: req.headers,
-    method: req.method,
-    url: req.url,
-    socket: req.socket,
-    httpVersionMajor: req.httpVersionMajor,
-  });
-  replay.end(body);
-  return replay as unknown as IncomingMessage;
+  const replay = new IncomingMessage(req.socket);
+  replay.headers = req.headers;
+  replay.method = req.method;
+  replay.url = req.url;
+  replay.httpVersionMajor = req.httpVersionMajor;
+  replay.push(body);
+  replay.push(null);
+  return replay;
 }
 
 /**
@@ -272,7 +268,7 @@ function pageGatePathname(rawUrl: string): string | null {
  * positioned to observe response headers over a real connection.
  */
 export function createRequestHandler(deps: RequestHandlerDeps) {
-  return async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  return async function handleRequest(req: IncomingMessage, res: RequestResponse): Promise<void> {
     // Every request gets an identity before any routing branch runs, so
     // whatever the tree serves — health, auth, rpc, media, page, 404, or
     // the 500 safety net — carries the same `x-request-id` on the way out
@@ -493,7 +489,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       // query strings are where appeal and password-reset tokens ride.
       deps.observeError({
         source: "request",
-        error,
+        error: normalizeObservedError(error),
         requestId,
         method: req.method ?? "?",
         path: pathnameOf(req.url) ?? "?",

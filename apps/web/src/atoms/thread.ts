@@ -29,5 +29,5 @@ export const threadAtomFamily = atomFamily((postId: string) =>
  * previous one's like state.
  */
 export function clearThreadFamily(): void {
-  for (const key of [...threadAtomFamily.getParams()]) threadAtomFamily.remove(key);
+  for (const key of threadAtomFamily.getParams()) threadAtomFamily.remove(key);
 }

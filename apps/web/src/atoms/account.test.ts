@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient } from "@tanstack/react-query";
+import { installTestAuthClient } from "@/lib/auth-client";
 
 type AuthClientResult = { data: unknown; error: unknown };
 
@@ -20,22 +21,32 @@ const { updateUser, changePassword } = vi.hoisted(() => ({
  * hang until that helper's 3s timeout. `setSession` below is what lets a test
  * land the refetch deliberately.
  */
+type AccountSessionState = { value: AccountSessionFixture };
+type AccountSessionFixture = {
+  data: {
+    user: { id: string; name: string; username: string | null; displayUsername: string | null };
+  } | null;
+  isPending: boolean;
+};
+
 const { state, listeners } = vi.hoisted(() => {
-  const initial: { value: unknown } = { value: { data: null, isPending: false } };
-  return { state: initial, listeners: new Set<(value: unknown) => void>() };
+  const initial: AccountSessionState = { value: { data: null, isPending: false } };
+  return { state: initial, listeners: new Set<(value: AccountSessionFixture) => void>() };
 });
 
-vi.mock("@/lib/auth-client", () => ({
+// SAFETY: the recording fakes resolve the { data, error } shapes the app reads
+// from the real client; the seam swaps only what each suite needs.
+installTestAuthClient({
   sessionStore: {
     get: () => state.value,
-    subscribe: (listener: (value: unknown) => void) => {
+    subscribe: (listener: (value: AccountSessionFixture) => void) => {
       listeners.add(listener);
       listener(state.value);
       return () => listeners.delete(listener);
     },
   },
   authClient: { updateUser, changePassword },
-}));
+});
 
 import { authErrorAtom } from "@/atoms/auth";
 import {
@@ -49,7 +60,7 @@ import {
 } from "@/atoms/account";
 import { sessionAtom } from "@/atoms/session";
 
-function setSession(value: unknown) {
+function setSession(value: AccountSessionFixture) {
   state.value = value;
   listeners.forEach((listener) => listener(value));
 }
@@ -64,6 +75,8 @@ function signedIn(username: string | null) {
 function freshStore() {
   const store = createStore();
   store.set(queryClientAtom, new QueryClient());
+  // SAFETY: the fixture is deliberately partial — the atom only reads the two
+  // session fields these tests exercise (see the note above the seam install).
   store.set(sessionAtom, state.value as never);
   return store;
 }
@@ -101,6 +114,7 @@ describe("changeHandleAtom", () => {
         },
         isPending: false,
       });
+      // SAFETY: deliberately partial fixture, same boundary as `freshStore` above.
       store.set(sessionAtom, state.value as never);
       return Promise.resolve({ data: {}, error: null });
     });

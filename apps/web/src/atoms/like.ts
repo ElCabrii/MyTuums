@@ -166,8 +166,8 @@ export const toggleLikeAtomFamily = atomFamily((postId: string) =>
 
 /** Drops every entry these families have created. See `clearPostFeedFamily`. */
 export function clearLikeFamilies(): void {
-  for (const key of [...likeFamily.getParams()]) likeFamily.remove(key);
-  for (const key of [...unlikeFamily.getParams()]) unlikeFamily.remove(key);
-  for (const key of [...intentFamily.getParams()]) intentFamily.remove(key);
-  for (const key of [...toggleLikeAtomFamily.getParams()]) toggleLikeAtomFamily.remove(key);
+  for (const key of likeFamily.getParams()) likeFamily.remove(key);
+  for (const key of unlikeFamily.getParams()) unlikeFamily.remove(key);
+  for (const key of intentFamily.getParams()) intentFamily.remove(key);
+  for (const key of toggleLikeAtomFamily.getParams()) toggleLikeAtomFamily.remove(key);
 }

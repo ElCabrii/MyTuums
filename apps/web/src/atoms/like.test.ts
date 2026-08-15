@@ -4,24 +4,21 @@ import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
 
-const { fakeClient } = vi.hoisted(() => ({
-  // The mock mirrors the real client's procedure tree — the post-cache sweep
-  // in `updatePostEverywhere` now also walks `orpc.search.posts.key()`, so a
-  // missing group here throws inside every like mutation.
-  fakeClient: {
-    post: { like: vi.fn(), unlike: vi.fn(), list: vi.fn(), thread: vi.fn() },
-    search: { typeahead: vi.fn(), users: vi.fn(), posts: vi.fn() },
-  },
-}));
+// The mock mirrors the real client's procedure tree — the post-cache sweep
+// in `updatePostEverywhere` now also walks `orpc.search.posts.key()`, so a
+// missing group here throws inside every like mutation.
+const fakeClient = {
+  post: { like: vi.fn(), unlike: vi.fn(), list: vi.fn(), thread: vi.fn() },
+  search: { typeahead: vi.fn(), users: vi.fn(), posts: vi.fn() },
+};
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import { orpc, type Post, type PostListPage, type SearchPostsPage } from "@/lib/orpc";
 import { readCachedPost } from "@/lib/post-cache";
 import { clearLikeFamilies, toggleLikeAtomFamily } from "@/atoms/like";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
 function makePost(overrides: Partial<Post> & { id: string }): Post {
   return {
@@ -107,7 +104,11 @@ describe("toggleLikeAtomFamily", () => {
       makePost({ id: "post-1", viewerHasLiked: false, likeCount: 2 }),
     );
 
-    let resolveLike!: (value: unknown) => void;
+    let resolveLike!: (value: {
+      postId: string;
+      likeCount: number;
+      viewerHasLiked: boolean;
+    }) => void;
     fakeClient.post.like.mockImplementation(
       () =>
         new Promise((resolve) => {

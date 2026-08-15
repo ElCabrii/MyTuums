@@ -46,7 +46,10 @@ function seedInfiniteLoading(queryClient: QueryClient, queryKey: QueryKey): void
   void queryClient.fetchInfiniteQuery({
     queryKey,
     queryFn: () => new Promise<never>(() => {}),
-    initialPageParam: undefined as string | undefined,
+    initialPageParam:
+      // SAFETY: the cursor page param is undefined for the first page; the
+      // type parameter comes from the query's input type, not this fixture.
+      undefined as string | undefined,
     getNextPageParam: () => undefined,
   });
 }
@@ -76,7 +79,10 @@ async function seedInfiniteError(
     await queryClient.fetchInfiniteQuery({
       queryKey,
       queryFn: () => Promise.reject(new Error(message)),
-      initialPageParam: undefined as string | undefined,
+      initialPageParam:
+        // SAFETY: the cursor page param is undefined for the first page; the
+        // type parameter comes from the query's input type, not this fixture.
+        undefined as string | undefined,
       getNextPageParam: () => undefined,
     });
   } catch {

@@ -78,9 +78,14 @@ function stubEncodePath({
     height,
     close: vi.fn(),
   });
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    drawImage: vi.fn(),
-  } as unknown as CanvasRenderingContext2D);
+  const contextDouble = {
+    drawImage: vi.fn(() => {}),
+  };
+  // SAFETY: the encoder only reaches drawImage on the 2D context; the double
+  // stands in for the full context type jsdom cannot construct.
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+    () => contextDouble as never,
+  );
   vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback: BlobCallback) =>
     callback(toBlob),
   );
