@@ -5,6 +5,7 @@ import { RPC_MAX_BODY_BYTES, SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
 import {
   AUTH_MAX_BODY_BYTES,
   createRequestHandler,
+  type AuthRequestSurface,
   type RequestHandlerDeps,
   type RequestResponse,
 } from "./request-handler.js";
@@ -359,7 +360,7 @@ describe("createRequestHandler", () => {
   it("replays a chunked auth body at exactly the limit to Better Auth", async () => {
     const { res, calls } = resStub();
     const received: Buffer[] = [];
-    const authNodeHandler = vi.fn(async (req: IncomingMessage, response: RequestResponse) => {
+    const authNodeHandler = vi.fn(async (req: AuthRequestSurface, response: RequestResponse) => {
       for await (const chunk of req) {
         received.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
       }

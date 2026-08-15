@@ -1,6 +1,12 @@
-import { IncomingMessage, type OutgoingHttpHeader, type OutgoingHttpHeaders } from "node:http";
+import {
+  IncomingMessage,
+  type IncomingHttpHeaders,
+  type OutgoingHttpHeader,
+  type OutgoingHttpHeaders,
+} from "node:http";
+import type { Socket } from "node:net";
 import path from "node:path";
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { RPC_MAX_BODY_BYTES, SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
 import { normalizeObservedError, type ErrorObserver } from "./error-observation.js";
 import { createRequestId, pathnameOf } from "./observability.js";
@@ -13,6 +19,15 @@ export interface RequestResponse {
   destroy(error?: Error): this;
   setHeader(name: string, value: number | string | readonly string[]): this;
   getHeader(name: string): OutgoingHttpHeader | undefined;
+}
+
+/** The request surface Better Auth's node adapter reads; the replayed body stream satisfies it. */
+export interface AuthRequestSurface extends NodeJS.ReadableStream {
+  headers: IncomingHttpHeaders;
+  method?: string;
+  url?: string;
+  socket: Socket;
+  httpVersionMajor: number;
 }
 
 /**
@@ -31,7 +46,7 @@ export interface RequestHandlerDeps {
   /** `SELECT 1` — throws if Postgres is unreachable. */
   pingDb: () => Promise<void>;
   /** BetterAuth's node handler for everything under `/api/auth`. */
-  authNodeHandler: (req: IncomingMessage, res: RequestResponse) => Promise<void> | void;
+  authNodeHandler: (req: AuthRequestSurface, res: RequestResponse) => Promise<void> | void;
   /**
    * Resolves the oRPC context and dispatches to the router for everything
    * under `/rpc`. Bundled as one callback — rather than passed apart as
@@ -197,15 +212,19 @@ async function readAuthBody(
 }
 
 /** Replays a bounded body while preserving the request metadata Better Auth reads. */
-function requestWithBody(req: IncomingMessage, body: Buffer): IncomingMessage {
-  const replay = new IncomingMessage(req.socket);
-  replay.headers = req.headers;
-  replay.method = req.method;
-  replay.url = req.url;
-  replay.httpVersionMajor = req.httpVersionMajor;
-  replay.push(body);
-  replay.push(null);
-  return replay;
+function requestWithBody(req: IncomingMessage, body: Buffer): AuthRequestSurface {
+  // A PassThrough rather than a second IncomingMessage: the latter registers
+  // itself against the live socket and would race the real request for the
+  // connection's stream events.
+  const stream = new PassThrough();
+  stream.end(body);
+  return Object.assign(stream, {
+    headers: req.headers,
+    method: req.method,
+    url: req.url,
+    socket: req.socket,
+    httpVersionMajor: req.httpVersionMajor,
+  });
 }
 
 /**

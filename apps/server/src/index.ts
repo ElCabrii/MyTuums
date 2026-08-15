@@ -2,7 +2,7 @@ import { parseEnv } from "./env.js";
 import { createRequestHandler, type RequestResponse } from "./request-handler.js";
 import { createStaticFileHandler, noStaticFiles } from "./static-files.js";
 import { decorateResponse } from "./response-decorators.js";
-import { createServer } from "node:http";
+import { IncomingMessage, createServer } from "node:http";
 import { BodyLimitPlugin, RPCHandler } from "@orpc/server/node";
 import { CORSPlugin, SimpleCsrfProtectionHandlerPlugin } from "@orpc/server/plugins";
 import { ORPCError, onError } from "@orpc/server";
@@ -96,7 +96,11 @@ const handler = new RPCHandler(appRouter, {
 // and a real session check for the page gate.
 const handleRequest = createRequestHandler({
   pingDb,
-  authNodeHandler: (req, res) => authNodeHandler(req, nodeResponse(res)),
+  authNodeHandler: (req, res) =>
+    // SAFETY: node:http's createServer callback always hands the real
+    // IncomingMessage to the routing tree; the replay only swaps the body
+    // stream, keeping every metadata field the adapter reads.
+    authNodeHandler(req as IncomingMessage, nodeResponse(res)),
   handleRpc: async (req, res) => {
     const context = await createContext({
       headers: fromNodeHeaders(req.headers),
