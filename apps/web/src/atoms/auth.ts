@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
+import { clearViewerState } from "@/atoms/session-teardown";
 import { authClient, type SocialProviderId } from "@/lib/auth-client";
 import { waitForSignedOut } from "@/lib/session-sync";
 import { dateOfBirthToIso } from "@/lib/auth-validation";
@@ -313,23 +314,15 @@ export const signUpAtom = atom(null, async (_get, set, fields: SignUpArgs): Prom
 export const signOutAtom = atom(null, async (get, set): Promise<void> => {
   set(authPendingAtom, true);
   try {
-    // Load the lazy teardown chunk while the current session is still live.
-    // Awaiting it after `waitForSignedOut()` would leave a window where the
-    // signed-out UI could observe the previous viewer's query cache.
-    const { clearViewerState } = await import("@/atoms/session-teardown");
     await authClient.signOut();
     // Not redundant with the line above — see `lib/session-sync.ts`. Without
     // it the caller navigates while the session store still reports the old
     // user, and `useRedirectWhenSignedIn` bounces them back.
     await waitForSignedOut();
-    // Dynamic import on purpose, not a static one at the top of this file:
-    // the teardown module pulls in the feed/query machinery it clears
-    // (postFeedAtom, the like/follow intent atoms, the thread family), and a
-    // static import dragged ~60 KB of that into the login page's chunks for
-    // the sake of an action only a signed-in user can trigger. Sign-out is
-    // also the one moment nothing is mounted against those families, which is
-    // what makes the sweep safe — see `atoms/session-teardown.ts`.
-    clearViewerState(get(queryClientAtom));
+    // Clears the QueryClient synchronously, then lazily loads and sweeps the
+    // heavier family modules. The server sign-out therefore cannot be blocked
+    // by a chunk failure, while the signed-out UI never sees the old cache.
+    await clearViewerState(get(queryClientAtom));
     // Sign-in state that belongs to the session that just ended: a pending
     // challenge's methods would otherwise still be on screen for whoever signs
     // in next on this browser.

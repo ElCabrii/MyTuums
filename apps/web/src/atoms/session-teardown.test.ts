@@ -29,7 +29,7 @@ import {
  */
 
 describe("clearViewerState", () => {
-  it("empties the query cache it is handed", () => {
+  it("empties the query cache before loading the family modules", async () => {
     const queryClient = createTestQueryClient();
     const fixtures = queryFixtures(queryClient);
 
@@ -47,9 +47,11 @@ describe("clearViewerState", () => {
     );
     expect(queryClient.getQueryCache().getAll().length).toBeGreaterThan(0);
 
-    clearViewerState(queryClient);
+    const teardown = clearViewerState(queryClient);
 
+    // `clearViewerState` reaches its first await only after this boundary.
     expect(queryClient.getQueryCache().getAll()).toEqual([]);
+    await teardown;
   });
 
   /**
@@ -74,19 +76,19 @@ describe("clearViewerState", () => {
     },
   ];
 
-  it.each(familyReaders)("hands the $family family a fresh atom afterwards", ({ read }) => {
+  it.each(familyReaders)("hands the $family family a fresh atom afterwards", async ({ read }) => {
     const before = read();
 
-    clearViewerState(createTestQueryClient());
+    await clearViewerState(createTestQueryClient());
 
     expect(read()).not.toBe(before);
   });
 
-  it("resets per-entry state, not just atom identity — a half-typed reply is gone", () => {
+  it("resets per-entry state, not just atom identity — a half-typed reply is gone", async () => {
     const store = createStore();
     store.set(replyDraftAtomFamily("post-1"), "a half-typed reply");
 
-    clearViewerState(createTestQueryClient());
+    await clearViewerState(createTestQueryClient());
 
     expect(store.get(replyDraftAtomFamily("post-1"))).toBe("");
   });

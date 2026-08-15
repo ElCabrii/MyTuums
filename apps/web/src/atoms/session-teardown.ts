@@ -1,13 +1,4 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { profileAtomFamily } from "@/atoms/profile";
-import { clearPostFeedFamily } from "@/atoms/post-feed";
-import { clearUserListFamily } from "@/atoms/user-list";
-import { clearSearchFamilies } from "@/atoms/search";
-import { clearLikeFamilies } from "@/atoms/like";
-import { clearFollowFamilies } from "@/atoms/follow";
-import { clearThreadFamily } from "@/atoms/thread";
-import { clearReplyFamilies } from "@/atoms/reply-composer";
-import { clearModerationFamilies } from "@/atoms/moderation";
 
 /**
  * Everything on this browser that belonged to the viewer, discarded in one
@@ -20,14 +11,12 @@ import { clearModerationFamilies } from "@/atoms/moderation";
  * added anywhere in `src/atoms`. Now adding one is a one-line change here,
  * next to the reasoning for the others.
  *
- * Fetched on demand, and that is load-bearing. The `clear*` helpers live
- * alongside the query and mutation machinery they clear (`postFeedAtom`, the
- * like/follow intent atoms, the thread family, the moderation dialogs), so
- * importing this module statically from `atoms/auth.ts` would drag ~60 KB of
- * that machinery into the login page's chunks — for an action only a
- * signed-in user can trigger. `signOutAtom` therefore awaits a dynamic
- * `import()` of this module, and a visitor who never signs out never pays for
- * it. Keep every import of this module dynamic.
+ * The coordinator is small enough to import statically; the family modules are
+ * not. Their `clear*` helpers live alongside the feed/query machinery they
+ * clear, so the dynamic imports inside `clearViewerState` keep that machinery
+ * out of the login page's initial chunks. The QueryClient is cleared before
+ * those imports are awaited, so a missing lazy chunk cannot delay the privacy
+ * boundary or prevent the server sign-out request that precedes it.
  *
  * What is *not* here: the auth-local flags `signOutAtom` resets
  * (`authErrorAtom`, `twoFactorMethodsAtom`, the two-factor offer). Those are
@@ -71,8 +60,30 @@ function clearFamily<Param>(family: {
  * client — the one hydrated into the Jotai store — is unambiguously the one
  * that gets cleared.
  */
-export function clearViewerState(queryClient: QueryClient): void {
+export async function clearViewerState(queryClient: QueryClient): Promise<void> {
   queryClient.clear();
+
+  const [
+    { profileAtomFamily },
+    { clearPostFeedFamily },
+    { clearUserListFamily },
+    { clearThreadFamily },
+    { clearReplyFamilies },
+    { clearLikeFamilies },
+    { clearFollowFamilies },
+    { clearModerationFamilies },
+    { clearSearchFamilies },
+  ] = await Promise.all([
+    import("@/atoms/profile"),
+    import("@/atoms/post-feed"),
+    import("@/atoms/user-list"),
+    import("@/atoms/thread"),
+    import("@/atoms/reply-composer"),
+    import("@/atoms/like"),
+    import("@/atoms/follow"),
+    import("@/atoms/moderation"),
+    import("@/atoms/search"),
+  ]);
 
   clearFamily(profileAtomFamily);
   clearPostFeedFamily();
