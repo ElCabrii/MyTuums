@@ -1,4 +1,4 @@
-# e2e — agent guide
+# e2e context
 
 ## Responsibility
 
@@ -110,4 +110,4 @@ upload specs, the dev bucket's `S3_*` values in `.env`.
 - [docs/architecture.md](../docs/architecture.md) — what the stack this suite
   drives actually looks like.
 - [docs/operations.md](../docs/operations.md) — ports, buckets, environments.
-- [.github/AGENTS.md](../.github/AGENTS.md) — how CI runs this job.
+- [.github/CONTEXT.md](../.github/CONTEXT.md) — how CI runs this job.

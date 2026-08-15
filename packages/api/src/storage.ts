@@ -72,7 +72,7 @@ export interface Storage {
  * everything under a prefix — pointed at production, that destroys every
  * avatar — and a procedure should not even be able to name them. They exist
  * for two callers, the E2E suite's cleanup and the reconcile script
- * (`packages/api/scripts/reconcile-media.mjs`), and only those import the
+ * (`packages/api/scripts/reconcile-media.ts`), and only those import the
  * destructive factory — the same instinct that makes `@my-tuums/auth/testing`
  * a separate instance rather than a conditional spread. The warning that used
  * to live in prose on the interface now lives in the type.
@@ -161,7 +161,7 @@ export function createStorage(config: StorageConfig, now: () => number = Date.no
  * The cleanup-only factory: the same client plus the `DestructiveStorage`
  * surface — listing, batched deletion and `removeByPrefix`, which
  * `e2e/support/db.ts`'s cleanup and the reconcile script
- * (`packages/api/scripts/reconcile-media.mjs`) need. Nothing else should ever
+ * (`packages/api/scripts/reconcile-media.ts`) need. Nothing else should ever
  * import this.
  */
 export function createDestructiveStorage(

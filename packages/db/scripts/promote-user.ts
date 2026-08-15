@@ -14,7 +14,7 @@
  *
  * Usage: pnpm db:promote <username> <role>   (role: moderator | staff | admin)
  *
- * Mirrors setup-test-db.mjs's shape: one process, `postgres` directly (a
+ * Mirrors setup-test-db.ts's shape: one process, `postgres` directly (a
  * promote script must not pull in the connection pool), and `DATABASE_URL`
  * from the environment, which the `dotenv` wrapper in package.json loads
  * from the root .env.
@@ -26,6 +26,12 @@ import postgres from "postgres";
 // import from @my-tuums/api (the dependency would point the wrong way).
 // Keep in step with that file.
 const PROMOTABLE_ROLES = ["moderator", "staff", "admin"];
+
+interface UserRow {
+  id: string;
+  username: string;
+  name: string;
+}
 
 const [username, role] = process.argv.slice(2);
 
@@ -49,7 +55,7 @@ const sql = postgres(databaseUrl, { max: 1, onnotice: () => {} });
 
 try {
   // The username is a parameterised value, never spliced into SQL.
-  const [target] = await sql`
+  const [target] = await sql<UserRow[]>`
     select id, username, name from "user" where username = ${username}
   `;
 

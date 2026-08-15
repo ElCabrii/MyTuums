@@ -13,17 +13,23 @@ import { readFileSync, readdirSync, statSync, lstatSync, readlinkSync, existsSyn
 import { join, resolve, posix } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const SELF = "scripts/check-docs.mjs";
+const SELF = "scripts/check-docs.ts";
 
-const failures = [];
+interface Failure {
+  file: string;
+  message: string;
+  fix: string;
+}
+
+const failures: Failure[] = [];
 
 /** Record one actionable failure: where it is, what is wrong, and what to do. */
-function fail(file, message, fix) {
+function fail(file: string, message: string, fix: string): void {
   failures.push({ file, message, fix });
 }
 
-const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
-const exists = (rel) => existsSync(join(ROOT, rel));
+const read = (rel: string): string => readFileSync(join(ROOT, rel), "utf8");
+const exists = (rel: string): boolean => existsSync(join(ROOT, rel));
 
 // --------------------------------------------------------------------------
 // Expectations
@@ -39,10 +45,10 @@ const REQUIRED_DOCS = {
     "Repository layout",
     "Documentation",
   ],
-  "AGENTS.md": [
+  "AGENTS.md": ["Workflow", "Repository guardrails", "Completion"],
+  "CONTEXT.md": [
     "Repository",
-    "Non-negotiable rules",
-    "Task routing",
+    "Context routing",
     "Cross-cutting invariants",
     "Generated files",
     "Verification matrix",
@@ -95,47 +101,53 @@ const REQUIRED_DOCS = {
     "Configuration and secrets",
     "Test and environment isolation",
   ],
-  ".github/AGENTS.md": ["Responsibility", "Start here", "Change map", "Invariants", "Verification"],
-  "apps/server/AGENTS.md": [
+  ".github/CONTEXT.md": [
     "Responsibility",
     "Start here",
     "Change map",
     "Invariants",
     "Verification",
   ],
-  "apps/web/AGENTS.md": [
+  "apps/server/CONTEXT.md": [
     "Responsibility",
     "Start here",
     "Change map",
     "Invariants",
     "Verification",
   ],
-  "packages/api/AGENTS.md": [
+  "apps/web/CONTEXT.md": [
     "Responsibility",
     "Start here",
     "Change map",
     "Invariants",
     "Verification",
   ],
-  "packages/auth/AGENTS.md": [
+  "packages/api/CONTEXT.md": [
     "Responsibility",
     "Start here",
     "Change map",
     "Invariants",
     "Verification",
   ],
-  "packages/db/AGENTS.md": [
+  "packages/auth/CONTEXT.md": [
     "Responsibility",
     "Start here",
     "Change map",
     "Invariants",
     "Verification",
   ],
-  "e2e/AGENTS.md": ["Responsibility", "Start here", "Change map", "Invariants", "Verification"],
+  "packages/db/CONTEXT.md": [
+    "Responsibility",
+    "Start here",
+    "Change map",
+    "Invariants",
+    "Verification",
+  ],
+  "e2e/CONTEXT.md": ["Responsibility", "Start here", "Change map", "Invariants", "Verification"],
 };
 
 /** Documents deleted by the documentation rewrite. A live reference to one is a dead end. */
-const REMOVED_DOCS = ["CONTEXT.md", "PRODUCT.md"];
+const REMOVED_DOCS = ["PRODUCT.md"];
 
 /**
  * Generated artefacts. They are absent from a fresh clone (so link checking must
@@ -162,8 +174,8 @@ const ABSENT_PATH_ALLOWLIST = new Set([
   "lighthouse-reports",
 ]);
 
-/** The root agent guide is a router, not a manual. Past this it stops being read in full. */
-const ROOT_AGENTS_MAX_BYTES = 9000;
+/** Root instructions are always loaded, so they carry a tight context budget. */
+const ROOT_AGENTS_MAX_BYTES = 5000;
 
 /** pnpm subcommands that are not workspace scripts. */
 const PNPM_BUILTINS = new Set([
@@ -203,7 +215,7 @@ const SKIP_DIRS = new Set([
 ]);
 
 /** Every file under `dir`, skipping build output, dependencies and generated trees. */
-function walk(dir, out = []) {
+function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
     const rel = dir ? posix.join(dir, entry.name) : entry.name;
     if (entry.isDirectory()) {
@@ -218,9 +230,9 @@ function walk(dir, out = []) {
 
 const allFiles = walk("");
 
-// Symlinks are skipped: every CLAUDE.md points at the AGENTS.md beside it, and
-// following them would report each finding twice under two names.
-const isSymlink = (rel) => lstatSync(join(ROOT, rel)).isSymbolicLink();
+// Symlinks are skipped: the root CLAUDE.md points at AGENTS.md, and following
+// it would report each finding twice under two names.
+const isSymlink = (rel: string): boolean => lstatSync(join(ROOT, rel)).isSymbolicLink();
 const markdownFiles = allFiles.filter((f) => f.endsWith(".md") && !isSymlink(f));
 
 const SCANNED_TEXT = /\.(md|ts|tsx|mjs|js|json|ya?ml)$/;
@@ -278,7 +290,7 @@ const LINK = /\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
  * Heading text with the inline markup GitHub strips before slugging: link and
  * image syntax collapse to their text, code spans and emphasis markers go.
  */
-function headingText(raw) {
+function headingText(raw: string): string {
   return raw
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/<[^>]+>/g, "")
@@ -290,7 +302,7 @@ function headingText(raw) {
  * GitHub's heading anchor: lowercase, punctuation dropped, whitespace to
  * hyphens. Letters, digits, `_` and `-` survive — everything else does not.
  */
-function slugify(text) {
+function slugify(text: string): string {
   return text
     .trim()
     .toLowerCase()
@@ -306,10 +318,10 @@ function slugify(text) {
  * Repeated headings get the `-1`, `-2`, … suffixes GitHub appends, with the
  * first occurrence keeping the bare slug.
  */
-function anchorsFromMarkdown(body) {
-  const anchors = new Set();
-  const seen = new Map();
-  let fence = null;
+function anchorsFromMarkdown(body: string): Set<string> {
+  const anchors = new Set<string>();
+  const seen = new Map<string, number>();
+  let fence: string | null = null;
 
   for (const line of body.split("\n")) {
     const marker = /^\s*(`{3,}|~{3,})/.exec(line);
@@ -335,10 +347,10 @@ function anchorsFromMarkdown(body) {
   return anchors;
 }
 
-const anchorCache = new Map();
+const anchorCache = new Map<string, Set<string>>();
 
 /** `anchorsFromMarkdown` for a repository-relative Markdown file, memoised. */
-function anchorsOf(rel) {
+function anchorsOf(rel: string): Set<string> {
   let anchors = anchorCache.get(rel);
   if (!anchors) {
     anchors = anchorsFromMarkdown(read(rel));
@@ -348,7 +360,7 @@ function anchorsOf(rel) {
 }
 
 /** The fragment as an anchor: percent-decoded when it decodes cleanly. */
-function decodeFragment(fragment) {
+function decodeFragment(fragment: string): string {
   try {
     return decodeURIComponent(fragment);
   } catch {
@@ -356,12 +368,26 @@ function decodeFragment(fragment) {
   }
 }
 
+interface LinkDeps {
+  fileExists: (rel: string) => boolean;
+  anchorsFor: (rel: string) => Set<string>;
+}
+
+interface LinkProblem {
+  message: string;
+  fix: string;
+}
+
 /**
  * The verdict on one link: `null` when it is fine, otherwise the failure to
  * report. Pure — the filesystem arrives through `fileExists`/`anchorsFor` — so
  * the self-tests below can exercise every branch without touching disk.
  */
-function linkProblem(doc, target, { fileExists, anchorsFor }) {
+function linkProblem(
+  doc: string,
+  target: string,
+  { fileExists, anchorsFor }: LinkDeps,
+): LinkProblem | null {
   if (/^(https?:|mailto:)/.test(target)) return null;
 
   const hash = target.indexOf("#");
@@ -415,7 +441,7 @@ const TOP_LEVEL_DIRS = new Set(["apps", "packages", "e2e", "docs", "scripts", ".
  * Glob segments are dropped down to the deepest directory that can be checked:
  * `src/paraglide/**` and `.auth/*.json` become `src/paraglide` and `.auth`.
  */
-function candidatePath(span) {
+function candidatePath(span: string): string | null {
   if (!PATH_SHAPE.test(span)) return null;
   const segments = span.replace(/\/$/, "").split("/");
   while (segments.length > 1 && segments[segments.length - 1].includes("*")) segments.pop();
@@ -448,16 +474,18 @@ for (const doc of markdownFiles) {
 // 4. Documented pnpm scripts exist in the manifests they belong to
 // --------------------------------------------------------------------------
 
-const manifestScripts = new Map();
+const manifestScripts = new Map<string, string[]>();
 for (const file of allFiles.filter((f) => f.endsWith("package.json"))) {
   try {
-    const manifest = JSON.parse(read(file));
+    const manifest = JSON.parse(read(file)) as { name?: string; scripts?: Record<string, string> };
     if (manifest.name) manifestScripts.set(manifest.name, Object.keys(manifest.scripts ?? {}));
   } catch {
     fail(file, "package.json is not valid JSON", "fix the manifest");
   }
 }
-const rootScripts = Object.keys(JSON.parse(read("package.json")).scripts ?? {});
+const rootScripts = Object.keys(
+  (JSON.parse(read("package.json")) as { scripts?: Record<string, string> }).scripts ?? {},
+);
 
 const FILTERED = /pnpm\s+--filter\s+(@?[\w/@.-]+)\s+([\w:]+)/g;
 const ROOT_SCRIPT = /pnpm\s+(?!--)([a-z][\w]*(?::[\w]+)*)/g;
@@ -467,8 +495,8 @@ const FENCE = /```[^\n]*\n([\s\S]*?)```/g;
  * Only the command text of a document: fenced blocks and inline code spans.
  * Prose says things like "pnpm 10 + Turborepo", which is not a script call.
  */
-function commandText(body) {
-  const parts = [];
+function commandText(body: string): string {
+  const parts: string[] = [];
   for (const match of body.matchAll(FENCE)) parts.push(match[1]);
   for (const match of body.replace(FENCE, "").matchAll(CODE_SPAN)) parts.push(match[1]);
   return parts.join("\n");
@@ -510,39 +538,37 @@ for (const doc of markdownFiles) {
 }
 
 // --------------------------------------------------------------------------
-// 5. CLAUDE.md is a pointer, never a second source of truth
+// 5. Root CLAUDE.md is a pointer, never a second source of truth
 // --------------------------------------------------------------------------
 
-const agentGuides = markdownFiles.filter((f) => f === "AGENTS.md" || f.endsWith("/AGENTS.md"));
-
-for (const guide of agentGuides) {
-  const dir = posix.dirname(guide) === "." ? "" : posix.dirname(guide);
-  const pointer = dir ? posix.join(dir, "CLAUDE.md") : "CLAUDE.md";
-  if (!exists(pointer)) {
-    fail(pointer, "AGENTS.md has no adjacent CLAUDE.md", `symlink it: ln -s AGENTS.md ${pointer}`);
-    continue;
-  }
-  const stats = lstatSync(join(ROOT, pointer));
+if (!exists("CLAUDE.md")) {
+  fail(
+    "CLAUDE.md",
+    "root AGENTS.md has no Claude pointer",
+    "symlink it: ln -s AGENTS.md CLAUDE.md",
+  );
+} else {
+  const stats = lstatSync(join(ROOT, "CLAUDE.md"));
   if (stats.isSymbolicLink()) {
-    const target = readlinkSync(join(ROOT, pointer));
+    const target = readlinkSync(join(ROOT, "CLAUDE.md"));
     if (target !== "AGENTS.md") {
       fail(
-        pointer,
-        `symlink points at "${target}" instead of the adjacent AGENTS.md`,
-        `re-link it: ln -sf AGENTS.md ${pointer}`,
+        "CLAUDE.md",
+        `symlink points at "${target}" instead of AGENTS.md`,
+        "re-link it: ln -sf AGENTS.md CLAUDE.md",
       );
     }
-    continue;
-  }
-  const body = read(pointer).trim();
-  if (body.length > 200) {
-    fail(
-      pointer,
-      "is a regular file with independent content",
-      "replace it with a symlink to the adjacent AGENTS.md, or a one-line pointer",
-    );
-  } else if (!body.includes("AGENTS.md")) {
-    fail(pointer, "does not point at AGENTS.md", "make it a symlink to the adjacent AGENTS.md");
+  } else {
+    const body = read("CLAUDE.md").trim();
+    if (body.length > 200) {
+      fail(
+        "CLAUDE.md",
+        "is a regular file with independent content",
+        "replace it with a symlink to AGENTS.md, or a one-line pointer",
+      );
+    } else if (!body.includes("AGENTS.md")) {
+      fail("CLAUDE.md", "does not point at AGENTS.md", "make it a symlink to AGENTS.md");
+    }
   }
 }
 
@@ -558,8 +584,8 @@ if (exists("AGENTS.md")) {
   if (rootAgentsBytes > ROOT_AGENTS_MAX_BYTES) {
     fail(
       "AGENTS.md",
-      `is ${String(rootAgentsBytes)} bytes, over the ${String(ROOT_AGENTS_MAX_BYTES)}-byte routing budget`,
-      "move implementation detail into a subtree AGENTS.md or docs/",
+      `is ${String(rootAgentsBytes)} bytes, over the ${String(ROOT_AGENTS_MAX_BYTES)}-byte instruction budget`,
+      "move repository knowledge into CONTEXT.md or docs/",
     );
   }
 }
@@ -575,7 +601,7 @@ for (const file of scannedTextFiles) {
       fail(
         file,
         `references the removed document ${removed}`,
-        "link to docs/product.md, docs/architecture.md or the owning AGENTS.md instead",
+        "link to docs/product.md, docs/architecture.md or the owning CONTEXT.md instead",
       );
     }
   }
@@ -586,14 +612,14 @@ for (const file of scannedTextFiles) {
 // --------------------------------------------------------------------------
 
 /** The bullet list following a `<!-- docs:check=<name> -->` marker, as backticked identifiers. */
-function markedList(doc, name) {
+function markedList(doc: string, name: string): string[] | null {
   if (!exists(doc)) return null;
   const body = read(doc);
   const marker = `<!-- docs:check=${name} -->`;
   const start = body.indexOf(marker);
   if (start === -1) return null;
   const rest = body.slice(start + marker.length);
-  const items = [];
+  const items: string[] = [];
   for (const line of rest.split("\n")) {
     const bullet = /^[-*]\s+`([^`]+)`/.exec(line.trim());
     if (bullet) {
@@ -694,10 +720,11 @@ for (const doc of markdownFiles) {
 // (they are pure and take microseconds), so a regression fails CI here rather
 // than by quietly accepting a dead link.
 
-function selfTestFailures() {
-  const problems = [];
-  const check = (name, actual, expected) => {
-    if (actual !== expected) problems.push(`${name}: expected ${expected}, got ${actual}`);
+function selfTestFailures(): string[] {
+  const problems: string[] = [];
+  const check = (name: string, actual: unknown, expected: unknown): void => {
+    if (actual !== expected)
+      problems.push(`${name}: expected ${String(expected)}, got ${String(actual)}`);
   };
 
   const SAME_FILE = [
@@ -734,12 +761,13 @@ function selfTestFailures() {
   check("duplicate: third is -2", anchors.has("notes-2"), true);
   check("duplicate: no -3", anchors.has("notes-3"), false);
 
-  const deps = {
-    fileExists: (rel) => rel === "docs/other.md" || rel === "docs/diagram.svg",
-    anchorsFor: (rel) =>
+  const deps: LinkDeps = {
+    fileExists: (rel: string): boolean => rel === "docs/other.md" || rel === "docs/diagram.svg",
+    anchorsFor: (rel: string): Set<string> =>
       rel === "docs/other.md" ? anchorsFromMarkdown(OTHER_FILE) : anchorsFromMarkdown(SAME_FILE),
   };
-  const problemFor = (target) => linkProblem("docs/self.md", target, deps);
+  const problemFor = (target: string): LinkProblem | null =>
+    linkProblem("docs/self.md", target, deps);
 
   // Same-file anchors.
   check("same-file valid", problemFor("#generated-files"), null);

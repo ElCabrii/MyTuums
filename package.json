@@ -1,6 +1,7 @@
 {
   "name": "my-tuums",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@10.12.1",
   "engines": {
     "node": ">=22"
@@ -8,9 +9,9 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
-    "docs:check": "node scripts/check-docs.mjs",
+    "lint": "eslint eslint.config.ts scripts && turbo run lint",
+    "typecheck": "tsc --noEmit -p tsconfig.json && turbo run typecheck",
+    "docs:check": "tsx scripts/check-docs.ts",
     "test": "turbo run test",
     "test:unit": "turbo run test:unit",
     "test:integration": "pnpm --filter @my-tuums/api test:integration",
@@ -34,7 +35,9 @@
     "lighthouse": "^13.4.1",
     "prettier": "^3.9.6",
     "prettier-plugin-tailwindcss": "^0.8.1",
+    "tsx": "^4.19.0",
     "turbo": "^2.10.7",
+    "typescript": "catalog:",
     "typescript-eslint": "^8.65.0"
   }
 }

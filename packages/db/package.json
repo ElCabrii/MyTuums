@@ -24,12 +24,12 @@
   "scripts": {
     "db:generate": "dotenv -e ../../.env -- drizzle-kit generate",
     "db:check": "dotenv -e ../../.env -- drizzle-kit check",
-    "db:generate:auth": "dotenv -e ../../.env -- npx @better-auth/cli generate --config ../auth/src/index.ts --output ./src/schema/auth.ts -y && node ./scripts/patch-auth-schema.mjs",
+    "db:generate:auth": "dotenv -e ../../.env -- npx @better-auth/cli generate --config ../auth/src/index.ts --output ./src/schema/auth.ts -y && tsx ./scripts/patch-auth-schema.ts",
     "db:migrate": "dotenv -e ../../.env -- drizzle-kit migrate",
     "db:push": "dotenv -e ../../.env -- drizzle-kit push",
     "db:studio": "dotenv -e ../../.env -- drizzle-kit studio",
-    "db:test:setup": "dotenv -e ../../.env -- tsx scripts/setup-test-db.mjs",
-    "db:promote": "dotenv -e ../../.env -- tsx scripts/promote-user.mjs",
+    "db:test:setup": "dotenv -e ../../.env -- tsx scripts/setup-test-db.ts",
+    "db:promote": "dotenv -e ../../.env -- tsx scripts/promote-user.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

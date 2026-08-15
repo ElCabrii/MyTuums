@@ -48,7 +48,8 @@ unset; the traps worth knowing are collected in
 
 | Command                                                         | What it does                                        |
 | --------------------------------------------------------------- | --------------------------------------------------- |
-| `pnpm build` · `pnpm lint` · `pnpm typecheck`                   | turbo, across the workspace                         |
+| `pnpm build`                                                    | production builds across the workspace              |
+| `pnpm lint` · `pnpm typecheck`                                  | root tooling and all workspace packages             |
 | `pnpm test:unit`                                                | vitest unit suites — pure logic, no database needed |
 | `pnpm db:test:setup` then `pnpm test:integration`               | API integration suites against real Postgres        |
 | `pnpm test:e2e`                                                 | Playwright; slow, own ports (`:3101` / `:5273`)     |
@@ -72,10 +73,10 @@ The rest of the Drizzle toolbox is package-level:
 | `packages/db`   | Drizzle schema, committed migrations, test-database guards                           |
 | `e2e`           | the Playwright suite                                                                 |
 | `docs`          | architecture, product, operations, security                                          |
-| `scripts`       | repository tooling (`check-docs.mjs`)                                                |
+| `scripts`       | repository tooling (`check-docs.ts`)                                                 |
 
-Each of those directories carries its own `AGENTS.md` — the authoritative
-guide for changing code inside it.
+Each of those directories carries its own `CONTEXT.md` — the authoritative
+map, boundaries, invariants, and verification guidance for that area.
 
 ## Conventions
 
@@ -87,13 +88,15 @@ code rather than the config:
 - **Shared client state is Jotai atoms**, not `useState`/`useEffect`.
 - **The strict TypeScript and ESLint configs are deliberate.**
 
-The full set, with the failure each one prevents, is in [AGENTS.md](AGENTS.md).
+The repository guardrails are in [AGENTS.md](AGENTS.md); their architectural
+reasons and owning source files are in [CONTEXT.md](CONTEXT.md).
 
 ## Documentation
 
 | Document                                     | Answers                                            |
 | -------------------------------------------- | -------------------------------------------------- |
-| [AGENTS.md](AGENTS.md)                       | where does this change go?                         |
+| [AGENTS.md](AGENTS.md)                       | how should an agent work in this repository?       |
+| [CONTEXT.md](CONTEXT.md)                     | where does this change go?                         |
 | [docs/architecture.md](docs/architecture.md) | how do the pieces fit and what happens at runtime? |
 | [docs/product.md](docs/product.md)           | what does the app do, and what do we call it?      |
 | [docs/operations.md](docs/operations.md)     | how do I run, deploy and maintain it?              |

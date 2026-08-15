@@ -2,7 +2,7 @@
  * The reconcile-media core: list the media bucket, read the `user` rows,
  * delete the objects no row references.
  *
- * Lives in `src/` rather than inside `scripts/reconcile-media.mjs` so the
+ * Lives in `src/` rather than inside `scripts/reconcile-media.ts` so the
  * ordering below is unit-tested (`src/reconcile-media.test.ts`) — the script
  * is the thin guarded wrapper that arms this against the bucket named on the
  * command line.

@@ -1,4 +1,4 @@
-# packages/auth — agent guide
+# packages/auth context
 
 ## Responsibility
 
