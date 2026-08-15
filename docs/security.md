@@ -63,6 +63,15 @@ procedure. It is not unguarded — it is **capability-gated**:
   comparison performed before any database work, and only a holder of a valid
   link can get past it to consume budget.
 
+The procedure itself only validates the input shape. Everything the paragraph
+above describes is enforced in `packages/api/src/appeal-intake.ts`, which owns
+intake as one module: the two capability sources (the email link, and a
+signed-in author's own removed post — never a session on the token path, and
+never the post path for an anonymous caller), the budget each spends, the
+appealable/current/latest gates, the replay policy and the insert whose unique
+constraints settle a race the pre-read cannot. That ordering — verify, then
+charge, then read — is the module's invariant, not the procedure's.
+
 Anything else building on `baseProcedure` is a bug.
 
 ## Authentication and sessions
