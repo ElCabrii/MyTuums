@@ -7,6 +7,8 @@ import {
   isAllowedUsernameCharset,
   isAtLeastYearsOld,
   isBioWithinLimit,
+  isLocalePreference,
+  isThemePreference,
   LOCALE_PREFERENCE_INVALID_MESSAGE,
   LOCALE_PREFERENCES,
   MINIMUM_AGE_YEARS,
@@ -186,12 +188,10 @@ describe("stored preferences", () => {
 
   it("excludes anything else — the list is the whole rule", () => {
     const unknown = ["", "  ", "sepia", "System", "en-GB", "de"];
-    expect(
-      unknown.filter((value) => (THEME_PREFERENCES as readonly string[]).includes(value)),
-    ).toEqual([]);
-    expect(
-      unknown.filter((value) => (LOCALE_PREFERENCES as readonly string[]).includes(value)),
-    ).toEqual([]);
+    expect(THEME_PREFERENCES.every(isThemePreference)).toBe(true);
+    expect(LOCALE_PREFERENCES.every(isLocalePreference)).toBe(true);
+    expect(unknown.filter(isThemePreference)).toEqual([]);
+    expect(unknown.filter(isLocalePreference)).toEqual([]);
   });
 });
 

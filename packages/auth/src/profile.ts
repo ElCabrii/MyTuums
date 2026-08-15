@@ -21,10 +21,10 @@ import { APIError } from "better-auth/api";
 import {
   BIO_TOO_LONG_MESSAGE,
   isBioWithinLimit,
+  isLocalePreference,
+  isThemePreference,
   LOCALE_PREFERENCE_INVALID_MESSAGE,
-  LOCALE_PREFERENCES,
   THEME_PREFERENCE_INVALID_MESSAGE,
-  THEME_PREFERENCES,
 } from "./rules.js";
 
 /** Message for any attempt to set an image field by hand — uploads are the only legitimate writer. */
@@ -69,9 +69,13 @@ function assertProviderImage(value: unknown): void {
   }
 }
 
-function assertOneOf(value: unknown, allowed: readonly string[], message: string): void {
+function assertPreference(
+  value: unknown,
+  isAllowed: (candidate: unknown) => boolean,
+  message: string,
+): void {
   if (isBlank(value)) return;
-  if (typeof value !== "string" || !allowed.includes(value)) {
+  if (!isAllowed(value)) {
     throw new APIError("BAD_REQUEST", { message });
   }
 }
@@ -132,8 +136,8 @@ export function validateProfileFieldsHook(
   assertNoClientOriginalImageWrite(user.imageOriginal);
   assertNoClientOriginalImageWrite(user.bannerImageOriginal);
 
-  assertOneOf(user.themePreference, THEME_PREFERENCES, THEME_PREFERENCE_INVALID_MESSAGE);
-  assertOneOf(user.localePreference, LOCALE_PREFERENCES, LOCALE_PREFERENCE_INVALID_MESSAGE);
+  assertPreference(user.themePreference, isThemePreference, THEME_PREFERENCE_INVALID_MESSAGE);
+  assertPreference(user.localePreference, isLocalePreference, LOCALE_PREFERENCE_INVALID_MESSAGE);
 
   return Promise.resolve();
 }

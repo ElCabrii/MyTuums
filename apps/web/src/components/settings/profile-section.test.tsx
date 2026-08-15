@@ -67,23 +67,19 @@ describe("ProfileSection", () => {
   // apiece, which lands just over vitest's 5s default on a loaded machine. The
   // budget is raised rather than the input shortened, because a shorter one
   // would stop crossing the limit and stop testing the thing.
-  it(
-    "shows the live counter and rejects an over-limit bio before transport",
-    async () => {
-      const store = createStore();
-      await renderWithProviders(<ProfileSection />, { store, signedInAs: true });
-      const user = userEvent.setup();
-      const overLimit = "x".repeat(BIO_MAX_LENGTH + 1);
-      const bio = screen.getByLabelText(m.auth_field_bio());
-      await user.type(bio, overLimit);
+  it("shows the live counter and rejects an over-limit bio before transport", async () => {
+    const store = createStore();
+    await renderWithProviders(<ProfileSection />, { store, signedInAs: true });
+    const user = userEvent.setup();
+    const overLimit = "x".repeat(BIO_MAX_LENGTH + 1);
+    const bio = screen.getByLabelText(m.auth_field_bio());
+    await user.type(bio, overLimit);
 
-      expect(screen.getByText("-1")).toHaveClass("text-destructive");
-      await user.click(screen.getByRole("button", { name: m.common_save() }));
-      expect(authClient.updateUser).not.toHaveBeenCalled();
-      expect(store.get(authErrorAtom)).toMatch(/bio/i);
-    },
-    20_000,
-  );
+    expect(screen.getByText("-1")).toHaveClass("text-destructive");
+    await user.click(screen.getByRole("button", { name: m.common_save() }));
+    expect(authClient.updateUser).not.toHaveBeenCalled();
+    expect(store.get(authErrorAtom)).toMatch(/bio/i);
+  }, 20_000);
 
   it("uploads and removes both avatar and banner through the transport boundary", async () => {
     const display = new File(["display"], "display.webp", { type: "image/webp" });

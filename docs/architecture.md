@@ -41,7 +41,7 @@ only file in that package with **no imports at all**. Reaching it does not
 construct the better-auth instance, read any env, or touch `@my-tuums/db`; the
 production bundle contains exactly those three workspace modules and nothing
 else from the packages. It lives in `packages/auth` because that is where the
-rules are *enforced* (the database hooks are the only place a user-field rule
+rules are _enforced_ (the database hooks are the only place a user-field rule
 actually holds) and because `packages/api` already depends on `packages/auth` —
 putting the shared statement in `packages/api` instead would force
 `packages/auth` to import it, closing a cycle.

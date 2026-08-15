@@ -15,6 +15,7 @@ import {
   type EmailLocale,
   type OutgoingEmail,
 } from "@my-tuums/auth";
+import { isLocalePreference } from "@my-tuums/auth/rules";
 import type { Database } from "@my-tuums/db";
 import { moderationAction, post, report, session, user } from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
@@ -256,10 +257,9 @@ export async function emailUser(
   // FKs cascade); there is nothing to say to it, and the action stands.
   if (!target?.email) return;
 
-  const locale: EmailLocale =
-    target.localePreference === "en" || target.localePreference === "fr"
-      ? target.localePreference
-      : localeFromRequest(headers);
+  const locale: EmailLocale = isLocalePreference(target.localePreference)
+    ? target.localePreference
+    : localeFromRequest(headers);
 
   try {
     await sendEmail({ to: target.email, ...build(locale) });

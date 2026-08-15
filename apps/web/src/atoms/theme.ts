@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import { atomEffect } from "jotai-effect";
-import { THEME_PREFERENCES, type ThemePreference } from "@my-tuums/auth/rules";
+import { isThemePreference, type ThemePreference } from "@my-tuums/auth/rules";
 import { viewerAtom } from "@/atoms/session";
 
 /** The theme choices the app offers: an explicit pair, or "system" to follow the OS. */
@@ -9,9 +9,6 @@ export type Theme = ThemePreference;
 
 const STORAGE_KEY = "mytuums-ui-theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
-
-const isTheme = (value: unknown): value is Theme =>
-  typeof value === "string" && (THEME_PREFERENCES as readonly string[]).includes(value);
 
 /**
  * `matchMedia` doesn't exist outside a browser, and importing this module —
@@ -72,10 +69,10 @@ const storedThemeAtom = atomWithStorage<unknown>(STORAGE_KEY, null, undefined, {
 export const themeAtom = atom(
   (get): Theme => {
     const stored = get(storedThemeAtom);
-    if (isTheme(stored)) return stored;
+    if (isThemePreference(stored)) return stored;
 
     const preferred = get(viewerAtom)?.themePreference;
-    if (isTheme(preferred)) return preferred;
+    if (isThemePreference(preferred)) return preferred;
 
     return "system";
   },

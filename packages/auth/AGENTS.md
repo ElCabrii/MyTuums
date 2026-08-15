@@ -19,16 +19,16 @@ nothing else — no routes, no UI, no queries beyond the adapter.
 
 ## Change map
 
-| Intent                          | Primary                        | Also touch                                                                                                       |
-| ------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| Add or change an OAuth provider | `src/social.ts`                | `../../apps/server/src/env.ts`, `../../.env.example`, `VITE_SOCIAL_PROVIDERS`, `apps/web/src/lib/auth-client.ts` |
-| Change an auth email            | `src/email.ts`                 | both locales in the same file                                                                                    |
-| Translate an auth error         | `src/i18n.ts`                  | `apps/web/src/lib/auth-error-message.ts`                                                                         |
-| Change a user-field rule        | `src/rules.ts`                 | nothing — the hooks, both handle forms and `packages/api` all read it. Keep the file import-free                 |
-| Change how a violation is refused | `src/dob.ts`, `src/profile.ts` | the `APIError` translation only; the rule itself belongs in `src/rules.ts`                                     |
-| Change session or plugin config | `src/index.ts`                 | read the inline comment first; several settings are pinned                                                       |
-| Change an auth rate limit       | `src/index.ts` (`customRules`) | these are security controls, not tuning                                                                          |
-| Add a test-only helper          | `src/testing.ts`               | never import it from application code                                                                            |
+| Intent                            | Primary                        | Also touch                                                                                                       |
+| --------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Add or change an OAuth provider   | `src/social.ts`                | `../../apps/server/src/env.ts`, `../../.env.example`, `VITE_SOCIAL_PROVIDERS`, `apps/web/src/lib/auth-client.ts` |
+| Change an auth email              | `src/email.ts`                 | both locales in the same file                                                                                    |
+| Translate an auth error           | `src/i18n.ts`                  | `apps/web/src/lib/auth-error-message.ts`                                                                         |
+| Change a user-field rule          | `src/rules.ts`                 | nothing — the hooks, both handle forms and `packages/api` all read it. Keep the file import-free                 |
+| Change how a violation is refused | `src/dob.ts`, `src/profile.ts` | the `APIError` translation only; the rule itself belongs in `src/rules.ts`                                       |
+| Change session or plugin config   | `src/index.ts`                 | read the inline comment first; several settings are pinned                                                       |
+| Change an auth rate limit         | `src/index.ts` (`customRules`) | these are security controls, not tuning                                                                          |
+| Add a test-only helper            | `src/testing.ts`               | never import it from application code                                                                            |
 
 ## Invariants
 
@@ -112,10 +112,10 @@ migration.
 
 ## Verification
 
-| Command                                           | Covers                              |
-| ------------------------------------------------- | ----------------------------------- |
-| `pnpm --filter @my-tuums/auth lint` / `typecheck` | this package alone                  |
-| `pnpm test:integration`                           | the real behaviour of this instance |
+| Command                                           | Covers                                |
+| ------------------------------------------------- | ------------------------------------- |
+| `pnpm --filter @my-tuums/auth lint` / `typecheck` | this package alone                    |
+| `pnpm test:integration`                           | the real behaviour of this instance   |
 | `pnpm --filter @my-tuums/api test:unit`           | `src/rules.ts`, through its interface |
 
 There is no test script here on purpose. The instance's behaviour is covered by

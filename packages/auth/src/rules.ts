@@ -241,6 +241,16 @@ export type ThemePreference = (typeof THEME_PREFERENCES)[number];
 /** A valid `localePreference` value. */
 export type LocalePreference = (typeof LOCALE_PREFERENCES)[number];
 
+/** Whether an untrusted value is one of the stored theme preferences. */
+export function isThemePreference(value: unknown): value is ThemePreference {
+  return typeof value === "string" && (THEME_PREFERENCES as readonly string[]).includes(value);
+}
+
+/** Whether an untrusted value is one of the stored locale preferences. */
+export function isLocalePreference(value: unknown): value is LocalePreference {
+  return typeof value === "string" && (LOCALE_PREFERENCES as readonly string[]).includes(value);
+}
+
 /** Rejection for a theme outside {@link THEME_PREFERENCES}. */
 export const THEME_PREFERENCE_INVALID_MESSAGE = "Please choose a valid theme.";
 /** Rejection for a locale outside {@link LOCALE_PREFERENCES}. */

@@ -72,7 +72,7 @@ the subtree guide.
   `@my-tuums/api/constants`, `@my-tuums/api/dimensions` and
   `@my-tuums/auth/rules` must never import `@my-tuums/db`; the web app imports
   them, and a database import throws at module load in a browser. Those three
-  are the *only* workspace modules in the SPA bundle, and they are the only
+  are the _only_ workspace modules in the SPA bundle, and they are the only
   ones `apps/web` may import from either package.
 - **Auth-owned user fields are written through the auth client only.**
   `packages/auth`'s database hooks are the single enforcement point for

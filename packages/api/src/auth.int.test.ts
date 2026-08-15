@@ -406,10 +406,14 @@ describe("profile field rules", () => {
     const { headers } = await signUp();
 
     for (const themePreference of THEME_PREFERENCES) {
-      await expect(auth.api.updateUser({ body: { themePreference }, headers })).resolves.toBeDefined();
+      await expect(
+        auth.api.updateUser({ body: { themePreference }, headers }),
+      ).resolves.toBeDefined();
     }
     for (const localePreference of LOCALE_PREFERENCES) {
-      await expect(auth.api.updateUser({ body: { localePreference }, headers })).resolves.toBeDefined();
+      await expect(
+        auth.api.updateUser({ body: { localePreference }, headers }),
+      ).resolves.toBeDefined();
     }
   });
 
@@ -419,7 +423,9 @@ describe("profile field rules", () => {
     // violation would reject every unrelated write.
     const { headers } = await signUp();
 
-    await expect(auth.api.updateUser({ body: { name: "Renamed" }, headers })).resolves.toBeDefined();
+    await expect(
+      auth.api.updateUser({ body: { name: "Renamed" }, headers }),
+    ).resolves.toBeDefined();
 
     const session = await auth.api.getSession({ headers });
     expect(session?.user.name).toBe("Renamed");
