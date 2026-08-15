@@ -244,7 +244,8 @@ sides by CI. See [operations.md](operations.md).
 ## Moderation — report, action, audit, appeal
 
 **Source of truth:** `packages/api/src/moderation.ts`,
-`packages/api/src/moderation-queue.ts`, `packages/api/src/moderation-appeals.ts`,
+`packages/api/src/moderation-queue.ts`, `packages/api/src/appeal-intake.ts`,
+`packages/api/src/moderation-appeals.ts`,
 `packages/api/src/moderation-actions.ts`, `packages/db/src/schema/app.ts`
 
 1. **Report.** `moderation.report` writes a row keyed
@@ -271,10 +272,20 @@ sides by CI. See [operations.md](operations.md).
    by an appeal that already passed its currency check. A rollback produces no
    audit row, no partial state change and no email: the notices are returned,
    never sent from inside the transaction.
-5. **Appeal.** `moderation.appealOpen` takes either an HMAC-signed token from
-   the notification email (works signed out — a banned user cannot sign in) or
-   a `postId` from a signed-in author's removed-post stub. `appealReview`
-   excludes the moderator who took the original action.
+5. **Appeal intake.** `moderation.appealOpen` is a thin procedure over
+   `packages/api/src/appeal-intake.ts`, which owns the whole intake lifecycle.
+   The email link (an HMAC-signed token, works signed out — a banned user
+   cannot sign in) and the signed-in author's removed-post stub are two source
+   adapters: each authenticates its own claim and spends its own
+   capability-keyed budget, and both normalise to one internal target — the
+   contested action, its appellant, and the nonce that makes the attempt
+   replayable exactly once. Everything after that is source-blind: appealable,
+   still current, still latest, not already appealed, then an insert whose
+   unique constraints settle the races the pre-read cannot. Intake sends no
+   email and changes no moderation state.
+6. **Appeal review.** `moderation.appealReview` upholds or overturns, in one
+   transaction with the inverse effect and the `appeal_resolved` audit row,
+   and excludes the moderator who took the original action.
 
 ## Schemas and migrations
 

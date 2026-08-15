@@ -12,32 +12,34 @@ over HTTP and imports only its browser-safe subpaths.
 
 ## Start here
 
-| File                        | Why                                                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------- |
-| `src/router.ts`             | The five groups and what owns each.                                                   |
-| `src/procedures.ts`         | The four gates, the two rate-limit mechanisms, the one exception.                     |
-| `src/context.ts`            | What every handler is handed, and why nothing is a module global.                     |
-| `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                               |
-| `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                    |
-| `src/moderation-actions.ts` | The forward and inverse moderation effects: transaction, guards, audit, owed notices. |
-| `src/profile-media.ts`      | The avatar/banner lifecycle: replace/remove, the locked swap, best-effort cleanup.    |
+| File                        | Why                                                                                      |
+| --------------------------- | ---------------------------------------------------------------------------------------- |
+| `src/router.ts`             | The five groups and what owns each.                                                      |
+| `src/procedures.ts`         | The four gates, the two rate-limit mechanisms, the one exception.                        |
+| `src/context.ts`            | What every handler is handed, and why nothing is a module global.                        |
+| `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                                  |
+| `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                       |
+| `src/moderation-actions.ts` | The forward and inverse moderation effects: transaction, guards, audit, owed notices.    |
+| `src/appeal-intake.ts`      | The appeal intake lifecycle: the two sources, the budgets, the gates, the replay policy. |
+| `src/profile-media.ts`      | The avatar/banner lifecycle: replace/remove, the locked swap, best-effort cleanup.       |
 
 ## Change map
 
-| Intent                                | Primary                                                                                  | Also touch                                                                          |
-| ------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`) | `src/router.ts` if it is a new group; an `.int.test.ts`                             |
-| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                      | a matching index in `packages/db/src/schema/app.ts`                                 |
-| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                      | `src/rate-limit.test.ts`                                                            |
-| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                     | `src/users.int.test.ts` pins it — read the invariant first                          |
-| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)         | `src/constants.ts` (action code), `docs/product.md` glossary                        |
-| Change the queue or a case view       | `src/moderation-queue.ts`                                                                | `src/moderation-inputs.ts` if the input shape moves                                 |
-| Change the appeal flow                | `src/moderation-appeals.ts`, `src/appeal-token.ts`                                       | `docs/security.md` — this is the one anonymous surface                              |
-| Change upload rules                   | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                           |
-| Change the upload/remove lifecycle    | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes |
-| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                |
-| Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                    |
-| Change an account rule                | `../auth/src/rules.ts`                                                                   | not `src/constants.ts` — see the invariant below                                    |
+| Intent                                | Primary                                                                                  | Also touch                                                                              |
+| ------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`) | `src/router.ts` if it is a new group; an `.int.test.ts`                                 |
+| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                      | a matching index in `packages/db/src/schema/app.ts`                                     |
+| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                      | `src/rate-limit.test.ts`                                                                |
+| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                     | `src/users.int.test.ts` pins it — read the invariant first                              |
+| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)         | `src/constants.ts` (action code), `docs/product.md` glossary                            |
+| Change the queue or a case view       | `src/moderation-queue.ts`                                                                | `src/moderation-inputs.ts` if the input shape moves                                     |
+| Change how an appeal is opened        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                             | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface |
+| Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                             | `src/moderation-actions.ts` if the inverse effect changes                               |
+| Change upload rules                   | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                               |
+| Change the upload/remove lifecycle    | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes     |
+| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                    |
+| Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                        |
+| Change an account rule                | `../auth/src/rules.ts`                                                                   | not `src/constants.ts` — see the invariant below                                        |
 
 ## Invariants
 
@@ -52,6 +54,26 @@ over HTTP and imports only its browser-safe subpaths.
 - **`baseProcedure` has exactly one consumer.** `moderation.appealOpen` is the
   app's one anonymous surface, and it is HMAC-capability-gated because a
   banned user cannot sign in to appeal. Anything else built on it is a bug.
+- **Appeal intake lives in `src/appeal-intake.ts`, and only there.**
+  `moderation.appealOpen` validates its input shape and calls `openAppeal`;
+  it owns nothing else. The module treats the email link and the removed-post
+  stub as two source adapters — each authenticates its own claim and spends
+  its own capability budget (`appeal:<nonce>`, `appeal:<actionId>`) — and
+  normalises both to one target, after which the appealable/current/latest
+  gates, the replay policy and the insert are source-blind. The ordering is
+  load-bearing: the HMAC comparison happens before any database work, and each
+  budget is consumed at the exact point its key comes into existence, so
+  everything after it is paid for. Intake never sends a notice and never
+  reverses an action — that is `appealReview`'s half, in
+  `src/moderation-appeals.ts`.
+- **A unique-constraint race must read back as a caller-facing refusal.**
+  `appeal` has a unique `token_nonce` and a partial unique open-per-action
+  index, and they — not intake's pre-read — are what make an appeal
+  exactly-once. Drizzle wraps driver failures in a `DrizzleQueryError` whose
+  `cause` carries postgres' SQLSTATE, so `isUniqueViolation` walks the cause
+  chain; matching only the top level let a real race escape as a 500.
+  `src/appeal-intake.int.test.ts` races real concurrent opens against real
+  Postgres to pin it.
 - **`publicUserColumns` is a privacy boundary.** Never add `email`,
   `twoFactorEnabled`, `lastLoginMethod`, `role` or a preference column; sign-in
   method is reconnaissance, not profile data. `src/users.int.test.ts` pins the

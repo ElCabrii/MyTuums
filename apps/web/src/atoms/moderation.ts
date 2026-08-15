@@ -345,9 +345,9 @@ export const appealReviewAtom = atomWithMutation((get) => {
 });
 
 /**
- * Removes every entry the moderation families have created — the sign-out
- * sweep (see `atoms/sign-out-sweep.ts`), run while nothing is mounted against
- * them.
+ * Removes every entry the moderation families have created — part of the
+ * sign-out sweep (see `atoms/session-teardown.ts`), run while nothing is
+ * mounted against them.
  */
 export function clearModerationFamilies(): void {
   for (const key of [...queueFamily.getParams()]) queueFamily.remove(key);

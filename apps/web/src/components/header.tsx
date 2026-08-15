@@ -63,9 +63,9 @@ export function Header() {
 
   const handleSignOut = async () => {
     try {
-      // Same path as the profile page's sign-out button: signOutAtom
-      // (atoms/auth.ts) owns the call, the QueryClient.clear(), and the
-      // family sweep; only the final navigate lives here.
+      // Same path as the profile page's sign-out button: signOutAtom owns the
+      // sequence and delegates cache/family cleanup to clearViewerState; only
+      // the final navigate lives here.
       await signOut();
       void navigate({ to: "/login" });
     } catch (err) {

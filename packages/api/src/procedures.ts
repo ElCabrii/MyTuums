@@ -86,8 +86,16 @@ export function rateLimit(policy: RateLimitPolicy) {
  * Same consume-and-throw shape as `rateLimit` (same message, same
  * `retryAfterSeconds` data), so a caller cannot tell which variant refused
  * them.
+ *
+ * The parameter is the limiter slice of `Context`, not the whole thing: the
+ * caller is `./appeal-intake.ts`, which deliberately declares a narrower
+ * context than a procedure gets, and this function has never needed more.
  */
-export function rateLimitCapability(context: Context, policy: RateLimitPolicy, key: string): void {
+export function rateLimitCapability(
+  context: Pick<Context, "rateLimiter">,
+  policy: RateLimitPolicy,
+  key: string,
+): void {
   const result = context.rateLimiter.consume(`${policy.name}:${key}`, policy);
 
   if (!result.allowed) {

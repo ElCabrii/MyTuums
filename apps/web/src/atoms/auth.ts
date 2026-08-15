@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
+import { clearViewerState } from "@/atoms/session-teardown";
 import { authClient, type SocialProviderId } from "@/lib/auth-client";
 import { waitForSignedOut } from "@/lib/session-sync";
 import { dateOfBirthToIso } from "@/lib/auth-validation";
@@ -299,30 +300,16 @@ export const signUpAtom = atom(null, async (_get, set, fields: SignUpArgs): Prom
   }
 });
 
-/** Sweeps every family's `remove()` across all params it has ever created. */
-function clearFamily<Param>(family: {
-  getParams(): Iterable<Param>;
-  remove(p: Param): void;
-}): void {
-  for (const param of [...family.getParams()]) family.remove(param);
-}
-
 /**
- * Signs the viewer out and sweeps every viewer-dependent cache.
+ * Signs the viewer out and discards everything on this browser that was
+ * theirs.
  *
  * Replaces the inline `authClient.signOut()` + `queryClient.clear()` that
- * used to live in `profile-layout.tsx`. Cached profiles and feeds carry
- * viewer-dependent fields (`viewerIsFollowing`, `viewerHasLiked`) behind
- * query keys that carry no viewer identity, so without clearing them here,
- * the next visitor on this browser would keep seeing the previous session's
- * follow/like state until each query happened to refetch on its own.
- *
- * Sign-out is also the one moment nothing in the app is mounted against
- * `profileAtomFamily`/`postFeedFamily`/`userListFamily`, which is why it's
- * safe to sweep every entry directly here instead of the lazy
- * `setShouldRemove` predicate those families explicitly avoid elsewhere —
- * there's nothing currently reading them that a mid-sweep removal could
- * split.
+ * used to live in `profile-layout.tsx`. *What* has to be discarded — the
+ * query cache and every viewer-keyed atom family — is the inventory owned by
+ * `atoms/session-teardown.ts`, not by this atom: this is the one place in the
+ * app that can say "the session is over", and it should not also have to know
+ * which families exist.
  */
 export const signOutAtom = atom(null, async (get, set): Promise<void> => {
   set(authPendingAtom, true);
@@ -332,48 +319,11 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
     // it the caller navigates while the session store still reports the old
     // user, and `useRedirectWhenSignedIn` bounces them back.
     await waitForSignedOut();
-    get(queryClientAtom).clear();
-    // Dynamic import on purpose, not a static one at the top of this file:
-    // these helpers live in the same modules as the feed/query machinery they
-    // sweep (postFeedAtom, the like/follow intent atoms, the thread family),
-    // and a static import dragged ~60 KB of that machinery into the login
-    // page's chunks for the sake of an action only a signed-in user can
-    // trigger. Sign-out is also the one moment nothing is mounted against
-    // those families, which is what makes sweeping them safe — see
-    // `atoms/sign-out-sweep.ts`.
-    const {
-      profileAtomFamily,
-      clearPostFeedFamily,
-      clearUserListFamily,
-      clearThreadFamily,
-      clearReplyFamilies,
-      clearLikeFamilies,
-      clearFollowFamilies,
-      clearSearchFamilies,
-      clearModerationFamilies,
-    } = await import("@/atoms/sign-out-sweep");
-    clearFamily(profileAtomFamily);
-    clearPostFeedFamily();
-    clearUserListFamily();
-    clearThreadFamily();
-    // Reply drafts are per-post and in-memory; they belong to the person who
-    // typed them, not to the browser.
-    clearReplyFamilies();
-    // The like/follow families hold per-entity intent as well as mutation
-    // atoms, and intent is viewer-relative — a stale `true` would make the
-    // next viewer's first response look superseded and be dropped.
-    clearLikeFamilies();
-    clearFollowFamilies();
-    // Moderation families hold per-case query atoms and the dialogs' form
-    // atoms; the data was already wiped by `queryClient.clear()` above, but
-    // the family Maps would keep stale atom instances (and stale mutation
-    // results) per case ref for the next session.
-    clearModerationFamilies();
-    // Search families are swept like every other family — results keyed on
-    // the previous session's queries shouldn't outlive it. (The debounced
-    // query and popover state die with the SearchBox at unmount, which the
-    // session gate triggers right after this runs.)
-    clearSearchFamilies();
+    // Clears the QueryClient synchronously, then schedules independent
+    // best-effort sweeps of the heavier family modules. No lazy chunk can
+    // block sign-out completion, while the signed-out UI never sees the old
+    // cache.
+    clearViewerState(get(queryClientAtom));
     // Sign-in state that belongs to the session that just ended: a pending
     // challenge's methods would otherwise still be on screen for whoever signs
     // in next on this browser.

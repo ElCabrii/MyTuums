@@ -102,9 +102,10 @@ export const searchPostsAtom = (q: string) => searchPostsFamily(q.trim());
  * Removes every entry both search families have ever created. Same reasoning
  * as `clearPostFeedFamily`: the families stay behind this narrow, all-or-
  * nothing entry point so no caller can `.remove()` a single key by hand and
- * split an in-progress "Load more". `signOutAtom` (`atoms/auth.ts`) is the
- * only caller, and sign-out is the one moment nothing here is mounted, so a
- * full sweep is safe. Cached search data carries viewer-relative fields
+ * split an in-progress "Load more". `clearViewerState`
+ * (`atoms/session-teardown.ts`) is the only caller, and sign-out is the one
+ * moment nothing here is mounted, so a full sweep is safe. Cached search data
+ * carries viewer-relative fields
  * (`viewerIsFollowing`, `viewerHasLiked`) under viewer-less query keys, so it
  * must not survive into the next session on this browser.
  */
