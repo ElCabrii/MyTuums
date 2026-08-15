@@ -137,9 +137,9 @@ export const needsHandleAtom = atom((get) => get(isSignedInAtom) && !get(viewerH
  * A signed-in account that has never declared a date of birth — a social
  * sign-up that skipped it, or an account that predates the 15+ rule.
  *
- * The rule itself lives in `packages/auth/src/dob.ts` (server) and
- * `lib/auth-validation.ts` (client); this atom exists because the *absence*
- * of a declaration is a completeness state, exactly like a missing handle:
+ * The rule itself lives in `@my-tuums/auth/rules`; the server hook and client
+ * form adapt it. This atom exists because the *absence* of a declaration is a
+ * completeness state, exactly like a missing handle:
  * the app holds such sessions at `/welcome` until they declare one. Sharing
  * the definition through one derived atom is what keeps the gate, the header
  * and the redirect from disagreeing about what "complete" means.

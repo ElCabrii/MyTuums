@@ -47,7 +47,14 @@ describe("date-of-birth parsing", () => {
   it("accepts the strict YYYY-MM-DD form and nothing looser", () => {
     expect(parseDateOnlyParts("1995-01-01")).toEqual({ y: 1995, m: 1, d: 1 });
 
-    for (const malformed of ["not-a-date", "1995/01/01", "01-01-1995", "1995-1-1", "19950101", ""]) {
+    for (const malformed of [
+      "not-a-date",
+      "1995/01/01",
+      "01-01-1995",
+      "1995-1-1",
+      "19950101",
+      "",
+    ]) {
       expect(parseDateOnlyParts(malformed)).toBeNull();
     }
   });
@@ -69,6 +76,7 @@ describe("date-of-birth parsing", () => {
     expect(parseDateOfBirthParts("1995-01-01T00:00:00.000Z")).toEqual(expected);
     expect(parseDateOfBirthParts("  1995-01-01  ")).toEqual(expected);
     expect(parseDateOfBirthParts(new Date("1995-01-01T00:00:00.000Z"))).toEqual(expected);
+    expect(parseDateOfBirthParts(Date.UTC(1995, 0, 1))).toEqual(expected);
   });
 
   it("rejects an impossible date even when a time component follows it", () => {
@@ -86,6 +94,7 @@ describe("date-of-birth parsing", () => {
     }
     expect(parseDateOfBirthParts("garbage")).toBeNull();
     expect(parseDateOfBirthParts(new Date("garbage"))).toBeNull();
+    expect(parseDateOfBirthParts({ date: "1995-01-01" })).toBeNull();
   });
 });
 
@@ -177,9 +186,9 @@ describe("stored preferences", () => {
 
   it("excludes anything else — the list is the whole rule", () => {
     const unknown = ["", "  ", "sepia", "System", "en-GB", "de"];
-    expect(unknown.filter((value) => (THEME_PREFERENCES as readonly string[]).includes(value))).toEqual(
-      [],
-    );
+    expect(
+      unknown.filter((value) => (THEME_PREFERENCES as readonly string[]).includes(value)),
+    ).toEqual([]);
     expect(
       unknown.filter((value) => (LOCALE_PREFERENCES as readonly string[]).includes(value)),
     ).toEqual([]);

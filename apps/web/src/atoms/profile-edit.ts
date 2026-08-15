@@ -93,9 +93,10 @@ const invalidateOwnProfileAtom = atom(null, (get) => {
  * Goes through `authClient.updateUser` rather than an oRPC procedure on
  * purpose: these are Better Auth user fields, and routing them through the auth
  * client is what makes `packages/auth/src/profile.ts`'s database hook the
- * single enforcement point for their rules. An oRPC procedure writing them with
- * Drizzle would bypass that hook entirely — which is exactly the property the
- * image upload relies on, and exactly the property these must NOT have.
+ * enforcement point for the shared rules in `@my-tuums/auth/rules`. An oRPC
+ * procedure writing them with Drizzle would bypass that hook entirely — which
+ * is exactly the property the image upload relies on, and exactly the property
+ * these must NOT have.
  */
 export const saveProfileAtom = atom(null, async (get, set): Promise<boolean> => {
   const validationError = get(profileEditValidationAtom);

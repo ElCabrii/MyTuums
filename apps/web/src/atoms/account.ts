@@ -1,6 +1,7 @@
 import { atom } from "jotai";
 import { atomWithReset, RESET } from "jotai/utils";
 import { queryClientAtom } from "jotai-tanstack-query";
+import type { LocalePreference } from "@my-tuums/auth/rules";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/lib/orpc";
 import { waitForSession } from "@/lib/session-sync";
@@ -10,7 +11,7 @@ import { linkedAccountsAtom } from "@/atoms/linked-accounts";
 import { viewerHandleAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
 import { themeAtom, type Theme } from "@/atoms/theme";
-import { getLocale, setLocale, type Locale } from "@/paraglide/runtime.js";
+import { getLocale, setLocale } from "@/paraglide/runtime.js";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -253,7 +254,7 @@ export const saveThemePreferenceAtom = atom(
  */
 export const saveLocalePreferenceAtom = atom(
   null,
-  async (_get, set, preference: Locale): Promise<boolean> => {
+  async (_get, set, preference: LocalePreference): Promise<boolean> => {
     set(authErrorAtom, null);
     set(authPendingAtom, true);
     try {

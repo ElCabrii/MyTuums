@@ -120,7 +120,13 @@ export function parseDateOfBirthParts(value: unknown): DateOfBirthParts | null {
     }
   }
 
-  const parsed = value instanceof Date ? value : new Date(value as never);
+  const parsed =
+    value instanceof Date
+      ? value
+      : typeof value === "string" || typeof value === "number"
+        ? new Date(value)
+        : null;
+  if (!parsed) return null;
   if (Number.isNaN(parsed.getTime())) return null;
   return {
     y: parsed.getUTCFullYear(),
