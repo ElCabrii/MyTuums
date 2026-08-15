@@ -1,4 +1,3 @@
-// @ts-check
 // The monorepo's single ESLint flat config — every package lints against
 // this file via turbo's `lint` task. Type-aware rules are the point:
 // `projectService` below plus the three promise rules that have caught
@@ -55,13 +54,13 @@ export default tseslint.config(
           // linted with type information, using the nearest tsconfig as a
           // stand-in rather than being skipped or crashing the run.
           //
-          // `eslint.config.mjs` itself is NOT here: the root tsconfig.json
-          // (node.json profile, allowJs/checkJs) includes it, so it joins
-          // the project service like any source file. Before that tsconfig
-          // existed, the stand-in could not resolve this file's imports —
-          // everything read as `error` typed, and linting the config against
-          // itself failed with no-unsafe-* errors on lines that were not
-          // actually unsafe.
+          // `eslint.config.ts` itself is NOT here: the root tsconfig.json
+          // (node.json profile) includes it, so it joins the project
+          // service like any source file. Before that tsconfig existed, the
+          // stand-in could not resolve this file's imports — everything
+          // read as `error` typed, and linting the config against itself
+          // failed with no-unsafe-* errors on lines that were not actually
+          // unsafe.
           allowDefaultProject: [
             "packages/db/drizzle.config.ts",
             "apps/server/tsup.config.ts",
@@ -70,6 +69,10 @@ export default tseslint.config(
             // theirs. It is object literals only, so the weaker inferred
             // typing has nothing unsafe to trip over.
             "apps/server/vitest.config.ts",
+            // The root tsconfig.json includes only eslint.config.ts, so the
+            // docs checker has no project of its own; the root tsconfig
+            // stands in for it.
+            "scripts/check-docs.ts",
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -85,12 +88,12 @@ export default tseslint.config(
     },
   },
   {
-    // Plain Node build scripts, run by `node` and never bundled or imported
-    // by the app. There's no tsconfig that covers them, so type-aware linting
-    // has nothing to work from — it reports every import as `error` typed
-    // rather than finding anything real. Syntax and correctness rules still
-    // apply.
-    files: ["**/scripts/**/*.mjs"],
+    // Plain Node build scripts, run by `node` or `tsx` and never bundled or
+    // imported by the app. There's no tsconfig that covers them, so type-aware
+    // linting has nothing to work from — it reports every import as `error`
+    // typed rather than finding anything real. Syntax and correctness rules
+    // still apply.
+    files: ["**/scripts/**/*.ts"],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
       globals: {

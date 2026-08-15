@@ -109,7 +109,7 @@ async function swapImageColumns(
  * correct, and turning a successful replace into an error because a stale
  * object could not be reaped would be the wrong trade. The cost is that
  * objects leak on the paths where the row write fails after the objects are
- * stored, or where this delete errors; `scripts/reconcile-media.mjs` is the
+ * stored, or where this delete errors; `scripts/reconcile-media.ts` is the
  * reaper, and its existence is part of why swallowing here is safe.
  */
 async function discardPrevious(storage: Storage, previous: PreviousPair | null): Promise<void> {

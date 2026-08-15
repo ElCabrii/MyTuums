@@ -250,7 +250,7 @@ never existed, so the block itself does not leak.
 
 - **Destructive database helpers refuse any database whose name does not end
   in `_test`** (`assertTestDatabase` in `packages/db/src/testing.ts`, and
-  `packages/db/scripts/setup-test-db.mjs`). `resolveTestDatabaseUrl` derives
+  `packages/db/scripts/setup-test-db.ts`). `resolveTestDatabaseUrl` derives
   that name from `DATABASE_URL` when `DATABASE_URL_TEST` is unset.
 - **Every Railway environment owns its own bucket** and one environment's
   credentials cannot address another's. This is what keeps the E2E suite's

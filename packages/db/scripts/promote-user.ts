@@ -14,7 +14,7 @@
  *
  * Usage: pnpm db:promote <username> <role>   (role: moderator | staff | admin)
  *
- * Mirrors setup-test-db.mjs's shape: one process, `postgres` directly (a
+ * Mirrors setup-test-db.ts's shape: one process, `postgres` directly (a
  * promote script must not pull in the connection pool), and `DATABASE_URL`
  * from the environment, which the `dotenv` wrapper in package.json loads
  * from the root .env.

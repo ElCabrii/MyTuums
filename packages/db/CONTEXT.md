@@ -24,7 +24,7 @@ databases. It serves data only — no HTTP, no business logic.
 | Change an auth table              | `packages/auth/src/index.ts` | `pnpm --filter @my-tuums/db db:generate:auth`, then `pnpm db:generate`    |
 | Add an index for a new list       | `src/schema/app.ts`          | the `keysetPage` call in `packages/api` it must mirror                    |
 | Change how migrations are applied | `src/migrate.ts`             | `apps/server/src/migrate.ts`, `docker-compose.yml`                        |
-| Change test-database handling     | `src/testing.ts`             | `scripts/setup-test-db.mjs`, `e2e/global-setup.ts`                        |
+| Change test-database handling     | `src/testing.ts`             | `scripts/setup-test-db.ts`, `e2e/global-setup.ts`                         |
 | Add a maintenance script          | `scripts/`                   | the `scripts` entry in `package.json`                                     |
 
 ## Invariants
@@ -39,7 +39,7 @@ databases. It serves data only — no HTTP, no business logic.
   regenerated wholesale; anything hand-written there is destroyed.
 - **`src/schema/auth.ts` is generated.** Regenerate it with
   `pnpm --filter @my-tuums/db db:generate:auth`, which runs the better-auth CLI
-  and then `scripts/patch-auth-schema.mjs`. That script's header explains what
+  and then `scripts/patch-auth-schema.ts`. That script's header explains what
   it patches and why.
 - **Composite primary keys are the idempotency mechanism.** Uniqueness for
   likes, follows, reports and blocks lives in the PK, so handlers use
@@ -54,7 +54,7 @@ databases. It serves data only — no HTTP, no business logic.
 - **Migrations are committed and shipped**, applied once by the pre-deploy
   step — never at server boot, where N replicas would race the same DDL.
 - **Destructive helpers refuse anything not ending in `_test`**
-  (`assertTestDatabase`, `scripts/setup-test-db.mjs`). This is the guard
+  (`assertTestDatabase`, `scripts/setup-test-db.ts`). This is the guard
   standing between a test run and the development database.
 - **One pool per process.** `db` is a singleton; integration suites share it,
   which is why the API suite runs `fileParallelism: false`.

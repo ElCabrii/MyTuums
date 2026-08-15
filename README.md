@@ -72,7 +72,7 @@ The rest of the Drizzle toolbox is package-level:
 | `packages/db`   | Drizzle schema, committed migrations, test-database guards                           |
 | `e2e`           | the Playwright suite                                                                 |
 | `docs`          | architecture, product, operations, security                                          |
-| `scripts`       | repository tooling (`check-docs.mjs`)                                                |
+| `scripts`       | repository tooling (`check-docs.ts`)                                                 |
 
 Each of those directories carries its own `CONTEXT.md` — the authoritative
 map, boundaries, invariants, and verification guidance for that area.
