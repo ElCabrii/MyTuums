@@ -13,7 +13,7 @@ Dependencies point one way. `apps/web` and `apps/server` are leaves; nothing
 imports them.
 
 ```
-apps/web ──▶ packages/api (browser-safe subpaths only)
+apps/web ──▶ packages/api, packages/auth (browser-safe subpaths only)
 apps/server ──▶ packages/api ──▶ packages/auth ──▶ packages/db
             └─▶ packages/auth ─────────────────────┘
             └─▶ packages/db
@@ -27,10 +27,24 @@ Node's type-stripping cannot rewrite the `.js` specifiers those packages
 ship). Only `apps/server`'s own declared dependencies stay external in the
 bundle.
 
-`apps/web` may import `@my-tuums/api/constants` and `@my-tuums/api/dimensions`
-and nothing else from that package. Those two subpaths must stay free of
-`@my-tuums/db`, which reads `DATABASE_URL` at module scope and throws in a
-browser.
+`apps/web` may import three workspace modules and no others:
+`@my-tuums/api/constants`, `@my-tuums/api/dimensions` and
+`@my-tuums/auth/rules`. All three must stay free of `@my-tuums/db`, which reads
+`DATABASE_URL` at module scope and throws in a browser.
+
+The `packages/auth` edge is the one that looks surprising, so it is worth
+stating why it does not weaken the direction above. `@my-tuums/auth/rules`
+(`packages/auth/src/rules.ts`) is the single statement of the account rules —
+handle bounds and charset, the date-of-birth parse and age comparison, the bio
+limit, the preference lists, and the English rejection strings — and it is the
+only file in that package with **no imports at all**. Reaching it does not
+construct the better-auth instance, read any env, or touch `@my-tuums/db`; the
+production bundle contains exactly those three workspace modules and nothing
+else from the packages. It lives in `packages/auth` because that is where the
+rules are _enforced_ (the database hooks are the only place a user-field rule
+actually holds) and because `packages/api` already depends on `packages/auth` —
+putting the shared statement in `packages/api` instead would force
+`packages/auth` to import it, closing a cycle.
 
 ## Development topology
 
@@ -171,6 +185,17 @@ lastLoginMethod, admin, i18n. `trustedOrigins` is `[webOrigin]` only.
 Session resolution goes through `auth.api.getSession` on every request — there
 is deliberately no session cookie cache, because a revoked session must stop
 authenticating immediately.
+
+User-field rules are enforced by the `databaseHooks` in
+`packages/auth/src/dob.ts` and `packages/auth/src/profile.ts` — the only place
+they hold, because these columns are bare `text` and the browser's checks are
+skippable. Those hooks are thin: the rules themselves live in
+`packages/auth/src/rules.ts`, which the browser reads too, so the hook and the
+form cannot come to disagree about what a valid handle, bio or date of birth
+is. What stays in the hooks is what only a server does — turning a violation
+into an `APIError`, permitting an absent date of birth (OAuth sign-ups arrive
+with none), and refusing the client image writes only the upload procedure may
+make.
 
 **Build-time versus runtime OAuth configuration** is the subtlety worth
 knowing. The server registers a provider only when _both_ halves of its

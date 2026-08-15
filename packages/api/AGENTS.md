@@ -39,6 +39,7 @@ over HTTP and imports only its browser-safe subpaths.
 | Change the upload/remove lifecycle    | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes     |
 | Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                    |
 | Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                        |
+| Change an account rule                | `../auth/src/rules.ts`                                                                   | not `src/constants.ts` — see the invariant below                                        |
 
 ## Invariants
 
@@ -138,6 +139,14 @@ over HTTP and imports only its browser-safe subpaths.
   refused (issue #60).
 - **`src/constants.ts` and `src/dimensions.ts` must stay dependency-free.** The
   browser imports them; an `@my-tuums/db` import throws at module load.
+- **Account rules are not this package's to state.** The handle bounds, the bio
+  limit, the date-of-birth rules and the preference lists live in
+  `packages/auth/src/rules.ts` (`@my-tuums/auth/rules`), because `packages/auth`
+  is where they are enforced. `usernameInput` in `src/users.ts` reads the bounds
+  from there rather than repeating `3`/`20`, and `src/constants.ts` deliberately
+  no longer carries a `BIO_MAX_LENGTH` copy — that copy existed only because
+  the browser had no other dependency-free module to read, and it needed a
+  drift test to stay honest. Re-adding one here re-creates the drift.
 - **`src/moderation-inputs.ts` is a leaf on purpose.** The moderation router
   files must never import each other — a cycle fails at module evaluation.
 

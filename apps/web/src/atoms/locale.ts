@@ -1,5 +1,6 @@
 import { atomEffect } from "jotai-effect";
-import { getLocale, locales, setLocale } from "@/paraglide/runtime.js";
+import { isLocalePreference } from "@my-tuums/auth/rules";
+import { getLocale, setLocale } from "@/paraglide/runtime.js";
 import { m } from "@/paraglide/messages.js";
 import { sessionPendingAtom, viewerAtom } from "@/atoms/session";
 
@@ -30,9 +31,6 @@ function hasLocaleCookie(): boolean {
   return document.cookie.split("; ").some((entry) => entry.startsWith(`${LOCALE_COOKIE}=`));
 }
 
-const isLocale = (value: unknown): value is (typeof locales)[number] =>
-  typeof value === "string" && (locales as readonly string[]).includes(value);
-
 /**
  * Applies the account's stored language on a device that has never picked one.
  *
@@ -60,7 +58,7 @@ export const localePreferenceEffect = atomEffect((get) => {
   if (get(sessionPendingAtom)) return;
 
   const preferred = get(viewerAtom)?.localePreference;
-  if (!isLocale(preferred)) return;
+  if (!isLocalePreference(preferred)) return;
   if (preferred === getLocale()) return;
   if (hasLocaleCookie()) return;
 

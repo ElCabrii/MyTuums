@@ -1,7 +1,8 @@
 import { atom } from "jotai";
 import { atomWithReset, RESET } from "jotai/utils";
 import { queryClientAtom } from "jotai-tanstack-query";
-import { BIO_MAX_LENGTH, type ImageKind } from "@my-tuums/api/constants";
+import { type ImageKind } from "@my-tuums/api/constants";
+import { BIO_MAX_LENGTH } from "@my-tuums/auth/rules";
 import { authClient } from "@/lib/auth-client";
 import { client, orpc } from "@/lib/orpc";
 import { createDisplayVariant, ImageError } from "@/lib/media";
@@ -92,9 +93,10 @@ const invalidateOwnProfileAtom = atom(null, (get) => {
  * Goes through `authClient.updateUser` rather than an oRPC procedure on
  * purpose: these are Better Auth user fields, and routing them through the auth
  * client is what makes `packages/auth/src/profile.ts`'s database hook the
- * single enforcement point for their rules. An oRPC procedure writing them with
- * Drizzle would bypass that hook entirely — which is exactly the property the
- * image upload relies on, and exactly the property these must NOT have.
+ * enforcement point for the shared rules in `@my-tuums/auth/rules`. An oRPC
+ * procedure writing them with Drizzle would bypass that hook entirely — which
+ * is exactly the property the image upload relies on, and exactly the property
+ * these must NOT have.
  */
 export const saveProfileAtom = atom(null, async (get, set): Promise<boolean> => {
   const validationError = get(profileEditValidationAtom);

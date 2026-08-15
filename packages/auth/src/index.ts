@@ -7,6 +7,7 @@ import { db } from "@my-tuums/db";
 import { authRateLimitEnabled, passkeyRpId, webOrigin } from "./env.js";
 import { validateDateOfBirthHook } from "./dob.js";
 import { validateProfileFieldsHook } from "./profile.js";
+import { isAllowedUsernameCharset, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "./rules.js";
 import {
   localeFromRequest,
   otpEmail,
@@ -166,10 +167,15 @@ export const auth = betterAuth({
   },
 
   plugins: [
+    // Registration only — the bounds and the charset come from ./rules.js, so
+    // the plugin, `usernameInput` in packages/api/src/users.ts and the two
+    // forms that claim a handle cannot disagree about what a handle is. The
+    // plugin's own normalisation (lowercasing into `username`, keeping the
+    // typed form in `displayUsername`) is deliberately left to it.
     username({
-      minUsernameLength: 3,
-      maxUsernameLength: 20,
-      usernameValidator: (u) => /^[a-zA-Z0-9_-]+$/.test(u),
+      minUsernameLength: USERNAME_MIN_LENGTH,
+      maxUsernameLength: USERNAME_MAX_LENGTH,
+      usernameValidator: isAllowedUsernameCharset,
     }),
 
     // The roles and ban fields the moderation system runs on (issue #38).
@@ -295,8 +301,9 @@ export const auth = betterAuth({
 // router (packages/api/src/moderation-actions.ts) builds its email copy here
 // and sends through the same `sendEmail` pipe as the auth flows, reads the
 // locale the same way, and points appeal links at `webOrigin`. The package's
-// exports map exposes only `.`, `./testing` and `./profile`, so the public
-// surface is whatever this file names.
+// exports map exposes only `.`, `./testing` and `./rules`, so the public
+// surface is whatever this file names — plus the browser-safe account rules,
+// which are the one part of this package `apps/web` may import.
 export {
   localeFromRequest,
   moderationBanEmail,

@@ -12,6 +12,7 @@ import { base32 } from "@better-auth/utils/base32";
 import { createOTP } from "@better-auth/utils/otp";
 import { desc, eq, like } from "drizzle-orm";
 import { auth } from "@my-tuums/auth";
+import { BIO_MAX_LENGTH, LOCALE_PREFERENCES, THEME_PREFERENCES } from "@my-tuums/auth/rules";
 import { authTest, testHelpers } from "@my-tuums/auth/testing";
 import { closeDb, db } from "@my-tuums/db";
 import { passkey, twoFactor, user, verification } from "@my-tuums/db/schema";
@@ -359,6 +360,75 @@ describe("date of birth requirement", () => {
 
     const session = await auth.api.getSession({ headers });
     expect(session?.user.dateOfBirth).toBeDefined();
+  });
+});
+
+/**
+ * The editable-profile rules, server-side — the other `databaseHooks` half
+ * (packages/auth/src/profile.ts).
+ *
+ * What is asserted here is the *adapter*: that the hook is wired into the
+ * production instance at all, that it turns a rule violation into a
+ * `BAD_REQUEST` carrying the exact English literal
+ * `apps/web/src/lib/auth-error-message.ts` is keyed on, and that it lets a
+ * partial update through untouched. The rules themselves — where the bio bound
+ * falls, which preference values exist — are `account-rules.test.ts`'s job, so
+ * they are not re-litigated here.
+ */
+describe("profile field rules", () => {
+  it("rejects a bio over the limit and accepts one exactly at it", async () => {
+    const { headers } = await signUp();
+
+    await expect(
+      auth.api.updateUser({ body: { bio: "x".repeat(BIO_MAX_LENGTH + 1) }, headers }),
+    ).rejects.toThrow("Your bio must be 160 characters or fewer.");
+
+    // The bound is inclusive, and the rule measures what is about to be stored
+    // rather than a trimmed copy of it.
+    await expect(
+      auth.api.updateUser({ body: { bio: "x".repeat(BIO_MAX_LENGTH) }, headers }),
+    ).resolves.toBeDefined();
+  });
+
+  it("rejects a theme or locale outside the offered values", async () => {
+    const { headers } = await signUp();
+
+    await expect(
+      auth.api.updateUser({ body: { themePreference: "sepia" }, headers }),
+    ).rejects.toThrow("Please choose a valid theme.");
+
+    await expect(
+      auth.api.updateUser({ body: { localePreference: "de" }, headers }),
+    ).rejects.toThrow("Please choose a valid language.");
+  });
+
+  it("accepts every offered preference value", async () => {
+    const { headers } = await signUp();
+
+    for (const themePreference of THEME_PREFERENCES) {
+      await expect(
+        auth.api.updateUser({ body: { themePreference }, headers }),
+      ).resolves.toBeDefined();
+    }
+    for (const localePreference of LOCALE_PREFERENCES) {
+      await expect(
+        auth.api.updateUser({ body: { localePreference }, headers }),
+      ).resolves.toBeDefined();
+    }
+  });
+
+  it("lets an unrelated partial update through — absence is not a violation", async () => {
+    // The hook sees *partial* updates: someone changing only their display
+    // name arrives with bio and both preferences undefined. Treating that as a
+    // violation would reject every unrelated write.
+    const { headers } = await signUp();
+
+    await expect(
+      auth.api.updateUser({ body: { name: "Renamed" }, headers }),
+    ).resolves.toBeDefined();
+
+    const session = await auth.api.getSession({ headers });
+    expect(session?.user.name).toBe("Renamed");
   });
 });
 

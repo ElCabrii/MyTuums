@@ -1,21 +1,25 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { Settings2 } from "lucide-react";
+import {
+  LOCALE_PREFERENCES,
+  THEME_PREFERENCES,
+  type LocalePreference,
+  type ThemePreference,
+} from "@my-tuums/auth/rules";
 import { authPendingAtom } from "@/atoms/auth";
 import { saveLocalePreferenceAtom, saveThemePreferenceAtom } from "@/atoms/account";
 import { viewerAtom } from "@/atoms/session";
-import type { Theme } from "@/atoms/theme";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import { Section } from "@/components/settings/section";
-import { locales, type Locale } from "@/paraglide/runtime.js";
 import { m } from "@/paraglide/messages.js";
 
-const THEMES: { value: Theme; label: () => string }[] = [
-  { value: "light", label: () => m.theme_light() },
-  { value: "dark", label: () => m.theme_dark() },
-  { value: "system", label: () => m.theme_system() },
-];
+const THEME_LABELS: Record<ThemePreference, () => string> = {
+  light: () => m.theme_light(),
+  dark: () => m.theme_dark(),
+  system: () => m.theme_system(),
+};
 
-const localeLabel = (locale: Locale): string =>
+const localeLabel = (locale: LocalePreference): string =>
   locale === "fr" ? m.locale_french() : m.locale_english();
 
 /**
@@ -60,7 +64,7 @@ export function PreferencesSection() {
             {m.settings_prefs_theme_label()}
           </p>
           <SegmentedControl label={m.settings_prefs_theme_label()}>
-            {THEMES.map(({ value, label }) => (
+            {THEME_PREFERENCES.map((value) => (
               <SegmentedControlItem
                 key={value}
                 active={storedTheme === value}
@@ -68,7 +72,7 @@ export function PreferencesSection() {
                   if (!isBusy) void saveTheme(value);
                 }}
               >
-                {label()}
+                {THEME_LABELS[value]()}
               </SegmentedControlItem>
             ))}
           </SegmentedControl>
@@ -79,7 +83,7 @@ export function PreferencesSection() {
             {m.settings_prefs_locale_label()}
           </p>
           <SegmentedControl label={m.settings_prefs_locale_label()}>
-            {locales.map((locale) => (
+            {LOCALE_PREFERENCES.map((locale) => (
               <SegmentedControlItem
                 key={locale}
                 active={storedLocale === locale}

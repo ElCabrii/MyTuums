@@ -1,7 +1,8 @@
 /**
- * The server half of the editable-profile rules, wired in via `databaseHooks`
- * in `./index.ts` alongside `./dob.ts` (and deliberately NOT in `./testing.ts`,
- * for the same reason: fixtures are allowed to mint rows a test needs).
+ * The Better Auth half of the editable-profile rules, wired in via
+ * `databaseHooks` in `./index.ts` alongside `./dob.ts` (and deliberately NOT in
+ * `./testing.ts`, for the same reason: fixtures are allowed to mint rows a
+ * test needs).
  *
  * These fields are `additionalFields`, which default to `input: true` — a
  * client can put any string in any of them through `updateUser`. Nothing else
@@ -9,38 +10,23 @@
  * checks are a courtesy that anyone can skip by calling the endpoint directly.
  * This hook is the only place the rules actually hold.
  *
- * The messages are English literals on purpose, exactly as in `./dob.ts`: they
- * are what the API throws, and `apps/web/src/lib/auth-error-message.ts` maps
- * them to translated copy at the render boundary while passing anything
- * unrecognised through. Keeping them byte-identical with the client's
- * `apps/web/src/lib/auth-validation.ts` is what lets a server rejection render
- * in the user's language.
+ * The shared half — the bio limit, the preference lists, and the sentences a
+ * rejection carries — is stated in `./rules.js`, which the browser reads too
+ * (`@my-tuums/auth/rules`). What stays here is server authority: the
+ * `APIError` translation, and the two image protections below, which exist
+ * because this hook sees writes no client should be making at all rather than
+ * because a form needs to check the same thing.
  */
 import { APIError } from "better-auth/api";
+import {
+  BIO_TOO_LONG_MESSAGE,
+  isBioWithinLimit,
+  isLocalePreference,
+  isThemePreference,
+  LOCALE_PREFERENCE_INVALID_MESSAGE,
+  THEME_PREFERENCE_INVALID_MESSAGE,
+} from "./rules.js";
 
-/**
- * Short enough to stay a one-line strapline rather than a second post, and the
- * same number the web app's `validateBio` uses. Changing it means changing
- * both, and the message string below.
- */
-export const BIO_MAX_LENGTH = 160;
-
-/** The themes the settings page offers and this package will accept. */
-export const THEME_PREFERENCES = ["light", "dark", "system"] as const;
-/** The locales the settings page offers and this package will accept. */
-export const LOCALE_PREFERENCES = ["en", "fr"] as const;
-
-/** A valid themePreference value. */
-export type ThemePreference = (typeof THEME_PREFERENCES)[number];
-/** A valid localePreference value. */
-export type LocalePreference = (typeof LOCALE_PREFERENCES)[number];
-
-/** Message for a bio over BIO_MAX_LENGTH — kept byte-identical with the client's validateBio. */
-export const BIO_TOO_LONG_MESSAGE = "Your bio must be 160 characters or fewer.";
-/** Message for a theme outside THEME_PREFERENCES. */
-export const THEME_PREFERENCE_INVALID_MESSAGE = "Please choose a valid theme.";
-/** Message for a locale outside LOCALE_PREFERENCES. */
-export const LOCALE_PREFERENCE_INVALID_MESSAGE = "Please choose a valid language.";
 /** Message for any attempt to set an image field by hand — uploads are the only legitimate writer. */
 export const MANAGED_IMAGE_MESSAGE = "Profile images are set by uploading a file.";
 
@@ -83,9 +69,13 @@ function assertProviderImage(value: unknown): void {
   }
 }
 
-function assertOneOf(value: unknown, allowed: readonly string[], message: string): void {
+function assertPreference(
+  value: unknown,
+  isAllowed: (candidate: unknown) => boolean,
+  message: string,
+): void {
   if (isBlank(value)) return;
-  if (typeof value !== "string" || !allowed.includes(value)) {
+  if (!isAllowed(value)) {
     throw new APIError("BAD_REQUEST", { message });
   }
 }
@@ -132,8 +122,10 @@ export function validateProfileFieldsHook(
     localePreference?: unknown;
   },
 ): Promise<void> {
+  // Measured untrimmed, unlike the browser's counterpart: what this hook is
+  // about to store is exactly what arrived, so that is what has to fit.
   if (!isBlank(user.bio)) {
-    if (typeof user.bio !== "string" || user.bio.length > BIO_MAX_LENGTH) {
+    if (typeof user.bio !== "string" || !isBioWithinLimit(user.bio)) {
       throw new APIError("BAD_REQUEST", { message: BIO_TOO_LONG_MESSAGE });
     }
   }
@@ -144,8 +136,8 @@ export function validateProfileFieldsHook(
   assertNoClientOriginalImageWrite(user.imageOriginal);
   assertNoClientOriginalImageWrite(user.bannerImageOriginal);
 
-  assertOneOf(user.themePreference, THEME_PREFERENCES, THEME_PREFERENCE_INVALID_MESSAGE);
-  assertOneOf(user.localePreference, LOCALE_PREFERENCES, LOCALE_PREFERENCE_INVALID_MESSAGE);
+  assertPreference(user.themePreference, isThemePreference, THEME_PREFERENCE_INVALID_MESSAGE);
+  assertPreference(user.localePreference, isLocalePreference, LOCALE_PREFERENCE_INVALID_MESSAGE);
 
   return Promise.resolve();
 }

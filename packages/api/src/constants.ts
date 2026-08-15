@@ -3,6 +3,11 @@
 // the composer's character counter, and importing them from the package root
 // would drag ./router.js -> @my-tuums/db into the browser bundle — where the
 // `DATABASE_URL` check in that module throws on import.
+//
+// Account rules — the bio limit, the handle bounds, the date-of-birth and
+// preference rules — are deliberately NOT here. They belong to
+// `@my-tuums/auth/rules`, which is browser-safe on the same terms and is the
+// package that actually enforces them.
 
 /** Maximum length of a post, in characters, after trimming. */
 export const POST_MAX_LENGTH = 500;
@@ -117,23 +122,6 @@ export const SUSPENSION_MAX_SECONDS = 365 * 24 * 60 * 60;
  * tell the reader the conversation continues above what they can see.
  */
 export const THREAD_ANCESTOR_MAX = 20;
-
-/**
- * Maximum length of a profile bio, in characters.
- *
- * DUPLICATED, deliberately, from `BIO_MAX_LENGTH` in
- * `packages/auth/src/profile.ts`, which is where the rule is actually
- * *enforced* — bios are written through `authClient.updateUser`, so the Better
- * Auth database hook is the authority and this copy is only what the web app
- * counts characters against. The two cannot share a module: this file must stay
- * dependency-free for the browser, and `packages/auth` importing
- * `@my-tuums/api` would close a dependency cycle (api already depends on auth).
- *
- * `auth-constants.int.test.ts` asserts the two agree, so a change to one that
- * forgets the other fails a test rather than silently letting the form accept
- * a bio the server rejects.
- */
-export const BIO_MAX_LENGTH = 160;
 
 /**
  * What the avatar and banner uploads accept.

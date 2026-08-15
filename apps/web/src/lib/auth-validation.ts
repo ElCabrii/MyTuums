@@ -1,40 +1,56 @@
 /**
- * Pure validation guards, extracted byte-for-byte from the sequential
- * `if`s that used to live in `register.tsx`'s and `login.tsx`'s submit
- * handlers. Kept here — rather than inline — so they're unit-testable
- * without mounting a form, and so `atoms/auth-form.ts` can derive a live
- * validation atom from the same rules the submit path enforces.
+ * The browser's form adapter over the account rules.
  *
- * `username`/`name`/`email` are trimmed before checking: leading/trailing
- * whitespace was never significant to the server. Passwords are NOT
- * trimmed — a leading or trailing space is a character the person typed
- * and BetterAuth hashes verbatim, so silently stripping it here would let
- * this function accept input the server treats as a different password.
+ * The rules themselves — the handle bounds and charset, the date-of-birth
+ * parse and the age comparison, the bio limit, and every sentence a rejection
+ * carries — live in `@my-tuums/auth/rules`, the one dependency-free module
+ * `packages/auth` also enforces them from. That subpath is browser-safe on the
+ * same terms as `@my-tuums/api/constants`: it imports nothing, so importing it
+ * cannot drag `@my-tuums/db` (which reads `DATABASE_URL` at module scope and
+ * throws) or the Better Auth instance into the bundle.
+ *
+ * What is left here is what only a form knows:
+ *
+ * - **Which fields are required.** The server never sees a half-filled form,
+ *   so "Username is required." has no server counterpart and is stated here.
+ * - **Trimming policy.** `username`/`name`/`email`/`bio` are trimmed before
+ *   checking: leading and trailing whitespace was never significant. Passwords
+ *   are NOT trimmed — a leading or trailing space is a character the person
+ *   typed and BetterAuth hashes verbatim, so stripping it here would let this
+ *   function accept input the server treats as a different password.
+ * - **Rule order.** Which violation a submission with several surfaces first.
+ * - **The rules with no server half at all**: password length and
+ *   confirmation, the two-factor code box, the login fields.
+ *
+ * Every message returned from here is a key in ./auth-error-message.ts, which
+ * is what lets a *server* rejection — thrown with the identical string by the
+ * database hooks — land on the same translated copy.
  */
+import {
+  BIO_TOO_LONG_MESSAGE,
+  DOB_INVALID_MESSAGE,
+  DOB_UNDER_AGE_MESSAGE,
+  isAtLeastYearsOld,
+  isBioWithinLimit,
+  parseDateOnlyParts,
+  usernameRuleViolation,
+} from "@my-tuums/auth/rules";
 
 /**
  * The handle rules, on their own so `/welcome` enforces exactly what
- * `/register` does.
+ * `/register` does — a social sign-up claims its handle on a different page
+ * from the one it was registered on.
  *
- * Extracted rather than duplicated because a social sign-up claims its handle
- * on a different page from the one it was registered on, and two copies of
- * "3 to 20 characters" would eventually disagree — at which point one form
- * accepts what the other rejects and both look broken. These bounds also mirror
- * the server: `username()` in packages/auth/src/index.ts and `usernameInput` in
- * packages/api/src/users.ts.
- *
- * The strings are unchanged from when these three checks were inline below, so
- * the `validation_username_*` mappings in ./auth-error-message.ts still hit.
+ * Presence is this function's own; the bound and the charset come from the
+ * shared module, so this form, the other form, `usernameInput` in
+ * packages/api/src/users.ts and the BetterAuth `username()` plugin all read
+ * one pair of numbers.
  */
 export function validateUsername(rawUsername: string): string | null {
   const username = rawUsername.trim();
 
   if (!username) return "Username is required.";
-  if (username.length < 3 || username.length > 20)
-    return "Username must be between 3 and 20 characters long.";
-  if (!/^[a-zA-Z0-9_-]+$/.test(username))
-    return "Username can only contain letters, numbers, underscores, and hyphens.";
-  return null;
+  return usernameRuleViolation(username);
 }
 
 export type RegisterFields = {
@@ -48,56 +64,24 @@ export type RegisterFields = {
 };
 
 /**
- * The client half of the 15+ rule. The server half is
- * `validateDateOfBirthHook` in packages/auth/src/dob.ts, and the two must
- * agree — that is what lets a server-rejected claim surface the same message
- * the client would have. The strings here are the English literals the
- * `validation_dob_*` mappings in ./auth-error-message.ts translate; the
- * server throws byte-identical ones so the pass-through lookup hits both.
+ * The date-of-birth field.
  *
- * The age comparison reads UTC date parts only: the date-of-birth the app
- * stores is a UTC midnight, so any local-time arithmetic could shift the
- * declared day.
+ * Presence is this function's own — the server deliberately permits an absent
+ * date of birth, because OAuth sign-ups arrive with none and the app holds
+ * them at `/welcome` until they declare one. Everything past presence is the
+ * shared rule: `parseDateOnlyParts` is the strict `YYYY-MM-DD` the native date
+ * input produces, and `isAtLeastYearsOld` is the same UTC tuple comparison the
+ * database hook runs.
  */
-const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-
 export function validateDateOfBirth(rawDateOfBirth: string): string | null {
   const dateOfBirth = rawDateOfBirth.trim();
 
   if (!dateOfBirth) return "Date of Birth is required.";
-  const match = DATE_ONLY_RE.exec(dateOfBirth);
-  if (!match) return "Please enter a valid date of birth.";
 
-  const y = Number(match[1]);
-  const m = Number(match[2]);
-  const d = Number(match[3]);
-  // Calendar check: the regex accepts "2025-02-30", which Date rolls over to
-  // March 2. Round-tripping through Date.UTC and reading back UTC parts is
-  // what catches impossible dates without any timezone involved.
-  const check = new Date(Date.UTC(y, m - 1, d));
-  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== m - 1 || check.getUTCDate() !== d) {
-    return "Please enter a valid date of birth.";
-  }
-
-  if (!isAtLeastYearsOld({ y, m, d }, 15)) {
-    return "You must be at least 15 years old to create an account.";
-  }
+  const parts = parseDateOnlyParts(dateOfBirth);
+  if (!parts) return DOB_INVALID_MESSAGE;
+  if (!isAtLeastYearsOld(parts)) return DOB_UNDER_AGE_MESSAGE;
   return null;
-}
-
-/** `dob + years <= today`, as integer `YYYYMMDD` tuples — same rule as dob.ts. */
-function isAtLeastYearsOld(
-  dob: { y: number; m: number; d: number },
-  years: number,
-  today: Date = new Date(),
-): boolean {
-  const dobTuple = dob.y * 10000 + dob.m * 100 + dob.d;
-  const cutoff = new Date(
-    Date.UTC(today.getUTCFullYear() - years, today.getUTCMonth(), today.getUTCDate()),
-  );
-  const cutoffTuple =
-    cutoff.getUTCFullYear() * 10000 + (cutoff.getUTCMonth() + 1) * 100 + cutoff.getUTCDate();
-  return dobTuple <= cutoffTuple;
 }
 
 /**
@@ -131,23 +115,15 @@ export function validateDisplayName(rawName: string): string | null {
 }
 
 /**
- * The bio rule. Optional — an empty bio is valid and stored as null.
+ * The bio field. Optional — an empty bio is valid and stored as null.
  *
- * The length and the message are byte-identical with `BIO_MAX_LENGTH` and
- * `BIO_TOO_LONG_MESSAGE` in packages/auth/src/profile.ts, which is where the
- * rule is actually enforced (bios are written through `updateUser`, so the
- * Better Auth database hook is the authority). Keeping the strings identical is
- * what lets a server rejection fall through ./auth-error-message.ts's lookup
- * onto the same translated copy this check would have produced — the same
- * arrangement the date-of-birth rule already uses.
- *
- * Counted in code units rather than grapheme clusters, matching what the server
- * checks with `String.length`. An emoji costing two is a rough edge both halves
- * share, which is the property that matters here.
+ * Trimmed before measuring, which the enforcing hook deliberately does not do:
+ * the form is about to trim what it sends, so the count a person sees must
+ * match the value that will arrive, while the hook measures exactly the string
+ * it is about to store.
  */
 export function validateBio(rawBio: string): string | null {
-  if (rawBio.trim().length > 160) return "Your bio must be 160 characters or fewer.";
-  return null;
+  return isBioWithinLimit(rawBio.trim()) ? null : BIO_TOO_LONG_MESSAGE;
 }
 
 /** First violated rule, in submit-handler order, or `null` once all pass. */

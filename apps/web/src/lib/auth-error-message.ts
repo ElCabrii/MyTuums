@@ -12,16 +12,15 @@ const validationMessages: Record<string, () => string> = {
   "Please enter your username or email address.": () => m.validation_identifier_required(),
   "Please enter your password.": () => m.validation_password_required(),
   "Please enter your verification code.": () => m.validation_code_required(),
-  // The date-of-birth strings, shared byte-for-byte with the server rule in
-  // packages/auth/src/dob.ts — the hook throws these verbatim, so a
-  // server-rejected claim lands here instead of rendering raw.
+  // The date-of-birth strings from `@my-tuums/auth/rules`; the hook in
+  // packages/auth/src/dob.ts throws them verbatim, so a server-rejected claim
+  // lands here instead of rendering raw.
   "Date of Birth is required.": () => m.validation_dob_required(),
   "Please enter a valid date of birth.": () => m.validation_dob_invalid(),
   "You must be at least 15 years old to create an account.": () => m.validation_dob_age(),
   // Shared byte-for-byte with `BIO_TOO_LONG_MESSAGE` in
-  // packages/auth/src/profile.ts, which is where the rule is actually enforced
-  // — bios are written through `updateUser`, so the database hook is the
-  // authority and the client check is a courtesy anyone can skip.
+  // `@my-tuums/auth/rules`. The database hook in packages/auth/src/profile.ts
+  // enforces it; the client check is a courtesy anyone can skip.
   "Your bio must be 160 characters or fewer.": () => m.validation_bio_length(),
   "Please choose a valid theme.": () => m.validation_preference_invalid(),
   "Please choose a valid language.": () => m.validation_preference_invalid(),
