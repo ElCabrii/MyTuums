@@ -5,18 +5,18 @@ import type { QueryClient } from "@tanstack/react-query";
  * call.
  *
  * This module owns the *inventory*: which caches and which atom families hold
- * viewer-owned state, and in what order they go. `signOutAtom` used to hold
- * that list itself, which meant the caller knew the whole teardown
- * implementation and had to be edited every time a viewer-owned family was
- * added anywhere in `src/atoms`. Now adding one is a one-line change here,
- * next to the reasoning for the others.
+ * viewer-owned state. `signOutAtom` used to hold that list itself, which meant
+ * the caller knew the whole teardown implementation and had to be edited every
+ * time a viewer-owned family was added anywhere in `src/atoms`. Now adding one
+ * is a one-line change here, next to the reasoning for the others.
  *
  * The coordinator is small enough to import statically; the family modules are
  * not. Their `clear*` helpers live alongside the feed/query machinery they
  * clear, so the dynamic imports inside `clearViewerState` keep that machinery
  * out of the login page's initial chunks. The QueryClient is cleared before
- * those imports are awaited, so a missing lazy chunk cannot delay the privacy
- * boundary or prevent the server sign-out request that precedes it.
+ * those imports start, and each family sweep is independent and best-effort,
+ * so a missing lazy chunk cannot delay the privacy boundary, prevent the
+ * server sign-out request that precedes it, or block the other families.
  *
  * What is *not* here: the auth-local flags `signOutAtom` resets
  * (`authErrorAtom`, `twoFactorMethodsAtom`, the two-factor offer). Those are
@@ -31,6 +31,19 @@ function clearFamily<Param>(family: {
   remove(p: Param): void;
 }): void {
   for (const param of [...family.getParams()]) family.remove(param);
+}
+
+/** Loads and clears one independent family without making sign-out wait on its chunk. */
+function sweepFamily<Module>(
+  name: string,
+  load: () => Promise<Module>,
+  clear: (loaded: Module) => void,
+): void {
+  void load()
+    .then(clear)
+    .catch((error: unknown) => {
+      console.error(`Failed to clear ${name} state after sign-out`, error);
+    });
 }
 
 /**
@@ -60,43 +73,75 @@ function clearFamily<Param>(family: {
  * client — the one hydrated into the Jotai store — is unambiguously the one
  * that gets cleared.
  */
-export async function clearViewerState(queryClient: QueryClient): Promise<void> {
+export function clearViewerState(queryClient: QueryClient): void {
   queryClient.clear();
 
-  const [
-    { profileAtomFamily },
-    { clearPostFeedFamily },
-    { clearUserListFamily },
-    { clearThreadFamily },
-    { clearReplyFamilies },
-    { clearLikeFamilies },
-    { clearFollowFamilies },
-    { clearModerationFamilies },
-    { clearSearchFamilies },
-  ] = await Promise.all([
-    import("@/atoms/profile"),
-    import("@/atoms/post-feed"),
-    import("@/atoms/user-list"),
-    import("@/atoms/thread"),
-    import("@/atoms/reply-composer"),
-    import("@/atoms/like"),
-    import("@/atoms/follow"),
-    import("@/atoms/moderation"),
-    import("@/atoms/search"),
-  ]);
-
-  clearFamily(profileAtomFamily);
-  clearPostFeedFamily();
-  clearUserListFamily();
-  clearThreadFamily();
+  sweepFamily(
+    "profile",
+    () => import("@/atoms/profile"),
+    ({ profileAtomFamily }) => {
+      clearFamily(profileAtomFamily);
+    },
+  );
+  sweepFamily(
+    "post feed",
+    () => import("@/atoms/post-feed"),
+    ({ clearPostFeedFamily }) => {
+      clearPostFeedFamily();
+    },
+  );
+  sweepFamily(
+    "user list",
+    () => import("@/atoms/user-list"),
+    ({ clearUserListFamily }) => {
+      clearUserListFamily();
+    },
+  );
+  sweepFamily(
+    "thread",
+    () => import("@/atoms/thread"),
+    ({ clearThreadFamily }) => {
+      clearThreadFamily();
+    },
+  );
   // Reply drafts are per-post and in-memory; they belong to the person who
   // typed them, not to the browser.
-  clearReplyFamilies();
-  clearLikeFamilies();
-  clearFollowFamilies();
-  clearModerationFamilies();
+  sweepFamily(
+    "reply",
+    () => import("@/atoms/reply-composer"),
+    ({ clearReplyFamilies }) => {
+      clearReplyFamilies();
+    },
+  );
+  sweepFamily(
+    "like",
+    () => import("@/atoms/like"),
+    ({ clearLikeFamilies }) => {
+      clearLikeFamilies();
+    },
+  );
+  sweepFamily(
+    "follow",
+    () => import("@/atoms/follow"),
+    ({ clearFollowFamilies }) => {
+      clearFollowFamilies();
+    },
+  );
+  sweepFamily(
+    "moderation",
+    () => import("@/atoms/moderation"),
+    ({ clearModerationFamilies }) => {
+      clearModerationFamilies();
+    },
+  );
   // Results keyed on the previous session's queries shouldn't outlive it. The
   // debounced query and the popover state die with the SearchBox at unmount,
   // which the session gate triggers right after sign-out.
-  clearSearchFamilies();
+  sweepFamily(
+    "search",
+    () => import("@/atoms/search"),
+    ({ clearSearchFamilies }) => {
+      clearSearchFamilies();
+    },
+  );
 }

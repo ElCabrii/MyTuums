@@ -319,10 +319,11 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
     // it the caller navigates while the session store still reports the old
     // user, and `useRedirectWhenSignedIn` bounces them back.
     await waitForSignedOut();
-    // Clears the QueryClient synchronously, then lazily loads and sweeps the
-    // heavier family modules. The server sign-out therefore cannot be blocked
-    // by a chunk failure, while the signed-out UI never sees the old cache.
-    await clearViewerState(get(queryClientAtom));
+    // Clears the QueryClient synchronously, then schedules independent
+    // best-effort sweeps of the heavier family modules. No lazy chunk can
+    // block sign-out completion, while the signed-out UI never sees the old
+    // cache.
+    clearViewerState(get(queryClientAtom));
     // Sign-in state that belongs to the session that just ended: a pending
     // challenge's methods would otherwise still be on screen for whoever signs
     // in next on this browser.

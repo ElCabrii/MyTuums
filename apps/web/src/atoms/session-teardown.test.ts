@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { clearViewerState } from "@/atoms/session-teardown";
 import { profileAtomFamily } from "@/atoms/profile";
@@ -32,6 +32,7 @@ describe("clearViewerState", () => {
   it("empties the query cache before loading the family modules", async () => {
     const queryClient = createTestQueryClient();
     const fixtures = queryFixtures(queryClient);
+    const profileBefore = profileAtomFamily("cache-clear-marker");
 
     // Viewer-relative rows behind viewer-less query keys: the exact reason the
     // cache is cleared wholesale rather than invalidated.
@@ -47,11 +48,13 @@ describe("clearViewerState", () => {
     );
     expect(queryClient.getQueryCache().getAll().length).toBeGreaterThan(0);
 
-    const teardown = clearViewerState(queryClient);
+    const result = clearViewerState(queryClient);
 
-    // `clearViewerState` reaches its first await only after this boundary.
+    expect(result).toBeUndefined();
     expect(queryClient.getQueryCache().getAll()).toEqual([]);
-    await teardown;
+    await vi.waitFor(() => {
+      expect(profileAtomFamily("cache-clear-marker")).not.toBe(profileBefore);
+    });
   });
 
   /**
@@ -79,17 +82,21 @@ describe("clearViewerState", () => {
   it.each(familyReaders)("hands the $family family a fresh atom afterwards", async ({ read }) => {
     const before = read();
 
-    await clearViewerState(createTestQueryClient());
+    clearViewerState(createTestQueryClient());
 
-    expect(read()).not.toBe(before);
+    await vi.waitFor(() => {
+      expect(read()).not.toBe(before);
+    });
   });
 
   it("resets per-entry state, not just atom identity — a half-typed reply is gone", async () => {
     const store = createStore();
     store.set(replyDraftAtomFamily("post-1"), "a half-typed reply");
 
-    await clearViewerState(createTestQueryClient());
+    clearViewerState(createTestQueryClient());
 
-    expect(store.get(replyDraftAtomFamily("post-1"))).toBe("");
+    await vi.waitFor(() => {
+      expect(store.get(replyDraftAtomFamily("post-1"))).toBe("");
+    });
   });
 });

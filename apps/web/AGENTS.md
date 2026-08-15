@@ -56,8 +56,9 @@ app's build from the same origin.
   carry viewer-relative fields (`viewerHasLiked`, `viewerIsFollowing`) under
   viewer-less keys. `src/atoms/session-teardown.ts` owns that whole inventory
   behind one call; a new viewer-owned family is added there, not in
-  `signOutAtom`, which imports the module dynamically to keep it out of the
-  login bundle.
+  `signOutAtom`. Its lightweight coordinator clears the QueryClient
+  synchronously, then dynamically imports each family for an independent,
+  best-effort sweep so chunk loading cannot block sign-out.
 - **Like and follow serialise per entity.** One `scope` id per entity,
   per-entity intent atoms drop superseded responses, and rollback rides on
   mutation-level `onError` — per-call callbacks never fire for write-only
