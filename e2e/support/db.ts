@@ -97,6 +97,8 @@ export async function createUser(input: CreateUserInput): Promise<CreatedUser> {
     );
   }
 
+  // SAFETY: A successful Better Auth sign-up response owns this `user` contract;
+  // failures have already been rejected above before the response is consumed.
   const body = (await response.json()) as { user: CreatedUser };
   return body.user;
 }

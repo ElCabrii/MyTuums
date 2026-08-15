@@ -78,19 +78,27 @@ const stackEnv = {
   ...s3Env(),
 };
 
-/** The ambient `S3_*` group as-is, or `{}` when any half is missing — the server refuses to boot on a partial group. */
-function s3Env(): Record<string, string> {
-  const required = [
-    "S3_ENDPOINT",
-    "S3_BUCKET",
-    "S3_ACCESS_KEY_ID",
-    "S3_SECRET_ACCESS_KEY",
-  ] as const;
+type S3Environment = Partial<{
+  S3_ENDPOINT: string;
+  S3_BUCKET: string;
+  S3_ACCESS_KEY_ID: string;
+  S3_SECRET_ACCESS_KEY: string;
+  S3_REGION: string;
+}>;
 
-  if (required.some((key) => !process.env[key])) return {};
+/** The ambient `S3_*` group as-is, or `{}` when any half is missing — the server refuses to boot on a partial group. */
+function s3Env(): S3Environment {
+  const endpoint = process.env.S3_ENDPOINT;
+  const bucket = process.env.S3_BUCKET;
+  const accessKeyId = process.env.S3_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
+  if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) return {};
 
   return {
-    ...Object.fromEntries(required.map((key) => [key, process.env[key] ?? ""])),
+    S3_ENDPOINT: endpoint,
+    S3_BUCKET: bucket,
+    S3_ACCESS_KEY_ID: accessKeyId,
+    S3_SECRET_ACCESS_KEY: secretAccessKey,
     S3_REGION: process.env.S3_REGION ?? "auto",
   };
 }

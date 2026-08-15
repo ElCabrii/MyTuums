@@ -30,6 +30,7 @@ profiles, moderation) with real authentication. pnpm 10 + Turborepo on Node
 | Schema, migrations, test databases                        | [packages/db/CONTEXT.md](packages/db/CONTEXT.md)     |
 | End-to-end journeys                                       | [e2e/CONTEXT.md](e2e/CONTEXT.md)                     |
 | Workflows, CI jobs, the production probe                  | [.github/CONTEXT.md](.github/CONTEXT.md)             |
+| Repository lint and TypeScript tooling                    | root configs, `package.json`, `tools/oxlint/`        |
 
 Cross-package questions — how the pieces fit, what a request does end to end —
 are answered in [docs/architecture.md](docs/architecture.md).

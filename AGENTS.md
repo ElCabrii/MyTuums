@@ -27,7 +27,8 @@ routing live in [CONTEXT.md](CONTEXT.md).
 - Put shared client state in Jotai atoms under `apps/web/src/atoms`; put server
   state behind `jotai-tanstack-query` atoms. Hooks are for behavior that has no
   useful atom-shaped representation.
-- Keep strict TypeScript and ESLint settings intact; resolve violations in code.
+- Keep strict TypeScript, ESLint, and Oxlint anti-slop settings intact; resolve
+  violations in code rather than weakening or suppressing rules.
 - Regenerate generated artifacts with the commands listed in
   [CONTEXT.md](CONTEXT.md#generated-files).
 - Keep non-production tooling on non-production databases and buckets. Database

@@ -21,6 +21,8 @@ test.describe("oRPC contract", () => {
     });
 
     expect(response.status()).toBe(401);
+    // SAFETY: This test is asserting the oRPC error-envelope contract returned
+    // by the endpoint; the field assertions immediately below verify it.
     const body = (await response.json()) as { json: { code: string; status: number } };
     expect(body.json.code).toBe("UNAUTHORIZED");
     expect(body.json.status).toBe(401);
@@ -56,6 +58,8 @@ test.describe("oRPC contract", () => {
     });
 
     expect(response.status()).toBe(400);
+    // SAFETY: This test is asserting the oRPC error-envelope contract returned
+    // by the endpoint; the code assertion immediately below verifies it.
     const body = (await response.json()) as { json: { code: string } };
     expect(body.json.code).toBe("BAD_REQUEST");
   });
@@ -92,6 +96,8 @@ test.describe("oRPC contract", () => {
       });
 
       if (response.status() === 429) {
+        // SAFETY: A 429 from this oRPC endpoint carries the error envelope whose
+        // code and optional retry value are verified before they are consumed.
         const body = (await response.json()) as {
           json: { code: string; data?: { retryAfterSeconds?: unknown } };
         };
@@ -101,7 +107,8 @@ test.describe("oRPC contract", () => {
       }
     }
 
-    expect(typeof retryAfterSeconds).toBe("number");
+    expect(retryAfterSeconds).toEqual(expect.any(Number));
+    // SAFETY: The runtime assertion above establishes the retry hint as a number.
     expect(retryAfterSeconds as number).toBeGreaterThan(0);
   });
 });

@@ -34,7 +34,8 @@ function expectSecurityHeaders(headers: Record<string, string | string[] | undef
  */
 function expectContentSecurityPolicy(headers: Record<string, string | string[] | undefined>): void {
   const csp = headers["content-security-policy"];
-  expect(typeof csp).toBe("string");
+  expect(csp).toEqual(expect.any(String));
+  // SAFETY: The runtime assertion above establishes the Node header value as a string.
   const directives = (csp as string).split("; ");
 
   expect(directives).toContain("default-src 'self'");

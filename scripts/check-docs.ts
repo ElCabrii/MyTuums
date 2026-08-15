@@ -433,7 +433,7 @@ for (const doc of markdownFiles) {
 // --------------------------------------------------------------------------
 
 const CODE_SPAN = /`([^`\n]+)`/g;
-const PATH_SHAPE = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._*-]+)+\/?$/;
+const REPOSITORY_PATH = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._*-]+)+\/?$/;
 const TOP_LEVEL_DIRS = new Set(["apps", "packages", "e2e", "docs", "scripts", ".github"]);
 
 /**
@@ -442,7 +442,7 @@ const TOP_LEVEL_DIRS = new Set(["apps", "packages", "e2e", "docs", "scripts", ".
  * `src/paraglide/**` and `.auth/*.json` become `src/paraglide` and `.auth`.
  */
 function candidatePath(span: string): string | null {
-  if (!PATH_SHAPE.test(span)) return null;
+  if (!REPOSITORY_PATH.test(span)) return null;
   const segments = span.replace(/\/$/, "").split("/");
   while (segments.length > 1 && segments[segments.length - 1].includes("*")) segments.pop();
   const cleaned = segments.join("/");
@@ -477,6 +477,8 @@ for (const doc of markdownFiles) {
 const manifestScripts = new Map<string, string[]>();
 for (const file of allFiles.filter((f) => f.endsWith("package.json"))) {
   try {
+    // SAFETY: `file` is a workspace package.json selected above; this checker
+    // consumes only the standard optional name and scripts manifest fields.
     const manifest = JSON.parse(read(file)) as { name?: string; scripts?: Record<string, string> };
     if (manifest.name) manifestScripts.set(manifest.name, Object.keys(manifest.scripts ?? {}));
   } catch {
@@ -484,6 +486,8 @@ for (const file of allFiles.filter((f) => f.endsWith("package.json"))) {
   }
 }
 const rootScripts = Object.keys(
+  // SAFETY: The repository root package.json is pnpm's manifest; this checker
+  // consumes only its standard optional scripts field.
   (JSON.parse(read("package.json")) as { scripts?: Record<string, string> }).scripts ?? {},
 );
 
@@ -722,7 +726,7 @@ for (const doc of markdownFiles) {
 
 function selfTestFailures(): string[] {
   const problems: string[] = [];
-  const check = (name: string, actual: unknown, expected: unknown): void => {
+  const check = <Value>(name: string, actual: Value, expected: Value): void => {
     if (actual !== expected)
       problems.push(`${name}: expected ${String(expected)}, got ${String(actual)}`);
   };
