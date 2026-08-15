@@ -12,9 +12,9 @@
       "types": "./src/testing.ts",
       "default": "./src/testing.ts"
     },
-    "./profile": {
-      "types": "./src/profile.ts",
-      "default": "./src/profile.ts"
+    "./rules": {
+      "types": "./src/rules.ts",
+      "default": "./src/rules.ts"
     }
   },
   "scripts": {

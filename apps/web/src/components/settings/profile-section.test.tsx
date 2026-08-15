@@ -3,7 +3,7 @@ import { renderWithProviders } from "@/test/render";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
-import { BIO_MAX_LENGTH } from "@my-tuums/api/constants";
+import { BIO_MAX_LENGTH } from "@my-tuums/auth/rules";
 import { authErrorAtom } from "@/atoms/auth";
 import { authClient } from "@/lib/auth-client";
 import { createDisplayVariant } from "@/lib/media";
@@ -61,19 +61,29 @@ describe("ProfileSection", () => {
     );
   });
 
-  it("shows the live counter and rejects an over-limit bio before transport", async () => {
-    const store = createStore();
-    await renderWithProviders(<ProfileSection />, { store, signedInAs: true });
-    const user = userEvent.setup();
-    const overLimit = "x".repeat(BIO_MAX_LENGTH + 1);
-    const bio = screen.getByLabelText(m.auth_field_bio());
-    await user.type(bio, overLimit);
+  // Typed rather than pasted on purpose — the counter is a derived atom, so
+  // what is being asserted is that it tracks every keystroke, not just the
+  // final value. That means BIO_MAX_LENGTH + 1 real key events and a re-render
+  // apiece, which lands just over vitest's 5s default on a loaded machine. The
+  // budget is raised rather than the input shortened, because a shorter one
+  // would stop crossing the limit and stop testing the thing.
+  it(
+    "shows the live counter and rejects an over-limit bio before transport",
+    async () => {
+      const store = createStore();
+      await renderWithProviders(<ProfileSection />, { store, signedInAs: true });
+      const user = userEvent.setup();
+      const overLimit = "x".repeat(BIO_MAX_LENGTH + 1);
+      const bio = screen.getByLabelText(m.auth_field_bio());
+      await user.type(bio, overLimit);
 
-    expect(screen.getByText("-1")).toHaveClass("text-destructive");
-    await user.click(screen.getByRole("button", { name: m.common_save() }));
-    expect(authClient.updateUser).not.toHaveBeenCalled();
-    expect(store.get(authErrorAtom)).toMatch(/bio/i);
-  });
+      expect(screen.getByText("-1")).toHaveClass("text-destructive");
+      await user.click(screen.getByRole("button", { name: m.common_save() }));
+      expect(authClient.updateUser).not.toHaveBeenCalled();
+      expect(store.get(authErrorAtom)).toMatch(/bio/i);
+    },
+    20_000,
+  );
 
   it("uploads and removes both avatar and banner through the transport boundary", async () => {
     const display = new File(["display"], "display.webp", { type: "image/webp" });

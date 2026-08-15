@@ -2,6 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { and, desc, eq, not, or, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import { follow, user, userBlock } from "@my-tuums/db/schema";
+import { USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "@my-tuums/auth/rules";
 import { z } from "zod";
 import { FOLLOW_PAGE_SIZE, FOLLOW_PAGE_SIZE_MAX, IMAGE_KINDS } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
@@ -81,11 +82,13 @@ export function viewerIsFollowing(viewerId: string) {
 const followCursor = createCursorCodec(z.string().min(1));
 
 /**
- * Bounds shared by every handle input here, matching the BetterAuth username
- * plugin's own rules (see packages/auth/src/index.ts) so an obviously-invalid
- * handle is rejected at the edge instead of costing a query.
+ * Bounds shared by every handle input here, read from the one account-rule
+ * module (`@my-tuums/auth/rules`) that the BetterAuth username plugin and both
+ * handle forms also read — so an obviously-invalid handle is rejected at the
+ * edge instead of costing a query, and the edge cannot come to disagree with
+ * what the plugin will accept.
  */
-const usernameInput = z.string().trim().min(3).max(20);
+const usernameInput = z.string().trim().min(USERNAME_MIN_LENGTH).max(USERNAME_MAX_LENGTH);
 
 async function countFollowers(db: Database, userId: string): Promise<number> {
   const [row] = await db

@@ -28,7 +28,7 @@ app's build from the same origin.
 | Add a UI component           | `pnpm --filter @my-tuums/web exec shadcn add <component>`       | never hand-write into `src/components/ui`                                         |
 | Add or change copy           | `messages/en.json`, `messages/fr.json`                          | recompile; never touch `src/paraglide`                                            |
 | Router-touching behaviour    | `src/hooks/`                                                    | never an atom — see the invariants                                                |
-| Change an auth flow page     | `src/routes/` + `src/atoms/auth.ts`                             | `src/lib/auth-validation.ts` (strings shared with the server)                     |
+| Change an auth flow page     | `src/routes/` + `src/atoms/auth.ts`                             | `src/lib/auth-validation.ts` (form policy only — the rules live in `@my-tuums/auth/rules`) |
 | Add a moderation surface     | `src/atoms/moderation.ts`, `src/components/moderation/`         | `src/hooks/use-require-role.ts`                                                   |
 
 ## Invariants
@@ -79,13 +79,23 @@ app's build from the same origin.
 
 ## Dependencies and boundaries
 
-- Import only `@my-tuums/api/constants` and `@my-tuums/api/dimensions` from the
-  API package. Those subpaths must stay free of `@my-tuums/db`, which throws at
-  module load in a browser.
+- Import exactly three workspace modules and no others:
+  `@my-tuums/api/constants`, `@my-tuums/api/dimensions` and
+  `@my-tuums/auth/rules`. All three must stay free of `@my-tuums/db`, which
+  throws at module load in a browser. The production bundle contains those
+  three and nothing else from the packages — check a sourcemap's `sources` if
+  you need to confirm it after a change.
+- **`src/lib/auth-validation.ts` is a form adapter, not a rule book.** The
+  handle bounds and charset, the date-of-birth parse and age comparison, the
+  bio limit and every English rejection string come from
+  `@my-tuums/auth/rules`, which is the same module `packages/auth`'s database
+  hooks enforce from. What this file owns is what only a form knows: which
+  fields are required, what gets trimmed, which violation surfaces first, and
+  the rules with no server half at all (password length and confirmation, the
+  two-factor box, the login fields). Restating a bound or a message here puts
+  the client back out of step with the server it cannot see.
 - The client mirrors pinned server settings: no session cookie cache,
-  `requireEmailVerification: false`. `src/lib/auth-validation.ts` shares its
-  English strings byte-for-byte with `packages/auth`; change one side alone and
-  server rejections render untranslated.
+  `requireEmailVerification: false`.
 - In dev, Vite proxies `/rpc`, `/api/auth` and `/media` to the API on `:3001`.
 - Only two `VITE_*` variables are read: `VITE_SOCIAL_PROVIDERS` and
   `VITE_GOOGLE_CLIENT_ID`. Both are inlined at build time — see

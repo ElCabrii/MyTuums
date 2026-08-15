@@ -69,9 +69,11 @@ the subtree guide.
   read it. Duplicating it lets the two gates disagree and bounce a visitor
   between them forever.
 - **The browser-safe subpaths stay dependency-free.**
-  `@my-tuums/api/constants` and `@my-tuums/api/dimensions` must never import
-  `@my-tuums/db`; the web app imports them, and a database import throws at
-  module load in a browser.
+  `@my-tuums/api/constants`, `@my-tuums/api/dimensions` and
+  `@my-tuums/auth/rules` must never import `@my-tuums/db`; the web app imports
+  them, and a database import throws at module load in a browser. Those three
+  are the *only* workspace modules in the SPA bundle, and they are the only
+  ones `apps/web` may import from either package.
 - **Auth-owned user fields are written through the auth client only.**
   `packages/auth`'s database hooks are the single enforcement point for
   user-field rules; an oRPC procedure writing them bypasses validation.
@@ -84,9 +86,14 @@ the subtree guide.
 - **Destructive database helpers refuse any database not ending in `_test`.**
 - **Migrations run as a pre-deploy step, never at server boot.** N replicas
   would race the same DDL.
-- **Error and validation strings are shared byte-for-byte** between
-  `apps/web/src/lib/auth-validation.ts` and `packages/auth`; change one side
-  alone and server rejections render untranslated.
+- **The account rules have exactly one definition.**
+  `packages/auth/src/rules.ts` (`@my-tuums/auth/rules`) owns the handle bounds
+  and charset, the date-of-birth parse and age comparison, the bio limit, the
+  preference lists, and every English rejection string. The browser forms, the
+  better-auth hooks and plugin config, and `usernameInput` in
+  `packages/api/src/users.ts` all read it. Those strings are also the keys of
+  `apps/web/src/lib/auth-error-message.ts`; restate one anywhere and server
+  rejections render untranslated.
 
 ## Generated files
 

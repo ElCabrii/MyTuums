@@ -1,7 +1,8 @@
 import { atom } from "jotai";
 import { atomWithReset, RESET } from "jotai/utils";
 import { queryClientAtom } from "jotai-tanstack-query";
-import { BIO_MAX_LENGTH, type ImageKind } from "@my-tuums/api/constants";
+import { type ImageKind } from "@my-tuums/api/constants";
+import { BIO_MAX_LENGTH } from "@my-tuums/auth/rules";
 import { authClient } from "@/lib/auth-client";
 import { client, orpc } from "@/lib/orpc";
 import { createDisplayVariant, ImageError } from "@/lib/media";

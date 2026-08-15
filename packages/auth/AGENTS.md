@@ -12,6 +12,7 @@ nothing else — no routes, no UI, no queries beyond the adapter.
 | File            | Why                                                                                               |
 | --------------- | ------------------------------------------------------------------------------------------------- |
 | `src/index.ts`  | The production instance. Every non-default setting is load-bearing and carries an inline comment. |
+| `src/rules.ts`  | The account rules, stated once. Browser-safe, import-free, read by the whole repo.                |
 | `src/social.ts` | Provider registration and `trustedProviders`, the account-linking control.                        |
 | `src/env.ts`    | Quiet env resolution — missing values make a feature absent, never a crash.                       |
 | `src/email.ts`  | The only place mail is sent, plus the en/fr copy.                                                 |
@@ -23,7 +24,8 @@ nothing else — no routes, no UI, no queries beyond the adapter.
 | Add or change an OAuth provider | `src/social.ts`                | `../../apps/server/src/env.ts`, `../../.env.example`, `VITE_SOCIAL_PROVIDERS`, `apps/web/src/lib/auth-client.ts` |
 | Change an auth email            | `src/email.ts`                 | both locales in the same file                                                                                    |
 | Translate an auth error         | `src/i18n.ts`                  | `apps/web/src/lib/auth-error-message.ts`                                                                         |
-| Change a user-field rule        | `src/dob.ts`, `src/profile.ts` | `apps/web/src/lib/auth-validation.ts` — the strings are shared byte-for-byte                                     |
+| Change a user-field rule        | `src/rules.ts`                 | nothing — the hooks, both handle forms and `packages/api` all read it. Keep the file import-free                 |
+| Change how a violation is refused | `src/dob.ts`, `src/profile.ts` | the `APIError` translation only; the rule itself belongs in `src/rules.ts`                                     |
 | Change session or plugin config | `src/index.ts`                 | read the inline comment first; several settings are pinned                                                       |
 | Change an auth rate limit       | `src/index.ts` (`customRules`) | these are security controls, not tuning                                                                          |
 | Add a test-only helper          | `src/testing.ts`               | never import it from application code                                                                            |
@@ -65,6 +67,19 @@ Each of these is a deliberate, non-default setting. The inline comment in
 - **The validation hooks are not applied in the test instance.** Fixtures may
   need to mint rows the rules would reject; the rules themselves are pure and
   tested separately.
+- **`src/rules.ts` has no imports, and must never gain one.** It is exposed as
+  `@my-tuums/auth/rules` and `apps/web` imports it — it is the only part of
+  this package the browser may reach. One `@my-tuums/db` import there throws at
+  module load in a browser; one `better-auth` import drags server code into the
+  SPA bundle. Everything it holds is a plain value or a pure function: nothing
+  throws, and nothing knows which side is calling.
+- **`src/dob.ts` and `src/profile.ts` are adapters, not rules.** What belongs
+  in them is what only a server does — `APIError` translation, permitting an
+  absent date of birth on the OAuth creation path, and the provider-image and
+  `input: false` original-image protections, which guard writes no client
+  should be making rather than restating something a form also checks.
+  Restating a bound or a message in either file re-opens the drift the single
+  module closes.
 - **`src/testing.ts` is reachable only as `@my-tuums/auth/testing`.** It mints
   sessions and captures OTPs. Never import it from application code.
 
@@ -73,9 +88,17 @@ Each of these is a deliberate, non-default setting. The inline comment in
 - `apps/server/src/index.ts` mounts `auth` at `/api/auth` via `toNodeHandler`.
 - `packages/api/src/context.ts` resolves every request's session with
   `auth.api.getSession`.
-- Error and date-of-birth strings are byte-identical with
-  `apps/web/src/lib/auth-validation.ts`; change one side alone and server
-  rejections render untranslated.
+- **`src/rules.ts` is the one module `apps/web` imports from this package**, as
+  `@my-tuums/auth/rules`. `apps/web/src/lib/auth-validation.ts` reads the
+  handle, date-of-birth and bio rules from it, `apps/web/src/atoms/profile-edit.ts`
+  reads `BIO_MAX_LENGTH` for the counter, and `usernameInput` in
+  `packages/api/src/users.ts` reads the handle bounds. That is a web → auth
+  dependency edge, and it is safe only because the file imports nothing — see
+  [docs/architecture.md](../../docs/architecture.md).
+- The rejection strings this package throws are the lookup keys in
+  `apps/web/src/lib/auth-error-message.ts`. They live in `src/rules.ts` so
+  there is one copy; restating one anywhere makes server rejections render
+  untranslated.
 - The better-auth family is pinned as one unit in the workspace catalog. Bump
   core and plugins together — `packages/api` verifies behaviour against these
   internals.
@@ -93,10 +116,13 @@ migration.
 | ------------------------------------------------- | ----------------------------------- |
 | `pnpm --filter @my-tuums/auth lint` / `typecheck` | this package alone                  |
 | `pnpm test:integration`                           | the real behaviour of this instance |
+| `pnpm --filter @my-tuums/api test:unit`           | `src/rules.ts`, through its interface |
 
-There is no test script here on purpose: the logic is covered by
-`packages/api`'s integration suites, which exercise the _production_ instance,
-and the validation rules are pure functions tested where they live.
+There is no test script here on purpose. The instance's behaviour is covered by
+`packages/api`'s integration suites, which exercise the _production_ instance;
+`src/rules.ts` is covered by `packages/api/src/account-rules.test.ts`, a **unit**
+test, which is itself the standing proof that the module needs no database, no
+environment and no better-auth instance to import.
 
 ## Further reading
 
