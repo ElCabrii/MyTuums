@@ -21,8 +21,9 @@ export const threadAtomFamily = atomFamily((postId: string) =>
 );
 
 /**
- * Drops every entry this family has created. Called from `signOutAtom` for
- * the same reason as `clearPostFeedFamily`: the thread payload carries
+ * Drops every entry this family has created. Called from `clearViewerState`
+ * (`atoms/session-teardown.ts`) for the same reason as `clearPostFeedFamily`:
+ * the thread payload carries
  * viewer-dependent `viewerHasLiked` behind a query key with no viewer
  * identity in it, so leaving it cached would show the next viewer the
  * previous one's like state.

@@ -67,9 +67,9 @@ export const postFeedAtom = (p: PostFeedParams) => postFeedFamily(encode(p));
  * the first place, just extended to cleanup: callers that want to clear it
  * shouldn't be able to reach in and `.remove()` a single key by hand, which
  * would split an in-progress "Load more" scroll-through the same way a lazy
- * `setShouldRemove` would. `signOutAtom` (`atoms/auth.ts`) is the only
- * caller, and sign-out is the one moment nothing here is mounted, so a full
- * sweep is safe.
+ * `setShouldRemove` would. `clearViewerState` (`atoms/session-teardown.ts`)
+ * is the only caller, and sign-out is the one moment nothing here is mounted,
+ * so a full sweep is safe.
  */
 export function clearPostFeedFamily(): void {
   for (const key of [...postFeedFamily.getParams()]) postFeedFamily.remove(key);

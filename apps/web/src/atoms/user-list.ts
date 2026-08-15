@@ -57,10 +57,10 @@ export const userListAtom = (username: string, direction: FollowDirection) =>
  * function rather than exporting the family itself, so the family's
  * `remove`/`getParams` stay behind this one narrow, all-or-nothing entry
  * point instead of being handed to callers wholesale — the same reasoning as
- * `clearPostFeedFamily` in `atoms/post-feed.ts`. `signOutAtom`
- * (`atoms/auth.ts`) is the only caller, and sign-out is the one moment
- * nothing here is mounted, so a full sweep can't split an open dialog's
- * in-progress pagination.
+ * `clearPostFeedFamily` in `atoms/post-feed.ts`. `clearViewerState`
+ * (`atoms/session-teardown.ts`) is the only caller, and sign-out is the one
+ * moment nothing here is mounted, so a full sweep can't split an open
+ * dialog's in-progress pagination.
  */
 export function clearUserListFamily(): void {
   for (const key of [...userListFamily.getParams()]) userListFamily.remove(key);
