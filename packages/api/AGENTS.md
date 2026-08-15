@@ -12,33 +12,33 @@ over HTTP and imports only its browser-safe subpaths.
 
 ## Start here
 
-| File                        | Why                                                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------- |
-| `src/router.ts`             | The five groups and what owns each.                                                   |
-| `src/procedures.ts`         | The four gates, the two rate-limit mechanisms, the one exception.                     |
-| `src/context.ts`            | What every handler is handed, and why nothing is a module global.                     |
-| `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                               |
-| `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                    |
-| `src/moderation-actions.ts` | The forward and inverse moderation effects: transaction, guards, audit, owed notices. |
+| File                        | Why                                                                                      |
+| --------------------------- | ---------------------------------------------------------------------------------------- |
+| `src/router.ts`             | The five groups and what owns each.                                                      |
+| `src/procedures.ts`         | The four gates, the two rate-limit mechanisms, the one exception.                        |
+| `src/context.ts`            | What every handler is handed, and why nothing is a module global.                        |
+| `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                                  |
+| `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                       |
+| `src/moderation-actions.ts` | The forward and inverse moderation effects: transaction, guards, audit, owed notices.    |
 | `src/appeal-intake.ts`      | The appeal intake lifecycle: the two sources, the budgets, the gates, the replay policy. |
-| `src/profile-media.ts`      | The avatar/banner lifecycle: replace/remove, the locked swap, best-effort cleanup.    |
+| `src/profile-media.ts`      | The avatar/banner lifecycle: replace/remove, the locked swap, best-effort cleanup.       |
 
 ## Change map
 
-| Intent                                | Primary                                                                                  | Also touch                                                                          |
-| ------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`) | `src/router.ts` if it is a new group; an `.int.test.ts`                             |
-| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                      | a matching index in `packages/db/src/schema/app.ts`                                 |
-| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                      | `src/rate-limit.test.ts`                                                            |
-| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                     | `src/users.int.test.ts` pins it — read the invariant first                          |
-| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)         | `src/constants.ts` (action code), `docs/product.md` glossary                        |
-| Change the queue or a case view       | `src/moderation-queue.ts`                                                                | `src/moderation-inputs.ts` if the input shape moves                                 |
+| Intent                                | Primary                                                                                  | Also touch                                                                              |
+| ------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`) | `src/router.ts` if it is a new group; an `.int.test.ts`                                 |
+| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                      | a matching index in `packages/db/src/schema/app.ts`                                     |
+| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                      | `src/rate-limit.test.ts`                                                                |
+| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                     | `src/users.int.test.ts` pins it — read the invariant first                              |
+| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)         | `src/constants.ts` (action code), `docs/product.md` glossary                            |
+| Change the queue or a case view       | `src/moderation-queue.ts`                                                                | `src/moderation-inputs.ts` if the input shape moves                                     |
 | Change how an appeal is opened        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                             | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface |
-| Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                             | `src/moderation-actions.ts` if the inverse effect changes                           |
-| Change upload rules                   | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                           |
-| Change the upload/remove lifecycle    | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes |
-| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                |
-| Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                    |
+| Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                             | `src/moderation-actions.ts` if the inverse effect changes                               |
+| Change upload rules                   | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                               |
+| Change the upload/remove lifecycle    | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes     |
+| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                    |
+| Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                        |
 
 ## Invariants
 
