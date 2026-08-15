@@ -46,7 +46,7 @@ app's build from the same origin.
 - **Atom families key on primitive strings only**, and never use
   `setShouldRemove`. Object params force a linear-scan `areEqual`; lazy removal
   can split a shared observer mid-scroll. Cleanup happens in
-  `src/atoms/sign-out-sweep.ts`, where nothing is mounted.
+  `src/atoms/session-teardown.ts`, where nothing is mounted.
 - **The conditional spreads in `src/lib/query-definitions.ts` are
   load-bearing.** oRPC embeds the whole input
   object in the query key; those spreads keep the global feed's key bare, and
@@ -54,7 +54,10 @@ app's build from the same origin.
   forks every cache entry silently.
 - **Sign-out clears the QueryClient and sweeps every family.** Cached rows
   carry viewer-relative fields (`viewerHasLiked`, `viewerIsFollowing`) under
-  viewer-less keys.
+  viewer-less keys. `src/atoms/session-teardown.ts` owns that whole inventory
+  behind one call; a new viewer-owned family is added there, not in
+  `signOutAtom`, which imports the module dynamically to keep it out of the
+  login bundle.
 - **Like and follow serialise per entity.** One `scope` id per entity,
   per-entity intent atoms drop superseded responses, and rollback rides on
   mutation-level `onError` — per-call callbacks never fire for write-only
