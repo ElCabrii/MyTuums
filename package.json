@@ -9,8 +9,8 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
+    "lint": "eslint eslint.config.ts scripts && turbo run lint",
+    "typecheck": "tsc --noEmit -p tsconfig.json && turbo run typecheck",
     "docs:check": "tsx scripts/check-docs.ts",
     "test": "turbo run test",
     "test:unit": "turbo run test:unit",
@@ -37,6 +37,7 @@
     "prettier-plugin-tailwindcss": "^0.8.1",
     "tsx": "^4.19.0",
     "turbo": "^2.10.7",
+    "typescript": "catalog:",
     "typescript-eslint": "^8.65.0"
   }
 }

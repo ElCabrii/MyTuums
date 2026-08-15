@@ -27,6 +27,12 @@ import postgres from "postgres";
 // Keep in step with that file.
 const PROMOTABLE_ROLES = ["moderator", "staff", "admin"];
 
+interface UserRow {
+  id: string;
+  username: string;
+  name: string;
+}
+
 const [username, role] = process.argv.slice(2);
 
 if (!username || !role) {
@@ -49,7 +55,7 @@ const sql = postgres(databaseUrl, { max: 1, onnotice: () => {} });
 
 try {
   // The username is a parameterised value, never spliced into SQL.
-  const [target] = await sql`
+  const [target] = await sql<UserRow[]>`
     select id, username, name from "user" where username = ${username}
   `;
 

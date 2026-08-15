@@ -69,10 +69,6 @@ export default tseslint.config(
             // theirs. It is object literals only, so the weaker inferred
             // typing has nothing unsafe to trip over.
             "apps/server/vitest.config.ts",
-            // The root tsconfig.json includes only eslint.config.ts, so the
-            // docs checker has no project of its own; the root tsconfig
-            // stands in for it.
-            "scripts/check-docs.ts",
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -85,21 +81,6 @@ export default tseslint.config(
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-misused-promises": "error",
       "@typescript-eslint/require-await": "error",
-    },
-  },
-  {
-    // Plain Node build scripts, run by `node` or `tsx` and never bundled or
-    // imported by the app. There's no tsconfig that covers them, so type-aware
-    // linting has nothing to work from — it reports every import as `error`
-    // typed rather than finding anything real. Syntax and correctness rules
-    // still apply.
-    files: ["**/scripts/**/*.ts"],
-    extends: [tseslint.configs.disableTypeChecked],
-    languageOptions: {
-      globals: {
-        console: "readonly",
-        process: "readonly",
-      },
     },
   },
 );

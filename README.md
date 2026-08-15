@@ -48,7 +48,8 @@ unset; the traps worth knowing are collected in
 
 | Command                                                         | What it does                                        |
 | --------------------------------------------------------------- | --------------------------------------------------- |
-| `pnpm build` · `pnpm lint` · `pnpm typecheck`                   | turbo, across the workspace                         |
+| `pnpm build`                                                    | production builds across the workspace              |
+| `pnpm lint` · `pnpm typecheck`                                  | root tooling and all workspace packages             |
 | `pnpm test:unit`                                                | vitest unit suites — pure logic, no database needed |
 | `pnpm db:test:setup` then `pnpm test:integration`               | API integration suites against real Postgres        |
 | `pnpm test:e2e`                                                 | Playwright; slow, own ports (`:3101` / `:5273`)     |
