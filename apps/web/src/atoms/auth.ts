@@ -313,6 +313,10 @@ export const signUpAtom = atom(null, async (_get, set, fields: SignUpArgs): Prom
 export const signOutAtom = atom(null, async (get, set): Promise<void> => {
   set(authPendingAtom, true);
   try {
+    // Load the lazy teardown chunk while the current session is still live.
+    // Awaiting it after `waitForSignedOut()` would leave a window where the
+    // signed-out UI could observe the previous viewer's query cache.
+    const { clearViewerState } = await import("@/atoms/session-teardown");
     await authClient.signOut();
     // Not redundant with the line above — see `lib/session-sync.ts`. Without
     // it the caller navigates while the session store still reports the old
@@ -325,7 +329,6 @@ export const signOutAtom = atom(null, async (get, set): Promise<void> => {
     // the sake of an action only a signed-in user can trigger. Sign-out is
     // also the one moment nothing is mounted against those families, which is
     // what makes the sweep safe — see `atoms/session-teardown.ts`.
-    const { clearViewerState } = await import("@/atoms/session-teardown");
     clearViewerState(get(queryClientAtom));
     // Sign-in state that belongs to the session that just ended: a pending
     // challenge's methods would otherwise still be on screen for whoever signs

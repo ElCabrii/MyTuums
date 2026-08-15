@@ -57,9 +57,9 @@ export function ProfileLayout() {
 
   const handleSignOut = async () => {
     try {
-      // signOutAtom (atoms/auth.ts) owns the sign-out call, the
-      // QueryClient.clear(), and sweeping the profile/feed/user-list
-      // families — see its comment for why clearing those matters here:
+      // signOutAtom (atoms/auth.ts) owns the sign-out sequence and delegates
+      // QueryClient.clear() plus the family sweep to clearViewerState — see
+      // that module's comment for why clearing those matters here:
       // viewer-dependent fields like `viewerIsFollowing` live behind query
       // keys with no viewer identity in them.
       await signOut();

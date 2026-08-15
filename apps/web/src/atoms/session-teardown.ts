@@ -76,16 +76,16 @@ export function clearViewerState(queryClient: QueryClient): void {
 
   clearFamily(profileAtomFamily);
   clearPostFeedFamily();
-  clearThreadFamily();
   clearUserListFamily();
+  clearThreadFamily();
   // Reply drafts are per-post and in-memory; they belong to the person who
   // typed them, not to the browser.
   clearReplyFamilies();
   clearLikeFamilies();
   clearFollowFamilies();
+  clearModerationFamilies();
   // Results keyed on the previous session's queries shouldn't outlive it. The
   // debounced query and the popover state die with the SearchBox at unmount,
   // which the session gate triggers right after sign-out.
   clearSearchFamilies();
-  clearModerationFamilies();
 }
