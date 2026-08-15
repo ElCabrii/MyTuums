@@ -157,7 +157,7 @@ describe("post.list", () => {
     expect(new Set(ids)).toEqual(new Set(seeded.map((p) => p.id))); // exactly the seeded set
   }, 20_000);
 
-  it("rows sharing a millisecond are still traversed exactly once — the precision: 3 silent-skip bug packages/db/AGENTS.md describes", async () => {
+  it("rows sharing a millisecond are still traversed exactly once — the precision: 3 silent-skip bug packages/db/CONTEXT.md describes", async () => {
     const author = await createTestUser();
     const tiedAt = new Date("2025-06-01T12:00:00.000Z");
     const tieCount = POST_PAGE_SIZE + 5; // more than a small page, all sharing one createdAt

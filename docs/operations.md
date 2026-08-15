@@ -190,7 +190,7 @@ demand — the standing replacement for a post-deploy check, since CI never
 deploys. It runs the same three assertions as the `docker` job's boot step:
 health, `/login` serving the SPA shell, and the page gate's redirect.
 
-Details and the invariants behind each job: [.github/AGENTS.md](../.github/AGENTS.md).
+Details and the invariants behind each job: [.github/CONTEXT.md](../.github/CONTEXT.md).
 
 ## Maintenance
 

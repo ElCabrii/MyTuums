@@ -1,4 +1,4 @@
-# apps/server — agent guide
+# apps/server context
 
 ## Responsibility
 

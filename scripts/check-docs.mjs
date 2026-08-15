@@ -39,10 +39,10 @@ const REQUIRED_DOCS = {
     "Repository layout",
     "Documentation",
   ],
-  "AGENTS.md": [
+  "AGENTS.md": ["Workflow", "Repository guardrails", "Completion"],
+  "CONTEXT.md": [
     "Repository",
-    "Non-negotiable rules",
-    "Task routing",
+    "Context routing",
     "Cross-cutting invariants",
     "Generated files",
     "Verification matrix",
@@ -95,47 +95,47 @@ const REQUIRED_DOCS = {
     "Configuration and secrets",
     "Test and environment isolation",
   ],
-  ".github/AGENTS.md": ["Responsibility", "Start here", "Change map", "Invariants", "Verification"],
-  "apps/server/AGENTS.md": [
+  ".github/CONTEXT.md": ["Responsibility", "Start here", "Change map", "Invariants", "Verification"],
+  "apps/server/CONTEXT.md": [
     "Responsibility",
     "Start here",
     "Change map",
     "Invariants",
     "Verification",
   ],
-  "apps/web/AGENTS.md": [
+  "apps/web/CONTEXT.md": [
     "Responsibility",
     "Start here",
     "Change map",
     "Invariants",
     "Verification",
   ],
-  "packages/api/AGENTS.md": [
+  "packages/api/CONTEXT.md": [
     "Responsibility",
     "Start here",
     "Change map",
     "Invariants",
     "Verification",
   ],
-  "packages/auth/AGENTS.md": [
+  "packages/auth/CONTEXT.md": [
     "Responsibility",
     "Start here",
     "Change map",
     "Invariants",
     "Verification",
   ],
-  "packages/db/AGENTS.md": [
+  "packages/db/CONTEXT.md": [
     "Responsibility",
     "Start here",
     "Change map",
     "Invariants",
     "Verification",
   ],
-  "e2e/AGENTS.md": ["Responsibility", "Start here", "Change map", "Invariants", "Verification"],
+  "e2e/CONTEXT.md": ["Responsibility", "Start here", "Change map", "Invariants", "Verification"],
 };
 
 /** Documents deleted by the documentation rewrite. A live reference to one is a dead end. */
-const REMOVED_DOCS = ["CONTEXT.md", "PRODUCT.md"];
+const REMOVED_DOCS = ["PRODUCT.md"];
 
 /**
  * Generated artefacts. They are absent from a fresh clone (so link checking must
@@ -163,7 +163,7 @@ const ABSENT_PATH_ALLOWLIST = new Set([
 ]);
 
 /** The root agent guide is a router, not a manual. Past this it stops being read in full. */
-const ROOT_AGENTS_MAX_BYTES = 9000;
+const ROOT_AGENTS_MAX_BYTES = 5000;
 
 /** pnpm subcommands that are not workspace scripts. */
 const PNPM_BUILTINS = new Set([
@@ -510,39 +510,37 @@ for (const doc of markdownFiles) {
 }
 
 // --------------------------------------------------------------------------
-// 5. CLAUDE.md is a pointer, never a second source of truth
+// 5. Root CLAUDE.md is a pointer, never a second source of truth
 // --------------------------------------------------------------------------
 
-const agentGuides = markdownFiles.filter((f) => f === "AGENTS.md" || f.endsWith("/AGENTS.md"));
-
-for (const guide of agentGuides) {
-  const dir = posix.dirname(guide) === "." ? "" : posix.dirname(guide);
-  const pointer = dir ? posix.join(dir, "CLAUDE.md") : "CLAUDE.md";
-  if (!exists(pointer)) {
-    fail(pointer, "AGENTS.md has no adjacent CLAUDE.md", `symlink it: ln -s AGENTS.md ${pointer}`);
-    continue;
-  }
-  const stats = lstatSync(join(ROOT, pointer));
+if (!exists("CLAUDE.md")) {
+  fail(
+    "CLAUDE.md",
+    "root AGENTS.md has no Claude pointer",
+    "symlink it: ln -s AGENTS.md CLAUDE.md",
+  );
+} else {
+  const stats = lstatSync(join(ROOT, "CLAUDE.md"));
   if (stats.isSymbolicLink()) {
-    const target = readlinkSync(join(ROOT, pointer));
+    const target = readlinkSync(join(ROOT, "CLAUDE.md"));
     if (target !== "AGENTS.md") {
       fail(
-        pointer,
-        `symlink points at "${target}" instead of the adjacent AGENTS.md`,
-        `re-link it: ln -sf AGENTS.md ${pointer}`,
+        "CLAUDE.md",
+        `symlink points at "${target}" instead of AGENTS.md`,
+        "re-link it: ln -sf AGENTS.md CLAUDE.md",
       );
     }
-    continue;
-  }
-  const body = read(pointer).trim();
-  if (body.length > 200) {
-    fail(
-      pointer,
-      "is a regular file with independent content",
-      "replace it with a symlink to the adjacent AGENTS.md, or a one-line pointer",
-    );
-  } else if (!body.includes("AGENTS.md")) {
-    fail(pointer, "does not point at AGENTS.md", "make it a symlink to the adjacent AGENTS.md");
+  } else {
+    const body = read("CLAUDE.md").trim();
+    if (body.length > 200) {
+      fail(
+        "CLAUDE.md",
+        "is a regular file with independent content",
+        "replace it with a symlink to AGENTS.md, or a one-line pointer",
+      );
+    } else if (!body.includes("AGENTS.md")) {
+      fail("CLAUDE.md", "does not point at AGENTS.md", "make it a symlink to AGENTS.md");
+    }
   }
 }
 
@@ -558,8 +556,8 @@ if (exists("AGENTS.md")) {
   if (rootAgentsBytes > ROOT_AGENTS_MAX_BYTES) {
     fail(
       "AGENTS.md",
-      `is ${String(rootAgentsBytes)} bytes, over the ${String(ROOT_AGENTS_MAX_BYTES)}-byte routing budget`,
-      "move implementation detail into a subtree AGENTS.md or docs/",
+      `is ${String(rootAgentsBytes)} bytes, over the ${String(ROOT_AGENTS_MAX_BYTES)}-byte instruction budget`,
+      "move repository knowledge into CONTEXT.md or docs/",
     );
   }
 }
@@ -575,7 +573,7 @@ for (const file of scannedTextFiles) {
       fail(
         file,
         `references the removed document ${removed}`,
-        "link to docs/product.md, docs/architecture.md or the owning AGENTS.md instead",
+        "link to docs/product.md, docs/architecture.md or the owning CONTEXT.md instead",
       );
     }
   }

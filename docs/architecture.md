@@ -1,7 +1,7 @@
 # Architecture
 
 How the workspaces fit together and what actually happens at runtime. For
-"where do I make this change", start from [AGENTS.md](../AGENTS.md); for
+"where do I make this change", start from [CONTEXT.md](../CONTEXT.md); for
 behaviour and vocabulary, [product.md](product.md).
 
 ## Workspace ownership and dependency direction

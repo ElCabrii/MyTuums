@@ -1,4 +1,4 @@
-# packages/db — agent guide
+# packages/db context
 
 ## Responsibility
 

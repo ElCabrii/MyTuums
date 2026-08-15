@@ -1,4 +1,4 @@
-# packages/api — agent guide
+# packages/api context
 
 ## Responsibility
 
