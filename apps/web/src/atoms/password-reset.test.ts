@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
+import { installTestAuthClient } from "@/lib/auth-client";
 
 /**
  * The two client calls under test, hoisted so the mock below and the
@@ -24,22 +25,27 @@ const { requestPasswordReset, resetPassword } = vi.hoisted(() => ({
 // A minimal nanostore-shaped double, exactly as in session.test.ts: `atoms/auth.ts`
 // imports `waitForSignedOut` from lib/session-sync, which reads `sessionStore` at
 // module scope — an absent export would crash the import, not the test.
+type PasswordResetSessionState = { value: PasswordResetSessionFixture };
+type PasswordResetSessionFixture = { data: null; isPending: boolean };
+
 const { state, listeners } = vi.hoisted(() => {
-  const initial: { value: unknown } = { value: { data: null, isPending: true } };
-  return { state: initial, listeners: new Set<(value: unknown) => void>() };
+  const initial: PasswordResetSessionState = { value: { data: null, isPending: true } };
+  return { state: initial, listeners: new Set<(value: PasswordResetSessionFixture) => void>() };
 });
 
-vi.mock("@/lib/auth-client", () => ({
+// SAFETY: the recording fakes resolve the { data, error } shapes the app reads
+// from the real client; the seam swaps only what each suite needs.
+installTestAuthClient({
   sessionStore: {
     get: () => state.value,
-    subscribe: (listener: (value: unknown) => void) => {
+    subscribe: (listener: (value: PasswordResetSessionFixture) => void) => {
       listeners.add(listener);
       listener(state.value);
       return () => listeners.delete(listener);
     },
   },
   authClient: { requestPasswordReset, resetPassword },
-}));
+});
 
 import {
   authErrorAtom,

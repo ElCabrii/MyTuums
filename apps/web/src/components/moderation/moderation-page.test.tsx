@@ -10,34 +10,31 @@ import {
 } from "@/test/render";
 import { ModerationPage } from "@/components/moderation/moderation-page";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
 // Every mutation atom `CaseDialog` reads unconditionally on mount, plus the
 // three queries this page's tabs can open — none are ever actually called
 // (nothing here opens a case or clicks an action), but `createTanstackQueryUtils`'s
 // proxy still needs a defined value at each path segment to build a key or a
 // mutation's options object without throwing (see case-dialog.test.tsx).
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: {
-    moderation: {
-      queue: vi.fn(),
-      case: vi.fn(),
-      auditLog: vi.fn(),
-      team: vi.fn(),
-      removePost: vi.fn(),
-      restorePost: vi.fn(),
-      resolve: vi.fn(),
-      suspendUser: vi.fn(),
-      banUser: vi.fn(),
-      unbanUser: vi.fn(),
-      appealReview: vi.fn(),
-    },
+const fakeClient = {
+  moderation: {
+    queue: vi.fn(),
+    case: vi.fn(),
+    auditLog: vi.fn(),
+    team: vi.fn(),
+    removePost: vi.fn(),
+    restorePost: vi.fn(),
+    resolve: vi.fn(),
+    suspendUser: vi.fn(),
+    banUser: vi.fn(),
+    unbanUser: vi.fn(),
+    appealReview: vi.fn(),
   },
-}));
+};
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {
   vi.clearAllMocks();

@@ -168,7 +168,10 @@ export type ViewerRole = "user" | "moderator" | "staff" | "admin";
  * The role ordering, weakest to strongest — same ranks as `roleRank` in
  * packages/api/src/roles.ts.
  */
-const ROLE_RANK: Record<ViewerRole, number> = { user: 0, moderator: 1, staff: 2, admin: 3 };
+const ROLE_RANK = { user: 0, moderator: 1, staff: 2, admin: 3 } satisfies Record<
+  ViewerRole,
+  number
+>;
 
 /** True when `role` is at least `min` — the client mirror of `roleAtLeast` in packages/api. */
 export function viewerRoleAtLeast(role: ViewerRole, min: ViewerRole): boolean {

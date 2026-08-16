@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 
@@ -6,8 +7,7 @@ export type FeedScope = "following" | "global";
 
 const STORAGE_KEY = "my-tuums.feed-scope";
 
-const isFeedScope = (value: unknown): value is FeedScope =>
-  value === "following" || value === "global";
+const feedScopeSchema = z.enum(["following", "global"]);
 
 /**
  * The raw persisted value. Typed `unknown` on purpose: `localStorage` is
@@ -39,7 +39,8 @@ const storedFeedScopeAtom = atomWithStorage<unknown>(STORAGE_KEY, "global", unde
 export const feedScopeAtom = atom(
   (get): FeedScope => {
     const stored = get(storedFeedScopeAtom);
-    return isFeedScope(stored) ? stored : "global";
+    const parsed = feedScopeSchema.safeParse(stored);
+    return parsed.success ? parsed.data : "global";
   },
   (_get, set, next: FeedScope) => {
     set(storedFeedScopeAtom, next);

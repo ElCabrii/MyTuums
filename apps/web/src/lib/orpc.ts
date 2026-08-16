@@ -24,10 +24,29 @@ const link = new RPCLink({
 });
 
 /** The raw oRPC client, for direct procedure calls outside the query layer. */
-export const client = createORPCClient<RouterClient<AppRouter>>(link);
+export let client = createORPCClient<RouterClient<AppRouter>>(link);
 
 /** TanStack Query utilities over `client` — the layer atoms build query/mutation options from. */
-export const orpc = createTanstackQueryUtils(client);
+export let orpc = createTanstackQueryUtils(client);
+
+/**
+ * Test-only seams: swap the module's live exports for utilities built over a
+ * harness's fake client. Production never calls these; consumers keep
+ * importing the same names, and ESM live bindings deliver the substitution.
+ */
+export function installTestClient<TestClient>(testClient: TestClient): void {
+  client =
+    // SAFETY: test clients implement the router's procedure surface by contract;
+    // the inferred oRPC client type is wider than the seam needs to express.
+    testClient as typeof client;
+  orpc = createTanstackQueryUtils(client);
+}
+
+export function installTestOrpc<TestOrpc>(testOrpc: TestOrpc): void {
+  // SAFETY: test utils are built by createTanstackQueryUtils over a fake client
+  // carrying the router's procedure names.
+  orpc = testOrpc as typeof orpc;
+}
 
 /** One page of `post.list` — a keyset-paginated slice of posts. */
 export type PostListPage = Awaited<ReturnType<typeof client.post.list>>;
@@ -79,7 +98,7 @@ export type BlockedUser = Awaited<
  * Lives here rather than inline now that the profile route and both follower
  * list routes need the same rule.
  */
-export function retryUnlessClientError(failureCount: number, error: unknown): boolean {
+export function retryUnlessClientError(failureCount: number, error: Error): boolean {
   return (
     !(error instanceof ORPCError && error.status >= 400 && error.status < 500) && failureCount < 2
   );

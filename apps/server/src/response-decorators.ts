@@ -1,6 +1,7 @@
 import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
+import { z } from "zod";
 import { bestEncoding, type Compression } from "./compression.js";
 import { NONBLOCKING_STYLESHEET_ONLOAD_HANDLER } from "@my-tuums/api/constants";
 
@@ -167,7 +168,7 @@ const CONTENT_SECURITY_POLICY = [
  * The per-response security headers, applied to every response that does not
  * already set one (inner wins — see `applyDefaults`).
  */
-const SECURITY_HEADERS: Record<string, string> = {
+const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "X-Frame-Options": "DENY",
@@ -184,13 +185,37 @@ const SECURITY_HEADERS: Record<string, string> = {
   // risky, and keeps this module's output identical across environments —
   // see the directive-by-directive reasoning above.
   "Content-Security-Policy": CONTENT_SECURITY_POLICY,
-};
+} satisfies OutgoingHttpHeaders;
 
 /** Bodies smaller than this are sent identity — compressing them costs CPU for nothing. */
 const MIN_COMPRESS_BODY_BYTES = 1024;
 
 /** The callback shape `res.write(chunk, cb)` and `res.end(chunk, cb)` accept. */
 type WriteCallback = (error?: Error | null) => void;
+
+interface ParsedEndArgs<Arg> {
+  chunk: Arg | undefined;
+  encoding: Arg | undefined;
+  callback: WriteCallback | undefined;
+}
+
+type HeaderValue = string | string[] | number | undefined;
+interface MergedHeaders {
+  [name: string]: string;
+}
+
+const outgoingHeadersSchema = z.record(
+  z.string(),
+  z.union([z.string(), z.array(z.string()), z.number(), z.undefined()]),
+);
+
+function headerArg<Value>(values: Value[]): Record<string, HeaderValue> | undefined {
+  for (const value of values) {
+    const parsed = outgoingHeadersSchema.safeParse(value);
+    if (parsed.success) return parsed.data;
+  }
+  return undefined;
+}
 
 /**
  * Parses the `(chunk)`, `(chunk, encoding)`, `(chunk, encoding, cb)` and
@@ -205,29 +230,36 @@ type WriteCallback = (error?: Error | null) => void;
  * arguments, so the drop is unreachable in practice. Kept as-is to preserve
  * the pre-refactor behaviour exactly.
  */
-function parseEndArgs(args: unknown[]): {
-  chunk: unknown;
-  encoding: unknown;
-  callback: WriteCallback | undefined;
-} {
-  let [chunk, encoding] = args as [unknown, unknown];
+function parseEndArgs<Arg>(args: Arg[]): ParsedEndArgs<Arg> {
+  let chunk: Arg | undefined = args[0];
+  let encoding: Arg | undefined = args[1];
   let callback: WriteCallback | undefined;
-  if (typeof chunk === "function") {
-    callback = chunk as unknown as WriteCallback;
+  if (chunk instanceof Function) {
+    // SAFETY: Node's end overloads permit only a WriteCallback in this argument position.
+    callback = chunk as WriteCallback;
     chunk = undefined;
     encoding = undefined;
-  } else if (typeof encoding === "function") {
-    callback = encoding as unknown as WriteCallback;
+  } else if (encoding instanceof Function) {
+    // SAFETY: Node's end overloads permit only a WriteCallback in this argument position.
+    callback = encoding as WriteCallback;
     encoding = undefined;
   }
   return { chunk, encoding, callback };
 }
 
 /** Body bytes from the chunk shapes `write`/`end` accept (string or Uint8Array). */
-function toBuffer(chunk: unknown, encoding: unknown): Buffer {
-  return typeof chunk === "string"
-    ? Buffer.from(chunk, (encoding as BufferEncoding | undefined) ?? "utf8")
-    : Buffer.from(chunk as Uint8Array);
+function toBuffer<Chunk, Encoding>(chunk: Chunk, encoding: Encoding): Buffer {
+  const parsedString = z.string().safeParse(chunk);
+  if (parsedString.success) {
+    const parsedEncoding = z.string().safeParse(encoding);
+    const bufferEncoding =
+      parsedEncoding.success && Buffer.isEncoding(parsedEncoding.data)
+        ? parsedEncoding.data
+        : "utf8";
+    return Buffer.from(parsedString.data, bufferEncoding);
+  }
+  if (chunk instanceof Uint8Array) return Buffer.from(chunk);
+  throw new TypeError("Response body chunks must be strings or Uint8Arrays");
 }
 
 /**
@@ -288,8 +320,8 @@ class DecoratedResponse {
   }
 
   /** The effective header view (setHeader state + writeHead args), lowercased. */
-  private mergedHeaders(headersArg: OutgoingHttpHeaders | undefined): Record<string, string> {
-    const merged: Record<string, string> = {};
+  private mergedHeaders(headersArg: OutgoingHttpHeaders | undefined): MergedHeaders {
+    const merged: MergedHeaders = {};
     for (const [name, value] of Object.entries(this.res.getHeaders())) {
       if (value !== undefined) merged[name.toLowerCase()] = String(value);
     }
@@ -305,11 +337,9 @@ class DecoratedResponse {
   private stripHeaders(rest: unknown[], names: string[]): unknown[] {
     // The headers object sits at index 0 (writeHead(status, headers)) or
     // index 1 (writeHead(status, reason, headers)).
-    const index = rest.findIndex(
-      (arg) => typeof arg === "object" && arg !== null && !Array.isArray(arg),
-    );
+    const index = rest.findIndex((arg) => outgoingHeadersSchema.safeParse(arg).success);
     if (index === -1) return rest;
-    const headers = { ...(rest[index] as Record<string, unknown>) };
+    const headers = { ...outgoingHeadersSchema.parse(rest[index]) };
     for (const key of Object.keys(headers)) {
       if (names.includes(key.toLowerCase())) delete headers[key];
     }
@@ -331,11 +361,9 @@ class DecoratedResponse {
         parts.add(part);
       }
     }
-    const index = rest.findIndex(
-      (arg) => typeof arg === "object" && arg !== null && !Array.isArray(arg),
-    );
+    const index = rest.findIndex((arg) => outgoingHeadersSchema.safeParse(arg).success);
     if (index !== -1) {
-      const headers = rest[index] as Record<string, string | string[] | number | undefined>;
+      const headers = outgoingHeadersSchema.parse(rest[index]);
       for (const key of Object.keys(headers)) {
         if (key.toLowerCase() === "vary" && headers[key] !== undefined) {
           const value = headers[key];
@@ -386,10 +414,12 @@ class DecoratedResponse {
     // Forwarded untouched — preserves the (status), (status, headers),
     // (status, reason, headers) and (status, reason) shapes, and lets Node
     // re-merge the writeHead-arg headers against the setHeader state.
-    this.originalWriteHead(status, ...(rest as []));
+    // SAFETY: rest is the untouched tail accepted by Node's writeHead overloads.
+    const writeHeadArgs = [status, ...rest] as Parameters<ServerResponse["writeHead"]>;
+    this.originalWriteHead(...writeHeadArgs);
   }
 
-  writeHead = (status: number, ...rest: unknown[]) => {
+  writeHead = <Rest>(status: number, ...rest: Rest[]) => {
     this.applyDefaults();
     if (this.flushed) {
       // Mirror Node's own ERR_HTTP_HEADERS_SENT: headers are immutable once
@@ -407,10 +437,7 @@ class DecoratedResponse {
     }
     this.stashed = { status, rest };
 
-    const headersArg = rest.find(
-      (arg): arg is OutgoingHttpHeaders =>
-        typeof arg === "object" && arg !== null && !Array.isArray(arg),
-    );
+    const headersArg = headerArg(rest);
     const merged = this.mergedHeaders(headersArg);
     const encoding = bestEncoding(this.req.headers["accept-encoding"]);
     this.candidate =
@@ -432,19 +459,22 @@ class DecoratedResponse {
     return this.res;
   };
 
-  write = (chunk: unknown, encoding?: unknown, callback?: WriteCallback) => {
+  write = <Chunk, Encoding>(chunk: Chunk, encoding?: Encoding, callback?: WriteCallback) => {
     if (!this.candidate) {
       // Forward untouched, preserving the caller's argument shape: the
       // overloaded original accepts (chunk), (chunk, encoding),
       // (chunk, encoding, cb) and (chunk, cb) — this re-materialises
       // whichever one the caller used.
-      const args: unknown[] = [chunk];
+      const args: Array<Chunk | Encoding | WriteCallback> = [chunk];
       if (encoding !== undefined) args.push(encoding);
       if (callback !== undefined) args.push(callback);
-      return this.originalWrite(...(args as Parameters<ServerResponse["write"]>));
+      // SAFETY: args reconstruct the exact Node write overload received by this wrapper.
+      const writeArgs = args as Parameters<ServerResponse["write"]>;
+      return this.originalWrite(...writeArgs);
     }
-    if (typeof encoding === "function") {
-      callback = encoding as unknown as WriteCallback;
+    if (encoding instanceof Function) {
+      // SAFETY: Node's write overloads permit only a WriteCallback in this argument position.
+      callback = encoding as WriteCallback;
       encoding = undefined;
     }
     if (chunk != null) {
@@ -455,18 +485,20 @@ class DecoratedResponse {
     return true;
   };
 
-  end = (...args: unknown[]) => {
+  end = <Arg>(...args: Arg[]) => {
     const { chunk, encoding, callback } = parseEndArgs(args);
 
     if (!this.candidate) {
       // Never intercept non-compressed flows — static files, redirects,
       // plain-text 404s — so they stay byte-identical.
       this.applyDefaults();
-      const passthrough: unknown[] = [];
+      const passthrough: Array<Arg | WriteCallback> = [];
       if (chunk !== undefined) passthrough.push(chunk);
       if (encoding !== undefined) passthrough.push(encoding);
       if (callback) passthrough.push(callback);
-      return this.originalEnd(...(passthrough as Parameters<ServerResponse["end"]>));
+      // SAFETY: passthrough reconstructs the exact Node end overload parsed above.
+      const endArgs = passthrough as Parameters<ServerResponse["end"]>;
+      return this.originalEnd(...endArgs);
     }
 
     if (chunk != null) {
@@ -509,10 +541,10 @@ class DecoratedResponse {
   // request-handler), but patch it anyway so a future caller of a compressed
   // response does not send a header block with no Content-Encoding while the
   // deferred end() then compresses underneath it.
-  flushHeaders = (...args: unknown[]) => {
+  flushHeaders = () => {
     this.applyDefaults();
     if (this.candidate && !this.flushed) this.flush(true);
-    return this.originalFlushHeaders(...(args as Parameters<ServerResponse["flushHeaders"]>));
+    return this.originalFlushHeaders();
   };
 }
 

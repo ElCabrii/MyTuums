@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
+import { installTestAuthClient } from "@/lib/auth-client";
 
 /**
  * A minimal nanostore-shaped double for BetterAuth's `sessionStore`. Real
@@ -8,26 +9,53 @@ import { createStore } from "jotai";
  * `onMount` comment leans on that guarantee, so the double has to honour it
  * too or a test could pass for the wrong reason.
  */
+type SessionState = { value: SessionFixtureValue };
+type SessionFixtureValue = {
+  data: {
+    user: {
+      id: string;
+      username: string | null;
+      displayUsername: string | null;
+      name: string;
+      dateOfBirth?: string | Date;
+    };
+  } | null;
+  isPending: boolean;
+  isRefetching?: boolean;
+};
+
 const { state, listeners } = vi.hoisted(() => {
-  const initial: { value: unknown } = { value: { data: null, isPending: true } };
-  return { state: initial, listeners: new Set<(value: unknown) => void>() };
+  const initial: SessionState = { value: { data: null, isPending: true } };
+  return { state: initial, listeners: new Set<(value: SessionFixtureValue) => void>() };
 });
 
-function push(value: unknown) {
+function push(value: SessionFixtureValue) {
   state.value = value;
   listeners.forEach((listener) => listener(value));
 }
 
-vi.mock("@/lib/auth-client", () => ({
-  sessionStore: {
-    get: () => state.value,
-    subscribe: (listener: (value: unknown) => void) => {
-      listeners.add(listener);
-      listener(state.value);
-      return () => listeners.delete(listener);
-    },
+const recordingSessionStore = {
+  get: () => state.value,
+  subscribe: (listener: (value: SessionFixtureValue) => void) => {
+    listeners.add(listener);
+    listener(state.value);
+    return () => listeners.delete(listener);
   },
-}));
+};
+
+// SAFETY: the recording fakes resolve the { data, error } shapes the app reads
+// from the real client; the seam swaps only what each suite needs.
+installTestAuthClient({ sessionStore: recordingSessionStore });
+
+/** After `vi.resetModules()`, re-seeds the fresh module instance with the same recording store. */
+async function reinstallAfterReset(): Promise<void> {
+  const freshAuthClient = await import("@/lib/auth-client");
+  // SAFETY: recordingSessionStore pushes partial fixtures; the seam trusts the
+  // suite to feed the shape the atoms read.
+  freshAuthClient.installTestAuthClient({
+    sessionStore: recordingSessionStore,
+  });
+}
 
 import {
   isSignedInAtom,
@@ -76,7 +104,9 @@ const signedOut = { data: null, isPending: false, isRefetching: false };
  * exactly one place to revisit if `sessionAtom`'s shape ever starts mattering
  * to these tests.
  */
-function setSession(store: ReturnType<typeof createStore>, value: unknown): void {
+function setSession(store: ReturnType<typeof createStore>, value: SessionFixtureValue): void {
+  // SAFETY: the fixture is deliberately partial — see the comment block above;
+  // this single helper is the one place that widening happens.
   store.set(sessionAtom, value as never);
 }
 
@@ -89,6 +119,7 @@ describe("sessionAtom", () => {
   it("is seeded from sessionStore.get() with no null-then-real-value flash", async () => {
     push(signedIn);
     vi.resetModules();
+    await reinstallAfterReset();
     const fresh = await import("@/atoms/session");
 
     // No store.sub — a bare first get on a never-before-touched store.
@@ -292,6 +323,7 @@ describe("sessionSettledAtom", () => {
   it("is false while the first /get-session is still in flight", async () => {
     push({ data: null, isPending: true });
     vi.resetModules();
+    await reinstallAfterReset();
     const fresh = await import("@/atoms/session");
 
     const store = createStore();
@@ -306,6 +338,7 @@ describe("sessionSettledAtom", () => {
   it("latches true once the session resolves — signed out or in, either way", async () => {
     push(signedOut);
     vi.resetModules();
+    await reinstallAfterReset();
     const fresh = await import("@/atoms/session");
 
     const store = createStore();
@@ -325,6 +358,7 @@ describe("sessionSettledAtom", () => {
     // once. A splash keyed on the raw flag would drop over the login form.
     push(signedOut);
     vi.resetModules();
+    await reinstallAfterReset();
     const fresh = await import("@/atoms/session");
 
     const store = createStore();

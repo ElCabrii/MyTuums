@@ -1,6 +1,6 @@
 import { createServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
+
 import {
   brotliCompressSync,
   brotliDecompressSync,
@@ -9,6 +9,7 @@ import {
   gzipSync,
 } from "node:zlib";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { decorateResponse } from "./response-decorators.js";
 
 /**
@@ -69,8 +70,8 @@ async function withServer(
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const { port } = server.address() as AddressInfo;
-    await run((path, init) => rawRequest(port, path, init));
+    const address = z.object({ port: z.number() }).parse(server.address());
+    await run((path, init) => rawRequest(address.port, path, init));
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -93,11 +94,12 @@ function expectSecurityHeaders(headers: RawResponse["headers"]): void {
 function expectContentSecurityPolicy(headers: RawResponse["headers"]): void {
   const csp = headers["content-security-policy"];
   // A single string value (never an array) proves `applyDefaults` never sets
-  // this header twice — Node would otherwise fold duplicate `setHeader`
-  // calls for the same name into an array, which `typeof` would report as
-  // `"object"`, not `"string"`.
-  expect(typeof csp).toBe("string");
-  const policy = csp as string;
+  // this header twice — Node would otherwise fold duplicate values.
+  expect(Array.isArray(csp)).toBe(false);
+  if (csp === undefined || Array.isArray(csp)) {
+    throw new Error("expected one Content-Security-Policy value");
+  }
+  const policy = csp;
 
   const directives = policy.split("; ");
   expect(directives).toContain("default-src 'self'");

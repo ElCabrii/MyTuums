@@ -43,9 +43,10 @@ over HTTP and imports only its browser-safe subpaths.
 
 ## Invariants
 
-- **The rate limiter and the storage client are threaded on `Context`, never
-  module globals.** Tests substitute both; one suite's limiter state must not
-  bleed into another's.
+- **The rate limiter, storage client, and email sender are threaded on `Context`,
+  never module globals.** Tests substitute all three; one suite's limiter state
+  must not bleed into another's, and moderation tests record delivery through
+  the same sender interface production uses.
 - **`rateLimit` keys on `user:<id>`; `rateLimitCapability` keys on a
   capability.** Do not describe limiting here as uniformly per-user.
   `rateLimitCapability` is what throttles `moderation.appealOpen`

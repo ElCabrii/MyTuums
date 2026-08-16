@@ -15,27 +15,23 @@ import { orpc, type BlockedUser } from "@/lib/orpc";
 import { BlockedUsersSection } from "@/components/settings/blocked-users-section";
 import { LinkedAccountsSection } from "@/components/settings/linked-accounts-section";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: {
-    post: { list: vi.fn(), thread: vi.fn() },
-    search: { posts: vi.fn(), users: vi.fn(), typeahead: vi.fn() },
-    user: { followers: vi.fn(), following: vi.fn(), byUsername: vi.fn() },
-    moderation: {
-      listBlocked: vi.fn(),
-      unblock: vi.fn(),
-      queue: vi.fn(),
-      case: vi.fn(),
-      auditLog: vi.fn(),
-    },
+const fakeClient = {
+  post: { list: vi.fn(), thread: vi.fn() },
+  search: { posts: vi.fn(), users: vi.fn(), typeahead: vi.fn() },
+  user: { followers: vi.fn(), following: vi.fn(), byUsername: vi.fn() },
+  moderation: {
+    listBlocked: vi.fn(),
+    unblock: vi.fn(),
+    queue: vi.fn(),
+    case: vi.fn(),
+    auditLog: vi.fn(),
   },
-}));
+};
 
-vi.mock("@/lib/orpc", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/orpc")>();
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { ...actual, orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 function makeBlockedUser(overrides: Partial<BlockedUser> & { id: string }): BlockedUser {
   return {

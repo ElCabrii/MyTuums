@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { installTestAuthClient } from "@/lib/auth-client";
 
 /**
  * `waitForSession` is the fix for a race that has already bitten this codebase
@@ -14,7 +15,9 @@ interface FakeValue {
 let current: FakeValue = { data: null };
 const listeners = new Set<(value: FakeValue) => void>();
 
-vi.mock("@/lib/auth-client", () => ({
+// SAFETY: the recording fakes resolve the { data, error } shapes the app reads
+// from the real client; the seam swaps only what each suite needs.
+installTestAuthClient({
   sessionStore: {
     get: () => current,
     subscribe: (listener: (value: FakeValue) => void) => {
@@ -25,7 +28,7 @@ vi.mock("@/lib/auth-client", () => ({
       return () => listeners.delete(listener);
     },
   },
-}));
+});
 
 function emit(next: FakeValue): void {
   current = next;

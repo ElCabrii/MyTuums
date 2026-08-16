@@ -108,14 +108,15 @@ export const saveProfileAtom = atom(null, async (get, set): Promise<boolean> => 
   set(authErrorAtom, null);
   set(authPendingAtom, true);
   try {
-    const res = await authClient.updateUser({
+    const body = {
       name: get(profileNameDraftAtom).trim(),
       // Empty means "no bio", stored as null rather than "" so the profile page
-      // can test the field rather than its length. The cast is the same client-
-      // type boundary `atoms/handle-claim.ts` documents: the server accepts
-      // these additionalFields, 1.6.25's client types don't surface them.
-      ...({ bio: get(profileBioDraftAtom).trim() || null } as Record<string, string | null>),
-    });
+      // can test the field rather than its length.
+      bio: get(profileBioDraftAtom).trim() || null,
+    };
+    // SAFETY: bio is an additionalField the server accepts; 1.6.25's client
+    // types don't surface it (same boundary as atoms/handle-claim.ts).
+    const res = await authClient.updateUser(body);
 
     if (res.error) {
       set(authErrorAtom, res.error.message || m.common_something_went_wrong());
@@ -158,7 +159,12 @@ export const uploadImageAtom = atom(
       set(invalidateOwnProfileAtom);
       return true;
     } catch (err) {
-      set(authErrorAtom, messageForUploadError(err));
+      set(
+        authErrorAtom,
+        messageForUploadError(
+          err instanceof Error ? err : new Error("Image upload failed", { cause: err }),
+        ),
+      );
       return false;
     } finally {
       set(imageUploadingAtom, null);
@@ -180,7 +186,12 @@ export const removeImageAtom = atom(null, async (_get, set, kind: ImageKind): Pr
     set(invalidateOwnProfileAtom);
     return true;
   } catch (err) {
-    set(authErrorAtom, messageForUploadError(err));
+    set(
+      authErrorAtom,
+      messageForUploadError(
+        err instanceof Error ? err : new Error("Image removal failed", { cause: err }),
+      ),
+    );
     return false;
   } finally {
     set(imageUploadingAtom, null);
@@ -196,7 +207,7 @@ export const removeImageAtom = atom(null, async (_get, set, kind: ImageKind): Pr
  * `lib/auth-error-message.ts` knows how to translate — so it is passed through
  * rather than flattened, exactly as that module's pass-through rule requires.
  */
-function messageForUploadError(err: unknown): string {
+function messageForUploadError(err: Error): string {
   if (err instanceof ImageError) {
     if (err.problem === "size") return m.validation_image_too_large();
     if (err.problem === "type") return m.validation_image_type();
@@ -204,5 +215,5 @@ function messageForUploadError(err: unknown): string {
   }
 
   console.error("Image upload error:", err);
-  return err instanceof Error && err.message ? err.message : m.common_something_went_wrong();
+  return err.message ? err.message : m.common_something_went_wrong();
 }

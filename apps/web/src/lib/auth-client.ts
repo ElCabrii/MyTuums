@@ -18,9 +18,9 @@ import type { WritableAtom } from "better-auth/react";
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
 
 /** True when a `VITE_GOOGLE_CLIENT_ID` is configured — the on/off switch for the One Tap prompt. */
-export const shouldOfferOneTap = googleClientId !== "";
+export let shouldOfferOneTap = googleClientId !== "";
 
-export const authClient = createAuthClient({
+export const realAuthClient = createAuthClient({
   /**
    * A static array of plugins that each satisfy `BetterAuthClientPlugin`
    * exactly, and it has to stay that way.
@@ -60,8 +60,12 @@ export const authClient = createAuthClient({
   ],
 });
 
-/** The client's React hook and action functions, re-exported for convenience. */
-export const { useSession, signIn, signUp, signOut } = authClient;
+/** The client's React hook and action functions, re-exported as live bindings so the test seam below can swap them. */
+export let authClient = realAuthClient;
+export let useSession = realAuthClient.useSession;
+export let signIn = realAuthClient.signIn;
+export let signUp = realAuthClient.signUp;
+export let signOut = realAuthClient.signOut;
 
 /**
  * BetterAuth's session lives in a nanostore (`$store.atoms.session`), not
@@ -113,8 +117,18 @@ type SessionWithDeclaredFields = ReturnType<typeof useSession> & {
   } | null;
 };
 
-export const sessionStore = authClient.$store.atoms
-  .session as WritableAtom<SessionWithDeclaredFields>;
+// SAFETY: the additionalFields above exist on the server's user schema but
+// reach this client only as JSON, so the session atom is declared with them.
+/** The session-store contract `atoms/session.ts` reads: get + nanostore-style subscribe. */
+export interface SessionStore {
+  get(): SessionWithDeclaredFields;
+  subscribe(listener: (value: SessionWithDeclaredFields) => void): () => void;
+}
+
+export let sessionStore: SessionStore =
+  // SAFETY: the additionalFields above exist on the server's user schema but
+  // reach this client only as JSON, so the session atom is declared with them.
+  realAuthClient.$store.atoms.session as WritableAtom<SessionWithDeclaredFields>;
 
 /** Providers this app knows how to render, in display order. */
 const KNOWN_SOCIAL_PROVIDERS = [
@@ -141,7 +155,12 @@ export type SocialProviderId = (typeof KNOWN_SOCIAL_PROVIDERS)[number]["id"];
  * yields no button instead of one that dead-ends at "provider not found" after
  * the person has already left the site.
  */
-export const socialProviders = (() => {
+export interface SocialProvider {
+  id: SocialProviderId;
+  label: string;
+}
+
+export let socialProviders: readonly SocialProvider[] = (() => {
   const enabled = new Set(
     (import.meta.env.VITE_SOCIAL_PROVIDERS ?? "")
       .split(",")
@@ -151,3 +170,83 @@ export const socialProviders = (() => {
 
   return KNOWN_SOCIAL_PROVIDERS.filter((provider) => enabled.has(provider.id));
 })();
+
+/** The `{ data, error }` pair every BetterAuth client action resolves with. */
+export interface AuthClientResult {
+  data: unknown;
+  error: unknown;
+}
+
+/** A recording stand-in for one client action — vi.fn implementations satisfy this directly. */
+export type AuthClientAction = (...args: never[]) => Promise<AuthClientResult>;
+
+/** The client surface the app reaches for — declared so test harnesses can substitute a recording fake. */
+export interface AuthClientSurface {
+  signIn?: {
+    email?: AuthClientAction;
+    username?: AuthClientAction;
+    social?: AuthClientAction;
+    passkey?: AuthClientAction;
+  };
+  signUp?: { email?: AuthClientAction };
+  signOut?: AuthClientAction;
+  requestPasswordReset?: AuthClientAction;
+  resetPassword?: AuthClientAction;
+  updateUser?: AuthClientAction;
+  changePassword?: AuthClientAction;
+  listAccounts?: AuthClientAction;
+  linkSocial?: AuthClientAction;
+  unlinkAccount?: AuthClientAction;
+  twoFactor?: {
+    enable?: AuthClientAction;
+    disable?: AuthClientAction;
+    verifyTotp?: AuthClientAction;
+    verifyOtp?: AuthClientAction;
+    verifyBackupCode?: AuthClientAction;
+    sendOtp?: AuthClientAction;
+  };
+  passkey?: {
+    addPasskey?: AuthClientAction;
+    listUserPasskeys?: AuthClientAction;
+    updatePasskey?: AuthClientAction;
+    deletePasskey?: AuthClientAction;
+  };
+  getLastUsedLoginMethod?: () => string | null;
+}
+
+export type UseSessionHook = typeof realAuthClient.useSession;
+
+export interface TestAuthClientOverrides {
+  authClient?: AuthClientSurface;
+  sessionStore?: unknown;
+  useSession?: UseSessionHook;
+  signIn?: typeof realAuthClient.signIn;
+  signUp?: typeof realAuthClient.signUp;
+  signOut?: typeof realAuthClient.signOut;
+  shouldOfferOneTap?: boolean;
+  socialProviders?: readonly SocialProvider[];
+}
+
+/**
+ * Test-only seam: swaps the module's live exports for a harness's fakes.
+ * Production never calls this — every consumer keeps importing the same names,
+ * and ESM live bindings deliver whatever the harness installed.
+ */
+export function installTestAuthClient(overrides: TestAuthClientOverrides): void {
+  if (overrides.authClient) {
+    // SAFETY: the fake implements the app's surface by contract; the inferred
+    // better-auth client type is wider than the seam needs to express.
+    authClient = overrides.authClient as typeof realAuthClient;
+  }
+  if (overrides.sessionStore) {
+    // SAFETY: test fakes push partial session fixtures; the seam trusts the suite
+    // to feed the shape the atoms read.
+    sessionStore = overrides.sessionStore as SessionStore;
+  }
+  if (overrides.useSession) useSession = overrides.useSession;
+  if (overrides.signIn) signIn = overrides.signIn;
+  if (overrides.signUp) signUp = overrides.signUp;
+  if (overrides.signOut) signOut = overrides.signOut;
+  if (overrides.shouldOfferOneTap !== undefined) shouldOfferOneTap = overrides.shouldOfferOneTap;
+  if (overrides.socialProviders) socialProviders = overrides.socialProviders;
+}

@@ -22,6 +22,11 @@ import { z } from "zod";
 /** The codec `createCursorCodec` returns — what `keysetPage` in ./pagination.ts takes. */
 export type CursorCodec = ReturnType<typeof createCursorCodec>;
 
+interface DecodedCursor {
+  createdAt: Date;
+  id: string;
+}
+
 export function createCursorCodec(idSchema: z.ZodType<string>) {
   const payloadSchema = z.object({
     createdAt: z.iso.datetime(),
@@ -35,7 +40,7 @@ export function createCursorCodec(idSchema: z.ZodType<string>) {
       );
     },
 
-    decode(raw: string): { createdAt: Date; id: string } {
+    decode(raw: string): DecodedCursor {
       let parsed: unknown;
       try {
         parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));

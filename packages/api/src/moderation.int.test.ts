@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
-import { auth, sendEmail } from "@my-tuums/auth";
+import { auth } from "@my-tuums/auth";
 import { closeDb, type Database } from "@my-tuums/db";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
@@ -13,9 +13,10 @@ import {
   user,
   userBlock,
 } from "@my-tuums/db/schema";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { APPEAL_TOKEN_MAX_LENGTH, appealToken } from "./appeal-token.js";
-import { isActionLatest, unbanEffect, type DbLike } from "./moderation-actions.js";
+import { isActionLatest, unbanEffect } from "./moderation-actions.js";
 import type { Context } from "./context.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { appRouter } from "./router.js";
@@ -28,25 +29,13 @@ import {
   sessionHeaders,
   setUserBan,
   setUserRole,
+  testEmailSender,
   truncateAll,
   type TestUser,
 } from "./testing/harness.js";
 
-// The moderation emails go through `sendEmail` (packages/auth/src/email.ts),
-// which is a silent no-op under NODE_ENV=test — so the spy changes nothing
-// about what the flows do, only what the tests can assert: "exactly one email"
-// is the audit trail the concurrency tests need (issue #51).
-vi.mock("@my-tuums/auth", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@my-tuums/auth")>();
-  return { ...actual, sendEmail: vi.fn() };
-});
-
 beforeAll(async () => {
   await truncateAll();
-});
-
-beforeEach(() => {
-  vi.mocked(sendEmail).mockClear();
 });
 
 afterAll(async () => {
@@ -175,6 +164,11 @@ function appealLink(
   });
 }
 
+interface CursorPageInput {
+  cursor?: string;
+  limit?: number;
+}
+
 /** Walks `moderation.queue` to exhaustion via `nextCursor`, collecting every case's target key. */
 async function walkAllQueuePages(
   context: Context,
@@ -184,11 +178,9 @@ async function walkAllQueuePages(
   let cursor: string | undefined;
   let pages = 0;
   do {
-    const page = await call(
-      appRouter.moderation.queue,
-      { cursor, ...(limit ? { limit } : {}) },
-      { context },
-    );
+    const input: CursorPageInput = { cursor };
+    if (limit) input.limit = limit;
+    const page = await call(appRouter.moderation.queue, input, { context });
     keys.push(
       ...page.items.map((item) => ({ targetType: item.targetType, targetId: item.targetId })),
     );
@@ -209,11 +201,9 @@ async function walkAllAuditPages(context: Context, limit?: number): Promise<stri
   let cursor: string | undefined;
   let pages = 0;
   do {
-    const page = await call(
-      appRouter.moderation.auditLog,
-      { cursor, ...(limit ? { limit } : {}) },
-      { context },
-    );
+    const input: CursorPageInput = { cursor };
+    if (limit) input.limit = limit;
+    const page = await call(appRouter.moderation.auditLog, input, { context });
     ids.push(...page.items.map((item) => item.id));
     cursor = page.nextCursor ?? undefined;
     pages += 1;
@@ -423,6 +413,8 @@ describe("report", () => {
     // is a compile error in typed code — `as never` is the only way to put
     // the bad payload on the wire, which is exactly what an untyped client
     // can do, and zod is the layer that must refuse it.
+    // SAFETY: This test deliberately crosses the typed client boundary; the procedure's
+    // discriminated-union schema is the runtime contract under test.
     await expect(
       call(
         appRouter.moderation.report,
@@ -430,6 +422,8 @@ describe("report", () => {
         { context: contextFor(reporter) },
       ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    // SAFETY: This test deliberately crosses the typed client boundary; the procedure's
+    // discriminated-union schema is the runtime contract under test.
     await expect(
       call(
         appRouter.moderation.report,
@@ -1036,7 +1030,7 @@ describe("resolve", () => {
 
 describe("removePost and restorePost", () => {
   // A failed assertion must not leak state into the next test: the email
-  // failure test installs a console.error spy and a one-shot sendEmail
+  // failure test installs a console.error spy and a one-shot testEmailSender.send
   // rejection, and neither survives a mid-test failure without this
   // (mockClear in the file's beforeEach only clears call records).
   afterEach(() => {
@@ -1094,7 +1088,7 @@ describe("removePost and restorePost", () => {
     // service must not turn a done removal into an error the moderator
     // retries (and gets "already removed" for). The loud log is for
     // operators; the action is the truth.
-    vi.mocked(sendEmail).mockRejectedValueOnce(new Error("resend is down"));
+    vi.mocked(testEmailSender.send).mockRejectedValueOnce(new Error("resend is down"));
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const result = await call(
@@ -1273,7 +1267,7 @@ describe("removePost and restorePost", () => {
     expect(restoredRows).toHaveLength(1);
 
     const restoreEmails = vi
-      .mocked(sendEmail)
+      .mocked(testEmailSender.send)
       .mock.calls.filter(([mail]) => mail.subject === "Your post was restored");
     expect(restoreEmails).toHaveLength(1);
   });
@@ -1586,7 +1580,7 @@ describe("banUser and unbanUser", () => {
     expect(unbannedRows).toHaveLength(1);
 
     const unbanEmails = vi
-      .mocked(sendEmail)
+      .mocked(testEmailSender.send)
       .mock.calls.filter(([mail]) => mail.subject === "Your account is no longer banned");
     expect(unbanEmails).toHaveLength(1);
   });
@@ -2433,7 +2427,7 @@ describe("appeal flow", () => {
     // Every call lands on the same key (`report:appeal:<actionId>`): the
     // first opens the appeal, the rest are refused as duplicates — and each
     // still consumes budget, so the 21st call trips the tier.
-    let refused: unknown = null;
+    let refused: Error | null = null;
     for (let i = 0; i < RATE_LIMITS.report.limit + 1; i++) {
       try {
         await call(
@@ -2442,6 +2436,9 @@ describe("appeal flow", () => {
           { context: contextFor(author) },
         );
       } catch (error) {
+        if (!(error instanceof Error)) {
+          throw new Error("expected an Error instance", { cause: error });
+        }
         refused = error;
       }
     }
@@ -2466,7 +2463,7 @@ describe("appeal flow", () => {
     // Replays of one link share its nonce's budget (`report:appeal:<nonce>`):
     // the first opens the appeal, later ones are refused as used links — and
     // each still consumes budget, so the 21st replay trips the tier.
-    let refused: unknown = null;
+    let refused: Error | null = null;
     for (let i = 0; i < RATE_LIMITS.report.limit + 1; i++) {
       try {
         await call(
@@ -2475,6 +2472,9 @@ describe("appeal flow", () => {
           { context: anonContext },
         );
       } catch (error) {
+        if (!(error instanceof Error)) {
+          throw new Error("expected an Error instance", { cause: error });
+        }
         refused = error;
       }
     }
@@ -2686,7 +2686,7 @@ describe("gates", () => {
     // so distinct targets keep the calls independent of idempotency.
     const posts = await seedPosts(author.id, RATE_LIMITS.report.limit + 1);
 
-    let refused: unknown = null;
+    let refused: Error | null = null;
     for (const p of posts) {
       try {
         await call(
@@ -2695,6 +2695,9 @@ describe("gates", () => {
           { context: contextFor(reporter) },
         );
       } catch (error) {
+        if (!(error instanceof Error)) {
+          throw new Error("expected an Error instance", { cause: error });
+        }
         refused = error;
       }
     }
@@ -2705,72 +2708,83 @@ describe("gates", () => {
   });
 });
 
-/**
- * A `DbLike` that records the SQL of every select it runs.
- *
- * The appeal-path lookups (issue #55) live inside handlers, so the only way
- * to assert on the SQL they actually send is to watch it go by. Drizzle
- * builders are thenables that expose `toSQL()`, so wrapping every object
- * that comes out of `db.select(...)` in a proxy that peeks at `then` — the
- * moment the handler awaits it — captures the exact statement, values and
- * all, without touching the handler. Only ever hand the wrapped db to the
- * code under test; everything else in this file keeps the raw
- * `anonContext.db`.
- */
-function capturingDb(
-  target: Database,
-  capture: (query: { sql: string; params: unknown[] }) => void,
-): DbLike {
-  const wrap = (value: unknown): unknown => {
-    if (value === null || typeof value !== "object") return value;
-    return new Proxy(value, {
-      get(obj, prop) {
-        if (prop === "then") {
-          // `await builder` reaches this: record what it is about to run,
-          // then hand the await through to the real thenable.
-          return (onFulfilled: (v: object) => unknown, onRejected: (e: unknown) => unknown) => {
-            const builder = obj as { toSQL?: () => { sql: string; params: unknown[] } };
-            if (builder.toSQL) capture(builder.toSQL());
-            return Promise.resolve(obj).then(onFulfilled, onRejected);
-          };
-        }
-        const member = (obj as Record<PropertyKey, unknown>)[prop];
-        if (typeof member === "function") {
-          return (...args: unknown[]) =>
-            wrap((member as (...args: unknown[]) => unknown).apply(obj, args));
-        }
-        return member;
-      },
-    });
-  };
-  return wrap(target) as DbLike;
+/** A Drizzle statement captured immediately before execution. */
+interface CapturedQuery {
+  sql: string;
+  params: unknown[];
+}
+
+interface CapturedThenable extends PromiseLike<readonly object[]> {
+  toSQL(): CapturedQuery;
 }
 
 /**
- * Runs `EXPLAIN` on a captured query.
- *
- * `toSQL()` leaves the values as `$n` parameters, which a standalone
- * EXPLAIN cannot see, so each parameter is inlined as a literal first. The
- * planner's choice depends on the query's shape, not on parameterisation,
- * and the values are this test's own.
+ * A real Database handle that records the SQL of every executed query builder.
+ * Chained builder methods stay wrapped, while all operations use the original connection.
  */
-async function explainPlan(
-  db: Database,
-  query: { sql: string; params: unknown[] },
-): Promise<string> {
-  const literal = (value: unknown): string => {
-    if (value === null) return "null";
-    if (value instanceof Date) return `'${value.toISOString()}'`;
-    if (typeof value === "string") return `'${value.replaceAll("'", "''")}'`;
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
-    throw new Error(`cannot inline EXPLAIN parameter of type ${typeof value}`);
-  };
+function capturingDb(target: Database, capture: (query: CapturedQuery) => void): Database {
+  function wrap<Value extends object>(value: Value): Value {
+    return new Proxy(value, {
+      get(owner, property) {
+        if (property === "then") {
+          // SAFETY: Drizzle query builders expose both PromiseLike.then and toSQL at execution time.
+          const query = owner as Value & CapturedThenable;
+          capture(query.toSQL());
+          return query.then.bind(query);
+        }
+
+        // SAFETY: A Proxy get trap receives a property belonging to its wrapped Drizzle object.
+        const member = owner[property as keyof Value];
+        if (!(member instanceof Function)) return member;
+
+        // SAFETY: Drizzle's fluent builder methods return another builder object; terminal execution
+        // is handled by the `then` branch above rather than this wrapper.
+        const method = member as (...args: never[]) => object;
+        return (...args: never[]) => wrap(method.apply(owner, args));
+      },
+    });
+  }
+
+  return wrap(target);
+}
+
+const explainParameterSchema = z.union([z.string(), z.number(), z.boolean(), z.date(), z.null()]);
+type ExplainParameter = z.infer<typeof explainParameterSchema>;
+
+function sqlLiteral(value: ExplainParameter): string {
+  const stringValue = z.string().safeParse(value);
+  if (stringValue.success) return `'${stringValue.data.replaceAll("'", "''")}'`;
+
+  const numberValue = z.number().safeParse(value);
+  if (numberValue.success) return String(numberValue.data);
+
+  const booleanValue = z.boolean().safeParse(value);
+  if (booleanValue.success) return booleanValue.data ? "true" : "false";
+
+  const dateValue = z.date().safeParse(value);
+  if (dateValue.success) return `'${dateValue.data.toISOString()}'`;
+
+  return "null";
+}
+
+/** Interpolates Drizzle's `$n` placeholders so Postgres can EXPLAIN the exact emitted query. */
+function interpolatedSql(query: CapturedQuery): string {
+  const parameters = z.array(explainParameterSchema).parse(query.params);
   let sqlText = query.sql;
   // Highest first, so `$10` is never hit by the `$1` replacement.
-  for (let i = query.params.length; i >= 1; i -= 1) {
-    sqlText = sqlText.replaceAll(`$${i}`, () => literal(query.params[i - 1]));
+  for (let index = parameters.length; index >= 1; index -= 1) {
+    const value = parameters[index - 1];
+    if (value === undefined) throw new Error(`missing SQL parameter $${index}`);
+    sqlText = sqlText.replaceAll(`$${index}`, () => sqlLiteral(value));
   }
-  const rows = await db.execute<{ "QUERY PLAN": string }>(sql.raw(`explain ${sqlText}`));
+  return sqlText;
+}
+
+/** Runs EXPLAIN against captured SQL and returns the planner's text lines. */
+async function explainPlan(db: Database, query: CapturedQuery): Promise<string> {
+  const rows = await db.execute<{ "QUERY PLAN": string }>(
+    sql.raw(`explain ${interpolatedSql(query)}`),
+  );
   return rows.map((row) => row["QUERY PLAN"]).join("\n");
 }
 
@@ -2802,7 +2816,7 @@ describe("moderation_action_target_idx reachability", () => {
       `);
       await anonContext.db.execute(sql`analyze "moderation_action"`);
 
-      const captured: Array<{ sql: string; params: unknown[] }> = [];
+      const captured: CapturedQuery[] = [];
       const capturedDb = capturingDb(anonContext.db, (query) => captured.push(query));
 
       // `isActionLatest`'s "anything newer?" probe — the real function,
@@ -2854,7 +2868,7 @@ describe("moderation_action_target_idx reachability", () => {
         { postId: postRow.id, reason: "Appealing from the plan test" },
         // The handler runs every query through the capture db, which still
         // is the real connection — only the SQL is recorded.
-        { context: { ...contextFor(author), db: capturedDb as unknown as Database } },
+        { context: { ...contextFor(author), db: capturedDb } },
       );
 
       // The two queries under test are the only captured ones whose

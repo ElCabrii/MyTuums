@@ -1,8 +1,7 @@
-import { sendEmail } from "@my-tuums/auth";
 import { closeDb } from "@my-tuums/db";
 import { and, eq } from "drizzle-orm";
 import { moderationAction, post, report, session, user } from "@my-tuums/db/schema";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   banUserEffect,
   removePostEffect,
@@ -12,23 +11,16 @@ import {
   suspendUserEffect,
   type DbLike,
 } from "./moderation-actions.js";
-import { anonContext, createTestUser, setUserRole, truncateAll } from "./testing/harness.js";
-
-// The moderation emails go through `sendEmail` (packages/auth/src/email.ts),
-// which is a silent no-op under NODE_ENV=test — so the spy changes nothing
-// about what the flows do, only what the tests can assert: "the effect
-// itself sends nothing; the caller's send is the only send".
-vi.mock("@my-tuums/auth", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@my-tuums/auth")>();
-  return { ...actual, sendEmail: vi.fn() };
-});
+import {
+  anonContext,
+  createTestUser,
+  setUserRole,
+  testEmailSender,
+  truncateAll,
+} from "./testing/harness.js";
 
 beforeAll(async () => {
   await truncateAll();
-});
-
-beforeEach(() => {
-  vi.mocked(sendEmail).mockClear();
 });
 
 afterAll(async () => {
@@ -60,12 +52,11 @@ function dbThatRollsBack(): DbLike {
     update: real.update.bind(real),
     delete: real.delete.bind(real),
     execute: real.execute.bind(real),
-    transaction: (async (callback: (tx: unknown) => Promise<unknown>) => {
-      await real.transaction(async (tx) => {
+    transaction: async (callback) =>
+      real.transaction(async (tx) => {
         await callback(tx);
         throw new Error("simulated failure after writes, before commit");
-      });
-    }) as unknown as DbLike["transaction"],
+      }),
   };
 }
 
@@ -91,7 +82,7 @@ describe("forward moderation effects", () => {
     });
 
     // The effect itself sends nothing — the notice is owed, not sent.
-    expect(vi.mocked(sendEmail)).not.toHaveBeenCalled();
+    expect(vi.mocked(testEmailSender.send)).not.toHaveBeenCalled();
     expect(pending.userId).toBe(author.id);
     expect(pending.build("en").subject).toBe("Your post was removed from MyTuums");
 
@@ -165,7 +156,7 @@ describe("forward moderation effects", () => {
       );
     expect(actions).toHaveLength(0);
 
-    expect(vi.mocked(sendEmail)).not.toHaveBeenCalled();
+    expect(vi.mocked(testEmailSender.send)).not.toHaveBeenCalled();
   });
 
   it("setRoleEffect rolls back the role write and its audit row together", async () => {
@@ -341,7 +332,7 @@ describe("forward moderation effects", () => {
     expect(action?.details).toEqual({ durationSeconds: 3600 });
 
     expect(pending.build("en").subject).toBe("Your account was suspended");
-    expect(vi.mocked(sendEmail)).not.toHaveBeenCalled();
+    expect(vi.mocked(testEmailSender.send)).not.toHaveBeenCalled();
   });
 
   it("banUserEffect commits the permanent ban and returns the notice", async () => {
@@ -379,13 +370,15 @@ describe("sendPendingEmails", () => {
       reason: "spam",
     });
 
-    vi.mocked(sendEmail).mockRejectedValueOnce(new Error("resend is down"));
+    vi.mocked(testEmailSender.send).mockRejectedValueOnce(new Error("resend is down"));
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(sendPendingEmails(anonContext.db, undefined, [pending])).resolves.toBeUndefined();
+    await expect(
+      sendPendingEmails(anonContext.db, undefined, [pending], testEmailSender),
+    ).resolves.toBeUndefined();
 
-    expect(vi.mocked(sendEmail)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(sendEmail).mock.calls[0][0].subject).toBe(
+    expect(vi.mocked(testEmailSender.send)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(testEmailSender.send).mock.calls[0][0].subject).toBe(
       "Your post was removed from MyTuums",
     );
     expect(errorSpy).toHaveBeenCalledWith(

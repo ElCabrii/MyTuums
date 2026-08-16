@@ -110,12 +110,16 @@ function ReportDialogBody({ target }: { target: CaseRef }) {
                 // union, not a coercion.
                 const trimmed = reason.trim();
                 if (target.targetType === "post") {
+                  // SAFETY: the Select items are built off the same literal reason
+                  // list, so the cast is the schema's own union, not a coercion.
                   report.mutate({
                     targetType: "post",
                     targetId: target.targetId,
                     reason: trimmed as (typeof POST_REPORT_REASONS)[number],
                   });
                 } else {
+                  // SAFETY: the Select items are built off the same literal reason
+                  // list, so the cast is the schema's own union, not a coercion.
                   report.mutate({
                     targetType: "user",
                     targetId: target.targetId,

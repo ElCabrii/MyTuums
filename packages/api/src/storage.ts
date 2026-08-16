@@ -251,7 +251,7 @@ function createStorageImpl(config: StorageConfig, now: () => number): Destructiv
         // than trusting response counts: an incomplete S3-compatible response
         // must not make reconciliation report an orphan as removed.
         const deletedKeys = new Set(
-          (result.Deleted ?? []).flatMap(({ Key }) => (typeof Key === "string" ? [Key] : [])),
+          (result.Deleted ?? []).flatMap(({ Key }) => (Key ? [Key] : [])),
         );
         const failuresByKey = new Map<string, StorageDeleteFailure>();
         for (const failure of result.Errors ?? []) {
@@ -260,7 +260,7 @@ function createStorageImpl(config: StorageConfig, now: () => number): Destructiv
             code: failure.Code ?? null,
             message: failure.Message ?? null,
           };
-          if (typeof failure.Key === "string" && batch.includes(failure.Key)) {
+          if (failure.Key && batch.includes(failure.Key)) {
             failuresByKey.set(failure.Key, normalized);
           } else {
             failures.push(normalized);

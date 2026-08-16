@@ -4,7 +4,7 @@ import type { Readable } from "node:stream";
 import path from "node:path";
 import { createBrotliCompress, constants, createGzip } from "node:zlib";
 import type { BrotliCompress, Gzip } from "node:zlib";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage, OutgoingHttpHeaders } from "node:http";
 import { bestEncoding, type Compression } from "./compression.js";
 
 /**
@@ -27,23 +27,23 @@ import { bestEncoding, type Compression } from "./compression.js";
  * unknown extension served as `application/octet-stream` downloads instead of
  * executing, which is the safe direction to be wrong in.
  */
-const CONTENT_TYPES: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".ico": "image/x-icon",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  ".txt": "text/plain; charset=utf-8",
-  ".webmanifest": "application/manifest+json",
-  ".map": "application/json; charset=utf-8",
-};
+const CONTENT_TYPES = new Map<string, string>([
+  [".html", "text/html; charset=utf-8"],
+  [".js", "text/javascript; charset=utf-8"],
+  [".css", "text/css; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
+  [".svg", "image/svg+xml"],
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".webp", "image/webp"],
+  [".ico", "image/x-icon"],
+  [".woff", "font/woff"],
+  [".woff2", "font/woff2"],
+  [".txt", "text/plain; charset=utf-8"],
+  [".webmanifest", "application/manifest+json"],
+  [".map", "application/json; charset=utf-8"],
+]);
 
 /**
  * File types worth compressing. Everything else — images, fonts — is already
@@ -82,9 +82,14 @@ function preferredEncoding(acceptEncoding: string | undefined, file: string): Co
  * A handler that may serve a request itself; `{ served: false }` means "not a
  * static file" and falls through to the caller's 404.
  */
+export interface StaticResponse extends NodeJS.WritableStream {
+  writeHead(status: number, headers?: OutgoingHttpHeaders): this;
+  destroy(error?: Error): this;
+}
+
 export type StaticFileHandler = (
   req: IncomingMessage,
-  res: ServerResponse,
+  res: StaticResponse,
 ) => Promise<{ served: boolean }>;
 
 /** Never serves anything. What a dev server (and a test) gets. */
@@ -208,14 +213,22 @@ function cacheHeaderFor(root: string, file: string): string {
 
 function send(
   req: IncomingMessage,
-  res: ServerResponse,
+  res: StaticResponse,
   options: { headOnly: boolean; file: string; cacheControl: string },
 ): Promise<void> {
   const { headOnly, file, cacheControl } = options;
   const encoding = preferredEncoding(req.headers["accept-encoding"], file);
 
-  const headers: Record<string, string> = {
-    "Content-Type": CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
+  interface StaticResponseHeaders {
+    [header: string]: string | undefined;
+    "Content-Type": string;
+    "Cache-Control": string;
+    "Content-Encoding"?: string;
+    Vary?: string;
+  }
+  const headers: StaticResponseHeaders = {
+    "Content-Type":
+      CONTENT_TYPES.get(path.extname(file).toLowerCase()) ?? "application/octet-stream",
     "Cache-Control": cacheControl,
   };
   if (encoding) {

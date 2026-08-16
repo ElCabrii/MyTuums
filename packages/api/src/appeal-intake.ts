@@ -38,6 +38,7 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, or } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
+import { z } from "zod";
 import type { Database } from "@my-tuums/db";
 import { appeal, moderationAction, post } from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
@@ -101,13 +102,17 @@ interface AppealTarget {
  * one); the depth bound is a guard against a self-referential chain, not a
  * real limit — the chains this sees are one link long.
  */
-function isUniqueViolation(error: unknown): boolean {
-  for (let current: unknown = error, depth = 0; depth < 8; depth += 1) {
-    if (typeof current !== "object" || current === null) return false;
-    if ((current as { code?: unknown }).code === "23505") return true;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return false;
+const databaseErrorSchema = z.object({
+  code: z.string().optional(),
+  cause: z.unknown().optional(),
+});
+
+function isUniqueViolation<Value>(error: Value, depth = 0): boolean {
+  if (depth >= 8) return false;
+  const parsed = databaseErrorSchema.safeParse(error);
+  if (!parsed.success) return false;
+  if (parsed.data.code === "23505") return true;
+  return parsed.data.cause === undefined ? false : isUniqueViolation(parsed.data.cause, depth + 1);
 }
 
 /** The user an action happened to — its target user, or the author for post actions. */
@@ -255,6 +260,8 @@ async function assertContestable(db: Database, target: AppealTarget): Promise<vo
   if (!actionRow) {
     throw new ORPCError("BAD_REQUEST", { message: "This appeal link is no longer valid." });
   }
+  // SAFETY: This select lists every ActionRow field, and the schema's action
+  // check constraint restricts the stored code to ModerationActionCode.
   const action = actionRow as ActionRow;
   if (!APPEALABLE_ACTIONS.includes(action.action)) {
     throw new ORPCError("BAD_REQUEST", { message: "This action can't be appealed." });

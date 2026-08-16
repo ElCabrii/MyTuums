@@ -33,12 +33,14 @@ export const decode = (key: string): PostFeedParams => {
   // Everything past the third delimiter, however many more it contains.
   const authorId = key.slice(feed.length + replies.length + parentId.length + 3);
 
-  return {
+  const params: PostFeedParams = {
+    // SAFETY: encode only ever writes one of the two literal feed scopes.
     feed: feed as FeedScope,
-    ...(authorId ? { authorId } : {}),
-    ...(parentId ? { parentId } : {}),
-    ...(replies === "r" ? { includeReplies: true } : {}),
   };
+  if (authorId) params.authorId = authorId;
+  if (parentId) params.parentId = parentId;
+  if (replies === "r") params.includeReplies = true;
+  return params;
 };
 
 /**
@@ -72,7 +74,7 @@ export const postFeedAtom = (p: PostFeedParams) => postFeedFamily(encode(p));
  * so a full sweep is safe.
  */
 export function clearPostFeedFamily(): void {
-  for (const key of [...postFeedFamily.getParams()]) postFeedFamily.remove(key);
+  for (const key of postFeedFamily.getParams()) postFeedFamily.remove(key);
 }
 
 /**

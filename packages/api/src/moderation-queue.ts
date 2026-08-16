@@ -356,8 +356,13 @@ export const queueRouter = {
         return stamped;
       });
       for (const reporterId of reporterIds) {
-        await emailUser(context.db, context.headers, reporterId, (locale) =>
-          moderationCaseResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
+        await emailUser(
+          context.db,
+          context.headers,
+          reporterId,
+          (locale) =>
+            moderationCaseResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
+          context.emailSender,
         );
       }
       return {

@@ -10,6 +10,8 @@ import {
 } from "@/test/render";
 import { QueueView } from "@/components/moderation/queue-view";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
 // None of these are actually invoked in this file — the row-click test only
 // opens the dialog, it never clicks an action — but `CaseBody` reads every
@@ -17,26 +19,21 @@ import { m } from "@/paraglide/messages.js";
 // `createTanstackQueryUtils`'s proxy indexes into the fake client one path
 // segment at a time, so a missing segment throws before mount even finishes
 // (see case-dialog.test.tsx's fuller version of this comment).
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: {
-    moderation: {
-      queue: vi.fn(),
-      case: vi.fn(),
-      removePost: vi.fn(),
-      restorePost: vi.fn(),
-      resolve: vi.fn(),
-      suspendUser: vi.fn(),
-      banUser: vi.fn(),
-      unbanUser: vi.fn(),
-      appealReview: vi.fn(),
-    },
+const fakeClient = {
+  moderation: {
+    queue: vi.fn(),
+    case: vi.fn(),
+    removePost: vi.fn(),
+    restorePost: vi.fn(),
+    resolve: vi.fn(),
+    suspendUser: vi.fn(),
+    banUser: vi.fn(),
+    unbanUser: vi.fn(),
+    appealReview: vi.fn(),
   },
-}));
+};
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {
   vi.clearAllMocks();

@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { z } from "zod";
 import { useEffect, type FormEvent } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { authErrorAtom, authPendingAtom, signUpAtom } from "@/atoms/auth";
@@ -31,9 +32,10 @@ export const Route = createFileRoute("/register")({
    * in the URL, and it is sanitized again in `lib/redirect.ts` before any
    * navigation honours it.
    */
-  validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
-    typeof search.redirect === "string" ? { redirect: search.redirect } : {},
+  validateSearch: (search) => redirectSearchSchema.parse(search),
 });
+
+const redirectSearchSchema = z.object({ redirect: z.string().optional() });
 
 /**
  * The sign-up page: username, display name, email, password and date of birth,

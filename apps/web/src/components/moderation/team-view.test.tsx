@@ -10,15 +10,12 @@ import {
 } from "@/test/render";
 import { TeamView } from "@/components/moderation/team-view";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: { moderation: { team: vi.fn(), setRole: vi.fn() } },
-}));
+const fakeClient = { moderation: { team: vi.fn(), setRole: vi.fn() } };
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {
   vi.clearAllMocks();

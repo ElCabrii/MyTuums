@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { EventEmitter } from "node:events";
+import type { IncomingMessage } from "node:http";
 
 /**
  * The per-request observability of the HTTP layer: an identity for every
@@ -50,6 +51,17 @@ export interface AccessLogEntry {
   durationMs: number;
 }
 
+/** The response surface the access log reads: a finish event, one header, and the status code. */
+export interface AccessLogResponse extends EventEmitter {
+  statusCode: number;
+  getHeader(name: string): number | string | string[] | undefined;
+}
+
+export function responseHeaderText(value: number | string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0] ?? "-";
+  return value === undefined ? "-" : String(value);
+}
+
 /**
  * Attaches the finish listener that writes the access log line and returns
  * the same `res`, so it composes with `decorateResponse` in `index.ts`:
@@ -66,7 +78,10 @@ export interface AccessLogEntry {
  * static-files.ts — was silent before the access log existed too; this
  * listener only ever adds lines, never replaces an error log.)
  */
-export function attachAccessLog(req: IncomingMessage, res: ServerResponse): ServerResponse {
+export function attachAccessLog<Response extends AccessLogResponse>(
+  req: IncomingMessage,
+  res: Response,
+): Response {
   const startedAt = performance.now();
 
   res.once("finish", () => {
@@ -76,7 +91,7 @@ export function attachAccessLog(req: IncomingMessage, res: ServerResponse): Serv
       // module header. A response that somehow lacks it (a future caller
       // that never went through the routing tree) logs a dash rather than
       // throwing from inside a listener.
-      requestId: (res.getHeader("x-request-id") as string | undefined) ?? "-",
+      requestId: responseHeaderText(res.getHeader("x-request-id")),
       method: req.method ?? "-",
       path: pathnameOf(req.url) ?? "-",
       status: res.statusCode,

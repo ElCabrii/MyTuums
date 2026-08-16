@@ -26,48 +26,42 @@ const discord = oauthCredentials("DISCORD");
 const twitch = oauthCredentials("TWITCH");
 
 /** The OAuth providers this deployment is actually configured for, keyed by provider id (file header explains the why). */
-export const socialProviders: SocialProviders = {
-  ...(google
-    ? {
-        google: {
-          ...google,
-          // Without this, Google silently reuses whichever account the browser
-          // is already signed into, which on a shared machine signs the person
-          // in as somebody else with no visible choice. It is also what makes
-          // "wrong account" recoverable without clearing cookies.
-          prompt: "select_account",
-        },
-      }
-    : {}),
+export const socialProviders: SocialProviders = {};
 
-  ...(discord
-    ? {
-        discord: {
-          ...discord,
-          // Discord accounts verified by phone alone return no email, and
-          // Better Auth requires one on every user row — without this the flow
-          // dies with `error=email_not_found` after the person has already
-          // consented. `.invalid` is reserved by RFC 2606 precisely so it can
-          // never route, which keeps a placeholder from being mistaken for a
-          // contact address by anything that later sends mail.
-          mapProfileToUser: (profile) => ({
-            email: profile.email ?? `${profile.id}@discord.invalid`,
-          }),
-        },
-      }
-    : {}),
+if (google) {
+  socialProviders.google = {
+    ...google,
+    // Without this, Google silently reuses whichever account the browser
+    // is already signed into, which on a shared machine signs the person
+    // in as somebody else with no visible choice. It is also what makes
+    // "wrong account" recoverable without clearing cookies.
+    prompt: "select_account",
+  };
+}
 
-  ...(twitch
-    ? {
-        twitch: {
-          ...twitch,
-          mapProfileToUser: (profile) => ({
-            email: profile.email ?? `${profile.sub}@twitch.invalid`,
-          }),
-        },
-      }
-    : {}),
-};
+if (discord) {
+  socialProviders.discord = {
+    ...discord,
+    // Discord accounts verified by phone alone return no email, and
+    // Better Auth requires one on every user row — without this the flow
+    // dies with `error=email_not_found` after the person has already
+    // consented. `.invalid` is reserved by RFC 2606 precisely so it can
+    // never route, which keeps a placeholder from being mistaken for a
+    // contact address by anything that later sends mail.
+    mapProfileToUser: (profile) => ({
+      email: profile.email ?? `${profile.id}@discord.invalid`,
+    }),
+  };
+}
+
+if (twitch) {
+  socialProviders.twitch = {
+    ...twitch,
+    mapProfileToUser: (profile) => ({
+      email: profile.email ?? `${profile.sub}@twitch.invalid`,
+    }),
+  };
+}
 
 /** Provider ids this deployment has credentials for, in the order they should be offered. */
 export const configuredSocialProviders = Object.keys(socialProviders);

@@ -12,24 +12,20 @@ import {
 } from "@/test/render";
 import { ThreadPage } from "@/components/thread-page";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: {
-    post: {
-      thread: vi.fn(),
-      list: vi.fn(),
-      create: vi.fn(),
-      like: vi.fn(),
-      unlike: vi.fn(),
-    },
+const fakeClient = {
+  post: {
+    thread: vi.fn(),
+    list: vi.fn(),
+    create: vi.fn(),
+    like: vi.fn(),
+    unlike: vi.fn(),
   },
-}));
+};
 
-vi.mock("@/lib/orpc", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/orpc")>();
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { ...actual, orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {
   vi.clearAllMocks();

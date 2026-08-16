@@ -1,9 +1,16 @@
-import { auth } from "@my-tuums/auth";
+import { auth, sendEmail, type OutgoingEmail } from "@my-tuums/auth";
 import { db, type Database } from "@my-tuums/db";
 import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { createStorage, type Storage } from "./storage.js";
 
 type Session = Awaited<ReturnType<typeof auth.api.getSession>>;
+
+/** The delivery seam moderation procedures use after their transactions commit. */
+export interface EmailSender {
+  send: (email: OutgoingEmail) => Promise<void>;
+}
+
+const defaultEmailSender: EmailSender = { send: sendEmail };
 
 /**
  * Everything an oRPC procedure can read: the database, the caller's session
@@ -48,6 +55,8 @@ export interface Context {
    * unconfigured OAuth provider is simply absent rather than fatal.
    */
   storage: Storage | null;
+  /** Email delivery is explicit so tests can record sends without replacing the auth module. */
+  emailSender: EmailSender;
   /**
    * The raw request headers, for the one thing that still needs them after
    * session resolution: the moderation emails' locale fallback
@@ -103,6 +112,7 @@ export async function createContext({
   requestId,
   rateLimiter = defaultRateLimiter,
   storage = defaultStorage,
+  emailSender = defaultEmailSender,
 }: {
   headers: Headers;
   /** The server's per-request identity — see `Context.requestId`. */
@@ -111,9 +121,11 @@ export async function createContext({
   rateLimiter?: RateLimiter;
   /** Override so a test can supply a fake bucket instead of reaching a real one. */
   storage?: Storage | null;
+  /** Override for tests; production uses the auth package's sender. */
+  emailSender?: EmailSender;
 }): Promise<Context> {
   const session = await auth.api.getSession({ headers });
-  return { db, session, requestId, rateLimiter, storage, headers };
+  return { db, session, requestId, rateLimiter, storage, emailSender, headers };
 }
 
 /** The process-wide storage client, for callers outside a procedure (the `/media` route). */

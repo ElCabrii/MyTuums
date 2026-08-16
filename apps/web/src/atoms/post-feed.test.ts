@@ -53,6 +53,7 @@ describe("homeFeedScopeAtom", () => {
   it("is null while the session is pending, regardless of what's stored", () => {
     const store = freshStore();
     store.set(feedScopeAtom, "following");
+    // SAFETY: partial session fixture — only the pending flag matters here.
     store.set(sessionAtom, { data: null, isPending: true } as never);
 
     expect(store.get(homeFeedScopeAtom)).toBeNull();
@@ -61,6 +62,7 @@ describe("homeFeedScopeAtom", () => {
   it("is global when signed out even if 'following' is stored — the server rejects an anonymous Following request", () => {
     const store = freshStore();
     store.set(feedScopeAtom, "following");
+    // SAFETY: partial session fixture — only the signed-out shape matters here.
     store.set(sessionAtom, { data: null, isPending: false } as never);
 
     expect(store.get(homeFeedScopeAtom)).toBe("global");
@@ -68,6 +70,7 @@ describe("homeFeedScopeAtom", () => {
 
   it("is the stored scope when signed in", () => {
     const store = freshStore();
+    // SAFETY: partial session fixture — the scope atom reads only the viewer id.
     store.set(sessionAtom, {
       data: { user: { id: "viewer-1" } },
       isPending: false,

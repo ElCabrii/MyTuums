@@ -10,7 +10,6 @@ import {
   moderationSuspensionEmail,
   moderationUnbanEmail,
   moderationUnsuspensionEmail,
-  sendEmail,
   webOrigin,
   type EmailLocale,
   type OutgoingEmail,
@@ -19,6 +18,7 @@ import { isLocalePreference } from "@my-tuums/auth/rules";
 import type { Database } from "@my-tuums/db";
 import { moderationAction, post, report, session, user } from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
+import type { EmailSender } from "./context.js";
 import { canManageRole, type UserRole } from "./roles.js";
 
 /**
@@ -189,9 +189,10 @@ export async function sendPendingEmails(
   db: DbLike,
   headers: Headers | undefined,
   pending: PendingEmail[],
+  emailSender: EmailSender,
 ): Promise<void> {
   for (const email of pending) {
-    await emailUser(db, headers, email.userId, email.build);
+    await emailUser(db, headers, email.userId, email.build, emailSender);
   }
 }
 
@@ -246,6 +247,7 @@ export async function emailUser(
   headers: Headers | undefined,
   userId: string,
   build: (locale: EmailLocale) => Omit<OutgoingEmail, "to">,
+  emailSender: EmailSender,
 ): Promise<void> {
   const [target] = await db
     .select({ email: user.email, localePreference: user.localePreference })
@@ -262,7 +264,7 @@ export async function emailUser(
     : localeFromRequest(headers);
 
   try {
-    await sendEmail({ to: target.email, ...build(locale) });
+    await emailSender.send({ to: target.email, ...build(locale) });
   } catch (error) {
     console.error("Moderation email failed to send", { to: target.email, userId }, error);
   }
@@ -678,6 +680,8 @@ export async function isActionCurrent(
     }
     case "role_changed": {
       if (!action.targetUserId) return false;
+      // SAFETY: role_changed rows are written only by setRoleEffect, which
+      // persists newRole in this details object in the same transaction.
       const details = action.details as { newRole?: string } | null;
       if (!details?.newRole) return false;
       const [target] = await db
@@ -955,6 +959,8 @@ export async function undoAction(
       break;
     }
     case "role_changed": {
+      // SAFETY: role_changed rows are written only by setRoleEffect, which
+      // persists both role codes in this details object before logging.
       const details = action.details as { oldRole?: string; newRole?: string } | null;
       const oldRole = details?.oldRole;
       const grantedRole = details?.newRole;

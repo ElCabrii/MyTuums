@@ -1,33 +1,50 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { atom } from "jotai";
+import { QueryClient } from "@tanstack/react-query";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { renderWithProviders, makeAuthor, makePost } from "@/test/render";
+import { installTestOrpc, orpc } from "@/lib/orpc";
 import { PostCard } from "@/components/post-card";
 import { m } from "@/paraglide/messages.js";
 
 // PostCard's like button is a write-only atom (`useSetAtom`, never
-// `useAtom`) — see `atoms/like.ts`. Mocking the family lets these tests
-// assert "clicking the button asks to toggle this exact post" without also
-// exercising the real mutation's network round trip, which
-// jsdom has no server to answer.
-const toggleLikeSpy = vi.fn();
-vi.mock("@/atoms/like", () => ({
-  toggleLikeAtomFamily: (postId: string) =>
-    atom(null, () => {
-      toggleLikeSpy(postId);
-    }),
-}));
+// `useAtom`) — see `atoms/like.ts`. Running the real atom against this fake
+// client lets the one test that clicks like assert "the button asked the
+// transport to toggle this exact post" without a network round trip jsdom
+// has no server to answer.
+const fakeClient = {
+  post: {
+    like: vi.fn(() => Promise.resolve({ postId: "", likeCount: 0, viewerHasLiked: true })),
+    unlike: vi.fn(() => Promise.resolve({ postId: "", likeCount: 0, viewerHasLiked: false })),
+    list: vi.fn(),
+    thread: vi.fn(),
+  },
+  search: { users: vi.fn(), posts: vi.fn() },
+  user: { byUsername: vi.fn() },
+};
+
+installTestOrpc(createTanstackQueryUtils(fakeClient));
+
+/** Seeds the post into the list cache, which is where the like atom reads the current state from. */
+function seedPostCache(queryClient: QueryClient, post: ReturnType<typeof makePost>): void {
+  queryClient.setQueryData(orpc.post.list.key({ input: { limit: 20 } }), {
+    pages: [{ items: [post], nextCursor: null }],
+    pageParams: [undefined],
+  });
+}
 
 describe("PostCard", () => {
   beforeEach(() => {
-    toggleLikeSpy.mockClear();
+    vi.clearAllMocks();
   });
 
   describe("signed in", () => {
     it("renders the like control as a pressed toggle when already liked, and invokes the toggle on click", async () => {
       const post = makePost({ viewerHasLiked: true, likeCount: 3 });
-      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+      const queryClient = new QueryClient();
+      seedPostCache(queryClient, post);
+      await renderWithProviders(<PostCard post={post} />, { queryClient, signedInAs: true });
 
       const likeButton = screen.getByRole("button", { name: m.post_unlike({ count: "3" }) });
       expect(likeButton).toHaveAttribute("aria-pressed", "true");
@@ -35,7 +52,9 @@ describe("PostCard", () => {
       const user = userEvent.setup();
       await user.click(likeButton);
 
-      expect(toggleLikeSpy).toHaveBeenCalledWith(post.id);
+      await waitFor(() =>
+        expect(fakeClient.post.unlike).toHaveBeenCalledWith({ postId: post.id }, expect.anything()),
+      );
     });
 
     it("renders the like control as an unpressed toggle when not liked", async () => {

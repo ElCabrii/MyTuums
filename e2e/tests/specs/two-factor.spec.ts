@@ -72,6 +72,8 @@ async function enableTwoFactor(
       response.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Turn on" }).click();
+  // SAFETY: This is Better Auth's two-factor enable response; `totpURI` is
+  // checked before use and absent backup codes deliberately become an empty list.
   const body = (await (await enableResponse).json()) as {
     totpURI?: string;
     backupCodes?: string[];

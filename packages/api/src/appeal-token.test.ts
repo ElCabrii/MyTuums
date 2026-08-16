@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   APPEAL_TOKEN_TTL_MS,
@@ -24,6 +24,13 @@ function payload(overrides: Partial<AppealTokenPayload> = {}): AppealTokenPayloa
 /** Decodes a token's first half — for the shape and tampering tests. */
 function bodyOf(raw: string): string {
   return raw.slice(0, raw.lastIndexOf("."));
+}
+
+/** Signs an arbitrary payload so verification tests can cross the typed signer's boundary honestly. */
+function signMalformed<Payload>(payload: Payload): string {
+  const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = createHmac("sha256", SECRET).update(body).digest("base64url");
+  return `${body}.${signature}`;
 }
 
 describe("createAppealTokenSigner", () => {
@@ -123,12 +130,12 @@ describe("createAppealTokenSigner", () => {
     });
 
     it("rejects a token missing a required field, or carrying the wrong purpose", () => {
-      const { sign, verify } = createAppealTokenSigner(SECRET);
+      const { verify } = createAppealTokenSigner(SECRET);
       const valid = payload();
       const tokens = [
-        sign({ ...valid, nonce: undefined } as unknown as AppealTokenPayload),
-        sign({ ...valid, purpose: "password-reset" } as unknown as AppealTokenPayload),
-        sign({ ...valid, iat: "not-a-number" } as unknown as AppealTokenPayload),
+        signMalformed({ ...valid, nonce: undefined }),
+        signMalformed({ ...valid, purpose: "password-reset" }),
+        signMalformed({ ...valid, iat: "not-a-number" }),
       ];
       for (const token of tokens) {
         expect(verify(token)).toBeNull();

@@ -291,7 +291,7 @@ describe("imageDimensions", () => {
       0x00,
       0x00,
       0x00,
-      ...new Array<number>(32).fill(0),
+      ...Array.from({ length: 32 }, () => 0),
     ]);
     expect(imageDimensions(webp, "image/webp")).toBeNull();
   });

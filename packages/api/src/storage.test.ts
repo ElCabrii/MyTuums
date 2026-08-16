@@ -73,6 +73,8 @@ describe("secondsUntilWindowEnd", () => {
 
 describe("removeMany", () => {
   it("surfaces per-key DeleteObjects failures and reports only confirmed progress", async () => {
+    // SAFETY: This fixture implements the DeleteObjects response fields consumed by removeMany;
+    // the SDK's generic `send` overload cannot infer a concrete command from a prototype spy.
     const send = vi.spyOn(S3Client.prototype, "send").mockResolvedValue({
       Deleted: [{ Key: "avatars/u/ok.webp" }],
       Errors: [{ Key: "avatars/u/failed.webp", Code: "AccessDenied", Message: "denied" }],
@@ -95,6 +97,8 @@ describe("removeMany", () => {
   });
 
   it("treats a requested key omitted from the response as an unconfirmed failure", async () => {
+    // SAFETY: This fixture implements the DeleteObjects response fields consumed by removeMany;
+    // the SDK's generic `send` overload cannot infer a concrete command from a prototype spy.
     vi.spyOn(S3Client.prototype, "send").mockResolvedValue({
       Deleted: [{ Key: "avatars/u/confirmed.webp" }],
       Errors: [],
@@ -117,6 +121,8 @@ describe("removeMany", () => {
   });
 
   it("returns the submitted count when every key succeeds", async () => {
+    // SAFETY: This fixture implements the DeleteObjects response fields consumed by removeMany;
+    // the SDK's generic `send` overload cannot infer a concrete command from a prototype spy.
     vi.spyOn(S3Client.prototype, "send").mockResolvedValue({
       Deleted: [{ Key: "avatars/u/one.webp" }, { Key: "avatars/u/two.webp" }],
     } as never);

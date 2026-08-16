@@ -5,20 +5,13 @@ import { QueryClient } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
 import { ORPCError } from "@orpc/client";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: { post: { thread: vi.fn() } },
-}));
+const fakeClient = { post: { thread: vi.fn() } };
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  const actual = await vi.importActual<typeof import("@/lib/orpc")>("@/lib/orpc");
-  return {
-    orpc: createTanstackQueryUtils(fakeClient),
-    retryUnlessClientError: actual.retryUnlessClientError,
-  };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import { clearThreadFamily, threadAtomFamily } from "@/atoms/thread";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
 beforeEach(() => {
   fakeClient.post.thread.mockReset();

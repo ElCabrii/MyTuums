@@ -7,13 +7,13 @@
  * a real session.
  */
 import { randomUUID } from "node:crypto";
-import { beforeEach } from "vitest";
+import { beforeEach, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { auth } from "@my-tuums/auth";
 import { db } from "@my-tuums/db";
 import { assertTestDatabase } from "@my-tuums/db/testing";
 import { post, user } from "@my-tuums/db/schema";
-import type { Context } from "../context.js";
+import type { Context, EmailSender } from "../context.js";
 import { createRateLimiter, type RateLimiter } from "../rate-limit.js";
 import type { UserRole } from "../roles.js";
 import type { DestructiveStorage, Storage } from "../storage.js";
@@ -83,6 +83,11 @@ const forwardingRateLimiter: RateLimiter = {
   },
 };
 
+/** Recording email adapter shared by integration-test contexts. */
+export const testEmailSender: EmailSender = {
+  send: vi.fn(() => Promise.resolve()),
+};
+
 /**
  * An in-memory stand-in for a Storage Bucket.
  *
@@ -118,7 +123,7 @@ export const testStorage: DestructiveStorage = {
   },
   removeByPrefix(prefix) {
     let removed = 0;
-    for (const key of [...testStorageObjects.keys()]) {
+    for (const key of testStorageObjects.keys()) {
       if (key.startsWith(prefix)) {
         testStorageObjects.delete(key);
         removed += 1;
@@ -133,6 +138,7 @@ export const testStorage: DestructiveStorage = {
 
 beforeEach(() => {
   testStorageObjects.clear();
+  vi.mocked(testEmailSender.send).mockReset().mockResolvedValue();
 });
 
 /**
@@ -212,6 +218,7 @@ export async function createTestUser(overrides?: {
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
+      emailSender: testEmailSender,
     },
   };
 }
@@ -223,6 +230,7 @@ export const anonContext: Context = {
   requestId: "test-request-id",
   rateLimiter: forwardingRateLimiter,
   storage: testStorage,
+  emailSender: testEmailSender,
 };
 
 /**
@@ -235,8 +243,16 @@ export function contextFor(
   user: TestUser,
   rateLimiter: RateLimiter = forwardingRateLimiter,
   storage: Storage | null = testStorage,
+  emailSender: EmailSender = testEmailSender,
 ): Context {
-  return { db, session: user.session, requestId: "test-request-id", rateLimiter, storage };
+  return {
+    db,
+    session: user.session,
+    requestId: "test-request-id",
+    rateLimiter,
+    storage,
+    emailSender,
+  };
 }
 
 /**
@@ -283,7 +299,7 @@ export async function seedPosts(
     };
     if (opts.parentId) row.parentId = opts.parentId;
     if (opts.createdAt) {
-      row.createdAt = typeof opts.createdAt === "function" ? opts.createdAt(i) : opts.createdAt;
+      row.createdAt = opts.createdAt instanceof Date ? opts.createdAt : opts.createdAt(i);
     }
     return row;
   });
@@ -333,6 +349,7 @@ export async function freshSessionFor(testUser: TestUser): Promise<TestUser> {
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
+      emailSender: testEmailSender,
     },
   };
 }

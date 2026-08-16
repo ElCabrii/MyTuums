@@ -79,7 +79,7 @@ async function seedPostContentMany(
   const rows: (typeof post.$inferInsert)[] = Array.from({ length: count }, (_, i) => ({
     authorId,
     content,
-    createdAt: typeof createdAt === "function" ? createdAt(i) : createdAt,
+    createdAt: createdAt instanceof Date ? createdAt : createdAt(i),
   }));
   return anonContext.db
     .insert(post)
@@ -97,18 +97,27 @@ async function seedPostContentMany(
 async function seedUsers(
   rows: Array<{ username: string; name?: string; createdAt?: Date }>,
 ): Promise<{ id: string; username: string | null; createdAt: Date }[]> {
-  const values: (typeof user.$inferInsert)[] = rows.map((r) => ({
-    id: randomUUID(),
-    name: r.name ?? "Seed User",
-    email: `seed+${randomUUID()}@example.com`,
-    username: r.username,
-    displayUsername: r.username,
-    ...(r.createdAt ? { createdAt: r.createdAt } : {}),
-  }));
+  const values: (typeof user.$inferInsert)[] = rows.map((row) => {
+    const value: typeof user.$inferInsert = {
+      id: randomUUID(),
+      name: row.name ?? "Seed User",
+      email: `seed+${randomUUID()}@example.com`,
+      username: row.username,
+      displayUsername: row.username,
+    };
+    if (row.createdAt) value.createdAt = row.createdAt;
+    return value;
+  });
   return anonContext.db
     .insert(user)
     .values(values)
     .returning({ id: user.id, username: user.username, createdAt: user.createdAt });
+}
+
+interface SearchPageInput {
+  q: string;
+  cursor?: string;
+  limit?: number;
 }
 
 /** Walks `search.users` to exhaustion via `nextCursor`, collecting every id it returns. */
@@ -118,11 +127,9 @@ async function walkAllUserPages(q: string, context: Context, limit?: number): Pr
   let pages = 0;
 
   do {
-    const page = await call(
-      appRouter.search.users,
-      { q, cursor, ...(limit ? { limit } : {}) },
-      { context },
-    );
+    const input: SearchPageInput = { q, cursor };
+    if (limit) input.limit = limit;
+    const page = await call(appRouter.search.users, input, { context });
     ids.push(...page.items.map((item) => item.id));
     cursor = page.nextCursor ?? undefined;
     pages += 1;
@@ -141,11 +148,9 @@ async function walkAllPostPages(q: string, context: Context, limit?: number): Pr
   let pages = 0;
 
   do {
-    const page = await call(
-      appRouter.search.posts,
-      { q, cursor, ...(limit ? { limit } : {}) },
-      { context },
-    );
+    const input: SearchPageInput = { q, cursor };
+    if (limit) input.limit = limit;
+    const page = await call(appRouter.search.posts, input, { context });
     ids.push(...page.items.map((item) => item.id));
     cursor = page.nextCursor ?? undefined;
     pages += 1;

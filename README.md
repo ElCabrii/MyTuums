@@ -49,7 +49,7 @@ unset; the traps worth knowing are collected in
 | Command                                                         | What it does                                        |
 | --------------------------------------------------------------- | --------------------------------------------------- |
 | `pnpm build`                                                    | production builds across the workspace              |
-| `pnpm lint` · `pnpm typecheck`                                  | root tooling and all workspace packages             |
+| `pnpm lint` · `pnpm typecheck`                                  | Oxlint, ESLint, and TypeScript across the workspace |
 | `pnpm test:unit`                                                | vitest unit suites — pure logic, no database needed |
 | `pnpm db:test:setup` then `pnpm test:integration`               | API integration suites against real Postgres        |
 | `pnpm test:e2e`                                                 | Playwright; slow, own ports (`:3101` / `:5273`)     |
@@ -74,9 +74,11 @@ The rest of the Drizzle toolbox is package-level:
 | `e2e`           | the Playwright suite                                                                 |
 | `docs`          | architecture, product, operations, security                                          |
 | `scripts`       | repository tooling (`check-docs.ts`)                                                 |
+| `tools/oxlint`  | vendored repository-local Oxlint plugins                                             |
 
-Each of those directories carries its own `CONTEXT.md` — the authoritative
-map, boundaries, invariants, and verification guidance for that area.
+The application and package directories carry their own `CONTEXT.md` files —
+the authoritative maps, boundaries, invariants, and verification guidance for
+each owned area.
 
 ## Conventions
 
@@ -86,7 +88,7 @@ code rather than the config:
 - **UI is shadcn only** — add components with the shadcn CLI, never another
   component library or a hand-rolled styled primitive.
 - **Shared client state is Jotai atoms**, not `useState`/`useEffect`.
-- **The strict TypeScript and ESLint configs are deliberate.**
+- **The strict TypeScript, ESLint, and Oxlint anti-slop configs are deliberate.**
 
 The repository guardrails are in [AGENTS.md](AGENTS.md); their architectural
 reasons and owning source files are in [CONTEXT.md](CONTEXT.md).

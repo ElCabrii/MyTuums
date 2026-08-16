@@ -57,6 +57,6 @@ export const createReplyAtomFamily = atomFamily((parentId: string) =>
 
 /** Drops every entry these families have created. See `clearPostFeedFamily`. */
 export function clearReplyFamilies(): void {
-  for (const key of [...replyDraftAtomFamily.getParams()]) replyDraftAtomFamily.remove(key);
-  for (const key of [...createReplyAtomFamily.getParams()]) createReplyAtomFamily.remove(key);
+  for (const key of replyDraftAtomFamily.getParams()) replyDraftAtomFamily.remove(key);
+  for (const key of createReplyAtomFamily.getParams()) createReplyAtomFamily.remove(key);
 }

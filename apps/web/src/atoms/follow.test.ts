@@ -4,32 +4,29 @@ import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: {
-    user: {
-      follow: vi.fn(),
-      unfollow: vi.fn(),
-      byUsername: vi.fn(),
-      followers: vi.fn(),
-      following: vi.fn(),
-    },
-    post: { list: vi.fn() },
-    // The follow-cache sweep now also walks `orpc.search.users.key()`, so a
-    // missing group here throws inside every follow mutation — mirroring the
-    // `search` group like.test.ts already carries.
-    search: { typeahead: vi.fn(), users: vi.fn(), posts: vi.fn() },
+const fakeClient = {
+  user: {
+    follow: vi.fn(),
+    unfollow: vi.fn(),
+    byUsername: vi.fn(),
+    followers: vi.fn(),
+    following: vi.fn(),
   },
-}));
+  post: { list: vi.fn() },
+  // The follow-cache sweep now also walks `orpc.search.users.key()`, so a
+  // missing group here throws inside every follow mutation — mirroring the
+  // `search` group like.test.ts already carries.
+  search: { typeahead: vi.fn(), users: vi.fn(), posts: vi.fn() },
+};
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import { orpc, type Profile, type SearchUser, type SearchUsersPage } from "@/lib/orpc";
 import { readCachedIsFollowing } from "@/lib/follow-cache";
 import { clearFollowFamilies, toggleFollowAtomFamily } from "@/atoms/follow";
 import { sessionAtom } from "@/atoms/session";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
 function makeProfile(overrides: Partial<Profile> & { id: string; username: string }): Profile {
   return {
@@ -79,6 +76,7 @@ function freshStoreWithTarget(profile: Profile) {
   store.set(queryClientAtom, queryClient);
   // A signed-in viewer, distinct from the target, so `follow:` scope tests
   // have a real viewer id to prove is absent.
+  // SAFETY: partial session fixture — the atoms read only the viewer id.
   store.set(sessionAtom, {
     data: { user: { id: "viewer-1" } },
     isPending: false,
@@ -142,7 +140,11 @@ describe("toggleFollowAtomFamily", () => {
       }),
     );
 
-    let resolveFollow!: (value: unknown) => void;
+    let resolveFollow!: (value: {
+      userId: string;
+      followerCount: number;
+      viewerIsFollowing: boolean;
+    }) => void;
     fakeClient.user.follow.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -194,6 +196,7 @@ describe("toggleFollowAtomFamily", () => {
     const store = createStore();
     const queryClient = new QueryClient();
     store.set(queryClientAtom, queryClient);
+    // SAFETY: partial session fixture — the atoms read only the viewer id.
     store.set(sessionAtom, {
       data: { user: { id: "viewer-1" } },
       isPending: false,

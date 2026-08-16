@@ -110,8 +110,8 @@ export const searchPostsAtom = (q: string) => searchPostsFamily(q.trim());
  * must not survive into the next session on this browser.
  */
 export function clearSearchFamilies(): void {
-  for (const key of [...searchUsersFamily.getParams()]) searchUsersFamily.remove(key);
-  for (const key of [...searchPostsFamily.getParams()]) searchPostsFamily.remove(key);
+  for (const key of searchUsersFamily.getParams()) searchUsersFamily.remove(key);
+  for (const key of searchPostsFamily.getParams()) searchPostsFamily.remove(key);
 }
 
 /** Whether the typeahead dropdown is open, app-wide — at most one SearchBox exists. */

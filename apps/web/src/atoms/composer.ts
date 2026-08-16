@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
+import { z } from "zod";
 import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import { orpc } from "@/lib/orpc";
 import { store } from "@/lib/store";
@@ -32,7 +33,8 @@ const storedComposerDraftAtom = atomWithStorage<unknown>(STORAGE_KEY, "", undefi
 export const composerDraftAtom = atom(
   (get): string => {
     const stored = get(storedComposerDraftAtom);
-    return typeof stored === "string" ? stored : "";
+    const parsed = z.string().safeParse(stored);
+    return parsed.success ? parsed.data : "";
   },
   (_get, set, next: string) => {
     set(storedComposerDraftAtom, next);

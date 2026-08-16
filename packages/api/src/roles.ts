@@ -24,7 +24,7 @@ export type UserRole = (typeof USER_ROLES)[number];
  * check that cannot see a role it knows nothing about must not pass.
  */
 export function roleRank(role: string): number {
-  return USER_ROLES.indexOf(role as UserRole);
+  return USER_ROLES.findIndex((candidate) => candidate === role);
 }
 
 /** True when `role` is at least `min` — `roleAtLeast(role, "staff")` gates staff+; `roleAtLeast(role, "user")` gates everyone. */

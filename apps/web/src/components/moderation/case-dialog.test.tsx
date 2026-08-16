@@ -11,6 +11,8 @@ import {
 import { CaseDialog } from "@/components/moderation/case-dialog";
 import { DEFAULT_SUSPENSION_SECONDS, type CaseRef } from "@/atoms/moderation";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
 /**
  * The mutation procedures the dialog's buttons call, plus `case` itself.
@@ -22,25 +24,20 @@ import { m } from "@/paraglide/messages.js";
  * guarding against would ever happen. Same reasoning as the `queue`/`case`/
  * `auditLog` stubs in `atoms/moderation.test.ts`.
  */
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: {
-    moderation: {
-      case: vi.fn(),
-      removePost: vi.fn(),
-      restorePost: vi.fn(),
-      resolve: vi.fn(),
-      suspendUser: vi.fn(),
-      banUser: vi.fn(),
-      unbanUser: vi.fn(),
-      appealReview: vi.fn(),
-    },
+const fakeClient = {
+  moderation: {
+    case: vi.fn(),
+    removePost: vi.fn(),
+    restorePost: vi.fn(),
+    resolve: vi.fn(),
+    suspendUser: vi.fn(),
+    banUser: vi.fn(),
+    unbanUser: vi.fn(),
+    appealReview: vi.fn(),
   },
-}));
+};
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {
   vi.clearAllMocks();

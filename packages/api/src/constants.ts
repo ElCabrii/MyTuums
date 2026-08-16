@@ -75,7 +75,9 @@ export const INVERSE_ACTION = {
  * The actions `appealOpen` accepts, derived from the inverse map so the two
  * lists can never drift — anything with an inverse is appealable.
  */
-export const APPEALABLE_ACTIONS = Object.keys(INVERSE_ACTION) as ModerationActionCode[];
+export const APPEALABLE_ACTIONS =
+  // SAFETY: Object.keys returns exactly INVERSE_ACTION's checked own keys.
+  Object.keys(INVERSE_ACTION) as ModerationActionCode[];
 
 /**
  * The stable report-reason codes (issue #38), one set per target type.

@@ -27,7 +27,10 @@ import { socialProviders, trustedProviders } from "./social.js";
  * are both pure and neither knows about the other. Order does not matter: they
  * validate disjoint fields, and the first violation throws.
  */
-const validateUserWrite = async (user: Record<string, unknown>): Promise<void> => {
+type AuthUserWrite = Parameters<typeof validateDateOfBirthHook>[0] &
+  Parameters<typeof validateProfileFieldsHook>[0];
+
+const validateUserWrite = async (user: AuthUserWrite): Promise<void> => {
   await validateDateOfBirthHook(user);
   await validateProfileFieldsHook(user);
 };

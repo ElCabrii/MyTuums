@@ -40,6 +40,23 @@ function tryResolveTestDatabaseUrl(): string | undefined {
  * quietly start depending on one.
  */
 const testDatabaseUrl = tryResolveTestDatabaseUrl();
+type IntegrationTestEnvironment = {
+  DATABASE_URL?: string;
+  BETTER_AUTH_SECRET: string;
+  BETTER_AUTH_URL: string;
+  WEB_ORIGIN: string;
+  RESEND_API_KEY: string;
+};
+const integrationEnvironment: IntegrationTestEnvironment = {
+  BETTER_AUTH_SECRET:
+    process.env.BETTER_AUTH_SECRET ?? "vitest-integration-secret-at-least-32-chars",
+  BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? "http://localhost:3001",
+  WEB_ORIGIN: process.env.WEB_ORIGIN ?? "http://localhost:5173",
+  // The root `.env` loaded above leaks RESEND_API_KEY into every worker. The
+  // integration suite must never reach the real mail service.
+  RESEND_API_KEY: "",
+};
+if (testDatabaseUrl) integrationEnvironment.DATABASE_URL = testDatabaseUrl;
 
 export default defineConfig({
   test: {
@@ -77,20 +94,7 @@ export default defineConfig({
           // DATABASE_URL at module scope and throws when it is missing, and
           // `@my-tuums/auth` reads WEB_ORIGIN the same way. Setting it in the
           // config's module scope instead would be too late for a forked pool.
-          env: {
-            ...(testDatabaseUrl ? { DATABASE_URL: testDatabaseUrl } : {}),
-            BETTER_AUTH_SECRET:
-              process.env.BETTER_AUTH_SECRET ?? "vitest-integration-secret-at-least-32-chars",
-            BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? "http://localhost:3001",
-            WEB_ORIGIN: process.env.WEB_ORIGIN ?? "http://localhost:5173",
-            // The root `.env` loaded above leaks RESEND_API_KEY (and its
-            // friends) into every worker's process.env. The integration suite
-            // must not reach the real mail service — the moderation procedures
-            // email the affected user on every action, and Resend refuses the
-            // `vitest+…@example.com` fixtures. Overriding the key to empty
-            // routes `sendEmail` to its quiet-under-test log path instead.
-            RESEND_API_KEY: "",
-          },
+          env: integrationEnvironment,
         },
       },
     ],

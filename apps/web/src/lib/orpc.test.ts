@@ -34,6 +34,8 @@ describe("retryUnlessClientError", () => {
 describe("query key shapes", () => {
   it("the global feed input carries no feed key at all", () => {
     const key = orpc.post.list.key({ input: { limit: 20 } });
+    // SAFETY: the key tuple is [scope, input state]; the test only inspects
+    // the input member, so the rest is left structurally unconstrained.
     const [, state] = key as [unknown, { input?: { feed?: unknown } }];
     expect(state.input).not.toHaveProperty("feed");
   });

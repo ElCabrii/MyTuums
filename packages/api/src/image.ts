@@ -24,10 +24,10 @@ import {
 import { imageDimensions } from "./dimensions.js";
 
 /** Where each slot's objects live. The kind is the key's first segment. */
-const KEY_PREFIX: Record<ImageKind, string> = {
+const KEY_PREFIX = {
   avatar: "avatars",
   banner: "banners",
-};
+} satisfies Record<ImageKind, string>;
 
 /**
  * Which of the two objects an upload slot carries. The display object is what
@@ -37,11 +37,11 @@ const KEY_PREFIX: Record<ImageKind, string> = {
  */
 export type ImageVariant = "original" | "display";
 
-const EXTENSION: Record<AllowedImageType, string> = {
+const EXTENSION = {
   "image/webp": "webp",
   "image/png": "png",
   "image/jpeg": "jpg",
-};
+} satisfies Record<AllowedImageType, string>;
 
 /**
  * The leading bytes that actually identify each format, checked because a
@@ -92,7 +92,7 @@ export function sniffImageType(bytes: Uint8Array): AllowedImageType | null {
 
 /** Narrows an arbitrary string to an `AllowedImageType`. */
 export function isAllowedImageType(value: string): value is AllowedImageType {
-  return (ALLOWED_IMAGE_TYPES as readonly string[]).includes(value);
+  return ALLOWED_IMAGE_TYPES.some((allowedType) => allowedType === value);
 }
 
 /** The reason codes `acceptImage` can refuse an upload with. */

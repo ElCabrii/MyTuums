@@ -119,8 +119,8 @@ export const toggleFollowAtomFamily = atomFamily((userId: string) =>
 
 /** Drops every entry these families have created. See `clearPostFeedFamily`. */
 export function clearFollowFamilies(): void {
-  for (const key of [...followFamily.getParams()]) followFamily.remove(key);
-  for (const key of [...unfollowFamily.getParams()]) unfollowFamily.remove(key);
-  for (const key of [...intentFamily.getParams()]) intentFamily.remove(key);
-  for (const key of [...toggleFollowAtomFamily.getParams()]) toggleFollowAtomFamily.remove(key);
+  for (const key of followFamily.getParams()) followFamily.remove(key);
+  for (const key of unfollowFamily.getParams()) unfollowFamily.remove(key);
+  for (const key of intentFamily.getParams()) intentFamily.remove(key);
+  for (const key of toggleFollowAtomFamily.getParams()) toggleFollowAtomFamily.remove(key);
 }

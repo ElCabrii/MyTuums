@@ -6,15 +6,12 @@ import { feedScopeAtom } from "@/lib/feed-scope";
 import { createTestQueryClient, queryFixtures, renderWithProviders } from "@/test/render";
 import { HomePage } from "@/components/home-page";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: { post: { list: vi.fn(), create: vi.fn() } },
-}));
+const fakeClient = { post: { list: vi.fn(), create: vi.fn() } };
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {
   vi.clearAllMocks();

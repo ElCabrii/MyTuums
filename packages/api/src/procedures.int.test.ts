@@ -1,6 +1,7 @@
-import { call, ORPCError } from "@orpc/server";
+import { call } from "@orpc/server";
 import { closeDb } from "@my-tuums/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { appRouter } from "./router.js";
 import {
@@ -81,17 +82,23 @@ describe("rate limiting", () => {
     );
     await Promise.all(attempts);
 
-    let caught: unknown;
+    let caught: Error | null = null;
     try {
       await call(appRouter.post.create, { content: "over budget" }, { context: contextFor(actor) });
-    } catch (err) {
-      caught = err;
+    } catch (error) {
+      if (!(error instanceof Error)) {
+        throw new Error("expected an Error instance", { cause: error });
+      }
+      caught = error;
     }
 
-    expect(caught).toBeInstanceOf(ORPCError);
-    const orpcErr = caught as ORPCError<string, { retryAfterSeconds: number }>;
-    expect(orpcErr.code).toBe("TOO_MANY_REQUESTS");
-    expect(orpcErr.data.retryAfterSeconds).toBeGreaterThan(0);
+    const rateLimitError = z
+      .object({
+        code: z.literal("TOO_MANY_REQUESTS"),
+        data: z.object({ retryAfterSeconds: z.number().positive() }),
+      })
+      .parse(caught);
+    expect(rateLimitError.data.retryAfterSeconds).toBeGreaterThan(0);
   }, 20_000);
 
   it("auth runs before the rate limiter on protected procedures — anonymous callers never consume budget", async () => {

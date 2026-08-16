@@ -7,6 +7,29 @@ import {
 import type { FeedScope } from "@/lib/feed-scope";
 import { orpc, retryUnlessClientError } from "@/lib/orpc";
 
+interface PostListInput {
+  limit: number;
+  authorId?: string;
+  parentId?: string;
+  includeReplies?: boolean;
+  feed?: FeedScope;
+  cursor?: string;
+}
+interface PagedSearchInput {
+  q: string;
+  limit: number;
+  cursor?: string;
+}
+interface PagedUserListInput {
+  username: string;
+  limit: number;
+  cursor?: string;
+}
+interface PagedModerationInput {
+  limit: number;
+  cursor?: string;
+}
+
 export type CaseRef = { targetType: "post" | "user"; targetId: string };
 
 export type FollowDirection = "followers" | "following";
@@ -30,15 +53,18 @@ export function postListQueryOptions({
   includeReplies,
 }: PostFeedParams) {
   return orpc.post.list.infiniteOptions({
-    input: (cursor: string | undefined) => ({
-      limit: POST_PAGE_SIZE,
-      ...(authorId ? { authorId } : {}),
-      ...(parentId ? { parentId } : {}),
-      ...(includeReplies ? { includeReplies } : {}),
-      ...(scope === "following" ? { feed: scope } : {}),
-      ...(cursor ? { cursor } : {}),
-    }),
-    initialPageParam: undefined as string | undefined,
+    input: (cursor: string | undefined) => {
+      const input: PostListInput = { limit: POST_PAGE_SIZE };
+      if (authorId) input.authorId = authorId;
+      if (parentId) input.parentId = parentId;
+      if (includeReplies) input.includeReplies = true;
+      if (scope === "following") input.feed = scope;
+      if (cursor) input.cursor = cursor;
+      return input;
+    },
+    initialPageParam:
+      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+      undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 }
@@ -60,12 +86,14 @@ export function threadQueryOptions(postId: string) {
 export function userListQueryOptions(username: string, direction: FollowDirection) {
   const procedure = direction === "followers" ? orpc.user.followers : orpc.user.following;
   return procedure.infiniteOptions({
-    input: (cursor: string | undefined) => ({
-      username,
-      limit: FOLLOW_PAGE_SIZE,
-      ...(cursor ? { cursor } : {}),
-    }),
-    initialPageParam: undefined as string | undefined,
+    input: (cursor: string | undefined) => {
+      const input: PagedUserListInput = { username, limit: FOLLOW_PAGE_SIZE };
+      if (cursor) input.cursor = cursor;
+      return input;
+    },
+    initialPageParam:
+      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+      undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 }
@@ -74,12 +102,17 @@ export function searchUsersQueryOptions(q: string) {
   const normalized = q.trim();
   return {
     ...orpc.search.users.infiniteOptions({
-      input: (cursor: string | undefined) => ({
-        q: normalized,
-        limit: SEARCH_PAGE_SIZE,
-        ...(cursor ? { cursor } : {}),
-      }),
-      initialPageParam: undefined as string | undefined,
+      input: (cursor: string | undefined) => {
+        const input: PagedSearchInput = {
+          q: normalized,
+          limit: SEARCH_PAGE_SIZE,
+        };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     }),
     enabled: normalized.length > 0,
@@ -90,12 +123,17 @@ export function searchPostsQueryOptions(q: string) {
   const normalized = q.trim();
   return {
     ...orpc.search.posts.infiniteOptions({
-      input: (cursor: string | undefined) => ({
-        q: normalized,
-        limit: SEARCH_PAGE_SIZE,
-        ...(cursor ? { cursor } : {}),
-      }),
-      initialPageParam: undefined as string | undefined,
+      input: (cursor: string | undefined) => {
+        const input: PagedSearchInput = {
+          q: normalized,
+          limit: SEARCH_PAGE_SIZE,
+        };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     }),
     enabled: normalized.length > 0,
@@ -104,22 +142,28 @@ export function searchPostsQueryOptions(q: string) {
 
 export function moderationQueueQueryOptions() {
   return orpc.moderation.queue.infiniteOptions({
-    input: (cursor: string | undefined) => ({
-      limit: MODERATION_PAGE_SIZE,
-      ...(cursor ? { cursor } : {}),
-    }),
-    initialPageParam: undefined as string | undefined,
+    input: (cursor: string | undefined) => {
+      const input: PagedModerationInput = { limit: MODERATION_PAGE_SIZE };
+      if (cursor) input.cursor = cursor;
+      return input;
+    },
+    initialPageParam:
+      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+      undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 }
 
 export function auditLogQueryOptions() {
   return orpc.moderation.auditLog.infiniteOptions({
-    input: (cursor: string | undefined) => ({
-      limit: MODERATION_PAGE_SIZE,
-      ...(cursor ? { cursor } : {}),
-    }),
-    initialPageParam: undefined as string | undefined,
+    input: (cursor: string | undefined) => {
+      const input: PagedModerationInput = { limit: MODERATION_PAGE_SIZE };
+      if (cursor) input.cursor = cursor;
+      return input;
+    },
+    initialPageParam:
+      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+      undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 }

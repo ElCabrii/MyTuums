@@ -13,6 +13,10 @@ apps/web/project.inlang/README.md
 # formatting them would make every future db:generate churn
 packages/db/drizzle/
 
+# Vendored Oxlint plugin (copied from the install-anti-slop skill); it is
+# generator-owned and uses its own tab-based style
+tools/oxlint/anti-slop/
+
 # Lockfiles and package-manager artifacts
 pnpm-lock.yaml
 

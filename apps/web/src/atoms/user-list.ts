@@ -23,13 +23,19 @@ export const encode = (username: string, direction: FollowDirection): string =>
   `${direction}:${username}`;
 
 /** Decodes a family key back into (direction, username) — the inverse of {@link encode}. */
-export const decode = (key: string): { username: string; direction: FollowDirection } => {
+export const decode = (key: string): DecodedUserListKey => {
   const separator = key.indexOf(":");
   return {
+    // SAFETY: encode only ever writes one of the two literal directions.
     direction: key.slice(0, separator) as FollowDirection,
     username: key.slice(separator + 1),
   };
 };
+
+interface DecodedUserListKey {
+  username: string;
+  direction: FollowDirection;
+}
 
 /**
  * One infinite-query atom per (direction, handle) pair.
@@ -63,7 +69,7 @@ export const userListAtom = (username: string, direction: FollowDirection) =>
  * dialog's in-progress pagination.
  */
 export function clearUserListFamily(): void {
-  for (const key of [...userListFamily.getParams()]) userListFamily.remove(key);
+  for (const key of userListFamily.getParams()) userListFamily.remove(key);
 }
 
 /**

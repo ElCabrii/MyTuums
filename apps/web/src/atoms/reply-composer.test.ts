@@ -2,14 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { waitFor } from "@testing-library/react";
 
-const { fakeClient } = vi.hoisted(() => ({
-  fakeClient: { post: { create: vi.fn(), list: vi.fn(), thread: vi.fn() } },
-}));
+const fakeClient = { post: { create: vi.fn(), list: vi.fn(), thread: vi.fn() } };
 
-vi.mock("@/lib/orpc", async () => {
-  const { createTanstackQueryUtils } = await import("@orpc/tanstack-query");
-  return { orpc: createTanstackQueryUtils(fakeClient) };
-});
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import { orpc } from "@/lib/orpc";
 import {
@@ -22,6 +17,8 @@ import {
 // store the draft-clearing side effect is observable on.
 import { store as singletonStore } from "@/lib/store";
 import { queryClient as singletonQueryClient } from "@/lib/query-client";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestOrpc } from "@/lib/orpc";
 
 beforeEach(() => {
   fakeClient.post.create.mockReset();
@@ -59,7 +56,7 @@ describe("createReplyAtomFamily", () => {
     singletonStore.set(replyDraftAtomFamily("parent-1"), "a reply");
     const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
 
-    let resolveCreate!: (value: unknown) => void;
+    let resolveCreate!: (value: { id: string }) => void;
     fakeClient.post.create.mockImplementation(
       () =>
         new Promise((resolve) => {

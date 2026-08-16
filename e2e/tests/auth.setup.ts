@@ -81,6 +81,8 @@ for (const user of FIXTURE_USERS) {
     expect(session.ok(), `get-session should succeed once signed in as ${user.username}`).toBe(
       true,
     );
+    // SAFETY: This is Better Auth's get-session endpoint; the assertions below
+    // verify the two optional user fields this setup step consumes.
     const body = (await session.json()) as { user?: { username?: string; role?: string } } | null;
     expect(body?.user?.username, `session user should be ${user.username}`).toBe(user.username);
     if (user.username === ALICE.username) {

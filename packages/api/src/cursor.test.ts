@@ -5,26 +5,27 @@ import { createCursorCodec } from "./cursor.js";
 
 const VALID_UUID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 
-function encodeRaw(payload: unknown): string {
+function encodeRaw<Payload>(payload: Payload): string {
   return Buffer.from(JSON.stringify(payload)).toString("base64url");
 }
 
 /** Runs `fn`, returns whatever it throws (or fails the test if it doesn't). */
-function captureError(fn: () => unknown): unknown {
+function captureError(fn: () => void): Error {
   try {
     fn();
-  } catch (err) {
-    return err;
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw new Error("expected fn to throw an Error instance", { cause: error });
   }
   throw new Error("expected fn to throw");
 }
 
-function expectMalformedCursor(fn: () => unknown): void {
-  const err = captureError(fn);
-  expect(err).toBeInstanceOf(ORPCError);
-  const orpcErr = err as ORPCError<string, unknown>;
-  expect(orpcErr.code).toBe("BAD_REQUEST");
-  expect(orpcErr.message).toBe("Malformed pagination cursor.");
+function expectMalformedCursor(fn: () => void): void {
+  const error = captureError(fn);
+  expect(error).toBeInstanceOf(ORPCError);
+  if (!(error instanceof ORPCError)) throw new Error("expected an ORPCError");
+  expect(error.code).toBe("BAD_REQUEST");
+  expect(error.message).toBe("Malformed pagination cursor.");
 }
 
 describe("createCursorCodec", () => {

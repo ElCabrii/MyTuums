@@ -108,7 +108,12 @@ async function storedImage(person: TestUser): Promise<{
   return row ?? { image: null, bannerImage: null, imageOriginal: null, bannerImageOriginal: null };
 }
 
-function deferred(): { promise: Promise<void>; resolve: () => void } {
+interface Deferred {
+  promise: Promise<void>;
+  resolve: () => void;
+}
+
+function deferred(): Deferred {
   let resolve: (() => void) | undefined;
   const promise = new Promise<void>((settle) => {
     resolve = settle;

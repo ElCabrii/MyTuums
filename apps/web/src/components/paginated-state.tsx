@@ -15,8 +15,8 @@ export interface PaginatedStateQuery {
   error: { message?: string } | null;
   hasNextPage?: boolean;
   isFetchingNextPage?: boolean;
-  refetch: () => unknown;
-  fetchNextPage?: () => unknown;
+  refetch: () => void;
+  fetchNextPage?: () => void;
 }
 
 /**

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient } from "@tanstack/react-query";
+import { installTestAuthClient } from "@/lib/auth-client";
 
 type AuthClientResult = { data: unknown; error: unknown };
 
@@ -10,9 +11,11 @@ const { linkSocial, unlinkAccount } = vi.hoisted(() => ({
   unlinkAccount: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
 }));
 
-vi.mock("@/lib/auth-client", () => ({
+// SAFETY: the recording fakes resolve the { data, error } shapes the app reads
+// from the real client; the seam swaps only what each suite needs.
+installTestAuthClient({
   authClient: { linkSocial, unlinkAccount },
-}));
+});
 
 import { authErrorAtom } from "@/atoms/auth";
 import {

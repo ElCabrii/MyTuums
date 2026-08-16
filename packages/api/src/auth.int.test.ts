@@ -69,16 +69,18 @@ async function signUp(
   const email = overrides.email ?? `vitest+${uuid}@example.com`;
   const username = overrides.username ?? `vitest${uuid.replace(/-/g, "").slice(0, 8)}`;
 
+  const body: NonNullable<Parameters<typeof auth.api.signUpEmail>[0]>["body"] = {
+    email,
+    password: overrides.password ?? PASSWORD,
+    name: "Vitest User",
+    username,
+  };
+  // Omitted unless a test says otherwise — the wire format the web app sends
+  // (`dateOfBirthToIso` in apps/web/src/lib/auth-validation.ts).
+  if (overrides.dateOfBirth) body.dateOfBirth = overrides.dateOfBirth;
+
   const result = await auth.api.signUpEmail({
-    body: {
-      email,
-      password: overrides.password ?? PASSWORD,
-      name: "Vitest User",
-      username,
-      // Omitted unless a test says otherwise — the wire format the web app
-      // sends (`dateOfBirthToIso` in apps/web/src/lib/auth-validation.ts).
-      ...(overrides.dateOfBirth ? { dateOfBirth: overrides.dateOfBirth } : {}),
-    },
+    body,
     returnHeaders: true,
   });
 
@@ -298,8 +300,8 @@ describe("date of birth requirement", () => {
 
   it("rejects a date of birth 15 years ago minus one day, and creates no row", async () => {
     const email = `vitest+${randomUUID()}@example.com`;
-    const result = await auth.api
-      .signUpEmail({
+    await expect(
+      auth.api.signUpEmail({
         body: {
           email,
           password: PASSWORD,
@@ -307,10 +309,8 @@ describe("date of birth requirement", () => {
           username: `vitest${randomUUID().replace(/-/g, "").slice(0, 8)}`,
           dateOfBirth: dob(15, 1),
         },
-      })
-      .catch((error: unknown) => error);
-
-    expect(String(result)).toContain("You must be at least 15 years old to create an account.");
+      }),
+    ).rejects.toThrow("You must be at least 15 years old to create an account.");
 
     const rows = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
     expect(rows).toHaveLength(0);
@@ -327,13 +327,16 @@ describe("date of birth requirement", () => {
   });
 
   it("rejects an impossible date rather than storing it", async () => {
-    // Cast past the typed `Date` boundary on purpose: the raw-string form is
-    // the wire format the web app actually sends (a Date cannot even represent
-    // February 30 — it rolls over), and the hook must reject it before
-    // `new Date()` silently stores March 2.
-    const impossibleDate = "1995-02-30T00:00:00.000Z" as unknown as Date;
-    const result = await auth.api
-      .signUpEmail({
+    // The raw-string form is the wire format the web app sends (a Date cannot
+    // even represent February 30 — it rolls over), and the hook must reject it
+    // before `new Date()` silently stores March 2. `as never` keeps the string
+    // on the wire while the client type declares `Date`.
+    const impossibleDate =
+      // SAFETY: see the comment above — the string is the wire value the hook
+      // parses; the assertion only bridges the client's `Date` field type.
+      "1995-02-30T00:00:00.000Z" as never;
+    await expect(
+      auth.api.signUpEmail({
         body: {
           email: `vitest+${randomUUID()}@example.com`,
           password: PASSWORD,
@@ -341,10 +344,8 @@ describe("date of birth requirement", () => {
           username: `vitest${randomUUID().replace(/-/g, "").slice(0, 8)}`,
           dateOfBirth: impossibleDate,
         },
-      })
-      .catch((error: unknown) => error);
-
-    expect(String(result)).toContain("Please enter a valid date of birth.");
+      }),
+    ).rejects.toThrow("Please enter a valid date of birth.");
   });
 
   it("enforces the same rule on updateUser — the /welcome claim path", async () => {
@@ -436,27 +437,20 @@ describe("i18n plugin", () => {
   it("translates an error message when the Paraglide locale cookie says French", async () => {
     const { email } = await signUp();
 
-    const result = await auth.api
-      .signInEmail({
+    await expect(
+      auth.api.signInEmail({
         body: { email, password: "definitely-the-wrong-password" },
         headers: new Headers({ cookie: "PARAGLIDE_LOCALE=fr" }),
-      })
-      .catch((error: unknown) => error);
-
-    // The web app passes unrecognised server errors straight through
-    // (lib/auth-error-message.ts), so a translated message here is what makes
-    // French sign-in errors read as French without any client change.
-    expect(String(result)).toContain("incorrect");
+      }),
+    ).rejects.toThrow("incorrect");
   });
 
   it("leaves the message in English without that cookie", async () => {
     const { email } = await signUp();
 
-    const result = await auth.api
-      .signInEmail({ body: { email, password: "definitely-the-wrong-password" } })
-      .catch((error: unknown) => error);
-
-    expect(String(result)).toMatch(/Invalid email or password/i);
+    await expect(
+      auth.api.signInEmail({ body: { email, password: "definitely-the-wrong-password" } }),
+    ).rejects.toThrow(/Invalid email or password/i);
   });
 });
 
@@ -621,8 +615,9 @@ describe("password reset", () => {
     const { jar } = await signUp();
     const sessionBefore = await auth.api.getSession({ headers: jar.headers });
     expect(sessionBefore).not.toBeNull();
+    if (!sessionBefore) throw new Error("expected a session before password reset");
 
-    const userId = (sessionBefore as { user: { id: string } }).user.id;
+    const userId = sessionBefore.user.id;
     const token = await insertResetToken(userId);
 
     await expect(

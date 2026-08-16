@@ -22,7 +22,11 @@ import {
   type Thread,
   type UserSummary,
 } from "@/lib/orpc";
-import type { SocialProviderId } from "@/lib/auth-client";
+import {
+  installTestAuthClient,
+  type SocialProviderId,
+  type UseSessionHook,
+} from "@/lib/auth-client";
 
 export { queryFixtures } from "@/test/query-fixtures";
 
@@ -124,7 +128,7 @@ interface TestSessionValue {
    */
   error: { status: number } | null;
   /** The store value's own refetch — what `lib/session-sync.ts`'s `refreshSession` calls. */
-  refetch: (queryParams?: unknown) => Promise<void>;
+  refetch: (queryParams?: { query?: { disableCookieCache?: boolean } }) => Promise<void>;
 }
 
 /**
@@ -157,15 +161,16 @@ const sessionListeners = new Set<(value: TestSessionValue) => void>();
 type TestSocialProvider = { id: SocialProviderId; label: string };
 const testSocialProviders: TestSocialProvider[] = [];
 
-vi.mock("@/lib/auth-client", () => ({
-  sessionStore: {
-    get: () => currentSession,
-    subscribe: (listener: (value: TestSessionValue) => void) => {
-      sessionListeners.add(listener);
-      listener(currentSession); // mirrors nanostores' "fire immediately" contract
-      return () => sessionListeners.delete(listener);
-    },
+const fakeSessionStore = {
+  get: () => currentSession,
+  subscribe: (listener: (value: TestSessionValue) => void) => {
+    sessionListeners.add(listener);
+    listener(currentSession); // mirrors nanostores' "fire immediately" contract
+    return () => sessionListeners.delete(listener);
   },
+};
+
+const fakeAuthClient = {
   /**
    * The full client surface the auth atoms reach for.
    *
@@ -181,51 +186,59 @@ vi.mock("@/lib/auth-client", () => ({
    * BetterAuth's client actually reports failure. A test that cares overrides
    * the specific one with `vi.mocked(...).mockResolvedValue(...)`.
    */
-  authClient: {
-    signIn: {
-      email: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-      username: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-      social: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-      passkey: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-    },
-    signUp: { email: vi.fn(() => Promise.resolve({ data: {}, error: null })) },
-    signOut: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-    requestPasswordReset: vi.fn(() => Promise.resolve({ data: { status: true }, error: null })),
-    resetPassword: vi.fn(() => Promise.resolve({ data: { status: true }, error: null })),
-    updateUser: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-    // `/settings/account`'s password section. Like every other namespace here,
-    // its absence would be a "cannot read properties of undefined" at click
-    // time rather than a type error.
-    changePassword: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-    listAccounts: vi.fn(() => Promise.resolve({ data: [], error: null })),
-    linkSocial: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-    unlinkAccount: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-    twoFactor: {
-      enable: vi.fn(() => Promise.resolve({ data: { totpURI: "", backupCodes: [] }, error: null })),
-      disable: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-      verifyTotp: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-      verifyOtp: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-      verifyBackupCode: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-      sendOtp: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-    },
-    passkey: {
-      addPasskey: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-      listUserPasskeys: vi.fn(() => Promise.resolve({ data: [], error: null })),
-      updatePasskey: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-      deletePasskey: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-    },
-    getLastUsedLoginMethod: vi.fn(() => null),
+  signIn: {
+    email: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    username: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    social: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    passkey: vi.fn(() => Promise.resolve({ data: {}, error: null })),
   },
-  useSession: () => currentSession,
-  signIn: vi.fn(),
-  signUp: vi.fn(),
-  signOut: vi.fn(),
-  // Read at module scope by `lib/one-tap.ts` and by `sign-in-options.tsx`;
-  // off by default so component tests don't render provider buttons unless
-  // they mean to.
-  shouldOfferOneTap: false,
-  socialProviders: testSocialProviders,
-}));
+  signUp: { email: vi.fn(() => Promise.resolve({ data: {}, error: null })) },
+  signOut: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+  requestPasswordReset: vi.fn(() => Promise.resolve({ data: { status: true }, error: null })),
+  resetPassword: vi.fn(() => Promise.resolve({ data: { status: true }, error: null })),
+  updateUser: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+  // `/settings/account`'s password section. Like every other namespace here,
+  // its absence would be a "cannot read properties of undefined" at click
+  // time rather than a type error.
+  changePassword: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+  listAccounts: vi.fn(() => Promise.resolve({ data: [], error: null })),
+  linkSocial: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+  unlinkAccount: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+  twoFactor: {
+    enable: vi.fn(() => Promise.resolve({ data: { totpURI: "", backupCodes: [] }, error: null })),
+    disable: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    verifyTotp: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    verifyOtp: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    verifyBackupCode: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    sendOtp: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+  },
+  passkey: {
+    addPasskey: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    listUserPasskeys: vi.fn(() => Promise.resolve({ data: [], error: null })),
+    updatePasskey: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    deletePasskey: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+  },
+  getLastUsedLoginMethod: vi.fn(() => null),
+};
+
+const fakeUseSession = () => currentSession;
+
+// Installed at module scope, not in a hook: `atoms/session.ts` seeds
+// `sessionAtom` from `sessionStore.get()` at ITS import time, which happens
+// while the test file's static imports are still being collected — before any
+// beforeEach could run. Importing this harness before the component under test
+// is therefore what puts the fake store in place ahead of that capture.
+{
+  // SAFETY: the fake covers the client surface the app reaches for; vi.fn
+  // members resolve the same { data, error } shapes better-auth reports.
+  installTestAuthClient({
+    sessionStore: fakeSessionStore,
+    authClient: fakeAuthClient,
+    useSession: fakeUseSession as UseSessionHook,
+    shouldOfferOneTap: false,
+    socialProviders: testSocialProviders,
+  });
+}
 
 /** Configures the OAuth buttons exposed by the mocked auth client for one test. */
 export function setTestSocialProviders(providers: readonly TestSocialProvider[]): void {
@@ -629,7 +642,11 @@ export function makeModerationCaseDetail(
     // `openAppeal ?? null` elides the unreachable-per-types `null` branch
     // from the inferred return type. The double cast keeps this fixture
     // truthful about what the API can actually send.
-    appeal: null as unknown as ModerationCaseDetail["appeal"],
+    appeal:
+      // SAFETY: the handler destructures [openAppeal] = await ....limit(1) and
+      // types it always-present (see the module note above); the wire can send
+      // null, so the fixture keeps it truthful.
+      null as never,
     ...common,
     target: {
       kind: "post",
@@ -668,7 +685,9 @@ export function makeUserModerationCaseDetail(
     // `openAppeal ?? null` elides the unreachable-per-types `null` branch
     // from the inferred return type. The double cast keeps this fixture
     // truthful about what the API can actually send.
-    appeal: null as unknown as ModerationCaseDetail["appeal"],
+    appeal:
+      // SAFETY: same nullable-on-the-wire truth as makeModerationCaseDetail.
+      null as never,
     ...common,
     target: {
       kind: "user",

@@ -1,19 +1,46 @@
 import { EventEmitter } from "node:events";
+import { IncomingMessage } from "node:http";
+import { Socket } from "node:net";
 import { describe, expect, it, vi } from "vitest";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import {
   attachAccessLog,
   createRequestId,
   pathnameOf,
-  type AccessLogEntry,
+  type AccessLogResponse,
 } from "./observability.js";
 
-/** A `ServerResponse`-shaped double: real `EventEmitter` + the fields the access log reads. */
-function resDouble(statusCode: number, requestId: string | undefined) {
-  const res = new EventEmitter() as unknown as ServerResponse & { statusCode: number };
-  res.statusCode = statusCode;
-  res.getHeader = (name: string) => (name === "x-request-id" ? requestId : undefined);
-  return res;
+const accessLogEntrySchema = z.object({
+  type: z.literal("access"),
+  requestId: z.string(),
+  method: z.string(),
+  path: z.string(),
+  status: z.number(),
+  durationMs: z.number(),
+});
+
+/** An `AccessLogResponse` double: real `EventEmitter` + the fields the access log reads. */
+function resDouble(statusCode: number, requestId: string | undefined): AccessLogResponse {
+  const res = new EventEmitter();
+  return Object.assign(res, {
+    statusCode,
+    getHeader: (name: string) => (name === "x-request-id" ? requestId : undefined),
+  });
+}
+
+/** A real `IncomingMessage` carrying only the metadata the access log reads. */
+function reqDouble(method: string, url: string): IncomingMessage {
+  const request = new IncomingMessage(new Socket());
+  request.method = method;
+  request.url = url;
+  return request;
+}
+
+/** The one log line `attachAccessLog` is expected to have written. */
+function loggedEntry(logSpy: {
+  mock: { calls: unknown[][] };
+}): z.infer<typeof accessLogEntrySchema> {
+  return accessLogEntrySchema.parse(JSON.parse(String(logSpy.mock.calls[0][0])));
 }
 
 describe("createRequestId", () => {
@@ -47,7 +74,7 @@ describe("attachAccessLog", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       const res = resDouble(200, "req-123");
-      const req = { method: "GET", url: "/health?probe=1" } as unknown as IncomingMessage;
+      const req = reqDouble("GET", "/health?probe=1");
 
       attachAccessLog(req, res);
       expect(logSpy).not.toHaveBeenCalled();
@@ -55,7 +82,7 @@ describe("attachAccessLog", () => {
       res.emit("finish");
 
       expect(logSpy).toHaveBeenCalledOnce();
-      const entry = JSON.parse(String(logSpy.mock.calls[0][0])) as AccessLogEntry;
+      const entry = loggedEntry(logSpy);
       expect(entry).toMatchObject({
         type: "access",
         requestId: "req-123",
@@ -74,13 +101,12 @@ describe("attachAccessLog", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       const res = resDouble(404, undefined);
-      const req = { method: "GET", url: "/nonsense" } as unknown as IncomingMessage;
+      const req = reqDouble("GET", "/nonsense");
 
       attachAccessLog(req, res);
       res.emit("finish");
 
-      const entry = JSON.parse(String(logSpy.mock.calls[0][0])) as AccessLogEntry;
-      expect(entry.requestId).toBe("-");
+      expect(loggedEntry(logSpy).requestId).toBe("-");
     } finally {
       logSpy.mockRestore();
     }
@@ -90,13 +116,12 @@ describe("attachAccessLog", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       const res = resDouble(503, "req-456");
-      const req = { method: "GET", url: "/health" } as unknown as IncomingMessage;
+      const req = reqDouble("GET", "/health");
 
       attachAccessLog(req, res);
       res.emit("finish");
 
-      const entry = JSON.parse(String(logSpy.mock.calls[0][0])) as AccessLogEntry;
-      expect(entry.status).toBe(503);
+      expect(loggedEntry(logSpy).status).toBe(503);
     } finally {
       logSpy.mockRestore();
     }

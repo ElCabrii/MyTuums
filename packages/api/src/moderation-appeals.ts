@@ -96,6 +96,8 @@ export const appealsRouter = {
       if (row.status !== "open") {
         throw new ORPCError("BAD_REQUEST", { message: "This appeal has already been reviewed." });
       }
+      // SAFETY: The query selects every ActionRow field, and the schema's action
+      // check constraint restricts the stored code to ModerationActionCode.
       const action = row.action as ActionRow;
       if (action.actorId === context.user.id) {
         throw new ORPCError("FORBIDDEN", { message: "You can't review your own action." });
@@ -164,9 +166,13 @@ export const appealsRouter = {
       });
 
       // Mail after the transaction commits — the review is final either way.
-      await sendPendingEmails(context.db, context.headers, pendingEmails);
-      await emailUser(context.db, context.headers, row.appellantId, (locale) =>
-        moderationResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
+      await sendPendingEmails(context.db, context.headers, pendingEmails, context.emailSender);
+      await emailUser(
+        context.db,
+        context.headers,
+        row.appellantId,
+        (locale) => moderationResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
+        context.emailSender,
       );
       return { appealId: input.appealId, status: input.outcome };
     }),

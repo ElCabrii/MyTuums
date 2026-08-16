@@ -52,7 +52,7 @@ export function SignInOptions() {
 
   // WebAuthn is absent on older browsers and in some embedded webviews;
   // offering a button that can only fail is worse than not offering it.
-  const supportsPasskeys = typeof window !== "undefined" && "PublicKeyCredential" in window;
+  const supportsPasskeys = "PublicKeyCredential" in globalThis;
 
   if (socialProviders.length === 0 && !supportsPasskeys) return null;
 

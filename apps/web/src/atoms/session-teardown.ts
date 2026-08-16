@@ -30,7 +30,7 @@ function clearFamily<Param>(family: {
   getParams(): Iterable<Param>;
   remove(p: Param): void;
 }): void {
-  for (const param of [...family.getParams()]) family.remove(param);
+  for (const param of family.getParams()) family.remove(param);
 }
 
 /** Loads and clears one independent family without making sign-out wait on its chunk. */
@@ -41,7 +41,7 @@ function sweepFamily<Module>(
 ): void {
   void load()
     .then(clear)
-    .catch((error: unknown) => {
+    .catch((error) => {
       console.error(`Failed to clear ${name} state after sign-out`, error);
     });
 }

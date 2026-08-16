@@ -497,7 +497,10 @@ export function SearchBox() {
     // combobox must not toggle: the open state is owned by focus, typing and
     // outside press instead. `preventBaseUIHandler` is the escape hatch that
     // stops the library's handler, which runs after this one.
-    (event as BaseUiMergedEvent).preventBaseUIHandler?.();
+    // SAFETY: base-ui merges its trigger click handler onto the synthetic event;
+    // this optional field is the documented escape hatch (see comment above).
+    const baseUiEvent = event as BaseUiMergedEvent;
+    baseUiEvent.preventBaseUIHandler?.();
     if (inputValue.trim() !== "") setOpen(true);
   };
 

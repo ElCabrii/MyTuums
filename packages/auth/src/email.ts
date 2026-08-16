@@ -114,12 +114,12 @@ export function localeFromRequest(headers: Headers | undefined): EmailLocale {
  * email translates the code the database stores. Unknown codes pass through
  * untranslated rather than erroring; the map must never throw.
  */
-const ROLE_LABEL: Record<string, Record<EmailLocale, string> | undefined> = {
-  user: { en: "user", fr: "utilisateur" },
-  moderator: { en: "moderator", fr: "modérateur" },
-  staff: { en: "staff", fr: "membre du staff" },
-  admin: { en: "administrator", fr: "administrateur" },
-};
+const ROLE_LABEL = new Map<string, Record<EmailLocale, string>>([
+  ["user", { en: "user", fr: "utilisateur" }],
+  ["moderator", { en: "moderator", fr: "modérateur" }],
+  ["staff", { en: "staff", fr: "membre du staff" }],
+  ["admin", { en: "administrator", fr: "administrateur" }],
+]);
 
 /**
  * Formats a date for email copy — long date and short time in the email's own
@@ -292,14 +292,14 @@ const copy = {
       en: ({ role, reason }: { role: string; reason?: string }) => ({
         subject: "Your MyTuums role changed",
         text:
-          `Your role on MyTuums is now ${ROLE_LABEL[role]?.["en"] ?? role}.` +
+          `Your role on MyTuums is now ${ROLE_LABEL.get(role)?.en ?? role}.` +
           (reason ? `\n\nReason: ${reason}` : "") +
           `\n\nIf you didn't expect this change, contact the moderation team.`,
       }),
       fr: ({ role, reason }: { role: string; reason?: string }) => ({
         subject: "Votre rôle MyTuums a changé",
         text:
-          `Votre rôle sur MyTuums est désormais ${ROLE_LABEL[role]?.["fr"] ?? role}.` +
+          `Votre rôle sur MyTuums est désormais ${ROLE_LABEL.get(role)?.fr ?? role}.` +
           (reason ? `\n\nMotif : ${reason}` : "") +
           `\n\nSi vous n'attendiez pas ce changement, contactez l'équipe de modération.`,
       }),
