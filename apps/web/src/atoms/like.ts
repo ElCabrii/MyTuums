@@ -4,9 +4,9 @@ import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import { store } from "@/lib/store";
 import { orpc } from "@/lib/orpc";
 import {
+  beginPostPatch,
   readCachedPost,
   restorePosts,
-  snapshotPosts,
   updatePostEverywhere,
   type PostSnapshot,
 } from "@/lib/post-cache";
@@ -93,25 +93,20 @@ function toggleMutationAtom(postId: string, direction: "like" | "unlike") {
       // cancel + snapshot + patch stay one atomic block with no boundary for
       // an interleaved dispatch to land in.
       onMutate: (): LikeContext => {
-        // All three caches hold this post (see lib/post-cache.ts), so all three
-        // need cancelling — an in-flight refetch landing after the patch would
-        // overwrite it with the pre-click server state, whether it came from a
-        // feed, a thread or a search result.
-        void queryClient.cancelQueries({ queryKey: orpc.post.list.key() });
-        void queryClient.cancelQueries({ queryKey: orpc.post.thread.key() });
-        void queryClient.cancelQueries({ queryKey: orpc.search.posts.key() });
-        // Scoped to this post (issue #53): likes on two different posts are
-        // genuinely concurrent, so the rollback must not replay state another
-        // post's mutation — or confirmation — has since written into the same
-        // entries.
-        const snapshot = snapshotPosts(queryClient, postId);
-
-        updatePostEverywhere(queryClient, postId, (post) => {
+        // `beginPostPatch` owns its key inventory (lib/post-cache.ts): it
+        // cancels exactly the three caches it is about to write — feeds,
+        // threads, and search results — before snapshotting and applying the
+        // optimistic patch (issue #127). Cancellation is fire-and-forget; the
+        // snapshot and patch run back-to-back with no await, so a refetch can't
+        // land between them to poison the rollback. The rollback is scoped to
+        // this post (issue #53): likes on two different posts are genuinely
+        // concurrent, so it must not replay state another post's mutation — or
+        // confirmation — has since written into the same entries.
+        const snapshot = beginPostPatch(queryClient, postId, (post) => {
           if (post.viewerHasLiked === liked) return post;
           const likeDelta = liked ? 1 : -1;
           return { ...post, viewerHasLiked: liked, likeCount: post.likeCount + likeDelta };
         });
-
         return { snapshot };
       },
 

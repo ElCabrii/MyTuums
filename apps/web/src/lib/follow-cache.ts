@@ -9,6 +9,27 @@ export interface FollowResult {
 }
 
 /**
+ * The caches this module writes, listed once so the pre-patch cancel has a
+ * single inventory to iterate (issue #127). A person's follow state lives in
+ * four shapes at once — their profile object, any follower/following list row,
+ * and any `search.users` result row — and {@link patchFollowState} /
+ * {@link restoreFollowCaches} sweep exactly these prefixes. {@link beginFollowPatch}
+ * cancels this inventory before writing, so a caller can't cancel a shorter
+ * list and let an in-flight refetch overwrite the patch with pre-click state.
+ *
+ * The sweeps list the same keys inline rather than iterating this array: each
+ * cache has a different shape (flat `Profile` vs paginated `InfiniteData`) and
+ * a different update, so a shared loop would need a per-key dispatch. Adding a
+ * cache means updating both this array and the sweep that writes it.
+ */
+export const FOLLOW_CACHE_KEYS = [
+  orpc.user.byUsername.key(),
+  orpc.user.followers.key(),
+  orpc.user.following.key(),
+  orpc.search.users.key(),
+];
+
+/**
  * A person's follow state is cached in four shapes at once: their profile
  * (a flat object), any follower/following list they appear in (paginated),
  * and any `search.users` result row (paginated — the search page renders a
@@ -103,12 +124,12 @@ function setFollowFlagInSearchCaches(
 }
 
 /**
- * Sweeps all four caches that hold a person's follow state: their profile
- * object, the followers list, the following list, and search-result rows.
- * The Following *feed* is a fifth cache that depends on this same state, but
- * it can't be patched client-side (there's no way to synthesise which posts
- * now belong in it), so that one is reset separately by the caller once the
- * mutation settles.
+ * Sweeps every cache that holds a person's follow state — the same keys
+ * {@link FOLLOW_CACHE_KEYS} lists for the pre-patch cancel, so keep the two in
+ * sync when adding a cache. The Following *feed* is a fifth cache that depends
+ * on this same state, but it can't be patched client-side (there's no way to
+ * synthesise which posts now belong in it), so that one is reset separately
+ * by the caller once the mutation settles.
  */
 export function patchFollowState(
   queryClient: QueryClient,
@@ -167,20 +188,60 @@ export interface FollowSnapshot {
   viewerIsFollowing: boolean;
   /** The target profile's pre-update follower count — absent when it wasn't cached. */
   followerCount: number | undefined;
-  /** The viewer's own profile's pre-update following count — absent when it wasn't cached. */
-  viewerFollowingCount: number | undefined;
+  /**
+   * The inverse of the ±1 the patch applied to the viewer's own `followingCount`,
+   * applied on rollback — absent when the viewer's profile wasn't cached (so
+   * the patch never touched it).
+   */
+  viewerFollowingDelta: number | undefined;
+}
+
+/**
+ * Cancels every cache this module writes, then captures the pre-update state
+ * and applies the optimistic patch — one call, so the cancel list is
+ * {@link FOLLOW_CACHE_KEYS}, the same keys the sweep writes, and can't be
+ * rediscovered shorter (issue #127). Cancellation is initiated (fire-and-forget)
+ * before the snapshot; the snapshot and patch then run synchronously with no
+ * `await` between them, so no refetch can land between the read and the write
+ * to poison the rollback. Returns the snapshot for `onError` to feed
+ * {@link restoreFollowCaches}.
+ */
+export function beginFollowPatch(
+  queryClient: QueryClient,
+  {
+    userId,
+    viewerId,
+    following,
+  }: { userId: string; viewerId: string | undefined; following: boolean },
+): FollowSnapshot {
+  // Cancelling the exact keys this module is about to write stops an in-flight
+  // refetch landing after the patch and overwriting it with pre-click server
+  // state.
+  for (const queryKey of FOLLOW_CACHE_KEYS) {
+    void queryClient.cancelQueries({ queryKey });
+  }
+  const snapshot = snapshotFollowCaches(queryClient, { userId, viewerId, following });
+  patchFollowState(queryClient, { userId, viewerId, following });
+  return snapshot;
 }
 
 /**
  * Captures the pre-update follow state of `userId`: their flag (from
- * whichever cache holds them) and, when cached, the counts the patch will
- * move — the target profile's follower count and the viewer's own profile's
- * following count. Counts are recorded only when their entry was cached, so
- * the rollback never invents a value for an entry the patch never touched.
+ * whichever cache holds them) and, when cached, the target profile's follower
+ * count. The viewer's own `followingCount` is recorded as the inverse of the
+ * ±1 the patch will apply (not as an absolute value), so the rollback can
+ * subtract only this mutation's delta — a concurrent follow of a different
+ * person advances the same shared field, and restoring an absolute value would
+ * clobber it. The delta is recorded only when the viewer's profile was cached,
+ * so the rollback never invents a value for an entry the patch never touched.
  */
 export function snapshotFollowCaches(
   queryClient: QueryClient,
-  { userId, viewerId }: { userId: string; viewerId: string | undefined },
+  {
+    userId,
+    viewerId,
+    following,
+  }: { userId: string; viewerId: string | undefined; following: boolean },
 ): FollowSnapshot {
   const targetProfile = cachedProfile(queryClient, userId);
   const viewerProfile = viewerId ? cachedProfile(queryClient, viewerId) : undefined;
@@ -189,7 +250,7 @@ export function snapshotFollowCaches(
     viewerId,
     viewerIsFollowing: readCachedIsFollowing(queryClient, userId),
     followerCount: targetProfile?.followerCount,
-    viewerFollowingCount: viewerProfile?.followingCount,
+    viewerFollowingDelta: viewerProfile ? (following ? -1 : 1) : undefined,
   };
 }
 
@@ -197,14 +258,17 @@ export function snapshotFollowCaches(
  * Undoes an optimistic edit captured by {@link snapshotFollowCaches}, e.g. on
  * a failed mutation. Writes the recorded pre-update values back with the same
  * per-person sweep as {@link patchFollowState}, so it touches only this
- * person's rows (and the viewer's own profile count) and leaves every other
- * person's state — including confirmed writes from concurrent mutations —
- * exactly as it is.
+ * person's rows and leaves every other person's state — including confirmed
+ * writes from concurrent mutations — exactly as it is.
  *
- * Counts are written back only when they were recorded, i.e. when the entry
- * was cached before the patch; an entry that appears after the snapshot (a
- * profile fetched mid-flight) is a fresh server read, and subtracting the
- * patch's ±1 delta from it again would be wrong.
+ * The target's follower count is restored absolutely (it is scoped to this
+ * person), but the viewer's own `followingCount` is a field shared by every
+ * follow mutation, so it is rolled back by applying the recorded inverse delta
+ * rather than an absolute value — a concurrent follow of a different person
+ * advances the same field, and restoring an absolute snapshot would clobber
+ * that increment. The delta is applied only when it was recorded, i.e. when
+ * the viewer's profile was cached before the patch; an entry that appears
+ * after the snapshot is a fresh server read and must not be adjusted.
  */
 export function restoreFollowCaches(queryClient: QueryClient, snapshot: FollowSnapshot): void {
   queryClient.setQueriesData<Profile>({ queryKey: orpc.user.byUsername.key() }, (cached) => {
@@ -225,9 +289,12 @@ export function restoreFollowCaches(queryClient: QueryClient, snapshot: FollowSn
     if (
       snapshot.viewerId &&
       cached.id === snapshot.viewerId &&
-      snapshot.viewerFollowingCount !== undefined
+      snapshot.viewerFollowingDelta !== undefined
     ) {
-      return { ...cached, followingCount: snapshot.viewerFollowingCount };
+      return {
+        ...cached,
+        followingCount: Math.max(0, cached.followingCount + snapshot.viewerFollowingDelta),
+      };
     }
 
     return cached;

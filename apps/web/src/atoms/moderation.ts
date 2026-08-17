@@ -9,6 +9,8 @@ import {
 } from "jotai-tanstack-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { orpc } from "@/lib/orpc";
+import { FOLLOW_CACHE_KEYS } from "@/lib/follow-cache";
+import { POST_CACHE_KEYS } from "@/lib/post-cache";
 import {
   auditLogQueryOptions,
   type CaseRef,
@@ -17,12 +19,12 @@ import {
   teamQueryOptions,
 } from "@/lib/query-definitions";
 
-export type { CaseRef } from "@/lib/query-definitions";
-
 /**
  * A reference to a moderation case target — what the queue rows hold, what the
  * dialogs carry, and the payload of `moderation.case`.
  */
+export type { CaseRef } from "@/lib/query-definitions";
+
 /** Encodes a case ref into a family key — the id LAST, so it may contain the delimiter (same layout as `encode` in `atoms/post-feed.ts`). */
 export const encodeCaseKey = (ref: CaseRef): string => `${ref.targetType}|${ref.targetId}`;
 
@@ -168,27 +170,51 @@ function invalidateModerationQueries(queryClient: QueryClient): void {
 }
 
 /**
- * Refetches every cache whose content `visibility.ts`'s predicate filters —
- * the surfaces where a banned account (`effectivelyBanned`) or a blocked
- * pair (either direction) disappears: feeds, threads, search, typeahead,
- * follow lists, and the profile being viewed. Block/unblock change the
- * block half of the predicate; ban/suspend/unban change the ban half — two
- * relationship kinds, one set of surfaces, so one sweep is what stops them
- * drifting again (issue #50). `listBlocked` rides along: it is the viewer's
+ * Every cache whose content `visibility.ts`'s predicate filters — the
+ * surfaces where a banned account (`effectivelyBanned`) or a blocked pair
+ * (either direction) disappears: feeds, threads, search, typeahead, follow
+ * lists, and the profile being viewed. Block/unblock change the block half of
+ * the predicate; ban/suspend/unban change the ban half — two relationship
+ * kinds, one set of surfaces, so one sweep is what stops them drifting again
+ * (issue #50). `listBlocked` rides along: it is the viewer's
  * block-relationship list, changed only by block/unblock, and the refetch a
  * ban triggers returns identical data — but keeping it inside the sweep is
  * the only thing that stops the block side from forking off the helper.
+ *
+ * The list is composed rather than re-listed: every one of these surfaces is
+ * owned by `post-cache.ts` or `follow-cache.ts` (they hold the same cached
+ * shapes this predicate filters), so pointing at their inventories keeps the
+ * two copies from drifting apart (issue #127) — when one of those modules
+ * gains a cache, this sweep gains it too. Only the two surfaces no cache
+ * module writes — typeahead suggestions and the block list itself — are
+ * listed here.
  */
+const VISIBILITY_CACHE_KEYS = [
+  ...POST_CACHE_KEYS,
+  ...FOLLOW_CACHE_KEYS,
+  orpc.search.typeahead.key(),
+  orpc.moderation.listBlocked.key(),
+];
+
 function invalidateVisibilityCaches(queryClient: QueryClient): void {
-  void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.search.users.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.user.followers.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.user.following.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.user.byUsername.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.moderation.listBlocked.key() });
+  for (const queryKey of VISIBILITY_CACHE_KEYS) {
+    void queryClient.invalidateQueries({ queryKey });
+  }
+}
+
+/**
+ * Every cache a post removal/restore rewrites: the three post shapes
+ * (`POST_CACHE_KEYS`) plus the typeahead, which also surfaces posts. Shared by
+ * the removal, restore, and appeal-overturn paths so they can't drift apart —
+ * an appeal overturn that restores a post must sweep the same surfaces the
+ * removal's inverse does, or a stale tombstone lingers in search/typeahead.
+ */
+const POST_SURFACE_KEYS = [...POST_CACHE_KEYS, orpc.search.typeahead.key()];
+
+function invalidatePostCaches(queryClient: QueryClient): void {
+  for (const queryKey of POST_SURFACE_KEYS) {
+    void queryClient.invalidateQueries({ queryKey });
+  }
 }
 
 /** Reports a post or user for one of the stable reason codes (issue #38). */
@@ -230,10 +256,7 @@ export const removePostAtom = atomWithMutation((get) => {
       // The tombstone rewrites the post for every viewer (content nulls, the
       // stub appears), so every cached copy — feeds, threads, search, the
       // typeahead — must refetch.
-      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
+      invalidatePostCaches(queryClient);
       invalidateModerationQueries(queryClient);
     },
   });
@@ -244,10 +267,7 @@ export const restorePostAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.restorePost.mutationOptions({
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
+      invalidatePostCaches(queryClient);
       invalidateModerationQueries(queryClient);
     },
   });
@@ -350,10 +370,13 @@ export const appealReviewAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.appealReview.mutationOptions({
     onSuccess: () => {
-      // An overturn restores the target, so the same sweep as the inverses
-      // themselves — content may have come back or a suspension lifted.
-      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
+      // An overturn reverses one of three actions, and the result only says
+      // "overturned" — not which — so sweep the union of the three inverses'
+      // surfaces: a post removal (content comes back → post surfaces), a
+      // suspension/ban (the user's content comes back app-wide → the full
+      // visibility sweep), or a role change (the roster changes → team).
+      invalidateVisibilityCaches(queryClient);
+      void queryClient.invalidateQueries({ queryKey: orpc.moderation.team.key() });
       invalidateModerationQueries(queryClient);
     },
   });

@@ -15,12 +15,15 @@ const fakeClient = {
     banUser: vi.fn(),
     resolve: vi.fn(),
     report: vi.fn(),
+    appealReview: vi.fn(),
     // The `invalidateModerationQueries` prefix keys (`queue`/`case`/
-    // `auditLog`) are read by the sweeps under test, so the fake must
-    // expose them like every other accessor the onSuccess paths touch.
+    // `auditLog`) and the `team` key are read by the sweeps under test, so
+    // the fake must expose them like every other accessor the onSuccess
+    // paths touch.
     queue: vi.fn(),
     case: vi.fn(),
     auditLog: vi.fn(),
+    team: vi.fn(),
   },
 };
 
@@ -28,6 +31,7 @@ installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import { orpc, type BlockedUser } from "@/lib/orpc";
 import {
+  appealReviewAtom,
   banUserAtom,
   blockedUsersAtom,
   reportAtom,
@@ -153,6 +157,45 @@ describe("moderation action cache sweeps", () => {
         orpc.moderation.queue.key(),
         orpc.moderation.case.key(),
         orpc.moderation.auditLog.key(),
+        orpc.post.list.key(),
+        orpc.post.thread.key(),
+        orpc.search.posts.key(),
+        orpc.search.users.key(),
+        orpc.search.typeahead.key(),
+        orpc.user.followers.key(),
+        orpc.user.following.key(),
+        orpc.user.byUsername.key(),
+        orpc.moderation.listBlocked.key(),
+      ]),
+    );
+
+    mutationUnsub();
+  });
+
+  it("overturning an appeal sweeps the union of all three inverses — post, visibility, and team (issue #50)", async () => {
+    fakeClient.moderation.appealReview.mockResolvedValue({
+      appealId: "appeal-1",
+      status: "overturned",
+    });
+
+    const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
+    const mutationUnsub = singletonStore.sub(appealReviewAtom, () => {});
+    singletonStore.get(appealReviewAtom).mutate({ appealId: "appeal-1", outcome: "overturned" });
+
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.queue.key() }),
+    );
+
+    // The result only says "overturned", not which action was reversed, so
+    // the sweep must cover all three: a post removal (post surfaces), a
+    // suspension/ban (the full visibility sweep), and a role change (team).
+    const swept = new Set(invalidateSpy.mock.calls.map(([args]) => args!.queryKey));
+    expect(swept).toEqual(
+      new Set([
+        orpc.moderation.queue.key(),
+        orpc.moderation.case.key(),
+        orpc.moderation.auditLog.key(),
+        orpc.moderation.team.key(),
         orpc.post.list.key(),
         orpc.post.thread.key(),
         orpc.search.posts.key(),

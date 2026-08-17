@@ -4,11 +4,10 @@ import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import { viewerIdAtom } from "@/atoms/session";
 import { store } from "@/lib/store";
 import {
-  patchFollowState,
+  beginFollowPatch,
   readCachedIsFollowing,
   reconcileFollow,
   restoreFollowCaches,
-  snapshotFollowCaches,
   type FollowResult,
   type FollowSnapshot,
 } from "@/lib/follow-cache";
@@ -59,17 +58,17 @@ function toggleMutationAtom(userId: string, direction: "follow" | "unfollow") {
       scope: { id: `follow:${userId}` },
 
       onMutate: (): FollowContext => {
-        // Profile and search-result caches both hold the person (see
-        // lib/follow-cache.ts); cancelling them stops an in-flight refetch
-        // landing after the patch and overwriting it with pre-click state.
-        void queryClient.cancelQueries({ queryKey: orpc.user.byUsername.key() });
-        void queryClient.cancelQueries({ queryKey: orpc.search.users.key() });
-        // Scoped to this person (issue #53): follow/unfollow of two different
-        // people are genuinely concurrent, so the rollback must not replay
-        // state the other's mutation — or confirmation — has since written
-        // into the same entries.
-        const snapshot = snapshotFollowCaches(queryClient, { userId, viewerId });
-        patchFollowState(queryClient, { userId, viewerId, following });
+        // `beginFollowPatch` owns its key inventory (lib/follow-cache.ts): it
+        // cancels exactly the four caches it is about to write — profile,
+        // follower and following lists, and search results — before capturing
+        // the snapshot and applying the patch (issue #127). Cancellation is
+        // fire-and-forget; the snapshot and patch run back-to-back with no
+        // await, so a refetch can't land between them to poison the rollback.
+        // The rollback itself is scoped to this person (issue #53):
+        // follow/unfollow of two different people are genuinely concurrent, so
+        // it must not replay state the other's mutation — or confirmation —
+        // has since written into the same entries.
+        const snapshot = beginFollowPatch(queryClient, { userId, viewerId, following });
         return { snapshot };
       },
 
@@ -90,8 +89,10 @@ function toggleMutationAtom(userId: string, direction: "follow" | "unfollow") {
       // every other cache here, this one has to be refetched. `resetQueries`
       // rather than `invalidateQueries`: the feed's membership just changed,
       // so dropping back to page one is both the correct reading and cheaper
-      // than refetching every page someone has scrolled through.
-      onSettled: () => {
+      // than refetching every page someone has scrolled through. A failed
+      // follow never changed the membership, so the error path skips the reset.
+      onSettled: (_data, error) => {
+        if (error) return;
         void queryClient.resetQueries({ queryKey: orpc.post.list.key() });
       },
     };

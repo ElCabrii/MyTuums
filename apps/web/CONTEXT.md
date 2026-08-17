@@ -19,17 +19,17 @@ app's build from the same origin.
 
 ## Change map
 
-| Intent                       | Primary                                                         | Also touch                                                                                 |
-| ---------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Add a page                   | `src/routes/<name>.tsx` (thin wrapper)                          | the page body in `src/components/`; `SIGNED_OUT_PATHS` if it must work signed out          |
-| Add client state             | `src/atoms/<concern>.ts`                                        | its `.test.ts` sibling                                                                     |
-| Read server data             | a new `atomWithQuery` / `atomWithInfiniteQuery` in `src/atoms/` | `src/lib/query-definitions.ts`; `src/lib/orpc.ts` for response types                       |
-| Add a mutation with optimism | `src/atoms/<concern>.ts`                                        | `src/lib/post-cache.ts` or `follow-cache.ts` for the sweep                                 |
-| Add a UI component           | `pnpm --filter @my-tuums/web exec shadcn add <component>`       | never hand-write into `src/components/ui`                                                  |
-| Add or change copy           | `messages/en.json`, `messages/fr.json`                          | recompile; never touch `src/paraglide`                                                     |
-| Router-touching behaviour    | `src/hooks/`                                                    | never an atom — see the invariants                                                         |
-| Change an auth flow page     | `src/routes/` + `src/atoms/auth.ts`                             | `src/lib/auth-validation.ts` (form policy only — the rules live in `@my-tuums/auth/rules`) |
-| Add a moderation surface     | `src/atoms/moderation.ts`, `src/components/moderation/`         | `src/hooks/use-require-role.ts`                                                            |
+| Intent                       | Primary                                                         | Also touch                                                                                                                                                                                                 |
+| ---------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a page                   | `src/routes/<name>.tsx` (thin wrapper)                          | the page body in `src/components/`; `SIGNED_OUT_PATHS` if it must work signed out                                                                                                                          |
+| Add client state             | `src/atoms/<concern>.ts`                                        | its `.test.ts` sibling                                                                                                                                                                                     |
+| Read server data             | a new `atomWithQuery` / `atomWithInfiniteQuery` in `src/atoms/` | `src/lib/query-definitions.ts`; `src/lib/orpc.ts` for response types                                                                                                                                       |
+| Add a mutation with optimism | `src/atoms/<concern>.ts`                                        | use `beginFollowPatch` / `beginPostPatch` in `src/lib/follow-cache.ts` / `post-cache.ts` — they own their cache inventory, cancellation and snapshot; roll back via `restoreFollowCaches` / `restorePosts` |
+| Add a UI component           | `pnpm --filter @my-tuums/web exec shadcn add <component>`       | never hand-write into `src/components/ui`                                                                                                                                                                  |
+| Add or change copy           | `messages/en.json`, `messages/fr.json`                          | recompile; never touch `src/paraglide`                                                                                                                                                                     |
+| Router-touching behaviour    | `src/hooks/`                                                    | never an atom — see the invariants                                                                                                                                                                         |
+| Change an auth flow page     | `src/routes/` + `src/atoms/auth.ts`                             | `src/lib/auth-validation.ts` (form policy only — the rules live in `@my-tuums/auth/rules`)                                                                                                                 |
+| Add a moderation surface     | `src/atoms/moderation.ts`, `src/components/moderation/`         | `src/hooks/use-require-role.ts`                                                                                                                                                                            |
 
 ## Invariants
 
