@@ -49,7 +49,7 @@ describe("TeamView — rank gating on Change role", () => {
     });
 
     // Same-rank (staff managing staff) and above-rank (staff managing admin)
-    // both refuse — `roleRank(member) < roleRank(viewer)` is strict.
+    // both refuse — `canManageRole` is strictly greater.
     await screen.findByText("Staff One");
     expect(
       screen.queryByRole("button", { name: m.moderation_team_change_role() }),
@@ -58,12 +58,11 @@ describe("TeamView — rank gating on Change role", () => {
 
   it("never offers Change role on the viewer's own row", async () => {
     const queryClient = createTestQueryClient();
-    // The seeded own row is ranked BELOW the viewer's session role
-    // (moderator < admin) so the rank clause alone would pass `canManage` —
-    // only the `member.id !== viewer?.id` guard can suppress the button
-    // here. If that guard were deleted, this row would show Change role.
+    // The viewer's own row carries the same role as their session, so
+    // `canManageRole(viewerRole, viewerRole)` is false (strictly greater) and
+    // the button is suppressed without a separate self-check.
     queryFixtures(queryClient).moderation.team([
-      makeTeamMember({ id: "admin-1", name: "Self Admin", role: "moderator" }),
+      makeTeamMember({ id: "admin-1", name: "Self Admin", role: "admin" }),
     ]);
     await renderWithProviders(<TeamView />, {
       queryClient,

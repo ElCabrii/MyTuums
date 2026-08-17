@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { atomEffect } from "jotai-effect";
+import { roleAtLeast, USER_ROLES, type UserRole } from "@my-tuums/api/roles";
 import { sessionStore } from "@/lib/auth-client";
 import { handleOf } from "@/lib/user";
 import { isReturningVisitor, stampReturningVisitor } from "@/lib/returning-visitor";
@@ -157,41 +158,24 @@ export const needsDobAtom = atom((get) => get(isSignedInAtom) && !get(viewerDate
 export const needsCompletionAtom = atom((get) => get(needsHandleAtom) || get(needsDobAtom));
 
 /**
- * The four roles, weakest to strongest — the client mirror of `UserRole`
- * in packages/api/src/roles.ts, which the browser cannot import (the api
- * root is server-only; see constants.ts's export rules). Keep the two
- * orderings in step.
- */
-export type ViewerRole = "user" | "moderator" | "staff" | "admin";
-
-/**
- * The role ordering, weakest to strongest — same ranks as `roleRank` in
- * packages/api/src/roles.ts.
- */
-const ROLE_RANK = { user: 0, moderator: 1, staff: 2, admin: 3 } satisfies Record<
-  ViewerRole,
-  number
->;
-
-/** True when `role` is at least `min` — the client mirror of `roleAtLeast` in packages/api. */
-export function viewerRoleAtLeast(role: ViewerRole, min: ViewerRole): boolean {
-  return ROLE_RANK[role] >= ROLE_RANK[min];
-}
-
-/**
  * The signed-in viewer's role, sanitised on read like theme/locale: an
  * unknown string off the wire (a future deployment's role, say) reads as
  * `user`, the weakest. Signed-out reads `user` too — the header that would
  * show a Moderation link only renders for a real session, so there is
- * nothing for a signed-out default to hide behind.
+ * nothing for a signed-out default to hide behind. The accepted set is
+ * `USER_ROLES` from `@my-tuums/api/roles`, the same source the server's
+ * checks read.
  */
-export const viewerRoleAtom = atom((get) => {
+export const viewerRoleAtom = atom((get): UserRole => {
   const role = get(viewerAtom)?.role;
-  return role === "moderator" || role === "staff" || role === "admin" ? role : "user";
+  // SAFETY: `USER_ROLES.includes` has just confirmed `role` is a member of the
+  // tuple, so the cast narrows a checked string to the union it was tested
+  // against; anything else falls through to the "user" literal.
+  return USER_ROLES.includes(role as UserRole) ? (role as UserRole) : "user";
 });
 
 /** Moderator and above (moderator, staff, admin) — the client half of the `/moderation` route's gate. */
-export const isModeratorAtom = atom((get) => viewerRoleAtLeast(get(viewerRoleAtom), "moderator"));
+export const isModeratorAtom = atom((get) => roleAtLeast(get(viewerRoleAtom), "moderator"));
 
 /** Staff and above (staff, admin). */
-export const isStaffAtom = atom((get) => viewerRoleAtLeast(get(viewerRoleAtom), "staff"));
+export const isStaffAtom = atom((get) => roleAtLeast(get(viewerRoleAtom), "staff"));

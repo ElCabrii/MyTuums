@@ -19,6 +19,10 @@
     "./dimensions": {
       "types": "./src/dimensions.ts",
       "default": "./src/dimensions.ts"
+    },
+    "./roles": {
+      "types": "./src/roles.ts",
+      "default": "./src/roles.ts"
     }
   },
   "scripts": {

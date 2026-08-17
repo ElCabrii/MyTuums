@@ -1,4 +1,5 @@
 import { m } from "@/paraglide/messages.js";
+import { USER_ROLES, type UserRole } from "@my-tuums/api/roles";
 
 /**
  * Translates an audit-log action code into user-facing copy. The codes are the
@@ -34,21 +35,21 @@ export function actionLabel(action: string): string {
 /**
  * Translates a role name into user-facing copy. The roles are the contract
  * (`USER_ROLES` in packages/api/src/roles.ts) — the fallback keeps an unknown
- * role rendering as itself.
+ * role rendering as itself. `ROLE_LABELS` is `satisfies Record<UserRole, …>`,
+ * so adding a role to `USER_ROLES` without a label here is a type error.
  */
+const ROLE_LABELS = {
+  user: () => m.moderation_role_user(),
+  moderator: () => m.moderation_role_moderator(),
+  staff: () => m.moderation_role_staff(),
+  admin: () => m.moderation_role_admin(),
+} satisfies Record<UserRole, () => string>;
+
 export function roleLabel(role: string): string {
-  switch (role) {
-    case "user":
-      return m.moderation_role_user();
-    case "moderator":
-      return m.moderation_role_moderator();
-    case "staff":
-      return m.moderation_role_staff();
-    case "admin":
-      return m.moderation_role_admin();
-    default:
-      return role;
-  }
+  // SAFETY: `USER_ROLES.includes` has just confirmed `role` is a member of the
+  // tuple, so the cast narrows a checked string to the union it was tested
+  // against; anything else falls through to the raw string.
+  return USER_ROLES.includes(role as UserRole) ? ROLE_LABELS[role as UserRole]() : role;
 }
 
 /**
@@ -79,28 +80,5 @@ export function reasonLabel(reason: string): string {
       return m.moderation_reason_underage();
     default:
       return reason;
-  }
-}
-
-/**
- * The numeric rank of a role, for client-side gating of the team view.
- *
- * Duplicated from `packages/api/src/roles.ts` on purpose: `roleRank` is not
- * web-exported (the package's exports map exposes only `.`, `./constants` and
- * `./dimensions`), and the team view needs "can I manage this member?" before
- * rendering the Change role button. The server is the real enforcement — this
- * only decides which buttons to draw — but the two must stay in agreement:
- * a rank raised or lowered server-side needs the same edit here.
- */
-export function roleRank(role: string): number {
-  switch (role) {
-    case "admin":
-      return 3;
-    case "staff":
-      return 2;
-    case "moderator":
-      return 1;
-    default:
-      return 0;
   }
 }

@@ -9,8 +9,13 @@
  * which is why its own endpoints are 404'd (apps/server/src/request-handler.ts)
  * and every gate here goes through the ordering below instead.
  *
- * The web app mirrors this ordering in apps/web/src/atoms/session.ts for what
- * the UI shows; the procedures are the real enforcement.
+ * Deliberately dependency-free and exposed under its own package subpath
+ * (`@my-tuums/api/roles`), on the same terms as `./constants.ts` and
+ * `./dimensions.ts`: the web app imports it to draw the right moderation
+ * buttons, and importing it from the package root would drag `./router.js` ->
+ * `@my-tuums/db` into the browser bundle — where the `DATABASE_URL` check in
+ * that module throws on import. The procedures are the real enforcement; this
+ * only decides what the UI shows.
  */
 
 /** The roles, weakest to strongest — the index *is* the rank. */

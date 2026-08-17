@@ -7,7 +7,7 @@ import {
   setRoleDialogAtom,
   teamAtom,
 } from "@/atoms/moderation";
-import { viewerAtom, viewerRoleAtom } from "@/atoms/session";
+import { viewerRoleAtom } from "@/atoms/session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +25,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PaginatedState } from "@/components/paginated-state";
-import { roleLabel, roleRank } from "@/components/moderation/labels";
+import { roleLabel } from "@/components/moderation/labels";
+import { canManageRole } from "@my-tuums/api/roles";
 import { UserAvatar } from "@/components/user-avatar";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
@@ -44,7 +45,6 @@ const ALL_ROLES = ["user", "moderator", "staff", "admin"] as const;
  */
 export function TeamView() {
   const team = useAtomValue(teamAtom);
-  const viewer = useAtomValue(viewerAtom);
   const viewerRole = useAtomValue(viewerRoleAtom);
   const openTarget = useAtomValue(setRoleDialogAtom);
   const setOpenTarget = useSetAtom(setRoleDialogAtom);
@@ -61,8 +61,7 @@ export function TeamView() {
     >
       {members.map((member) => {
         const memberHandle = handleOf(member);
-        const canManage =
-          member.id !== viewer?.id && roleRank(member.role ?? "user") < roleRank(viewerRole);
+        const canManage = canManageRole(viewerRole, member.role ?? "user");
         return (
           <div
             key={member.id}
