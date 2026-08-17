@@ -185,10 +185,14 @@ request:
 | `e2e`         | Postgres + the ci bucket's secrets, capped at 60 minutes                 |
 | `docker`      | builds the image, asserts its contents, boots it and probes it over HTTP |
 
-`.github/workflows/smoke.yml` probes the live domain every six hours and on
-demand — the standing replacement for a post-deploy check, since CI never
-deploys. It runs the same three assertions as the `docker` job's boot step:
-health, `/login` serving the SPA shell, and the page gate's redirect.
+`.github/workflows/smoke.yml` probes the production service every six hours
+and on demand — the standing replacement for a post-deploy check, since CI
+never deploys. It runs the same three assertions as the `docker` job's boot
+step: health, `/login` serving the SPA shell, and the page gate's redirect.
+It targets the Railway origin directly (with the production Host header):
+Cloudflare's Bot Fight Mode challenges datacenter IPs, so probing the public
+domain from a GitHub Actions runner is 403'd at the edge, and the free plan
+cannot skip Bot Fight Mode for specific IPs.
 
 Details and the invariants behind each job: [.github/CONTEXT.md](../.github/CONTEXT.md).
 
