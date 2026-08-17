@@ -1,5 +1,5 @@
 import { useAtom, useAtomValue } from "jotai";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Link, getRouteApi } from "@tanstack/react-router";
 import { ORPCError } from "@orpc/client";
 import { APPEAL_REASON_MAX_LENGTH, APPEAL_REASON_MIN_LENGTH } from "@my-tuums/api/constants";
@@ -32,6 +32,20 @@ function AppealCard({ token, postId }: { token?: string; postId?: string }) {
   const isSignedIn = useAtomValue(isSignedInAtom);
   const appealOpen = useAtomValue(appealOpenAtom);
   const [reason, setReason] = useAtom(appealReasonAtom);
+
+  // A successful submission starts the next appeal blank. The reset lives
+  // here rather than in `appealOpenAtom.onSuccess`, because that callback is
+  // handed only a Getter and cannot `set` — and writing through a module-scope
+  // store would miss whatever Jotai Provider actually mounted this page (e.g.
+  // the harness's fresh store in a test). `setReason` is already bound to the
+  // active Provider store, so the reset lands where the mutation ran.
+  // `isSuccess` is reset by the card's own remount on identifier change, so
+  // the effect does not re-fire into a fresh form.
+  useEffect(() => {
+    if (appealOpen.isSuccess) {
+      setReason("");
+    }
+  }, [appealOpen.isSuccess, setReason]);
 
   const trimmed = reason.trim();
   const hasIdentifier = Boolean(token || postId);

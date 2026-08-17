@@ -8,7 +8,6 @@ import {
   queryClientAtom,
 } from "jotai-tanstack-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { store } from "@/lib/store";
 import { orpc } from "@/lib/orpc";
 import {
   auditLogQueryOptions,
@@ -323,10 +322,6 @@ export const appealOpenAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.appealOpen.mutationOptions({
     onSuccess: () => {
-      // Same pattern as `createPostAtom` (atoms/composer.ts): the draft reset
-      // goes through the module-scope store, which `onSuccess` can reach, so
-      // the next appeal starts blank.
-      store.set(appealReasonAtom, "");
       // The queue merges open appeals, so a successful submission must refetch
       // it (a no-op for a signed-out submitter with nothing mounted).
       void queryClient.invalidateQueries({ queryKey: orpc.moderation.queue.key() });
