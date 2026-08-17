@@ -9,6 +9,23 @@ export interface FollowResult {
 }
 
 /**
+ * Every cache this module writes, owned here so the pre-patch cancel and the
+ * sweep can never drift apart (issue #127). A person's follow state lives in
+ * four shapes at once — their profile object, any follower/following list row,
+ * and any `search.users` result row — and {@link patchFollowState} /
+ * {@link restoreFollowCaches} sweep exactly these prefixes. {@link beginFollowPatch}
+ * cancels this same inventory before writing, so a caller can't cancel a
+ * shorter list and let an in-flight refetch overwrite the patch with
+ * pre-click state.
+ */
+export const FOLLOW_CACHE_KEYS = [
+  orpc.user.byUsername.key(),
+  orpc.user.followers.key(),
+  orpc.user.following.key(),
+  orpc.search.users.key(),
+];
+
+/**
  * A person's follow state is cached in four shapes at once: their profile
  * (a flat object), any follower/following list they appear in (paginated),
  * and any `search.users` result row (paginated — the search page renders a
@@ -103,12 +120,12 @@ function setFollowFlagInSearchCaches(
 }
 
 /**
- * Sweeps all four caches that hold a person's follow state: their profile
- * object, the followers list, the following list, and search-result rows.
- * The Following *feed* is a fifth cache that depends on this same state, but
- * it can't be patched client-side (there's no way to synthesise which posts
- * now belong in it), so that one is reset separately by the caller once the
- * mutation settles.
+ * Sweeps every cache that holds a person's follow state — the exact inventory
+ * lives in {@link FOLLOW_CACHE_KEYS}, so the write list and the pre-patch
+ * cancel can't drift. The Following *feed* is a fifth cache that depends on
+ * this same state, but it can't be patched client-side (there's no way to
+ * synthesise which posts now belong in it), so that one is reset separately
+ * by the caller once the mutation settles.
  */
 export function patchFollowState(
   queryClient: QueryClient,
@@ -169,6 +186,41 @@ export interface FollowSnapshot {
   followerCount: number | undefined;
   /** The viewer's own profile's pre-update following count — absent when it wasn't cached. */
   viewerFollowingCount: number | undefined;
+}
+
+/**
+ * Captures the pre-update follow state of `userId`: their flag (from
+ * whichever cache holds them) and, when cached, the counts the patch will
+ * move — the target profile's follower count and the viewer's own profile's
+ * following count. Counts are recorded only when their entry was cached, so
+ * the rollback never invents a value for an entry the patch never touched.
+ */
+/**
+ * Cancels every cache this module writes, then captures the pre-update state
+ * and applies the optimistic patch — one call, so the cancel list is defined
+ * by the same {@link FOLLOW_CACHE_KEYS} the sweep uses and can't be rediscovered
+ * shorter (issue #127). The snapshot is taken after cancellation and applied
+ * synchronously back-to-back, so no refetch can land between the read and the
+ * patch to poison the rollback either. Returns the snapshot for `onError` to
+ * feed {@link restoreFollowCaches}.
+ */
+export function beginFollowPatch(
+  queryClient: QueryClient,
+  {
+    userId,
+    viewerId,
+    following,
+  }: { userId: string; viewerId: string | undefined; following: boolean },
+): FollowSnapshot {
+  // Cancelling the exact keys this module is about to write stops an in-flight
+  // refetch landing after the patch and overwriting it with pre-click server
+  // state.
+  for (const queryKey of FOLLOW_CACHE_KEYS) {
+    void queryClient.cancelQueries({ queryKey });
+  }
+  const snapshot = snapshotFollowCaches(queryClient, { userId, viewerId });
+  patchFollowState(queryClient, { userId, viewerId, following });
+  return snapshot;
 }
 
 /**

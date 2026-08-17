@@ -21,7 +21,7 @@ const fakeClient = {
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));
 
-import { orpc, type Profile, type SearchUser, type SearchUsersPage } from "@/lib/orpc";
+import { orpc, type Profile, type SearchUser, type SearchUsersPage, type UserListPage, type UserSummary } from "@/lib/orpc";
 import { readCachedIsFollowing } from "@/lib/follow-cache";
 import { clearFollowFamilies, toggleFollowAtomFamily } from "@/atoms/follow";
 import { sessionAtom } from "@/atoms/session";
@@ -67,6 +67,26 @@ function makeSearchUser(
 }
 
 function searchUsersPage(items: SearchUser[]): InfiniteData<SearchUsersPage> {
+  return { pages: [{ items, nextCursor: null }], pageParams: [undefined] };
+}
+
+function makeSummary(
+  overrides: Partial<UserSummary> & { id: string; username: string },
+): UserSummary {
+  return {
+    name: overrides.username,
+    displayUsername: overrides.username,
+    image: null,
+    bio: null,
+    bannerImage: null,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    followedAt: new Date("2026-01-02T00:00:00.000Z"),
+    viewerIsFollowing: false,
+    ...overrides,
+  };
+}
+
+function listPage(items: UserSummary[]): InfiniteData<UserListPage> {
   return { pages: [{ items, nextCursor: null }], pageParams: [undefined] };
 }
 
@@ -232,6 +252,106 @@ describe("toggleFollowAtomFamily", () => {
 
     store.set(toggleFollowAtomFamily("target-1"));
     expect(readCachedIsFollowing(queryClient, "target-1")).toBe(true);
+  });
+
+  // Issue #127: the optimistic follow patch writes four caches — profile,
+  // follower/following lists, and search results — so onMutate must cancel ALL
+  // of them before writing, or an in-flight `user.followers` refetch resolves
+  // after the patch and overwrites the optimistic flip with pre-click state.
+  // Here a stale followers refetch is already in flight; cancelling it is what
+  // keeps the optimistic `viewerIsFollowing: true` alive once it resolves.
+  it("cancels an in-flight followers refetch so a stale result can't overwrite the optimistic patch", async () => {
+    const { store, queryClient } = freshStoreWithTarget(
+      makeProfile({
+        id: "target-1",
+        username: "target",
+        followerCount: 5,
+        viewerIsFollowing: false,
+      }),
+    );
+    fakeClient.user.follow.mockImplementation(() => new Promise(() => {}));
+
+    // Seed a follower list holding the target (not yet followed), then start a
+    // refetch that stays in flight until we resolve it with pre-click state.
+    const followersKey = orpc.user.followers.key({ input: { username: "someone" } });
+    let resolveStaleRefetch!: (page: InfiniteData<UserListPage>) => void;
+    const staleRefetch = new Promise<InfiniteData<UserListPage>>((resolve) => {
+      resolveStaleRefetch = resolve;
+    });
+    queryClient.setQueryData(
+      followersKey,
+      listPage([makeSummary({ id: "target-1", username: "target", viewerIsFollowing: false })]),
+    );
+    const query = queryClient.getQueryCache().build(queryClient, {
+      queryKey: followersKey,
+      queryFn: () => staleRefetch,
+    });
+    const inFlight = query.fetch().then(() => undefined, () => undefined);
+
+    store.set(toggleFollowAtomFamily("target-1"));
+    const row = () =>
+      queryClient.getQueryData<InfiniteData<UserListPage>>(followersKey)?.pages[0]?.items[0];
+    // The optimistic patch flipped the row before the stale refetch resolved.
+    expect(row()?.viewerIsFollowing).toBe(true);
+
+    // The stale refetch lands with pre-click state. Because onMutate cancelled
+    // it, the resolution must not overwrite the optimistic flip.
+    resolveStaleRefetch(
+      listPage([makeSummary({ id: "target-1", username: "target", viewerIsFollowing: false })]),
+    );
+    await inFlight;
+    expect(row()?.viewerIsFollowing).toBe(true);
+  });
+
+  // Issue #127, rollback half: a stale refetch must not poison the snapshot the
+  // rollback restores from. onMutate cancels before it reads and writes (the
+  // snapshot and patch run back-to-back with no await), so the snapshot records
+  // the true pre-click state and the rejected mutation restores it even when a
+  // stale followers refetch is in flight.
+  it("cancels an in-flight followers refetch so it can't poison the rollback either", async () => {
+    const { store, queryClient } = freshStoreWithTarget(
+      makeProfile({
+        id: "target-1",
+        username: "target",
+        followerCount: 5,
+        viewerIsFollowing: false,
+      }),
+    );
+    fakeClient.user.follow.mockRejectedValue(new Error("network down"));
+
+    const followersKey = orpc.user.followers.key({ input: { username: "someone" } });
+    let resolveStaleRefetch!: (page: InfiniteData<UserListPage>) => void;
+    const staleRefetch = new Promise<InfiniteData<UserListPage>>((resolve) => {
+      resolveStaleRefetch = resolve;
+    });
+    queryClient.setQueryData(
+      followersKey,
+      listPage([makeSummary({ id: "target-1", username: "target", viewerIsFollowing: false })]),
+    );
+    const query = queryClient.getQueryCache().build(queryClient, {
+      queryKey: followersKey,
+      queryFn: () => staleRefetch,
+    });
+    const inFlight = query.fetch().then(() => undefined, () => undefined);
+
+    store.set(toggleFollowAtomFamily("target-1"));
+    const row = () =>
+      queryClient.getQueryData<InfiniteData<UserListPage>>(followersKey)?.pages[0]?.items[0];
+    expect(row()?.viewerIsFollowing).toBe(true);
+
+    // Stale refetch resolves with pre-click state; cancellation discards it and
+    // the optimistic flip stays until the mutation's own rollback runs.
+    resolveStaleRefetch(
+      listPage([makeSummary({ id: "target-1", username: "target", viewerIsFollowing: false })]),
+    );
+    await inFlight;
+    expect(row()?.viewerIsFollowing).toBe(true);
+
+    // The rejected mutation rolls the row back to the pre-click value the
+    // (uncorrupted) snapshot recorded.
+    await waitFor(() => {
+      expect(row()?.viewerIsFollowing).toBe(false);
+    });
   });
 
   // Following someone changes which posts belong in the Following feed, and

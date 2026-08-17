@@ -1,6 +1,21 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import { orpc, type Post, type PostListPage, type SearchPostsPage, type Thread } from "@/lib/orpc";
 
+/**
+ * Every cache this module writes, owned here so the pre-patch cancel and the
+ * sweep can never drift apart (issue #127). A post is cached in three shapes
+ * at once — feeds, threads, and search results — and {@link updatePostEverywhere}
+ * / {@link restorePosts} sweep exactly these prefixes. {@link beginPostPatch}
+ * cancels this same inventory before writing, so a caller can't cancel a
+ * shorter list and let an in-flight refetch overwrite the patch with
+ * pre-click state.
+ */
+export const POST_CACHE_KEYS = [
+  orpc.post.list.key(),
+  orpc.post.thread.key(),
+  orpc.search.posts.key(),
+];
+
 /** Every cached `post.list` entry as [queryKey, data] — the read unit for {@link readCachedPost}. */
 export type CachedFeeds = [readonly unknown[], InfiniteData<PostListPage> | undefined][];
 /** Every cached `post.thread` entry as [queryKey, data] — the read unit for {@link readCachedPost}. */
@@ -144,6 +159,32 @@ export function updatePostEverywhere(
           }
         : cached,
   );
+}
+
+/**
+ * Cancels every cache this module writes, then captures the pre-update row and
+ * applies `update` across all of them — one call, so the cancel list is
+ * defined by the same {@link POST_CACHE_KEYS} the sweep uses and can't be
+ * rediscovered shorter (issue #127). Snapshot and patch run synchronously
+ * back-to-back, so no refetch can land between the read and the write to
+ * poison the rollback. Returns the snapshot for `onError` to feed
+ * {@link restorePosts} — `undefined` when the post was cached nowhere (then
+ * the patch is a no-op and there is nothing to undo).
+ */
+export function beginPostPatch(
+  queryClient: QueryClient,
+  postId: string,
+  update: (post: Post) => Post,
+): PostSnapshot | undefined {
+  // Cancelling the exact keys this module is about to write stops an in-flight
+  // refetch landing after the patch and overwriting it with pre-click server
+  // state.
+  for (const queryKey of POST_CACHE_KEYS) {
+    void queryClient.cancelQueries({ queryKey });
+  }
+  const snapshot = snapshotPosts(queryClient, postId);
+  updatePostEverywhere(queryClient, postId, update);
+  return snapshot;
 }
 
 /**

@@ -10,6 +10,8 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import { store } from "@/lib/store";
 import { orpc } from "@/lib/orpc";
+import { FOLLOW_CACHE_KEYS } from "@/lib/follow-cache";
+import { POST_CACHE_KEYS } from "@/lib/post-cache";
 import {
   auditLogQueryOptions,
   type CaseRef,
@@ -169,27 +171,36 @@ function invalidateModerationQueries(queryClient: QueryClient): void {
 }
 
 /**
- * Refetches every cache whose content `visibility.ts`'s predicate filters —
- * the surfaces where a banned account (`effectivelyBanned`) or a blocked
- * pair (either direction) disappears: feeds, threads, search, typeahead,
- * follow lists, and the profile being viewed. Block/unblock change the
- * block half of the predicate; ban/suspend/unban change the ban half — two
- * relationship kinds, one set of surfaces, so one sweep is what stops them
- * drifting again (issue #50). `listBlocked` rides along: it is the viewer's
+ * Every cache whose content `visibility.ts`'s predicate filters — the
+ * surfaces where a banned account (`effectivelyBanned`) or a blocked pair
+ * (either direction) disappears: feeds, threads, search, typeahead, follow
+ * lists, and the profile being viewed. Block/unblock change the block half of
+ * the predicate; ban/suspend/unban change the ban half — two relationship
+ * kinds, one set of surfaces, so one sweep is what stops them drifting again
+ * (issue #50). `listBlocked` rides along: it is the viewer's
  * block-relationship list, changed only by block/unblock, and the refetch a
  * ban triggers returns identical data — but keeping it inside the sweep is
  * the only thing that stops the block side from forking off the helper.
+ *
+ * The list is composed rather than re-listed: every one of these surfaces is
+ * owned by `post-cache.ts` or `follow-cache.ts` (they hold the same cached
+ * shapes this predicate filters), so pointing at their inventories keeps the
+ * two copies from drifting apart (issue #127) — when one of those modules
+ * gains a cache, this sweep gains it too. Only the two surfaces no cache
+ * module writes — typeahead suggestions and the block list itself — are
+ * listed here.
  */
+const VISIBILITY_CACHE_KEYS = [
+  ...POST_CACHE_KEYS,
+  ...FOLLOW_CACHE_KEYS,
+  orpc.search.typeahead.key(),
+  orpc.moderation.listBlocked.key(),
+];
+
 function invalidateVisibilityCaches(queryClient: QueryClient): void {
-  void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.search.users.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.user.followers.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.user.following.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.user.byUsername.key() });
-  void queryClient.invalidateQueries({ queryKey: orpc.moderation.listBlocked.key() });
+  for (const queryKey of VISIBILITY_CACHE_KEYS) {
+    void queryClient.invalidateQueries({ queryKey });
+  }
 }
 
 /** Reports a post or user for one of the stable reason codes (issue #38). */
