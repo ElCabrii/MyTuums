@@ -3,6 +3,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ORPCError } from "@orpc/client";
 import { renderWithProviders } from "@/test/render";
+import { appealReasonAtom } from "@/atoms/moderation";
 import { AppealPage } from "@/components/moderation/appeal-page";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
@@ -124,6 +125,26 @@ describe("AppealPage — the four card states", () => {
     expect(screen.queryByRole("link", { name: m.auth_log_in() })).not.toBeInTheDocument();
   });
 
+  it("clears the reason draft on a successful submission, through the active Provider store", async () => {
+    fakeClient.moderation.appealOpen.mockResolvedValue({ appealId: "appeal-1", status: "open" });
+    const { store } = await renderWithProviders(<AppealPage />, {
+      initialPath: "/appeal?postId=post-1",
+      signedInAs: true,
+    });
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(m.appeal_field_reason()), "It really wasn't spam");
+    await waitFor(() => expect(store.get(appealReasonAtom)).toBe("It really wasn't spam"));
+
+    await user.click(screen.getByRole("button", { name: m.appeal_submit() }));
+    await screen.findByRole("heading", { name: m.appeal_success_title() });
+
+    // The reset lands in the same Provider store that mounted the page (a
+    // module-scope write would miss it and this assertion would hang on the
+    // stale draft).
+    await waitFor(() => expect(store.get(appealReasonAtom)).toBe(""));
+  });
+
   /**
    * `AppealPage`'s only real logic is `key={identifier}` (appeal-page.tsx),
    * documented as making a submitted state from one link not greet the next
@@ -133,7 +154,7 @@ describe("AppealPage — the four card states", () => {
    */
   it("remounts fresh when the identifier changes, dropping a prior submission's success state", async () => {
     fakeClient.moderation.appealOpen.mockResolvedValue({ appealId: "appeal-1", status: "open" });
-    const { router } = await renderWithProviders(<AppealPage />, {
+    const { router, store } = await renderWithProviders(<AppealPage />, {
       initialPath: "/appeal?postId=post-1",
       signedInAs: true,
     });
@@ -149,16 +170,15 @@ describe("AppealPage — the four card states", () => {
       await router.navigate({ to: "/appeal", search: { postId: "post-2" } });
     });
 
-    // The remount is what's under test here — the mutation's own `onSuccess`
-    // reset of the reason draft (atoms/moderation.ts) writes through the
-    // app's module-scope store, which this harness's own fresh Provider
-    // store doesn't share, so the draft text is out of scope for this
-    // assertion; the card state is what `key={identifier}` actually owns,
-    // and it's what a real link swap depends on (the mutation observer's
-    // own `isSuccess`, which unmount/remount does reset).
+    // The remount is what's under test here — the card state is what
+    // `key={identifier}` actually owns, and it's what a real link swap depends
+    // on (the mutation observer's own `isSuccess`, which unmount/remount does
+    // reset). The reason draft was cleared by the first submission's success
+    // (see the dedicated draft-reset test), so the fresh form starts blank.
     expect(await screen.findByRole("heading", { name: m.appeal_title() })).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: m.appeal_success_title() }),
     ).not.toBeInTheDocument();
+    expect(store.get(appealReasonAtom)).toBe("");
   });
 });
