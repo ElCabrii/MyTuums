@@ -6,8 +6,7 @@ import { useSignOut } from "@/hooks/use-sign-out";
 import { m } from "@/paraglide/messages.js";
 
 /**
- * The sign-out card at the bottom of `/settings/account` — navigates to
- * `/login` only after `signOutAtom` has actually emptied the session store.
+ * The sign-out card at the bottom of `/settings/account`.
  */
 export function SignOutSection() {
   const handleSignOut = useSignOut();

@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, type FormEvent } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
@@ -14,7 +14,7 @@ import {
   resetPasswordValidationAtom,
   resetResetPasswordFormAtom,
 } from "@/atoms/auth-form";
-import { signOut } from "@/lib/auth-client";
+import { useSignOut } from "@/hooks/use-sign-out";
 import { localizeAuthError } from "@/lib/auth-error-message";
 import { ErrorBanner } from "@/components/error-banner";
 import { PageCard } from "@/components/page-card";
@@ -58,7 +58,7 @@ const resetPasswordSearchSchema = z.object({
  */
 function ResetPasswordPage() {
   const { token, error: linkError } = Route.useSearch();
-  const navigate = useNavigate();
+  const handleSignOut = useSignOut();
 
   const [newPassword, setNewPassword] = useAtom(resetPasswordNewAtom);
   const [confirmPassword, setConfirmPassword] = useAtom(resetPasswordConfirmAtom);
@@ -109,9 +109,10 @@ function ResetPasswordPage() {
                 // (`revokeSessionsOnPasswordReset`), so a stale client-side
                 // session would bounce /login's `useRedirectWhenSignedIn`
                 // straight back to a profile the server no longer lets it
-                // read. Signing out first settles the store; it is a no-op
-                // when there was no session.
-                void signOut().then(() => navigate({ to: "/login" }));
+                // read. `useSignOut` settles the store (and clears viewer
+                // state) before navigating; it is a no-op when there was no
+                // session.
+                void handleSignOut();
               }}
             >
               <KeyRound className="h-4 w-4" />

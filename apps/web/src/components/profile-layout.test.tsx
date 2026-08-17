@@ -194,7 +194,7 @@ describe("ProfileLayout role and ownership gates", () => {
     // refetch empties the store; the mock mirrors that by flipping the
     // session store from inside the call, which is what `signOutAtom`'s
     // `waitForSignedOut()` is waiting for.
-    vi.mocked(authClient.signOut).mockImplementation(() => {
+    vi.mocked(authClient.signOut).mockImplementationOnce(() => {
       setTestSession({
         data: null,
         isPending: false,
@@ -210,5 +210,29 @@ describe("ProfileLayout role and ownership gates", () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
     expect(authClient.signOut).toHaveBeenCalled();
+  });
+
+  it("stays on the page and logs when sign-out fails", async () => {
+    const own = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("alex", own);
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(authClient.signOut).mockRejectedValueOnce(new Error("network down"));
+
+    const { router } = await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@alex",
+      signedInAs: { id: own.id, username: "alex" },
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: m.auth_sign_out() }));
+
+    await waitFor(() =>
+      expect(consoleError).toHaveBeenCalledWith("Failed to sign out", expect.anything()),
+    );
+    expect(router.state.location.pathname).toBe("/@alex");
+    consoleError.mockRestore();
   });
 });
