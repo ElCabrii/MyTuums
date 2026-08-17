@@ -96,11 +96,12 @@ function toggleMutationAtom(postId: string, direction: "like" | "unlike") {
         // `beginPostPatch` owns its key inventory (lib/post-cache.ts): it
         // cancels exactly the three caches it is about to write — feeds,
         // threads, and search results — before snapshotting and applying the
-        // optimistic patch, so the cancel list can't drift from the write list
-        // (issue #127). The rollback is scoped to this post (issue #53): likes
-        // on two different posts are genuinely concurrent, so it must not
-        // replay state another post's mutation — or confirmation — has since
-        // written into the same entries.
+        // optimistic patch (issue #127). Cancellation is fire-and-forget; the
+        // snapshot and patch run back-to-back with no await, so a refetch can't
+        // land between them to poison the rollback. The rollback is scoped to
+        // this post (issue #53): likes on two different posts are genuinely
+        // concurrent, so it must not replay state another post's mutation — or
+        // confirmation — has since written into the same entries.
         const snapshot = beginPostPatch(queryClient, postId, (post) => {
           if (post.viewerHasLiked === liked) return post;
           const likeDelta = liked ? 1 : -1;

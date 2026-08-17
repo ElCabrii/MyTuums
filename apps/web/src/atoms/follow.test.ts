@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
@@ -20,6 +20,21 @@ const fakeClient = {
 };
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));
+
+// The fake client is module-scoped and shared across tests; reset every mock
+// before each test so an implementation set by one test can't leak into the
+// next (order-independence).
+beforeEach(() => {
+  fakeClient.user.follow.mockReset();
+  fakeClient.user.unfollow.mockReset();
+  fakeClient.user.byUsername.mockReset();
+  fakeClient.user.followers.mockReset();
+  fakeClient.user.following.mockReset();
+  fakeClient.post.list.mockReset();
+  fakeClient.search.typeahead.mockReset();
+  fakeClient.search.users.mockReset();
+  fakeClient.search.posts.mockReset();
+});
 
 import { orpc, type Profile, type SearchUser, type SearchUsersPage, type UserListPage, type UserSummary } from "@/lib/orpc";
 import { readCachedIsFollowing } from "@/lib/follow-cache";
@@ -303,12 +318,14 @@ describe("toggleFollowAtomFamily", () => {
     expect(row()?.viewerIsFollowing).toBe(true);
   });
 
-  // Issue #127, rollback half: a stale refetch must not poison the snapshot the
-  // rollback restores from. onMutate cancels before it reads and writes (the
-  // snapshot and patch run back-to-back with no await), so the snapshot records
-  // the true pre-click state and the rejected mutation restores it even when a
-  // stale followers refetch is in flight.
-  it("cancels an in-flight followers refetch so it can't poison the rollback either", async () => {
+  // Issue #127, rollback half: a rejected mutation must restore pre-click state
+  // even when a stale followers refetch was in flight. Cancellation discards
+  // the stale refetch (so it can't overwrite the optimistic flip), and the
+  // rollback then restores the snapshot's pre-click value. The snapshot is read
+  // synchronously after the cancel, so a refetch can't race it — this test
+  // proves the cancel and the rollback compose, not that the snapshot is
+  // protected from a race.
+  it("rolls back to pre-click state when a cancelled followers refetch was in flight", async () => {
     const { store, queryClient } = freshStoreWithTarget(
       makeProfile({
         id: "target-1",
@@ -354,6 +371,51 @@ describe("toggleFollowAtomFamily", () => {
     });
   });
 
+  // The cancel loop covers all four caches, not just `user.followers` — a stale
+  // `search.users` refetch must be discarded the same way, or a search result's
+  // follow button would flip back to pre-click state once the refetch lands.
+  it("cancels an in-flight search.users refetch too", async () => {
+    const { store, queryClient } = freshStoreWithTarget(
+      makeProfile({
+        id: "target-1",
+        username: "target",
+        followerCount: 5,
+        viewerIsFollowing: false,
+      }),
+    );
+    fakeClient.user.follow.mockImplementation(() => new Promise(() => {}));
+
+    const searchKey = orpc.search.users.key({ input: { q: "target", limit: 20 } });
+    let resolveStaleRefetch!: (page: InfiniteData<SearchUsersPage>) => void;
+    const staleRefetch = new Promise<InfiniteData<SearchUsersPage>>((resolve) => {
+      resolveStaleRefetch = resolve;
+    });
+    queryClient.setQueryData(
+      searchKey,
+      searchUsersPage([
+        makeSearchUser({ id: "target-1", username: "target", viewerIsFollowing: false }),
+      ]),
+    );
+    const query = queryClient.getQueryCache().build(queryClient, {
+      queryKey: searchKey,
+      queryFn: () => staleRefetch,
+    });
+    const inFlight = query.fetch().then(() => undefined, () => undefined);
+
+    store.set(toggleFollowAtomFamily("target-1"));
+    const row = () =>
+      queryClient.getQueryData<InfiniteData<SearchUsersPage>>(searchKey)?.pages[0]?.items[0];
+    expect(row()?.viewerIsFollowing).toBe(true);
+
+    resolveStaleRefetch(
+      searchUsersPage([
+        makeSearchUser({ id: "target-1", username: "target", viewerIsFollowing: false }),
+      ]),
+    );
+    await inFlight;
+    expect(row()?.viewerIsFollowing).toBe(true);
+  });
+
   // Following someone changes which posts belong in the Following feed, and
   // there's no way to synthesise that client-side — so unlike every other
   // cache this module touches, `post.list` has to actually be refetched.
@@ -373,6 +435,24 @@ describe("toggleFollowAtomFamily", () => {
     await waitFor(() => {
       expect(resetSpy).toHaveBeenCalledWith({ queryKey: orpc.post.list.key() });
     });
+  });
+
+  it("does not reset the post.list queries when the mutation fails", async () => {
+    const { store, queryClient } = freshStoreWithTarget(
+      makeProfile({ id: "target-1", username: "target", viewerIsFollowing: false }),
+    );
+    const resetSpy = vi.spyOn(queryClient, "resetQueries");
+    fakeClient.user.follow.mockRejectedValue(new Error("network down"));
+
+    store.set(toggleFollowAtomFamily("target-1"));
+
+    // The rollback runs, but the feed membership never changed, so no reset.
+    await waitFor(() => {
+      expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(
+        false,
+      );
+    });
+    expect(resetSpy).not.toHaveBeenCalled();
   });
 });
 

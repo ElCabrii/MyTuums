@@ -2,13 +2,17 @@ import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import { orpc, type Post, type PostListPage, type SearchPostsPage, type Thread } from "@/lib/orpc";
 
 /**
- * Every cache this module writes, owned here so the pre-patch cancel and the
- * sweep can never drift apart (issue #127). A post is cached in three shapes
+ * The caches this module writes, listed once so the pre-patch cancel has a
+ * single inventory to iterate (issue #127). A post is cached in three shapes
  * at once — feeds, threads, and search results — and {@link updatePostEverywhere}
  * / {@link restorePosts} sweep exactly these prefixes. {@link beginPostPatch}
- * cancels this same inventory before writing, so a caller can't cancel a
- * shorter list and let an in-flight refetch overwrite the patch with
- * pre-click state.
+ * cancels this inventory before writing, so a caller can't cancel a shorter
+ * list and let an in-flight refetch overwrite the patch with pre-click state.
+ *
+ * The sweep lists the same keys inline rather than iterating this array: each
+ * cache has a different shape (paginated `InfiniteData` vs a flat `Thread`) and
+ * a different update, so a shared loop would need a per-key dispatch. Adding a
+ * cache means updating both this array and the sweep that writes it.
  */
 export const POST_CACHE_KEYS = [
   orpc.post.list.key(),
@@ -17,11 +21,11 @@ export const POST_CACHE_KEYS = [
 ];
 
 /** Every cached `post.list` entry as [queryKey, data] — the read unit for {@link readCachedPost}. */
-export type CachedFeeds = [readonly unknown[], InfiniteData<PostListPage> | undefined][];
+type CachedFeeds = [readonly unknown[], InfiniteData<PostListPage> | undefined][];
 /** Every cached `post.thread` entry as [queryKey, data] — the read unit for {@link readCachedPost}. */
-export type CachedThreads = [readonly unknown[], Thread | undefined][];
+type CachedThreads = [readonly unknown[], Thread | undefined][];
 /** Every cached `search.posts` entry as [queryKey, data] — the read unit for {@link readCachedPost}. */
-export type CachedSearchPosts = [readonly unknown[], InfiniteData<SearchPostsPage> | undefined][];
+type CachedSearchPosts = [readonly unknown[], InfiniteData<SearchPostsPage> | undefined][];
 
 /**
  * The pre-mutation state of ONE post, captured before an optimistic edit so
@@ -164,10 +168,11 @@ export function updatePostEverywhere(
 /**
  * Cancels every cache this module writes, then captures the pre-update row and
  * applies `update` across all of them — one call, so the cancel list is
- * defined by the same {@link POST_CACHE_KEYS} the sweep uses and can't be
- * rediscovered shorter (issue #127). Snapshot and patch run synchronously
- * back-to-back, so no refetch can land between the read and the write to
- * poison the rollback. Returns the snapshot for `onError` to feed
+ * {@link POST_CACHE_KEYS}, the same keys the sweep writes, and can't be
+ * rediscovered shorter (issue #127). Cancellation is initiated (fire-and-forget)
+ * before the snapshot; the snapshot and patch then run synchronously with no
+ * `await` between them, so no refetch can land between the read and the write
+ * to poison the rollback. Returns the snapshot for `onError` to feed
  * {@link restorePosts} — `undefined` when the post was cached nowhere (then
  * the patch is a no-op and there is nothing to undo).
  */

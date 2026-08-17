@@ -20,12 +20,12 @@ import {
   teamQueryOptions,
 } from "@/lib/query-definitions";
 
-export type { CaseRef } from "@/lib/query-definitions";
-
 /**
  * A reference to a moderation case target — what the queue rows hold, what the
  * dialogs carry, and the payload of `moderation.case`.
  */
+export type { CaseRef } from "@/lib/query-definitions";
+
 /** Encodes a case ref into a family key — the id LAST, so it may contain the delimiter (same layout as `encode` in `atoms/post-feed.ts`). */
 export const encodeCaseKey = (ref: CaseRef): string => `${ref.targetType}|${ref.targetId}`;
 
@@ -203,6 +203,21 @@ function invalidateVisibilityCaches(queryClient: QueryClient): void {
   }
 }
 
+/**
+ * Every cache a post removal/restore rewrites: the three post shapes
+ * (`POST_CACHE_KEYS`) plus the typeahead, which also surfaces posts. Shared by
+ * the removal, restore, and appeal-overturn paths so they can't drift apart —
+ * an appeal overturn that restores a post must sweep the same surfaces the
+ * removal's inverse does, or a stale tombstone lingers in search/typeahead.
+ */
+const POST_SURFACE_KEYS = [...POST_CACHE_KEYS, orpc.search.typeahead.key()];
+
+function invalidatePostCaches(queryClient: QueryClient): void {
+  for (const queryKey of POST_SURFACE_KEYS) {
+    void queryClient.invalidateQueries({ queryKey });
+  }
+}
+
 /** Reports a post or user for one of the stable reason codes (issue #38). */
 export const reportAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
@@ -242,10 +257,7 @@ export const removePostAtom = atomWithMutation((get) => {
       // The tombstone rewrites the post for every viewer (content nulls, the
       // stub appears), so every cached copy — feeds, threads, search, the
       // typeahead — must refetch.
-      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
+      invalidatePostCaches(queryClient);
       invalidateModerationQueries(queryClient);
     },
   });
@@ -256,10 +268,7 @@ export const restorePostAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.restorePost.mutationOptions({
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.posts.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.search.typeahead.key() });
+      invalidatePostCaches(queryClient);
       invalidateModerationQueries(queryClient);
     },
   });
@@ -352,8 +361,7 @@ export const appealReviewAtom = atomWithMutation((get) => {
     onSuccess: () => {
       // An overturn restores the target, so the same sweep as the inverses
       // themselves — content may have come back or a suspension lifted.
-      void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
-      void queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() });
+      invalidatePostCaches(queryClient);
       invalidateModerationQueries(queryClient);
     },
   });

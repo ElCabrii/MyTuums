@@ -237,7 +237,7 @@ describe("snapshot / restore round trip", () => {
       list: queryClient.getQueryData(followersKey("someone")),
     };
 
-    const snapshot = snapshotFollowCaches(queryClient, { userId: "target-1", viewerId: undefined });
+    const snapshot = snapshotFollowCaches(queryClient, { userId: "target-1", viewerId: undefined, following: true });
     patchFollowState(queryClient, { userId: "target-1", viewerId: undefined, following: true });
 
     expect(queryClient.getQueryData<Profile>(profileKey("target"))?.followerCount).toBe(6);
@@ -280,7 +280,7 @@ describe("snapshot / restore round trip", () => {
     );
 
     // Follow X: snapshot, then optimistic patch.
-    const snapshotX = snapshotFollowCaches(queryClient, { userId: "x-1", viewerId: "viewer-1" });
+    const snapshotX = snapshotFollowCaches(queryClient, { userId: "x-1", viewerId: "viewer-1", following: true });
     patchFollowState(queryClient, { userId: "x-1", viewerId: "viewer-1", following: true });
 
     // Follow Y concurrently: optimistic patch, then the server confirms with
@@ -302,6 +302,10 @@ describe("snapshot / restore round trip", () => {
     const list = queryClient.getQueryData<InfiniteData<UserListPage>>(followersKey("someone"));
     expect(list?.pages[0]?.items.find((i) => i.id === "x-1")?.viewerIsFollowing).toBe(false);
     expect(list?.pages[0]?.items.find((i) => i.id === "y-1")?.viewerIsFollowing).toBe(true);
+
+    // The viewer's own followingCount is shared by both follows: X's rollback
+    // must subtract only its own +1, leaving Y's +1 in place (2 + 1 = 3).
+    expect(queryClient.getQueryData<Profile>(profileKey("viewer"))?.followingCount).toBe(3);
   });
 });
 
