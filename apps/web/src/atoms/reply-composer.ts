@@ -26,7 +26,9 @@ export const replyDraftAtomFamily = atomFamily<string, PrimitiveAtom<string>>(()
  *
  * `onSuccess` reaches the store directly rather than closing over a `set`,
  * for the same reason `createPostAtom` does: `atomWithMutation`'s options
- * factory is handed a `Getter` only.
+ * factory is handed a `Getter` only. As with `createPostAtom`, this is safe
+ * only because the app has one store; a component in scope should reset
+ * through its provider-bound `set` (see `resetAppealReasonEffect`).
  */
 export const createReplyAtomFamily = atomFamily((parentId: string) =>
   atomWithMutation((get) => {

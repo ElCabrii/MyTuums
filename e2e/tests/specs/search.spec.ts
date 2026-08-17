@@ -40,8 +40,12 @@ test.describe("search", () => {
     await expect(page.getByRole("heading", { name: "People" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible();
     // The results are real, not just headings: exact match lands only on the
-    // seeded post's own text in the Posts section.
-    await expect(page.getByText(post.content, { exact: true })).toBeVisible();
+    // seeded post's own text in the Posts section. Scoping to the section (not
+    // the whole page) keeps a lingering typeahead suggestion — a focus return
+    // reopening the non-empty query on the destination page — from becoming a
+    // second strict-mode match.
+    const postsSection = page.getByRole("region", { name: "Posts" });
+    await expect(postsSection.getByText(post.content, { exact: true })).toBeVisible();
   });
 
   test("clicking a suggested user row opens that profile", async ({ page, db }) => {
