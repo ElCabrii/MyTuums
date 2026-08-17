@@ -359,9 +359,13 @@ export const appealReviewAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.appealReview.mutationOptions({
     onSuccess: () => {
-      // An overturn restores the target, so the same sweep as the inverses
-      // themselves — content may have come back or a suspension lifted.
-      invalidatePostCaches(queryClient);
+      // An overturn reverses one of three actions, and the result only says
+      // "overturned" — not which — so sweep the union of the three inverses'
+      // surfaces: a post removal (content comes back → post surfaces), a
+      // suspension/ban (the user's content comes back app-wide → the full
+      // visibility sweep), or a role change (the roster changes → team).
+      invalidateVisibilityCaches(queryClient);
+      void queryClient.invalidateQueries({ queryKey: orpc.moderation.team.key() });
       invalidateModerationQueries(queryClient);
     },
   });
