@@ -1,7 +1,7 @@
-import { getRouteApi, Link, Outlet, useNavigate } from "@tanstack/react-router";
+import { getRouteApi, Link, Outlet } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { ORPCError } from "@orpc/client";
-import { authPendingAtom, signOutAtom } from "@/atoms/auth";
+import { authPendingAtom } from "@/atoms/auth";
 import { viewerAtom, isStaffAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
 import { blockDialogAtom, reportDialogAtom, unbanUserAtom } from "@/atoms/moderation";
@@ -19,6 +19,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
+import { useSignOut } from "@/hooks/use-sign-out";
 import {
   UserX,
   Mail,
@@ -43,31 +44,16 @@ const routeApi = getRouteApi("/@{$username}");
  * they open in a modal off the counts below (see ./follow-list-dialog.tsx).
  */
 export function ProfileLayout() {
-  const navigate = useNavigate();
   const { username } = routeApi.useParams();
   const viewer = useAtomValue(viewerAtom);
   const isSigningOut = useAtomValue(authPendingAtom);
-  const signOut = useSetAtom(signOutAtom);
+  const handleSignOut = useSignOut();
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
   const isStaff = useAtomValue(isStaffAtom);
   const unbanUser = useAtomValue(unbanUserAtom);
 
   const profileQuery = useAtomValue(profileAtomFamily(username));
-
-  const handleSignOut = async () => {
-    try {
-      // signOutAtom (atoms/auth.ts) owns the sign-out sequence and delegates
-      // QueryClient.clear() plus the family sweep to clearViewerState — see
-      // that module's comment for why clearing those matters here:
-      // viewer-dependent fields like `viewerIsFollowing` live behind query
-      // keys with no viewer identity in them.
-      await signOut();
-      void navigate({ to: "/login" });
-    } catch (err) {
-      console.error("Failed to sign out", err);
-    }
-  };
 
   if (profileQuery.isPending) {
     return (

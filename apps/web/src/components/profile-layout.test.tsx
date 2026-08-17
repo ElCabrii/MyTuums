@@ -9,8 +9,10 @@ import {
   makeProfile,
   queryFixtures,
   renderWithProviders,
+  setTestSession,
 } from "@/test/render";
 import { ProfileLayout } from "@/components/profile-layout";
+import { authClient } from "@/lib/auth-client";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
@@ -175,5 +177,38 @@ describe("ProfileLayout role and ownership gates", () => {
     await user.click(screen.getByLabelText(m.moderation_kebab()));
     await user.click(await screen.findByRole("menuitem", { name: m.moderation_kebab_block() }));
     expect(store.get(blockDialogAtom)).toEqual({ userId: other.id, handle: "Other" });
+  });
+
+  it("signs out from the viewer's own profile and lands on /login", async () => {
+    const own = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("alex", own);
+
+    const { router } = await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@alex",
+      signedInAs: { id: own.id, username: "alex" },
+    });
+
+    // The real client resolves `/sign-out` before its own `/get-session`
+    // refetch empties the store; the mock mirrors that by flipping the
+    // session store from inside the call, which is what `signOutAtom`'s
+    // `waitForSignedOut()` is waiting for.
+    vi.mocked(authClient.signOut).mockImplementation(() => {
+      setTestSession({
+        data: null,
+        isPending: false,
+        isRefetching: false,
+        error: null,
+        refetch: vi.fn(() => Promise.resolve()),
+      });
+      return Promise.resolve({ data: {}, error: null });
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: m.auth_sign_out() }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(authClient.signOut).toHaveBeenCalled();
   });
 });
