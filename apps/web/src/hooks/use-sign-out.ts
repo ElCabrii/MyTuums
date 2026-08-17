@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useSetAtom } from "jotai";
-import { signOutAtom } from "@/atoms/auth";
+import { authErrorAtom, signOutAtom } from "@/atoms/auth";
+import { m } from "@/paraglide/messages.js";
 
 /**
  * Signs the viewer out and lands them on /login.
@@ -10,8 +11,9 @@ import { signOutAtom } from "@/atoms/auth";
  * empty, and `clearViewerState`'s cache/family sweep — and this hook owns what
  * happens after: the navigate and the single error path. Every entry point
  * (header menu, profile page, settings, the post-reset "log in" button) calls
- * this, so a rejected sign-out behaves the same from each: logged, and the
- * visitor left on the page they were on.
+ * this, so a rejected sign-out behaves the same from each: the error is
+ * surfaced through `authErrorAtom` (and logged), and the visitor is left on
+ * the page they were on.
  *
  * This hook is the sole owner of the post-sign-out destination. The signed-in
  * gate (`use-require-signed-in.ts`) is the fallback for any *other* way a
@@ -24,6 +26,7 @@ import { signOutAtom } from "@/atoms/auth";
 export function useSignOut(): () => Promise<void> {
   const navigate = useNavigate();
   const signOut = useSetAtom(signOutAtom);
+  const setAuthError = useSetAtom(authErrorAtom);
 
   return async () => {
     try {
@@ -31,6 +34,7 @@ export function useSignOut(): () => Promise<void> {
       void navigate({ to: "/login" });
     } catch (err) {
       console.error("Failed to sign out", err);
+      setAuthError(m.common_something_went_wrong());
     }
   };
 }

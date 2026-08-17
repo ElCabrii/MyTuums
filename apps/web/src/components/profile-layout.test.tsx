@@ -3,6 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { ORPCError } from "@orpc/client";
+import { authErrorAtom } from "@/atoms/auth";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import {
   createTestQueryClient,
@@ -220,7 +221,7 @@ describe("ProfileLayout role and ownership gates", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(authClient.signOut).mockRejectedValueOnce(new Error("network down"));
 
-    const { router } = await renderWithProviders(<ProfileLayout />, {
+    const { router, store } = await renderWithProviders(<ProfileLayout />, {
       queryClient,
       initialPath: "/@alex",
       signedInAs: { id: own.id, username: "alex" },
@@ -233,6 +234,7 @@ describe("ProfileLayout role and ownership gates", () => {
       expect(consoleError).toHaveBeenCalledWith("Failed to sign out", expect.anything()),
     );
     expect(router.state.location.pathname).toBe("/@alex");
+    expect(store.get(authErrorAtom)).toBe(m.common_something_went_wrong());
     consoleError.mockRestore();
   });
 });
