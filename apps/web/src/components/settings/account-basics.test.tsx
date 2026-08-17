@@ -196,8 +196,14 @@ describe("SignOutSection", () => {
     expect(router.state.location.pathname).toBe("/settings/account");
 
     act(() => {
-      setTestSignedOut();
       release();
+    });
+    // `signOut` resolved but the store is still signed-in: `waitForSignedOut`
+    // is still waiting, so navigation must not have happened yet.
+    expect(router.state.location.pathname).toBe("/settings/account");
+
+    act(() => {
+      setTestSignedOut();
     });
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
   });

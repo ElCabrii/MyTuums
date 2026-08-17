@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
-import { useAtomValue, useSetAtom } from "jotai";
+import { Link } from "@tanstack/react-router";
+import { useAtomValue } from "jotai";
 import {
   MessageSquare,
   Bell,
@@ -22,9 +22,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SearchBox } from "@/components/search-box";
 import { isModeratorAtom, viewerAtom, viewerHandleAtom } from "@/atoms/session";
-import { authPendingAtom, signOutAtom } from "@/atoms/auth";
+import { authPendingAtom } from "@/atoms/auth";
 import { UserAvatar } from "@/components/user-avatar";
 import { VersionTag } from "@/components/version-tag";
+import { useSignOut } from "@/hooks/use-sign-out";
 import { m } from "@/paraglide/messages.js";
 
 // The theme dropdown ships its own popover machinery (floating-ui + focus
@@ -50,28 +51,15 @@ const ModeToggle = lazy(() =>
  * it (see the regression pinned in `e2e/tests/specs/welcome.spec.ts`).
  */
 export function Header() {
-  const navigate = useNavigate();
   const user = useAtomValue(viewerAtom);
   const handle = useAtomValue(viewerHandleAtom);
   const isSigningOut = useAtomValue(authPendingAtom);
   const isModerator = useAtomValue(isModeratorAtom);
-  const signOut = useSetAtom(signOutAtom);
+  const handleSignOut = useSignOut();
 
   if (!user) return null;
 
   const nameDisplay = user.name || user.displayUsername || user.username || m.nav_profile();
-
-  const handleSignOut = async () => {
-    try {
-      // Same path as the profile page's sign-out button: signOutAtom owns the
-      // sequence and delegates cache/family cleanup to clearViewerState; only
-      // the final navigate lives here.
-      await signOut();
-      void navigate({ to: "/login" });
-    } catch (err) {
-      console.error("Failed to sign out", err);
-    }
-  };
 
   return (
     <header className="bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 w-full border-b backdrop-blur">

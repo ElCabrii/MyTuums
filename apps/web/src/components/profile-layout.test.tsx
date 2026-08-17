@@ -3,14 +3,17 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { ORPCError } from "@orpc/client";
+import { authErrorAtom } from "@/atoms/auth";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import {
   createTestQueryClient,
   makeProfile,
   queryFixtures,
   renderWithProviders,
+  setTestSession,
 } from "@/test/render";
 import { ProfileLayout } from "@/components/profile-layout";
+import { authClient } from "@/lib/auth-client";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
@@ -175,5 +178,63 @@ describe("ProfileLayout role and ownership gates", () => {
     await user.click(screen.getByLabelText(m.moderation_kebab()));
     await user.click(await screen.findByRole("menuitem", { name: m.moderation_kebab_block() }));
     expect(store.get(blockDialogAtom)).toEqual({ userId: other.id, handle: "Other" });
+  });
+
+  it("signs out from the viewer's own profile and lands on /login", async () => {
+    const own = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("alex", own);
+
+    const { router } = await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@alex",
+      signedInAs: { id: own.id, username: "alex" },
+    });
+
+    // The real client resolves `/sign-out` before its own `/get-session`
+    // refetch empties the store; the mock mirrors that by flipping the
+    // session store from inside the call, which is what `signOutAtom`'s
+    // `waitForSignedOut()` is waiting for.
+    vi.mocked(authClient.signOut).mockImplementationOnce(() => {
+      setTestSession({
+        data: null,
+        isPending: false,
+        isRefetching: false,
+        error: null,
+        refetch: vi.fn(() => Promise.resolve()),
+      });
+      return Promise.resolve({ data: {}, error: null });
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: m.auth_sign_out() }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(authClient.signOut).toHaveBeenCalled();
+  });
+
+  it("stays on the page and logs when sign-out fails", async () => {
+    const own = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("alex", own);
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(authClient.signOut).mockRejectedValueOnce(new Error("network down"));
+
+    const { router, store } = await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@alex",
+      signedInAs: { id: own.id, username: "alex" },
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: m.auth_sign_out() }));
+
+    await waitFor(() =>
+      expect(consoleError).toHaveBeenCalledWith("Failed to sign out", expect.anything()),
+    );
+    expect(router.state.location.pathname).toBe("/@alex");
+    expect(store.get(authErrorAtom)).toBe(m.common_something_went_wrong());
+    consoleError.mockRestore();
   });
 });

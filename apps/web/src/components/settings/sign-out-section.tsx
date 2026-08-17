@@ -1,17 +1,15 @@
-import { useNavigate } from "@tanstack/react-router";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useAtomValue } from "jotai";
 import { Loader2, LogOut } from "lucide-react";
-import { authPendingAtom, signOutAtom } from "@/atoms/auth";
+import { authPendingAtom } from "@/atoms/auth";
 import { Button } from "@/components/ui/button";
+import { useSignOut } from "@/hooks/use-sign-out";
 import { m } from "@/paraglide/messages.js";
 
 /**
- * The sign-out card at the bottom of `/settings/account` — navigates to
- * `/login` only after `signOutAtom` has actually emptied the session store.
+ * The sign-out card at the bottom of `/settings/account`.
  */
 export function SignOutSection() {
-  const navigate = useNavigate();
-  const signOut = useSetAtom(signOutAtom);
+  const handleSignOut = useSignOut();
   const isBusy = useAtomValue(authPendingAtom);
 
   return (
@@ -25,12 +23,7 @@ export function SignOutSection() {
         size="sm"
         className="shrink-0 gap-2 rounded-full"
         disabled={isBusy}
-        onClick={() => {
-          // `signOutAtom` waits for the session store to actually empty before
-          // resolving (see lib/session-sync.ts), so this navigation cannot be
-          // undone by a redirect effect reading a stale session.
-          void signOut().then(() => navigate({ to: "/login" }));
-        }}
+        onClick={() => void handleSignOut()}
       >
         {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
         <span>{m.auth_sign_out()}</span>
