@@ -47,8 +47,9 @@ export const composerDraftAtom = atom(
  *
  * `onSuccess` can't reach `set` — `atomWithMutation`'s `getOptions` is only
  * handed a `Getter` — so the draft reset goes through the module-scope
- * `store` the same way `main.tsx` does, instead of a `set` closed over from
- * a component.
+ * `store` the same way `main.tsx` does. That is safe only because the app has
+ * one store; a component in scope should reset through its provider-bound
+ * `set` instead (see `resetAppealReasonEffect` in `atoms/moderation.ts`).
  */
 export const createPostAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);

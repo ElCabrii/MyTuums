@@ -134,7 +134,7 @@ describe("AppealPage — the four card states", () => {
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(m.appeal_field_reason()), "It really wasn't spam");
-    expect(store.get(appealReasonAtom)).toBe("It really wasn't spam");
+    await waitFor(() => expect(store.get(appealReasonAtom)).toBe("It really wasn't spam"));
 
     await user.click(screen.getByRole("button", { name: m.appeal_submit() }));
     await screen.findByRole("heading", { name: m.appeal_success_title() });

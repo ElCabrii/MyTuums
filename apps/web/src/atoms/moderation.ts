@@ -329,6 +329,22 @@ export const appealOpenAtom = atomWithMutation((get) => {
   });
 });
 
+/**
+ * Clears the appeal draft once a submission succeeds — the same
+ * mount-time-effect pattern as the dialog resets above, consumed with
+ * `useAtomValue`. The reset lives here rather than in `appealOpenAtom.onSuccess`
+ * because that callback is handed only a Getter and cannot `set`; an
+ * `atomEffect` runs inside the active Provider store, so the write lands where
+ * the mutation ran (a module-scope `store.set` would miss a non-app Provider).
+ * `isSuccess` is reset by the card's own remount on identifier change, so the
+ * effect does not re-fire into a fresh form.
+ */
+export const resetAppealReasonEffect = atomEffect((get, set) => {
+  if (get(appealOpenAtom).isSuccess) {
+    set(appealReasonAtom, "");
+  }
+});
+
 /** Reviews an appeal: upholds the action or overturns it, each with its own inverse + email. */
 export const appealReviewAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
