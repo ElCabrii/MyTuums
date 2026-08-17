@@ -12,7 +12,7 @@ deploys. Railway builds its own image from `apps/server/Dockerfile`, so the
 | File                    | Why                                                               |
 | ----------------------- | ----------------------------------------------------------------- |
 | `workflows/ci.yml`      | Five jobs: `check`, `unit`, `integration`, `e2e`, `docker`.       |
-| `workflows/smoke.yml`   | The scheduled probe of the production service.                 |
+| `workflows/smoke.yml`   | The scheduled probe of the production service.                    |
 | `../docs/operations.md` | What the pipeline is checking and why the environments are split. |
 
 ## Change map
