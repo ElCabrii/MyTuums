@@ -8,7 +8,6 @@ import {
   queryClientAtom,
 } from "jotai-tanstack-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { store } from "@/lib/store";
 import { orpc } from "@/lib/orpc";
 import { FOLLOW_CACHE_KEYS } from "@/lib/follow-cache";
 import { POST_CACHE_KEYS } from "@/lib/post-cache";
@@ -343,15 +342,27 @@ export const appealOpenAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.appealOpen.mutationOptions({
     onSuccess: () => {
-      // Same pattern as `createPostAtom` (atoms/composer.ts): the draft reset
-      // goes through the module-scope store, which `onSuccess` can reach, so
-      // the next appeal starts blank.
-      store.set(appealReasonAtom, "");
       // The queue merges open appeals, so a successful submission must refetch
       // it (a no-op for a signed-out submitter with nothing mounted).
       void queryClient.invalidateQueries({ queryKey: orpc.moderation.queue.key() });
     },
   });
+});
+
+/**
+ * Clears the appeal draft once a submission succeeds — the same
+ * mount-time-effect pattern as the dialog resets above, consumed with
+ * `useAtomValue`. The reset lives here rather than in `appealOpenAtom.onSuccess`
+ * because that callback is handed only a Getter and cannot `set`; an
+ * `atomEffect` runs inside the active Provider store, so the write lands where
+ * the mutation ran (a module-scope `store.set` would miss a non-app Provider).
+ * `isSuccess` is reset by the card's own remount on identifier change, so the
+ * effect does not re-fire into a fresh form.
+ */
+export const resetAppealReasonEffect = atomEffect((get, set) => {
+  if (get(appealOpenAtom).isSuccess) {
+    set(appealReasonAtom, "");
+  }
 });
 
 /** Reviews an appeal: upholds the action or overturns it, each with its own inverse + email. */

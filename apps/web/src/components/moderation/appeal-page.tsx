@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Link, getRouteApi } from "@tanstack/react-router";
 import { ORPCError } from "@orpc/client";
 import { APPEAL_REASON_MAX_LENGTH, APPEAL_REASON_MIN_LENGTH } from "@my-tuums/api/constants";
-import { appealOpenAtom, appealReasonAtom } from "@/atoms/moderation";
+import { appealOpenAtom, appealReasonAtom, resetAppealReasonEffect } from "@/atoms/moderation";
 import { isSignedInAtom } from "@/atoms/session";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,6 +32,8 @@ function AppealCard({ token, postId }: { token?: string; postId?: string }) {
   const isSignedIn = useAtomValue(isSignedInAtom);
   const appealOpen = useAtomValue(appealOpenAtom);
   const [reason, setReason] = useAtom(appealReasonAtom);
+  // Clears the draft once a submission succeeds — see `resetAppealReasonEffect`.
+  useAtomValue(resetAppealReasonEffect);
 
   const trimmed = reason.trim();
   const hasIdentifier = Boolean(token || postId);
