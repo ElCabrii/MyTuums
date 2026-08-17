@@ -36,7 +36,14 @@ beforeEach(() => {
   fakeClient.search.posts.mockReset();
 });
 
-import { orpc, type Profile, type SearchUser, type SearchUsersPage, type UserListPage, type UserSummary } from "@/lib/orpc";
+import {
+  orpc,
+  type Profile,
+  type SearchUser,
+  type SearchUsersPage,
+  type UserListPage,
+  type UserSummary,
+} from "@/lib/orpc";
 import { readCachedIsFollowing } from "@/lib/follow-cache";
 import { clearFollowFamilies, toggleFollowAtomFamily } from "@/atoms/follow";
 import { sessionAtom } from "@/atoms/session";
@@ -301,7 +308,10 @@ describe("toggleFollowAtomFamily", () => {
       queryKey: followersKey,
       queryFn: () => staleRefetch,
     });
-    const inFlight = query.fetch().then(() => undefined, () => undefined);
+    const inFlight = query.fetch().then(
+      () => undefined,
+      () => undefined,
+    );
 
     store.set(toggleFollowAtomFamily("target-1"));
     const row = () =>
@@ -349,7 +359,10 @@ describe("toggleFollowAtomFamily", () => {
       queryKey: followersKey,
       queryFn: () => staleRefetch,
     });
-    const inFlight = query.fetch().then(() => undefined, () => undefined);
+    const inFlight = query.fetch().then(
+      () => undefined,
+      () => undefined,
+    );
 
     store.set(toggleFollowAtomFamily("target-1"));
     const row = () =>
@@ -400,7 +413,10 @@ describe("toggleFollowAtomFamily", () => {
       queryKey: searchKey,
       queryFn: () => staleRefetch,
     });
-    const inFlight = query.fetch().then(() => undefined, () => undefined);
+    const inFlight = query.fetch().then(
+      () => undefined,
+      () => undefined,
+    );
 
     store.set(toggleFollowAtomFamily("target-1"));
     const row = () =>

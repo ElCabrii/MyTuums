@@ -237,7 +237,11 @@ describe("snapshot / restore round trip", () => {
       list: queryClient.getQueryData(followersKey("someone")),
     };
 
-    const snapshot = snapshotFollowCaches(queryClient, { userId: "target-1", viewerId: undefined, following: true });
+    const snapshot = snapshotFollowCaches(queryClient, {
+      userId: "target-1",
+      viewerId: undefined,
+      following: true,
+    });
     patchFollowState(queryClient, { userId: "target-1", viewerId: undefined, following: true });
 
     expect(queryClient.getQueryData<Profile>(profileKey("target"))?.followerCount).toBe(6);
@@ -280,7 +284,11 @@ describe("snapshot / restore round trip", () => {
     );
 
     // Follow X: snapshot, then optimistic patch.
-    const snapshotX = snapshotFollowCaches(queryClient, { userId: "x-1", viewerId: "viewer-1", following: true });
+    const snapshotX = snapshotFollowCaches(queryClient, {
+      userId: "x-1",
+      viewerId: "viewer-1",
+      following: true,
+    });
     patchFollowState(queryClient, { userId: "x-1", viewerId: "viewer-1", following: true });
 
     // Follow Y concurrently: optimistic patch, then the server confirms with

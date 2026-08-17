@@ -180,9 +180,7 @@ describe("moderation action cache sweeps", () => {
 
     const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
     const mutationUnsub = singletonStore.sub(appealReviewAtom, () => {});
-    singletonStore
-      .get(appealReviewAtom)
-      .mutate({ appealId: "appeal-1", outcome: "overturned" });
+    singletonStore.get(appealReviewAtom).mutate({ appealId: "appeal-1", outcome: "overturned" });
 
     await waitFor(() =>
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.queue.key() }),
