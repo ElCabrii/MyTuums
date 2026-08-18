@@ -54,12 +54,10 @@ async function renderCase(target: CaseRef, detail: ReturnType<typeof makeModerat
   });
 }
 
-/**
- * One open report, so the Actions card renders — the card is withheld when a
- * case has no open reports (see `CaseBody`), and every action test below is
- * about acting on an open report.
- */
-const OPEN_REPORT = makeModerationReport();
+/** One open report — the dismiss action is gated on these, so dismiss tests seed one. */
+function makeOpenReport() {
+  return makeModerationReport();
+}
 
 describe("CaseDialog — role gating on user actions", () => {
   const target: CaseRef = { targetType: "user", targetId: "user-1" };
@@ -68,7 +66,7 @@ describe("CaseDialog — role gating on user actions", () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).moderation.case(
       target,
-      makeUserModerationCaseDetail({ id: "user-1" }, { reports: [OPEN_REPORT] }),
+      makeUserModerationCaseDetail({ id: "user-1" }),
     );
     await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
       queryClient,
@@ -85,7 +83,7 @@ describe("CaseDialog — role gating on user actions", () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).moderation.case(
       target,
-      makeUserModerationCaseDetail({ id: "user-1" }, { reports: [OPEN_REPORT] }),
+      makeUserModerationCaseDetail({ id: "user-1" }),
     );
     await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
       queryClient,
@@ -100,7 +98,7 @@ describe("CaseDialog — role gating on user actions", () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).moderation.case(
       target,
-      makeUserModerationCaseDetail({ id: "user-1" }, { reports: [OPEN_REPORT] }),
+      makeUserModerationCaseDetail({ id: "user-1" }),
     );
     await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
       queryClient,
@@ -137,7 +135,7 @@ describe("CaseDialog — suspend flow", () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).moderation.case(
       target,
-      makeUserModerationCaseDetail({ id: "user-1" }, { reports: [OPEN_REPORT] }),
+      makeUserModerationCaseDetail({ id: "user-1" }),
     );
     await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
       queryClient,
@@ -176,10 +174,11 @@ describe("CaseDialog — a banned target's actions", () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).moderation.case(
       target,
-      makeUserModerationCaseDetail(
-        { id: "user-1", banned: true, banExpires: new Date("2099-01-01T00:00:00.000Z") },
-        { reports: [OPEN_REPORT] },
-      ),
+      makeUserModerationCaseDetail({
+        id: "user-1",
+        banned: true,
+        banExpires: new Date("2099-01-01T00:00:00.000Z"),
+      }),
     );
     await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
       queryClient,
@@ -199,10 +198,7 @@ describe("CaseDialog — a banned target's actions", () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).moderation.case(
       target,
-      makeUserModerationCaseDetail(
-        { id: "user-1", banned: true, banExpires: null },
-        { reports: [OPEN_REPORT] },
-      ),
+      makeUserModerationCaseDetail({ id: "user-1", banned: true, banExpires: null }),
     );
     await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
       queryClient,
@@ -232,10 +228,7 @@ describe("CaseDialog — a banned target's actions", () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).moderation.case(
       target,
-      makeUserModerationCaseDetail(
-        { id: "user-1", banned: true, banExpires: null },
-        { reports: [OPEN_REPORT] },
-      ),
+      makeUserModerationCaseDetail({ id: "user-1", banned: true, banExpires: null }),
     );
     await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
       queryClient,
@@ -256,10 +249,7 @@ describe("CaseDialog — post actions", () => {
   it("keeps Remove post disabled until a reason is entered, then submits the trimmed reason", async () => {
     fakeClient.moderation.removePost.mockResolvedValue({ postId: "post-1", removed: true });
     const target: CaseRef = { targetType: "post", targetId: "post-1" };
-    await renderCase(
-      target,
-      makeModerationCaseDetail({ id: "post-1" }, { reports: [OPEN_REPORT] }),
-    );
+    await renderCase(target, makeModerationCaseDetail({ id: "post-1" }));
 
     const removeButton = await screen.findByRole("button", { name: m.moderation_remove_submit() });
     expect(removeButton).toBeDisabled();
@@ -283,11 +273,25 @@ describe("CaseDialog — post actions", () => {
   it("shows Restore instead of the reason form for an already-removed post, and submits its id", async () => {
     fakeClient.moderation.restorePost.mockResolvedValue({ postId: "post-1", restored: true });
     const target: CaseRef = { targetType: "post", targetId: "post-1" };
+    // The real post-removal state: `removePostEffect` stamps every open report
+    // in the same transaction that sets the tombstone, so a removed post has
+    // `removedAt` set AND no open reports. Restore must still be reachable —
+    // it is report-independent, and this is the only consumer of
+    // `restorePostAtom` in the app.
     await renderCase(
       target,
       makeModerationCaseDetail(
         { id: "post-1", removedAt: new Date("2026-01-01T00:00:00.000Z") },
-        { reports: [OPEN_REPORT] },
+        {
+          reports: [
+            makeModerationReport({
+              resolvedAt: new Date("2026-01-01T00:00:00.000Z"),
+              resolvedBy: "moderator-1",
+              resolvedOutcome: "actioned",
+              resolutionNote: "removed",
+            }),
+          ],
+        },
       ),
     );
 
@@ -317,7 +321,7 @@ describe("CaseDialog — dismissing a case", () => {
     const target: CaseRef = { targetType: "post", targetId: "post-1" };
     await renderCase(
       target,
-      makeModerationCaseDetail({ id: "post-1" }, { reports: [OPEN_REPORT] }),
+      makeModerationCaseDetail({ id: "post-1" }, { reports: [makeOpenReport()] }),
     );
 
     const user = userEvent.setup();
@@ -341,10 +345,10 @@ describe("CaseDialog — dismissing a case", () => {
   });
 });
 
-describe("CaseDialog — withholding Actions with no open reports", () => {
+describe("CaseDialog — gating Dismiss on open reports", () => {
   const target: CaseRef = { targetType: "post", targetId: "post-1" };
 
-  it("hides the whole Actions card when every report is resolved", async () => {
+  it("hides only the Dismiss action when every report is resolved, keeping the target action", async () => {
     await renderCase(
       target,
       makeModerationCaseDetail(
@@ -363,22 +367,24 @@ describe("CaseDialog — withholding Actions with no open reports", () => {
     );
 
     expect(await screen.findByText(m.moderation_case_reports_title())).toBeInTheDocument();
-    // No open reports → nothing to resolve → the Actions card must be absent,
-    // not empty.
-    expect(screen.queryByText(m.moderation_actions_title())).not.toBeInTheDocument();
+    // The card stays: the target action (Remove) is report-independent and must
+    // remain reachable. Only the dismiss — whose whole job is stamping reports —
+    // is withheld when there is nothing open to stamp (issue #59's no-op resolve).
+    expect(screen.getByText(m.moderation_actions_title())).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: m.moderation_remove_submit() }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: m.moderation_remove_submit() }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: m.moderation_dismiss() })).not.toBeInTheDocument();
   });
 
-  it("keeps Actions when at least one report is still open", async () => {
+  it("keeps Dismiss when at least one report is still open", async () => {
     await renderCase(
       target,
       makeModerationCaseDetail(
         { id: "post-1" },
         {
           reports: [
-            OPEN_REPORT,
+            makeOpenReport(),
             makeModerationReport({
               resolvedAt: new Date(),
               resolvedBy: "moderator-1",
@@ -391,7 +397,7 @@ describe("CaseDialog — withholding Actions with no open reports", () => {
     );
 
     expect(
-      await screen.findByRole("button", { name: m.moderation_remove_submit() }),
+      await screen.findByRole("button", { name: m.moderation_dismiss() }),
     ).toBeInTheDocument();
   });
 });

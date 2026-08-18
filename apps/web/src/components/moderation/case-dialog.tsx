@@ -79,6 +79,15 @@ import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 import { getLocale } from "@/paraglide/runtime.js";
 
+/**
+ * Whether a report is still open. `resolvedAt` is the single source of truth
+ * for a report's state — the count badge and the dismiss gate both read it, so
+ * the predicate lives here rather than being restated at each call site.
+ */
+function isOpenReport(report: ModerationCaseDetail["reports"][number]): boolean {
+  return report.resolvedAt === null;
+}
+
 /** The suspension lengths the case dialog offers, seconds → label. */
 const SUSPENSION_PRESETS: { seconds: number; label: string }[] = [
   { seconds: 60 * 60, label: m.moderation_duration_1h() },
@@ -180,10 +189,6 @@ function CaseSkeleton() {
 function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
   const targetPost = detail.target.kind === "post" ? detail.target : null;
   const targetUser = detail.target.kind === "user" ? detail.target : null;
-  // Every action in the Actions card — the post/user sentence and the dismiss —
-  // stamps or reopens reports. With nothing open there is nothing to resolve,
-  // so the card is withheld rather than shown empty (issue #59's no-op resolve).
-  const hasOpenReports = detail.reports.some((report) => report.resolvedAt === null);
 
   return (
     <div className="space-y-4">
@@ -195,7 +200,7 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
 
       {detail.appeal && <AppealSection appeal={detail.appeal} />}
 
-      {hasOpenReports && <ActionsSection detail={detail} />}
+      <ActionsSection detail={detail} />
     </div>
   );
 }
@@ -365,7 +370,7 @@ function TargetUserCard({
 /** Every report against the target, newest first, with resolved state. */
 function ReportsSection({ reports }: { reports: ModerationCaseDetail["reports"] }) {
   const locale = getLocale();
-  const open = reports.filter((report) => report.resolvedAt === null).length;
+  const open = reports.filter(isOpenReport).length;
 
   return (
     <Card size="sm">
@@ -528,10 +533,17 @@ function AppealSection({ appeal }: { appeal: NonNullable<ModerationCaseDetail["a
  * Everything that changes something, in one card: the target-specific action
  * first, then the always-available way out of the case (dismiss) behind a
  * separator so the two are never mistaken for each other.
+ *
+ * The card itself is never withheld: the post/user sentence and its inverse
+ * (Restore, Unban/Unsuspend) are report-independent — they change the target,
+ * not the reports — so a case with no open reports still has live actions.
+ * Only the dismiss is gated on open reports, because it is the one action
+ * whose whole job is stamping them (issue #59's no-op resolve).
  */
 function ActionsSection({ detail }: { detail: ModerationCaseDetail }) {
   const targetPost = detail.target.kind === "post" ? detail.target : null;
   const targetUser = detail.target.kind === "user" ? detail.target : null;
+  const hasOpenReports = detail.reports.some(isOpenReport);
 
   return (
     <Card size="sm">
@@ -541,8 +553,12 @@ function ActionsSection({ detail }: { detail: ModerationCaseDetail }) {
       <CardContent className="space-y-4">
         {targetPost && <PostActions target={targetPost} />}
         {targetUser && <UserActions target={targetUser} />}
-        <Separator />
-        <DismissAction detail={detail} />
+        {hasOpenReports && (
+          <>
+            <Separator />
+            <DismissAction detail={detail} />
+          </>
+        )}
       </CardContent>
     </Card>
   );
