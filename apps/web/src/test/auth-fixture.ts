@@ -6,12 +6,14 @@ import {
 } from "@/lib/auth-client";
 
 /**
- * The BetterAuth fake and the session-driving calls. Importing this module
- * *is* the install: the fake is registered at module scope, before any
- * component that transitively reaches `@/lib/auth-client` can instantiate the
- * real client. Because this module has no other reason to be imported, the
- * ordering constraint stops being something a caller can get wrong — a test
- * that needs a session imports this, and a test that doesn't, doesn't.
+ * The BetterAuth fake and the session-driving calls. The fake is installed by
+ * `installTestAuthFixture()`, which `src/test/setup.ts` calls during the Vitest
+ * setup phase — before any test module is evaluated. That is what removes the
+ * import-order hazard: `atoms/session.ts` seeds `sessionAtom` from
+ * `sessionStore.get()` at its own import time, and the setup phase runs before
+ * any test file's static imports are collected, so the fake store is always in
+ * place before that capture. A test author never has to remember to import
+ * this module (or `@/test/render`) before the component under test.
  *
  * The domain factories and QueryClient tuning live in `./factories.ts` (no
  * side effects); the router stand-in lives in `./route-tree.ts`.
@@ -152,12 +154,15 @@ const fakeAuthClient = {
 
 const fakeUseSession = () => currentSession;
 
-// Installed at module scope, not in a hook: `atoms/session.ts` seeds
-// `sessionAtom` from `sessionStore.get()` at ITS import time, which happens
-// while the test file's static imports are still being collected — before any
-// beforeEach could run. Importing this harness before the component under test
-// is therefore what puts the fake store in place ahead of that capture.
-{
+/**
+ * Installs the fake auth client. Called once from `src/test/setup.ts` during
+ * the Vitest setup phase, before any test module is evaluated — so
+ * `atoms/session.ts`'s import-time `sessionStore.get()` always reads the fake
+ * store, regardless of what a test file imports first. It is idempotent by
+ * design: the fake is a module-level singleton, and re-installing it just
+ * re-points the same live bindings at the same fakes.
+ */
+export function installTestAuthFixture(): void {
   // SAFETY: the fake covers the client surface the app reaches for; vi.fn
   // members resolve the same { data, error } shapes better-auth reports.
   installTestAuthClient({

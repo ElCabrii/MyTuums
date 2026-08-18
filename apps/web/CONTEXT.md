@@ -132,10 +132,18 @@ in `src/test/`:
 - `render.tsx` — `renderWithProviders` and the re-exports component tests use.
 - `auth-fixture.ts` — the BetterAuth fake and the session-driving calls
   (`setTestSession`, `setTestSignedOut`, `patchTestSessionUser`,
-  `setTestSocialProviders`). Importing it _is_ the install, so a test that
-  needs a session imports it and one that doesn't, doesn't.
+  `setTestSocialProviders`). The fake is installed by `installTestAuthFixture()`,
+  which `src/test/setup.ts` calls during the Vitest setup phase — before any
+  test module is evaluated. That is what removes the import-order convention:
+  `src/atoms/session.ts` seeds `sessionAtom` from `sessionStore.get()` at its own
+  import time, and the setup phase runs first, so a test can import a component
+  that reaches `src/atoms/session.ts` before `@/test/render` without binding to
+  the real BetterAuth session store.
 - `route-tree.tsx` — the stub route tree, asserted against `src/routes/*.tsx`
-  so a new page that forgets its stub fails with the missing route named.
+  in both directions: a new page that forgets its stub fails with the missing
+  route named, and a page deleted or renamed while its stub lingered fails with
+  the stale stub named. The comparison lives in the pure `diffRouteTree`
+  helper, which `route-tree.test.ts` exercises directly.
 - `factories.ts` — the `make*` domain builders and `createTestQueryClient`,
   with no side effects, importable from pure tests.
 

@@ -1,6 +1,18 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
+import { installTestAuthFixture } from "@/test/auth-fixture";
+
+/**
+ * Install the BetterAuth fake before any test module is evaluated. Vitest runs
+ * `setupFiles` in a separate module graph from the test files, and it does so
+ * before collecting a test file's static imports — so `atoms/session.ts`'s
+ * import-time `sessionStore.get()` always reads the fake store, no matter what
+ * a test imports first. This is what removes the import-order convention that
+ * used to require importing `@/test/render` (or `auth-fixture.ts`) before the
+ * component under test.
+ */
+installTestAuthFixture();
 
 /**
  * Node >= 22 ships its own `localStorage` global, which is `undefined` unless

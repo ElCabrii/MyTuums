@@ -20,8 +20,9 @@ import {
  * memory router standing in for `src/routeTree.gen.ts` (generated, git-ignored,
  * so tests can't depend on it).
  *
- * The auth fake and session fixtures live in `./auth-fixture.ts` (importing it
- * is the install); the domain factories and QueryClient tuning live in
+ * The auth fake and session fixtures live in `./auth-fixture.ts` (installed by
+ * `src/test/setup.ts` during the Vitest setup phase, before any test module
+ * evaluates); the domain factories and QueryClient tuning live in
  * `./factories.ts`; the router stand-in lives in `./route-tree.ts`. This module
  * re-exports what component tests need so their call sites stay stable.
  */

@@ -58,6 +58,35 @@ function collectFullPaths(route: AnyRoute, into: Set<string>): void {
   }
 }
 
+/**
+ * The two-way drift between the real route files and the test stub tree.
+ * `missing` are real routes with no stub (a new page that forgot its stub);
+ * `stale` are stub routes with no real file (a page deleted or renamed while
+ * its stub lingered). Both are sorted so the error message is deterministic.
+ */
+export interface RouteTreeDrift {
+  missing: string[];
+  stale: string[];
+}
+
+/**
+ * Pure comparison of the real route paths against the stub tree's full paths.
+ * Extracted from `buildTestRouter` so the consistency rule is testable without
+ * constructing a router, and so the two directions of drift are reported
+ * together rather than only the "missing stub" half.
+ */
+export function diffRouteTree(
+  realPaths: Iterable<string>,
+  stubPaths: Iterable<string>,
+): RouteTreeDrift {
+  const real = new Set(realPaths);
+  const stub = new Set(stubPaths);
+  return {
+    missing: [...real].filter((path) => !stub.has(path)).sort(),
+    stale: [...stub].filter((path) => !real.has(path)).sort(),
+  };
+}
+
 function createTestRouteTree(ui: ReactNode) {
   const rootRoute = createRootRoute({
     component: () => (
@@ -143,20 +172,32 @@ export function buildTestRouter(ui: ReactNode, initialPath: string) {
     history: createMemoryHistory({ initialEntries: [initialPath] }),
   });
 
-  // Assert the stub tree covers every real route. A new page that forgets to
-  // add its path here fails with the missing route named, rather than inside
-  // an unrelated `<Link>` in some other test. `fullPath` is only populated
-  // once the router has initialised its route tree, so this runs after
-  // `createRouter` rather than inside `createTestRouteTree`.
+  // Assert the stub tree and the real route files agree in both directions. A
+  // new page that forgets to add its path here fails with the missing route
+  // named; a page deleted or renamed while its stub lingered fails with the
+  // stale stub named. `fullPath` is only populated once the router has
+  // initialised its route tree, so this runs after `createRouter` rather than
+  // inside `createTestRouteTree`.
   const stubPaths = new Set<string>();
   collectFullPaths(router.routeTree, stubPaths);
-  const missing = [...REAL_FULL_PATHS].filter((path) => !stubPaths.has(path));
-  if (missing.length > 0) {
-    throw new Error(
-      `The test route tree in src/test/route-tree.tsx is missing routes that exist in src/routes/. ` +
-        `Add a stub for each so a component under test can <Link> or navigate() to it:\n` +
-        missing.map((path) => `  - ${path}`).join("\n"),
-    );
+  const { missing, stale } = diffRouteTree(REAL_FULL_PATHS, stubPaths);
+  if (missing.length > 0 || stale.length > 0) {
+    const problems: string[] = [];
+    if (missing.length > 0) {
+      problems.push(
+        `The test route tree in src/test/route-tree.tsx is missing routes that exist in src/routes/. ` +
+          `Add a stub for each so a component under test can <Link> or navigate() to it:\n` +
+          missing.map((path) => `  - ${path}`).join("\n"),
+      );
+    }
+    if (stale.length > 0) {
+      problems.push(
+        `The test route tree in src/test/route-tree.tsx has stubs for routes that no longer exist in src/routes/. ` +
+          `Remove each stale stub (or, if it is intentional, model it as an explicit exception):\n` +
+          stale.map((path) => `  - ${path}`).join("\n"),
+      );
+    }
+    throw new Error(problems.join("\n"));
   }
 
   return router;
