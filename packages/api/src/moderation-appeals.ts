@@ -13,6 +13,7 @@ import {
   sendModerationEmail,
   undoAction,
   type ActionRow,
+  type PendingEmail,
 } from "./moderation-actions.js";
 import { noteInput } from "./moderation-inputs.js";
 import { baseProcedure, moderatorProcedure, rateLimit } from "./procedures.js";
@@ -107,79 +108,77 @@ export const appealsRouter = {
       // otherwise leave the action reversed with the appeal still open, or
       // the appeal stamped with no audit trail. The reversal's emails go out
       // after THAT transaction commits, the same rule as every other
-      // moderation action: `applyModerationEffect` sends the notices its
-      // effect body returned only after the review's commit, so an inner
-      // savepoint rolled back can never email an action that never happened.
+      // moderation action: `applyModerationEffect` opens the transaction and
+      // sends the notices its effect body returned only after the commit, so
+      // an inner savepoint rolled back can never email an action that never
+      // happened.
       await applyModerationEffect(context, async (db) => {
-        let pending: Awaited<ReturnType<typeof undoAction>> = [];
-        await db.transaction(async (tx) => {
-          // Serialize on the appeal row: two reviewers who both passed the
-          // "still open" check above would otherwise stamp the same appeal
-          // twice — the second transaction must observe the first's commit and
-          // refuse instead of overwriting the review.
-          const [openAppeal] = await tx
-            .select({ id: appeal.id })
-            .from(appeal)
-            .where(and(eq(appeal.id, input.appealId), eq(appeal.status, "open")))
-            .for("update")
-            .limit(1);
-          if (!openAppeal) {
-            throw new ORPCError("BAD_REQUEST", { message: "This appeal has already been reviewed." });
+        let pending: PendingEmail[] = [];
+        // Serialize on the appeal row: two reviewers who both passed the
+        // "still open" check above would otherwise stamp the same appeal
+        // twice — the second transaction must observe the first's commit and
+        // refuse instead of overwriting the review.
+        const [openAppeal] = await db
+          .select({ id: appeal.id })
+          .from(appeal)
+          .where(and(eq(appeal.id, input.appealId), eq(appeal.status, "open")))
+          .for("update")
+          .limit(1);
+        if (!openAppeal) {
+          throw new ORPCError("BAD_REQUEST", { message: "This appeal has already been reviewed." });
+        }
+
+        if (input.outcome === "overturned") {
+          // The appeal contests a specific logged action. If a newer action of
+          // the same kind has since replaced it (remove → restore → remove,
+          // ban → unban → re-ban), overturning would reverse the NEWER state,
+          // not the contested one — the same hazard `isActionCurrent`'s
+          // live-state read cannot see.
+          if (!(await isActionLatest(db, action))) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: "A newer moderation action has superseded this one.",
+            });
           }
+          // `undoAction` runs on the runner's transaction, so its inverse
+          // effects open savepoints, not real transactions — the send follows
+          // the review's commit above, never an inner savepoint.
+          pending = await undoAction(
+            db,
+            action,
+            context.user.id,
+            context.user.role ?? "user",
+            input.note,
+          );
+        }
 
-          if (input.outcome === "overturned") {
-            // The appeal contests a specific logged action. If a newer action of
-            // the same kind has since replaced it (remove → restore → remove,
-            // ban → unban → re-ban), overturning would reverse the NEWER state,
-            // not the contested one — the same hazard `isActionCurrent`'s
-            // live-state read cannot see.
-            if (!(await isActionLatest(tx, action))) {
-              throw new ORPCError("BAD_REQUEST", {
-                message: "A newer moderation action has superseded this one.",
-              });
-            }
-            // `undoAction` runs on the review's `tx`, so its inverse effects
-            // open savepoints, not real transactions — the send follows the
-            // review's commit above, never an inner savepoint.
-            pending = await undoAction(
-              tx,
-              action,
-              context.user.id,
-              context.user.role ?? "user",
-              input.note,
-            );
-          }
+        await db
+          .update(appeal)
+          .set({
+            status: input.outcome,
+            reviewedBy: context.user.id,
+            reviewNote: input.note,
+            reviewedAt: new Date(),
+          })
+          .where(eq(appeal.id, input.appealId));
 
-          await tx
-            .update(appeal)
-            .set({
-              status: input.outcome,
-              reviewedBy: context.user.id,
-              reviewNote: input.note,
-              reviewedAt: new Date(),
-            })
-            .where(eq(appeal.id, input.appealId));
-
-          await logAction(tx, {
-            action: "appeal_resolved",
-            actorId: context.user.id,
-            targetType: action.targetType,
-            targetPostId: action.targetPostId ?? undefined,
-            targetUserId: action.targetUserId ?? undefined,
-            note: input.note,
-            details: { outcome: input.outcome },
-          });
+        await logAction(db, {
+          action: "appeal_resolved",
+          actorId: context.user.id,
+          targetType: action.targetType,
+          targetPostId: action.targetPostId ?? undefined,
+          targetUserId: action.targetUserId ?? undefined,
+          note: input.note,
+          details: { outcome: input.outcome },
         });
+
         return { result: undefined, pending };
       });
 
       // The review's resolution notice to the appellant is NOT an effect's
       // owed notice — it goes out here, after the review commit, whatever the
       // outcome.
-      await sendModerationEmail(
-        context,
-        row.appellantId,
-        (locale) => moderationResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
+      await sendModerationEmail(context, row.appellantId, (locale) =>
+        moderationResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
       );
       return { appealId: input.appealId, status: input.outcome };
     }),

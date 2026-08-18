@@ -260,12 +260,13 @@ sides by CI. See [operations.md](operations.md).
    changes, the team view and the audit log are `staffProcedure`. Every action
    is one effect in `packages/api/src/moderation-actions.ts`
    (`removePostEffect`, `suspendUserEffect`, `banUserEffect`, `setRoleEffect`):
-   the effect owns its transaction, its `FOR UPDATE` guard read, the report
-   stamps, the audit row, and the notice it owes. The module's single entry
-   point — `applyModerationEffect`, wrapped per-action as `removePost`,
-   `restorePost`, `suspendUser`, `banUser`, `unbanUser`, `setRole` — owns the
-   "commit, then send" ordering, so the procedures pass `Context` once and
-   never touch the notices themselves.
+   the effect owns its `FOR UPDATE` guard read, the report stamps, the audit
+   row, and the notice it owes. The module's single entry point —
+   `applyModerationEffect`, wrapped per-action as `removePost`, `restorePost`,
+   `suspendUser`, `banUser`, `unbanUser`, `setRole` — opens the transaction,
+   runs the effect inside it, and sends the owed notices only after it
+   commits, so the procedures pass `Context` once and never touch the notices
+   themselves.
 4. **Audit.** `moderation_action` is append-only. Every effect — forward and
    inverse (`restorePostEffect`, `unbanEffect`, `restoreRoleEffect`) — reads
    its guard `FOR UPDATE` inside its own transaction: an unlocked pre-read is

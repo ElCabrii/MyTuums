@@ -1,10 +1,10 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { moderationCaseResolutionEmail } from "@my-tuums/auth";
+import { moderationCaseResolutionEmail, type EmailLocale } from "@my-tuums/auth";
 import { appeal, moderationAction, post, report, user } from "@my-tuums/db/schema";
 import { createCursorCodec } from "./cursor.js";
-import { logAction, sendModerationEmail, stampReports } from "./moderation-actions.js";
+import { applyModerationEffect, logAction, stampReports } from "./moderation-actions.js";
 import { noteInput, queueInput } from "./moderation-inputs.js";
 import { moderatorProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
@@ -323,16 +323,17 @@ export const queueRouter = {
       // The report stamps and the `case_resolved` audit row commit together:
       // if the log insert failed after the stamps, the case would read as
       // resolved with no trail of who resolved it — and the reporters were
-      // already stamped, so a retry would email nobody. Emails stay after
-      // the commit (the same "mail after the transaction" rule every other
-      // moderation action follows).
+      // already stamped, so a retry would email nobody. The reporters' emails
+      // go out after the commit through `applyModerationEffect`, the same
+      // "mail after the transaction" rule every other moderation action
+      // follows.
       //
       // Zero stamped reports makes the whole thing a no-op that would only
       // write a misleading `case_resolved` row (`reporterCount: 0`) — the
       // queue's appeal-only cases reach this otherwise (issue #59) — so it
       // is refused inside the transaction, audit row and all.
-      const { reporterIds } = await context.db.transaction(async (tx) => {
-        const stamped = await stampReports(tx, {
+      const resolved = await applyModerationEffect(context, async (db) => {
+        const stamped = await stampReports(db, {
           targetType: input.targetType,
           targetId: input.targetId,
           outcome: input.outcome,
@@ -344,7 +345,7 @@ export const queueRouter = {
             message: "This case has no open reports to resolve.",
           });
         }
-        await logAction(tx, {
+        await logAction(db, {
           action: "case_resolved",
           actorId: context.user.id,
           targetType: input.targetType,
@@ -353,20 +354,19 @@ export const queueRouter = {
           note: input.note,
           details: { outcome: input.outcome, reporterCount: stamped.reporterIds.length },
         });
-        return stamped;
+        return {
+          result: stamped.reporterIds.length,
+          pending: stamped.reporterIds.map((reporterId) => ({
+            userId: reporterId,
+            build: (locale: EmailLocale) =>
+              moderationCaseResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
+          })),
+        };
       });
-      for (const reporterId of reporterIds) {
-        await sendModerationEmail(
-          context,
-          reporterId,
-          (locale) =>
-            moderationCaseResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
-        );
-      }
       return {
         targetType: input.targetType,
         targetId: input.targetId,
-        resolved: reporterIds.length,
+        resolved,
       };
     }),
 };

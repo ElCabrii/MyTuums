@@ -216,7 +216,7 @@ describe("forward moderation effects", () => {
       oldRole: "user",
     });
 
-    expect(pending).toEqual([]);
+    expect(pending.pending).toEqual([]);
 
     const [row] = await anonContext.db
       .select({ role: user.role })
@@ -247,9 +247,9 @@ describe("forward moderation effects", () => {
       oldRole: "user",
     });
 
-    expect(pending).toHaveLength(1);
-    expect(pending[0].userId).toBe(bob.id);
-    expect(pending[0].build("en").subject).toBe("Your MyTuums role changed");
+    expect(pending.pending).toHaveLength(1);
+    expect(pending.pending[0].userId).toBe(bob.id);
+    expect(pending.pending[0].build("en").subject).toBe("Your MyTuums role changed");
 
     const [row] = await anonContext.db
       .select({ role: user.role })
@@ -411,14 +411,19 @@ describe("applyModerationEffect", () => {
     await setUserRole(mod.id, "moderator");
     const postId = await seedPost(author.id, "roll me back");
 
+    // The runner opens the transaction and hands the effect the transaction
+    // handle; the effect runs inside it and then throws, so the runner's
+    // transaction rolls back — the removal, the audit row and the send all
+    // vanish together.
     await expect(
-      applyModerationEffect(anonContext, async () => {
-        const { pending } = await removePostEffect(dbThatRollsBack(), {
+      applyModerationEffect(anonContext, async (db) => {
+        const { pending } = await removePostEffect(db, {
           postId,
           actorId: mod.id,
           reason: "spam content",
         });
-        return { result: undefined, pending };
+        expect(pending).toHaveLength(1);
+        throw new Error("simulated failure after writes, before commit");
       }),
     ).rejects.toThrow("simulated failure after writes, before commit");
 
@@ -460,7 +465,6 @@ describe("the moderation entry points deliver their notices", () => {
     const postId = await seedPost(author.id, "restore me");
     await removePost(anonContext, { postId, actorId: mod.id, reason: "spam" });
 
-    vi.mocked(testEmailSender.send).mockReset().mockResolvedValue();
     await restorePost(anonContext, { postId, actorId: mod.id });
 
     const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
@@ -531,5 +535,18 @@ describe("the moderation entry points deliver their notices", () => {
 
     const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
     expect(emails).toContain("Your account is no longer banned");
+
+    // The no-op half: restoring a post that was never removed owes no email —
+    // the inverse effect returns an empty pending list and the runner sends
+    // nothing.
+    const author = await createTestUser();
+    const mod = await createTestUser();
+    await setUserRole(mod.id, "moderator");
+    const postId = await seedPost(author.id, "never removed");
+
+    await restorePost(anonContext, { postId, actorId: mod.id });
+
+    const afterNoOp = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
+    expect(afterNoOp).not.toContain("Your post was restored");
   });
 });
