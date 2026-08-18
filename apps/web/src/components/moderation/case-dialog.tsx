@@ -180,6 +180,10 @@ function CaseSkeleton() {
 function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
   const targetPost = detail.target.kind === "post" ? detail.target : null;
   const targetUser = detail.target.kind === "user" ? detail.target : null;
+  // Every action in the Actions card — the post/user sentence and the dismiss —
+  // stamps or reopens reports. With nothing open there is nothing to resolve,
+  // so the card is withheld rather than shown empty (issue #59's no-op resolve).
+  const hasOpenReports = detail.reports.some((report) => report.resolvedAt === null);
 
   return (
     <div className="space-y-4">
@@ -191,7 +195,7 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
 
       {detail.appeal && <AppealSection appeal={detail.appeal} />}
 
-      <ActionsSection detail={detail} />
+      {hasOpenReports && <ActionsSection detail={detail} />}
     </div>
   );
 }
