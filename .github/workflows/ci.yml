@@ -22,8 +22,12 @@ env:
   # Kept in one place so the three jobs cannot drift apart. The password is a
   # throwaway for the ephemeral service container.
   POSTGRES_PASSWORD: ci-postgres-password
-  DATABASE_URL: postgresql://postgres:ci-postgres-password@localhost:5432/mytuums
-  DATABASE_URL_TEST: postgresql://postgres:ci-postgres-password@localhost:5432/mytuums_test
+  # Port 5433, not 5432: the self-hosted runner also runs the dev stack
+  # (`pnpm docker:up` binds 5432), so the CI service container would collide
+  # with it. The `docker` job's `--network host` boot step reaches this port
+  # through the runner's loopback, same as 5432.
+  DATABASE_URL: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums
+  DATABASE_URL_TEST: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums_test
   BETTER_AUTH_SECRET: ci-better-auth-secret-at-least-32-characters
   BETTER_AUTH_URL: http://localhost:3001
   WEB_ORIGIN: http://localhost:5173
@@ -42,7 +46,7 @@ jobs:
   # a build has run once.
   check:
     name: Lint & typecheck
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -85,7 +89,7 @@ jobs:
 
   unit:
     name: Unit tests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -105,7 +109,7 @@ jobs:
 
   integration:
     name: Integration tests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     services:
       # Ephemeral Postgres — same image (postgres:16-alpine) as
@@ -117,7 +121,7 @@ jobs:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_DB: mytuums
         ports:
-          - 5432:5432
+          - 5433:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d mytuums"
           --health-interval 5s
@@ -162,7 +166,7 @@ jobs:
 
   e2e:
     name: E2E tests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     # The default job timeout is 6 hours — far past what this suite can take.
     # A hung spec would otherwise burn runner time before failing on its own.
     timeout-minutes: 60
@@ -176,7 +180,7 @@ jobs:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_DB: mytuums
         ports:
-          - 5432:5432
+          - 5433:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d mytuums"
           --health-interval 5s
@@ -242,8 +246,12 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
 
+      # No `--with-deps`: that flag runs `sudo` to install system libraries,
+      # which the self-hosted runner's user cannot do non-interactively. The
+      # deps are already installed on the machine (the browser runs), and they
+      # persist across runs — unlike an ephemeral GitHub-hosted runner.
       - name: Install Chromium
-        run: pnpm --filter @my-tuums/e2e exec playwright install --with-deps chromium
+        run: pnpm --filter @my-tuums/e2e exec playwright install chromium
 
       - run: pnpm test:e2e
 
@@ -274,7 +282,7 @@ jobs:
   # fail the commit, not to produce an artifact.
   docker:
     name: Docker image builds
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     services:
       # Same ephemeral Postgres as the integration and e2e jobs. The image's
@@ -288,7 +296,7 @@ jobs:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_DB: mytuums
         ports:
-          - 5432:5432
+          - 5433:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d mytuums"
           --health-interval 5s
@@ -412,11 +420,21 @@ jobs:
       # until the job's default 6-hour timeout.
       - name: Boot the image and probe it over HTTP
         run: |
+          # The smoke server binds port 3002, not 3001: the self-hosted runner
+          # also runs the dev stack (`pnpm dev` holds 3001), so the container
+          # would fail to bind and the probes would silently hit the dev server
+          # instead. BETTER_AUTH_URL is overridden to match.
+          #
           # One IP drives all four social probes, and better-auth's default
           # budget for /sign-in* is 3 per 10 seconds — the same reason the E2E
           # stack sets this. It disables better-auth's own limiter only; the
           # oRPC rate limits (packages/api) are a separate mechanism and stay
           # on.
+          # A previous failed run can leave the container behind (the cleanup
+          # at the end of this step never ran), and `docker run --name` then
+          # fails on the name conflict. Remove any stale one first.
+          docker rm -f ci-smoke-server >/dev/null 2>&1 || true
+
           docker run -d --name ci-smoke-server --network host \
             -e "DATABASE_URL=${DATABASE_URL}" \
             -e "BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}" \
@@ -429,17 +447,18 @@ jobs:
             -e "TWITCH_CLIENT_ID=ci-placeholder-twitch-client-id" \
             -e "TWITCH_CLIENT_SECRET=ci-placeholder-twitch-client-secret" \
             -e "AUTH_RATE_LIMIT=false" \
-            -e PORT=3001 -e HOST=0.0.0.0 -e NODE_ENV=production \
+            -e "BETTER_AUTH_URL=http://localhost:3002" \
+            -e PORT=3002 -e HOST=0.0.0.0 -e NODE_ENV=production \
             mytuums-server:ci || {
             echo "::error::docker run failed - the image could not be started";
             exit 1; }
 
           for _ in $(seq 1 30); do
-            curl -f --max-time 10 http://localhost:3001/health > /tmp/health.json 2>/dev/null && break
+            curl -f --max-time 10 http://localhost:3002/health > /tmp/health.json 2>/dev/null && break
             sleep 2
           done
 
-          curl -fsS --max-time 10 http://localhost:3001/health > /tmp/health.json || {
+          curl -fsS --max-time 10 http://localhost:3002/health > /tmp/health.json || {
             echo "::error::the image's CMD did not become healthy after 30 attempts - the production process does not boot";
             docker logs ci-smoke-server;
             exit 1; }
@@ -448,23 +467,23 @@ jobs:
             docker logs ci-smoke-server;
             exit 1; }
 
-          login_code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://localhost:3001/login)
+          login_code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://localhost:3002/login)
           [ "$login_code" = "200" ] || {
             echo "::error::/login returned $login_code instead of 200 - the static SPA is not being served";
             docker logs ci-smoke-server;
             exit 1; }
-          login_type=$(curl -s --max-time 10 -o /dev/null -w '%{content_type}' http://localhost:3001/login)
+          login_type=$(curl -s --max-time 10 -o /dev/null -w '%{content_type}' http://localhost:3002/login)
           echo "$login_type" | grep -q 'text/html' || {
             echo "::error::/login served content-type $login_type instead of text/html";
             docker logs ci-smoke-server;
             exit 1; }
 
-          root_code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://localhost:3001/)
+          root_code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://localhost:3002/)
           [ "$root_code" = "302" ] || {
             echo "::error::/ returned $root_code instead of 302 - the page gate is not live";
             docker logs ci-smoke-server;
             exit 1; }
-          root_target=$(curl -s --max-time 10 -o /dev/null -w '%{redirect_url}' http://localhost:3001/)
+          root_target=$(curl -s --max-time 10 -o /dev/null -w '%{redirect_url}' http://localhost:3002/)
           echo "$root_target" | grep -q '/login?redirect=' || {
             echo "::error::/ redirected to $root_target instead of /login?redirect=...";
             docker logs ci-smoke-server;
@@ -490,7 +509,7 @@ jobs:
             code=$(curl -s --max-time 10 -o "/tmp/social-$provider.json" -w '%{http_code}' \
               -X POST -H 'Content-Type: application/json' \
               -d "{\"provider\":\"$provider\"}" \
-              http://localhost:3001/api/auth/sign-in/social)
+              http://localhost:3002/api/auth/sign-in/social)
             [ "$code" = "200" ] || social_probe_failed "social sign-in for $provider returned $code - the server does not hold that provider's credentials"
             grep -q '"redirect":true' "/tmp/social-$provider.json" || social_probe_failed "social sign-in for $provider did not offer a redirect"
             grep -q "$host" "/tmp/social-$provider.json" || social_probe_failed "social sign-in for $provider did not target $host (authorize URL mismatch)"
@@ -499,7 +518,7 @@ jobs:
           github_code=$(curl -s --max-time 10 -o /tmp/social-github.json -w '%{http_code}' \
             -X POST -H 'Content-Type: application/json' \
             -d '{"provider":"github"}' \
-            http://localhost:3001/api/auth/sign-in/social)
+            http://localhost:3002/api/auth/sign-in/social)
           [ "$github_code" = "404" ] || social_probe_failed "unregistered provider github returned $github_code instead of 404 - the registration check is vacuous"
           grep -q 'PROVIDER_NOT_FOUND' /tmp/social-github.json || social_probe_failed "unregistered provider github did not report PROVIDER_NOT_FOUND"
           echo "Social providers agree: server registers google, discord, twitch; unregistered providers are refused."
