@@ -18,7 +18,7 @@
  * actual work. This script only parses argv and maps the library's errors to
  * exit codes, so the local `pnpm db:promote` flow and the production
  * `node apps/server/dist/promote.js` entry point (see apps/server/src/promote.ts)
- * cannot drift apart.
+ * cannot drift apart. It is bootstrap-only: it refuses once an admin exists.
  */
 import { promoteUser } from "../src/promote.ts";
 
@@ -26,14 +26,13 @@ const [username, role] = process.argv.slice(2);
 
 if (!username || !role) {
   console.error("Usage: pnpm db:promote <username> <role>");
-  process.exit(1);
-}
-
-promoteUser(username, role)
-  .then((message) => {
+  process.exitCode = 1;
+} else {
+  try {
+    const message = await promoteUser(username, role);
     console.log(`✓ ${message}`);
-  })
-  .catch((error) => {
+  } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
-  });
+    process.exitCode = 1;
+  }
+}

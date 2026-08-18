@@ -46,17 +46,17 @@ unset; the traps worth knowing are collected in
 
 ## Common commands
 
-| Command                                                         | What it does                                        |
-| --------------------------------------------------------------- | --------------------------------------------------- |
-| `pnpm build`                                                    | production builds across the workspace              |
-| `pnpm lint` · `pnpm typecheck`                                  | Oxlint, ESLint, and TypeScript across the workspace |
-| `pnpm test:unit`                                                | vitest unit suites — pure logic, no database needed |
-| `pnpm db:test:setup` then `pnpm test:integration`               | API integration suites against real Postgres        |
-| `pnpm test:e2e`                                                 | Playwright; slow, own ports (`:3101` / `:5273`)     |
-| `pnpm db:generate` · `pnpm db:push` · `pnpm db:promote`         | new migration · apply it · grant a moderation role  |
-| `pnpm docs:check`                                               | validate the docs against the code                  |
-| `pnpm docker:up` · `pnpm docker:down`                           | the full local stack                                |
-| `pnpm --filter @my-tuums/api exec vitest run src/image.test.ts` | one test file (same shape for web)                  |
+| Command                                                         | What it does                                                   |
+| --------------------------------------------------------------- | -------------------------------------------------------------- |
+| `pnpm build`                                                    | production builds across the workspace                         |
+| `pnpm lint` · `pnpm typecheck`                                  | Oxlint, ESLint, and TypeScript across the workspace            |
+| `pnpm test:unit`                                                | vitest unit suites — pure logic, no database needed            |
+| `pnpm db:test:setup` then `pnpm test:integration`               | API integration suites against real Postgres                   |
+| `pnpm test:e2e`                                                 | Playwright; slow, own ports (`:3101` / `:5273`)                |
+| `pnpm db:generate` · `pnpm db:push` · `pnpm db:promote`         | new migration · apply it · appoint the first admin (bootstrap) |
+| `pnpm docs:check`                                               | validate the docs against the code                             |
+| `pnpm docker:up` · `pnpm docker:down`                           | the full local stack                                           |
+| `pnpm --filter @my-tuums/api exec vitest run src/image.test.ts` | one test file (same shape for web)                             |
 
 The rest of the Drizzle toolbox is package-level:
 `pnpm --filter @my-tuums/db db:migrate` · `db:check` · `db:studio` ·

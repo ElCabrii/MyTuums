@@ -147,13 +147,17 @@ pnpm db:promote                        # grant a moderator/staff/admin role (loc
 
 `pnpm db:promote` runs through `tsx` and `dotenv-cli`, which are dev
 dependencies and therefore absent from the production image. To appoint the
-first moderators in production, run the bundled entry point from the Railway
+first admin in production, run the bundled entry point from the Railway
 console instead — it needs only `node` and `DATABASE_URL` (already in the
 process environment there):
 
 ```bash
 node apps/server/dist/promote.js <username> <role>
 ```
+
+This is a **bootstrap-only** operation: it refuses to run once an admin
+already exists, so every later role change goes through the moderation desk
+(`moderation.setRole`), which enforces the hierarchy and writes the audit log.
 
 `packages/db/drizzle` is committed and ships inside the image. In production
 migrations run as a **pre-deploy step** (`apps/server/dist/migrate.js`), which

@@ -15,7 +15,7 @@
  *
  * The actual work is `promoteUser` in `@my-tuums/db/promote` — the same
  * function the local `pnpm db:promote` script calls, so the two paths cannot
- * drift apart.
+ * drift apart. It is bootstrap-only: it refuses once an admin already exists.
  */
 import { promoteUser } from "@my-tuums/db/promote";
 
@@ -23,15 +23,13 @@ const [username, role] = process.argv.slice(2);
 
 if (!username || !role) {
   console.error("Usage: node apps/server/dist/promote.js <username> <role>");
-  process.exit(1);
-}
-
-promoteUser(username, role)
-  .then((message) => {
+  process.exitCode = 1;
+} else {
+  try {
+    const message = await promoteUser(username, role);
     console.log(`✓ ${message}`);
-    process.exit(0);
-  })
-  .catch((error) => {
+  } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
-  });
+    process.exitCode = 1;
+  }
+}
