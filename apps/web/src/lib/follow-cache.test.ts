@@ -15,38 +15,16 @@ import {
   restoreFollowCaches,
   snapshotFollowCaches,
 } from "@/lib/follow-cache";
-
-function makeProfile(overrides: Partial<Profile> & { id: string; username: string }): Profile {
-  return {
-    name: overrides.username,
-    displayUsername: overrides.username,
-    image: null,
-    bio: null,
-    bannerImage: null,
-    createdAt: new Date("2026-01-01T00:00:00.000Z"),
-    followerCount: 0,
-    followingCount: 0,
-    viewerIsFollowing: false,
-    // The suspension flag (issue #38): never suspended by default.
-    suspended: false,
-    ...overrides,
-  };
-}
+import { makeProfile, makeUserSummary } from "@/test/factories";
 
 function makeSummary(
   overrides: Partial<UserSummary> & { id: string; username: string },
 ): UserSummary {
-  return {
+  return makeUserSummary({
     name: overrides.username,
     displayUsername: overrides.username,
-    image: null,
-    bio: null,
-    bannerImage: null,
-    createdAt: new Date("2026-01-01T00:00:00.000Z"),
-    followedAt: new Date("2026-01-02T00:00:00.000Z"),
-    viewerIsFollowing: false,
     ...overrides,
-  };
+  });
 }
 
 function listPage(items: UserSummary[]): InfiniteData<UserListPage> {

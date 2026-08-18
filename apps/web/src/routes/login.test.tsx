@@ -1,6 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-// Imported before anything that transitively loads `@/lib/auth-client` — see
-// header.test.tsx's comment on why the harness goes first.
 import { renderWithProviders } from "@/test/render";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
