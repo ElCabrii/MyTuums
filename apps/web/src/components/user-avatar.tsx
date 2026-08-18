@@ -46,7 +46,12 @@ export function UserAvatar({ user, className, fallbackClassName, alt }: UserAvat
   return (
     <Avatar className={className}>
       <AvatarImage src={user?.image || undefined} alt={alt ?? displayName ?? ""} />
-      <AvatarFallback className={cn("font-semibold", fallbackClassName)}>
+      {/* `text-foreground`, not the primitive's `text-muted-foreground`: that
+          default measures 4.39:1 on its own `bg-muted` disc, which fails WCAG
+          AA for the initials at every size this app draws an avatar. Sites
+          with their own pair (the header's primary-filled disc) still win —
+          `fallbackClassName` is merged last. */}
+      <AvatarFallback className={cn("text-foreground font-semibold", fallbackClassName)}>
         {initialsOf(displayName)}
       </AvatarFallback>
     </Avatar>

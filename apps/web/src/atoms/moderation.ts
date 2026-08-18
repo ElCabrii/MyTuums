@@ -51,6 +51,36 @@ const queueFamily = atomFamily(() => atomWithInfiniteQuery(() => moderationQueue
 export const moderationQueueAtom = queueFamily("");
 
 /**
+ * What the queue's header reads: how many cases are loaded, how many of them
+ * carry an open appeal, and whether the server has more behind the cursor.
+ *
+ * Derived rather than computed in the view because the page header and the
+ * queue list both want it, and a derived atom keeps the two off a second
+ * `.pages.flatMap` that could drift. `loaded`/`hasMore` are deliberately
+ * named for what they are — the queue is keyset-paginated, so this counts the
+ * pages fetched so far, never a server-side total.
+ */
+export interface QueueSummary {
+  /** Cases in the pages fetched so far. */
+  loaded: number;
+  /** How many of those carry an open appeal. */
+  appeals: number;
+  /** Whether the server has at least one more page. */
+  hasMore: boolean;
+}
+
+/** The queue's headline numbers — see {@link QueueSummary}. */
+export const moderationQueueSummaryAtom = atom<QueueSummary>((get) => {
+  const queue = get(moderationQueueAtom);
+  const cases = queue.data?.pages.flatMap((page) => page.items) ?? [];
+  return {
+    loaded: cases.length,
+    appeals: cases.filter((item) => item.appeal !== null).length,
+    hasMore: queue.hasNextPage,
+  };
+});
+
+/**
  * One infinite-query atom per audit-log scope — same reasoning as
  * `queueFamily`; the key is always `""` today.
  */

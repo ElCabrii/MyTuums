@@ -37,6 +37,7 @@ export function PaginatedState({
   isEmpty,
   emptyAction,
   listClassName,
+  loadingFallback,
   children,
 }: {
   query: PaginatedStateQuery;
@@ -51,14 +52,23 @@ export function PaginatedState({
   emptyAction?: ReactNode;
   /** The class for the loaded-content wrapper (`space-y-*`). */
   listClassName?: string;
+  /**
+   * Replaces the centred spinner while the first page loads. Sites whose rows
+   * have a fixed shape (the moderation desk) pass a skeleton of that shape so
+   * the list does not jump when the data lands; everywhere else the spinner
+   * stays, because a skeleton of a variable-height post would be a lie.
+   */
+  loadingFallback?: ReactNode;
   /** The loaded rows, rendered between the wrapper and the "Load more" button. */
   children: ReactNode;
 }) {
   if (query.isPending) {
     return (
-      <div className="flex justify-center py-12">
-        <Loader2 className="text-primary h-6 w-6 animate-spin motion-reduce:animate-none" />
-      </div>
+      loadingFallback ?? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="text-primary h-6 w-6 animate-spin motion-reduce:animate-none" />
+        </div>
+      )
     );
   }
 
