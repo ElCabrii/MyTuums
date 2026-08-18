@@ -755,6 +755,26 @@ export function makeUserModerationCaseDetail(
   };
 }
 
+/**
+ * A minimal moderation report row — `moderation.case`'s `reports` shape.
+ * Unresolved (`resolvedAt: null`) by default so the Actions card renders;
+ * a test pinning a resolved state overrides the resolution fields.
+ */
+export function makeModerationReport(
+  overrides: Partial<ModerationCaseDetail["reports"][number]> = {},
+): ModerationCaseDetail["reports"][number] {
+  return {
+    reporterId: crypto.randomUUID(),
+    reason: "spam",
+    createdAt: new Date(),
+    resolvedAt: null,
+    resolvedBy: null,
+    resolvedOutcome: null,
+    resolutionNote: null,
+    ...overrides,
+  };
+}
+
 /** A minimal audit-log entry — `moderation.auditLog`'s row shape, no actor/target by default. */
 export function makeAuditEntry(overrides: Partial<AuditEntry> = {}): AuditEntry {
   return {
