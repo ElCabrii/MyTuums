@@ -18,7 +18,7 @@ import { isLocalePreference } from "@my-tuums/auth/rules";
 import type { Database } from "@my-tuums/db";
 import { moderationAction, post, report, session, user } from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
-import type { EmailSender } from "./context.js";
+import type { Context } from "./context.js";
 import { canManageRole, type UserRole } from "./roles.js";
 
 /**
@@ -31,10 +31,12 @@ import { canManageRole, type UserRole } from "./roles.js";
  * its state change and its `moderation_action` row in ONE transaction (the
  * audit log is append-only by construction — the only writes to it are
  * `logAction` calls), reads its guard `FOR UPDATE` inside that transaction,
- * and returns the email it owes as a `PendingEmail` rather than sending it —
- * the caller sends after its own commit, so a rollback can never produce an
- * email describing an action that never happened. The appealable actions mint
- * the signed-out appeal link the email points at.
+ * and returns the email it owes as a `PendingEmail` rather than sending it.
+ * `applyModerationEffect` (and the per-action wrappers) opens that
+ * transaction, runs the effect inside it, and sends the owed notices only
+ * after it commits, so a rollback can never produce an email describing an
+ * action that never happened (issue #128). The appealable actions mint the
+ * signed-out appeal link the email points at.
  */
 
 /**
@@ -55,6 +57,13 @@ export type DbLike = Pick<
   Database,
   "select" | "insert" | "update" | "delete" | "execute" | "transaction"
 >;
+
+/**
+ * The slice of `Context` the moderation effects and their send path read —
+ * `db`, `headers` and `emailSender`. Stated as a `Pick` so the dependency is
+ * explicit: nothing here needs the session, the rate limiter or storage.
+ */
+type EffectContext = Pick<Context, "db" | "headers" | "emailSender">;
 
 /**
  * The nine stable action codes and the appealable/inverse lists — defined in
@@ -181,19 +190,30 @@ export type PendingEmail = {
 };
 
 /**
- * Sends the emails an effect returned, after the caller's transaction has
- * committed. A failed send is logged and swallowed — the action stands, and
- * the log is for operators (see `emailUser`).
+ * The one place "commit, then send" lives. Opens the transaction itself, runs
+ * the effect inside it, and sends the notices the effect owed only AFTER the
+ * transaction has committed — so a rollback can never produce an email
+ * describing an action that never happened (issue #128). The effect is handed
+ * the transaction handle, not the bare `db`, so it physically cannot commit
+ * outside this runner: the send always follows the commit.
+ *
+ * The inverse-effect appeal path works unchanged: the effect the caller passes
+ * runs inside this transaction, and its own `db.transaction` calls nest as
+ * savepoints — the send still follows the outer commit, never an inner
+ * savepoint.
  */
-export async function sendPendingEmails(
-  db: DbLike,
-  headers: Headers | undefined,
-  pending: PendingEmail[],
-  emailSender: EmailSender,
-): Promise<void> {
+export async function applyModerationEffect<T>(
+  context: EffectContext,
+  effect: (db: DbLike) => Promise<{ result: T; pending: PendingEmail[] }>,
+): Promise<T> {
+  const { result, pending } = await context.db.transaction(async (tx) => {
+    const { result, pending } = await effect(tx);
+    return { result, pending };
+  });
   for (const email of pending) {
-    await emailUser(db, headers, email.userId, email.build, emailSender);
+    await sendModerationEmail(context, email.userId, email.build);
   }
+  return result;
 }
 
 /**
@@ -241,15 +261,18 @@ export function roleNotice(args: { userId: string; role: string; reason?: string
  * done deal into a failed moderation call — the moderator retries, and gets
  * the "already removed" class of errors while the notice never goes out.
  * The action stands; the log is for operators.
+ *
+ * Takes the `EffectContext` slice rather than the four delivery fields by
+ * hand (issue #128). The non-effect notices — the queue's case-resolution and
+ * the appeal's resolution emails — call this directly; the effect notices go
+ * through `applyModerationEffect`.
  */
-export async function emailUser(
-  db: DbLike,
-  headers: Headers | undefined,
+export async function sendModerationEmail(
+  context: EffectContext,
   userId: string,
   build: (locale: EmailLocale) => Omit<OutgoingEmail, "to">,
-  emailSender: EmailSender,
 ): Promise<void> {
-  const [target] = await db
+  const [target] = await context.db
     .select({ email: user.email, localePreference: user.localePreference })
     .from(user)
     .where(eq(user.id, userId))
@@ -261,10 +284,10 @@ export async function emailUser(
 
   const locale: EmailLocale = isLocalePreference(target.localePreference)
     ? target.localePreference
-    : localeFromRequest(headers);
+    : localeFromRequest(context.headers);
 
   try {
-    await emailSender.send({ to: target.email, ...build(locale) });
+    await context.emailSender.send({ to: target.email, ...build(locale) });
   } catch (error) {
     console.error("Moderation email failed to send", { to: target.email, userId }, error);
   }
@@ -303,7 +326,7 @@ export function makeAppealUrl(actionId: string, userId: string): string {
 export async function removePostEffect(
   db: DbLike,
   args: { postId: string; actorId: string; reason: string },
-): Promise<{ pending: PendingEmail }> {
+): Promise<{ pending: PendingEmail[] }> {
   return db.transaction(async (tx) => {
     const [target] = await tx
       .select({
@@ -340,18 +363,20 @@ export async function removePostEffect(
       reason: args.reason,
     });
     return {
-      pending: {
-        userId: target.authorId,
-        build: (locale) =>
-          moderationRemovalEmail(
-            {
-              postText: target.content,
-              reason: args.reason,
-              appealUrl: makeAppealUrl(action.id, target.authorId),
-            },
-            locale,
-          ),
-      },
+      pending: [
+        {
+          userId: target.authorId,
+          build: (locale) =>
+            moderationRemovalEmail(
+              {
+                postText: target.content,
+                reason: args.reason,
+                appealUrl: makeAppealUrl(action.id, target.authorId),
+              },
+              locale,
+            ),
+        },
+      ],
     };
   });
 }
@@ -383,7 +408,7 @@ export async function suspendUserEffect(
     reason: string;
     durationSeconds: number;
   },
-): Promise<{ banExpires: Date; pending: PendingEmail }> {
+): Promise<{ banExpires: Date; pending: PendingEmail[] }> {
   return db.transaction(async (tx) => {
     const [target] = await tx
       .select({
@@ -450,18 +475,20 @@ export async function suspendUserEffect(
     });
     return {
       banExpires,
-      pending: {
-        userId: args.userId,
-        build: (locale) =>
-          moderationSuspensionEmail(
-            {
-              reason: args.reason,
-              expiresAt: banExpires,
-              appealUrl: makeAppealUrl(action.id, args.userId),
-            },
-            locale,
-          ),
-      },
+      pending: [
+        {
+          userId: args.userId,
+          build: (locale) =>
+            moderationSuspensionEmail(
+              {
+                reason: args.reason,
+                expiresAt: banExpires,
+                appealUrl: makeAppealUrl(action.id, args.userId),
+              },
+              locale,
+            ),
+        },
+      ],
     };
   });
 }
@@ -473,7 +500,7 @@ export async function suspendUserEffect(
 export async function banUserEffect(
   db: DbLike,
   args: { userId: string; actorId: string; actorRole: string; reason: string },
-): Promise<{ pending: PendingEmail }> {
+): Promise<{ pending: PendingEmail[] }> {
   return db.transaction(async (tx) => {
     const [target] = await tx
       .select({ id: user.id, role: user.role })
@@ -506,17 +533,19 @@ export async function banUserEffect(
       reason: args.reason,
     });
     return {
-      pending: {
-        userId: args.userId,
-        build: (locale) =>
-          moderationBanEmail(
-            {
-              reason: args.reason,
-              appealUrl: makeAppealUrl(action.id, args.userId),
-            },
-            locale,
-          ),
-      },
+      pending: [
+        {
+          userId: args.userId,
+          build: (locale) =>
+            moderationBanEmail(
+              {
+                reason: args.reason,
+                appealUrl: makeAppealUrl(action.id, args.userId),
+              },
+              locale,
+            ),
+        },
+      ],
     };
   });
 }
@@ -537,7 +566,7 @@ export async function banUserEffect(
 export async function setRoleEffect(
   db: DbLike,
   args: { userId: string; actorId: string; actorRole: string; role: UserRole },
-): Promise<{ pending: PendingEmail }> {
+): Promise<{ pending: PendingEmail[] }> {
   await db.transaction(async (tx) => {
     const [target] = await tx
       .select({ id: user.id, role: user.role })
@@ -562,7 +591,7 @@ export async function setRoleEffect(
       details: { oldRole: target.role ?? "user", newRole: args.role },
     });
   });
-  return { pending: roleNotice({ userId: args.userId, role: args.role }) };
+  return { pending: [roleNotice({ userId: args.userId, role: args.role })] };
 }
 
 /**
@@ -602,7 +631,7 @@ export async function restoreRoleEffect(
     /** The role being restored. */
     oldRole: string;
   },
-): Promise<PendingEmail[]> {
+): Promise<{ pending: PendingEmail[] }> {
   return db.transaction(async (tx) => {
     const [target] = await tx
       .select({ role: user.role })
@@ -616,7 +645,7 @@ export async function restoreRoleEffect(
     // The contested grant no longer holds — a newer role change (or an
     // earlier overturn) won the window. Nothing to restore, and a second
     // `role_changed` row would lie about what happened (issue #51).
-    if (target.role !== args.grantedRole) return [];
+    if (target.role !== args.grantedRole) return { pending: [] };
 
     // Both ends of the swing must be manageable: the role currently held
     // (what the reviewer would be acting on) and the role being restored.
@@ -636,7 +665,7 @@ export async function restoreRoleEffect(
       details: { oldRole: target.role ?? "user", newRole: args.oldRole },
     });
 
-    return [roleNotice({ userId: args.userId, role: args.oldRole })];
+    return { pending: [roleNotice({ userId: args.userId, role: args.oldRole })] };
   });
 }
 
@@ -770,7 +799,7 @@ export async function isActionLatest(
 export async function restorePostEffect(
   db: DbLike,
   args: { postId: string; actorId: string; note?: string },
-): Promise<PendingEmail[]> {
+): Promise<{ pending: PendingEmail[] }> {
   // The guard read lives INSIDE the transaction, under the same row lock the
   // forward paths take — a moderator's Restore racing the appeal overturn
   // must not both pass an unlocked "is it still removed?" check and each log
@@ -793,7 +822,7 @@ export async function restorePostEffect(
     // Already restored (a race with the appeal overturn or a manual restore):
     // nothing to log — the first restore's audit row exists, and a second one
     // would lie about what happened.
-    if (target.removedAt === null) return [];
+    if (target.removedAt === null) return { pending: [] };
 
     await tx
       .update(post)
@@ -808,7 +837,7 @@ export async function restorePostEffect(
       note: args.note,
     });
 
-    return [restoreNotice(target.authorId)];
+    return { pending: [restoreNotice(target.authorId)] };
   });
 }
 
@@ -850,7 +879,7 @@ export async function unbanEffect(
      */
     tolerateNotBanned?: boolean;
   },
-): Promise<PendingEmail[]> {
+): Promise<{ pending: PendingEmail[] }> {
   // Same shape as restorePostEffect (issue #51): the guard read happens
   // inside the transaction under a row lock, so two concurrent unbans cannot
   // both read "banned" and each write a `user_unbanned` row and email the
@@ -867,7 +896,7 @@ export async function unbanEffect(
 
     if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
     if (!target.banned) {
-      if (args.tolerateNotBanned) return [];
+      if (args.tolerateNotBanned) return { pending: [] };
       throw new ORPCError("BAD_REQUEST", { message: "This account isn't banned or suspended." });
     }
     if (!canManageRole(args.actorRole, target.role ?? "user")) {
@@ -892,7 +921,7 @@ export async function unbanEffect(
       note: args.note,
     });
 
-    return [unbanNotice(args.userId, code)];
+    return { pending: [unbanNotice(args.userId, code)] };
   });
 }
 
@@ -937,24 +966,28 @@ export async function undoAction(
   switch (action.action) {
     case "post_removed": {
       pending.push(
-        ...(await restorePostEffect(db, {
-          postId: action.targetPostId!,
-          actorId,
-          note,
-        })),
+        ...(
+          await restorePostEffect(db, {
+            postId: action.targetPostId!,
+            actorId,
+            note,
+          })
+        ).pending,
       );
       break;
     }
     case "user_suspended":
     case "user_banned": {
       pending.push(
-        ...(await unbanEffect(db, {
-          userId: action.targetUserId!,
-          actorId,
-          actorRole,
-          note,
-          tolerateNotBanned: true,
-        })),
+        ...(
+          await unbanEffect(db, {
+            userId: action.targetUserId!,
+            actorId,
+            actorRole,
+            note,
+            tolerateNotBanned: true,
+          })
+        ).pending,
       );
       break;
     }
@@ -968,17 +1001,106 @@ export async function undoAction(
         throw new ORPCError("BAD_REQUEST", { message: "This action can't be overturned." });
       }
       pending.push(
-        ...(await restoreRoleEffect(db, {
-          userId: action.targetUserId!,
-          actorId,
-          actorRole,
-          grantedRole,
-          oldRole,
-        })),
+        ...(
+          await restoreRoleEffect(db, {
+            userId: action.targetUserId!,
+            actorId,
+            actorRole,
+            grantedRole,
+            oldRole,
+          })
+        ).pending,
       );
       break;
     }
   }
 
   return pending;
+}
+
+/**
+ * Per-action wrappers (issue #128): each takes the `Context` once, runs its
+ * effect, and owns the "commit, then send" ordering through
+ * `applyModerationEffect`. The procedures in `./moderation.ts` and
+ * `./moderation-appeals.ts` call these, so `PendingEmail` and the send path
+ * are no longer part of the interface they touch.
+ */
+
+/**
+ * Runs a "void" effect and sends the notices it owed — the shared shape of
+ * every wrapper below that does not return a value. Every effect now returns
+ * `{ pending }`, so the wrapper just forwards it.
+ */
+async function runEffect(
+  context: EffectContext,
+  run: (db: DbLike) => Promise<{ pending: PendingEmail[] }>,
+): Promise<void> {
+  await applyModerationEffect(context, async (db) => {
+    const { pending } = await run(db);
+    return { result: undefined, pending };
+  });
+}
+
+/** Removes a post and emails the author — the notice goes out after the removal commits. */
+export function removePost(
+  context: EffectContext,
+  args: { postId: string; actorId: string; reason: string },
+): Promise<void> {
+  return runEffect(context, (db) => removePostEffect(db, args));
+}
+
+/** Restores a removed post and emails the author when something was actually restored. */
+export function restorePost(
+  context: EffectContext,
+  args: { postId: string; actorId: string; note?: string },
+): Promise<void> {
+  return runEffect(context, (db) => restorePostEffect(db, args));
+}
+
+/** Suspends a user for a bounded time and emails them, returning the stored expiry. */
+export function suspendUser(
+  context: EffectContext,
+  args: {
+    userId: string;
+    actorId: string;
+    actorRole: string;
+    reason: string;
+    durationSeconds: number;
+  },
+): Promise<Date> {
+  return applyModerationEffect(context, (db) =>
+    suspendUserEffect(db, args).then(({ banExpires, pending }) => ({
+      result: banExpires,
+      pending,
+    })),
+  );
+}
+
+/** Bans a user permanently and emails them. */
+export function banUser(
+  context: EffectContext,
+  args: { userId: string; actorId: string; actorRole: string; reason: string },
+): Promise<void> {
+  return runEffect(context, (db) => banUserEffect(db, args));
+}
+
+/** Unbans or unsuspends a user and emails them with the copy matching the lifted sentence. */
+export function unbanUser(
+  context: EffectContext,
+  args: {
+    userId: string;
+    actorId: string;
+    actorRole: string;
+    note?: string;
+  },
+): Promise<void> {
+  return runEffect(context, (db) => unbanEffect(db, args));
+}
+
+/** Changes a user's role and emails them. */
+export function setRole(
+  context: EffectContext,
+  args: { userId: string; actorId: string; actorRole: string; role: UserRole },
+): Promise<void> {
+  return runEffect(context, (db) => setRoleEffect(db, args));
 }

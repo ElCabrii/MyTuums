@@ -3,17 +3,24 @@ import { and, eq } from "drizzle-orm";
 import { moderationAction, post, report, session, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  applyModerationEffect,
+  banUser,
   banUserEffect,
+  removePost,
   removePostEffect,
+  restorePost,
   restoreRoleEffect,
-  sendPendingEmails,
+  setRole,
   setRoleEffect,
+  suspendUser,
   suspendUserEffect,
+  unbanUser,
   type DbLike,
 } from "./moderation-actions.js";
 import {
   anonContext,
   createTestUser,
+  setUserBan,
   setUserRole,
   testEmailSender,
   truncateAll,
@@ -83,8 +90,9 @@ describe("forward moderation effects", () => {
 
     // The effect itself sends nothing — the notice is owed, not sent.
     expect(vi.mocked(testEmailSender.send)).not.toHaveBeenCalled();
-    expect(pending.userId).toBe(author.id);
-    expect(pending.build("en").subject).toBe("Your post was removed from MyTuums");
+    expect(pending).toHaveLength(1);
+    expect(pending[0].userId).toBe(author.id);
+    expect(pending[0].build("en").subject).toBe("Your post was removed from MyTuums");
 
     const [row] = await anonContext.db
       .select({
@@ -208,7 +216,7 @@ describe("forward moderation effects", () => {
       oldRole: "user",
     });
 
-    expect(pending).toEqual([]);
+    expect(pending.pending).toEqual([]);
 
     const [row] = await anonContext.db
       .select({ role: user.role })
@@ -239,9 +247,9 @@ describe("forward moderation effects", () => {
       oldRole: "user",
     });
 
-    expect(pending).toHaveLength(1);
-    expect(pending[0].userId).toBe(bob.id);
-    expect(pending[0].build("en").subject).toBe("Your MyTuums role changed");
+    expect(pending.pending).toHaveLength(1);
+    expect(pending.pending[0].userId).toBe(bob.id);
+    expect(pending.pending[0].build("en").subject).toBe("Your MyTuums role changed");
 
     const [row] = await anonContext.db
       .select({ role: user.role })
@@ -331,7 +339,8 @@ describe("forward moderation effects", () => {
       );
     expect(action?.details).toEqual({ durationSeconds: 3600 });
 
-    expect(pending.build("en").subject).toBe("Your account was suspended");
+    expect(pending).toHaveLength(1);
+    expect(pending[0].build("en").subject).toBe("Your account was suspended");
     expect(vi.mocked(testEmailSender.send)).not.toHaveBeenCalled();
   });
 
@@ -353,28 +362,27 @@ describe("forward moderation effects", () => {
       .where(eq(user.id, victim.id));
     expect(row?.banned).toBe(true);
     expect(row?.banExpires).toBeNull();
-    expect(pending.build("en").subject).toBe("Your account was banned");
+    expect(pending).toHaveLength(1);
+    expect(pending[0].build("en").subject).toBe("Your account was banned");
   });
 });
 
-describe("sendPendingEmails", () => {
-  it("sends the notice after the commit — and a dead email adapter is swallowed, the action stands", async () => {
+describe("applyModerationEffect", () => {
+  it("sends the effect's notice after its commit — and a dead email adapter is swallowed, the action stands", async () => {
     const author = await createTestUser();
     const mod = await createTestUser();
     await setUserRole(mod.id, "moderator");
     const postId = await seedPost(author.id, "email may fail");
 
-    const { pending } = await removePostEffect(anonContext.db, {
-      postId,
-      actorId: mod.id,
-      reason: "spam",
-    });
-
     vi.mocked(testEmailSender.send).mockRejectedValueOnce(new Error("resend is down"));
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
-      sendPendingEmails(anonContext.db, undefined, [pending], testEmailSender),
+      removePost(anonContext, {
+        postId,
+        actorId: mod.id,
+        reason: "spam",
+      }),
     ).resolves.toBeUndefined();
 
     expect(vi.mocked(testEmailSender.send)).toHaveBeenCalledTimes(1);
@@ -395,5 +403,150 @@ describe("sendPendingEmails", () => {
       .where(eq(post.id, postId));
     expect(row?.removedAt).not.toBeNull();
     errorSpy.mockRestore();
+  });
+
+  it("an effect that rolls back produces no audit row and no email", async () => {
+    const author = await createTestUser();
+    const mod = await createTestUser();
+    await setUserRole(mod.id, "moderator");
+    const postId = await seedPost(author.id, "roll me back");
+
+    // The runner opens the transaction and hands the effect the transaction
+    // handle; the effect runs inside it and then throws, so the runner's
+    // transaction rolls back — the removal, the audit row and the send all
+    // vanish together.
+    await expect(
+      applyModerationEffect(anonContext, async (db) => {
+        const { pending } = await removePostEffect(db, {
+          postId,
+          actorId: mod.id,
+          reason: "spam content",
+        });
+        expect(pending).toHaveLength(1);
+        throw new Error("simulated failure after writes, before commit");
+      }),
+    ).rejects.toThrow("simulated failure after writes, before commit");
+
+    const [row] = await anonContext.db
+      .select({ removedAt: post.removedAt })
+      .from(post)
+      .where(eq(post.id, postId));
+    expect(row?.removedAt).toBeNull();
+
+    const actions = await anonContext.db
+      .select({ id: moderationAction.id })
+      .from(moderationAction)
+      .where(
+        and(eq(moderationAction.action, "post_removed"), eq(moderationAction.targetPostId, postId)),
+      );
+    expect(actions).toHaveLength(0);
+
+    expect(vi.mocked(testEmailSender.send)).not.toHaveBeenCalled();
+  });
+});
+
+describe("the moderation entry points deliver their notices", () => {
+  it("removePost delivers its removal notice", async () => {
+    const author = await createTestUser();
+    const mod = await createTestUser();
+    await setUserRole(mod.id, "moderator");
+    const postId = await seedPost(author.id, "remove me");
+
+    await removePost(anonContext, { postId, actorId: mod.id, reason: "spam" });
+
+    const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
+    expect(emails).toContain("Your post was removed from MyTuums");
+  });
+
+  it("restorePost delivers its restore notice", async () => {
+    const author = await createTestUser();
+    const mod = await createTestUser();
+    await setUserRole(mod.id, "moderator");
+    const postId = await seedPost(author.id, "restore me");
+    await removePost(anonContext, { postId, actorId: mod.id, reason: "spam" });
+
+    await restorePost(anonContext, { postId, actorId: mod.id });
+
+    const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
+    expect(emails).toContain("Your post was restored");
+  });
+
+  it("suspendUser delivers its suspension notice and returns the stored expiry", async () => {
+    const victim = await createTestUser();
+    const mod = await createTestUser();
+    await setUserRole(mod.id, "moderator");
+
+    const banExpires = await suspendUser(anonContext, {
+      userId: victim.id,
+      actorId: mod.id,
+      actorRole: "moderator",
+      reason: "spam",
+      durationSeconds: 3600,
+    });
+
+    expect(banExpires).toBeInstanceOf(Date);
+    const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
+    expect(emails).toContain("Your account was suspended");
+  });
+
+  it("banUser delivers its ban notice", async () => {
+    const victim = await createTestUser();
+    const staff = await createTestUser();
+    await setUserRole(staff.id, "staff");
+
+    await banUser(anonContext, {
+      userId: victim.id,
+      actorId: staff.id,
+      actorRole: "staff",
+      reason: "permanent spam",
+    });
+
+    const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
+    expect(emails).toContain("Your account was banned");
+  });
+
+  it("setRole delivers its role-change notice", async () => {
+    const admin = await createTestUser();
+    await setUserRole(admin.id, "admin");
+    const bob = await createTestUser();
+
+    await setRole(anonContext, {
+      userId: bob.id,
+      actorId: admin.id,
+      actorRole: "admin",
+      role: "moderator",
+    });
+
+    const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
+    expect(emails).toContain("Your MyTuums role changed");
+  });
+
+  it("the direct inverse effects still deliver (unbanUser) and a no-op inverse sends nothing", async () => {
+    const target = await createTestUser();
+    await setUserBan(target.id, { reason: "permanent spam", expiresAt: null });
+    const staff = await createTestUser();
+    await setUserRole(staff.id, "staff");
+
+    await unbanUser(anonContext, {
+      userId: target.id,
+      actorId: staff.id,
+      actorRole: "staff",
+    });
+
+    const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
+    expect(emails).toContain("Your account is no longer banned");
+
+    // The no-op half: restoring a post that was never removed owes no email —
+    // the inverse effect returns an empty pending list and the runner sends
+    // nothing.
+    const author = await createTestUser();
+    const mod = await createTestUser();
+    await setUserRole(mod.id, "moderator");
+    const postId = await seedPost(author.id, "never removed");
+
+    await restorePost(anonContext, { postId, actorId: mod.id });
+
+    const afterNoOp = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
+    expect(afterNoOp).not.toContain("Your post was restored");
   });
 });

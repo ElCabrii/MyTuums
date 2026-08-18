@@ -264,9 +264,13 @@ sides by CI. See [operations.md](operations.md).
    changes, the team view and the audit log are `staffProcedure`. Every action
    is one effect in `packages/api/src/moderation-actions.ts`
    (`removePostEffect`, `suspendUserEffect`, `banUserEffect`, `setRoleEffect`):
-   the effect owns its transaction, its `FOR UPDATE` guard read, the report
-   stamps, the audit row, and the notice it owes — the procedure sends that
-   notice only after the effect's transaction has committed.
+   the effect owns its `FOR UPDATE` guard read, the report stamps, the audit
+   row, and the notice it owes. The module's single entry point —
+   `applyModerationEffect`, wrapped per-action as `removePost`, `restorePost`,
+   `suspendUser`, `banUser`, `unbanUser`, `setRole` — opens the transaction,
+   runs the effect inside it, and sends the owed notices only after it
+   commits, so the procedures pass `Context` once and never touch the notices
+   themselves.
 4. **Audit.** `moderation_action` is append-only. Every effect — forward and
    inverse (`restorePostEffect`, `unbanEffect`, `restoreRoleEffect`) — reads
    its guard `FOR UPDATE` inside its own transaction: an unlocked pre-read is
@@ -275,7 +279,8 @@ sides by CI. See [operations.md](operations.md).
    grant under that same lock, so a racing role change can never be clobbered
    by an appeal that already passed its currency check. A rollback produces no
    audit row, no partial state change and no email: the notices are returned,
-   never sent from inside the transaction.
+   never sent from inside the transaction, and `applyModerationEffect` sends
+   them only after the owning transaction commits.
 5. **Appeal intake.** `moderation.appealOpen` is a thin procedure over
    `packages/api/src/appeal-intake.ts`, which owns the whole intake lifecycle.
    The email link (an HMAC-signed token, works signed out — a banned user
@@ -289,7 +294,9 @@ sides by CI. See [operations.md](operations.md).
    email and changes no moderation state.
 6. **Appeal review.** `moderation.appealReview` upholds or overturns, in one
    transaction with the inverse effect and the `appeal_resolved` audit row,
-   and excludes the moderator who took the original action.
+   and excludes the moderator who took the original action. It runs that
+   transaction through `applyModerationEffect`, so the overturn's notices go
+   out after the REVIEW's commit — never an inner savepoint.
 
 ## Schemas and migrations
 

@@ -14,13 +14,12 @@ import {
 import { createCursorCodec } from "./cursor.js";
 import { appealsRouter } from "./moderation-appeals.js";
 import {
-  banUserEffect,
-  removePostEffect,
-  restorePostEffect,
-  sendPendingEmails,
-  setRoleEffect,
-  suspendUserEffect,
-  unbanEffect,
+  banUser,
+  removePost,
+  restorePost,
+  setRole,
+  suspendUser,
+  unbanUser,
 } from "./moderation-actions.js";
 import { noteInput, queueInput } from "./moderation-inputs.js";
 import { queueRouter } from "./moderation-queue.js";
@@ -247,12 +246,11 @@ export const moderationRouter = {
     .handler(async ({ input, context }) => {
       // The effect commits the tombstone + stamps + audit row, then the
       // author is emailed — a failed send must not roll the removal back.
-      const { pending } = await removePostEffect(context.db, {
+      await removePost(context, {
         postId: input.postId,
         actorId: context.user.id,
         reason: input.reason,
       });
-      await sendPendingEmails(context.db, context.headers, [pending], context.emailSender);
       return { postId: input.postId, removed: true };
     }),
 
@@ -264,12 +262,11 @@ export const moderationRouter = {
       // The effect commits the tombstone clear + audit row, then the author
       // is emailed — and an already-restored post (a race with the appeal
       // overturn) owes no email: nothing happened.
-      const pending = await restorePostEffect(context.db, {
+      await restorePost(context, {
         postId: input.postId,
         actorId: context.user.id,
         note: input.note,
       });
-      await sendPendingEmails(context.db, context.headers, pending, context.emailSender);
       return { postId: input.postId, restored: true };
     }),
 
@@ -288,14 +285,13 @@ export const moderationRouter = {
     .handler(async ({ input, context }) => {
       // The effect commits the ban + session sweep + stamps + audit row,
       // then the user is emailed with the stored expiry.
-      const { banExpires, pending } = await suspendUserEffect(context.db, {
+      const banExpires = await suspendUser(context, {
         userId: input.userId,
         actorId: context.user.id,
         actorRole: context.user.role ?? "user",
         reason: input.reason,
         durationSeconds: input.durationSeconds,
       });
-      await sendPendingEmails(context.db, context.headers, [pending], context.emailSender);
       return { userId: input.userId, suspended: true, banExpires };
     }),
 
@@ -311,13 +307,12 @@ export const moderationRouter = {
     .handler(async ({ input, context }) => {
       // The effect commits the ban + session sweep + stamps + audit row,
       // then the user is emailed.
-      const { pending } = await banUserEffect(context.db, {
+      await banUser(context, {
         userId: input.userId,
         actorId: context.user.id,
         actorRole: context.user.role ?? "user",
         reason: input.reason,
       });
-      await sendPendingEmails(context.db, context.headers, [pending], context.emailSender);
       return { userId: input.userId, banned: true };
     }),
 
@@ -326,12 +321,12 @@ export const moderationRouter = {
     .use(rateLimit(RATE_LIMITS.moderate))
     .input(z.object({ userId: z.string().min(1), note: noteInput }))
     .handler(async ({ input, context }) => {
-      // The rank guard lives in `unbanEffect` (shared with the appeal
+      // The rank guard lives in the effect (shared with the appeal
       // overturn), so no inverse path can skip it: lifting a sentence is as
       // restricted as imposing one. Strict by default — an account that
       // isn't banned is the caller-facing error; the appeal path passes
       // `tolerateNotBanned` instead.
-      const pending = await unbanEffect(context.db, {
+      await unbanUser(context, {
         userId: input.userId,
         actorId: context.user.id,
         actorRole: context.user.role ?? "user",
@@ -339,7 +334,6 @@ export const moderationRouter = {
       });
       // The effect commits the clear + audit row, then the user is emailed
       // with the copy matching the sentence that was lifted.
-      await sendPendingEmails(context.db, context.headers, pending, context.emailSender);
       return { userId: input.userId, unbanned: true };
     }),
 
@@ -364,13 +358,12 @@ export const moderationRouter = {
 
       // The effect commits the role write + audit row, then the user is
       // emailed.
-      const { pending } = await setRoleEffect(context.db, {
+      await setRole(context, {
         userId: input.userId,
         actorId: context.user.id,
         actorRole: context.user.role ?? "user",
         role: input.role,
       });
-      await sendPendingEmails(context.db, context.headers, [pending], context.emailSender);
       return { userId: input.userId, role: input.role };
     }),
 

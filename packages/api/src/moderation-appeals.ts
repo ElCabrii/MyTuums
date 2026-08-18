@@ -7,10 +7,10 @@ import { openAppeal } from "./appeal-intake.js";
 import { APPEAL_TOKEN_MAX_LENGTH } from "./appeal-token.js";
 import { APPEAL_REASON_MAX_LENGTH, APPEAL_REASON_MIN_LENGTH } from "./constants.js";
 import {
-  emailUser,
+  applyModerationEffect,
   isActionLatest,
   logAction,
-  sendPendingEmails,
+  sendModerationEmail,
   undoAction,
   type ActionRow,
   type PendingEmail,
@@ -106,15 +106,19 @@ export const appealsRouter = {
       // The overturn, the appeal stamp and the `appeal_resolved` audit row
       // commit in ONE transaction — a failure between any of them would
       // otherwise leave the action reversed with the appeal still open, or
-      // the appeal stamped with no audit trail. Emails go out after the
-      // commit, the same rule as every other moderation action.
-      let pendingEmails: PendingEmail[] = [];
-      await context.db.transaction(async (tx) => {
+      // the appeal stamped with no audit trail. The reversal's emails go out
+      // after THAT transaction commits, the same rule as every other
+      // moderation action: `applyModerationEffect` opens the transaction and
+      // sends the notices its effect body returned only after the commit, so
+      // an inner savepoint rolled back can never email an action that never
+      // happened.
+      await applyModerationEffect(context, async (db) => {
+        let pending: PendingEmail[] = [];
         // Serialize on the appeal row: two reviewers who both passed the
         // "still open" check above would otherwise stamp the same appeal
         // twice — the second transaction must observe the first's commit and
         // refuse instead of overwriting the review.
-        const [openAppeal] = await tx
+        const [openAppeal] = await db
           .select({ id: appeal.id })
           .from(appeal)
           .where(and(eq(appeal.id, input.appealId), eq(appeal.status, "open")))
@@ -130,13 +134,16 @@ export const appealsRouter = {
           // ban → unban → re-ban), overturning would reverse the NEWER state,
           // not the contested one — the same hazard `isActionCurrent`'s
           // live-state read cannot see.
-          if (!(await isActionLatest(tx, action))) {
+          if (!(await isActionLatest(db, action))) {
             throw new ORPCError("BAD_REQUEST", {
               message: "A newer moderation action has superseded this one.",
             });
           }
-          pendingEmails = await undoAction(
-            tx,
+          // `undoAction` runs on the runner's transaction, so its inverse
+          // effects open savepoints, not real transactions — the send follows
+          // the review's commit above, never an inner savepoint.
+          pending = await undoAction(
+            db,
             action,
             context.user.id,
             context.user.role ?? "user",
@@ -144,7 +151,7 @@ export const appealsRouter = {
           );
         }
 
-        await tx
+        await db
           .update(appeal)
           .set({
             status: input.outcome,
@@ -154,7 +161,7 @@ export const appealsRouter = {
           })
           .where(eq(appeal.id, input.appealId));
 
-        await logAction(tx, {
+        await logAction(db, {
           action: "appeal_resolved",
           actorId: context.user.id,
           targetType: action.targetType,
@@ -163,16 +170,15 @@ export const appealsRouter = {
           note: input.note,
           details: { outcome: input.outcome },
         });
+
+        return { result: undefined, pending };
       });
 
-      // Mail after the transaction commits — the review is final either way.
-      await sendPendingEmails(context.db, context.headers, pendingEmails, context.emailSender);
-      await emailUser(
-        context.db,
-        context.headers,
-        row.appellantId,
-        (locale) => moderationResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
-        context.emailSender,
+      // The review's resolution notice to the appellant is NOT an effect's
+      // owed notice — it goes out here, after the review commit, whatever the
+      // outcome.
+      await sendModerationEmail(context, row.appellantId, (locale) =>
+        moderationResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
       );
       return { appealId: input.appealId, status: input.outcome };
     }),

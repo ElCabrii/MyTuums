@@ -12,16 +12,16 @@ over HTTP and imports only its browser-safe subpaths.
 
 ## Start here
 
-| File                        | Why                                                                                      |
-| --------------------------- | ---------------------------------------------------------------------------------------- |
-| `src/router.ts`             | The five groups and what owns each.                                                      |
-| `src/procedures.ts`         | The four gates, the two rate-limit mechanisms, the one exception.                        |
-| `src/context.ts`            | What every handler is handed, and why nothing is a module global.                        |
-| `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                                  |
-| `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                       |
-| `src/moderation-actions.ts` | The forward and inverse moderation effects: transaction, guards, audit, owed notices.    |
-| `src/appeal-intake.ts`      | The appeal intake lifecycle: the two sources, the budgets, the gates, the replay policy. |
-| `src/profile-media.ts`      | The avatar/banner lifecycle: replace/remove, the locked swap, best-effort cleanup.       |
+| File                        | Why                                                                                                                                                                                      |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/router.ts`             | The five groups and what owns each.                                                                                                                                                      |
+| `src/procedures.ts`         | The four gates, the two rate-limit mechanisms, the one exception.                                                                                                                        |
+| `src/context.ts`            | What every handler is handed, and why nothing is a module global.                                                                                                                        |
+| `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                                                                                                                                  |
+| `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                                                                                                                       |
+| `src/moderation-actions.ts` | The forward and inverse moderation effects: transaction, guards, audit, owed notices. The one entry point (`applyModerationEffect`) and the per-action wrappers own "commit, then send". |
+| `src/appeal-intake.ts`      | The appeal intake lifecycle: the two sources, the budgets, the gates, the replay policy.                                                                                                 |
+| `src/profile-media.ts`      | The avatar/banner lifecycle: replace/remove, the locked swap, best-effort cleanup.                                                                                                       |
 
 ## Change map
 
@@ -111,8 +111,15 @@ over HTTP and imports only its browser-safe subpaths.
   #51). The role overturn checks the contested grant under that same lock, so
   a racing role change can never be clobbered by an appeal that already passed
   its currency check. The effects return the notices they owe (`PendingEmail`)
-  instead of sending them — the procedure sends after the commit, so a
-  rollback produces no audit row, no partial state and no email.
+  instead of sending them. The module's single entry point
+  (`applyModerationEffect`, and the per-action wrappers `removePost`,
+  `restorePost`, `suspendUser`, `banUser`, `unbanUser`, `setRole`) opens the
+  transaction itself, runs the effect inside it, and sends the owed notices
+  only after it commits — so a rollback produces no audit row, no partial
+  state and no email, and the send can never be forgotten by a caller that
+  goes through the wrappers. The raw effects remain exported for the appeal
+  intake and the tests, which compose them directly; a new procedure must go
+  through the wrappers, not call an effect and hand-thread the send.
 - **Cursor bounds go through `sql.param(value, column)`.** Interpolating a JS
   `Date` hands postgres.js something it cannot serialise.
 - **`keysetPage`'s `createdAtField` is type-tied to the `createdAt` column**, so

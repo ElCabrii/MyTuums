@@ -1734,7 +1734,7 @@ describe("unbanEffect", () => {
         actorRole: "staff",
         tolerateNotBanned: true,
       }),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual({ pending: [] });
 
     // No audit row was written for either attempt — nothing was lifted.
     const rows = await anonContext.db
@@ -1754,9 +1754,9 @@ describe("unbanEffect", () => {
       actorId: actor.id,
       actorRole: "staff",
     });
-    expect(pending).toHaveLength(1);
-    expect(pending[0].userId).toBe(target.id);
-    expect(pending[0].build("en").subject).toBe("Your account is no longer banned");
+    expect(pending.pending).toHaveLength(1);
+    expect(pending.pending[0].userId).toBe(target.id);
+    expect(pending.pending[0].build("en").subject).toBe("Your account is no longer banned");
 
     const [row] = await anonContext.db
       .select({ banned: user.banned, banExpires: user.banExpires })
