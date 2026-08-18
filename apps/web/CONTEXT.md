@@ -21,7 +21,7 @@ app's build from the same origin.
 
 | Intent                       | Primary                                                         | Also touch                                                                                                                                                                                                 |
 | ---------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Add a page                   | `src/routes/<name>.tsx` (thin wrapper)                          | the page body in `src/components/`; `SIGNED_OUT_PATHS` if it must work signed out                                                                                                                          |
+| Add a page                   | `src/routes/<name>.tsx` (thin wrapper)                          | the page body in `src/components/`; `SIGNED_OUT_PATHS` if it must work signed out; a stub in `src/test/route-tree.tsx` (asserted against the route files)                                                  |
 | Add client state             | `src/atoms/<concern>.ts`                                        | its `.test.ts` sibling                                                                                                                                                                                     |
 | Read server data             | a new `atomWithQuery` / `atomWithInfiniteQuery` in `src/atoms/` | `src/lib/query-definitions.ts`; `src/lib/orpc.ts` for response types                                                                                                                                       |
 | Add a mutation with optimism | `src/atoms/<concern>.ts`                                        | use `beginFollowPatch` / `beginPostPatch` in `src/lib/follow-cache.ts` / `post-cache.ts` — they own their cache inventory, cancellation and snapshot; roll back via `restoreFollowCaches` / `restorePosts` |
@@ -126,9 +126,21 @@ first.
 | `pnpm --filter @my-tuums/web build`                                   | the production bundle |
 
 `src/test/render.tsx` provides `renderWithProviders`: a fresh store, a memory
-router and a mocked auth client. `src/test/query-fixtures.ts` owns query-cache
-seeding through `queryFixtures(queryClient)`; its error operations must be
-awaited.
+router and a mocked auth client. The test harness is split across four modules
+in `src/test/`:
+
+- `render.tsx` — `renderWithProviders` and the re-exports component tests use.
+- `auth-fixture.ts` — the BetterAuth fake and the session-driving calls
+  (`setTestSession`, `setTestSignedOut`, `patchTestSessionUser`,
+  `setTestSocialProviders`). Importing it _is_ the install, so a test that
+  needs a session imports it and one that doesn't, doesn't.
+- `route-tree.tsx` — the stub route tree, asserted against `src/routes/*.tsx`
+  so a new page that forgets its stub fails with the missing route named.
+- `factories.ts` — the `make*` domain builders and `createTestQueryClient`,
+  with no side effects, importable from pure tests.
+
+`src/test/query-fixtures.ts` owns query-cache seeding through
+`queryFixtures(queryClient)`; its error operations must be awaited.
 
 ## Further reading
 

@@ -1,9 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-// Imported before anything that transitively loads `@/lib/auth-client`: the
-// session mock lives in this module, and importing Header first would
-// instantiate the real better-auth client (and its module-scope /get-session
-// fetch) before the mock registers. Every component test in this repo puts
-// the harness first for the same reason.
 import { renderWithProviders, setTestSession } from "@/test/render";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
