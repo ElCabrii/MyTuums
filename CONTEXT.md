@@ -29,7 +29,7 @@ profiles, moderation) with real authentication. pnpm 10 + Turborepo on Node
 | Sign-in, OAuth providers, sessions, auth email            | [packages/auth/CONTEXT.md](packages/auth/CONTEXT.md) |
 | Schema, migrations, test databases                        | [packages/db/CONTEXT.md](packages/db/CONTEXT.md)     |
 | End-to-end journeys                                       | [e2e/CONTEXT.md](e2e/CONTEXT.md)                     |
-| Workflows, CI jobs, the production probe                  | [.github/CONTEXT.md](.github/CONTEXT.md)             |
+| Workflows, CI jobs                                        | [.github/CONTEXT.md](.github/CONTEXT.md)             |
 | Repository lint and TypeScript tooling                    | root configs, `package.json`, `tools/oxlint/`        |
 
 Cross-package questions — how the pieces fit, what a request does end to end —
@@ -49,11 +49,11 @@ to the owning context.
   read it. Duplicating it lets the two gates disagree and bounce a visitor
   between them forever.
 - **The browser-safe subpaths stay dependency-free.**
-  `@my-tuums/api/constants`, `@my-tuums/api/dimensions` and
-  `@my-tuums/auth/rules` must never import `@my-tuums/db`; the web app imports
-  them, and a database import throws at module load in a browser. Those three
-  are the _only_ workspace modules in the SPA bundle, and they are the only
-  ones `apps/web` may import from either package.
+  `@my-tuums/api/constants`, `@my-tuums/api/dimensions`, `@my-tuums/api/roles`
+  and `@my-tuums/auth/rules` must never import `@my-tuums/db`; the web app
+  imports them, and a database import throws at module load in a browser.
+  Those four are the _only_ workspace modules in the SPA bundle, and they are
+  the only ones `apps/web` may import from either package.
 - **Auth-owned user fields are written through the auth client only.**
   `packages/auth`'s database hooks are the single enforcement point for
   user-field rules; an oRPC procedure writing them bypasses validation.

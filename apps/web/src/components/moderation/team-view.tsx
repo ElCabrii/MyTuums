@@ -7,7 +7,7 @@ import {
   setRoleDialogAtom,
   teamAtom,
 } from "@/atoms/moderation";
-import { viewerAtom, viewerRoleAtom } from "@/atoms/session";
+import { viewerRoleAtom } from "@/atoms/session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,7 +35,8 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PaginatedState } from "@/components/paginated-state";
-import { roleIcon, roleLabel, roleRank } from "@/components/moderation/labels";
+import { roleIcon, roleLabel } from "@/components/moderation/labels";
+import { canManageRole, roleRank } from "@my-tuums/api/roles";
 import { UserAvatar } from "@/components/user-avatar";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
@@ -66,7 +67,6 @@ function roleItems(grantable: readonly string[]): Record<string, string> {
  */
 export function TeamView() {
   const team = useAtomValue(teamAtom);
-  const viewer = useAtomValue(viewerAtom);
   const viewerRole = useAtomValue(viewerRoleAtom);
   const openTarget = useAtomValue(setRoleDialogAtom);
   const members = [...(team.data?.items ?? [])].sort(
@@ -93,7 +93,9 @@ export function TeamView() {
         const memberHandle = handleOf(member);
         const memberRole = member.role ?? "user";
         const isViewer = member.id === viewer?.id;
-        const canManage = !isViewer && roleRank(memberRole) < roleRank(viewerRole);
+        // `canManageRole` is strictly-greater, so it already refuses the
+        // viewer's own row — the viewer always holds their own rank.
+        const canManage = canManageRole(viewerRole, memberRole);
 
         return (
           <Item key={member.id} variant="outline">

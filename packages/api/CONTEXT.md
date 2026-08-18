@@ -138,8 +138,9 @@ over HTTP and imports only its browser-safe subpaths.
   right for bounding one client, wrong for billing. `maxKeys` is a leak alarm,
   not an admission gate: at capacity a brand-new key is let through, never
   refused (issue #60).
-- **`src/constants.ts` and `src/dimensions.ts` must stay dependency-free.** The
-  browser imports them; an `@my-tuums/db` import throws at module load.
+- **`src/constants.ts`, `src/dimensions.ts` and `src/roles.ts` must stay
+  dependency-free.** The browser imports them; an `@my-tuums/db` import throws
+  at module load.
 - **Account rules are not this package's to state.** The handle bounds, the bio
   limit, the date-of-birth rules and the preference lists live in
   `packages/auth/src/rules.ts` (`@my-tuums/auth/rules`), because `packages/auth`

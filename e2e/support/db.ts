@@ -1,5 +1,6 @@
 import { and, desc, eq, like, sql } from "drizzle-orm";
 import { assertTestDatabase, databaseNameOf, resolveTestDatabaseUrl } from "@my-tuums/db/testing";
+import type { UserRole } from "@my-tuums/api/roles";
 import { E2E } from "../playwright.config";
 
 /**
@@ -352,10 +353,7 @@ export async function deleteReport(input: {
  * so a fixture promoted at sign-up time carries the role from its first
  * browser request.
  */
-export async function setUserRole(
-  userId: string,
-  role: "user" | "moderator" | "staff" | "admin",
-): Promise<void> {
+export async function setUserRole(userId: string, role: UserRole): Promise<void> {
   assertTestDatabase();
   const db = await getDb();
   const { user } = await schemaModulePromise;
