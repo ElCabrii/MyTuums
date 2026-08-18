@@ -87,7 +87,7 @@ const REQUIRED_DOCS = {
     "Docker image",
     "Migrations",
     "Observability",
-    "CI and smoke checks",
+    "CI checks",
     "Maintenance",
   ],
   "docs/security.md": [
