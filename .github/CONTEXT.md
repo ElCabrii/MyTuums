@@ -59,6 +59,10 @@ deploys. Railway builds its own image from `apps/server/Dockerfile`, so the
   on the default bridge network `localhost` is the container's own loopback
   and the migration cannot reach the database at all. Moving to a
   container-based or macOS runner requires `host.docker.internal` instead.
+- **CI's Postgres binds host port 5433, not 5432.** The self-hosted runner
+  also runs the dev stack (`pnpm docker:up` binds 5432), so the CI service
+  container would collide with it. `DATABASE_URL`/`DATABASE_URL_TEST` and the
+  three service `ports:` mappings must stay in step.
 - **The OAuth provider mirror is asserted from both sides.** The bundle grep
   proves the client list shipped; the booted container's
   `/api/auth/sign-in/social` probes prove the server registers the same

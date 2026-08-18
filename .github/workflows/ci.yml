@@ -22,8 +22,12 @@ env:
   # Kept in one place so the three jobs cannot drift apart. The password is a
   # throwaway for the ephemeral service container.
   POSTGRES_PASSWORD: ci-postgres-password
-  DATABASE_URL: postgresql://postgres:ci-postgres-password@localhost:5432/mytuums
-  DATABASE_URL_TEST: postgresql://postgres:ci-postgres-password@localhost:5432/mytuums_test
+  # Port 5433, not 5432: the self-hosted runner also runs the dev stack
+  # (`pnpm docker:up` binds 5432), so the CI service container would collide
+  # with it. The `docker` job's `--network host` boot step reaches this port
+  # through the runner's loopback, same as 5432.
+  DATABASE_URL: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums
+  DATABASE_URL_TEST: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums_test
   BETTER_AUTH_SECRET: ci-better-auth-secret-at-least-32-characters
   BETTER_AUTH_URL: http://localhost:3001
   WEB_ORIGIN: http://localhost:5173
@@ -117,7 +121,7 @@ jobs:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_DB: mytuums
         ports:
-          - 5432:5432
+          - 5433:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d mytuums"
           --health-interval 5s
@@ -176,7 +180,7 @@ jobs:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_DB: mytuums
         ports:
-          - 5432:5432
+          - 5433:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d mytuums"
           --health-interval 5s
@@ -288,7 +292,7 @@ jobs:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_DB: mytuums
         ports:
-          - 5432:5432
+          - 5433:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d mytuums"
           --health-interval 5s
