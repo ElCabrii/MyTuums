@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import {
   createTestQueryClient,
   makeModerationCaseDetail,
+  makeModerationReport,
   makeUserModerationCaseDetail,
   queryFixtures,
   renderWithProviders,
@@ -51,6 +52,11 @@ async function renderCase(target: CaseRef, detail: ReturnType<typeof makeModerat
     queryClient,
     signedInAs: { role: "moderator" },
   });
+}
+
+/** One open report — the dismiss action is gated on these, so dismiss tests seed one. */
+function makeOpenReport() {
+  return makeModerationReport();
 }
 
 describe("CaseDialog — role gating on user actions", () => {
@@ -267,9 +273,26 @@ describe("CaseDialog — post actions", () => {
   it("shows Restore instead of the reason form for an already-removed post, and submits its id", async () => {
     fakeClient.moderation.restorePost.mockResolvedValue({ postId: "post-1", restored: true });
     const target: CaseRef = { targetType: "post", targetId: "post-1" };
+    // The real post-removal state: `removePostEffect` stamps every open report
+    // in the same transaction that sets the tombstone, so a removed post has
+    // `removedAt` set AND no open reports. Restore must still be reachable —
+    // it is report-independent, and this is the only consumer of
+    // `restorePostAtom` in the app.
     await renderCase(
       target,
-      makeModerationCaseDetail({ id: "post-1", removedAt: new Date("2026-01-01T00:00:00.000Z") }),
+      makeModerationCaseDetail(
+        { id: "post-1", removedAt: new Date("2026-01-01T00:00:00.000Z") },
+        {
+          reports: [
+            makeModerationReport({
+              resolvedAt: new Date("2026-01-01T00:00:00.000Z"),
+              resolvedBy: "moderator-1",
+              resolvedOutcome: "actioned",
+              resolutionNote: "removed",
+            }),
+          ],
+        },
+      ),
     );
 
     expect(
@@ -296,7 +319,10 @@ describe("CaseDialog — dismissing a case", () => {
       resolved: 1,
     });
     const target: CaseRef = { targetType: "post", targetId: "post-1" };
-    await renderCase(target, makeModerationCaseDetail({ id: "post-1" }));
+    await renderCase(
+      target,
+      makeModerationCaseDetail({ id: "post-1" }, { reports: [makeOpenReport()] }),
+    );
 
     const user = userEvent.setup();
     await user.type(
@@ -316,6 +342,59 @@ describe("CaseDialog — dismissing a case", () => {
         expect.anything(),
       ),
     );
+  });
+});
+
+describe("CaseDialog — gating Dismiss on open reports", () => {
+  const target: CaseRef = { targetType: "post", targetId: "post-1" };
+
+  it("hides only the Dismiss action when every report is resolved, keeping the target action", async () => {
+    await renderCase(
+      target,
+      makeModerationCaseDetail(
+        { id: "post-1" },
+        {
+          reports: [
+            makeModerationReport({
+              resolvedAt: new Date(),
+              resolvedBy: "moderator-1",
+              resolvedOutcome: "actioned",
+              resolutionNote: "removed",
+            }),
+          ],
+        },
+      ),
+    );
+
+    expect(await screen.findByText(m.moderation_case_reports_title())).toBeInTheDocument();
+    // The card stays: the target action (Remove) is report-independent and must
+    // remain reachable. Only the dismiss — whose whole job is stamping reports —
+    // is withheld when there is nothing open to stamp (issue #59's no-op resolve).
+    expect(screen.getByText(m.moderation_actions_title())).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: m.moderation_remove_submit() })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: m.moderation_dismiss() })).not.toBeInTheDocument();
+  });
+
+  it("keeps Dismiss when at least one report is still open", async () => {
+    await renderCase(
+      target,
+      makeModerationCaseDetail(
+        { id: "post-1" },
+        {
+          reports: [
+            makeOpenReport(),
+            makeModerationReport({
+              resolvedAt: new Date(),
+              resolvedBy: "moderator-1",
+              resolvedOutcome: "dismissed",
+              resolutionNote: null,
+            }),
+          ],
+        },
+      ),
+    );
+
+    expect(await screen.findByRole("button", { name: m.moderation_dismiss() })).toBeInTheDocument();
   });
 });
 

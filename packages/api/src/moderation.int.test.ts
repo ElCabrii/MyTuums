@@ -104,6 +104,26 @@ async function seedReport(
 }
 
 /**
+ * The exact identity projection a queue preview carries, read straight from
+ * the row — so the shape assertions pin the projection, not a fixture's
+ * guess at what sign-up generated.
+ */
+async function identityOf(userId: string) {
+  const [row] = await anonContext.db
+    .select({
+      id: user.id,
+      name: user.name,
+      username: user.username,
+      displayUsername: user.displayUsername,
+      image: user.image,
+    })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  return row;
+}
+
+/**
  * Wipes every report and appeal row created so far.
  *
  * The queue's group view is global — an open case created by one test would
@@ -579,6 +599,109 @@ describe("queue", () => {
     expect([...only.reasons].sort()).toEqual(["harassment", "spam"]);
     expect(only.appeal).toBeNull();
     expect(page.nextCursor).toBeNull();
+
+    await clearQueueFixtures();
+  });
+
+  it("carries a target preview: a post's author and bounded excerpt, an account's identity and ban state", async () => {
+    const author = await createTestUser();
+    const reported = await createTestUser();
+    const reporter = await createTestUser();
+    const mod = await moderatorUser();
+    const parent = await seedPostContent(author.id, "the parent");
+    // One code point past the cap, so the excerpt is cut and the flag is set.
+    const long = "x".repeat(141);
+    const reply = await seedPostContent(author.id, long, { parentId: parent.id });
+
+    await seedReport(reporter.id, "post", reply.id, "spam");
+    await seedReport(reporter.id, "user", reported.id, "harassment");
+    await setUserBan(reported.id, { reason: "rule break", expiresAt: null });
+
+    const page = await call(
+      appRouter.moderation.queue,
+      { limit: 10 },
+      { context: contextFor(mod) },
+    );
+    const byId = new Map(page.items.map((item) => [item.targetId, item]));
+
+    const postCase = byId.get(reply.id);
+    expect(postCase?.preview).toEqual({
+      kind: "post",
+      excerpt: "x".repeat(140),
+      truncated: true,
+      isReply: true,
+      removed: false,
+      author: await identityOf(author.id),
+    });
+
+    const userCase = byId.get(reported.id);
+    expect(userCase?.preview).toEqual({
+      kind: "user",
+      user: await identityOf(reported.id),
+      banned: true,
+      banExpires: null,
+    });
+
+    await clearQueueFixtures();
+  });
+
+  it("marks a removed post in its preview, and reads an expired suspension as no longer banned", async () => {
+    const author = await createTestUser();
+    const reported = await createTestUser();
+    const reporter = await createTestUser();
+    const mod = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "short body");
+    await seedReport(reporter.id, "post", postRow.id, "spam");
+    await seedReport(reporter.id, "user", reported.id, "spam");
+    await setUserBan(reported.id, {
+      reason: "served",
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "rule break" },
+      { context: contextFor(mod) },
+    );
+    // The removal stamps the post's report, so re-report it to keep the case open.
+    await seedReport((await createTestUser()).id, "post", postRow.id, "spam");
+
+    const page = await call(
+      appRouter.moderation.queue,
+      { limit: 10 },
+      { context: contextFor(mod) },
+    );
+    const byId = new Map(page.items.map((item) => [item.targetId, item]));
+
+    const postPreview = byId.get(postRow.id)?.preview;
+    expect(postPreview).toMatchObject({
+      kind: "post",
+      excerpt: "short body",
+      truncated: false,
+      removed: true,
+    });
+    // The moderator projection deliberately does not filter removed content:
+    // the removed post is the thing the appeal will be about.
+    expect(byId.get(reported.id)?.preview).toMatchObject({ kind: "user", banned: false });
+
+    await clearQueueFixtures();
+  });
+
+  it("renders a case whose target row is gone with a null preview instead of failing", async () => {
+    const reporter = await createTestUser();
+    const mod = await moderatorUser();
+    // `report.targetId` is plain text with no foreign key, so a report can
+    // outlive its target — the queue must still show the case.
+    const orphanId = randomUUID();
+    await seedReport(reporter.id, "post", orphanId, "spam");
+
+    const page = await call(
+      appRouter.moderation.queue,
+      { limit: 10 },
+      { context: contextFor(mod) },
+    );
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0].targetId).toBe(orphanId);
+    expect(page.items[0].preview).toBeNull();
 
     await clearQueueFixtures();
   });

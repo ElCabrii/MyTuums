@@ -5,6 +5,8 @@ import {
   createTestQueryClient,
   makeModerationCase,
   makeModerationCaseDetail,
+  makePostPreview,
+  makeUserPreview,
   queryFixtures,
   renderWithProviders,
 } from "@/test/render";
@@ -87,6 +89,125 @@ describe("QueueView", () => {
       await screen.findByText(m.moderation_case_reports_one({ count: "1" })),
     ).toBeInTheDocument();
     expect(screen.queryByText(m.moderation_queue_appeal())).not.toBeInTheDocument();
+  });
+
+  it("counts what is loaded, and badges the appeals among it", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.queue([
+      {
+        items: [
+          makeModerationCase({ targetId: "post-1", appeal: null }),
+          makeModerationCase({
+            targetId: "post-2",
+            appeal: { id: "appeal-1", reason: "not spam", createdAt: new Date() },
+          }),
+          makeModerationCase({ targetId: "post-3", appeal: null }),
+        ],
+        nextCursor: null,
+      },
+    ]);
+    await renderWithProviders(<QueueView />, { queryClient, signedInAs: { role: "moderator" } });
+
+    expect(
+      await screen.findByText(m.moderation_queue_open_many({ count: "3" })),
+    ).toBeInTheDocument();
+    // One of the three carries an appeal — the appeal badge counts cases, not
+    // reports, so a page of three with one appeal reads "1 appeal".
+    expect(screen.getByText(m.moderation_queue_appeals_one({ count: "1" }))).toBeInTheDocument();
+  });
+
+  it("marks the count as partial while the server still has a page behind the cursor", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.queue([
+      { items: [makeModerationCase({ targetId: "post-1" })], nextCursor: "cursor-1" },
+    ]);
+    await renderWithProviders(<QueueView />, { queryClient, signedInAs: { role: "moderator" } });
+
+    // "1+", never "1": one case is loaded and the cursor proves there are more,
+    // so the singular form would claim a total the server never sent.
+    expect(
+      await screen.findByText(m.moderation_queue_open_many({ count: "1+" })),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(m.moderation_queue_appeals_one({ count: "1" })),
+    ).not.toBeInTheDocument();
+  });
+
+  it("names the reported post's author and shows its excerpt, ellipsised only when the server cut it", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.queue([
+      {
+        items: [
+          makeModerationCase({
+            targetId: "post-1",
+            preview: makePostPreview({
+              excerpt: "a very long body the server cut",
+              truncated: true,
+              author: {
+                id: "author-1",
+                name: "Alex Mercer",
+                username: "alexmercer",
+                displayUsername: "AlexMercer",
+                image: null,
+              },
+            }),
+          }),
+        ],
+        nextCursor: null,
+      },
+    ]);
+    await renderWithProviders(<QueueView />, { queryClient, signedInAs: { role: "moderator" } });
+
+    expect(await screen.findByText("Alex Mercer")).toBeInTheDocument();
+    expect(screen.getByText(/@alexmercer/)).toBeInTheDocument();
+    // The ellipsis is the client's, drawn only because the server said it
+    // truncated — the excerpt itself never carries one.
+    expect(screen.getByText(/a very long body the server cut…/)).toBeInTheDocument();
+  });
+
+  it("badges what has already happened to the target: a removed reply, a suspension, a permanent ban", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.queue([
+      {
+        items: [
+          makeModerationCase({
+            targetId: "post-1",
+            preview: makePostPreview({ isReply: true, removed: true }),
+          }),
+          makeModerationCase({
+            targetType: "user",
+            targetId: "user-1",
+            preview: makeUserPreview({ banned: true, banExpires: new Date("2027-01-01") }),
+          }),
+          makeModerationCase({
+            targetType: "user",
+            targetId: "user-2",
+            preview: makeUserPreview({ banned: true, banExpires: null }),
+          }),
+        ],
+        nextCursor: null,
+      },
+    ]);
+    await renderWithProviders(<QueueView />, { queryClient, signedInAs: { role: "moderator" } });
+
+    expect(await screen.findByText(m.moderation_case_reply_badge())).toBeInTheDocument();
+    expect(screen.getByText(m.moderation_case_removed_badge())).toBeInTheDocument();
+    // `banExpires` is the only thing separating the two sentences.
+    expect(screen.getByText(m.moderation_queue_suspended_badge())).toBeInTheDocument();
+    expect(screen.getByText(m.moderation_case_banned_badge())).toBeInTheDocument();
+  });
+
+  it("still renders a case whose target row is gone, saying so instead of naming nobody", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.queue([
+      { items: [makeModerationCase({ targetId: "post-1", preview: null })], nextCursor: null },
+    ]);
+    await renderWithProviders(<QueueView />, { queryClient, signedInAs: { role: "moderator" } });
+
+    expect(await screen.findByText(m.moderation_queue_target_gone())).toBeInTheDocument();
+    // The case is still openable — the reports outlived their target and are
+    // what a moderator has to close.
+    expect(screen.getByRole("button", { name: /Spam/ })).toBeInTheDocument();
   });
 
   it("opens the case dialog for the clicked row's exact target", async () => {
