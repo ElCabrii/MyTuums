@@ -63,6 +63,10 @@ deploys. Railway builds its own image from `apps/server/Dockerfile`, so the
   also runs the dev stack (`pnpm docker:up` binds 5432), so the CI service
   container would collide with it. `DATABASE_URL`/`DATABASE_URL_TEST` and the
   three service `ports:` mappings must stay in step.
+- **The `docker` job's smoke server binds port 3002, not 3001.** The
+  self-hosted runner also runs the dev stack (`pnpm dev` holds 3001), so the
+  container would fail to bind and the probes would silently hit the dev
+  server. The boot step overrides `BETTER_AUTH_URL` to match.
 - **The OAuth provider mirror is asserted from both sides.** The bundle grep
   proves the client list shipped; the booted container's
   `/api/auth/sign-in/social` probes prove the server registers the same
