@@ -61,14 +61,15 @@ databases. It serves data only — no HTTP, no business logic.
 
 ## Dependencies and boundaries
 
-Four subpath exports, all source `.ts` — consumers compile or inline them:
+Five subpath exports, all source `.ts` — consumers compile or inline them:
 
-| Subpath     | Exports                                    | Consumers                                      |
-| ----------- | ------------------------------------------ | ---------------------------------------------- |
-| `.`         | `db`, `Database`, `closeDb`, `pingDb`      | `packages/api`, `packages/auth`, `apps/server` |
-| `./schema`  | tables and relations                       | `packages/api`, `e2e`                          |
-| `./testing` | test-URL helpers and the destructive guard | vitest configs, `e2e`                          |
-| `./migrate` | `runMigrations`                            | `apps/server/src/migrate.ts`                   |
+| Subpath     | Exports                                    | Consumers                                               |
+| ----------- | ------------------------------------------ | ------------------------------------------------------- |
+| `.`         | `db`, `Database`, `closeDb`, `pingDb`      | `packages/api`, `packages/auth`, `apps/server`          |
+| `./schema`  | tables and relations                       | `packages/api`, `e2e`                                   |
+| `./testing` | test-URL helpers and the destructive guard | vitest configs, `e2e`                                   |
+| `./migrate` | `runMigrations`                            | `apps/server/src/migrate.ts`                            |
+| `./promote` | `promoteUser`                              | `scripts/promote-user.ts`, `apps/server/src/promote.ts` |
 
 This package must not import `packages/api` or `packages/auth` — the
 dependency direction is one way.

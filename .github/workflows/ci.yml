@@ -371,6 +371,16 @@ jobs:
           docker run --rm --entrypoint sh mytuums-server:ci -c             'test -f apps/server/dist/migrate.js && test -f packages/db/drizzle/meta/_journal.json'             || { echo "::error::migrate.js or packages/db/drizzle missing from the image"; exit 1; }
           echo "Migration runner and SQL are present in the image."
 
+      # The promote-user CLI is the production path for appointing the first
+      # moderators (issue #147): `pnpm db:promote` needs tsx/dotenv-cli, which
+      # the runner image does not install. If this entry point stops being
+      # bundled or copied, the Railway console has no way to bootstrap
+      # moderation.
+      - name: Assert the promote-user CLI shipped
+        run: |
+          docker run --rm --entrypoint sh mytuums-server:ci -c             'test -f apps/server/dist/promote.js'             || { echo "::error::promote.js missing from the image - is it in tsup.config.ts's entry list?"; exit 1; }
+          echo "Promote-user CLI is present in the image."
+
       # The regression that motivated this step (issue #58): the runner used
       # to `pnpm install --prod` over the both-workspaces prune, shipping the
       # entire web dependency tree (react, jotai, shadcn, ...) into an image

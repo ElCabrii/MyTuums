@@ -142,7 +142,17 @@ pnpm --filter @my-tuums/db db:migrate  # apply through the migrator
 pnpm --filter @my-tuums/db db:check    # catch a schema edit with no migration
 pnpm --filter @my-tuums/db db:studio   # browse
 pnpm db:test:setup                     # create and migrate the _test database
-pnpm db:promote                        # grant a moderator/staff/admin role
+pnpm db:promote                        # grant a moderator/staff/admin role (local)
+```
+
+`pnpm db:promote` runs through `tsx` and `dotenv-cli`, which are dev
+dependencies and therefore absent from the production image. To appoint the
+first moderators in production, run the bundled entry point from the Railway
+console instead — it needs only `node` and `DATABASE_URL` (already in the
+process environment there):
+
+```bash
+node apps/server/dist/promote.js <username> <role>
 ```
 
 `packages/db/drizzle` is committed and ships inside the image. In production
