@@ -191,7 +191,7 @@ never deploys. It runs the same three assertions as the `docker` job's boot
 step: health, `/login` serving the SPA shell, and the page gate's redirect.
 It targets the Railway origin directly (with the production Host header):
 Cloudflare's Bot Fight Mode challenges datacenter IPs, so probing the public
-domain from a GitHub Actions runner is 403'd at the edge, and the free plan
+domain from a GitHub-hosted runner is 403'd at the edge, and the free plan
 cannot skip Bot Fight Mode for specific IPs.
 
 Details and the invariants behind each job: [.github/CONTEXT.md](../.github/CONTEXT.md).

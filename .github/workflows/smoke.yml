@@ -8,7 +8,7 @@
 #
 # The probe targets the Railway origin directly, not the public domain:
 # Cloudflare's Bot Fight Mode challenges requests from datacenter IPs, so
-# every scheduled run from a GitHub Actions runner was 403'd at the edge, and
+# every scheduled run from a GitHub-hosted runner was 403'd at the edge, and
 # the free plan cannot skip Bot Fight Mode for specific IPs. The origin is
 # what this check protects — Railway config, service variables, deploys — and
 # the edge adds nothing to that purpose.
@@ -30,7 +30,7 @@ permissions:
 jobs:
   smoke:
     name: Smoke-check production
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       # The Railway origin: the CNAME target of mytuums.com (production
       # environment's mytuums-server service, port 3001, syncStatus ACTIVE).

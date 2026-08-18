@@ -42,7 +42,7 @@ jobs:
   # a build has run once.
   check:
     name: Lint & typecheck
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -85,7 +85,7 @@ jobs:
 
   unit:
     name: Unit tests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -105,7 +105,7 @@ jobs:
 
   integration:
     name: Integration tests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     services:
       # Ephemeral Postgres — same image (postgres:16-alpine) as
@@ -162,7 +162,7 @@ jobs:
 
   e2e:
     name: E2E tests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     # The default job timeout is 6 hours — far past what this suite can take.
     # A hung spec would otherwise burn runner time before failing on its own.
     timeout-minutes: 60
@@ -274,7 +274,7 @@ jobs:
   # fail the commit, not to produce an artifact.
   docker:
     name: Docker image builds
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     services:
       # Same ephemeral Postgres as the integration and e2e jobs. The image's

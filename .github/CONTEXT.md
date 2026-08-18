@@ -49,6 +49,11 @@ deploys. Railway builds its own image from `apps/server/Dockerfile`, so the
   `e2e` script runs through `dotenv -e .env`, which errors on a missing file.
   dotenv does not override variables that are already set, so the workflow's
   `env:` block still wins.
+- **Every job runs on a self-hosted runner.** The repo's CI and smoke jobs
+  use `runs-on: self-hosted` — the owner's own device — so no GitHub-hosted
+  minutes are consumed. The runner must be a native Linux machine with Node
+  22, pnpm, Docker, and the `postgres:16-alpine` image available, and it must
+  be online when a run is triggered.
 - **The `docker` job's boot step needs `--network host` on a native Linux
   runner.** The Postgres service port is published on the runner's loopback;
   on the default bridge network `localhost` is the container's own loopback
