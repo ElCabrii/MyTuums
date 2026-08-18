@@ -83,11 +83,11 @@ app's build from the same origin.
 
 ## Dependencies and boundaries
 
-- Import exactly three workspace modules and no others:
-  `@my-tuums/api/constants`, `@my-tuums/api/dimensions` and
-  `@my-tuums/auth/rules`. All three must stay free of `@my-tuums/db`, which
+- Import exactly four workspace modules and no others:
+  `@my-tuums/api/constants`, `@my-tuums/api/dimensions`, `@my-tuums/api/roles`
+  and `@my-tuums/auth/rules`. All four must stay free of `@my-tuums/db`, which
   throws at module load in a browser. The production bundle contains those
-  three and nothing else from the packages — check a sourcemap's `sources` if
+  four and nothing else from the packages — check a sourcemap's `sources` if
   you need to confirm it after a change.
 - **`src/lib/auth-validation.ts` is a form adapter, not a rule book.** The
   handle bounds and charset, the date-of-birth parse and age comparison, the
