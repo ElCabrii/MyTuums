@@ -16,13 +16,13 @@ would produce a broken one.
 
 ## Change map
 
-| Intent                           | Primary                                         | Also touch                                                        |
-| -------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------- |
-| Add a repo-wide check            | `workflows/ci.yml` (`check` job)                | the root script it runs (`package.json`)                          |
-| Add or rename a test suite       | `workflows/ci.yml` (`unit`/`integration`/`e2e`) | the package's `package.json`, `../docs/operations.md`             |
-| Change what the image must prove | `workflows/ci.yml` (`docker` job)               | `../apps/server/Dockerfile`                                       |
-| Add a secret                     | `workflows/ci.yml` (`e2e` job `env:`)           | `../.env.example`, `../docs/operations.md`                        |
-| Bump a third-party action        | the `uses:` SHA and its trailing `# vN` comment | —                                                                 |
+| Intent                           | Primary                                         | Also touch                                            |
+| -------------------------------- | ----------------------------------------------- | ----------------------------------------------------- |
+| Add a repo-wide check            | `workflows/ci.yml` (`check` job)                | the root script it runs (`package.json`)              |
+| Add or rename a test suite       | `workflows/ci.yml` (`unit`/`integration`/`e2e`) | the package's `package.json`, `../docs/operations.md` |
+| Change what the image must prove | `workflows/ci.yml` (`docker` job)               | `../apps/server/Dockerfile`                           |
+| Add a secret                     | `workflows/ci.yml` (`e2e` job `env:`)           | `../.env.example`, `../docs/operations.md`            |
+| Bump a third-party action        | the `uses:` SHA and its trailing `# vN` comment | —                                                     |
 
 ## Invariants
 
