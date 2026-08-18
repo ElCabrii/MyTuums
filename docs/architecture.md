@@ -27,9 +27,9 @@ Node's type-stripping cannot rewrite the `.js` specifiers those packages
 ship). Only `apps/server`'s own declared dependencies stay external in the
 bundle.
 
-`apps/web` may import three workspace modules and no others:
-`@my-tuums/api/constants`, `@my-tuums/api/dimensions` and
-`@my-tuums/auth/rules`. All three must stay free of `@my-tuums/db`, which reads
+`apps/web` may import four workspace modules and no others:
+`@my-tuums/api/constants`, `@my-tuums/api/dimensions`, `@my-tuums/api/roles`
+and `@my-tuums/auth/rules`. All four must stay free of `@my-tuums/db`, which reads
 `DATABASE_URL` at module scope and throws in a browser.
 
 The `packages/auth` edge is the one that looks surprising, so it is worth
@@ -39,7 +39,7 @@ handle bounds and charset, the date-of-birth parse and age comparison, the bio
 limit, the preference lists, and the English rejection strings — and it is the
 only file in that package with **no imports at all**. Reaching it does not
 construct the better-auth instance, read any env, or touch `@my-tuums/db`; the
-production bundle contains exactly those three workspace modules and nothing
+production bundle contains exactly those four workspace modules and nothing
 else from the packages. It lives in `packages/auth` because that is where the
 rules are _enforced_ (the database hooks are the only place a user-field rule
 actually holds) and because `packages/api` already depends on `packages/auth` —

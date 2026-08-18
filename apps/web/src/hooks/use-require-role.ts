@@ -1,5 +1,6 @@
 import { useAtomValue } from "jotai";
-import { viewerRoleAtom, viewerRoleAtLeast, type ViewerRole } from "@/atoms/session";
+import { roleAtLeast, type UserRole } from "@my-tuums/api/roles";
+import { viewerRoleAtom } from "@/atoms/session";
 
 /**
  * True when the signed-in viewer's role is at least `min` — the client half
@@ -17,6 +18,6 @@ import { viewerRoleAtom, viewerRoleAtLeast, type ViewerRole } from "@/atoms/sess
  * `RoleForbiddenPage` themselves rather than redirecting — a moderator
  * reaching a staff tab should see "you can't", not a loop.
  */
-export function useRequireRole(min: ViewerRole): boolean {
-  return viewerRoleAtLeast(useAtomValue(viewerRoleAtom), min);
+export function useRequireRole(min: UserRole): boolean {
+  return roleAtLeast(useAtomValue(viewerRoleAtom), min);
 }
