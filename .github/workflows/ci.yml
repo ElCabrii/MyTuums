@@ -246,8 +246,12 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
 
+      # No `--with-deps`: that flag runs `sudo` to install system libraries,
+      # which the self-hosted runner's user cannot do non-interactively. The
+      # deps are already installed on the machine (the browser runs), and they
+      # persist across runs — unlike an ephemeral GitHub-hosted runner.
       - name: Install Chromium
-        run: pnpm --filter @my-tuums/e2e exec playwright install --with-deps chromium
+        run: pnpm --filter @my-tuums/e2e exec playwright install chromium
 
       - run: pnpm test:e2e
 
