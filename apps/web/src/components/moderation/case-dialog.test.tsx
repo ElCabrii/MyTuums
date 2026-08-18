@@ -371,9 +371,7 @@ describe("CaseDialog — gating Dismiss on open reports", () => {
     // remain reachable. Only the dismiss — whose whole job is stamping reports —
     // is withheld when there is nothing open to stamp (issue #59's no-op resolve).
     expect(screen.getByText(m.moderation_actions_title())).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: m.moderation_remove_submit() }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: m.moderation_remove_submit() })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: m.moderation_dismiss() })).not.toBeInTheDocument();
   });
 
@@ -396,9 +394,7 @@ describe("CaseDialog — gating Dismiss on open reports", () => {
       ),
     );
 
-    expect(
-      await screen.findByRole("button", { name: m.moderation_dismiss() }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: m.moderation_dismiss() })).toBeInTheDocument();
   });
 });
 
