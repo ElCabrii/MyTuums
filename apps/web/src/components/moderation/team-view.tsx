@@ -7,7 +7,7 @@ import {
   setRoleDialogAtom,
   teamAtom,
 } from "@/atoms/moderation";
-import { viewerRoleAtom } from "@/atoms/session";
+import { viewerIdAtom, viewerRoleAtom } from "@/atoms/session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -67,6 +67,7 @@ function roleItems(grantable: readonly string[]): Record<string, string> {
  */
 export function TeamView() {
   const team = useAtomValue(teamAtom);
+  const viewerId = useAtomValue(viewerIdAtom);
   const viewerRole = useAtomValue(viewerRoleAtom);
   const openTarget = useAtomValue(setRoleDialogAtom);
   const members = [...(team.data?.items ?? [])].sort(
@@ -92,7 +93,7 @@ export function TeamView() {
       {members.map((member) => {
         const memberHandle = handleOf(member);
         const memberRole = member.role ?? "user";
-        const isViewer = member.id === viewer?.id;
+        const isViewer = member.id === viewerId;
         // `canManageRole` is strictly-greater, so it already refuses the
         // viewer's own row — the viewer always holds their own rank.
         const canManage = canManageRole(viewerRole, memberRole);
