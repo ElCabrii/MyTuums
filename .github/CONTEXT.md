@@ -2,17 +2,16 @@
 
 ## Responsibility
 
-The repository's automation: the pull-request/push pipeline and the scheduled
-production probe. Nothing here builds an artefact anyone consumes — CI never
-deploys. Railway builds its own image from `apps/server/Dockerfile`, so the
-`docker` job exists to fail a commit that would produce a broken one.
+The repository's automation: the pull-request/push pipeline. Nothing here builds
+an artefact anyone consumes — CI never deploys. Railway builds its own image
+from `apps/server/Dockerfile`, so the `docker` job exists to fail a commit that
+would produce a broken one.
 
 ## Start here
 
 | File                    | Why                                                               |
 | ----------------------- | ----------------------------------------------------------------- |
 | `workflows/ci.yml`      | Five jobs: `check`, `unit`, `integration`, `e2e`, `docker`.       |
-| `workflows/smoke.yml`   | The scheduled probe of the production service.                    |
 | `../docs/operations.md` | What the pipeline is checking and why the environments are split. |
 
 ## Change map
@@ -22,7 +21,6 @@ deploys. Railway builds its own image from `apps/server/Dockerfile`, so the
 | Add a repo-wide check            | `workflows/ci.yml` (`check` job)                | the root script it runs (`package.json`)                          |
 | Add or rename a test suite       | `workflows/ci.yml` (`unit`/`integration`/`e2e`) | the package's `package.json`, `../docs/operations.md`             |
 | Change what the image must prove | `workflows/ci.yml` (`docker` job)               | `../apps/server/Dockerfile`                                       |
-| Change a production probe        | `workflows/smoke.yml`                           | the `docker` job's boot step — the two assert the same three URLs |
 | Add a secret                     | `workflows/ci.yml` (`e2e` job `env:`)           | `../.env.example`, `../docs/operations.md`                        |
 | Bump a third-party action        | the `uses:` SHA and its trailing `# vN` comment | —                                                                 |
 
@@ -49,8 +47,8 @@ deploys. Railway builds its own image from `apps/server/Dockerfile`, so the
   `e2e` script runs through `dotenv -e .env`, which errors on a missing file.
   dotenv does not override variables that are already set, so the workflow's
   `env:` block still wins.
-- **Every job runs on a self-hosted runner.** The repo's CI and smoke jobs
-  use `runs-on: self-hosted` — the owner's own device — so no GitHub-hosted
+- **Every job runs on a self-hosted runner.** The repo's CI jobs use
+  `runs-on: self-hosted` — the owner's own device — so no GitHub-hosted
   minutes are consumed. The runner must be a native Linux machine with Node
   22, pnpm, Docker, and the `postgres:16-alpine` image available, and it must
   be online when a run is triggered.
@@ -83,8 +81,8 @@ deploys. Railway builds its own image from `apps/server/Dockerfile`, so the
 - The pipeline runs the workspace's own scripts; it owns no build logic of its
   own. A check that should also run locally belongs in `package.json` first.
 - Secrets: only the `e2e` job takes any (the `S3_*` set for the `ci` bucket).
-  `check`, `unit`, `integration`, `docker` and `smoke.yml` take none. Fork
-  pull requests get no secrets, and the upload specs skip themselves.
+  `check`, `unit`, `integration` and `docker` take none. Fork pull requests
+  get no secrets, and the upload specs skip themselves.
 
 ## Verification
 

@@ -321,7 +321,6 @@ so Railway and `docker-compose.yml` run the identical runner.
 | Integration      | `*.int.test.ts` in `packages/api`                                 | real Postgres, `fileParallelism: false`       |
 | E2E              | Playwright `setup` / `api` / `chromium` projects                  | real server, real Postgres, optional bucket   |
 | Docker           | CI builds the image, asserts its contents, boots it and probes it | a Postgres service                            |
-| Production smoke | `.github/workflows/smoke.yml` probes the live domain              | nothing                                       |
 
 The unit/integration split is enforced by CI giving the `unit` job no database
 service. The `docker` job is the only place the production artefact is ever
