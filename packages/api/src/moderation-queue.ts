@@ -4,7 +4,7 @@ import { z } from "zod";
 import { moderationCaseResolutionEmail } from "@my-tuums/auth";
 import { appeal, moderationAction, post, report, user } from "@my-tuums/db/schema";
 import { createCursorCodec } from "./cursor.js";
-import { emailUser, logAction, stampReports } from "./moderation-actions.js";
+import { logAction, sendModerationEmail, stampReports } from "./moderation-actions.js";
 import { noteInput, queueInput } from "./moderation-inputs.js";
 import { moderatorProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
@@ -356,13 +356,11 @@ export const queueRouter = {
         return stamped;
       });
       for (const reporterId of reporterIds) {
-        await emailUser(
-          context.db,
-          context.headers,
+        await sendModerationEmail(
+          context,
           reporterId,
           (locale) =>
             moderationCaseResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
-          context.emailSender,
         );
       }
       return {

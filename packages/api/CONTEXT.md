@@ -19,7 +19,7 @@ over HTTP and imports only its browser-safe subpaths.
 | `src/context.ts`            | What every handler is handed, and why nothing is a module global.                        |
 | `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                                  |
 | `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                       |
-| `src/moderation-actions.ts` | The forward and inverse moderation effects: transaction, guards, audit, owed notices.    |
+| `src/moderation-actions.ts` | The forward and inverse moderation effects: transaction, guards, audit, owed notices. The one entry point (`applyModerationEffect`) and the per-action wrappers own "commit, then send". |
 | `src/appeal-intake.ts`      | The appeal intake lifecycle: the two sources, the budgets, the gates, the replay policy. |
 | `src/profile-media.ts`      | The avatar/banner lifecycle: replace/remove, the locked swap, best-effort cleanup.       |
 
@@ -111,8 +111,13 @@ over HTTP and imports only its browser-safe subpaths.
   #51). The role overturn checks the contested grant under that same lock, so
   a racing role change can never be clobbered by an appeal that already passed
   its currency check. The effects return the notices they owe (`PendingEmail`)
-  instead of sending them — the procedure sends after the commit, so a
-  rollback produces no audit row, no partial state and no email.
+  instead of sending them — the module's single entry point
+  (`applyModerationEffect`, and the per-action wrappers `removePost`,
+  `restorePost`, `suspendUser`, `banUser`, `unbanUser`, `setRole`) sends them
+  after the effect's transaction commits, so a rollback produces no audit row,
+  no partial state and no email. The one "commit, then send" statement lives
+  there, so a caller cannot forget the send: the procedures pass `Context` once
+  and never touch `PendingEmail` or `sendPendingEmails` themselves.
 - **Cursor bounds go through `sql.param(value, column)`.** Interpolating a JS
   `Date` hands postgres.js something it cannot serialise.
 - **`keysetPage`'s `createdAtField` is type-tied to the `createdAt` column**, so
