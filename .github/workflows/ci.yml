@@ -426,6 +426,11 @@ jobs:
           # stack sets this. It disables better-auth's own limiter only; the
           # oRPC rate limits (packages/api) are a separate mechanism and stay
           # on.
+          # A previous failed run can leave the container behind (the cleanup
+          # at the end of this step never ran), and `docker run --name` then
+          # fails on the name conflict. Remove any stale one first.
+          docker rm -f ci-smoke-server >/dev/null 2>&1 || true
+
           docker run -d --name ci-smoke-server --network host \
             -e "DATABASE_URL=${DATABASE_URL}" \
             -e "BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}" \
