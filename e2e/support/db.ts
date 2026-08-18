@@ -298,6 +298,52 @@ export async function seedLike(postId: string, userId: string): Promise<void> {
 }
 
 /**
+ * Inserts a report row directly — the composite PK (reporter, target) makes
+ * this idempotent, the same way `seedFollow` and `seedLike` are.
+ *
+ * The alternative is driving the report dialog, which the moderation journey
+ * already covers end to end; a spec that only needs a case sitting in the
+ * queue (the accessibility scan) should not pay for that walk.
+ */
+export async function seedReport(input: {
+  reporterId: string;
+  targetType: "post" | "user";
+  targetId: string;
+  reason: string;
+}): Promise<void> {
+  const db = await getDb();
+  const { report } = await schemaModulePromise;
+  await db.insert(report).values(input).onConflictDoNothing();
+}
+
+/**
+ * Deletes one seeded report — the inverse of {@link seedReport}.
+ *
+ * Specs share one database (`workers: 1`, and only global setup truncates),
+ * so a spec that seeds an open report leaves a case sitting in every later
+ * spec's queue — including the moderation journey, which asserts the queue
+ * drains to empty. A spec that seeds a case cleans it up.
+ */
+export async function deleteReport(input: {
+  reporterId: string;
+  targetType: "post" | "user";
+  targetId: string;
+}): Promise<void> {
+  assertTestDatabase();
+  const db = await getDb();
+  const { report } = await schemaModulePromise;
+  await db
+    .delete(report)
+    .where(
+      and(
+        eq(report.reporterId, input.reporterId),
+        eq(report.targetType, input.targetType),
+        eq(report.targetId, input.targetId),
+      ),
+    );
+}
+
+/**
  * Sets a user's role directly in the database.
  *
  * The admin plugin's own endpoints are 404'd in the request handler

@@ -73,7 +73,13 @@ function ReportDialogBody({ target }: { target: CaseRef }) {
         <DialogDescription>{m.moderation_report_choose()}</DialogDescription>
       </DialogHeader>
       <div className="space-y-4 px-6 pb-6">
-        <Select value={reason} onValueChange={(value) => setReason(value ?? "")}>
+        {/* `items` is what makes the trigger read "Hate speech" once a reason
+            is picked: Base UI renders the raw code otherwise. */}
+        <Select
+          items={Object.fromEntries(reasons.map((code) => [code, reasonLabel(code)]))}
+          value={reason}
+          onValueChange={(value) => setReason(value ?? "")}
+        >
           {/* The trigger's only text is the placeholder rendered inside the
                 combobox, which is content, not a label — without this the
                 picker would have no accessible name at all. */}

@@ -1,3 +1,19 @@
+import { createElement, type ReactNode } from "react";
+import {
+  Activity,
+  Ban,
+  CheckCheck,
+  Crown,
+  Hourglass,
+  type LucideIcon,
+  Scale,
+  Shield,
+  ShieldCheck,
+  Trash2,
+  Undo2,
+  User,
+  UserCog,
+} from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 import { USER_ROLES, type UserRole } from "@my-tuums/api/roles";
 
@@ -80,5 +96,106 @@ export function reasonLabel(reason: string): string {
       return m.moderation_reason_underage();
     default:
       return reason;
+  }
+}
+
+/**
+ * How loudly a report reason should read in the queue and the case dialog.
+ *
+ * A moderator triaging a page of cases needs to see which ones cannot wait
+ * before reading a single word, and the only severity signal the API carries
+ * is the reason code itself (`report.reason`'s check constraint in
+ * packages/db) — there is no priority column to render. So the split is made
+ * here, from the same codes {@link reasonLabel} translates: the four reasons
+ * that describe harm to a person or the law read `destructive`, the rest read
+ * as a neutral chip. An unknown code stays neutral, like every other fallback
+ * in this file — a new reason must be classified deliberately, not inherit
+ * urgency by accident.
+ */
+export function reasonBadgeVariant(reason: string): "destructive" | "secondary" {
+  switch (reason) {
+    case "illegal_content":
+    case "self_harm":
+    case "hate_speech":
+    case "underage":
+      return "destructive";
+    default:
+      return "secondary";
+  }
+}
+
+/**
+ * How an audit-log action reads: `destructive` for the ones that took
+ * something away, `secondary` for the ones that gave it back or merely closed
+ * a case. Same contract and same fallback reasoning as {@link actionLabel} —
+ * a new code renders neutral until it is classified here.
+ */
+export function actionBadgeVariant(action: string): "destructive" | "secondary" {
+  switch (action) {
+    case "post_removed":
+    case "user_suspended":
+    case "user_banned":
+      return "destructive";
+    default:
+      return "secondary";
+  }
+}
+
+/**
+ * The glyph an audit-log action carries. Same contract and same fallback
+ * reasoning as {@link actionLabel}: an unclassified code gets the generic
+ * activity glyph rather than borrowing another action's meaning.
+ *
+ * Returns the rendered element rather than the component: a caller holding
+ * `const Icon = actionIcon(...)` would be declaring a component inside its own
+ * render, which is both what `react-hooks/static-components` rejects and what
+ * would remount the glyph on every keystroke elsewhere in the row.
+ */
+export function actionIcon(action: string): ReactNode {
+  return createElement(actionIconComponent(action));
+}
+
+function actionIconComponent(action: string): LucideIcon {
+  switch (action) {
+    case "post_removed":
+      return Trash2;
+    case "post_restored":
+    case "user_unsuspended":
+    case "user_unbanned":
+      return Undo2;
+    case "user_suspended":
+      return Hourglass;
+    case "user_banned":
+      return Ban;
+    case "role_changed":
+      return UserCog;
+    case "case_resolved":
+      return CheckCheck;
+    case "appeal_resolved":
+      return Scale;
+    default:
+      return Activity;
+  }
+}
+
+/**
+ * The glyph a role carries in the team roster, rising with rank. Same
+ * contract, fallback and element-not-component reasoning as
+ * {@link actionIcon}.
+ */
+export function roleIcon(role: string): ReactNode {
+  return createElement(roleIconComponent(role));
+}
+
+function roleIconComponent(role: string): LucideIcon {
+  switch (role) {
+    case "moderator":
+      return Shield;
+    case "staff":
+      return ShieldCheck;
+    case "admin":
+      return Crown;
+    default:
+      return User;
   }
 }

@@ -606,9 +606,13 @@ export function makeThread(overrides: Partial<Thread> = {}): Thread {
 
 /**
  * A minimal moderation queue row — mirrors the merged-case shape
- * `moderation.queue` returns (`packages/api/src/moderation.ts`'s
+ * `moderation.queue` returns (`packages/api/src/moderation-queue.ts`'s
  * `MergedCase`). No open reports and no appeal by default; a real case
  * always has at least one of the two.
+ *
+ * `preview` defaults to `null` — the target-row-is-gone case — so a test that
+ * says nothing about the target gets the fallback rendering rather than a
+ * fixture identity it never asked for. `makeCasePreview` builds the other two.
  */
 export function makeModerationCase(overrides: Partial<ModerationCase> = {}): ModerationCase {
   return {
@@ -618,6 +622,49 @@ export function makeModerationCase(overrides: Partial<ModerationCase> = {}): Mod
     reportCount: 1,
     reasons: ["spam"],
     appeal: null,
+    preview: null,
+    ...overrides,
+  };
+}
+
+/** The person half of a queue preview: a post's author, or the reported account. */
+type PreviewPerson = Extract<NonNullable<ModerationCase["preview"]>, { kind: "user" }>["user"];
+
+function makePreviewPerson(overrides: Partial<PreviewPerson> = {}): PreviewPerson {
+  return {
+    id: "user-1",
+    name: "Alex Mercer",
+    username: "alexmercer",
+    displayUsername: "AlexMercer",
+    image: null,
+    ...overrides,
+  };
+}
+
+/** A post-target queue preview: the author plus the server-bounded excerpt. */
+export function makePostPreview(
+  overrides: Partial<Extract<NonNullable<ModerationCase["preview"]>, { kind: "post" }>> = {},
+): ModerationCase["preview"] {
+  return {
+    kind: "post",
+    excerpt: "the reported post",
+    truncated: false,
+    isReply: false,
+    removed: false,
+    author: makePreviewPerson(),
+    ...overrides,
+  };
+}
+
+/** A user-target queue preview: the account plus its effective ban state. */
+export function makeUserPreview(
+  overrides: Partial<Extract<NonNullable<ModerationCase["preview"]>, { kind: "user" }>> = {},
+): ModerationCase["preview"] {
+  return {
+    kind: "user",
+    user: makePreviewPerson(),
+    banned: false,
+    banExpires: null,
     ...overrides,
   };
 }

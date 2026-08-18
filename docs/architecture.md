@@ -255,7 +255,11 @@ sides by CI. See [operations.md](operations.md).
    appeals in JS behind a single keyset cursor. It is the one paginated list
    that does not go through `keysetPage`, because the merge does not fit the
    single-query skeleton; each side carries a correlated not-exists exclusion
-   so a dual report-and-appeal case is never emitted twice.
+   so a dual report-and-appeal case is never emitted twice. Each case then
+   carries a `preview` of its target — the reported post's author and a
+   bounded excerpt, or the reported account and its effective ban state —
+   loaded for the page after the merge and the slice, so a row says which
+   case to open rather than only how many are waiting.
 3. **Action.** Removals and suspensions are `moderatorProcedure`; bans, role
    changes, the team view and the audit log are `staffProcedure`. Every action
    is one effect in `packages/api/src/moderation-actions.ts`

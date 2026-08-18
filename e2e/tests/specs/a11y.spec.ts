@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { test, expect } from "../../support/fixtures";
-import { ALICE } from "../../support/users";
+import { ALICE, BOB } from "../../support/users";
 
 /**
  * `minor`/`moderate` findings on this app skew toward noise (contrast on
@@ -60,6 +60,42 @@ test.describe("accessibility", () => {
   test("a profile page has no serious or critical violations", async ({ page }) => {
     await page.goto(`/@${ALICE.username}`);
     await expectNoSeriousViolations(page);
+  });
+
+  // The desk is the app's densest screen — tabs, a table, badges and a
+  // modal full of form controls — and alice is the moderator fixture, so it
+  // is reachable here without seeding a second role.
+  test("the moderation desk has no serious or critical violations", async ({ page, db }) => {
+    const bobId = await db.getUserId(BOB.username);
+    const [reported] = await db.seedPosts(bobId, 1, {
+      content: () => `Accessibility scan target ${Date.now().toString()}`,
+    });
+    if (!reported) throw new Error("seedPosts returned no row");
+    const report = {
+      reporterId: await db.getUserId(ALICE.username),
+      targetType: "post" as const,
+      targetId: reported.id,
+    };
+    await db.seedReport({ ...report, reason: "spam" });
+
+    try {
+      await page.goto("/moderation");
+      await expect(page.getByRole("heading", { name: "Moderation" })).toBeVisible();
+      await expectNoSeriousViolations(page);
+
+      // Again with the case dialog open: its form controls are the half of the
+      // desk a scan of the list alone never reaches.
+      await page
+        .getByRole("button", { name: /1 report/ })
+        .first()
+        .click();
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await expectNoSeriousViolations(page);
+    } finally {
+      // Even on a failed scan: an open report left behind is a case in every
+      // later spec's queue (see `deleteReport`).
+      await db.deleteReport(report);
+    }
   });
 
   test("a thread page has no serious or critical violations", async ({ page, db }) => {
