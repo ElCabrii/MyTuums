@@ -224,6 +224,13 @@ never existed, so the block itself does not leak.
   currency check. Moving any of these reads out of the transaction re-opens
   the race.
 - Appeal review excludes the moderator who took the original action.
+- The bootstrap promotion (`pnpm db:promote` / `node apps/server/dist/promote.js`)
+  is the one deliberate exception to "role changes go through `/rpc`": it
+  exists to appoint the first admin before anyone can moderate. It is
+  bootstrap-only by construction — `promoteUser` in `packages/db/src/promote.ts`
+  refuses to run once an admin already exists — so it cannot become an
+  unrestricted production role setter that bypasses the rank guard and the
+  audit log.
 
 ## Configuration and secrets
 

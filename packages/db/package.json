@@ -19,6 +19,10 @@
     "./migrate": {
       "types": "./src/migrate.ts",
       "default": "./src/migrate.ts"
+    },
+    "./promote": {
+      "types": "./src/promote.ts",
+      "default": "./src/promote.ts"
     }
   },
   "scripts": {

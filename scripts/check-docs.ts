@@ -168,6 +168,7 @@ const ABSENT_PATH_ALLOWLIST = new Set([
   "apps/web/node_modules",
   "apps/server/dist",
   "apps/server/dist/migrate.js",
+  "apps/server/dist/promote.js",
   "packages/db/drizzle/meta/_journal.json",
   "e2e/.auth",
   "e2e/playwright-report",

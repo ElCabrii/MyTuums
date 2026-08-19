@@ -14,58 +14,25 @@
  *
  * Usage: pnpm db:promote <username> <role>   (role: moderator | staff | admin)
  *
- * Mirrors setup-test-db.ts's shape: one process, `postgres` directly (a
- * promote script must not pull in the connection pool), and `DATABASE_URL`
- * from the environment, which the `dotenv` wrapper in package.json loads
- * from the root .env.
+ * A thin wrapper over `promoteUser` in `@my-tuums/db/promote`, which owns the
+ * actual work. This script only parses argv and maps the library's errors to
+ * exit codes, so the local `pnpm db:promote` flow and the production
+ * `node apps/server/dist/promote.js` entry point (see apps/server/src/promote.ts)
+ * cannot drift apart. It is bootstrap-only: it refuses once an admin exists.
  */
-import postgres from "postgres";
-
-// The promotable roles are `USER_ROLES` minus `user` from
-// packages/api/src/roles.ts, duplicated here because this package cannot
-// import from @my-tuums/api (the dependency would point the wrong way).
-// Keep in step with that file.
-const PROMOTABLE_ROLES = ["moderator", "staff", "admin"];
-
-interface UserRow {
-  id: string;
-  username: string;
-  name: string;
-}
+import { promoteUser } from "../src/promote.ts";
 
 const [username, role] = process.argv.slice(2);
 
 if (!username || !role) {
   console.error("Usage: pnpm db:promote <username> <role>");
-  process.exit(1);
-}
-
-if (!PROMOTABLE_ROLES.includes(role)) {
-  console.error(`Unknown role "${role}" — expected one of ${PROMOTABLE_ROLES.join(", ")}.`);
-  process.exit(1);
-}
-
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  console.error("DATABASE_URL is not set — copy .env.example → .env first.");
-  process.exit(1);
-}
-
-const sql = postgres(databaseUrl, { max: 1, onnotice: () => {} });
-
-try {
-  // The username is a parameterised value, never spliced into SQL.
-  const [target] = await sql<UserRow[]>`
-    select id, username, name from "user" where username = ${username}
-  `;
-
-  if (!target) {
-    console.error(`No user with username "${username}".`);
-    process.exit(1);
+  process.exitCode = 1;
+} else {
+  try {
+    const message = await promoteUser(username, role);
+    console.log(`✓ ${message}`);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
   }
-
-  await sql`update "user" set role = ${role} where id = ${target.id}`;
-  console.log(`✓ ${target.username}${target.name ? ` (${target.name})` : ""} is now ${role}`);
-} finally {
-  await sql.end();
 }

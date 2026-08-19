@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { sslFor } from "./connection.js";
 import * as schema from "./schema/index.js";
 
 // Read at module scope on purpose: every import of @my-tuums/db shares one
@@ -15,33 +16,14 @@ if (!connectionString) {
   );
 }
 
-/**
- * Whether to require TLS for this connection. Loopback addresses obviously
- * don't need it. Container orchestrators (Docker Compose, Kubernetes, ...)
- * resolve service-to-service hostnames as a single DNS label with no dot
- * (e.g. `postgres`, `postgres.svc`) inside a network that's already private
- * and un-routable from outside — and don't terminate TLS on it. A dotted
- * hostname is treated as a real DNS name (managed cloud DB, VPC endpoint,
- * ...) and requires TLS. This replaces an earlier version that only
- * special-cased `localhost`/`127.0.0.1` literally, which meant Postgres
- * looked "unreachable" from inside Docker Compose — the driver was
- * attempting a TLS handshake against a server that doesn't speak TLS.
- */
-function requiresTls(url: string): boolean {
-  const { hostname } = new URL(url);
-  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
-    return false;
-  }
-  return hostname.includes(".");
-}
-
 // One pool for the whole process (10 connections, 10s connect timeout): the
 // API procedures, the migration runner, and the test helpers all go through
-// this same client.
+// this same client. The TLS rule lives in ./connection.ts so the one-shot
+// maintenance scripts apply the same policy.
 const client = postgres(connectionString, {
   max: 10,
   connect_timeout: 10,
-  ssl: requiresTls(connectionString) ? "require" : false,
+  ssl: sslFor(connectionString),
 });
 
 /**
