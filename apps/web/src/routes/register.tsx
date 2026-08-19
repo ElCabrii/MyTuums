@@ -228,28 +228,38 @@ export function RegisterPage() {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <div className="flex items-start gap-2.5 text-sm">
-              <input
-                id="termsAccepted"
-                type="checkbox"
-                checked={termsAccepted}
-                onChange={(e) => setTermsAccepted(e.target.checked)}
-                aria-labelledby="terms-acceptance-label"
-                className="border-border accent-primary mt-0.5 h-4 w-4 rounded"
-              />
-              <span id="terms-acceptance-label" className="text-muted-foreground">
+          <div className="flex items-start gap-2.5 text-sm">
+            <input
+              id="termsAccepted"
+              type="checkbox"
+              checked={termsAccepted}
+              onChange={(e) => setTermsAccepted(e.target.checked)}
+              aria-labelledby="terms-acceptance-label"
+              className="border-border accent-primary mt-0.5 h-4 w-4 rounded"
+            />
+            <span id="terms-acceptance-label" className="text-muted-foreground">
+              <label htmlFor="termsAccepted" className="cursor-pointer">
                 {m.auth_register_terms_before()}
-                <Link to="/terms" className="text-link font-medium hover:underline">
-                  {m.legal_terms_of_service()}
-                </Link>
-                {m.auth_register_terms_mid()}
-                <Link to="/privacy" className="text-link font-medium hover:underline">
-                  {m.legal_privacy_policy()}
-                </Link>
-                {m.auth_register_terms_after()}
-              </span>
-            </div>
+              </label>
+              <Link
+                to="/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-link font-medium hover:underline"
+              >
+                {m.legal_terms_of_service()}
+              </Link>
+              {m.auth_register_terms_mid()}
+              <Link
+                to="/privacy"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-link font-medium hover:underline"
+              >
+                {m.legal_privacy_policy()}
+              </Link>
+              {m.auth_register_terms_after()}
+            </span>
           </div>
 
           <Button

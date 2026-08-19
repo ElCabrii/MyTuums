@@ -23,6 +23,7 @@ test.describe("registration", () => {
     // The 15+ rule is part of a valid registration — an under-15 date is
     // rejected below.
     await page.getByLabel("Date of Birth").fill("1995-01-01");
+    await page.getByRole("checkbox", { name: /I have read and agree/ }).check();
     await page.getByRole("main").getByRole("button", { name: "Register" }).click();
 
     // useRedirectWhenSignedIn is the entire post-signup redirect — signUpAtom

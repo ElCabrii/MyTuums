@@ -38,6 +38,7 @@ async function signUpFresh(page: import("@playwright/test").Page, prefix: string
   await page.getByLabel("Password", { exact: true }).fill(account.password);
   await page.getByLabel("Confirm Password").fill(account.password);
   await page.getByLabel("Date of Birth").fill(account.dateOfBirth);
+  await page.getByRole("checkbox", { name: /I have read and agree/ }).check();
   await page.getByRole("main").getByRole("button", { name: "Register" }).click();
 
   // A fresh sign-up is offered two-factor at /welcome before its profile — see
