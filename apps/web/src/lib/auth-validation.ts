@@ -61,6 +61,8 @@ export type RegisterFields = {
   confirmPassword: string;
   /** "YYYY-MM-DD" — the value of the native date input, before `dateOfBirthToIso`. */
   dateOfBirth: string;
+  /** The unticked-by-default consent box for the Terms of Service and Privacy Policy. */
+  termsAccepted: boolean;
 };
 
 /**
@@ -138,6 +140,9 @@ export function validateRegister(fields: RegisterFields): string | null {
   if (fields.password !== fields.confirmPassword) return "Passwords do not match.";
   const dateOfBirthError = validateDateOfBirth(fields.dateOfBirth);
   if (dateOfBirthError) return dateOfBirthError;
+  if (!fields.termsAccepted) {
+    return "You must accept the Terms of Service and Privacy Policy to create an account.";
+  }
   return null;
 }
 

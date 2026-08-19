@@ -11,6 +11,7 @@ import {
   registerEmailAtom,
   registerNameAtom,
   registerPasswordAtom,
+  registerTermsAcceptedAtom,
   registerUsernameAtom,
   registerValidationAtom,
   resetForgotPasswordFormAtom,
@@ -76,6 +77,7 @@ describe("registerValidationAtom", () => {
       password: "short",
       confirmPassword: "different",
       dateOfBirth: "",
+      termsAccepted: false,
     };
     store.set(registerUsernameAtom, fields.username);
     store.set(registerNameAtom, fields.name);
@@ -97,6 +99,7 @@ describe("registerValidationAtom", () => {
     store.set(registerPasswordAtom, "password1");
     store.set(registerConfirmPasswordAtom, "password1");
     store.set(registerDateOfBirthAtom, "1995-01-01");
+    store.set(registerTermsAcceptedAtom, true);
     expect(store.get(registerValidationAtom)).toBeNull();
   });
 
@@ -118,8 +121,23 @@ describe("registerValidationAtom", () => {
     store.set(registerPasswordAtom, "password1");
     store.set(registerConfirmPasswordAtom, "password1");
     store.set(registerDateOfBirthAtom, under15Iso);
+    store.set(registerTermsAcceptedAtom, true);
     expect(store.get(registerValidationAtom)).toBe(
       "You must be at least 15 years old to create an account.",
+    );
+  });
+
+  it("rejects when every field passes but the terms box is unticked", () => {
+    const store = createStore();
+    store.set(registerUsernameAtom, "alice");
+    store.set(registerNameAtom, "Alice");
+    store.set(registerEmailAtom, "alice@example.com");
+    store.set(registerPasswordAtom, "password1");
+    store.set(registerConfirmPasswordAtom, "password1");
+    store.set(registerDateOfBirthAtom, "1995-01-01");
+    store.set(registerTermsAcceptedAtom, false);
+    expect(store.get(registerValidationAtom)).toBe(
+      "You must accept the Terms of Service and Privacy Policy to create an account.",
     );
   });
 });
@@ -148,6 +166,7 @@ describe("resetRegisterFormAtom", () => {
     store.set(registerPasswordAtom, "password1");
     store.set(registerConfirmPasswordAtom, "password1");
     store.set(registerDateOfBirthAtom, "1995-01-01");
+    store.set(registerTermsAcceptedAtom, true);
     store.set(authErrorAtom, "Username already taken");
 
     store.set(resetRegisterFormAtom);
@@ -158,6 +177,7 @@ describe("resetRegisterFormAtom", () => {
     expect(store.get(registerPasswordAtom)).toBe("");
     expect(store.get(registerConfirmPasswordAtom)).toBe("");
     expect(store.get(registerDateOfBirthAtom)).toBe("");
+    expect(store.get(registerTermsAcceptedAtom)).toBe(false);
     expect(store.get(authErrorAtom)).toBeNull();
   });
 });
