@@ -20,6 +20,7 @@ const validFields: RegisterFields = {
   password: "password1",
   confirmPassword: "password1",
   dateOfBirth: "1995-01-01",
+  termsAccepted: true,
 };
 
 // The exact strings the rules return. Named here so a table reads as the rule
@@ -35,6 +36,8 @@ const PASSWORD_MISMATCH = "Passwords do not match.";
 const DOB_REQUIRED = "Date of Birth is required.";
 const DOB_INVALID = "Please enter a valid date of birth.";
 const DOB_AGE = "You must be at least 15 years old to create an account.";
+const TERMS_REQUIRED =
+  "You must accept the Terms of Service and Privacy Policy to create an account.";
 
 /** "YYYY-MM-DD" in UTC for the given date. */
 function iso(d: Date): string {
@@ -128,6 +131,11 @@ describe("validateRegister", () => {
     );
   });
 
+  it("requires the Terms of Service and Privacy Policy acceptance box", () => {
+    expect(validateRegister({ ...validFields, termsAccepted: false })).toBe(TERMS_REQUIRED);
+    expect(validateRegister({ ...validFields, termsAccepted: true })).toBeNull();
+  });
+
   // Rule order is the point: a submission violating several rules at once must
   // surface the FIRST one a person would see fixed in the real form, not just
   // any true violation. Each row loosens exactly one field relative to the row
@@ -143,6 +151,7 @@ describe("validateRegister", () => {
           password: "1",
           confirmPassword: "2",
           dateOfBirth: "",
+          termsAccepted: true,
         },
         USERNAME_REQUIRED,
       ],
@@ -156,6 +165,7 @@ describe("validateRegister", () => {
           password: "1",
           confirmPassword: "2",
           dateOfBirth: "",
+          termsAccepted: true,
         },
         USERNAME_LENGTH,
       ],
@@ -169,6 +179,7 @@ describe("validateRegister", () => {
           password: "1",
           confirmPassword: "2",
           dateOfBirth: "",
+          termsAccepted: true,
         },
         USERNAME_CHARS,
       ],
@@ -181,6 +192,7 @@ describe("validateRegister", () => {
           password: "1",
           confirmPassword: "2",
           dateOfBirth: "",
+          termsAccepted: true,
         },
         NAME_REQUIRED,
       ],
@@ -193,6 +205,7 @@ describe("validateRegister", () => {
           password: "1",
           confirmPassword: "2",
           dateOfBirth: "",
+          termsAccepted: true,
         },
         EMAIL_INVALID,
       ],
@@ -205,6 +218,7 @@ describe("validateRegister", () => {
           password: "short",
           confirmPassword: "different",
           dateOfBirth: "",
+          termsAccepted: true,
         },
         PASSWORD_LENGTH,
       ],
@@ -217,8 +231,35 @@ describe("validateRegister", () => {
           password: "password1",
           confirmPassword: "password2",
           dateOfBirth: yearsAgo(15, 1),
+          termsAccepted: true,
         },
         PASSWORD_MISMATCH,
+      ],
+      [
+        "date of birth beats terms acceptance",
+        {
+          username: "alice",
+          name: "Alice",
+          email: "alice@example.com",
+          password: "password1",
+          confirmPassword: "password1",
+          dateOfBirth: yearsAgo(15, 1),
+          termsAccepted: false,
+        },
+        DOB_AGE,
+      ],
+      [
+        "terms acceptance is the last gate before submit",
+        {
+          username: "alice",
+          name: "Alice",
+          email: "alice@example.com",
+          password: "password1",
+          confirmPassword: "password1",
+          dateOfBirth: yearsAgo(15),
+          termsAccepted: false,
+        },
+        TERMS_REQUIRED,
       ],
     ];
 

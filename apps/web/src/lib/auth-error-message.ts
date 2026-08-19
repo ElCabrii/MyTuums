@@ -18,6 +18,8 @@ const validationMessages = {
   "Date of Birth is required.": () => m.validation_dob_required(),
   "Please enter a valid date of birth.": () => m.validation_dob_invalid(),
   "You must be at least 15 years old to create an account.": () => m.validation_dob_age(),
+  "You must accept the Terms of Service and Privacy Policy to create an account.": () =>
+    m.validation_terms_required(),
   // Shared byte-for-byte with `BIO_TOO_LONG_MESSAGE` in
   // `@my-tuums/auth/rules`. The database hook in packages/auth/src/profile.ts
   // enforces it; the client check is a courtesy anyone can skip.

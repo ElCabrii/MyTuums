@@ -9,6 +9,7 @@ import {
   registerEmailAtom,
   registerNameAtom,
   registerPasswordAtom,
+  registerTermsAcceptedAtom,
   registerUsernameAtom,
   registerValidationAtom,
   resetRegisterFormAtom,
@@ -43,7 +44,7 @@ const redirectSearchSchema = z.object({ redirect: z.string().optional() });
  * session updating — navigation is owned by `useRedirectWhenSignedIn` (see the
  * double-navigation note in the submit handler).
  */
-function RegisterPage() {
+export function RegisterPage() {
   const { redirect: redirectFromSearch } = Route.useSearch();
   useRedirectWhenSignedIn(redirectFromSearch);
 
@@ -53,6 +54,7 @@ function RegisterPage() {
   const [password, setPassword] = useAtom(registerPasswordAtom);
   const [confirmPassword, setConfirmPassword] = useAtom(registerConfirmPasswordAtom);
   const [dateOfBirth, setDateOfBirth] = useAtom(registerDateOfBirthAtom);
+  const [termsAccepted, setTermsAccepted] = useAtom(registerTermsAcceptedAtom);
   const validationError = useAtomValue(registerValidationAtom);
   const [error, setError] = useAtom(authErrorAtom);
   const isSubmitting = useAtomValue(authPendingAtom);
@@ -223,6 +225,30 @@ function RegisterPage() {
                 autoComplete="bday"
                 required
               />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-start gap-2.5 text-sm">
+              <input
+                id="termsAccepted"
+                type="checkbox"
+                checked={termsAccepted}
+                onChange={(e) => setTermsAccepted(e.target.checked)}
+                aria-labelledby="terms-acceptance-label"
+                className="border-border accent-primary mt-0.5 h-4 w-4 rounded"
+              />
+              <span id="terms-acceptance-label" className="text-muted-foreground">
+                {m.auth_register_terms_before()}
+                <Link to="/terms" className="text-link font-medium hover:underline">
+                  {m.legal_terms_of_service()}
+                </Link>
+                {m.auth_register_terms_mid()}
+                <Link to="/privacy" className="text-link font-medium hover:underline">
+                  {m.legal_privacy_policy()}
+                </Link>
+                {m.auth_register_terms_after()}
+              </span>
             </div>
           </div>
 
