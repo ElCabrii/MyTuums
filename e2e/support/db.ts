@@ -143,6 +143,27 @@ export async function clearDateOfBirth(userId: string): Promise<void> {
   await db.update(user).set({ dateOfBirth: null }).where(eq(user.id, userId));
 }
 
+/**
+ * Nulls out a user's recorded legal consent, reproducing an OAuth or passkey
+ * sign-up — neither has anywhere to present the acceptance box, so those
+ * accounts land with both columns null (issue #157). Accounts created before
+ * the record existed have the same shape.
+ *
+ * Same honesty as `clearUsername`: a real provider round trip cannot run in
+ * this suite, and what the gate gets asked about is the *columns being
+ * unset*, not the path that left them that way.
+ */
+export async function clearLegalConsent(userId: string): Promise<void> {
+  assertTestDatabase();
+  const db = await getDb();
+  const { user } = await schemaModulePromise;
+
+  await db
+    .update(user)
+    .set({ legalAcceptedAt: null, legalVersion: null })
+    .where(eq(user.id, userId));
+}
+
 /** A post as the seeding helpers return it — id, content, and the explicit createdAt they were inserted with. */
 export interface SeededPost {
   id: string;

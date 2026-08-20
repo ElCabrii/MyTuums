@@ -50,7 +50,10 @@ Each of these is a deliberate, non-default setting. The inline comment in
   legal consent dialog records them. The rule is wired to `create.before`
   alone: `lastLoginMethod({ storeInDatabase: true })` updates the row it just
   created from inside the same sign-up request, and that update carries no
-  consent fields.
+  consent fields. Enforcement for every other path is the oRPC gate on
+  `protectedProcedure` in `packages/api`, which refuses an account whose
+  record is absent or stale; both read `hasCurrentLegalConsent` from
+  `src/rules.ts`.
 - **OAuth credentials are all-or-nothing per provider.** A half-set pair must
   never render a button that fails at the token exchange; `src/env.ts` treats
   an empty string as absent, and `apps/server/src/env.ts` refuses to boot on a

@@ -20,7 +20,9 @@ both by the server's page gate and by the client.
   recording existed remain without a recorded acceptance. Signed-in accounts
   that have never recorded legal consent, or whose recorded legal version is
   stale, are held on any page by a global consent dialog until they accept the
-  current Terms of Service and Privacy Policy.
+  current Terms of Service and Privacy Policy — and the API refuses them
+  independently of the dialog, so the hold is not something a browser can be
+  talked out of.
 - **Two-factor** authentication (TOTP, plus email codes) and **passkeys**
   (WebAuthn).
 - **OAuth sign-in with Google, Discord and Twitch.** _Configuration-dependent_:

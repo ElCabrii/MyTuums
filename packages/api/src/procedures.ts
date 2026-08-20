@@ -1,4 +1,5 @@
 import { ORPCError, os } from "@orpc/server";
+import { hasCurrentLegalConsent, LEGAL_CONSENT_REQUIRED_MESSAGE } from "@my-tuums/auth/rules";
 import type { Context } from "./context.js";
 import type { RateLimitPolicy } from "./rate-limit.js";
 import { roleAtLeast, type UserRole } from "./roles.js";
@@ -112,10 +113,44 @@ export function rateLimitCapability(
  * there is no anonymous surface (issue #36; `publicProcedure` used to sit
  * here for the five/eight reads that stayed public, and is now gone).
  */
-export const protectedProcedure = base.use(({ context, next }) => {
-  if (!context.session?.user) throw new ORPCError("UNAUTHORIZED");
-  return next({ context: { ...context, user: context.session.user } });
-});
+export const protectedProcedure = base
+  .use(({ context, next }) => {
+    if (!context.session?.user) throw new ORPCError("UNAUTHORIZED");
+    return next({ context: { ...context, user: context.session.user } });
+  })
+  /**
+   * The legal consent gate (issues #157, #158).
+   *
+   * `packages/auth`'s create hook refuses a `/sign-up/email` that carries no
+   * acceptance, but it is structurally unable to cover the other creation
+   * paths: an OAuth or passkey sign-up has nowhere to put a checkbox, so
+   * those accounts exist before anyone can be asked. Accounts that predate
+   * the record have the same shape, as does anyone whose acceptance is for a
+   * superseded version.
+   *
+   * So the record is enforced again here, at use rather than at creation.
+   * The web app's consent dialog asks for it, but a dialog is a courtesy
+   * anyone can skip — this is the half that holds, and it is why the gate
+   * lives on `protectedProcedure` rather than on the procedures someone
+   * remembered to mark.
+   *
+   * What stays reachable is deliberate, and all of it is outside oRPC:
+   * accepting runs through `authClient.updateUser`, the /welcome handle and
+   * date-of-birth claim through the same, and signing out and reading the
+   * documents never touch a procedure. `moderation.appealOpen` builds from
+   * `baseProcedure`, so a banned account can still be heard without first
+   * being asked to accept anything.
+   *
+   * FORBIDDEN, not UNAUTHORIZED: the session is valid and the caller is who
+   * they say they are — there is simply something they owe first. Signing
+   * them out would lose the session they need in order to accept.
+   */
+  .use(({ context, next }) => {
+    if (!hasCurrentLegalConsent(context.user)) {
+      throw new ORPCError("FORBIDDEN", { message: LEGAL_CONSENT_REQUIRED_MESSAGE });
+    }
+    return next();
+  });
 
 /**
  * Denies with FORBIDDEN when the caller's role is below the minimum.

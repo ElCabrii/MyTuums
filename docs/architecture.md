@@ -200,6 +200,19 @@ with none), requiring legal acceptance on the email/password sign-up path
 sign-up makes to its own row), and refusing the client image writes only the
 upload procedure may make.
 
+Legal acceptance is the one rule with a second enforcement point, because the
+hook cannot reach every account that needs it: an OAuth or passkey sign-up has
+nowhere to present a checkbox, so it creates an account before anyone can be
+asked, and accounts predating the record have the same shape. So
+`protectedProcedure` in `packages/api/src/procedures.ts` refuses any caller
+whose record is absent or names a superseded version. The two enforcement
+points read one predicate — `hasCurrentLegalConsent` in
+`packages/auth/src/rules.ts` — which the web app's consent dialog reads too, so
+the hook, the gate and the browser cannot disagree about who still owes an
+acceptance. Everything that gate leaves reachable sits outside oRPC on
+purpose: accepting and the `/welcome` claim go through the auth client, and
+signing out and reading the documents touch no procedure at all.
+
 **Build-time versus runtime OAuth configuration** is the subtlety worth
 knowing. The server registers a provider only when _both_ halves of its
 credential pair exist (`packages/auth/src/social.ts`). The browser cannot read
