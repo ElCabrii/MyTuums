@@ -15,7 +15,7 @@ over HTTP and imports only its browser-safe subpaths.
 | File                        | Why                                                                                                                                                                                      |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/router.ts`             | The five groups and what owns each.                                                                                                                                                      |
-| `src/procedures.ts`         | The four gates, the two rate-limit mechanisms, the one exception.                                                                                                                        |
+| `src/procedures.ts`         | The four gates, the legal consent gate, the two rate-limit mechanisms, the one exception.                                                                                                |
 | `src/context.ts`            | What every handler is handed, and why nothing is a module global.                                                                                                                        |
 | `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                                                                                                                                  |
 | `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                                                                                                                       |
@@ -55,6 +55,16 @@ over HTTP and imports only its browser-safe subpaths.
 - **`baseProcedure` has exactly one consumer.** `moderation.appealOpen` is the
   app's one anonymous surface, and it is HMAC-capability-gated because a
   banned user cannot sign in to appeal. Anything else built on it is a bug.
+- **`protectedProcedure` carries the legal consent gate.** An account whose
+  recorded acceptance is absent or names a superseded version is refused
+  FORBIDDEN, because `packages/auth`'s create hook can only cover
+  `/sign-up/email` — an OAuth or passkey sign-up has nowhere to put a
+  checkbox, so those accounts exist before anyone can be asked. It lives on
+  the gate every procedure is built from rather than on the ones someone
+  remembered to mark, and `hasCurrentLegalConsent` in `@my-tuums/auth/rules`
+  is the single reader the web dialog shares. Accepting, the `/welcome` claim,
+  signing out and reading the documents all run outside oRPC, which is what
+  keeps the gate from locking out the very people it is asking.
 - **Appeal intake lives in `src/appeal-intake.ts`, and only there.**
   `moderation.appealOpen` validates its input shape and calls `openAppeal`;
   it owns nothing else. The module treats the email link and the removed-post

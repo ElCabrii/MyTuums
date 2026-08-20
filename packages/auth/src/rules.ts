@@ -232,6 +232,31 @@ export const LEGAL_VERSION = "2026-08-02";
 export const LEGAL_ACCEPTANCE_REQUIRED_MESSAGE =
   "You must accept the Terms of Service and Privacy Policy to create an account.";
 
+/**
+ * Refusal for a signed-in account whose recorded consent is absent or not
+ * `LEGAL_VERSION`. Distinct from the sign-up string above, which talks about
+ * creating an account: by the time this one is reached the account exists and
+ * the ask is to accept the current documents before carrying on.
+ */
+export const LEGAL_CONSENT_REQUIRED_MESSAGE =
+  "You must accept the current Terms of Service and Privacy Policy to continue.";
+
+/**
+ * Whether a recorded acceptance is the current one.
+ *
+ * The single reader of "is this account's consent good?", shared by the oRPC
+ * gate in packages/api and the web app's consent dialog so the server and the
+ * browser cannot disagree about who has to be asked. Absent evidence is not
+ * consent: an account created before the record existed, or through a path
+ * that could not carry it, reads as stale here.
+ */
+export function hasCurrentLegalConsent(consent: {
+  legalAcceptedAt?: Date | string | null;
+  legalVersion?: string | null;
+}): boolean {
+  return Boolean(consent.legalAcceptedAt) && consent.legalVersion === LEGAL_VERSION;
+}
+
 // --------------------------------------------------------------------------
 // Bio
 // --------------------------------------------------------------------------

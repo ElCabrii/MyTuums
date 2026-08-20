@@ -99,6 +99,16 @@ Anything else building on `baseProcedure` is a bug.
 - **`hasValidSession` fails open.** A database blip degrades to "the client
   gate decides", never to a mass sign-out — a deliberate availability trade
   that the client-side gate still backstops.
+- **Legal consent is refused server-side, not just asked for.** The dialog in
+  the web app is a courtesy; `protectedProcedure` is the control. An account
+  with no recorded acceptance, or one naming a superseded version, gets
+  FORBIDDEN from every procedure — which is what covers the creation paths the
+  sign-up hook cannot see (OAuth, passkey, and accounts predating the record).
+  Deliberately reachable without consent, all outside oRPC: accepting, the
+  `/welcome` claim, signing out, and the documents themselves. So is
+  `moderation.appealOpen`, which builds from `baseProcedure` — a banned
+  account must be able to appeal without first being asked to accept
+  anything.
 
 ### Redirects
 
