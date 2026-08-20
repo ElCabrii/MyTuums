@@ -55,9 +55,7 @@ export function LegalConsentDialog() {
       <DialogContent showCloseButton={false} className="max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {mode === "missing"
-              ? m.legal_consent_missing_title()
-              : m.legal_consent_update_title()}
+            {mode === "missing" ? m.legal_consent_missing_title() : m.legal_consent_update_title()}
           </DialogTitle>
           <DialogDescription>
             {mode === "missing"

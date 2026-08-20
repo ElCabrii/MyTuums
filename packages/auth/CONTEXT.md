@@ -9,13 +9,13 @@ nothing else — no routes, no UI, no queries beyond the adapter.
 
 ## Start here
 
-| File            | Why                                                                                                 |
-| --------------- | --------------------------------------------------------------------------------------------------- |
-| `src/index.ts`  | The production instance. Every non-default setting is load-bearing and carries an inline comment.   |
-| `src/rules.ts`  | The account rules, stated once. Browser-safe, import-free, read by the whole repo.                  |
-| `src/social.ts` | Provider registration and `trustedProviders`, the account-linking control.                          |
-| `src/env.ts`    | Quiet env resolution — missing values make a feature absent, never a crash.                         |
-| `src/email.ts`  | The only place mail is sent, plus the en/fr copy.                                                   |
+| File            | Why                                                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts`  | The production instance. Every non-default setting is load-bearing and carries an inline comment.                        |
+| `src/rules.ts`  | The account rules, stated once. Browser-safe, import-free, read by the whole repo.                                       |
+| `src/social.ts` | Provider registration and `trustedProviders`, the account-linking control.                                               |
+| `src/env.ts`    | Quiet env resolution — missing values make a feature absent, never a crash.                                              |
+| `src/email.ts`  | The only place mail is sent, plus the en/fr copy.                                                                        |
 | `src/legal.ts`  | The email/password sign-up consent hook; OAuth/passkey consent is recorded by the web app's global legal consent dialog. |
 
 ## Change map
