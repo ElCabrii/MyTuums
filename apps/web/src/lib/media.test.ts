@@ -168,6 +168,23 @@ describe("createDisplayVariant", () => {
     expect(encoded.name).toBe("avatar-display.png");
   });
 
+  it("allows a photographic-sized PNG fallback for the full-resolution banner", async () => {
+    // A browser without WebP encoding can produce a multi-megabyte PNG. This
+    // is larger than the old 2 MB banner cap, but within the re-derived 8 MB.
+    const size = 3 * 1024 * 1024;
+    stubEncodePath({
+      toBlob: new Blob([new Uint8Array(size)], { type: "image/png" }),
+      width: 3000,
+      height: 1000,
+    });
+
+    const encoded = await createDisplayVariant(file("image/jpeg"), "banner");
+
+    expect(encoded.size).toBe(size);
+    expect(encoded.type).toBe("image/png");
+    expect(encoded.name).toBe("banner-display.png");
+  });
+
   it("keeps webp when the canvas produced webp", async () => {
     stubEncodePath({ toBlob: new Blob([new Uint8Array(64)], { type: "image/webp" }) });
 

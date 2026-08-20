@@ -151,11 +151,12 @@ export type ImageKind = (typeof IMAGE_KINDS)[number];
  * - the **original** — the user's file, untouched. The byte cap is what
  *   bounds a hostile upload; a generous cap is fine because the megapixel
  *   rule below bounds the real cost (pixels, not bytes).
- * - the **display** object — the browser-made WebP the feeds render, so
- *   megabytes of original never travel down a timeline. Its byte cap and its
- *   `maxWidth`/`maxHeight` are checked against the actual payload, never a
- *   declared length: with the client re-encode gone from the mandatory path,
- *   these are what stop a hostile "display" object being an unbounded image.
+ * - the **display** object — the browser-made WebP (or PNG fallback) the feeds
+ *   render, so megabytes of original never travel down a timeline. Its byte
+ *   cap and its `maxWidth`/`maxHeight` are checked against the actual payload,
+ *   never a declared length: with the client re-encode gone from the mandatory
+ *   path, these are what stop a hostile "display" object being an unbounded
+ *   image.
  */
 export const IMAGE_LIMITS = {
   avatar: {
@@ -166,12 +167,13 @@ export const IMAGE_LIMITS = {
   },
   banner: {
     maxOriginalBytes: 8 * 1024 * 1024,
-    maxDisplayBytes: 2 * 1024 * 1024,
-    // 2x the largest render size: the profile banner fills a max-w-[1500px]
-    // container at h-48/h-64 with object-cover, so on a 2x DPR display the
-    // browser wants ~3000px of source width to stay sharp. The 3:1 aspect
-    // matches the previous 1500x500 cap; only the resolution doubles. A
-    // 3000x1000 WebP at canvas quality is well under the 2 MB display cap.
+    // The banner renders full-bleed (`w-full`), outside the profile's
+    // max-w-[1500px] content wrapper. This 3000x1000 ceiling is a deliberate
+    // cost/sharpness tradeoff: it gives 2x-DPR coverage at a 1500px CSS-wide
+    // desktop viewport without turning every larger monitor into a 5K asset.
+    // The 3:1 aspect is unchanged, and the byte cap scales with the fourfold
+    // pixel-area increase from 1500x500.
+    maxDisplayBytes: 8 * 1024 * 1024,
     maxWidth: 3000,
     maxHeight: 1000,
   },
