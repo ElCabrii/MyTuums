@@ -7,6 +7,7 @@ import { db } from "@my-tuums/db";
 import { authRateLimitEnabled, passkeyRpId, webOrigin } from "./env.js";
 import { validateDateOfBirthHook } from "./dob.js";
 import { validateProfileFieldsHook } from "./profile.js";
+import { validateLegalAcceptanceHook } from "./legal.js";
 import { isAllowedUsernameCharset, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "./rules.js";
 import {
   localeFromRequest,
@@ -33,6 +34,23 @@ type AuthUserWrite = Parameters<typeof validateDateOfBirthHook>[0] &
 const validateUserWrite = async (user: AuthUserWrite): Promise<void> => {
   await validateDateOfBirthHook(user);
   await validateProfileFieldsHook(user);
+};
+
+/**
+ * The create path also carries the legal-acceptance rule, which the update
+ * path must NOT: consent is a condition of *creating* an account, and
+ * `lastLoginMethod({ storeInDatabase: true })` updates the row it just made
+ * from inside the same `/sign-up/email` request. Running the rule on that
+ * update rejected it — the body is `{ lastLoginMethod }` and carries no
+ * consent — which left `last_login_method` unset on every sign-up and logged
+ * a Better Auth error on each one.
+ */
+const validateUserCreate = async (
+  user: AuthUserWrite & Parameters<typeof validateLegalAcceptanceHook>[0],
+  context: Parameters<typeof validateLegalAcceptanceHook>[1],
+): Promise<void> => {
+  await validateUserWrite(user);
+  await validateLegalAcceptanceHook(user, context);
 };
 
 /**
@@ -153,18 +171,28 @@ export const auth = betterAuth({
       // theme.ts and locale.ts for the resolution order.
       themePreference: { type: "string", required: false },
       localePreference: { type: "string", required: false },
+
+      // Consent evidence for the Legal documents. The
+      // email/password sign-up path requires both; existing accounts and
+      // OAuth/passkey sign-ups leave them null until the web app's global
+      // legal consent dialog records them.
+      legalAcceptedAt: { type: "date", required: false },
+      legalVersion: { type: "string", required: false },
     },
   },
 
   databaseHooks: {
     user: {
-      // Both creation paths — email/password and OAuth — run these. Each rule
-      // returns early on an absent value, so a sign-up that supplies none of
-      // these fields passes through untouched.
-      create: { before: validateUserWrite },
+      // Both creation paths — email/password and OAuth — run these. The
+      // date-of-birth and profile rules return early on an absent value, so a
+      // sign-up that supplies none of those fields passes through untouched;
+      // legal acceptance is the exception and is required, on `/sign-up/email`
+      // only (see ./legal.ts and validateUserCreate above).
+      create: { before: validateUserCreate },
       // updateUser is how the /welcome claim and every settings edit arrive;
-      // same rules, and this is the only place they actually hold — the
-      // columns are bare `text` and the client's checks are skippable.
+      // the same field rules, and this is the only place they actually hold —
+      // the columns are bare `text` and the client's checks are skippable.
+      // Deliberately not the legal rule: see validateUserCreate.
       update: { before: validateUserWrite },
     },
   },

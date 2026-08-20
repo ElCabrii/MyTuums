@@ -3,6 +3,7 @@ import { request as httpRequest } from "node:http";
 import { gunzipSync } from "node:zlib";
 import { E2E } from "../../playwright.config";
 import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
+import { legalConsentBody } from "../../support/users";
 
 // This project's baseURL is the server (E2E.serverUrl) — see the `api`
 // project in playwright.config.ts.
@@ -159,6 +160,7 @@ test.describe("JSON response compression", () => {
         password: "headers-spec-password",
         name: "Headers Spec",
         username,
+        ...legalConsentBody(),
       },
     });
     expect(signUp.ok(), await signUp.text()).toBe(true);

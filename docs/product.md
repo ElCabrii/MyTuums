@@ -15,7 +15,12 @@ both by the server's page gate and by the client.
 - Email and password sign-up, with a handle (username), a date of birth,
   and an explicit acceptance of the Terms of Service and Privacy Policy.
   Accounts must be at least 15 years old; the rule is enforced identically on
-  the client and in a database hook.
+  the client and in a database hook. Consent is recorded on the account as a
+  timestamp plus the accepted legal version; accounts created before this
+  recording existed remain without a recorded acceptance. Signed-in accounts
+  that have never recorded legal consent, or whose recorded legal version is
+  stale, are held on any page by a global consent dialog until they accept the
+  current Terms of Service and Privacy Policy.
 - **Two-factor** authentication (TOTP, plus email codes) and **passkeys**
   (WebAuthn).
 - **OAuth sign-in with Google, Discord and Twitch.** _Configuration-dependent_:

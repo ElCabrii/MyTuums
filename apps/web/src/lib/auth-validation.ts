@@ -30,6 +30,7 @@ import {
   BIO_TOO_LONG_MESSAGE,
   DOB_INVALID_MESSAGE,
   DOB_UNDER_AGE_MESSAGE,
+  LEGAL_ACCEPTANCE_REQUIRED_MESSAGE,
   isAtLeastYearsOld,
   isBioWithinLimit,
   parseDateOnlyParts,
@@ -61,8 +62,8 @@ export type RegisterFields = {
   confirmPassword: string;
   /** "YYYY-MM-DD" — the value of the native date input, before `dateOfBirthToIso`. */
   dateOfBirth: string;
-  /** The unticked-by-default consent box for the Terms of Service and Privacy Policy. */
-  termsAccepted: boolean;
+  /** The unticked-by-default consent box for the Legal documents. */
+  legalAccepted: boolean;
 };
 
 /**
@@ -140,8 +141,8 @@ export function validateRegister(fields: RegisterFields): string | null {
   if (fields.password !== fields.confirmPassword) return "Passwords do not match.";
   const dateOfBirthError = validateDateOfBirth(fields.dateOfBirth);
   if (dateOfBirthError) return dateOfBirthError;
-  if (!fields.termsAccepted) {
-    return "You must accept the Terms of Service and Privacy Policy to create an account.";
+  if (!fields.legalAccepted) {
+    return LEGAL_ACCEPTANCE_REQUIRED_MESSAGE;
   }
   return null;
 }

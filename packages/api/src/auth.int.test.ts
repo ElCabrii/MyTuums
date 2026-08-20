@@ -12,7 +12,13 @@ import { base32 } from "@better-auth/utils/base32";
 import { createOTP } from "@better-auth/utils/otp";
 import { desc, eq, like } from "drizzle-orm";
 import { auth } from "@my-tuums/auth";
-import { BIO_MAX_LENGTH, LOCALE_PREFERENCES, THEME_PREFERENCES } from "@my-tuums/auth/rules";
+import {
+  BIO_MAX_LENGTH,
+  LOCALE_PREFERENCES,
+  LEGAL_ACCEPTANCE_REQUIRED_MESSAGE,
+  LEGAL_VERSION,
+  THEME_PREFERENCES,
+} from "@my-tuums/auth/rules";
 import { authTest, testHelpers } from "@my-tuums/auth/testing";
 import { closeDb, db } from "@my-tuums/db";
 import { passkey, twoFactor, user, verification } from "@my-tuums/db/schema";
@@ -63,7 +69,14 @@ class CookieJar {
 
 /** Signs up through the real instance and returns a jar carrying the session. */
 async function signUp(
-  overrides: { username?: string; email?: string; password?: string; dateOfBirth?: Date } = {},
+  overrides: {
+    username?: string;
+    email?: string;
+    password?: string;
+    dateOfBirth?: Date;
+    legalAcceptedAt?: Date | string | null;
+    legalVersion?: string | null;
+  } = {},
 ) {
   const uuid = randomUUID();
   const email = overrides.email ?? `vitest+${uuid}@example.com`;
@@ -74,10 +87,20 @@ async function signUp(
     password: overrides.password ?? PASSWORD,
     name: "Vitest User",
     username,
+    legalAcceptedAt: new Date(),
+    legalVersion: LEGAL_VERSION,
   };
   // Omitted unless a test says otherwise — the wire format the web app sends
   // (`dateOfBirthToIso` in apps/web/src/lib/auth-validation.ts).
   if (overrides.dateOfBirth) body.dateOfBirth = overrides.dateOfBirth;
+  if (overrides.legalAcceptedAt !== undefined) {
+    // SAFETY: the test deliberately crosses the typed client boundary to send
+    // the wire values the hook parses; the production client sends a string.
+    body.legalAcceptedAt = overrides.legalAcceptedAt as never;
+  }
+  if (overrides.legalVersion !== undefined) {
+    body.legalVersion = overrides.legalVersion;
+  }
 
   const result = await auth.api.signUpEmail({
     body,
@@ -308,6 +331,8 @@ describe("date of birth requirement", () => {
           name: "Vitest User",
           username: `vitest${randomUUID().replace(/-/g, "").slice(0, 8)}`,
           dateOfBirth: dob(15, 1),
+          legalAcceptedAt: new Date(),
+          legalVersion: LEGAL_VERSION,
         },
       }),
     ).rejects.toThrow("You must be at least 15 years old to create an account.");
@@ -343,6 +368,8 @@ describe("date of birth requirement", () => {
           name: "Vitest User",
           username: `vitest${randomUUID().replace(/-/g, "").slice(0, 8)}`,
           dateOfBirth: impossibleDate,
+          legalAcceptedAt: new Date(),
+          legalVersion: LEGAL_VERSION,
         },
       }),
     ).rejects.toThrow("Please enter a valid date of birth.");
@@ -361,6 +388,89 @@ describe("date of birth requirement", () => {
 
     const session = await auth.api.getSession({ headers });
     expect(session?.user.dateOfBirth).toBeDefined();
+  });
+});
+
+/**
+ * Legal acceptance, server-side. The hook in
+ * packages/auth/src/legal.ts is deliberately narrower than the other user
+ * hooks: it requires consent only on `/sign-up/email`, because that is the
+ * one path that presents the checkbox. Existing accounts and OAuth/passkey
+ * sign-ups remain `NULL`; issue #157 owns the remaining creation paths.
+ */
+describe("legal acceptance", () => {
+  it("records the accepted timestamp and version on email/password sign-up", async () => {
+    const { email } = await signUp();
+
+    const [row] = await db.select().from(user).where(eq(user.email, email));
+    expect(row?.legalAcceptedAt).toBeInstanceOf(Date);
+    expect(row?.legalVersion).toBe(LEGAL_VERSION);
+  });
+
+  it("rejects email/password sign-up without consent and creates no row", async () => {
+    const email = `vitest+${randomUUID()}@example.com`;
+    await expect(
+      auth.api.signUpEmail({
+        body: {
+          email,
+          password: PASSWORD,
+          name: "Vitest User",
+          username: `vitest${randomUUID().replace(/-/g, "").slice(0, 8)}`,
+        },
+      }),
+    ).rejects.toThrow(LEGAL_ACCEPTANCE_REQUIRED_MESSAGE);
+
+    const rows = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("rejects a stale legal version rather than recording consent against it", async () => {
+    const email = `vitest+${randomUUID()}@example.com`;
+    await expect(
+      auth.api.signUpEmail({
+        body: {
+          email,
+          password: PASSWORD,
+          name: "Vitest User",
+          username: `vitest${randomUUID().replace(/-/g, "").slice(0, 8)}`,
+          legalAcceptedAt: new Date(),
+          legalVersion: "2020-01-01",
+        },
+      }),
+    ).rejects.toThrow(LEGAL_ACCEPTANCE_REQUIRED_MESSAGE);
+
+    const rows = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
+    expect(rows).toHaveLength(0);
+  });
+
+  /**
+   * Sign-up must leave the writes it makes to its own row alone.
+   * `lastLoginMethod({ storeInDatabase: true })` updates the row it just
+   * created from inside the same `/sign-up/email` request, carrying no
+   * consent fields — which is why the rule runs on `create.before` only and
+   * not on `update.before` (packages/auth/src/index.ts's
+   * `validateUserCreate`). Wiring it to both left `last_login_method` unset
+   * and logged a Better Auth error on every sign-up.
+   *
+   * Note the limit of this assertion: `auth.api.signUpEmail` is a direct
+   * call, and the inner update does not inherit the `/sign-up/email` path the
+   * way it does over HTTP, so this does not fail under the old wiring. The
+   * E2E stack is where that showed up. Kept because the column being
+   * populated by sign-up alone is the behaviour worth pinning.
+   */
+  it("records lastLoginMethod on sign-up alone, with no sign-in after it", async () => {
+    const { email } = await signUp();
+
+    const [row] = await db.select().from(user).where(eq(user.email, email));
+    expect(row?.lastLoginMethod).toBe("email");
+  });
+
+  it("does not require consent on updateUser — existing accounts and partial edits pass", async () => {
+    const { headers } = await signUp();
+
+    await expect(
+      auth.api.updateUser({ body: { name: "Renamed" }, headers }),
+    ).resolves.toBeDefined();
   });
 });
 

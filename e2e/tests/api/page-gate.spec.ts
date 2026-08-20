@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { legalConsentBody } from "../../support/users";
 
 // This project's baseURL is the server (E2E.serverUrl) — see the `api`
 // project in playwright.config.ts.
@@ -47,6 +48,7 @@ test.describe("page gate", () => {
         password: "page-gate-probe-password",
         name: "Page Gate Probe",
         username,
+        ...legalConsentBody(),
       },
     });
     expect(signUp.ok(), await signUp.text()).toBe(true);
@@ -95,6 +97,7 @@ test.describe("media gate", () => {
         password: "media-gate-probe-password",
         name: "Media Gate Probe",
         username,
+        ...legalConsentBody(),
       },
     });
     expect(signUp.ok(), await signUp.text()).toBe(true);

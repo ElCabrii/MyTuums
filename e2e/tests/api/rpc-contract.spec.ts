@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { legalConsentBody } from "../../support/users";
 
 // This project's baseURL is the server (E2E.serverUrl) — see the `api`
 // project in playwright.config.ts.
@@ -43,6 +44,7 @@ test.describe("oRPC contract", () => {
         password: "malformed-body-probe-password",
         name: "Malformed Body Probe",
         username,
+        ...legalConsentBody(),
       },
     });
     expect(signUp.ok(), await signUp.text()).toBe(true);
@@ -81,6 +83,7 @@ test.describe("oRPC contract", () => {
         password: "rate-limit-probe-password",
         name: "Rate Limit Probe",
         username,
+        ...legalConsentBody(),
       },
     });
     expect(signUp.ok(), await signUp.text()).toBe(true);

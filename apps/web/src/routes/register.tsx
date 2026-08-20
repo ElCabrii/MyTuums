@@ -9,7 +9,7 @@ import {
   registerEmailAtom,
   registerNameAtom,
   registerPasswordAtom,
-  registerTermsAcceptedAtom,
+  registerLegalAcceptedAtom,
   registerUsernameAtom,
   registerValidationAtom,
   resetRegisterFormAtom,
@@ -54,7 +54,7 @@ export function RegisterPage() {
   const [password, setPassword] = useAtom(registerPasswordAtom);
   const [confirmPassword, setConfirmPassword] = useAtom(registerConfirmPasswordAtom);
   const [dateOfBirth, setDateOfBirth] = useAtom(registerDateOfBirthAtom);
-  const [termsAccepted, setTermsAccepted] = useAtom(registerTermsAcceptedAtom);
+  const [legalAccepted, setLegalAccepted] = useAtom(registerLegalAcceptedAtom);
   const validationError = useAtomValue(registerValidationAtom);
   const [error, setError] = useAtom(authErrorAtom);
   const isSubmitting = useAtomValue(authPendingAtom);
@@ -77,7 +77,7 @@ export function RegisterPage() {
     // No navigate here — success flows through the session updating, which
     // useRedirectWhenSignedIn picks up. Calling it here too was the old
     // double-navigation bug.
-    await signUp({ username, name, email, password, dateOfBirth });
+    await signUp({ username, name, email, password, dateOfBirth, legalAccepted });
   };
 
   return (
@@ -230,15 +230,15 @@ export function RegisterPage() {
 
           <div className="flex items-start gap-2.5 text-sm">
             <input
-              id="termsAccepted"
+              id="legalAccepted"
               type="checkbox"
-              checked={termsAccepted}
-              onChange={(e) => setTermsAccepted(e.target.checked)}
-              aria-labelledby="terms-acceptance-label"
+              checked={legalAccepted}
+              onChange={(e) => setLegalAccepted(e.target.checked)}
+              aria-labelledby="legal-acceptance-label"
               className="border-border accent-primary mt-0.5 h-4 w-4 rounded"
             />
-            <span id="terms-acceptance-label" className="text-muted-foreground">
-              <label htmlFor="termsAccepted" className="cursor-pointer">
+            <span id="legal-acceptance-label" className="text-muted-foreground">
+              <label htmlFor="legalAccepted" className="cursor-pointer">
                 {m.auth_register_terms_before()}
               </label>
               <Link

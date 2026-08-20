@@ -46,6 +46,8 @@ export const authTest = betterAuth({
       bannerImageOriginal: { type: "string", required: false },
       themePreference: { type: "string", required: false },
       localePreference: { type: "string", required: false },
+      legalAcceptedAt: { type: "date", required: false },
+      legalVersion: { type: "string", required: false },
     },
   },
 

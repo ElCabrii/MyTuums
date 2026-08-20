@@ -9,26 +9,27 @@ nothing else — no routes, no UI, no queries beyond the adapter.
 
 ## Start here
 
-| File            | Why                                                                                               |
-| --------------- | ------------------------------------------------------------------------------------------------- |
-| `src/index.ts`  | The production instance. Every non-default setting is load-bearing and carries an inline comment. |
-| `src/rules.ts`  | The account rules, stated once. Browser-safe, import-free, read by the whole repo.                |
-| `src/social.ts` | Provider registration and `trustedProviders`, the account-linking control.                        |
-| `src/env.ts`    | Quiet env resolution — missing values make a feature absent, never a crash.                       |
-| `src/email.ts`  | The only place mail is sent, plus the en/fr copy.                                                 |
+| File            | Why                                                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts`  | The production instance. Every non-default setting is load-bearing and carries an inline comment.                        |
+| `src/rules.ts`  | The account rules, stated once. Browser-safe, import-free, read by the whole repo.                                       |
+| `src/social.ts` | Provider registration and `trustedProviders`, the account-linking control.                                               |
+| `src/env.ts`    | Quiet env resolution — missing values make a feature absent, never a crash.                                              |
+| `src/email.ts`  | The only place mail is sent, plus the en/fr copy.                                                                        |
+| `src/legal.ts`  | The email/password sign-up consent hook; OAuth/passkey consent is recorded by the web app's global legal consent dialog. |
 
 ## Change map
 
-| Intent                            | Primary                        | Also touch                                                                                                       |
-| --------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| Add or change an OAuth provider   | `src/social.ts`                | `../../apps/server/src/env.ts`, `../../.env.example`, `VITE_SOCIAL_PROVIDERS`, `apps/web/src/lib/auth-client.ts` |
-| Change an auth email              | `src/email.ts`                 | both locales in the same file                                                                                    |
-| Translate an auth error           | `src/i18n.ts`                  | `apps/web/src/lib/auth-error-message.ts`                                                                         |
-| Change a user-field rule          | `src/rules.ts`                 | nothing — the hooks, both handle forms and `packages/api` all read it. Keep the file import-free                 |
-| Change how a violation is refused | `src/dob.ts`, `src/profile.ts` | the `APIError` translation only; the rule itself belongs in `src/rules.ts`                                       |
-| Change session or plugin config   | `src/index.ts`                 | read the inline comment first; several settings are pinned                                                       |
-| Change an auth rate limit         | `src/index.ts` (`customRules`) | these are security controls, not tuning                                                                          |
-| Add a test-only helper            | `src/testing.ts`               | never import it from application code                                                                            |
+| Intent                            | Primary                                        | Also touch                                                                                                       |
+| --------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Add or change an OAuth provider   | `src/social.ts`                                | `../../apps/server/src/env.ts`, `../../.env.example`, `VITE_SOCIAL_PROVIDERS`, `apps/web/src/lib/auth-client.ts` |
+| Change an auth email              | `src/email.ts`                                 | both locales in the same file                                                                                    |
+| Translate an auth error           | `src/i18n.ts`                                  | `apps/web/src/lib/auth-error-message.ts`                                                                         |
+| Change a user-field rule          | `src/rules.ts`                                 | nothing — the hooks, both handle forms and `packages/api` all read it. Keep the file import-free                 |
+| Change how a violation is refused | `src/dob.ts`, `src/profile.ts`, `src/legal.ts` | the `APIError` translation only; the rule itself belongs in `src/rules.ts`                                       |
+| Change session or plugin config   | `src/index.ts`                                 | read the inline comment first; several settings are pinned                                                       |
+| Change an auth rate limit         | `src/index.ts` (`customRules`)                 | these are security controls, not tuning                                                                          |
+| Add a test-only helper            | `src/testing.ts`                               | never import it from application code                                                                            |
 
 ## Invariants
 
@@ -43,6 +44,13 @@ Each of these is a deliberate, non-default setting. The inline comment in
   none of them. `imageOriginal` and `bannerImageOriginal` are `input: false` —
   only the upload procedure in `packages/api` writes them, via Drizzle,
   bypassing hooks.
+- **Legal acceptance is required only on `/sign-up/email`, and only on
+  create.** The consent timestamp and version are nullable so existing
+  accounts and OAuth/passkey sign-ups remain `NULL` until the web app's global
+  legal consent dialog records them. The rule is wired to `create.before`
+  alone: `lastLoginMethod({ storeInDatabase: true })` updates the row it just
+  created from inside the same sign-up request, and that update carries no
+  consent fields.
 - **OAuth credentials are all-or-nothing per provider.** A half-set pair must
   never render a button that fails at the token exchange; `src/env.ts` treats
   an empty string as absent, and `apps/server/src/env.ts` refuses to boot on a
@@ -73,11 +81,12 @@ Each of these is a deliberate, non-default setting. The inline comment in
   module load in a browser; one `better-auth` import drags server code into the
   SPA bundle. Everything it holds is a plain value or a pure function: nothing
   throws, and nothing knows which side is calling.
-- **`src/dob.ts` and `src/profile.ts` are adapters, not rules.** What belongs
+- **`src/dob.ts`, `src/profile.ts` and `src/legal.ts` are adapters, not rules.** What belongs
   in them is what only a server does — `APIError` translation, permitting an
-  absent date of birth on the OAuth creation path, and the provider-image and
-  `input: false` original-image protections, which guard writes no client
-  should be making rather than restating something a form also checks.
+  absent date of birth on the OAuth creation path, requiring consent on the
+  email/password sign-up path, and the provider-image and `input: false`
+  original-image protections, which guard writes no client should be making
+  rather than restating something a form also checks.
   Restating a bound or a message in either file re-opens the drift the single
   module closes.
 - **`src/testing.ts` is reachable only as `@my-tuums/auth/testing`.** It mints

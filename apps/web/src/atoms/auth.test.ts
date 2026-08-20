@@ -4,12 +4,13 @@ import { installTestAuthClient } from "@/lib/auth-client";
 
 type AuthClientResult = { data: unknown; error: unknown };
 
-const { signInEmail, signInUsername, signInPasskey } = vi.hoisted(() => ({
+const { signInEmail, signInUsername, signInPasskey, signUpEmail } = vi.hoisted(() => ({
   signInEmail: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
   signInUsername: vi.fn((): Promise<AuthClientResult> =>
     Promise.resolve({ data: {}, error: null }),
   ),
   signInPasskey: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
+  signUpEmail: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
 }));
 
 // SAFETY: the recording fakes resolve the { data, error } shapes the app reads
@@ -21,10 +22,14 @@ installTestAuthClient({
       username: signInUsername,
       passkey: signInPasskey,
     },
+    signUp: {
+      email: signUpEmail,
+    },
   },
 });
 
-import { authErrorAtom, signInAtom, signInWithPasskeyAtom } from "@/atoms/auth";
+import { authErrorAtom, signInAtom, signInWithPasskeyAtom, signUpAtom } from "@/atoms/auth";
+import { LEGAL_VERSION } from "@my-tuums/auth/rules";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -110,5 +115,52 @@ describe("signInWithPasskeyAtom", () => {
     signInPasskey.mockResolvedValueOnce({ data: { user: { id: "u1" } }, error: null });
 
     await expect(store.set(signInWithPasskeyAtom)).resolves.toBe("signed-in");
+  });
+});
+
+describe("signUpAtom", () => {
+  it("sends legal acceptance evidence only when the box is checked", async () => {
+    const store = createStore();
+
+    await store.set(signUpAtom, {
+      username: "alice",
+      name: "Alice",
+      email: "alice@example.com",
+      password: "password1",
+      dateOfBirth: "1995-01-01",
+      legalAccepted: true,
+    });
+
+    // SAFETY: Vitest's asymmetric matcher is intentionally passed through
+    // `unknown`; `objectContaining` recognizes it at runtime by shape.
+    const isoDateMatcher: unknown = expect.stringMatching(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+    ) as unknown;
+    expect(signUpEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        legalVersion: LEGAL_VERSION,
+        legalAcceptedAt: isoDateMatcher,
+      }),
+    );
+  });
+
+  it("omits legal acceptance evidence when the box is unchecked", async () => {
+    const store = createStore();
+
+    await store.set(signUpAtom, {
+      username: "alice",
+      name: "Alice",
+      email: "alice@example.com",
+      password: "password1",
+      dateOfBirth: "1995-01-01",
+      legalAccepted: false,
+    });
+
+    expect(signUpEmail).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        legalAcceptedAt: undefined,
+        legalVersion: undefined,
+      }),
+    );
   });
 });
