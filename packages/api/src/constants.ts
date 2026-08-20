@@ -167,8 +167,13 @@ export const IMAGE_LIMITS = {
   banner: {
     maxOriginalBytes: 8 * 1024 * 1024,
     maxDisplayBytes: 2 * 1024 * 1024,
-    maxWidth: 1500,
-    maxHeight: 500,
+    // 2x the largest render size: the profile banner fills a max-w-[1500px]
+    // container at h-48/h-64 with object-cover, so on a 2x DPR display the
+    // browser wants ~3000px of source width to stay sharp. The 3:1 aspect
+    // matches the previous 1500x500 cap; only the resolution doubles. A
+    // 3000x1000 WebP at canvas quality is well under the 2 MB display cap.
+    maxWidth: 3000,
+    maxHeight: 1000,
   },
 } as const satisfies Record<
   ImageKind,
