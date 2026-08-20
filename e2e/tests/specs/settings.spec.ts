@@ -197,7 +197,7 @@ test.describe("images", () => {
     await page.goto("/settings/account");
     // A landscape banner, which is the shape a banner actually is — and the
     // shape that regressed. The display object encodes at 1200x400, so its
-    // width is well past the slot's 500px HEIGHT bound: a parser that confuses
+    // width is just past the slot's 1000px HEIGHT bound: a parser that confuses
     // the two axes rejects this as "too large" and passes a square or a 1x1.
     await page.getByLabel("Banner").setInputFiles({
       name: "banner.png",
