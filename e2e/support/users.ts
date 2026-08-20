@@ -8,6 +8,21 @@
  * the handle from here instead, so a fixture rename is a one-line change.
  */
 
+import { LEGAL_VERSION } from "@my-tuums/auth/rules";
+
+/**
+ * The legal-consent evidence every seeded account has to carry.
+ *
+ * `/sign-up/email` refuses a body without it (packages/auth/src/legal.ts), and
+ * an account that somehow got in without it is held on every page by the
+ * global consent dialog — either way a seeded fixture that omits this breaks
+ * the spec that uses it. Spread into the sign-up body, the same way
+ * `dateOfBirth` is converted to its wire form at each call site.
+ */
+export function legalConsentBody() {
+  return { legalAcceptedAt: new Date().toISOString(), legalVersion: LEGAL_VERSION };
+}
+
 /**
  * A fixture account — the shape `auth.setup.ts` signs up and storage-state
  * files are named after, so specs never hardcode "alice"/"bob".

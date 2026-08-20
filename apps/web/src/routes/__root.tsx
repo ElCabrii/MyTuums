@@ -4,6 +4,7 @@ import { useAtomValue } from "jotai";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { NotFoundPage } from "@/components/not-found-page";
+import { LegalConsentDialog } from "@/components/legal-consent-dialog";
 import { themeClassEffect } from "@/atoms/theme";
 import { localeDocumentEffect, localePreferenceEffect } from "@/atoms/locale";
 import { isSignedInAtom, sessionSettledAtom, sessionSettledEffect } from "@/atoms/session";
@@ -92,6 +93,11 @@ function RootLayout() {
         <ReportDialog />
         <BlockDialog />
       </Suspense>
+      {/* Mounted unconditionally: the dialog owns the whole decision — signed
+          in, consent missing or stale, and not currently on one of the legal
+          documents itself. Duplicating half of that here would let the two
+          drift. */}
+      <LegalConsentDialog />
     </div>
   );
 }

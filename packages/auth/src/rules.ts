@@ -213,6 +213,26 @@ export function usernameRuleViolation(username: string): string | null {
 }
 
 // --------------------------------------------------------------------------
+// Legal acceptance
+// --------------------------------------------------------------------------
+
+/**
+ * The machine-readable version of the Legal documents
+ * accepted at sign-up. The legal pages render the same date as
+ * `legal_terms_updated` / `legal_privacy_updated`; this value is what the
+ * database stores so consent can be demonstrated without parsing prose.
+ */
+export const LEGAL_VERSION = "2026-08-02";
+
+/**
+ * Rejection for an email/password sign-up that did not record consent. The
+ * wording names the two documents, not the internal "legal" model, because
+ * this exact string is a key of `apps/web/src/lib/auth-error-message.ts`.
+ */
+export const LEGAL_ACCEPTANCE_REQUIRED_MESSAGE =
+  "You must accept the Terms of Service and Privacy Policy to create an account.";
+
+// --------------------------------------------------------------------------
 // Bio
 // --------------------------------------------------------------------------
 

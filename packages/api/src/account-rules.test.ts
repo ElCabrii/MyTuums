@@ -14,6 +14,8 @@ import {
   MINIMUM_AGE_YEARS,
   parseDateOfBirthParts,
   parseDateOnlyParts,
+  LEGAL_ACCEPTANCE_REQUIRED_MESSAGE,
+  LEGAL_VERSION,
   THEME_PREFERENCE_INVALID_MESSAGE,
   THEME_PREFERENCES,
   USERNAME_CHARACTERS_MESSAGE,
@@ -218,7 +220,14 @@ describe("rejection messages", () => {
     );
     expect(DOB_INVALID_MESSAGE).toBe("Please enter a valid date of birth.");
     expect(DOB_UNDER_AGE_MESSAGE).toBe("You must be at least 15 years old to create an account.");
+    expect(LEGAL_ACCEPTANCE_REQUIRED_MESSAGE).toBe(
+      "You must accept the Terms of Service and Privacy Policy to create an account.",
+    );
     expect(THEME_PREFERENCE_INVALID_MESSAGE).toBe("Please choose a valid theme.");
     expect(LOCALE_PREFERENCE_INVALID_MESSAGE).toBe("Please choose a valid language.");
+  });
+
+  it("pins the legal version to the legal pages' last-updated date", () => {
+    expect(LEGAL_VERSION).toBe("2026-08-02");
   });
 });

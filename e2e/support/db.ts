@@ -2,6 +2,7 @@ import { and, desc, eq, like, sql } from "drizzle-orm";
 import { assertTestDatabase, databaseNameOf, resolveTestDatabaseUrl } from "@my-tuums/db/testing";
 import type { UserRole } from "@my-tuums/api/roles";
 import { E2E } from "../playwright.config";
+import { legalConsentBody } from "./users";
 
 /**
  * Same fix-up `global-setup.ts` needs, for the same reason: `@my-tuums/db`
@@ -89,6 +90,7 @@ export async function createUser(input: CreateUserInput): Promise<CreatedUser> {
       // The ISO form the web form sends (dateOfBirthToIso in the web app) —
       // same contract, so the server stores the same instant either way.
       dateOfBirth: `${input.dateOfBirth}T00:00:00.000Z`,
+      ...legalConsentBody(),
     }),
   });
 

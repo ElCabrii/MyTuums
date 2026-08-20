@@ -4,6 +4,7 @@ import { clearViewerState } from "@/atoms/session-teardown";
 import { authClient, type SocialProviderId } from "@/lib/auth-client";
 import { waitForSignedOut } from "@/lib/session-sync";
 import { dateOfBirthToIso } from "@/lib/auth-validation";
+import { LEGAL_VERSION } from "@my-tuums/auth/rules";
 import { sanitizeRedirect } from "@/lib/redirect";
 import { offerTwoFactorAtom } from "@/atoms/onboarding";
 import { m } from "@/paraglide/messages.js";
@@ -100,6 +101,8 @@ interface SignUpEmailBody {
   name: string;
   username: string;
   dateOfBirth?: string;
+  legalAcceptedAt?: string;
+  legalVersion?: string;
 }
 
 /**
@@ -274,6 +277,8 @@ type SignUpArgs = {
   password: string;
   /** "YYYY-MM-DD" from the form; converted to the UTC-midnight wire format here. */
   dateOfBirth: string;
+  /** The checked consent box; only true sends the server-side acceptance evidence. */
+  legalAccepted: boolean;
 };
 
 /**
@@ -291,6 +296,10 @@ export const signUpAtom = atom(null, async (_get, set, fields: SignUpArgs): Prom
       username: fields.username.trim(),
       dateOfBirth: dateOfBirthToIso(fields.dateOfBirth),
     };
+    if (fields.legalAccepted) {
+      body.legalAcceptedAt = new Date().toISOString();
+      body.legalVersion = LEGAL_VERSION;
+    }
     // SAFETY: The server accepts dateOfBirth (user.additionalFields in
     // packages/auth/src/index.ts); better-auth 1.6.25's client types don't
     // surface it on the sign-up body — see lib/auth-client.ts's sessionStore cast.

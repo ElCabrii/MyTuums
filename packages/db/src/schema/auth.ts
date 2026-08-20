@@ -33,6 +33,8 @@ export const user = pgTable("user", {
   bannerImageOriginal: text("banner_image_original"),
   themePreference: text("theme_preference"),
   localePreference: text("locale_preference"),
+  legalAcceptedAt: timestamp("legal_accepted_at", { withTimezone: true }),
+  legalVersion: text("legal_version"),
 });
 
 export const session = pgTable(

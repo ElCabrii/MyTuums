@@ -3,7 +3,7 @@ import path from "node:path";
 import { expect, test as setup, type APIRequestContext } from "@playwright/test";
 import { E2E } from "../playwright.config";
 import { getUserId, setUserRole } from "../support/db";
-import { ALICE, FIXTURE_USERS, type FixtureUser } from "../support/users";
+import { ALICE, FIXTURE_USERS, legalConsentBody, type FixtureUser } from "../support/users";
 
 // Lives under `tests/` rather than at the package root: playwright.config.ts
 // sets `testDir: "./tests"`, and Playwright only ever discovers spec files by
@@ -40,6 +40,7 @@ async function ensureFixtureSession(request: APIRequestContext, user: FixtureUse
       // The ISO form the web form sends — without it, alice/bob would park at
       // /welcome on their first navigation and the whole suite would break.
       dateOfBirth: `${user.dateOfBirth}T00:00:00.000Z`,
+      ...legalConsentBody(),
     },
   });
 

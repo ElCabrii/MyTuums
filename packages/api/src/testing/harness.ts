@@ -13,6 +13,7 @@ import { auth } from "@my-tuums/auth";
 import { db } from "@my-tuums/db";
 import { assertTestDatabase } from "@my-tuums/db/testing";
 import { post, user } from "@my-tuums/db/schema";
+import { LEGAL_VERSION } from "@my-tuums/auth/rules";
 import type { Context, EmailSender } from "../context.js";
 import { createRateLimiter, type RateLimiter } from "../rate-limit.js";
 import type { UserRole } from "../roles.js";
@@ -167,6 +168,8 @@ export async function createTestUser(overrides?: {
       password: "vitest-Sup3rSecret!",
       name,
       username,
+      legalAcceptedAt: new Date(),
+      legalVersion: LEGAL_VERSION,
     },
     returnHeaders: true,
   });

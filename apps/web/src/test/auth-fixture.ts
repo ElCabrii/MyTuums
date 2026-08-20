@@ -1,4 +1,5 @@
 import { afterEach, vi } from "vitest";
+import { LEGAL_VERSION } from "@my-tuums/auth/rules";
 import {
   installTestAuthClient,
   type SocialProviderId,
@@ -37,6 +38,8 @@ export interface TestSessionUser {
    */
   themePreference?: string | null;
   localePreference?: string | null;
+  legalAcceptedAt?: Date | string | null;
+  legalVersion?: string | null;
   /** Read by `/settings/account`'s two-factor section to decide on/off. */
   twoFactorEnabled?: boolean | null;
   /**
@@ -235,6 +238,8 @@ export function signedInSession(user: Partial<TestSessionUser> = {}): TestSessio
         bannerImage: null,
         themePreference: null,
         localePreference: null,
+        legalAcceptedAt: new Date("2026-08-02T00:00:00.000Z"),
+        legalVersion: LEGAL_VERSION,
         // The unprivileged default every account starts at — see the
         // `role` field's doc comment above.
         role: "user",

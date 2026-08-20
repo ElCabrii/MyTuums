@@ -1,10 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RegisterPage } from "@/routes/register";
-import { authClient } from "@/lib/auth-client";
+import { authClient, type AuthClientAction } from "@/lib/auth-client";
 import { m } from "@/paraglide/messages.js";
+import { LEGAL_VERSION } from "@my-tuums/auth/rules";
+
+type SignUpEmailBody = {
+  legalAcceptedAt?: string;
+  legalVersion?: string;
+};
 
 /**
  * The E2E specs locate this box by its accessible name (`/I have read and
@@ -19,13 +25,13 @@ import { m } from "@/paraglide/messages.js";
  * the copy. `stringContaining` also keeps punctuation in the messages from
  * being read as regex metacharacters.
  */
-const termsNameParts = [
+const legalNameParts = [
   m.auth_register_terms_before().trim(),
   m.legal_terms_of_service(),
   m.legal_privacy_policy(),
 ];
 
-describe("RegisterPage — Terms & Privacy acceptance (issue #153)", () => {
+describe("RegisterPage — Legal acceptance (issue #153)", () => {
   it("blocks submission while the acceptance box is unticked and shows the translated error", async () => {
     await renderWithProviders(<RegisterPage />, { initialPath: "/register" });
     const user = userEvent.setup();
@@ -39,10 +45,10 @@ describe("RegisterPage — Terms & Privacy acceptance (issue #153)", () => {
 
     // The page has exactly one checkbox, so no name filter is needed to find
     // it — and `getByRole` fails loudly if a second one ever appears.
-    const termsBox = screen.getByRole("checkbox");
-    expect(termsBox).not.toBeChecked();
-    for (const part of termsNameParts) {
-      expect(termsBox).toHaveAccessibleName(expect.stringContaining(part));
+    const legalBox = screen.getByRole("checkbox");
+    expect(legalBox).not.toBeChecked();
+    for (const part of legalNameParts) {
+      expect(legalBox).toHaveAccessibleName(expect.stringContaining(part));
     }
     expect(screen.getByRole("link", { name: m.legal_terms_of_service() })).toHaveAttribute(
       "href",
@@ -76,5 +82,14 @@ describe("RegisterPage — Terms & Privacy acceptance (issue #153)", () => {
     await user.click(screen.getByRole("button", { name: m.auth_register() }));
 
     await waitFor(() => expect(authClient.signUp.email).toHaveBeenCalled());
+
+    // SAFETY: the recording fake is called with the sign-up body at runtime;
+    // the test narrows only the two fields this issue adds.
+    const signUpEmailMock = vi.mocked(authClient.signUp.email as AuthClientAction);
+    // SAFETY: the recording fake is called with the sign-up body at runtime;
+    // the test narrows only the two fields this issue adds.
+    const body = signUpEmailMock.mock.calls[0]?.[0] as SignUpEmailBody;
+    expect(body.legalVersion).toBe(LEGAL_VERSION);
+    expect(body.legalAcceptedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 });

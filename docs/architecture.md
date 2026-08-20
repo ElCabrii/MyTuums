@@ -187,15 +187,18 @@ is deliberately no session cookie cache, because a revoked session must stop
 authenticating immediately.
 
 User-field rules are enforced by the `databaseHooks` in
-`packages/auth/src/dob.ts` and `packages/auth/src/profile.ts` — the only place
-they hold, because these columns are bare `text` and the browser's checks are
-skippable. Those hooks are thin: the rules themselves live in
+`packages/auth/src/dob.ts`, `packages/auth/src/profile.ts` and
+`packages/auth/src/legal.ts` — the only place they hold, because these columns
+are bare `text` and the browser's checks are skippable. Those hooks are thin:
+the rules themselves live in
 `packages/auth/src/rules.ts`, which the browser reads too, so the hook and the
 form cannot come to disagree about what a valid handle, bio or date of birth
 is. What stays in the hooks is what only a server does — turning a violation
 into an `APIError`, permitting an absent date of birth (OAuth sign-ups arrive
-with none), and refusing the client image writes only the upload procedure may
-make.
+with none), requiring legal acceptance on the email/password sign-up path
+(`create.before` only — the update hook has to stay open for the writes
+sign-up makes to its own row), and refusing the client image writes only the
+upload procedure may make.
 
 **Build-time versus runtime OAuth configuration** is the subtlety worth
 knowing. The server registers a provider only when _both_ halves of its

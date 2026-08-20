@@ -20,7 +20,7 @@ const validFields: RegisterFields = {
   password: "password1",
   confirmPassword: "password1",
   dateOfBirth: "1995-01-01",
-  termsAccepted: true,
+  legalAccepted: true,
 };
 
 // The exact strings the rules return. Named here so a table reads as the rule
@@ -36,7 +36,7 @@ const PASSWORD_MISMATCH = "Passwords do not match.";
 const DOB_REQUIRED = "Date of Birth is required.";
 const DOB_INVALID = "Please enter a valid date of birth.";
 const DOB_AGE = "You must be at least 15 years old to create an account.";
-const TERMS_REQUIRED =
+const LEGAL_REQUIRED =
   "You must accept the Terms of Service and Privacy Policy to create an account.";
 
 /** "YYYY-MM-DD" in UTC for the given date. */
@@ -131,9 +131,9 @@ describe("validateRegister", () => {
     );
   });
 
-  it("requires the Terms of Service and Privacy Policy acceptance box", () => {
-    expect(validateRegister({ ...validFields, termsAccepted: false })).toBe(TERMS_REQUIRED);
-    expect(validateRegister({ ...validFields, termsAccepted: true })).toBeNull();
+  it("requires the Legal documents acceptance box", () => {
+    expect(validateRegister({ ...validFields, legalAccepted: false })).toBe(LEGAL_REQUIRED);
+    expect(validateRegister({ ...validFields, legalAccepted: true })).toBeNull();
   });
 
   // Rule order is the point: a submission violating several rules at once must
@@ -151,7 +151,7 @@ describe("validateRegister", () => {
           password: "1",
           confirmPassword: "2",
           dateOfBirth: "",
-          termsAccepted: true,
+          legalAccepted: true,
         },
         USERNAME_REQUIRED,
       ],
@@ -165,7 +165,7 @@ describe("validateRegister", () => {
           password: "1",
           confirmPassword: "2",
           dateOfBirth: "",
-          termsAccepted: true,
+          legalAccepted: true,
         },
         USERNAME_LENGTH,
       ],
@@ -179,7 +179,7 @@ describe("validateRegister", () => {
           password: "1",
           confirmPassword: "2",
           dateOfBirth: "",
-          termsAccepted: true,
+          legalAccepted: true,
         },
         USERNAME_CHARS,
       ],
@@ -192,7 +192,7 @@ describe("validateRegister", () => {
           password: "1",
           confirmPassword: "2",
           dateOfBirth: "",
-          termsAccepted: true,
+          legalAccepted: true,
         },
         NAME_REQUIRED,
       ],
@@ -205,7 +205,7 @@ describe("validateRegister", () => {
           password: "1",
           confirmPassword: "2",
           dateOfBirth: "",
-          termsAccepted: true,
+          legalAccepted: true,
         },
         EMAIL_INVALID,
       ],
@@ -218,7 +218,7 @@ describe("validateRegister", () => {
           password: "short",
           confirmPassword: "different",
           dateOfBirth: "",
-          termsAccepted: true,
+          legalAccepted: true,
         },
         PASSWORD_LENGTH,
       ],
@@ -231,12 +231,12 @@ describe("validateRegister", () => {
           password: "password1",
           confirmPassword: "password2",
           dateOfBirth: yearsAgo(15, 1),
-          termsAccepted: true,
+          legalAccepted: true,
         },
         PASSWORD_MISMATCH,
       ],
       [
-        "date of birth beats terms acceptance",
+        "date of birth beats legal acceptance",
         {
           username: "alice",
           name: "Alice",
@@ -244,12 +244,12 @@ describe("validateRegister", () => {
           password: "password1",
           confirmPassword: "password1",
           dateOfBirth: yearsAgo(15, 1),
-          termsAccepted: false,
+          legalAccepted: false,
         },
         DOB_AGE,
       ],
       [
-        "terms acceptance is the last gate before submit",
+        "legal acceptance is the last gate before submit",
         {
           username: "alice",
           name: "Alice",
@@ -257,9 +257,9 @@ describe("validateRegister", () => {
           password: "password1",
           confirmPassword: "password1",
           dateOfBirth: yearsAgo(15),
-          termsAccepted: false,
+          legalAccepted: false,
         },
-        TERMS_REQUIRED,
+        LEGAL_REQUIRED,
       ],
     ];
 

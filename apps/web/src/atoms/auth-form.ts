@@ -30,8 +30,8 @@ export const registerPasswordAtom = atomWithReset("");
 export const registerConfirmPasswordAtom = atomWithReset("");
 /** The register form's date-of-birth field, in "YYYY-MM-DD" from the native input. */
 export const registerDateOfBirthAtom = atomWithReset("");
-/** The register form's Terms of Service and Privacy Policy acceptance box. */
-export const registerTermsAcceptedAtom = atomWithReset(false);
+/** The register form's Legal documents acceptance box. */
+export const registerLegalAcceptedAtom = atomWithReset(false);
 
 /** The forgot-password form's email field. */
 export const forgotPasswordEmailAtom = atomWithReset("");
@@ -78,7 +78,7 @@ export const resetRegisterFormAtom = atom(null, (_get, set) => {
   set(registerPasswordAtom, RESET);
   set(registerConfirmPasswordAtom, RESET);
   set(registerDateOfBirthAtom, RESET);
-  set(registerTermsAcceptedAtom, RESET);
+  set(registerLegalAcceptedAtom, RESET);
   set(authErrorAtom, null);
 });
 
@@ -113,7 +113,7 @@ export const registerValidationAtom = atom((get) =>
     password: get(registerPasswordAtom),
     confirmPassword: get(registerConfirmPasswordAtom),
     dateOfBirth: get(registerDateOfBirthAtom),
-    termsAccepted: get(registerTermsAcceptedAtom),
+    legalAccepted: get(registerLegalAcceptedAtom),
   }),
 );
 

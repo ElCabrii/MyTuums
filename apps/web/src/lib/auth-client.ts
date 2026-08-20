@@ -104,6 +104,8 @@ type SessionWithDeclaredFields = ReturnType<typeof useSession> & {
       bannerImage: string | null;
       themePreference: string | null;
       localePreference: string | null;
+      legalAcceptedAt: Date | string | null;
+      legalVersion: string | null;
       // The moderation system's role and ban fields (issue #38), typed off
       // the wire exactly like the additionalFields above: the admin plugin's
       // schema reaches this client only as JSON. `role` defaults to "user"

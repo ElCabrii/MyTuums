@@ -29,6 +29,7 @@ app's build from the same origin.
 | Add or change copy           | `messages/en.json`, `messages/fr.json`                          | recompile; never touch `src/paraglide`                                                                                                                                                                     |
 | Router-touching behaviour    | `src/hooks/`                                                    | never an atom — see the invariants                                                                                                                                                                         |
 | Change an auth flow page     | `src/routes/` + `src/atoms/auth.ts`                             | `src/lib/auth-validation.ts` (form policy only — the rules live in `@my-tuums/auth/rules`)                                                                                                                 |
+| Change the legal consent gate | `src/atoms/legal-consent.ts`, `src/components/legal-consent-dialog.tsx` | `LEGAL_VERSION` in `@my-tuums/auth/rules`; `e2e/support/users.ts` seeds consent for every fixture                                                                                                          |
 | Add a moderation surface     | `src/atoms/moderation.ts`, `src/components/moderation/`         | `src/hooks/use-require-role.ts`                                                                                                                                                                            |
 
 ## Invariants
@@ -68,6 +69,12 @@ app's build from the same origin.
 - **Exactly one effect owns each redirect.** Auth pages call
   `useRedirectWhenSignedIn` and never navigate on success themselves;
   double-navigation races were real bugs.
+- **The legal consent gate decides everything itself.** `LegalConsentDialog`
+  is mounted unconditionally in `__root.tsx`; it reads whether the viewer is
+  signed in, whether their recorded `legalVersion` is current, and whether the
+  current path is one of the legal documents. Re-stating any of that at the
+  mount point lets the two halves drift, and the path check is what keeps an
+  undismissable modal off the very pages it links to.
 - **Callback URLs given to better-auth must be absolute**
   (`window.location.origin`). A relative one resolves against the API origin
   and dead-ends in dev.
