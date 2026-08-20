@@ -118,10 +118,7 @@ const WEBP = new Uint8Array([
 function pngWithDimensions(width: number, height: number, size = 24): Uint8Array {
   const bytes = new Uint8Array(size);
   bytes.set(PNG.slice(0, 8));
-  bytes.set(
-    [(width >>> 24) & 0xff, (width >>> 16) & 0xff, (width >>> 8) & 0xff, width & 0xff],
-    16,
-  );
+  bytes.set([(width >>> 24) & 0xff, (width >>> 16) & 0xff, (width >>> 8) & 0xff, width & 0xff], 16);
   bytes.set(
     [(height >>> 24) & 0xff, (height >>> 16) & 0xff, (height >>> 8) & 0xff, height & 0xff],
     20,
