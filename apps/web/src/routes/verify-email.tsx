@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
@@ -7,6 +8,7 @@ import {
   verifyEmailAtom,
   verifyEmailSentAtom,
 } from "@/atoms/auth";
+import { resetVerifyEmailFormAtom } from "@/atoms/auth-form";
 import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";
 import { localizeAuthError } from "@/lib/auth-error-message";
 import { ErrorBanner } from "@/components/error-banner";
@@ -66,6 +68,14 @@ export function VerifyEmailPage() {
   const isSubmitting = useAtomValue(authPendingAtom);
   const error = useAtomValue(authErrorAtom);
   const resend = useSetAtom(resendVerificationEmailAtom);
+
+  // See auth-form.ts: resetting on unmount is what bounds this page's share of
+  // the auth atoms. Without it a failed resend stays in `authErrorAtom`, and
+  // "Back to sign in" renders it as a sign-in error on a form nobody has
+  // submitted yet. `verifyEmailAtom` deliberately survives — it belongs to the
+  // sign-up in progress, not to this page.
+  const resetForm = useSetAtom(resetVerifyEmailFormAtom);
+  useEffect(() => resetForm, [resetForm]);
 
   if (linkError) {
     return (

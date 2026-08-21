@@ -106,7 +106,10 @@ app's build from the same origin.
   two-factor box, the login fields). Restating a bound or a message here puts
   the client back out of step with the server it cannot see.
 - The client mirrors pinned server settings: no session cookie cache,
-  `requireEmailVerification: false`.
+  `requireEmailVerification: true`. Because verification is required, a
+  password sign-up returns no session — `/register` navigates to
+  `/verify-email` itself rather than waiting on `useRedirectWhenSignedIn`, and
+  `/login` does the same on the `EMAIL_NOT_VERIFIED` outcome.
 - In dev, Vite proxies `/rpc`, `/api/auth` and `/media` to the API on `:3001`.
 - Only two `VITE_*` variables are read: `VITE_SOCIAL_PROVIDERS` and
   `VITE_GOOGLE_CLIENT_ID`. Both are inlined at build time — see

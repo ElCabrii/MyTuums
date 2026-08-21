@@ -211,6 +211,16 @@ export const signInAtom = atom(
     set(twoFactorMethodsAtom, []);
     try {
       const isEmail = identifier.includes("@");
+      // Deliberately NO `callbackURL` here, even though `sendOnSignIn` uses it
+      // as the landing page of the verification link it re-sends. On the
+      // *success* path better-auth echoes `callbackURL` back as
+      // `{ redirect: true, url }`, and its always-on `redirectPlugin`
+      // (client/fetch-plugins.mjs) hard-assigns `window.location.href` to it —
+      // so passing one here would send every ordinary sign-in to
+      // `/verify-email` and blow away the SPA's own redirect. The resend's
+      // link therefore keeps better-auth's `/` default; a *valid* one still
+      // verifies and signs in, and `resendVerificationEmailAtom` — the resend
+      // this app actually drives — does pass `/verify-email`.
       const res = isEmail
         ? await authClient.signIn.email({ email: identifier.trim(), password })
         : await authClient.signIn.username({ username: identifier.trim(), password });
@@ -225,12 +235,15 @@ export const signInAtom = atom(
         // password on an account whose email was never verified. Better Auth
         // rejects the sign-in (no session) and `sendOnSignIn` has already
         // re-sent the verification email, so this navigates to the
-        // check-your-email screen rather than a "try again" banner. The
-        // identifier is only an email address on the email branch below; a
-        // username sign-in leaves `verifyEmailAtom` null and the route shows
-        // the pending state without a resend (the link was already sent).
+        // check-your-email screen rather than a "try again" banner.
+        //
+        // The username branch CLEARS the address rather than leaving it: a
+        // sign-up followed by a username sign-in for a different account would
+        // otherwise strand the first address here, and the resend button would
+        // mail the wrong one. Cleared, the page shows the pending state with no
+        // resend — correct, since `sendOnSignIn` just sent the link anyway.
         if (errorCodeOf(res.error) === "EMAIL_NOT_VERIFIED") {
-          if (isEmail) set(verifyEmailAtom, identifier.trim());
+          set(verifyEmailAtom, isEmail ? identifier.trim() : null);
           return { status: "verify-email" };
         }
         set(authErrorAtom, res.error.message || m.common_something_went_wrong());

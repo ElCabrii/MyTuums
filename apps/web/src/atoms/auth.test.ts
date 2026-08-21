@@ -131,6 +131,43 @@ describe("signInAtom", () => {
     expect(store.get(verifyEmailAtom)).toBeNull();
   });
 
+  it("clears a previous account's address when a different one signs in by username", async () => {
+    const store = createStore();
+    // Signed up as A, came back to /login without a reload, now signing in as
+    // B by handle. Leaving A's address behind would put a resend button on the
+    // pending screen that mails the wrong person.
+    store.set(verifyEmailAtom, "account-a@example.com");
+    signInUsername.mockResolvedValueOnce({
+      data: null,
+      error: { code: "EMAIL_NOT_VERIFIED", message: "Email not verified" },
+    });
+
+    await store.set(signInAtom, { identifier: "account-b", password: "whatever1" });
+
+    expect(store.get(verifyEmailAtom)).toBeNull();
+  });
+
+  it("sends no callbackURL, so a successful sign-in is never hard-redirected", async () => {
+    const store = createStore();
+    signInEmail.mockResolvedValueOnce({ data: { user: { id: "u1" } }, error: null });
+
+    await store.set(signInAtom, { identifier: "alice@example.com", password: "whatever1" });
+
+    // better-auth echoes `callbackURL` back as `{ redirect: true, url }` on the
+    // SUCCESS path, and its always-on `redirectPlugin` assigns
+    // `window.location.href` to it. Passing one to buy a nicer landing page for
+    // the `sendOnSignIn` resend link would therefore send every ordinary
+    // sign-in to `/verify-email` and blow away the SPA's own redirect.
+    // SAFETY: Vitest's asymmetric matcher is passed through `unknown` on
+    // purpose — `not.objectContaining` recognizes it by shape at runtime, and
+    // the surrounding assertion is what verifies the call actually happened.
+    const anyString: unknown = expect.any(String) as unknown;
+    expect(signInEmail).toHaveBeenCalledWith(
+      expect.not.objectContaining({ callbackURL: anyString }),
+    );
+    expect(signInUsername).not.toHaveBeenCalled();
+  });
+
   it('resolves "signed-in" and touches nothing on success', async () => {
     const store = createStore();
     signInUsername.mockResolvedValueOnce({ data: { user: { id: "u1" } }, error: null });

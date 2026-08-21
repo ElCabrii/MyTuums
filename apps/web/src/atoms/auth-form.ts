@@ -5,6 +5,7 @@ import {
   forgotPasswordSentAtom,
   resetPasswordDoneAtom,
   resetPasswordInvalidAtom,
+  verifyEmailSentAtom,
 } from "@/atoms/auth";
 import {
   validateEmail,
@@ -86,6 +87,21 @@ export const resetForgotPasswordFormAtom = atom(null, (_get, set) => {
   set(forgotPasswordEmailAtom, RESET);
   set(authErrorAtom, null);
   set(forgotPasswordSentAtom, false);
+});
+
+/**
+ * `/verify-email`'s page-scoped state (issue #172).
+ *
+ * `verifyEmailAtom` deliberately SURVIVES: it is the address of a sign-up
+ * still in progress, and `/login` sets it on its way here, so clearing it on
+ * unmount would take the resend button away from the very screen it belongs
+ * to. What is page-scoped is the outcome of a resend — the sent flag and any
+ * failure. Without this, a failed resend leaves `authErrorAtom` set and
+ * "Back to sign in" renders the resend failure as a sign-in error.
+ */
+export const resetVerifyEmailFormAtom = atom(null, (_get, set) => {
+  set(verifyEmailSentAtom, false);
+  set(authErrorAtom, null);
 });
 
 export const resetResetPasswordFormAtom = atom(null, (_get, set) => {

@@ -64,6 +64,30 @@ describe("VerifyEmailPage", () => {
     expect(store.get(verifyEmailSentAtom)).toBe(false);
   });
 
+  it("clears a failed resend on unmount, so /login does not inherit the error", async () => {
+    const store = createStore();
+    act(() => store.set(verifyEmailAtom, "pending@example.com"));
+    vi.mocked(authClient.sendVerificationEmail).mockResolvedValueOnce({
+      data: null,
+      error: { code: "TOO_MANY_REQUESTS", message: "Too many requests" },
+    });
+    const { unmount } = await renderWithProviders(<VerifyEmailPage />, {
+      store,
+      initialPath: "/verify-email",
+    });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: m.auth_verify_resend() }));
+
+    unmount();
+
+    expect(store.get(authErrorAtom)).toBeNull();
+    expect(store.get(verifyEmailSentAtom)).toBe(false);
+    // The pending address belongs to the sign-up in progress, not this page —
+    // /login sets it on the way here, so it must survive.
+    expect(store.get(verifyEmailAtom)).toBe("pending@example.com");
+  });
+
   // The anti-enumeration property: Better Auth appends a different code for a
   // token that expired, one that was tampered with, and one whose account no
   // longer exists. A visitor must not be able to tell those apart — all three
