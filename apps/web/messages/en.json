@@ -199,6 +199,7 @@
   "settings_image_remove_label": "Remove {label}",
   "settings_image_crop_title": "Adjust {label}",
   "settings_image_crop_hint": "Drag to reposition, scroll to zoom.",
+  "settings_banner_crop_safe_area": "Keep important content inside the outlined safe area. Responsive layouts may crop the edges.",
   "settings_image_crop_apply": "Apply",
   "settings_handle_title": "Handle",
   "settings_handle_description": "The @name people find you by.",

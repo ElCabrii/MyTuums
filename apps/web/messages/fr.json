@@ -199,6 +199,7 @@
   "settings_image_remove_label": "Supprimer : {label}",
   "settings_image_crop_title": "Ajuster : {label}",
   "settings_image_crop_hint": "Faites glisser pour repositionner, faites défiler pour zoomer.",
+  "settings_banner_crop_safe_area": "Gardez les éléments importants dans la zone délimitée. Les mises en page adaptatives peuvent rogner les bords.",
   "settings_image_crop_apply": "Appliquer",
   "settings_handle_title": "Pseudo",
   "settings_handle_description": "Le @pseudo par lequel on vous trouve.",
