@@ -68,13 +68,23 @@ beside a live dev stack rather than asking you to stop working first.
 Production runs on Railway, **always in a European region** — the app,
 Postgres and object storage in the same region.
 
-Three environments, and they do not do the same job:
+Four environments, and they do not do the same job:
 
-| Environment  | Runs the app | Postgres | Bucket          |
-| ------------ | ------------ | -------- | --------------- |
-| `production` | yes          | yes      | the live bucket |
-| `dev`        | no           | no       | dev bucket only |
-| `ci`         | no           | no       | ci bucket only  |
+| Environment  | Runs the app | Postgres | Bucket              | Deploy source         |
+| ------------ | ------------ | -------- | ------------------- | --------------------- |
+| `production` | yes          | yes      | the live bucket     | `main`                |
+| `Preview`    | yes          | yes      | Preview bucket only | active release branch |
+| `dev`        | no           | no       | dev bucket only     | none                  |
+| `ci`         | no           | no       | ci bucket only      | none                  |
+
+`Preview` is the release-candidate environment. It uses fresh, isolated data
+and storage and auto-deploys the active release branch. When a new release
+branch is opened, update the Preview service's Railway deployment trigger to
+that branch. Production continues to auto-deploy `main` only.
+
+Keep production third-party credentials out of Preview. OAuth, transactional
+email, and error-reporting integrations remain disabled there until dedicated
+non-production credentials are configured.
 
 `dev` and `ci` exist **only** to own a bucket. Postgres and the monorepo run
 locally or on a CI runner; Railway's dev and ci environments never run the
