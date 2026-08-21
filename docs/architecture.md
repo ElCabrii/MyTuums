@@ -239,6 +239,22 @@ sides by CI. See [operations.md](operations.md).
   post cards and settings preview for free. Re-cropping means re-uploading;
   the retained original is what makes that lossless. The server is unaffected:
   it validates the display object on its own bounds, exactly as before.
+- **The editor frames what the encoder would keep anyway** — at zoom 1 its
+  rectangle is exactly the one the no-crop policy picks (`calculateCropFrame`),
+  so opening the editor and applying without adjusting anything is a no-op,
+  and the preview is honest about what will be stored. It must NOT frame the
+  storage cap's aspect: the banner is `w-full` behind a fixed `h-48 sm:h-64`
+  frame, so its on-screen ratio is viewport-dependent (≈2:1 on a phone, 7.5:1
+  only at 1920px). Forcing every banner to the cap's 7.5:1 made a 1200x400
+  upload need 3.2x upscaling where keeping it whole needs 1.28x — the very
+  softness the width-priority policy exists to remove. `media.test.ts` pins the
+  zero-regression property directly.
+- **The pre-decode guards run at file pick, not just at encode.**
+  `validateImageFile` owns the type, byte-cap and header megapixel checks, and
+  the editor calls it before it decodes anything. The megapixel ceiling is the
+  load-bearing one: a ~200 KB PNG declaring 400 MP allocates about a gigabyte
+  on decode, so an editor that measured the source first would freeze the tab
+  merely on selection.
 - **Lifecycle.** `user.uploadImage` and `user.removeImage` are thin
   procedures over `packages/api/src/profile-media.ts`, which owns the whole
   avatar/banner lifecycle: minting the object pair, the locked database

@@ -5,6 +5,7 @@ import {
   ImageError,
   calculateCropRect,
   calculateDisplayLayout,
+  clampCrop,
   createDisplayVariant,
 } from "@/lib/media";
 
@@ -108,62 +109,103 @@ describe("IMAGE_ACCEPT", () => {
 });
 
 describe("calculateCropRect", () => {
-  // The crop editor's core: given source dims, a target aspect and a crop
-  // descriptor, it picks the source rectangle the display variant will be
-  // drawn from. Pinned here because the editor's drag/zoom and the encoder's
-  // crop branch both build on it.
+  // The crop editor's core: given source dims, a slot and a crop descriptor, it
+  // picks the source rectangle the display variant is drawn from. Pinned here
+  // because the editor's drag/zoom and the encoder's crop branch both build on
+  // it.
 
-  it("covers the source at the given aspect, centered by default", () => {
-    // Square source, square aspect: the whole image.
-    expect(calculateCropRect({ width: 400, height: 400 }, 1, { x: 0.5, y: 0.5, scale: 1 })).toEqual(
-      {
-        x: 0,
-        y: 0,
-        width: 400,
-        height: 400,
-      },
-    );
-    // Portrait source, square aspect: the widest square, vertically centered.
-    expect(calculateCropRect({ width: 200, height: 400 }, 1, { x: 0.5, y: 0.5, scale: 1 })).toEqual(
-      {
-        x: 0,
-        y: 100,
-        width: 200,
-        height: 200,
-      },
-    );
-    // Landscape source, banner aspect (7.5:1): full width, height cropped to 512.
-    expect(
-      calculateCropRect({ width: 3840, height: 2160 }, 7.5, { x: 0.5, y: 0.5, scale: 1 }),
-    ).toEqual({ x: 0, y: 824, width: 3840, height: 512 });
+  it("frames exactly what the no-crop path would keep, at zoom 1", () => {
+    // THE load-bearing property: the default crop must select the same
+    // rectangle `calculateDisplayLayout` picks with no crop at all. If these
+    // ever diverge, merely opening the editor changes the stored image — which
+    // is how a fixed 7.5:1 editor frame silently re-introduced the softness
+    // this module's width-priority policy exists to remove.
+    const sources = [
+      { width: 1200, height: 400 },
+      { width: 1500, height: 500 },
+      { width: 3840, height: 2160 },
+      { width: 4000, height: 256 },
+      { width: 1920, height: 256 },
+      { width: 600, height: 600 },
+      { width: 200, height: 200 },
+      { width: 200, height: 400 },
+    ];
+    for (const kind of ["avatar", "banner"] as const) {
+      for (const source of sources) {
+        const bare = calculateDisplayLayout(source, kind);
+        const rect = calculateCropRect(source, kind, { x: 0.5, y: 0.5, scale: 1 });
+        expect({ x: rect.x, y: rect.y, width: rect.width, height: rect.height }).toEqual({
+          x: bare.sourceX,
+          y: bare.sourceY,
+          width: bare.sourceWidth,
+          height: bare.sourceHeight,
+        });
+      }
+    }
   });
 
   it("zooms in by shrinking the rect around the center", () => {
-    expect(calculateCropRect({ width: 400, height: 400 }, 1, { x: 0.5, y: 0.5, scale: 2 })).toEqual(
-      {
-        x: 100,
-        y: 100,
-        width: 200,
-        height: 200,
-      },
-    );
+    // An avatar keeps the whole square at zoom 1, so zoom 2 is the middle half.
+    expect(
+      calculateCropRect({ width: 400, height: 400 }, "avatar", { x: 0.5, y: 0.5, scale: 2 }),
+    ).toEqual({ x: 100, y: 100, width: 200, height: 200 });
   });
 
   it("clamps the rect to the source when the center is near an edge", () => {
-    // A center at the top-left corner would overhang; the rect is pulled back
-    // to the source's edge rather than producing a rect the canvas cannot draw.
-    expect(calculateCropRect({ width: 400, height: 400 }, 1, { x: 0, y: 0, scale: 2 })).toEqual({
+    // A center at a corner would overhang; the rect is pulled back to the
+    // source's edge rather than producing a rect the canvas cannot draw.
+    expect(
+      calculateCropRect({ width: 400, height: 400 }, "avatar", { x: 0, y: 0, scale: 2 }),
+    ).toEqual({
       x: 0,
       y: 0,
       width: 200,
       height: 200,
     });
-    expect(calculateCropRect({ width: 400, height: 400 }, 1, { x: 1, y: 1, scale: 2 })).toEqual({
+    expect(
+      calculateCropRect({ width: 400, height: 400 }, "avatar", { x: 1, y: 1, scale: 2 }),
+    ).toEqual({
       x: 200,
       y: 200,
       width: 200,
       height: 200,
     });
+  });
+
+  it("never selects a rect outside the source, at any zoom or center", () => {
+    const source = { width: 3840, height: 2160 };
+    for (const kind of ["avatar", "banner"] as const) {
+      for (const scale of [1, 1.5, 3, 8]) {
+        for (const [x, y] of [
+          [0, 0],
+          [0.5, 0.5],
+          [1, 1],
+          [-2, 3],
+        ]) {
+          const rect = calculateCropRect(source, kind, { x, y, scale });
+          expect(rect.x).toBeGreaterThanOrEqual(0);
+          expect(rect.y).toBeGreaterThanOrEqual(0);
+          expect(rect.x + rect.width).toBeLessThanOrEqual(source.width + 1e-9);
+          expect(rect.y + rect.height).toBeLessThanOrEqual(source.height + 1e-9);
+        }
+      }
+    }
+  });
+});
+
+describe("clampCrop", () => {
+  it("floors the zoom at 1 — below it there is nothing more to show", () => {
+    expect(
+      clampCrop({ x: 0.5, y: 0.5, scale: 0.2 }, { width: 400, height: 400 }, "avatar").scale,
+    ).toBe(1);
+  });
+
+  it("pulls an off-source center back so the rect stays inside", () => {
+    const source = { width: 400, height: 400 };
+    const clamped = clampCrop({ x: 5, y: -5, scale: 2 }, source, "avatar");
+    // At zoom 2 the rect is half the source, so the center cannot leave [.25,.75].
+    expect(clamped.x).toBeCloseTo(0.75, 5);
+    expect(clamped.y).toBeCloseTo(0.25, 5);
   });
 });
 
@@ -293,42 +335,29 @@ describe("calculateDisplayLayout", () => {
     expect(layout.height).toBe(400);
   });
 
-  it("crop: cover-crops the chosen rect to the slot's aspect, never upscaling", () => {
-    // Portrait avatar, default center crop -> the widest square, at native size.
-    expect(
-      calculateDisplayLayout({ width: 200, height: 400 }, "avatar", { x: 0.5, y: 0.5, scale: 1 }),
-    ).toEqual({
-      sourceX: 0,
-      sourceY: 100,
-      sourceWidth: 200,
-      sourceHeight: 200,
-      width: 200,
-      height: 200,
-    });
-    // A large square avatar is downscaled to the 512 cap, whole.
-    expect(
-      calculateDisplayLayout({ width: 4000, height: 4000 }, "avatar", { x: 0.5, y: 0.5, scale: 1 }),
-    ).toEqual({
-      sourceX: 0,
-      sourceY: 0,
-      sourceWidth: 4000,
-      sourceHeight: 4000,
-      width: 512,
-      height: 512,
-    });
-    // Banner: the reported 3840x2160 photo, center-cropped to the 3840x512 cap.
-    expect(
-      calculateDisplayLayout({ width: 3840, height: 2160 }, "banner", { x: 0.5, y: 0.5, scale: 1 }),
-    ).toEqual({
-      sourceX: 0,
-      sourceY: 824,
-      sourceWidth: 3840,
-      sourceHeight: 512,
-      width: 3840,
-      height: 512,
-    });
-    // Zooming in on the banner keeps the crop rect at native size — the output
-    // is the crop rect itself, never an upscaled sliver.
+  it("crop: the default crop encodes exactly what no crop would have", () => {
+    // Applying the editor without touching it must not change the image. The
+    // earlier version of this branch framed the storage cap's aspect instead,
+    // which cropped a portrait avatar to a square and squeezed every banner to
+    // 7.5:1 — re-introducing the softness the width-priority policy removes.
+    for (const source of [
+      { width: 200, height: 400 },
+      { width: 1200, height: 400 },
+      { width: 4000, height: 4000 },
+      { width: 3840, height: 2160 },
+      { width: 100, height: 100 },
+    ]) {
+      for (const kind of ["avatar", "banner"] as const) {
+        expect(calculateDisplayLayout(source, kind, { x: 0.5, y: 0.5, scale: 1 })).toEqual(
+          calculateDisplayLayout(source, kind),
+        );
+      }
+    }
+  });
+
+  it("crop: zooming keeps the rect at native size rather than upscaling a sliver", () => {
+    // A 3840x2160 banner frames 3840x512 at zoom 1; zoom 2 halves that rect and
+    // encodes it 1:1 — the output is the crop, never an upscale of it.
     expect(
       calculateDisplayLayout({ width: 3840, height: 2160 }, "banner", { x: 0.5, y: 0.5, scale: 2 }),
     ).toEqual({
@@ -338,17 +367,6 @@ describe("calculateDisplayLayout", () => {
       sourceHeight: 256,
       width: 1920,
       height: 256,
-    });
-    // A small source is never blown up: 100x100 stays 100x100.
-    expect(
-      calculateDisplayLayout({ width: 100, height: 100 }, "avatar", { x: 0.5, y: 0.5, scale: 1 }),
-    ).toEqual({
-      sourceX: 0,
-      sourceY: 0,
-      sourceWidth: 100,
-      sourceHeight: 100,
-      width: 100,
-      height: 100,
     });
   });
 

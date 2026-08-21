@@ -202,6 +202,32 @@ function ImageRow({
    */
   const [pending, setPending] = useState<File | null>(null);
 
+  /**
+   * Vets the file, then opens the editor for it.
+   *
+   * The guard runs *before* the dialog mounts, and it is the same one the
+   * upload applies: type, byte cap, and the header megapixel ceiling. That last
+   * one is why this is async and why it cannot be skipped here — the editor
+   * decodes the source to measure it, and a decompression bomb (a ~200 KB PNG
+   * declaring 400 MP) would allocate roughly a gigabyte and freeze the tab
+   * merely by being selected. There is no crop worth choosing for a file the
+   * server will refuse on arrival either way.
+   */
+  async function openEditor(file: File) {
+    try {
+      await validateImageFile(file, kind);
+    } catch (err) {
+      setError(
+        messageForUploadError(
+          err instanceof Error ? err : new Error("Image rejected", { cause: err }),
+        ),
+      );
+      return;
+    }
+    setError(null);
+    setPending(file);
+  }
+
   const isUploading = uploading === kind;
   // Both controls lock while *either* slot is uploading: they write the same
   // session, and letting a banner upload land mid-avatar-upload would make the
@@ -244,23 +270,7 @@ function ImageRow({
             // fires a change event — otherwise a failed upload cannot be
             // retried without choosing something else first.
             e.target.value = "";
-            if (!file) return;
-            // Refuse the file the crop editor could never upload — an SVG or an
-            // over-cap original — before the dialog opens, with the same copy
-            // the upload itself would have produced. There is no crop worth
-            // choosing for a file the server will reject on arrival.
-            try {
-              validateImageFile(file, kind);
-            } catch (err) {
-              setError(
-                messageForUploadError(
-                  err instanceof Error ? err : new Error("Image rejected", { cause: err }),
-                ),
-              );
-              return;
-            }
-            setError(null);
-            setPending(file);
+            if (file) void openEditor(file);
           }}
         />
         <Button

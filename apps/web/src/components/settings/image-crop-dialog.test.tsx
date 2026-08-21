@@ -115,13 +115,15 @@ describe("ImageCropDialog", () => {
   });
 
   it("pans the crop center when the image is dragged", async () => {
-    // A 800x1600 portrait in a square frame: the crop rect is 800x800, so
-    // there is vertical room to pan and none horizontally.
-    stubDecode(800, 1600);
-    stubFrameSize(400, 400);
+    // A 1000x1000 source in a banner slot: the encoder keeps 1000x512 of it, so
+    // there are 488 rows of vertical slack to reposition — which is the whole
+    // point of the editor for a banner. (An avatar has no slack at zoom 1: it
+    // frames the entire source, so there is nothing to pan until you zoom.)
+    stubDecode(1000, 1000);
+    stubFrameSize(1000, 512);
     const onApply = vi.fn<(crop: Crop) => void>();
     const { container } = await renderWithProviders(
-      <ImageCropDialog kind="avatar" file={file()} onApply={onApply} onCancel={vi.fn()} />,
+      <ImageCropDialog kind="banner" file={file()} onApply={onApply} onCancel={vi.fn()} />,
     );
     const user = userEvent.setup();
     await waitFor(() =>
@@ -130,19 +132,19 @@ describe("ImageCropDialog", () => {
 
     const frame = container.ownerDocument.querySelector<HTMLElement>(".touch-none");
     expect(frame).not.toBeNull();
-    // Dragging the image DOWN by a quarter frame moves the visible region UP.
+    // Dragging the image DOWN by 100px moves the visible region UP.
     await user.pointer([
-      { target: frame!, coords: { clientX: 200, clientY: 200 }, keys: "[MouseLeft>]" },
-      { target: frame!, coords: { clientX: 200, clientY: 300 } },
+      { target: frame!, coords: { clientX: 500, clientY: 200 }, keys: "[MouseLeft>]" },
+      { target: frame!, coords: { clientX: 500, clientY: 300 } },
       { target: frame!, keys: "[/MouseLeft]" },
     ]);
 
     await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
 
     const crop = onApply.mock.calls.at(-1)![0];
-    // 100px of a 400px frame is a quarter of the 800px-tall crop rect = 200
-    // source rows, which is 0.125 of the 1600px source.
-    expect(crop.y).toBeCloseTo(0.375, 5);
+    // The frame is rendered 1:1 with the 512-row crop rect, so 100 CSS px is
+    // 100 source rows — a tenth of the 1000px source.
+    expect(crop.y).toBeCloseTo(0.4, 5);
     // Nothing to pan horizontally: the rect already spans the full width.
     expect(crop.x).toBe(0.5);
     expect(crop.scale).toBe(1);

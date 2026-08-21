@@ -56,9 +56,24 @@ function isAllowedType(type: string): boolean {
  * checked against server-side, so a file that passes here cannot be rejected
  * on bytes later.
  */
-export function validateImageFile(file: File, kind: ImageKind): void {
+export async function validateImageFile(file: File, kind: ImageKind): Promise<void> {
   if (!isAllowedType(file.type)) throw new ImageError("type");
   if (file.size === 0 || file.size > IMAGE_LIMITS[kind].maxOriginalBytes) {
+    throw new ImageError("size");
+  }
+
+  // Megapixel pre-check on header bytes, before any decode: a 400 MP
+  // flat-colour PNG is ~200 KB and decodes to a gigabyte of pixels. The byte
+  // cap above never sees it. This has to run before *any* caller decodes —
+  // including the crop editor, which decodes to measure the source, so a bomb
+  // would freeze the tab merely by being selected. The server enforces the
+  // same ceiling on the original; rejecting here saves the browser the decode.
+  // A file whose header is unparseable (a JPEG with a huge EXIF block pushes
+  // the SOF past the first 64 bytes) simply skips the pre-check — the server
+  // still holds the line.
+  const header = await readFirstBytes(file, 64);
+  const headerDims = header ? imageDimensions(header, file.type) : null;
+  if (headerDims && headerDims.width * headerDims.height > MAX_IMAGE_MEGAPIXELS * 1_000_000) {
     throw new ImageError("size");
   }
 }
@@ -102,19 +117,7 @@ export async function createDisplayVariantImpl(
   kind: ImageKind,
   crop?: Crop,
 ): Promise<File> {
-  validateImageFile(file, kind);
-
-  // Megapixel pre-check on header bytes, before any decode: a 400 MP
-  // flat-colour PNG is ~200 KB and decodes to a gigabyte of pixels. The server
-  // enforces the same ceiling on the original; rejecting here saves the
-  // browser from paying for the decode. A file whose header is unparseable
-  // (a JPEG with a huge EXIF block pushes the SOF past the first 64 bytes)
-  // simply skips the pre-check — the server still holds the line.
-  const header = await readFirstBytes(file, 64);
-  const headerDims = header ? imageDimensions(header, file.type) : null;
-  if (headerDims && headerDims.width * headerDims.height > MAX_IMAGE_MEGAPIXELS * 1_000_000) {
-    throw new ImageError("size");
-  }
+  await validateImageFile(file, kind);
 
   const bitmap = await decode(file);
 
@@ -189,64 +192,92 @@ export async function createDisplayVariantImpl(
 
 /**
  * The crop a user chose in the editor: the visible region's center as a
- * fraction of the source (0..1) and a zoom, where 1 is the largest rect of the
- * slot's aspect that fits the source. Client-only — the crop is baked into the
+ * fraction of the source (0..1), and a zoom where **1 shows exactly what the
+ * no-crop policy would have kept**. Client-only — the crop is baked into the
  * display variant before upload, never sent to the server.
  */
 export type Crop = { x: number; y: number; scale: number };
+
+/** Pixel dimensions of an image or a region of one. */
+export type ImageSize = { width: number; height: number };
+
+/** The crop that changes nothing: what a slot encodes to when nobody adjusts it. */
+export const DEFAULT_CROP: Crop = { x: 0.5, y: 0.5, scale: 1 };
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
 /**
- * The source rectangle a cover-crop of `aspect` selects, given a crop
- * descriptor.
+ * The region the editor frames at zoom 1 — deliberately the *same* rectangle
+ * the no-crop path would have encoded, so opening the editor and applying
+ * without touching anything is a no-op.
  *
- * `crop.x`/`crop.y` are the crop's center as a fraction of the source (0..1);
- * `crop.scale` is the zoom, where 1 is the largest rect of `aspect` that fits
- * the source. The result is clamped so the rect never leaves the source — a
- * center near an edge, or a zoom that would overhang, is pulled back rather
- * than producing a rect the canvas cannot draw.
+ * This is what stops the editor from re-introducing the softness this module's
+ * width-priority policy exists to remove. Framing the storage cap's aspect
+ * (7.5:1) instead would cover-crop every banner to that ratio, and the banner
+ * is NOT 7.5:1 on screen: it is `w-full` behind a fixed `h-48 sm:h-64` frame,
+ * so its aspect is viewport-dependent (≈2:1 on a phone, 4.7:1 at 1200px, 7.5:1
+ * only at 1920px). A 1200x400 upload forced to 1200x160 needs 3.2x upscaling in
+ * a 1200x256 frame, against 1.28x when kept whole — worse than the bug this
+ * PR fixed. Framing what the encoder would keep anyway has no such failure
+ * mode, and it makes the preview honest about what will be stored.
+ */
+export function calculateCropFrame(
+  source: { width: number; height: number },
+  kind: ImageKind,
+): ImageSize {
+  const layout = calculateDisplayLayout(source, kind);
+  return { width: layout.sourceWidth, height: layout.sourceHeight };
+}
+
+/**
+ * The source rectangle a crop selects.
+ *
+ * At `scale` 1 this is exactly `calculateCropFrame` — the whole of what would
+ * have been encoded anyway. Zooming in shrinks the rect around
+ * `crop.x`/`crop.y` (the center, as a fraction of the source), keeping the
+ * frame's aspect so the preview and the encode agree. The rect is clamped
+ * inside the source, so a center near an edge is pulled back rather than
+ * producing a rectangle the canvas cannot draw.
  */
 export type CropRect = { x: number; y: number; width: number; height: number };
 
 export function calculateCropRect(
   source: { width: number; height: number },
-  aspect: number,
+  kind: ImageKind,
   crop: Crop,
 ): CropRect {
   const scale = Math.max(1, crop.scale);
-  const coverWidth = Math.min(source.width, source.height * aspect);
-  const coverHeight = Math.min(source.height, source.width / aspect);
-  const width = coverWidth / scale;
-  const height = coverHeight / scale;
-  const x = clamp(crop.x * source.width - width / 2, 0, source.width - width);
-  const y = clamp(crop.y * source.height - height / 2, 0, source.height - height);
+  const frame = calculateCropFrame(source, kind);
+  // Whole pixels throughout: `drawImage` samples a source rectangle, and the
+  // no-crop path this must agree with at zoom 1 already rounds. A fractional
+  // rect here would make the default crop differ from no crop at all by a
+  // half-pixel, which is exactly the drift the zoom-1 test forbids.
+  const width = Math.min(source.width, Math.round(frame.width / scale));
+  const height = Math.min(source.height, Math.round(frame.height / scale));
+  const x = Math.floor(clamp(crop.x * source.width - width / 2, 0, source.width - width));
+  const y = Math.floor(clamp(crop.y * source.height - height / 2, 0, source.height - height));
   return { x, y, width, height };
 }
 
 /**
  * Clamps a crop descriptor so its rect stays inside the source: the center is
- * pulled back from the edges and the zoom is floored at 1 (never below the
- * cover rect). The editor calls this after every pan/zoom so the descriptor it
- * emits is always drawable, and `calculateCropRect` never has to overhang.
+ * pulled back from the edges and the zoom is floored at 1. The editor calls
+ * this after every pan/zoom so the descriptor it emits is always drawable.
  */
 export function clampCrop(
   crop: Crop,
   source: { width: number; height: number },
-  aspect: number,
+  kind: ImageKind,
 ): Crop {
   const scale = Math.max(1, crop.scale);
-  const coverWidth = Math.min(source.width, source.height * aspect);
-  const coverHeight = Math.min(source.height, source.width / aspect);
-  const width = coverWidth / scale;
-  const height = coverHeight / scale;
-  const minX = width / (2 * source.width);
-  const minY = height / (2 * source.height);
+  const rect = calculateCropRect(source, kind, { ...crop, scale });
+  const halfX = rect.width / (2 * source.width);
+  const halfY = rect.height / (2 * source.height);
   return {
-    x: clamp(crop.x, minX, 1 - minX),
-    y: clamp(crop.y, minY, 1 - minY),
+    x: clamp(crop.x, halfX, 1 - halfX),
+    y: clamp(crop.y, halfY, 1 - halfY),
     scale,
   };
 }
@@ -268,12 +299,17 @@ export function calculateDisplayLayout(
   const { maxWidth, maxHeight } = IMAGE_LIMITS[kind];
 
   if (crop) {
-    // The crop editor's output: the chosen rect, cover-cropped to the slot's
-    // aspect, never upscaled. `rect` already has the slot's aspect, so
-    // `maxWidth / rect.width === maxHeight / rect.height` and one `min` is the
-    // whole scale decision.
-    const rect = calculateCropRect(source, maxWidth / maxHeight, crop);
-    const scale = Math.min(maxWidth / rect.width, 1);
+    // The crop editor's output. `calculateCropRect` recurses into this function
+    // WITHOUT a crop to find the frame, so this branch must never be reached
+    // from there — it isn't, because that call omits `crop`.
+    //
+    // Both caps are honoured independently rather than assuming the rect has
+    // the cap's aspect: at zoom 1 the rect is whatever the no-crop policy
+    // picked (any aspect at all), so scaling on width alone could leave a tall
+    // rect over the height cap and the server would reject the browser's own
+    // variant. Never upscales.
+    const rect = calculateCropRect(source, kind, crop);
+    const scale = Math.min(maxWidth / rect.width, maxHeight / rect.height, 1);
     return {
       sourceX: rect.x,
       sourceY: rect.y,

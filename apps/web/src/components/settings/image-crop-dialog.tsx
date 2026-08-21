@@ -1,14 +1,20 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
   type PointerEvent,
 } from "react";
 import { IMAGE_LIMITS, type ImageKind } from "@my-tuums/api/constants";
-import { calculateCropRect, clampCrop, type Crop } from "@/lib/media";
+import {
+  calculateCropFrame,
+  calculateCropRect,
+  clampCrop,
+  DEFAULT_CROP,
+  type Crop,
+  type ImageSize,
+} from "@/lib/media";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -53,9 +59,22 @@ export function ImageCropDialog({
   onApply: (crop: Crop) => void;
   onCancel: () => void;
 }) {
-  const [crop, setCrop] = useState<Crop>({ x: 0.5, y: 0.5, scale: 1 });
-  const [dims, setDims] = useState<{ width: number; height: number } | null>(null);
+  const [crop, setCrop] = useState<Crop>(DEFAULT_CROP);
   const [failed, setFailed] = useState(false);
+
+  /**
+   * The decoded source and its preview URL, resolved together.
+   *
+   * One piece of state rather than two because they are useless apart: the
+   * `<img>` cannot be positioned without the dimensions, and the dimensions
+   * have nothing to show without the URL. Setting them in one go also keeps
+   * the URL's creation inside the effect that revokes it — allocating it in a
+   * `useMemo` would be unsafe under StrictMode, which runs the calculation
+   * twice in development and discards one result, leaking a URL that pins the
+   * whole file until the page unloads.
+   */
+  const [source, setSource] = useState<{ dims: ImageSize; url: string } | null>(null);
+  const dims = source?.dims ?? null;
 
   /**
    * The crop frame, held in state rather than a plain ref: the dialog's popup
@@ -65,6 +84,20 @@ export function ImageCropDialog({
    */
   const [frame, setFrame] = useState<HTMLDivElement | null>(null);
   const frameRef = useCallback((node: HTMLDivElement | null) => setFrame(node), []);
+
+  /**
+   * The preview box's shape: the region that will actually be encoded, not the
+   * storage cap's ratio. Framing the cap (7.5:1 for banners) would both lie
+   * about the result and force every banner into a ratio the on-screen frame
+   * never has — see `calculateCropFrame`. Falls back to the cap's ratio only
+   * while the source is still decoding, when there is nothing to show anyway.
+   */
+  const frameAspect = dims
+    ? (() => {
+        const box = calculateCropFrame(dims, kind);
+        return box.width / box.height;
+      })()
+    : IMAGE_LIMITS[kind].maxWidth / IMAGE_LIMITS[kind].maxHeight;
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -74,26 +107,30 @@ export function ImageCropDialog({
     frameHeight: number;
   } | null>(null);
 
-  const aspect = IMAGE_LIMITS[kind].maxWidth / IMAGE_LIMITS[kind].maxHeight;
-
-  // The `<img>`'s source. Derived rather than stored in an effect: the URL is a
-  // pure function of the file, and the effect below owns only its revocation.
-  const url = useMemo(() => URL.createObjectURL(file), [file]);
-  useEffect(() => () => URL.revokeObjectURL(url), [url]);
-
   useEffect(() => {
+    let objectUrl: string | null = null;
     let cancelled = false;
+
     createImageBitmap(file, { imageOrientation: "from-image" })
       .then((bitmap) => {
-        if (cancelled) return;
-        setDims({ width: bitmap.width, height: bitmap.height });
+        // Closed on both paths: a bitmap holds decoded pixels outside the JS
+        // heap (up to 50 MP here), so a cancelled decode that simply returned
+        // would strand hundreds of megabytes per choose-and-cancel cycle.
+        const dimensions = { width: bitmap.width, height: bitmap.height };
         bitmap.close();
+        // The URL is minted only once the decode has succeeded, so a cancelled
+        // or failed pick never allocates one to leak.
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(file);
+        setSource({ dims: dimensions, url: objectUrl });
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
       });
+
     return () => {
       cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [file]);
 
@@ -114,7 +151,7 @@ export function ImageCropDialog({
             scale: Math.min(Math.max(current.scale * factor, 1), MAX_CROP_SCALE),
           },
           dims,
-          aspect,
+          kind,
         ),
       );
     };
@@ -123,7 +160,7 @@ export function ImageCropDialog({
     // behind the dialog while the person zooms.
     frame.addEventListener("wheel", onWheel, { passive: false });
     return () => frame.removeEventListener("wheel", onWheel);
-  }, [aspect, dims, frame]);
+  }, [dims, frame, kind]);
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (!dims || !frame) return;
@@ -150,10 +187,10 @@ export function ImageCropDialog({
     // Dragging the image by (dx, dy) moves the crop rect by (-dx, -dy) in
     // frame space; one frame width is one crop-rect width, so the normalized
     // center shifts by that fraction of the rect's normalized size.
-    const rect = calculateCropRect(dims, aspect, drag.crop);
+    const rect = calculateCropRect(dims, kind, drag.crop);
     const x = drag.crop.x - (dx / drag.frameWidth) * (rect.width / dims.width);
     const y = drag.crop.y - (dy / drag.frameHeight) * (rect.height / dims.height);
-    setCrop(clampCrop({ x, y, scale: drag.crop.scale }, dims, aspect));
+    setCrop(clampCrop({ x, y, scale: drag.crop.scale }, dims, kind));
   }
 
   function onPointerEnd(event: PointerEvent<HTMLDivElement>) {
@@ -177,19 +214,19 @@ export function ImageCropDialog({
             <div
               ref={frameRef}
               className="bg-muted relative w-full touch-none overflow-hidden rounded-lg select-none"
-              style={{ aspectRatio: `${aspect}` }}
+              style={{ aspectRatio: `${frameAspect}` }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerEnd}
               onPointerCancel={onPointerEnd}
             >
-              {dims && (
+              {source && (
                 <img
-                  src={url}
+                  src={source.url}
                   alt=""
                   draggable={false}
                   className="absolute max-w-none"
-                  style={imageStyle(dims, aspect, crop)}
+                  style={imageStyle(source.dims, kind, crop)}
                 />
               )}
             </div>
@@ -217,10 +254,10 @@ export function ImageCropDialog({
  */
 function imageStyle(
   dims: { width: number; height: number },
-  aspect: number,
+  kind: ImageKind,
   crop: Crop,
 ): CSSProperties {
-  const rect = calculateCropRect(dims, aspect, crop);
+  const rect = calculateCropRect(dims, kind, crop);
   return {
     width: `${(dims.width / rect.width) * 100}%`,
     height: `${(dims.height / rect.height) * 100}%`,

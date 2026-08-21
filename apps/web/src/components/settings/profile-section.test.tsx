@@ -53,6 +53,37 @@ afterEach(() => {
   globalThis.URL.revokeObjectURL = originalRevokeObjectURL;
 });
 
+/** A PNG whose header declares `width`x`height`, for the megapixel pre-check. */
+function pngWithHeader(width: number, height: number): File {
+  const bytes = new Uint8Array([
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+    0x00,
+    0x00,
+    0x00,
+    0x0d,
+    0x49,
+    0x48,
+    0x44,
+    0x52,
+    (width >>> 24) & 0xff,
+    (width >>> 16) & 0xff,
+    (width >>> 8) & 0xff,
+    width & 0xff,
+    (height >>> 24) & 0xff,
+    (height >>> 16) & 0xff,
+    (height >>> 8) & 0xff,
+    height & 0xff,
+  ]);
+  return new File([bytes], "bomb.png", { type: "image/png" });
+}
+
 /** Picks a file for one slot and commits the crop editor's default crop. */
 async function pickAndApply(user: ReturnType<typeof userEvent.setup>, label: string, file: File) {
   await user.upload(screen.getByLabelText(label), file);
@@ -180,6 +211,27 @@ describe("ProfileSection", () => {
       screen.queryByRole("button", { name: m.settings_image_crop_apply() }),
     ).not.toBeInTheDocument();
     expect(fakeClient.user.uploadImage).not.toHaveBeenCalled();
+  });
+
+  it("refuses a decompression bomb before the editor can decode it", async () => {
+    // A ~200 KB PNG whose header declares 400 MP. The byte cap never sees it,
+    // and the editor decodes the source to measure it — so without a header
+    // check at file-pick this allocates about a gigabyte and freezes the tab
+    // merely by being selected.
+    const store = createStore();
+    await renderWithProviders(<ProfileSection />, { store, signedInAs: true });
+    const user = userEvent.setup();
+
+    await user.upload(
+      screen.getByLabelText(m.settings_avatar_label()),
+      pngWithHeader(20_000, 20_000),
+    );
+
+    await waitFor(() => expect(store.get(authErrorAtom)).toBe(m.validation_image_too_large()));
+    expect(globalThis.createImageBitmap).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: m.settings_image_crop_apply() }),
+    ).not.toBeInTheDocument();
   });
 
   it("locks both image slots while either upload is in flight", async () => {
