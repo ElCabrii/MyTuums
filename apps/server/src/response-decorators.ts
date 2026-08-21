@@ -72,20 +72,20 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   `base-uri` stops an injected `<base>` tag from rewriting every relative
  *   URL on the page (script `src`, form actions, links) to an attacker's
  *   origin.
- * - `img-src 'self' https:`: images come from two places, and neither is a
- *   single origin that can be pinned. Own uploads are served from this
- *   origin as `/media/<key>`, which 302s the BROWSER to a presigned URL on
- *   the storage bucket's endpoint (`S3_ENDPOINT`) — a value that is
- *   per-environment, has already changed once (see `packages/api/src/
- *   storage.ts`'s `StorageConfig.endpoint` doc), and is not threaded into
- *   this module. Separately, `user.image`/`bannerImage` (packages/auth) hold
- *   an OAuth provider's own avatar URL verbatim until someone uploads a
- *   replacement (`apps/web/src/components/user-avatar.tsx` renders
- *   `user.image` unmodified) — Google, Discord and Twitch avatar CDNs, none
- *   of which this app controls or should enumerate. `https:` is the honest
- *   statement of that: no bare-HTTP or non-network scheme, everything else is
- *   already scoped by same-origin session checks before it ever reaches an
- *   `<img>` tag.
+ * - `img-src 'self' https: blob:`: images come from three places. Own uploads
+ *   are served from this origin as `/media/<key>`, which 302s the BROWSER to a
+ *   presigned URL on the storage bucket's endpoint (`S3_ENDPOINT`) — a value
+ *   that is per-environment, has already changed once (see
+ *   `packages/api/src/storage.ts`'s `StorageConfig.endpoint` doc), and is not
+ *   threaded into this module. Separately, `user.image`/`bannerImage`
+ *   (packages/auth) hold an OAuth provider's own avatar URL verbatim until
+ *   someone uploads a replacement (`apps/web/src/components/user-avatar.tsx`
+ *   renders `user.image` unmodified) — Google, Discord and Twitch avatar CDNs,
+ *   none of which this app controls or should enumerate. Finally, the settings
+ *   crop editor renders the selected local file through a short-lived `blob:`
+ *   object URL (`apps/web/src/components/settings/image-crop-dialog.tsx`).
+ *   `blob:` is limited to image loads; no bare-HTTP or `data:` source is
+ *   allowed, and stored media remains behind the same-origin session gate.
  * - `font-src 'self'`: `@fontsource-variable/inter` ships the font files
  *   through the build; nothing is fetched from a font CDN.
  * - `script-src 'self' https://accounts.google.com 'unsafe-hashes'
@@ -154,7 +154,7 @@ const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
-  "img-src 'self' https:",
+  "img-src 'self' https: blob:",
   "font-src 'self'",
   `script-src 'self' https://accounts.google.com 'unsafe-hashes' '${STYLESHEET_SWAP_HANDLER_HASH}'`,
   "style-src 'self' 'unsafe-inline' https://accounts.google.com",
