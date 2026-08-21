@@ -97,6 +97,7 @@ describe("ImageCropDialog", () => {
         name: m.settings_image_crop_title({ label: m.settings_banner_label() }),
       }),
     ).toBeInTheDocument();
+    expect(screen.getByText(m.settings_banner_crop_safe_area())).toBeInTheDocument();
   });
 
   it("cancels without applying a crop", async () => {
@@ -115,12 +116,12 @@ describe("ImageCropDialog", () => {
   });
 
   it("pans the crop center when the image is dragged", async () => {
-    // A 1000x1000 source in a banner slot: the encoder keeps 1000x512 of it, so
-    // there are 488 rows of vertical slack to reposition — which is the whole
+    // A 1000x1000 source in a banner slot: the encoder keeps a 1000x333 3:1
+    // region, so there is vertical slack to reposition — which is the whole
     // point of the editor for a banner. (An avatar has no slack at zoom 1: it
     // frames the entire source, so there is nothing to pan until you zoom.)
     stubDecode(1000, 1000);
-    stubFrameSize(1000, 512);
+    stubFrameSize(1000, 333);
     const onApply = vi.fn<(crop: Crop) => void>();
     const { container } = await renderWithProviders(
       <ImageCropDialog kind="banner" file={file()} onApply={onApply} onCancel={vi.fn()} />,
@@ -142,8 +143,8 @@ describe("ImageCropDialog", () => {
     await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
 
     const crop = onApply.mock.calls.at(-1)![0];
-    // The frame is rendered 1:1 with the 512-row crop rect, so 100 CSS px is
-    // 100 source rows — a tenth of the 1000px source.
+    // The frame and crop rect share the same 3:1 scale, so a 100px drag moves
+    // the center by one tenth of the 1000px source.
     expect(crop.y).toBeCloseTo(0.4, 5);
     // Nothing to pan horizontally: the rect already spans the full width.
     expect(crop.x).toBe(0.5);

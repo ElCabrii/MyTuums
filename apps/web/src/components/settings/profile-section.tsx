@@ -85,7 +85,7 @@ export function ProfileSection() {
           hint={m.settings_banner_hint()}
           hasImage={Boolean(viewer?.bannerImage)}
           preview={
-            <div className="border-border/50 bg-muted h-16 w-28 shrink-0 overflow-hidden rounded-xl border">
+            <div className="border-border/50 bg-muted aspect-[3/1] w-28 shrink-0 overflow-hidden rounded-xl border">
               {viewer?.bannerImage && (
                 <img
                   src={viewer.bannerImage}
