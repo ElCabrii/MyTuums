@@ -5,7 +5,7 @@ import { type ImageKind } from "@my-tuums/api/constants";
 import { BIO_MAX_LENGTH } from "@my-tuums/auth/rules";
 import { authClient } from "@/lib/auth-client";
 import { client, orpc } from "@/lib/orpc";
-import { createDisplayVariant, ImageError } from "@/lib/media";
+import { createDisplayVariant, ImageError, type Crop } from "@/lib/media";
 import { refreshSession } from "@/lib/session-sync";
 import { validateBio, validateDisplayName } from "@/lib/auth-validation";
 import { authErrorAtom, authPendingAtom } from "@/atoms/auth";
@@ -139,20 +139,29 @@ export const saveProfileAtom = atom(null, async (get, set): Promise<boolean> => 
  * untouched, the variant alongside it (see `lib/media.ts` for why the upload
  * carries both).
  *
+ * `crop`, when present, is the crop editor's choice: the display variant is
+ * re-encoded from the original using that region, so the crop is baked into the
+ * stored display object rather than sent as separate state. The original stays
+ * untouched, which is what lets a future re-crop start from the full image.
+ *
  * The upload procedure writes the user row itself, past Better Auth, so the
  * session the client holds is stale the moment this resolves — hence
  * `refreshSession()` rather than the `waitFor*` helpers, which only outlast a
  * refetch something else already started. The refresh is also what brings the
- * new `imageOriginal`/`bannerImageOriginal` into the session for the future
- * crop editor.
+ * new `imageOriginal`/`bannerImageOriginal` into the session, which is what a
+ * re-crop would start from.
  */
 export const uploadImageAtom = atom(
   null,
-  async (_get, set, { kind, file }: { kind: ImageKind; file: File }): Promise<boolean> => {
+  async (
+    _get,
+    set,
+    { kind, file, crop }: { kind: ImageKind; file: File; crop?: Crop },
+  ): Promise<boolean> => {
     set(authErrorAtom, null);
     set(imageUploadingAtom, kind);
     try {
-      const display = await createDisplayVariant(file, kind);
+      const display = await createDisplayVariant(file, kind, crop);
       await client.user.uploadImage({ kind, original: file, display });
 
       await refreshSession();
@@ -207,7 +216,7 @@ export const removeImageAtom = atom(null, async (_get, set, kind: ImageKind): Pr
  * `lib/auth-error-message.ts` knows how to translate — so it is passed through
  * rather than flattened, exactly as that module's pass-through rule requires.
  */
-function messageForUploadError(err: Error): string {
+export function messageForUploadError(err: Error): string {
   if (err instanceof ImageError) {
     if (err.problem === "size") return m.validation_image_too_large();
     if (err.problem === "type") return m.validation_image_type();

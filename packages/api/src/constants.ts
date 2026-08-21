@@ -168,14 +168,19 @@ export const IMAGE_LIMITS = {
   banner: {
     maxOriginalBytes: 8 * 1024 * 1024,
     // The banner renders full-bleed (`w-full`), outside the profile's
-    // max-w-[1500px] content wrapper. This 3000x1000 ceiling is a deliberate
-    // cost/sharpness tradeoff: it gives 2x-DPR coverage at a 1500px CSS-wide
-    // desktop viewport without turning every larger monitor into a 5K asset.
-    // The 3:1 aspect is unchanged, and the byte cap scales with the fourfold
-    // pixel-area increase from 1500x500.
+    // max-w-[1500px] content wrapper, behind a fixed `h-48 sm:h-64` frame that
+    // `object-cover` fills. This 3840x512 ceiling is the device-pixel sample a
+    // 1920x256 CSS banner needs at DPR 2 — the widest common desktop frame.
+    // The encoder (apps/web/src/lib/media.ts) is width-priority against these
+    // bounds: it fills width up to 3840 and center-crops height to 512 only for
+    // sources tall enough to exceed it, so a tall photo spends its pixels on
+    // width the banner shows instead of height `object-cover` discards — the old
+    // contain fit left a 3840x2160 upload at 1778x1000, starved of width.
+    // Fewer pixels than the 3000x1000 it replaced (1.97 MP vs 3 MP), so the byte
+    // cap is unchanged and a PNG fallback still clears it comfortably.
     maxDisplayBytes: 8 * 1024 * 1024,
-    maxWidth: 3000,
-    maxHeight: 1000,
+    maxWidth: 3840,
+    maxHeight: 512,
   },
 } as const satisfies Record<
   ImageKind,

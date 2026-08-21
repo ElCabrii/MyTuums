@@ -45,6 +45,40 @@ function isAllowedType(type: string): boolean {
 }
 
 /**
+ * The client-side refusals that can be decided before any decode: the type
+ * must be in the allowlist and the original must be within the slot's byte cap.
+ *
+ * Extracted from `createDisplayVariantImpl` so the crop editor can refuse a
+ * file before it ever opens — an SVG or an over-cap original has no crop worth
+ * choosing, and showing the editor for it would only delay the same refusal.
+ * The byte cap is the original's, not the display's: it is what we are willing
+ * to *read* before shrinking, and it is also the cap the original object is
+ * checked against server-side, so a file that passes here cannot be rejected
+ * on bytes later.
+ */
+export async function validateImageFile(file: File, kind: ImageKind): Promise<void> {
+  if (!isAllowedType(file.type)) throw new ImageError("type");
+  if (file.size === 0 || file.size > IMAGE_LIMITS[kind].maxOriginalBytes) {
+    throw new ImageError("size");
+  }
+
+  // Megapixel pre-check on header bytes, before any decode: a 400 MP
+  // flat-colour PNG is ~200 KB and decodes to a gigabyte of pixels. The byte
+  // cap above never sees it. This has to run before *any* caller decodes —
+  // including the crop editor, which decodes to measure the source, so a bomb
+  // would freeze the tab merely by being selected. The server enforces the
+  // same ceiling on the original; rejecting here saves the browser the decode.
+  // A file whose header is unparseable (a JPEG with a huge EXIF block pushes
+  // the SOF past the first 64 bytes) simply skips the pre-check — the server
+  // still holds the line.
+  const header = await readFirstBytes(file, 64);
+  const headerDims = header ? imageDimensions(header, file.type) : null;
+  if (headerDims && headerDims.width * headerDims.height > MAX_IMAGE_MEGAPIXELS * 1_000_000) {
+    throw new ImageError("size");
+  }
+}
+
+/**
  * The first `max` bytes of a file, or `null` when the platform cannot read
  * them (some engines lack `File.prototype.arrayBuffer`, and a sliced blob even
  * more so — FileReader is the one path every engine implements).
@@ -61,61 +95,56 @@ function readFirstBytes(file: File, max: number): Promise<Uint8Array | null> {
 
 /**
  * Re-encodes `file` to a WebP (or a PNG on a browser without WebP encode
- * support) no larger than the slot's display bounds, preserving aspect ratio
- * and never scaling up.
+ * support) no larger than the slot's display bounds, never scaling up.
  *
  * WebP because it is in `ALLOWED_IMAGE_TYPES`, is markedly smaller than PNG for
- * photographs, and is supported by every browser this app targets. `cover`-style
- * cropping is deliberately NOT done here — the avatar is displayed in a round
- * frame with `object-cover`, so cropping at encode time would permanently
- * discard pixels the display already hides.
+ * photographs, and is supported by every browser this app targets. Banners are
+ * width-priority (see `calculateDisplayLayout`): fitting the whole source into
+ * the cap was height-limited for tall photos and left the full-bleed banner
+ * starved of width, so the banner fills width first and center-crops only the
+ * height the fixed frame hides.
+ *
+ * With a `crop` — what the editor in
+ * `components/settings/image-crop-dialog.tsx` produces — the chosen region
+ * replaces those defaults and is baked into these pixels. That is the whole of
+ * how a crop persists: there is no crop column, and every surface that renders
+ * the image reads this one object. The untouched original remains the source
+ * of truth, so a later re-crop starts from the full picture rather than from
+ * an already-cropped copy.
  */
-export async function createDisplayVariantImpl(file: File, kind: ImageKind): Promise<File> {
-  if (!isAllowedType(file.type)) throw new ImageError("type");
-  // The original's cap, not the display's: this is what we are willing to
-  // *read* before shrinking, and it is also the cap the original object is
-  // checked against server-side, so a file that passes here cannot be rejected
-  // on bytes later.
-  if (file.size === 0 || file.size > IMAGE_LIMITS[kind].maxOriginalBytes) {
-    throw new ImageError("size");
-  }
-
-  // Megapixel pre-check on header bytes, before any decode: a 400 MP
-  // flat-colour PNG is ~200 KB and decodes to a gigabyte of pixels. The server
-  // enforces the same ceiling on the original; rejecting here saves the
-  // browser from paying for the decode. A file whose header is unparseable
-  // (a JPEG with a huge EXIF block pushes the SOF past the first 64 bytes)
-  // simply skips the pre-check — the server still holds the line.
-  const header = await readFirstBytes(file, 64);
-  const headerDims = header ? imageDimensions(header, file.type) : null;
-  if (headerDims && headerDims.width * headerDims.height > MAX_IMAGE_MEGAPIXELS * 1_000_000) {
-    throw new ImageError("size");
-  }
+export async function createDisplayVariantImpl(
+  file: File,
+  kind: ImageKind,
+  crop?: Crop,
+): Promise<File> {
+  await validateImageFile(file, kind);
 
   const bitmap = await decode(file);
 
   try {
-    const { maxWidth, maxHeight } = IMAGE_LIMITS[kind];
-    // `min(..., 1)` is what stops a small image being blown up to the bounds,
-    // which would add bytes and lose sharpness to gain nothing.
-    //
-    // The bitmap's dims, not the header's: `imageOrientation: "from-image"`
-    // makes the decode already upright, so these are the display dims — which
-    // is also what the canvas output's header will say, keeping the server's
-    // display-bound check consistent with what actually renders. A rotated
-    // phone photo is 3000x1000 in its header and 1000x3000 upright here; sizing
-    // against the header would distort it.
-    const scale = Math.min(maxWidth / bitmap.width, maxHeight / bitmap.height, 1);
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const layout = calculateDisplayLayout(
+      { width: bitmap.width, height: bitmap.height },
+      kind,
+      crop,
+    );
 
     const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = layout.width;
+    canvas.height = layout.height;
 
     const context = canvas.getContext("2d");
     if (!context) throw new ImageError("decode");
-    context.drawImage(bitmap, 0, 0, width, height);
+    context.drawImage(
+      bitmap,
+      layout.sourceX,
+      layout.sourceY,
+      layout.sourceWidth,
+      layout.sourceHeight,
+      0,
+      0,
+      layout.width,
+      layout.height,
+    );
 
     const blob = await toBlob(canvas);
     if (blob.size > IMAGE_LIMITS[kind].maxDisplayBytes) throw new ImageError("size");
@@ -139,10 +168,211 @@ export async function createDisplayVariantImpl(file: File, kind: ImageKind): Pro
 }
 
 /**
+ * Chooses the source rectangle and output size for one display variant.
+ *
+ * With a `crop` (the editor's output) the layout is a cover-crop of the chosen
+ * rect to the slot's aspect, never upscaled — see the branch at the top. The
+ * two branches below are the no-crop defaults.
+ *
+ * Avatars preserve the whole image (contain): the round frame's `object-cover`
+ * already hides nothing worth keeping, so cropping at encode would only
+ * permanently discard pixels a future refit wants.
+ *
+ * Banners are width-priority. The profile banner is a full-bleed `w-full` box
+ * behind a fixed `h-48 sm:h-64` frame that `object-cover` fills, so width is
+ * the dimension the display is starved of and height is the one the frame
+ * throws away. The layout fills width up to the cap (never upscaling) and crops
+ * height to the cap, centered, only when the source is tall enough to exceed
+ * it — the top/bottom dropped are exactly what `object-cover` hides. Width is
+ * never cropped: a wider viewport can always use more width, and a source that
+ * already fits the cap is kept whole so `object-cover` samples every pixel
+ * rather than an upscaled sliver. This is a strict improvement over the old
+ * contain fit, which was height-limited for tall sources and left width short.
+ */
+
+/**
+ * The crop a user chose in the editor: the visible region's center as a
+ * fraction of the source (0..1), and a zoom where **1 shows exactly what the
+ * no-crop policy would have kept**. Client-only — the crop is baked into the
+ * display variant before upload, never sent to the server.
+ */
+export type Crop = { x: number; y: number; scale: number };
+
+/** Pixel dimensions of an image or a region of one. */
+export type ImageSize = { width: number; height: number };
+
+/** The crop that changes nothing: what a slot encodes to when nobody adjusts it. */
+export const DEFAULT_CROP: Crop = { x: 0.5, y: 0.5, scale: 1 };
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+/**
+ * The region the editor frames at zoom 1 — deliberately the *same* rectangle
+ * the no-crop path would have encoded, so opening the editor and applying
+ * without touching anything is a no-op.
+ *
+ * This is what stops the editor from re-introducing the softness this module's
+ * width-priority policy exists to remove. Framing the storage cap's aspect
+ * (7.5:1) instead would cover-crop every banner to that ratio, and the banner
+ * is NOT 7.5:1 on screen: it is `w-full` behind a fixed `h-48 sm:h-64` frame,
+ * so its aspect is viewport-dependent (≈2:1 on a phone, 4.7:1 at 1200px, 7.5:1
+ * only at 1920px). A 1200x400 upload forced to 1200x160 needs 3.2x upscaling in
+ * a 1200x256 frame, against 1.28x when kept whole — worse than the bug this
+ * PR fixed. Framing what the encoder would keep anyway has no such failure
+ * mode, and it makes the preview honest about what will be stored.
+ */
+export function calculateCropFrame(
+  source: { width: number; height: number },
+  kind: ImageKind,
+): ImageSize {
+  const layout = calculateDisplayLayout(source, kind);
+  return { width: layout.sourceWidth, height: layout.sourceHeight };
+}
+
+/**
+ * The source rectangle a crop selects.
+ *
+ * At `scale` 1 this is exactly `calculateCropFrame` — the whole of what would
+ * have been encoded anyway. Zooming in shrinks the rect around
+ * `crop.x`/`crop.y` (the center, as a fraction of the source), keeping the
+ * frame's aspect so the preview and the encode agree. The rect is clamped
+ * inside the source, so a center near an edge is pulled back rather than
+ * producing a rectangle the canvas cannot draw.
+ */
+export type CropRect = { x: number; y: number; width: number; height: number };
+
+export function calculateCropRect(
+  source: { width: number; height: number },
+  kind: ImageKind,
+  crop: Crop,
+): CropRect {
+  const scale = Math.max(1, crop.scale);
+  const frame = calculateCropFrame(source, kind);
+  // Whole pixels throughout: `drawImage` samples a source rectangle, and the
+  // no-crop path this must agree with at zoom 1 already rounds. A fractional
+  // rect here would make the default crop differ from no crop at all by a
+  // half-pixel, which is exactly the drift the zoom-1 test forbids.
+  const width = Math.min(source.width, Math.round(frame.width / scale));
+  const height = Math.min(source.height, Math.round(frame.height / scale));
+  const x = Math.floor(clamp(crop.x * source.width - width / 2, 0, source.width - width));
+  const y = Math.floor(clamp(crop.y * source.height - height / 2, 0, source.height - height));
+  return { x, y, width, height };
+}
+
+/**
+ * Clamps a crop descriptor so its rect stays inside the source: the center is
+ * pulled back from the edges and the zoom is floored at 1. The editor calls
+ * this after every pan/zoom so the descriptor it emits is always drawable.
+ */
+export function clampCrop(
+  crop: Crop,
+  source: { width: number; height: number },
+  kind: ImageKind,
+): Crop {
+  const scale = Math.max(1, crop.scale);
+  const rect = calculateCropRect(source, kind, { ...crop, scale });
+  const halfX = rect.width / (2 * source.width);
+  const halfY = rect.height / (2 * source.height);
+  return {
+    x: clamp(crop.x, halfX, 1 - halfX),
+    y: clamp(crop.y, halfY, 1 - halfY),
+    scale,
+  };
+}
+
+export type DisplayLayout = {
+  sourceX: number;
+  sourceY: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  width: number;
+  height: number;
+};
+
+export function calculateDisplayLayout(
+  source: { width: number; height: number },
+  kind: ImageKind,
+  crop?: Crop,
+): DisplayLayout {
+  const { maxWidth, maxHeight } = IMAGE_LIMITS[kind];
+
+  if (crop) {
+    // The crop editor's output. `calculateCropRect` recurses into this function
+    // WITHOUT a crop to find the frame, so this branch must never be reached
+    // from there — it isn't, because that call omits `crop`.
+    //
+    // Both caps are honoured independently rather than assuming the rect has
+    // the cap's aspect: at zoom 1 the rect is whatever the no-crop policy
+    // picked (any aspect at all), so scaling on width alone could leave a tall
+    // rect over the height cap and the server would reject the browser's own
+    // variant. Never upscales.
+    const rect = calculateCropRect(source, kind, crop);
+    const scale = Math.min(maxWidth / rect.width, maxHeight / rect.height, 1);
+    return {
+      sourceX: rect.x,
+      sourceY: rect.y,
+      sourceWidth: rect.width,
+      sourceHeight: rect.height,
+      width: Math.max(1, Math.round(rect.width * scale)),
+      height: Math.max(1, Math.round(rect.height * scale)),
+    };
+  }
+
+  if (kind === "avatar") {
+    // `min(..., 1)` stops a small image being blown up to the bounds, which
+    // would add bytes and lose sharpness to gain nothing.
+    const scale = Math.min(maxWidth / source.width, maxHeight / source.height, 1);
+    const width = Math.max(1, Math.round(source.width * scale));
+    const height = Math.max(1, Math.round(source.height * scale));
+
+    return {
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: source.width,
+      sourceHeight: source.height,
+      width,
+      height,
+    };
+  }
+
+  // Fill width up to the cap; never upscale, never crop width.
+  const scale = Math.min(maxWidth / source.width, 1);
+  const width = Math.max(1, Math.round(source.width * scale));
+  const drawnHeight = source.height * scale;
+
+  if (drawnHeight <= maxHeight) {
+    // The source fits the cap's height at this width — contain, no crop.
+    return {
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: source.width,
+      sourceHeight: source.height,
+      width,
+      height: Math.max(1, Math.round(drawnHeight)),
+    };
+  }
+
+  // Too tall: keep the full (scaled) width and crop height to the cap,
+  // centered. `maxHeight / scale` is the source rows that map to `maxHeight`
+  // after the width fill — everything outside them is what the frame hides.
+  const sourceHeight = Math.round(maxHeight / scale);
+  return {
+    sourceX: 0,
+    sourceY: Math.floor((source.height - sourceHeight) / 2),
+    sourceWidth: source.width,
+    sourceHeight,
+    width,
+    height: maxHeight,
+  };
+}
+
+/**
  * Live binding so test harnesses can substitute a no-op variant creator and
  * exercise upload flows without running the real image pipeline.
  */
-export let createDisplayVariant: (file: File, kind: ImageKind) => Promise<File> =
+export let createDisplayVariant: (file: File, kind: ImageKind, crop?: Crop) => Promise<File> =
   createDisplayVariantImpl;
 
 /** Test seam: swaps the variant creator the upload atoms call through. */
