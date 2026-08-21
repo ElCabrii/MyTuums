@@ -3,6 +3,7 @@ import { IMAGE_LIMITS } from "@my-tuums/api/constants";
 import {
   IMAGE_ACCEPT,
   ImageError,
+  calculateCropRect,
   calculateDisplayLayout,
   createDisplayVariant,
 } from "@/lib/media";
@@ -103,6 +104,66 @@ describe("IMAGE_ACCEPT", () => {
     // that is rejected after the round trip.
     expect(IMAGE_ACCEPT).toBe("image/webp,image/png,image/jpeg");
     expect(IMAGE_ACCEPT).not.toContain("svg");
+  });
+});
+
+describe("calculateCropRect", () => {
+  // The crop editor's core: given source dims, a target aspect and a crop
+  // descriptor, it picks the source rectangle the display variant will be
+  // drawn from. Pinned here because the editor's drag/zoom and the encoder's
+  // crop branch both build on it.
+
+  it("covers the source at the given aspect, centered by default", () => {
+    // Square source, square aspect: the whole image.
+    expect(calculateCropRect({ width: 400, height: 400 }, 1, { x: 0.5, y: 0.5, scale: 1 })).toEqual(
+      {
+        x: 0,
+        y: 0,
+        width: 400,
+        height: 400,
+      },
+    );
+    // Portrait source, square aspect: the widest square, vertically centered.
+    expect(calculateCropRect({ width: 200, height: 400 }, 1, { x: 0.5, y: 0.5, scale: 1 })).toEqual(
+      {
+        x: 0,
+        y: 100,
+        width: 200,
+        height: 200,
+      },
+    );
+    // Landscape source, banner aspect (7.5:1): full width, height cropped to 512.
+    expect(
+      calculateCropRect({ width: 3840, height: 2160 }, 7.5, { x: 0.5, y: 0.5, scale: 1 }),
+    ).toEqual({ x: 0, y: 824, width: 3840, height: 512 });
+  });
+
+  it("zooms in by shrinking the rect around the center", () => {
+    expect(calculateCropRect({ width: 400, height: 400 }, 1, { x: 0.5, y: 0.5, scale: 2 })).toEqual(
+      {
+        x: 100,
+        y: 100,
+        width: 200,
+        height: 200,
+      },
+    );
+  });
+
+  it("clamps the rect to the source when the center is near an edge", () => {
+    // A center at the top-left corner would overhang; the rect is pulled back
+    // to the source's edge rather than producing a rect the canvas cannot draw.
+    expect(calculateCropRect({ width: 400, height: 400 }, 1, { x: 0, y: 0, scale: 2 })).toEqual({
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 200,
+    });
+    expect(calculateCropRect({ width: 400, height: 400 }, 1, { x: 1, y: 1, scale: 2 })).toEqual({
+      x: 200,
+      y: 200,
+      width: 200,
+      height: 200,
+    });
   });
 });
 
@@ -232,6 +293,65 @@ describe("calculateDisplayLayout", () => {
     expect(layout.height).toBe(400);
   });
 
+  it("crop: cover-crops the chosen rect to the slot's aspect, never upscaling", () => {
+    // Portrait avatar, default center crop -> the widest square, at native size.
+    expect(
+      calculateDisplayLayout({ width: 200, height: 400 }, "avatar", { x: 0.5, y: 0.5, scale: 1 }),
+    ).toEqual({
+      sourceX: 0,
+      sourceY: 100,
+      sourceWidth: 200,
+      sourceHeight: 200,
+      width: 200,
+      height: 200,
+    });
+    // A large square avatar is downscaled to the 512 cap, whole.
+    expect(
+      calculateDisplayLayout({ width: 4000, height: 4000 }, "avatar", { x: 0.5, y: 0.5, scale: 1 }),
+    ).toEqual({
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: 4000,
+      sourceHeight: 4000,
+      width: 512,
+      height: 512,
+    });
+    // Banner: the reported 3840x2160 photo, center-cropped to the 3840x512 cap.
+    expect(
+      calculateDisplayLayout({ width: 3840, height: 2160 }, "banner", { x: 0.5, y: 0.5, scale: 1 }),
+    ).toEqual({
+      sourceX: 0,
+      sourceY: 824,
+      sourceWidth: 3840,
+      sourceHeight: 512,
+      width: 3840,
+      height: 512,
+    });
+    // Zooming in on the banner keeps the crop rect at native size — the output
+    // is the crop rect itself, never an upscaled sliver.
+    expect(
+      calculateDisplayLayout({ width: 3840, height: 2160 }, "banner", { x: 0.5, y: 0.5, scale: 2 }),
+    ).toEqual({
+      sourceX: 960,
+      sourceY: 952,
+      sourceWidth: 1920,
+      sourceHeight: 256,
+      width: 1920,
+      height: 256,
+    });
+    // A small source is never blown up: 100x100 stays 100x100.
+    expect(
+      calculateDisplayLayout({ width: 100, height: 100 }, "avatar", { x: 0.5, y: 0.5, scale: 1 }),
+    ).toEqual({
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: 100,
+      sourceHeight: 100,
+      width: 100,
+      height: 100,
+    });
+  });
+
   it("produces output the server's display-bound check will accept, for any source", () => {
     // The encoder's output is what `acceptImage(_, _, kind, "display")` sizes
     // against IMAGE_LIMITS, so width/height can never exceed the slot cap —
@@ -245,9 +365,31 @@ describe("calculateDisplayLayout", () => {
       { kind: "banner" as const, src: { width: 4000, height: 256 } },
       { kind: "banner" as const, src: { width: 5000, height: 3000 } },
       { kind: "banner" as const, src: { width: 600, height: 600 } },
+      // The crop editor's output must clear the same bounds, including after a
+      // zoom and an off-center pan.
+      {
+        kind: "avatar" as const,
+        src: { width: 200, height: 400 },
+        crop: { x: 0.5, y: 0.5, scale: 1 },
+      },
+      {
+        kind: "avatar" as const,
+        src: { width: 4000, height: 4000 },
+        crop: { x: 0.25, y: 0.75, scale: 3 },
+      },
+      {
+        kind: "banner" as const,
+        src: { width: 3840, height: 2160 },
+        crop: { x: 0.5, y: 0.5, scale: 2 },
+      },
+      {
+        kind: "banner" as const,
+        src: { width: 5000, height: 3000 },
+        crop: { x: 0.1, y: 0.9, scale: 4 },
+      },
     ];
-    for (const { kind, src } of cases) {
-      const { width, height, sourceWidth, sourceHeight } = calculateDisplayLayout(src, kind);
+    for (const { kind, src, crop } of cases) {
+      const { width, height, sourceWidth, sourceHeight } = calculateDisplayLayout(src, kind, crop);
       const { maxWidth, maxHeight } = IMAGE_LIMITS[kind];
       expect(width).toBeLessThanOrEqual(maxWidth);
       expect(height).toBeLessThanOrEqual(maxHeight);

@@ -225,8 +225,20 @@ sides by CI. See [operations.md](operations.md).
 
 **Source of truth:** `packages/api/src/profile-media.ts`,
 `packages/api/src/image.ts`, `packages/api/src/storage.ts`,
-`packages/api/src/media.ts`, `packages/api/src/reconcile-media.ts`
+`packages/api/src/media.ts`, `packages/api/src/reconcile-media.ts`,
+`apps/web/src/lib/media.ts`
 
+- **Crop is baked, not stored.** The browser re-encodes every picked file into
+  a display variant (`apps/web/src/lib/media.ts`) and uploads it beside the
+  untouched original. The crop/reposition editor
+  (`apps/web/src/components/settings/image-crop-dialog.tsx`) chooses the
+  visible region _before_ that encode, so the choice lands in the display
+  object's pixels — there is deliberately **no crop column and no server-side
+  crop state**. Everything that renders a profile image reads the same display
+  object, which is what makes the crop consistent across the profile, header,
+  post cards and settings preview for free. Re-cropping means re-uploading;
+  the retained original is what makes that lossless. The server is unaffected:
+  it validates the display object on its own bounds, exactly as before.
 - **Lifecycle.** `user.uploadImage` and `user.removeImage` are thin
   procedures over `packages/api/src/profile-media.ts`, which owns the whole
   avatar/banner lifecycle: minting the object pair, the locked database

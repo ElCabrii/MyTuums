@@ -1,13 +1,14 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Check, Image as ImageIcon, Loader2, Trash2, Upload, UserRound } from "lucide-react";
 import type { ImageKind } from "@my-tuums/api/constants";
-import { authPendingAtom } from "@/atoms/auth";
+import { authErrorAtom, authPendingAtom } from "@/atoms/auth";
 import { viewerAtom } from "@/atoms/session";
 import {
   bioRemainingAtom,
   hydrateProfileEditAtom,
   imageUploadingAtom,
+  messageForUploadError,
   profileBioDraftAtom,
   profileNameDraftAtom,
   removeImageAtom,
@@ -15,11 +16,12 @@ import {
   saveProfileAtom,
   uploadImageAtom,
 } from "@/atoms/profile-edit";
-import { IMAGE_ACCEPT } from "@/lib/media";
+import { IMAGE_ACCEPT, validateImageFile } from "@/lib/media";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserAvatar } from "@/components/user-avatar";
 import { Section } from "@/components/settings/section";
+import { ImageCropDialog } from "@/components/settings/image-crop-dialog";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -189,6 +191,16 @@ function ImageRow({
   const uploading = useAtomValue(imageUploadingAtom);
   const upload = useSetAtom(uploadImageAtom);
   const remove = useSetAtom(removeImageAtom);
+  const setError = useSetAtom(authErrorAtom);
+
+  /**
+   * The file waiting on a crop, or null when the editor is closed.
+   *
+   * Component state rather than an atom: it lives and dies with this row's
+   * dialog, nothing else in the app reads it, and holding a `File` in a
+   * module-scoped atom would outlive the form it belongs to.
+   */
+  const [pending, setPending] = useState<File | null>(null);
 
   const isUploading = uploading === kind;
   // Both controls lock while *either* slot is uploading: they write the same
@@ -198,6 +210,18 @@ function ImageRow({
 
   return (
     <div className="flex items-center gap-4">
+      {pending && (
+        <ImageCropDialog
+          kind={kind}
+          file={pending}
+          onApply={(crop) => {
+            setPending(null);
+            void upload({ kind, file: pending, crop });
+          }}
+          onCancel={() => setPending(null)}
+        />
+      )}
+
       {preview}
 
       <div className="min-w-0 flex-1 space-y-1">
@@ -220,7 +244,23 @@ function ImageRow({
             // fires a change event — otherwise a failed upload cannot be
             // retried without choosing something else first.
             e.target.value = "";
-            if (file) void upload({ kind, file });
+            if (!file) return;
+            // Refuse the file the crop editor could never upload — an SVG or an
+            // over-cap original — before the dialog opens, with the same copy
+            // the upload itself would have produced. There is no crop worth
+            // choosing for a file the server will reject on arrival.
+            try {
+              validateImageFile(file, kind);
+            } catch (err) {
+              setError(
+                messageForUploadError(
+                  err instanceof Error ? err : new Error("Image rejected", { cause: err }),
+                ),
+              );
+              return;
+            }
+            setError(null);
+            setPending(file);
           }}
         />
         <Button

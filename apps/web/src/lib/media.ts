@@ -45,6 +45,25 @@ function isAllowedType(type: string): boolean {
 }
 
 /**
+ * The client-side refusals that can be decided before any decode: the type
+ * must be in the allowlist and the original must be within the slot's byte cap.
+ *
+ * Extracted from `createDisplayVariantImpl` so the crop editor can refuse a
+ * file before it ever opens — an SVG or an over-cap original has no crop worth
+ * choosing, and showing the editor for it would only delay the same refusal.
+ * The byte cap is the original's, not the display's: it is what we are willing
+ * to *read* before shrinking, and it is also the cap the original object is
+ * checked against server-side, so a file that passes here cannot be rejected
+ * on bytes later.
+ */
+export function validateImageFile(file: File, kind: ImageKind): void {
+  if (!isAllowedType(file.type)) throw new ImageError("type");
+  if (file.size === 0 || file.size > IMAGE_LIMITS[kind].maxOriginalBytes) {
+    throw new ImageError("size");
+  }
+}
+
+/**
  * The first `max` bytes of a file, or `null` when the platform cannot read
  * them (some engines lack `File.prototype.arrayBuffer`, and a sliced blob even
  * more so — FileReader is the one path every engine implements).
@@ -68,18 +87,22 @@ function readFirstBytes(file: File, max: number): Promise<Uint8Array | null> {
  * width-priority (see `calculateDisplayLayout`): fitting the whole source into
  * the cap was height-limited for tall photos and left the full-bleed banner
  * starved of width, so the banner fills width first and center-crops only the
- * height the fixed frame hides. The untouched original remains the source of
- * truth for the future crop/reposition editor.
+ * height the fixed frame hides.
+ *
+ * With a `crop` — what the editor in
+ * `components/settings/image-crop-dialog.tsx` produces — the chosen region
+ * replaces those defaults and is baked into these pixels. That is the whole of
+ * how a crop persists: there is no crop column, and every surface that renders
+ * the image reads this one object. The untouched original remains the source
+ * of truth, so a later re-crop starts from the full picture rather than from
+ * an already-cropped copy.
  */
-export async function createDisplayVariantImpl(file: File, kind: ImageKind): Promise<File> {
-  if (!isAllowedType(file.type)) throw new ImageError("type");
-  // The original's cap, not the display's: this is what we are willing to
-  // *read* before shrinking, and it is also the cap the original object is
-  // checked against server-side, so a file that passes here cannot be rejected
-  // on bytes later.
-  if (file.size === 0 || file.size > IMAGE_LIMITS[kind].maxOriginalBytes) {
-    throw new ImageError("size");
-  }
+export async function createDisplayVariantImpl(
+  file: File,
+  kind: ImageKind,
+  crop?: Crop,
+): Promise<File> {
+  validateImageFile(file, kind);
 
   // Megapixel pre-check on header bytes, before any decode: a 400 MP
   // flat-colour PNG is ~200 KB and decodes to a gigabyte of pixels. The server
@@ -96,7 +119,11 @@ export async function createDisplayVariantImpl(file: File, kind: ImageKind): Pro
   const bitmap = await decode(file);
 
   try {
-    const layout = calculateDisplayLayout({ width: bitmap.width, height: bitmap.height }, kind);
+    const layout = calculateDisplayLayout(
+      { width: bitmap.width, height: bitmap.height },
+      kind,
+      crop,
+    );
 
     const canvas = document.createElement("canvas");
     canvas.width = layout.width;
@@ -140,6 +167,10 @@ export async function createDisplayVariantImpl(file: File, kind: ImageKind): Pro
 /**
  * Chooses the source rectangle and output size for one display variant.
  *
+ * With a `crop` (the editor's output) the layout is a cover-crop of the chosen
+ * rect to the slot's aspect, never upscaled — see the branch at the top. The
+ * two branches below are the no-crop defaults.
+ *
  * Avatars preserve the whole image (contain): the round frame's `object-cover`
  * already hides nothing worth keeping, so cropping at encode would only
  * permanently discard pixels a future refit wants.
@@ -155,6 +186,71 @@ export async function createDisplayVariantImpl(file: File, kind: ImageKind): Pro
  * rather than an upscaled sliver. This is a strict improvement over the old
  * contain fit, which was height-limited for tall sources and left width short.
  */
+
+/**
+ * The crop a user chose in the editor: the visible region's center as a
+ * fraction of the source (0..1) and a zoom, where 1 is the largest rect of the
+ * slot's aspect that fits the source. Client-only — the crop is baked into the
+ * display variant before upload, never sent to the server.
+ */
+export type Crop = { x: number; y: number; scale: number };
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+/**
+ * The source rectangle a cover-crop of `aspect` selects, given a crop
+ * descriptor.
+ *
+ * `crop.x`/`crop.y` are the crop's center as a fraction of the source (0..1);
+ * `crop.scale` is the zoom, where 1 is the largest rect of `aspect` that fits
+ * the source. The result is clamped so the rect never leaves the source — a
+ * center near an edge, or a zoom that would overhang, is pulled back rather
+ * than producing a rect the canvas cannot draw.
+ */
+export type CropRect = { x: number; y: number; width: number; height: number };
+
+export function calculateCropRect(
+  source: { width: number; height: number },
+  aspect: number,
+  crop: Crop,
+): CropRect {
+  const scale = Math.max(1, crop.scale);
+  const coverWidth = Math.min(source.width, source.height * aspect);
+  const coverHeight = Math.min(source.height, source.width / aspect);
+  const width = coverWidth / scale;
+  const height = coverHeight / scale;
+  const x = clamp(crop.x * source.width - width / 2, 0, source.width - width);
+  const y = clamp(crop.y * source.height - height / 2, 0, source.height - height);
+  return { x, y, width, height };
+}
+
+/**
+ * Clamps a crop descriptor so its rect stays inside the source: the center is
+ * pulled back from the edges and the zoom is floored at 1 (never below the
+ * cover rect). The editor calls this after every pan/zoom so the descriptor it
+ * emits is always drawable, and `calculateCropRect` never has to overhang.
+ */
+export function clampCrop(
+  crop: Crop,
+  source: { width: number; height: number },
+  aspect: number,
+): Crop {
+  const scale = Math.max(1, crop.scale);
+  const coverWidth = Math.min(source.width, source.height * aspect);
+  const coverHeight = Math.min(source.height, source.width / aspect);
+  const width = coverWidth / scale;
+  const height = coverHeight / scale;
+  const minX = width / (2 * source.width);
+  const minY = height / (2 * source.height);
+  return {
+    x: clamp(crop.x, minX, 1 - minX),
+    y: clamp(crop.y, minY, 1 - minY),
+    scale,
+  };
+}
+
 export type DisplayLayout = {
   sourceX: number;
   sourceY: number;
@@ -167,8 +263,26 @@ export type DisplayLayout = {
 export function calculateDisplayLayout(
   source: { width: number; height: number },
   kind: ImageKind,
+  crop?: Crop,
 ): DisplayLayout {
   const { maxWidth, maxHeight } = IMAGE_LIMITS[kind];
+
+  if (crop) {
+    // The crop editor's output: the chosen rect, cover-cropped to the slot's
+    // aspect, never upscaled. `rect` already has the slot's aspect, so
+    // `maxWidth / rect.width === maxHeight / rect.height` and one `min` is the
+    // whole scale decision.
+    const rect = calculateCropRect(source, maxWidth / maxHeight, crop);
+    const scale = Math.min(maxWidth / rect.width, 1);
+    return {
+      sourceX: rect.x,
+      sourceY: rect.y,
+      sourceWidth: rect.width,
+      sourceHeight: rect.height,
+      width: Math.max(1, Math.round(rect.width * scale)),
+      height: Math.max(1, Math.round(rect.height * scale)),
+    };
+  }
 
   if (kind === "avatar") {
     // `min(..., 1)` stops a small image being blown up to the bounds, which
@@ -222,7 +336,7 @@ export function calculateDisplayLayout(
  * Live binding so test harnesses can substitute a no-op variant creator and
  * exercise upload flows without running the real image pipeline.
  */
-export let createDisplayVariant: (file: File, kind: ImageKind) => Promise<File> =
+export let createDisplayVariant: (file: File, kind: ImageKind, crop?: Crop) => Promise<File> =
   createDisplayVariantImpl;
 
 /** Test seam: swaps the variant creator the upload atoms call through. */

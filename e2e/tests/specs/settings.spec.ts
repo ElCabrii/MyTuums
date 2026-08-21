@@ -161,6 +161,19 @@ function solidPng(width: number, height: number): Buffer {
 test.describe("images", () => {
   test.skip(!storageBucketConfigured(), "no Storage Bucket configured (S3_* unset)");
 
+  /**
+   * Picking a file opens the crop editor (issue #151) instead of uploading
+   * straight away; the upload only starts once a crop is committed. Applying
+   * the default (centered, unzoomed) crop is what these specs want — they are
+   * about the upload path, not about the editor, which has its own component
+   * suite in apps/web.
+   */
+  async function applyCrop(page: import("@playwright/test").Page) {
+    const apply = page.getByRole("button", { name: "Apply" });
+    await expect(apply).toBeEnabled();
+    await apply.click();
+  }
+
   test("uploads an avatar, and it renders on the profile from /media", async ({ page }) => {
     const account = await signUpFresh(page, "avatar");
 
@@ -172,6 +185,7 @@ test.describe("images", () => {
       mimeType: "image/png",
       buffer: solidPng(800, 800),
     });
+    await applyCrop(page);
 
     // The Remove button only renders once the account actually has an image,
     // so its appearance is the upload landing — not a fixed wait.
@@ -204,6 +218,7 @@ test.describe("images", () => {
       mimeType: "image/png",
       buffer: solidPng(1200, 400),
     });
+    await applyCrop(page);
     await expect(page.getByRole("button", { name: "Remove Banner" })).toBeVisible({
       timeout: 20_000,
     });
@@ -227,6 +242,7 @@ test.describe("images", () => {
       mimeType: "image/png",
       buffer: PNG_1X1,
     });
+    await applyCrop(page);
     const remove = page.getByRole("button", { name: "Remove Profile picture" });
     await expect(remove).toBeVisible({ timeout: 20_000 });
 
@@ -249,6 +265,9 @@ test.describe("images", () => {
     });
 
     await expect(page.getByRole("alert")).toContainText("isn't supported");
+    // Refused before the crop editor opens: a file that cannot be uploaded has
+    // no crop worth choosing (apps/web/src/lib/media.ts, `validateImageFile`).
+    await expect(page.getByRole("button", { name: "Apply" })).toBeHidden();
     await expect(page.getByRole("button", { name: "Remove Profile picture" })).toBeHidden();
   });
 });
