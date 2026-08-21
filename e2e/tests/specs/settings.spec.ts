@@ -210,13 +210,13 @@ test.describe("images", () => {
 
     await page.goto("/settings/account");
     // A landscape banner, which is the shape a banner actually is — and the
-    // shape that regressed. The display object encodes at 1200x400, so its
-    // width is just past the slot's 1000px HEIGHT bound: a parser that confuses
-    // the two axes rejects this as "too large" and passes a square or a 1x1.
+    // shape that regressed. The display object encodes at 1500x500, so swapping
+    // its axes produces a 500x1500 image beyond the 1280px height bound. A
+    // square or smaller landscape fixture would let that parser bug pass.
     await page.getByLabel("Banner").setInputFiles({
       name: "banner.png",
       mimeType: "image/png",
-      buffer: solidPng(1200, 400),
+      buffer: solidPng(1500, 500),
     });
     await applyCrop(page);
     await expect(page.getByRole("button", { name: "Remove Banner" })).toBeVisible({

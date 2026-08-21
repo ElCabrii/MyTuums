@@ -98,6 +98,11 @@ describe("ImageCropDialog", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByText(m.settings_banner_crop_safe_area())).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveClass(
+      "max-h-[calc(100dvh-2rem)]",
+      "overflow-y-auto",
+      "[&>*]:shrink-0",
+    );
   });
 
   it("cancels without applying a crop", async () => {

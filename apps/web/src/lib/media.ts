@@ -134,20 +134,34 @@ export async function createDisplayVariantImpl(
 
     const context = canvas.getContext("2d");
     if (!context) throw new ImageError("decode");
-    context.drawImage(
-      bitmap,
-      layout.sourceX,
-      layout.sourceY,
-      layout.sourceWidth,
-      layout.sourceHeight,
-      0,
-      0,
-      layout.width,
-      layout.height,
-    );
+    let blob: Blob;
+    while (true) {
+      context.drawImage(
+        bitmap,
+        layout.sourceX,
+        layout.sourceY,
+        layout.sourceWidth,
+        layout.sourceHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
 
-    const blob = await toBlob(canvas);
-    if (blob.size > IMAGE_LIMITS[kind].maxDisplayBytes) throw new ImageError("size");
+      blob = await toBlob(canvas);
+      if (blob.size <= IMAGE_LIMITS[kind].maxDisplayBytes) break;
+
+      // Browsers without WebP encoding silently return lossless PNG. A noisy
+      // 3840x1280 PNG can exceed the display byte cap even though its dimensions
+      // are valid, so retry at half resolution. This preserves a 1920px-wide
+      // sample on the first retry and guarantees progress for unusually large
+      // fallbacks without raising the RPC/storage budget.
+      if (blob.type !== "image/png" || (canvas.width === 1 && canvas.height === 1)) {
+        throw new ImageError("size");
+      }
+      canvas.width = Math.max(1, Math.floor(canvas.width / 2));
+      canvas.height = Math.max(1, Math.floor(canvas.height / 2));
+    }
 
     // `canvas.toBlob` falls back to `image/png` when WebP encode is
     // unsupported — silently, with no error — so the type must be read off the

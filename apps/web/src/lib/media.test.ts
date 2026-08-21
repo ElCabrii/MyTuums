@@ -76,7 +76,7 @@ function stubEncodePath({
   width = 100,
   height = 100,
 }: {
-  toBlob: Blob;
+  toBlob: Blob | Blob[];
   width?: number;
   height?: number;
 }) {
@@ -93,9 +93,13 @@ function stubEncodePath({
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
     () => contextDouble as never,
   );
-  vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback: BlobCallback) =>
-    callback(toBlob),
-  );
+  const blobs = Array.isArray(toBlob) ? toBlob : [toBlob];
+  let encodeIndex = 0;
+  vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback: BlobCallback) => {
+    callback(blobs[Math.min(encodeIndex, blobs.length - 1)] ?? null);
+    encodeIndex += 1;
+  });
+  return contextDouble;
 }
 
 describe("IMAGE_ACCEPT", () => {
@@ -458,6 +462,23 @@ describe("createDisplayVariant", () => {
     expect(encoded.size).toBe(size);
     expect(encoded.type).toBe("image/png");
     expect(encoded.name).toBe("banner-display.png");
+  });
+
+  it("downscales an oversized PNG fallback until it fits the display byte cap", async () => {
+    const context = stubEncodePath({
+      toBlob: [
+        new Blob([new Uint8Array(9 * 1024 * 1024)], { type: "image/png" }),
+        new Blob([new Uint8Array(4 * 1024 * 1024)], { type: "image/png" }),
+      ],
+      width: 3840,
+      height: 1280,
+    });
+
+    const encoded = await createDisplayVariant(file("image/jpeg"), "banner");
+
+    expect(encoded.size).toBe(4 * 1024 * 1024);
+    expect(context.drawImage).toHaveBeenCalledTimes(2);
+    expect(context.drawImage.mock.calls[1]?.slice(-2)).toEqual([1920, 640]);
   });
 
   it("keeps webp when the canvas produced webp", async () => {
