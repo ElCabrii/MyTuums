@@ -124,9 +124,7 @@ test.describe("Content-Security-Policy enforcement", () => {
             ),
             (character) => character.charCodeAt(0),
           );
-          const blobUrl = URL.createObjectURL(
-            new Blob([imageBytes], { type: "image/png" }),
-          );
+          const blobUrl = URL.createObjectURL(new Blob([imageBytes], { type: "image/png" }));
           const finish = (loaded: boolean) => {
             URL.revokeObjectURL(blobUrl);
             resolve(loaded);
