@@ -111,6 +111,34 @@ test.describe("Content-Security-Policy enforcement", () => {
     // if the hash-source is wrong instead of racing a sleep.
     await expect(page.locator("#swap-target")).toHaveJSProperty("media", "all");
 
+    // The settings crop editor previews a selected file through a blob URL.
+    // Keep this in a real document under the exact response policy: jsdom and
+    // a CSP string assertion cannot observe the browser blocking this image.
+    const blobImageLoaded = await page.evaluate(
+      () =>
+        new Promise<boolean>((resolve) => {
+          const image = new Image();
+          const imageBytes = Uint8Array.from(
+            atob(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+            ),
+            (character) => character.charCodeAt(0),
+          );
+          const blobUrl = URL.createObjectURL(
+            new Blob([imageBytes], { type: "image/png" }),
+          );
+          const finish = (loaded: boolean) => {
+            URL.revokeObjectURL(blobUrl);
+            resolve(loaded);
+          };
+          image.onload = () => finish(true);
+          image.onerror = () => finish(false);
+          image.src = blobUrl;
+          document.body.append(image);
+        }),
+    );
+    expect(blobImageLoaded).toBe(true);
+
     expect(cspViolations).toEqual([]);
   });
 });
