@@ -3,7 +3,7 @@ import { request as httpRequest } from "node:http";
 import { gunzipSync } from "node:zlib";
 import { E2E } from "../../playwright.config";
 import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
-import { legalConsentBody } from "../../support/users";
+import { signUpVerifiedSession } from "../../support/auth";
 
 // This project's baseURL is the server (E2E.serverUrl) — see the `api`
 // project in playwright.config.ts.
@@ -153,17 +153,7 @@ test.describe("JSON response compression", () => {
   // rate limiter is per-identity, so a fresh user's write budget is untouched
   // by the other specs hammering their own identities.
   test("a large /rpc/post/list response is gzip-compressed on the wire", async ({ request }) => {
-    const username = `hd${Date.now().toString(36)}`;
-    const signUp = await request.post("/api/auth/sign-up/email", {
-      data: {
-        email: `${username}@example.test`,
-        password: "headers-spec-password",
-        name: "Headers Spec",
-        username,
-        ...legalConsentBody(),
-      },
-    });
-    expect(signUp.ok(), await signUp.text()).toBe(true);
+    await signUpVerifiedSession(request, "hd");
 
     // 490-char bodies stay under POST_MAX_LENGTH (500) while keeping three
     // posts comfortably past the server's 1 KB compression threshold.

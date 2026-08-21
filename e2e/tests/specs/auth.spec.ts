@@ -7,7 +7,7 @@ import { ALICE, dateOfBirthUnder15 } from "../../support/users";
 test.use({ storageState: { cookies: [], origins: [] } });
 
 test.describe("registration", () => {
-  test("registering a fresh account signs the user in and offers two-factor before the profile", async ({
+  test("registering a fresh account lands on the check-your-email screen without a session", async ({
     page,
   }) => {
     const username = `e2enew${Date.now().toString(36)}`;
@@ -26,20 +26,23 @@ test.describe("registration", () => {
     await page.getByRole("checkbox", { name: /I have read and agree/ }).check();
     await page.getByRole("main").getByRole("button", { name: "Register" }).click();
 
-    // useRedirectWhenSignedIn is the entire post-signup redirect — signUpAtom
-    // deliberately doesn't navigate itself (see atoms/auth.ts) — so reaching
-    // /welcome at all proves the session actually took.
-    //
-    // /welcome rather than the profile because a fresh sign-up is offered
-    // two-factor once, on the way past: `signUpAtom` raises
-    // `offerTwoFactorAtom` and the redirect effect honours it (atoms/
-    // onboarding.ts). It is an offer, not a gate — declining is a real answer,
-    // and taking it is what lands them on their profile.
-    await expect(page).toHaveURL(/\/welcome$/);
-    await expect(page.getByRole("heading", { name: "Secure your account" })).toBeVisible();
+    // With requireEmailVerification (packages/auth), sign-up creates the
+    // account and sends the verification link but issues NO session (issue
+    // #172), so the person lands on /verify-email rather than /welcome and the
+    // app stays signed out until the email is proved. register.tsx drives this
+    // navigation itself — signUpAtom no longer navigates on a session it never
+    // gets, so reaching /verify-email at all is what proves the sign-up
+    // succeeded. The post-signup two-factor offer is gone on the password path
+    // (a documented tradeoff: verification happens in a separate browser
+    // session; 2FA stays configurable from settings).
+    await expect(page).toHaveURL(/\/verify-email$/);
+    await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
 
-    await page.getByRole("button", { name: "Skip for now" }).click();
-    await expect(page).toHaveURL(new RegExp(`/@${username}$`));
+    // No session means no access to the app: a protected page bounces to
+    // /login (with the destination preserved) rather than rendering for someone
+    // who has not proved their email.
+    await page.goto("/discover");
+    await expect(page).toHaveURL(/\/login(\?redirect=.*)?$/);
   });
 
   test("validation errors surface in submit-handler order when several rules are violated", async ({

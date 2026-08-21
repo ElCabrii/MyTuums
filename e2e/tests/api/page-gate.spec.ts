@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { legalConsentBody } from "../../support/users";
+import { signUpVerifiedSession } from "../../support/auth";
 
 // This project's baseURL is the server (E2E.serverUrl) — see the `api`
 // project in playwright.config.ts.
@@ -41,21 +41,11 @@ test.describe("page gate", () => {
   });
 
   test("a request carrying a live session is not redirected", async ({ request }) => {
-    const username = `pg${Date.now().toString(36)}`;
-    const signUp = await request.post("/api/auth/sign-up/email", {
-      data: {
-        email: `${username}@example.test`,
-        password: "page-gate-probe-password",
-        name: "Page Gate Probe",
-        username,
-        ...legalConsentBody(),
-      },
-    });
-    expect(signUp.ok(), await signUp.text()).toBe(true);
+    await signUpVerifiedSession(request, "pg");
 
-    // The `request` fixture carries the session cookie the sign-up response
-    // set, the same way the rate-limit test in rpc-contract.spec.ts relies on
-    // it for its own throwaway identity.
+    // The `request` fixture carries the session cookie the sign-in set, the
+    // same way the rate-limit test in rpc-contract.spec.ts relies on it for
+    // its own throwaway identity.
     const response = await request.get("/@alice", { maxRedirects: 0 });
 
     expect(response.status()).not.toBe(302);
@@ -90,17 +80,7 @@ test.describe("media gate", () => {
   });
 
   test("a request carrying a live session gets past the gate", async ({ request }) => {
-    const username = `mg${Date.now().toString(36)}`;
-    const signUp = await request.post("/api/auth/sign-up/email", {
-      data: {
-        email: `${username}@example.test`,
-        password: "media-gate-probe-password",
-        name: "Media Gate Probe",
-        username,
-        ...legalConsentBody(),
-      },
-    });
-    expect(signUp.ok(), await signUp.text()).toBe(true);
+    await signUpVerifiedSession(request, "mg");
 
     // The key doesn't need to point at a real object — only that the answer
     // is no longer the flat 401 every anonymous caller gets. Whatever the

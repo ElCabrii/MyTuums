@@ -152,6 +152,19 @@ beforeEach(() => {
  * `randomUUID()` is the source of uniqueness for both the email and the
  * username, so concurrent tests (and repeated runs against a database that
  * wasn't truncated) never collide on BetterAuth's unique constraints.
+ *
+ * With `requireEmailVerification: true` (packages/auth/src/index.ts), sign-up
+ * creates the account and sends the verification email but issues NO session —
+ * so a fixture built only from `signUpEmail` could not sign in. Fixture
+ * accounts are meant to be usable, so this grandfathers each one the same way
+ * the `0014_grandfather_email_verified` migration grandfathered every real
+ * account: flip `email_verified` directly, then sign in through the real
+ * instance to mint a genuine session and its signed cookie. The sign-in goes
+ * through `auth.api.signInEmail` rather than the test instance's
+ * `getAuthHeaders` to keep exercising the production cookie-issuance path;
+ * direct `auth.api.*` calls bypass the router's `onRequest` rate limiter (see
+ * the password-reset block in auth.int.test.ts), so a suite that seeds many
+ * users in a loop never spends a `/sign-in/email` budget.
  */
 export async function createTestUser(overrides?: {
   username?: string;
@@ -161,24 +174,42 @@ export async function createTestUser(overrides?: {
   const email = `vitest+${uuid}@example.com`;
   const username = overrides?.username ?? `vitest${uuid.replace(/-/g, "").slice(0, 8)}`;
   const name = overrides?.name ?? "Vitest User";
+  const password = "vitest-Sup3rSecret!";
 
-  const signUpResult = await auth.api.signUpEmail({
+  // Creates the user through the production instance (real password hashing,
+  // username normalisation, the legal/dob/profile hooks) and sends the
+  // verification email (captured by `testEmailSender`). With
+  // `requireEmailVerification` the response carries no session and no
+  // `set-cookie` — the account is unusable until the email is proved, which
+  // the two steps below short-circuit for fixtures.
+  await auth.api.signUpEmail({
     body: {
       email,
-      password: "vitest-Sup3rSecret!",
+      password,
       name,
       username,
       legalAcceptedAt: new Date(),
       legalVersion: LEGAL_VERSION,
     },
+  });
+
+  const [created] = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
+  if (!created) {
+    throw new Error("createTestUser: signUpEmail did not create a user row.");
+  }
+  await db.update(user).set({ emailVerified: true }).where(eq(user.id, created.id));
+
+  const signInResult = await auth.api.signInEmail({
+    body: { email, password },
     returnHeaders: true,
   });
 
-  const setCookie = signUpResult.headers.get("set-cookie");
+  const setCookie = signInResult.headers.get("set-cookie");
   if (!setCookie) {
     throw new Error(
-      "auth.api.signUpEmail() returned no set-cookie header — check that " +
-        "emailAndPassword is enabled in packages/auth/src/index.ts.",
+      "auth.api.signInEmail() returned no set-cookie header after the " +
+        "fixture was marked verified — check requireEmailVerification / " +
+        "emailVerified in packages/auth/src/index.ts.",
     );
   }
 
@@ -194,7 +225,7 @@ export async function createTestUser(overrides?: {
     ?.slice("better-auth.session_token=".length);
   if (!sessionCookie) {
     throw new Error(
-      "auth.api.signUpEmail() returned no better-auth.session_token cookie — " +
+      "auth.api.signInEmail() returned no better-auth.session_token cookie — " +
         "the session cookie name has changed upstream.",
     );
   }
@@ -202,8 +233,8 @@ export async function createTestUser(overrides?: {
   const session = await auth.api.getSession({ headers: new Headers({ cookie: setCookie }) });
   if (!session) {
     throw new Error(
-      "auth.api.getSession() returned null immediately after sign-up — the " +
-        "session cookie from signUpEmail didn't round-trip.",
+      "auth.api.getSession() returned null after sign-in — the session " +
+        "cookie from signInEmail didn't round-trip.",
     );
   }
 

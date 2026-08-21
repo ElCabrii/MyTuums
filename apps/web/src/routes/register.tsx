@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
 import { useEffect, type FormEvent } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
@@ -47,6 +47,7 @@ const redirectSearchSchema = z.object({ redirect: z.string().optional() });
 export function RegisterPage() {
   const { redirect: redirectFromSearch } = Route.useSearch();
   useRedirectWhenSignedIn(redirectFromSearch);
+  const navigate = useNavigate();
 
   const [username, setUsername] = useAtom(registerUsernameAtom);
   const [name, setName] = useAtom(registerNameAtom);
@@ -74,10 +75,13 @@ export function RegisterPage() {
       return;
     }
 
-    // No navigate here — success flows through the session updating, which
-    // useRedirectWhenSignedIn picks up. Calling it here too was the old
-    // double-navigation bug.
-    await signUp({ username, name, email, password, dateOfBirth, legalAccepted });
+    // A successful password sign-up no longer creates a session (issue #172:
+    // `requireEmailVerification`), so `useRedirectWhenSignedIn` will not fire
+    // — the account exists but is held back until the email is verified. Move
+    // the person to the check-your-email screen here; `signUpAtom` has stashed
+    // the address in `verifyEmailAtom` so that screen can offer a resend.
+    const ok = await signUp({ username, name, email, password, dateOfBirth, legalAccepted });
+    if (ok) void navigate({ to: "/verify-email", replace: true });
   };
 
   return (

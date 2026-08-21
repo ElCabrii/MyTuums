@@ -4,14 +4,20 @@ import { installTestAuthClient } from "@/lib/auth-client";
 
 type AuthClientResult = { data: unknown; error: unknown };
 
-const { signInEmail, signInUsername, signInPasskey, signUpEmail } = vi.hoisted(() => ({
-  signInEmail: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
-  signInUsername: vi.fn((): Promise<AuthClientResult> =>
-    Promise.resolve({ data: {}, error: null }),
-  ),
-  signInPasskey: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
-  signUpEmail: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
-}));
+const { signInEmail, signInUsername, signInPasskey, signUpEmail, sendVerificationEmail } =
+  vi.hoisted(() => ({
+    signInEmail: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
+    signInUsername: vi.fn((): Promise<AuthClientResult> =>
+      Promise.resolve({ data: {}, error: null }),
+    ),
+    signInPasskey: vi.fn((): Promise<AuthClientResult> =>
+      Promise.resolve({ data: {}, error: null }),
+    ),
+    signUpEmail: vi.fn((): Promise<AuthClientResult> => Promise.resolve({ data: {}, error: null })),
+    sendVerificationEmail: vi.fn((): Promise<AuthClientResult> =>
+      Promise.resolve({ data: { status: true }, error: null }),
+    ),
+  }));
 
 // SAFETY: the recording fakes resolve the { data, error } shapes the app reads
 // from the real client; the seam swaps only what each suite needs.
@@ -25,10 +31,19 @@ installTestAuthClient({
     signUp: {
       email: signUpEmail,
     },
+    sendVerificationEmail,
   },
 });
 
-import { authErrorAtom, signInAtom, signInWithPasskeyAtom, signUpAtom } from "@/atoms/auth";
+import {
+  authErrorAtom,
+  resendVerificationEmailAtom,
+  signInAtom,
+  signInWithPasskeyAtom,
+  signUpAtom,
+  verifyEmailAtom,
+  verifyEmailSentAtom,
+} from "@/atoms/auth";
 import { LEGAL_VERSION } from "@my-tuums/auth/rules";
 
 beforeEach(() => {
@@ -77,6 +92,43 @@ describe("signInAtom", () => {
 
     expect(outcome).toEqual({ status: "failed" });
     expect(store.get(authErrorAtom)).toBe("Invalid email or password");
+  });
+
+  it('reports "verify-email" and remembers the address on EMAIL_NOT_VERIFIED — issue #172', async () => {
+    const store = createStore();
+    signInEmail.mockResolvedValueOnce({
+      data: null,
+      error: { code: "EMAIL_NOT_VERIFIED", message: "Email not verified" },
+    });
+
+    const outcome = await store.set(signInAtom, {
+      identifier: "  Pending@example.com  ",
+      password: "correct-password",
+    });
+
+    expect(outcome).toEqual({ status: "verify-email" });
+    // The route navigates to /verify-email on this outcome, so a banner here
+    // would mean both the redirect and a "try again" message fire.
+    expect(store.get(authErrorAtom)).toBeNull();
+    // Trimmed, so the pending screen's resend button targets the address the
+    // person actually signed in with.
+    expect(store.get(verifyEmailAtom)).toBe("Pending@example.com");
+  });
+
+  it("leaves the address unknown when an unverified account signs in by username", async () => {
+    const store = createStore();
+    signInUsername.mockResolvedValueOnce({
+      data: null,
+      error: { code: "EMAIL_NOT_VERIFIED", message: "Email not verified" },
+    });
+
+    const outcome = await store.set(signInAtom, { identifier: "pending", password: "whatever1" });
+
+    expect(outcome).toEqual({ status: "verify-email" });
+    // A username is not an address: the pending screen shows the copy without
+    // a resend button rather than mailing something derived from a handle.
+    // `sendOnSignIn` has already re-sent the link server-side.
+    expect(store.get(verifyEmailAtom)).toBeNull();
   });
 
   it('resolves "signed-in" and touches nothing on success', async () => {
@@ -162,5 +214,100 @@ describe("signUpAtom", () => {
         legalVersion: undefined,
       }),
     );
+  });
+});
+
+describe("signUpAtom, after email verification landed (issue #172)", () => {
+  it("holds onto the address so /verify-email can offer a resend", async () => {
+    const store = createStore();
+
+    await store.set(signUpAtom, {
+      username: "alice",
+      name: "Alice",
+      email: "  Alice@Example.com  ",
+      password: "password1",
+      dateOfBirth: "1995-01-01",
+      legalAccepted: true,
+    });
+
+    // The trimmed address the sign-up was actually sent with — the resend
+    // button targets the same one rather than the raw field value.
+    expect(store.get(verifyEmailAtom)).toBe("Alice@Example.com");
+  });
+
+  it("asks for the verification link to land back on /verify-email", async () => {
+    const store = createStore();
+
+    await store.set(signUpAtom, {
+      username: "alice",
+      name: "Alice",
+      email: "alice@example.com",
+      password: "password1",
+      dateOfBirth: "1995-01-01",
+      legalAccepted: true,
+    });
+
+    // Absolute, and pointed at the web origin: Better Auth resolves a relative
+    // callbackURL against the API origin, which serves no HTML in dev.
+    expect(signUpEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        callbackURL: `${window.location.origin}/verify-email`,
+      }),
+    );
+  });
+
+  it("remembers nothing when the sign-up itself failed", async () => {
+    const store = createStore();
+    signUpEmail.mockResolvedValueOnce({
+      data: null,
+      error: { code: "USER_ALREADY_EXISTS", message: "User already exists" },
+    });
+
+    await expect(
+      store.set(signUpAtom, {
+        username: "alice",
+        name: "Alice",
+        email: "alice@example.com",
+        password: "password1",
+        dateOfBirth: "1995-01-01",
+        legalAccepted: true,
+      }),
+    ).resolves.toBe(false);
+
+    // No account is pending verification, so the route must not send anyone to
+    // the check-your-email screen with a stale address in hand.
+    expect(store.get(verifyEmailAtom)).toBeNull();
+  });
+});
+
+describe("resendVerificationEmailAtom", () => {
+  it("requests a fresh link for the address and flags the generic confirmation", async () => {
+    const store = createStore();
+
+    await expect(store.set(resendVerificationEmailAtom, "pending@example.com")).resolves.toBe(true);
+
+    expect(sendVerificationEmail).toHaveBeenCalledWith({
+      email: "pending@example.com",
+      callbackURL: `${window.location.origin}/verify-email`,
+    });
+    expect(store.get(verifyEmailSentAtom)).toBe(true);
+    expect(store.get(authErrorAtom)).toBeNull();
+  });
+
+  it("surfaces a rejected resend in the banner instead of claiming it was sent", async () => {
+    const store = createStore();
+    sendVerificationEmail.mockResolvedValueOnce({
+      data: null,
+      error: { code: "TOO_MANY_REQUESTS", message: "Too many requests" },
+    });
+
+    await expect(store.set(resendVerificationEmailAtom, "pending@example.com")).resolves.toBe(
+      false,
+    );
+
+    // The rate limit is the abuse control for this endpoint, and being told the
+    // link was re-sent when it was not is worse than the error.
+    expect(store.get(verifyEmailSentAtom)).toBe(false);
+    expect(store.get(authErrorAtom)).toBe("Too many requests");
   });
 });

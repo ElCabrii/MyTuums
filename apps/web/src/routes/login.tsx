@@ -146,6 +146,17 @@ export function LoginPage() {
     // the dedicated screen instead of the form's error banner (issue #74).
     if (outcome.status === "banned") {
       void navigate({ to: "/banned", replace: true });
+      return;
+    }
+
+    // The unverified-account recovery path (issue #172): a correct password on
+    // an account whose email was never verified. Better Auth rejected the
+    // sign-in (no session) and `sendOnSignIn` has already re-sent the
+    // verification email, so send the person to the check-your-email screen
+    // rather than a "try again" banner. `signInAtom` set `verifyEmailAtom`
+    // when the identifier was an email, so the resend button is available then.
+    if (outcome.status === "verify-email") {
+      void navigate({ to: "/verify-email", replace: true });
     }
   };
 
