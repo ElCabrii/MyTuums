@@ -48,6 +48,16 @@ const MAX_CROP_SCALE = 8;
 /** Wheel zoom step: one notch in or out. */
 const ZOOM_STEP = 1.1;
 
+/**
+ * The center guaranteed to survive common responsive profile frames.
+ *
+ * The narrow edge is a 320px phone over the 192px mobile banner (5:3); the
+ * wide edge is a 1920px desktop over the 256px banner (7.5:1). Relative to the
+ * canonical 3:1 source, those frames retain 5/9 of its width and 2/5 of its
+ * height respectively. Wider or narrower exceptional viewports can crop more.
+ */
+const BANNER_SAFE_AREA = { width: `${(5 / 9) * 100}%`, height: "40%" } as const;
+
 export function ImageCropDialog({
   kind,
   file,
@@ -85,13 +95,7 @@ export function ImageCropDialog({
   const [frame, setFrame] = useState<HTMLDivElement | null>(null);
   const frameRef = useCallback((node: HTMLDivElement | null) => setFrame(node), []);
 
-  /**
-   * The preview box's shape: the region that will actually be encoded, not the
-   * storage cap's ratio. Framing the cap (7.5:1 for banners) would both lie
-   * about the result and force every banner into a ratio the on-screen frame
-   * never has — see `calculateCropFrame`. Falls back to the cap's ratio only
-   * while the source is still decoding, when there is nothing to show anyway.
-   */
+  /** The preview box has the exact aspect that will be encoded. */
   const frameAspect = dims
     ? (() => {
         const box = calculateCropFrame(dims, kind);
@@ -201,7 +205,13 @@ export function ImageCropDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className={kind === "banner" ? "max-w-2xl" : undefined}>
+      <DialogContent
+        className={
+          kind === "banner"
+            ? "max-h-[calc(100dvh-2rem)] max-w-5xl overflow-y-auto [&>*]:shrink-0"
+            : undefined
+        }
+      >
         <DialogHeader>
           <DialogTitle>{m.settings_image_crop_title({ label })}</DialogTitle>
           <DialogDescription>{m.settings_image_crop_hint()}</DialogDescription>
@@ -221,15 +231,33 @@ export function ImageCropDialog({
               onPointerCancel={onPointerEnd}
             >
               {source && (
-                <img
-                  src={source.url}
-                  alt=""
-                  draggable={false}
-                  className="absolute max-w-none"
-                  style={imageStyle(source.dims, kind, crop)}
-                />
+                <>
+                  <img
+                    src={source.url}
+                    alt=""
+                    draggable={false}
+                    className="absolute max-w-none"
+                    style={imageStyle(source.dims, kind, crop)}
+                  />
+                  {kind === "banner" && (
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute top-1/2 left-1/2 border border-white/90 shadow-[0_0_0_9999px_rgb(0_0_0/0.28)]"
+                      style={{
+                        width: BANNER_SAFE_AREA.width,
+                        height: BANNER_SAFE_AREA.height,
+                        transform: "translate(-50%, -50%)",
+                      }}
+                    />
+                  )}
+                </>
               )}
             </div>
+          )}
+          {kind === "banner" && !failed && (
+            <p className="text-muted-foreground mt-2 text-xs">
+              {m.settings_banner_crop_safe_area()}
+            </p>
           )}
         </div>
 

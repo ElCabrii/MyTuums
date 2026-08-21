@@ -198,7 +198,9 @@ used to 429 every request from a fresh session.
 
 **Response headers** are set at one choke point,
 `apps/server/src/response-decorators.ts`: a Content-Security-Policy with
-`frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`,
+`img-src 'self' https: blob:` (the `blob:` source is only for the transient
+local image preview in the crop editor), `frame-ancestors 'none'`,
+`X-Content-Type-Options: nosniff`,
 `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`
 and HSTS. Inner handlers win, so a handler setting its own header keeps it.
 

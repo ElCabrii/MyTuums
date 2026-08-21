@@ -143,6 +143,9 @@ export const IMAGE_KINDS = ["avatar", "banner"] as const;
 
 export type ImageKind = (typeof IMAGE_KINDS)[number];
 
+/** The canonical aspect of every encoded profile banner. */
+export const BANNER_ASPECT_RATIO = 3;
+
 /**
  * Per-slot upload limits.
  *
@@ -167,20 +170,14 @@ export const IMAGE_LIMITS = {
   },
   banner: {
     maxOriginalBytes: 8 * 1024 * 1024,
-    // The banner renders full-bleed (`w-full`), outside the profile's
-    // max-w-[1500px] content wrapper, behind a fixed `h-48 sm:h-64` frame that
-    // `object-cover` fills. This 3840x512 ceiling is the device-pixel sample a
-    // 1920x256 CSS banner needs at DPR 2 — the widest common desktop frame.
-    // The encoder (apps/web/src/lib/media.ts) is width-priority against these
-    // bounds: it fills width up to 3840 and center-crops height to 512 only for
-    // sources tall enough to exceed it, so a tall photo spends its pixels on
-    // width the banner shows instead of height `object-cover` discards — the old
-    // contain fit left a 3840x2160 upload at 1778x1000, starved of width.
-    // Fewer pixels than the 3000x1000 it replaced (1.97 MP vs 3 MP), so the byte
-    // cap is unchanged and a PNG fallback still clears it comfortably.
+    // Every display variant is encoded at the canonical 3:1 banner aspect.
+    // The profile frame remains responsive and `object-cover` may hide edges,
+    // so the crop editor exposes the center safe area shared by supported
+    // layouts. 3840px provides a 2x sample on a 1920px-wide display; 1280px is
+    // the matching height and preserves source detail for responsive crops.
     maxDisplayBytes: 8 * 1024 * 1024,
     maxWidth: 3840,
-    maxHeight: 512,
+    maxHeight: 1280,
   },
 } as const satisfies Record<
   ImageKind,
