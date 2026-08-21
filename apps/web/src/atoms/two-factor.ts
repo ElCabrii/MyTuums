@@ -35,6 +35,48 @@ export interface TwoFactorSetup {
 export const twoFactorSetupAtom = atom<TwoFactorSetup | null>(null);
 
 /**
+ * Whether the manual-entry fallback ("Can't scan?") is expanded, and whether
+ * its copy action has just fired (issue #169).
+ *
+ * Collapsed by default: the secret IS the second factor, so it should not sit
+ * on screen — over a shoulder, or in a screen share — for people who scanned
+ * the QR code and never needed it. Shared atoms rather than component state so
+ * the settings card and the `/welcome` offer cannot drift, the same reason the
+ * panel atoms above are shared.
+ *
+ * Neither is persisted, and `openTwoFactorPanelAtom` resets both, so the
+ * fallback re-collapses whenever enrolment is left or restarted — it can never
+ * outlive `twoFactorSetupAtom`, which holds the secret itself.
+ */
+export const twoFactorSecretShownAtom = atomWithReset(false);
+
+export const twoFactorSecretCopiedAtom = atomWithReset(false);
+
+/**
+ * Copies the TOTP secret and flags the confirmation.
+ *
+ * `navigator.clipboard` is absent over plain HTTP and in some embedded
+ * webviews, and it can reject when permission is denied. Either way the
+ * revealed text stays on screen to be selected by hand, so a failure degrades
+ * to "copy it yourself" rather than a broken step — which is why this reports
+ * a boolean instead of routing to `authErrorAtom`. The secret is never logged,
+ * including on the failure path.
+ */
+export const copyTwoFactorSecretAtom = atom(
+  null,
+  async (_get, set, secret: string): Promise<boolean> => {
+    try {
+      await navigator.clipboard.writeText(secret);
+      set(twoFactorSecretCopiedAtom, true);
+      return true;
+    } catch {
+      set(twoFactorSecretCopiedAtom, false);
+      return false;
+    }
+  },
+);
+
+/**
  * Which two-factor panel the settings page is showing.
  *
  * `"verify"` is not derived from `twoFactorSetupAtom !== null` even though it
@@ -53,6 +95,10 @@ export const openTwoFactorPanelAtom = atom(null, (_get, set, panel: TwoFactorPan
   // Never leave a typed password sitting in the store across panels.
   set(twoFactorPasswordAtom, RESET);
   set(twoFactorCodeAtom, RESET);
+  // The manual-entry fallback re-collapses with every panel change: a revealed
+  // secret must not survive leaving or restarting enrolment (issue #169).
+  set(twoFactorSecretShownAtom, RESET);
+  set(twoFactorSecretCopiedAtom, RESET);
   set(authErrorAtom, null);
   if (panel === "idle") set(twoFactorSetupAtom, null);
 });

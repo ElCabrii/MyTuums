@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Section } from "@/components/settings/section";
+import { TotpSecretFallback } from "@/components/settings/totp-secret-fallback";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -87,8 +88,28 @@ export function TwoFactorSection() {
             >
               {m.auth_field_password()}
             </label>
+            {/* `name` matters as much as `autoComplete` here: password
+                managers key their heuristics off the submitted field name, and
+                without one this reads as an unnamed password box rather than
+                the account's current password (issue #169). The hidden
+                username field is the other half — an autofill entry is a
+                (username, password) pair, so a lone password field in a form
+                with no identity to match against is skipped by most managers.
+                It is `readOnly` and hidden from assistive tech: it exists to
+                be read by the browser, never typed into. */}
+            <input
+              type="text"
+              name="username"
+              value={viewer?.username ?? viewer?.email ?? ""}
+              autoComplete="username"
+              readOnly
+              hidden
+              aria-hidden="true"
+              tabIndex={-1}
+            />
             <Input
               id="twofa-password"
+              name="current-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -126,6 +147,7 @@ export function TwoFactorSection() {
             <div className="w-fit rounded-2xl bg-white p-4">
               <QRCode value={setup.totpURI} size={160} />
             </div>
+            <TotpSecretFallback totpURI={setup.totpURI} />
           </div>
 
           <div className="space-y-2">
