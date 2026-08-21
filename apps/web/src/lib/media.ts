@@ -61,14 +61,15 @@ function readFirstBytes(file: File, max: number): Promise<Uint8Array | null> {
 
 /**
  * Re-encodes `file` to a WebP (or a PNG on a browser without WebP encode
- * support) no larger than the slot's display bounds, preserving aspect ratio
- * and never scaling up.
+ * support) no larger than the slot's display bounds, never scaling up.
  *
  * WebP because it is in `ALLOWED_IMAGE_TYPES`, is markedly smaller than PNG for
- * photographs, and is supported by every browser this app targets. `cover`-style
- * cropping is deliberately NOT done here — the avatar is displayed in a round
- * frame with `object-cover`, so cropping at encode time would permanently
- * discard pixels the display already hides.
+ * photographs, and is supported by every browser this app targets. Banners are
+ * width-priority (see `calculateDisplayLayout`): fitting the whole source into
+ * the cap was height-limited for tall photos and left the full-bleed banner
+ * starved of width, so the banner fills width first and center-crops only the
+ * height the fixed frame hides. The untouched original remains the source of
+ * truth for the future crop/reposition editor.
  */
 export async function createDisplayVariantImpl(file: File, kind: ImageKind): Promise<File> {
   if (!isAllowedType(file.type)) throw new ImageError("type");
@@ -95,27 +96,25 @@ export async function createDisplayVariantImpl(file: File, kind: ImageKind): Pro
   const bitmap = await decode(file);
 
   try {
-    const { maxWidth, maxHeight } = IMAGE_LIMITS[kind];
-    // `min(..., 1)` is what stops a small image being blown up to the bounds,
-    // which would add bytes and lose sharpness to gain nothing.
-    //
-    // The bitmap's dims, not the header's: `imageOrientation: "from-image"`
-    // makes the decode already upright, so these are the display dims — which
-    // is also what the canvas output's header will say, keeping the server's
-    // display-bound check consistent with what actually renders. A rotated
-    // phone photo is 3000x1000 in its header and 1000x3000 upright here; sizing
-    // against the header would distort it.
-    const scale = Math.min(maxWidth / bitmap.width, maxHeight / bitmap.height, 1);
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const layout = calculateDisplayLayout({ width: bitmap.width, height: bitmap.height }, kind);
 
     const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = layout.width;
+    canvas.height = layout.height;
 
     const context = canvas.getContext("2d");
     if (!context) throw new ImageError("decode");
-    context.drawImage(bitmap, 0, 0, width, height);
+    context.drawImage(
+      bitmap,
+      layout.sourceX,
+      layout.sourceY,
+      layout.sourceWidth,
+      layout.sourceHeight,
+      0,
+      0,
+      layout.width,
+      layout.height,
+    );
 
     const blob = await toBlob(canvas);
     if (blob.size > IMAGE_LIMITS[kind].maxDisplayBytes) throw new ImageError("size");
@@ -136,6 +135,87 @@ export async function createDisplayVariantImpl(file: File, kind: ImageKind): Pro
     // avatar preview loop would retain every image the user auditioned.
     bitmap.close();
   }
+}
+
+/**
+ * Chooses the source rectangle and output size for one display variant.
+ *
+ * Avatars preserve the whole image (contain): the round frame's `object-cover`
+ * already hides nothing worth keeping, so cropping at encode would only
+ * permanently discard pixels a future refit wants.
+ *
+ * Banners are width-priority. The profile banner is a full-bleed `w-full` box
+ * behind a fixed `h-48 sm:h-64` frame that `object-cover` fills, so width is
+ * the dimension the display is starved of and height is the one the frame
+ * throws away. The layout fills width up to the cap (never upscaling) and crops
+ * height to the cap, centered, only when the source is tall enough to exceed
+ * it — the top/bottom dropped are exactly what `object-cover` hides. Width is
+ * never cropped: a wider viewport can always use more width, and a source that
+ * already fits the cap is kept whole so `object-cover` samples every pixel
+ * rather than an upscaled sliver. This is a strict improvement over the old
+ * contain fit, which was height-limited for tall sources and left width short.
+ */
+export type DisplayLayout = {
+  sourceX: number;
+  sourceY: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  width: number;
+  height: number;
+};
+
+export function calculateDisplayLayout(
+  source: { width: number; height: number },
+  kind: ImageKind,
+): DisplayLayout {
+  const { maxWidth, maxHeight } = IMAGE_LIMITS[kind];
+
+  if (kind === "avatar") {
+    // `min(..., 1)` stops a small image being blown up to the bounds, which
+    // would add bytes and lose sharpness to gain nothing.
+    const scale = Math.min(maxWidth / source.width, maxHeight / source.height, 1);
+    const width = Math.max(1, Math.round(source.width * scale));
+    const height = Math.max(1, Math.round(source.height * scale));
+
+    return {
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: source.width,
+      sourceHeight: source.height,
+      width,
+      height,
+    };
+  }
+
+  // Fill width up to the cap; never upscale, never crop width.
+  const scale = Math.min(maxWidth / source.width, 1);
+  const width = Math.max(1, Math.round(source.width * scale));
+  const drawnHeight = source.height * scale;
+
+  if (drawnHeight <= maxHeight) {
+    // The source fits the cap's height at this width — contain, no crop.
+    return {
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: source.width,
+      sourceHeight: source.height,
+      width,
+      height: Math.max(1, Math.round(drawnHeight)),
+    };
+  }
+
+  // Too tall: keep the full (scaled) width and crop height to the cap,
+  // centered. `maxHeight / scale` is the source rows that map to `maxHeight`
+  // after the width fill — everything outside them is what the frame hides.
+  const sourceHeight = Math.round(maxHeight / scale);
+  return {
+    sourceX: 0,
+    sourceY: Math.floor((source.height - sourceHeight) / 2),
+    sourceWidth: source.width,
+    sourceHeight,
+    width,
+    height: maxHeight,
+  };
 }
 
 /**

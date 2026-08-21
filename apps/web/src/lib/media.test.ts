@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IMAGE_LIMITS } from "@my-tuums/api/constants";
-import { IMAGE_ACCEPT, ImageError, createDisplayVariant } from "@/lib/media";
+import {
+  IMAGE_ACCEPT,
+  ImageError,
+  calculateDisplayLayout,
+  createDisplayVariant,
+} from "@/lib/media";
 
 /**
  * The guard paths only.
@@ -101,6 +106,158 @@ describe("IMAGE_ACCEPT", () => {
   });
 });
 
+describe("calculateDisplayLayout", () => {
+  // The pure half of the encoder: given source dims and a slot, it picks the
+  // source rectangle and output size with no canvas in the loop. That makes it
+  // the right seam to pin the crop contract — the canvas path is untestable in
+  // jsdom (see the file header) and covered end to end elsewhere, but the
+  // arithmetic that decides sharpness is all here.
+
+  it("avatar: contains the whole image and never upscales", () => {
+    // A 4000x4000 source is scaled down to the 512x512 cap, keeping every row.
+    expect(calculateDisplayLayout({ width: 4000, height: 4000 }, "avatar")).toEqual({
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: 4000,
+      sourceHeight: 4000,
+      width: 512,
+      height: 512,
+    });
+    // A source under the cap stays at native size — no invented pixels.
+    expect(calculateDisplayLayout({ width: 100, height: 100 }, "avatar")).toEqual({
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: 100,
+      sourceHeight: 100,
+      width: 100,
+      height: 100,
+    });
+    // Portrait is height-limited but still whole-image: 200x400 -> 200x400.
+    expect(calculateDisplayLayout({ width: 200, height: 400 }, "avatar")).toEqual({
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: 200,
+      sourceHeight: 400,
+      width: 200,
+      height: 400,
+    });
+  });
+
+  it("banner: fills width, center-cropping height only when the source is tall", () => {
+    // The reported case: a 3840x2160 photo. Contain used to be height-limited
+    // to 1778x1000, starving the full-bleed banner of width. Width-priority
+    // keeps the full 3840 width and center-crops to the 512 cap.
+    expect(calculateDisplayLayout({ width: 3840, height: 2160 }, "banner")).toEqual({
+      sourceX: 0,
+      sourceY: 824,
+      sourceWidth: 3840,
+      sourceHeight: 512,
+      width: 3840,
+      height: 512,
+    });
+    // A source already at the banner shape is kept whole — no crop, no upscale.
+    expect(calculateDisplayLayout({ width: 1920, height: 256 }, "banner")).toEqual({
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: 1920,
+      sourceHeight: 256,
+      width: 1920,
+      height: 256,
+    });
+    // A wide-short source is width-downscaled, never width-cropped: 4000x256
+    // -> 3840x246, keeping every row. Cropping width here would throw away
+    // pixels a wider viewport could have used.
+    expect(calculateDisplayLayout({ width: 4000, height: 256 }, "banner")).toEqual({
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: 4000,
+      sourceHeight: 256,
+      width: 3840,
+      height: 246,
+    });
+    // A huge source is center-cropped to the cap after the width fill.
+    expect(calculateDisplayLayout({ width: 5000, height: 3000 }, "banner")).toEqual({
+      sourceX: 0,
+      sourceY: 1166,
+      sourceWidth: 5000,
+      sourceHeight: 667,
+      width: 3840,
+      height: 512,
+    });
+  });
+
+  it("banner: never shrinks a source that fits the cap to a sliver", () => {
+    // The regression the symmetric cover-crop would have introduced: a small
+    // or moderately-tall source must NOT be cropped to the banner aspect,
+    // because that would upscale what `object-cover` could have sampled whole.
+    // 200x200 stays 200x200, not 200x27.
+    expect(calculateDisplayLayout({ width: 200, height: 200 }, "banner")).toEqual({
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: 200,
+      sourceHeight: 200,
+      width: 200,
+      height: 200,
+    });
+    // 1500x500 (3:1) stays whole — the frame is 7.5:1, but cropping a 3:1
+    // source to 7.5:1 would undershoot the frame's height and force upscaling.
+    expect(calculateDisplayLayout({ width: 1500, height: 500 }, "banner")).toEqual({
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: 1500,
+      sourceHeight: 500,
+      width: 1500,
+      height: 500,
+    });
+    // 600x600 just clears the cap height, so only the 88 rows the frame hides
+    // are dropped — not the 520 a full aspect-crop would have taken.
+    expect(calculateDisplayLayout({ width: 600, height: 600 }, "banner")).toEqual({
+      sourceX: 0,
+      sourceY: 44,
+      sourceWidth: 600,
+      sourceHeight: 512,
+      width: 600,
+      height: 512,
+    });
+  });
+
+  it("banner: never crops width, even for sources wider than the cap aspect", () => {
+    // A 9:1 panorama (3840x400) is wider than the 7.5:1 frame. Width-priority
+    // keeps the full width (downscaled to the cap) and leaves the spare height
+    // alone — it does NOT crop width to force the banner aspect.
+    const layout = calculateDisplayLayout({ width: 3840, height: 400 }, "banner");
+    expect(layout.sourceX).toBe(0);
+    expect(layout.sourceWidth).toBe(3840);
+    expect(layout.width).toBe(3840);
+    expect(layout.height).toBe(400);
+  });
+
+  it("produces output the server's display-bound check will accept, for any source", () => {
+    // The encoder's output is what `acceptImage(_, _, kind, "display")` sizes
+    // against IMAGE_LIMITS, so width/height can never exceed the slot cap —
+    // including after a center crop — or the server would reject the browser's
+    // own variant. Checked across the awkward shapes, both slots.
+    const cases = [
+      { kind: "avatar" as const, src: { width: 4000, height: 4000 } },
+      { kind: "avatar" as const, src: { width: 100, height: 100 } },
+      { kind: "banner" as const, src: { width: 3840, height: 2160 } },
+      { kind: "banner" as const, src: { width: 200, height: 200 } },
+      { kind: "banner" as const, src: { width: 4000, height: 256 } },
+      { kind: "banner" as const, src: { width: 5000, height: 3000 } },
+      { kind: "banner" as const, src: { width: 600, height: 600 } },
+    ];
+    for (const { kind, src } of cases) {
+      const { width, height, sourceWidth, sourceHeight } = calculateDisplayLayout(src, kind);
+      const { maxWidth, maxHeight } = IMAGE_LIMITS[kind];
+      expect(width).toBeLessThanOrEqual(maxWidth);
+      expect(height).toBeLessThanOrEqual(maxHeight);
+      // The drawn source rectangle stays inside the source.
+      expect(sourceWidth).toBeLessThanOrEqual(src.width);
+      expect(sourceHeight).toBeLessThanOrEqual(src.height);
+    }
+  });
+});
+
 describe("createDisplayVariant", () => {
   it("rejects a type outside the allowlist without touching the decoder", async () => {
     const decode = vi.fn();
@@ -174,8 +331,8 @@ describe("createDisplayVariant", () => {
     const size = 3 * 1024 * 1024;
     stubEncodePath({
       toBlob: new Blob([new Uint8Array(size)], { type: "image/png" }),
-      width: 3000,
-      height: 1000,
+      width: 3840,
+      height: 512,
     });
 
     const encoded = await createDisplayVariant(file("image/jpeg"), "banner");

@@ -262,26 +262,26 @@ describe("acceptImage", () => {
   });
 
   it("accepts the banner's enlarged display bounds and byte budget", () => {
-    // A 3 MB 3000x1000 PNG is larger than the old 2 MB cap, so this catches
+    // A 3 MB 3840x512 PNG is larger than the old 2 MB cap, so this catches
     // the client/server display-byte limit falling behind the new resolution.
-    const fullResolution = pngWithDimensions(3000, 1000, 3 * 1024 * 1024);
+    const fullResolution = pngWithDimensions(3840, 512, 3 * 1024 * 1024);
     expect(acceptImage(fullResolution, "image/png", "banner", "display")).toMatchObject({
       ok: true,
     });
 
     expect(IMAGE_LIMITS.banner).toMatchObject({
       maxDisplayBytes: 8 * 1024 * 1024,
-      maxWidth: 3000,
-      maxHeight: 1000,
+      maxWidth: 3840,
+      maxHeight: 512,
     });
     expect(
-      acceptImage(pngWithDimensions(3001, 1000), "image/png", "banner", "display"),
+      acceptImage(pngWithDimensions(3841, 512), "image/png", "banner", "display"),
     ).toMatchObject({
       ok: false,
       reason: "size",
     });
     expect(
-      acceptImage(pngWithDimensions(3000, 1001), "image/png", "banner", "display"),
+      acceptImage(pngWithDimensions(3840, 513), "image/png", "banner", "display"),
     ).toMatchObject({
       ok: false,
       reason: "size",
