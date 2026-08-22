@@ -18,6 +18,7 @@ import {
   LEGAL_ACCEPTANCE_REQUIRED_MESSAGE,
   LEGAL_VERSION,
   THEME_PREFERENCES,
+  USERNAME_CANONICAL_WRITE_MESSAGE,
 } from "@my-tuums/auth/rules";
 import { authTest, testHelpers } from "@my-tuums/auth/testing";
 import { closeDb, db } from "@my-tuums/db";
@@ -484,6 +485,80 @@ describe("handles", () => {
     const [row] = await db.select({ id: user.id }).from(user).where(eq(user.username, username));
     expect(row).toBeDefined();
     expect(headers).toBeDefined();
+  });
+
+  it("stores and returns lowercase handles after sign-up and handle changes", async () => {
+    const { email, headers } = await signUp({ username: "AlexMercer" });
+
+    const [created] = await db
+      .select({ username: user.username, displayUsername: user.displayUsername })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(created).toEqual({ username: "alexmercer", displayUsername: "alexmercer" });
+
+    const firstSession = await auth.api.getSession({ headers });
+    expect(firstSession?.user).toMatchObject({
+      username: "alexmercer",
+      displayUsername: "alexmercer",
+    });
+
+    await auth.api.updateUser({ body: { username: "NewHandle" }, headers });
+
+    const [updated] = await db
+      .select({ username: user.username, displayUsername: user.displayUsername })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(updated).toEqual({ username: "newhandle", displayUsername: "newhandle" });
+
+    const updatedSession = await auth.api.getSession({ headers });
+    expect(updatedSession?.user).toMatchObject({
+      username: "newhandle",
+      displayUsername: "newhandle",
+    });
+  });
+
+  it("rejects display-only handle updates instead of splitting the two handle columns", async () => {
+    const { email, headers } = await signUp({ username: "AlexMercer" });
+
+    await expect(
+      auth.api.updateUser({ body: { displayUsername: "AlternateHandle" }, headers }),
+    ).rejects.toThrow(USERNAME_CANONICAL_WRITE_MESSAGE);
+
+    const [unchanged] = await db
+      .select({ username: user.username, displayUsername: user.displayUsername })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(unchanged).toEqual({ username: "alexmercer", displayUsername: "alexmercer" });
+  });
+
+  it("normalizes legacy writes at the database boundary during a rolling deploy", async () => {
+    const { email } = await signUp({ username: "InitialHandle" });
+
+    // Models the version that remains live while Railway's pre-deploy
+    // migration runs: it canonicalises username but preserves typed casing in
+    // displayUsername. The migration trigger must make that old write safe.
+    await db
+      .update(user)
+      .set({ username: "legacyhandle", displayUsername: "LegacyHandle" })
+      .where(eq(user.email, email));
+
+    const [updated] = await db
+      .select({ username: user.username, displayUsername: user.displayUsername })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(updated).toEqual({ username: "legacyhandle", displayUsername: "legacyhandle" });
+
+    // Direct display-only writes cannot split the columns either.
+    await db.update(user).set({ displayUsername: "AlternateHandle" }).where(eq(user.email, email));
+
+    const [resynchronized] = await db
+      .select({ username: user.username, displayUsername: user.displayUsername })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(resynchronized).toEqual({
+      username: "legacyhandle",
+      displayUsername: "legacyhandle",
+    });
   });
 });
 

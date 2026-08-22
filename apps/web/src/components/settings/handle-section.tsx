@@ -64,7 +64,7 @@ export function HandleSection() {
               type="text"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder={viewer?.displayUsername ?? currentHandle ?? ""}
+              placeholder={currentHandle ?? viewer?.displayUsername ?? ""}
               className="bg-background/50 h-10 pl-10"
               autoComplete="username"
             />

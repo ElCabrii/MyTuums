@@ -88,7 +88,7 @@ export function ProfileLayout() {
 
   const profile = profileQuery.data;
   const isOwnProfile = viewer?.id === profile.id;
-  const handle = profile.displayUsername || handleOf(profile) || username;
+  const handle = handleOf(profile) || username;
   const displayName = profile.name || handle;
 
   // The `suspended` flag is the server's contract for a banned profile (see

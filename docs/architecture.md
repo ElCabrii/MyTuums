@@ -35,16 +35,16 @@ and `@my-tuums/auth/rules`. All four must stay free of `@my-tuums/db`, which rea
 The `packages/auth` edge is the one that looks surprising, so it is worth
 stating why it does not weaken the direction above. `@my-tuums/auth/rules`
 (`packages/auth/src/rules.ts`) is the single statement of the account rules —
-handle bounds and charset, the date-of-birth parse and age comparison, the bio
-limit, the preference lists, and the English rejection strings — and it is the
-only file in that package with **no imports at all**. Reaching it does not
-construct the better-auth instance, read any env, or touch `@my-tuums/db`; the
-production bundle contains exactly those four workspace modules and nothing
-else from the packages. It lives in `packages/auth` because that is where the
-rules are _enforced_ (the database hooks are the only place a user-field rule
-actually holds) and because `packages/api` already depends on `packages/auth` —
-putting the shared statement in `packages/api` instead would force
-`packages/auth` to import it, closing a cycle.
+handle bounds, charset and lowercase normalization, the date-of-birth parse and
+age comparison, the bio limit, the preference lists, and the English rejection
+strings — and it is the only file in that package with **no imports at all**.
+Reaching it does not construct the better-auth instance, read any env, or touch
+`@my-tuums/db`; the production bundle contains exactly those four workspace
+modules and nothing else from the packages. It lives in `packages/auth` because
+that is where the rules are _enforced_ (the database hooks are the only place a
+user-field rule actually holds) and because `packages/api` already depends on
+`packages/auth` — putting the shared statement in `packages/api` instead would
+force `packages/auth` to import it, closing a cycle.
 
 ## Development topology
 
@@ -370,6 +370,12 @@ catches a schema edit that never had a migration generated.
 Migrations run as a pre-deploy step, never at server boot: N replicas would
 race the same DDL. The image ships `apps/server/dist/migrate.js` and the SQL
 so Railway and `docker-compose.yml` run the identical runner.
+
+Handle canonicalisation is also enforced by the database trigger installed in
+`0015_lowercase_usernames`: `username` is lowercased and `display_username` is
+derived from it on every handle write. This closes the pre-deploy interval in
+which Railway still routes traffic to the previous application version, and
+keeps direct database writers from splitting the two representations.
 
 ## Test topology
 

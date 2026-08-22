@@ -1,7 +1,8 @@
 /**
  * The handle used in URLs (`/@alexmercer`). Prefers the canonical `username`
- * that the BetterAuth username plugin normalises over `displayUsername`, so
- * links stay stable even when the two differ in casing.
+ * that the BetterAuth username plugin normalises over `displayUsername`.
+ * New rows keep both fields identical; the fallback remains for handle rows
+ * created before the canonical username field existed.
  */
 export function handleOf(
   user: { username?: string | null; displayUsername?: string | null } | null | undefined,

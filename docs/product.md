@@ -12,8 +12,8 @@ both by the server's page gate and by the client.
 
 ## Accounts and authentication
 
-- Email and password sign-up, with a handle (username), a date of birth,
-  and an explicit acceptance of the Terms of Service and Privacy Policy.
+- Email and password sign-up, with a lowercase handle (username), a date of
+  birth, and an explicit acceptance of the Terms of Service and Privacy Policy.
   Accounts must be at least 15 years old; the rule is enforced identically on
   the client and in a database hook. Consent is recorded on the account as a
   timestamp plus the accepted legal version; accounts created before this
@@ -54,8 +54,8 @@ both by the server's page gate and by the client.
 
 ## Profiles and search
 
-- A profile carries a display name, handle, bio (160 characters), avatar,
-  banner, join date, and follower/following counts.
+- A profile carries a display name, lowercase handle, bio (160 characters),
+  avatar, banner, join date, and follower/following counts.
 - Profiles are addressed by handle. A profile hidden by a block reads as "no
   such user"; a banned profile resolves to a suspended stub instead.
 - Search has three surfaces: a header typeahead (up to five users and five

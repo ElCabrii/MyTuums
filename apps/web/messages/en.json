@@ -127,6 +127,7 @@
   "validation_username_required": "Username is required.",
   "validation_username_length": "Username must be between 3 and 20 characters long.",
   "validation_username_characters": "Username can only contain letters, numbers, underscores, and hyphens.",
+  "validation_username_canonical_write": "Change a handle through the username field, not the display username field.",
   "validation_display_name_required": "Display Name is required.",
   "validation_email_invalid": "Please enter a valid email address.",
   "validation_password_length": "Password must be at least 8 characters long.",

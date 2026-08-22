@@ -208,6 +208,21 @@ describe("signInWithPasskeyAtom", () => {
 });
 
 describe("signUpAtom", () => {
+  it("submits a mixed-case handle in canonical lowercase", async () => {
+    const store = createStore();
+
+    await store.set(signUpAtom, {
+      username: "  AlexMercer  ",
+      name: "Alex Mercer",
+      email: "alex@example.com",
+      password: "password1",
+      dateOfBirth: "1995-01-01",
+      legalAccepted: true,
+    });
+
+    expect(signUpEmail).toHaveBeenCalledWith(expect.objectContaining({ username: "alexmercer" }));
+  });
+
   it("sends legal acceptance evidence only when the box is checked", async () => {
     const store = createStore();
 
