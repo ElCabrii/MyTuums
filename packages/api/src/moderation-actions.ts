@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import {
   localeFromRequest,
@@ -16,7 +16,7 @@ import {
 } from "@my-tuums/auth";
 import { isLocalePreference } from "@my-tuums/auth/rules";
 import type { Database } from "@my-tuums/db";
-import { moderationAction, post, report, session, user } from "@my-tuums/db/schema";
+import { appeal, moderationAction, post, report, session, user } from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
 import type { Context } from "./context.js";
 import { canManageRole, type UserRole } from "./roles.js";
@@ -1041,6 +1041,53 @@ async function runEffect(
   });
 }
 
+/**
+ * Runs a manual action that makes earlier appealable actions no longer apply.
+ *
+ * Open appeals are stamped `reversed`, not `overturned`: the moderator acted
+ * directly rather than reviewing the appeal, so the nullable review fields
+ * stay empty and the inverse action's audit row remains the honest record of
+ * who acted and why. The stamp and inverse action share one transaction.
+ *
+ * The appeal rows are updated before the effect locks its post/user target.
+ * Appeal review takes those locks in the same order, preventing a concurrent
+ * manual reversal and review from deadlocking each other.
+ */
+async function runManualReversal(
+  context: EffectContext,
+  args: {
+    targetType: "post" | "user";
+    targetId: string;
+    actionCodes: ModerationActionCode[];
+  },
+  run: (db: DbLike) => Promise<{ pending: PendingEmail[] }>,
+): Promise<void> {
+  await applyModerationEffect(context, async (db) => {
+    const targetMatch =
+      args.targetType === "post"
+        ? eq(moderationAction.targetPostId, args.targetId)
+        : eq(moderationAction.targetUserId, args.targetId);
+    const reversedActionIds = db
+      .select({ id: moderationAction.id })
+      .from(moderationAction)
+      .where(
+        and(
+          eq(moderationAction.targetType, args.targetType),
+          targetMatch,
+          inArray(moderationAction.action, args.actionCodes),
+        ),
+      );
+
+    await db
+      .update(appeal)
+      .set({ status: "reversed" })
+      .where(and(eq(appeal.status, "open"), inArray(appeal.actionId, reversedActionIds)));
+
+    const { pending } = await run(db);
+    return { result: undefined, pending };
+  });
+}
+
 /** Removes a post and emails the author — the notice goes out after the removal commits. */
 export function removePost(
   context: EffectContext,
@@ -1054,7 +1101,11 @@ export function restorePost(
   context: EffectContext,
   args: { postId: string; actorId: string; note?: string },
 ): Promise<void> {
-  return runEffect(context, (db) => restorePostEffect(db, args));
+  return runManualReversal(
+    context,
+    { targetType: "post", targetId: args.postId, actionCodes: ["post_removed"] },
+    (db) => restorePostEffect(db, args),
+  );
 }
 
 /** Suspends a user for a bounded time and emails them, returning the stored expiry. */
@@ -1094,13 +1145,25 @@ export function unbanUser(
     note?: string;
   },
 ): Promise<void> {
-  return runEffect(context, (db) => unbanEffect(db, args));
+  return runManualReversal(
+    context,
+    {
+      targetType: "user",
+      targetId: args.userId,
+      actionCodes: ["user_suspended", "user_banned"],
+    },
+    (db) => unbanEffect(db, args),
+  );
 }
 
-/** Changes a user's role and emails them. */
+/** Changes a user's role, closes appeals against superseded role changes, and emails them. */
 export function setRole(
   context: EffectContext,
   args: { userId: string; actorId: string; actorRole: string; role: UserRole },
 ): Promise<void> {
-  return runEffect(context, (db) => setRoleEffect(db, args));
+  return runManualReversal(
+    context,
+    { targetType: "user", targetId: args.userId, actionCodes: ["role_changed"] },
+    (db) => setRoleEffect(db, args),
+  );
 }

@@ -133,7 +133,9 @@ author's removed-post stub. The appeal lands in the moderation queue labelled
 as such, and is reviewed by any moderator **except the one who took the
 original action**. Overturning an appeal applies the inverse action, which —
 like any action — emails the user. An appeal's own text is between 10 and 2000
-characters.
+characters. If a moderator reverses the contested action directly, the appeal
+closes as `reversed` and leaves the queue; the inverse action still emails the
+affected user, but the appeal is not recorded as having been reviewed.
 
 ## Glossary
 

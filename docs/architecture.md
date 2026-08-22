@@ -347,6 +347,11 @@ sides by CI. See [operations.md](operations.md).
    and excludes the moderator who took the original action. It runs that
    transaction through `applyModerationEffect`, so the overturn's notices go
    out after the REVIEW's commit — never an inner savepoint.
+7. **Manual reversal.** Restoring a post, unbanning or unsuspending an account,
+   or changing a role that an open appeal contests stamps that appeal
+   `reversed` in the same transaction. It leaves the review fields empty and
+   does not add an `appeal_resolved` row because no appeal review occurred;
+   the inverse action's audit row and post-commit email record what happened.
 
 ## Schemas and migrations
 

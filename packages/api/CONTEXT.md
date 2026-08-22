@@ -130,6 +130,13 @@ over HTTP and imports only its browser-safe subpaths.
   goes through the wrappers. The raw effects remain exported for the appeal
   intake and the tests, which compose them directly; a new procedure must go
   through the wrappers, not call an effect and hand-thread the send.
+- **A manual inverse action closes appeals before locking its target.** The
+  `restorePost`, `unbanUser` and `setRole` wrappers stamp linked open appeals
+  `reversed` in the same transaction as the inverse action. They do not fill
+  the review fields or log `appeal_resolved`, because no appeal review took
+  place; the inverse action's audit row and notice are the source of truth.
+  Appeal rows are locked before post/user rows, matching `appealReview`'s lock
+  order so a direct reversal racing a review cannot deadlock.
 - **Cursor bounds go through `sql.param(value, column)`.** Interpolating a JS
   `Date` hands postgres.js something it cannot serialise.
 - **`keysetPage`'s `createdAtField` is type-tied to the `createdAt` column**, so
