@@ -19,6 +19,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
+import { MentionText } from "@/components/mention-text";
 import { useSignOut } from "@/hooks/use-sign-out";
 import {
   UserX,
@@ -235,12 +236,13 @@ export function ProfileLayout() {
             <p className="text-muted-foreground text-sm font-medium">@{handle}</p>
           </div>
 
-          {/* `whitespace-pre-line` so a bio typed with line breaks keeps them.
-              The field is plain text and is rendered as such — no markdown, no
-              linkification — which is what keeps it free of any escaping
-              question. */}
+          {/* `whitespace-pre-line` keeps authored line breaks. MentionText
+              emits React text children and profile links rather than HTML, so
+              linkification does not create an escaping boundary. */}
           {profile.bio && (
-            <p className="max-w-2xl text-sm leading-relaxed whitespace-pre-line">{profile.bio}</p>
+            <p className="max-w-2xl text-sm leading-relaxed whitespace-pre-line">
+              <MentionText text={profile.bio} />
+            </p>
           )}
 
           <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">

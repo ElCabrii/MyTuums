@@ -153,6 +153,22 @@ describe("PostCard", () => {
   });
 
   describe("content rendering", () => {
+    it.each([
+      ["post", null],
+      ["reply", "parent-1"],
+    ])("links mentions in a published %s to canonical profiles", async (_kind, parentId) => {
+      const post = makePost({ content: "Hello @Alice!", parentId });
+      const { router } = await renderWithProviders(<PostCard post={post} />);
+
+      const user = userEvent.setup();
+      const mention = screen.getByRole("link", { name: "@Alice" });
+      expect(mention).toHaveAttribute("href", "/@alice");
+      await user.click(mention);
+
+      expect(router.state.location.pathname).toBe("/@alice");
+      expect(router.state.location.pathname).not.toBe(`/post/${post.id}`);
+    });
+
     it("preserves line breaks in the raw DOM text", async () => {
       const post = makePost({ content: "line one\nline two\nline three" });
       const { container } = await renderWithProviders(<PostCard post={post} />);
