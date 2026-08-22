@@ -81,13 +81,12 @@ const containsPattern = (pattern: string) => `%${escapeLikePattern(pattern)}%`;
  */
 export const searchRouter = {
   /**
-   * The header dropdown: up to 5 users and 5 posts for a query, no cursor.
+   * The header dropdown: up to 5 matching profiles for a query, no cursor.
    *
    * Users rank username prefix matches ahead of substring-only matches, which
    * is what makes "al" suggest the person actually called al over everyone
-   * whose name merely contains "al". Each side is a hard cap of 5 because the
-   * dropdown fits roughly ten rows; a full results page goes through
-   * `users`/`posts` below instead.
+   * whose name merely contains "al". The full results page goes through
+   * `users` and `posts` below; typing only suggests profiles.
    */
   typeahead: protectedProcedure
     .use(rateLimit(RATE_LIMITS.search))
@@ -123,25 +122,7 @@ export const searchRouter = {
         )
         .limit(5);
 
-      const posts = await context.db
-        .select(postSelection(viewerId))
-        .from(post)
-        .innerJoin(user, eq(user.id, post.authorId))
-        .where(
-          and(
-            ilike(post.content, contains),
-            isNull(post.parentId),
-            // Same removal rule as `search.posts` below — a removed post's
-            // text must not be probeable through the dropdown either
-            // (issue #48).
-            isNull(post.removedAt),
-            not(invisibleAuthor(viewerId)),
-          ),
-        )
-        .orderBy(desc(post.createdAt), desc(post.id))
-        .limit(5);
-
-      return { users, posts };
+      return { users };
     }),
 
   /**

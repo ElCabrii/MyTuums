@@ -40,9 +40,7 @@ function destinationOf(
   row: SuggestionRowData,
   query: string,
 ):
-  | { to: "/@{$username}"; params: { username: string } }
-  | { to: "/post/$postId"; params: { postId: string } }
-  | { to: "/search"; search: { q: string } } {
+  { to: "/@{$username}"; params: { username: string } } | { to: "/search"; search: { q: string } } {
   switch (row.kind) {
     case "user": {
       const handle = handleOf(row.user);
@@ -50,34 +48,29 @@ function destinationOf(
         ? { to: "/@{$username}", params: { username: handle } }
         : { to: "/search", search: { q: query } };
     }
-    case "post":
-      return { to: "/post/$postId", params: { postId: row.post.id } };
     case "see-all":
       return { to: "/search", search: { q: query } };
   }
 }
 
 /**
- * The stable list key for a suggestion row — user and post ids, and a static
- * literal for the single see-all entry. Keys live here rather than inside
- * `SuggestionRow` because React consumes them at the list site (the `.map`
- * in `SuggestionList`), not where the element's JSX is written.
+ * The stable list key for a suggestion row — a user id or the static literal
+ * for the single see-all entry. Keys live here rather than inside
+ * `SuggestionRow` because React consumes them at the list site (the `.map` in
+ * `SuggestionList`), not where the element's JSX is written.
  */
 function suggestionRowKey(row: SuggestionRowData): string {
   switch (row.kind) {
     case "user":
       return row.user.id;
-    case "post":
-      return row.post.id;
     case "see-all":
       return "search-see-all";
   }
 }
 
 /**
- * One option in the suggestions list: a user row (with a link when the user
- * has a handle, a plain row otherwise), a post row, or the see-all entry —
- * the four shapes `suggestionRows` can emit.
+ * One option in the suggestions list: a profile row (with a link when the
+ * user has a handle, a plain row otherwise), or the see-all entry.
  *
  * Rows share one interaction contract: hover selects (keyboard and pointer
  * share a single highlight) and a click dismisses before the row's own
@@ -148,33 +141,6 @@ function SuggestionRow({
         />
         <span className="text-foreground block truncate text-sm font-medium">{displayName}</span>
       </div>
-    );
-  }
-
-  if (row.kind === "post") {
-    const authorName = row.post.author.name || handleOf(row.post.author) || m.user_unknown();
-    return (
-      <Link
-        to="/post/$postId"
-        params={{ postId: row.post.id }}
-        {...rowProps}
-        onMouseEnter={() => onSelect(index)}
-        onClick={onDismiss}
-      >
-        <UserAvatar
-          user={row.post.author}
-          alt={authorName}
-          className="h-8 w-8 shrink-0"
-          fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
-        />
-        <span className="min-w-0">
-          <span className="text-foreground block truncate text-sm font-medium">{authorName}</span>
-          <span className="text-muted-foreground line-clamp-1 block text-xs">
-            {/* Null only for removed posts (see post-card.tsx). */}
-            {row.post.content ?? ""}
-          </span>
-        </span>
-      </Link>
     );
   }
 
@@ -313,7 +279,7 @@ function SearchField({
             // cancel is hidden: it is unstylable (the native glyph shows up
             // in accent color and answers the cursor with a default arrow),
             // so the app draws the button it can style instead.
-            className="bg-muted/50 focus-visible:bg-background w-full pr-9 pl-9 [&::-webkit-search-cancel-button]:hidden"
+            className="w-full pr-9 pl-9 [&::-webkit-search-cancel-button]:hidden"
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
             onFocus={onFocus}
@@ -371,15 +337,11 @@ function SuggestionPopover(props: {
       // the keyboard, the listbox only mirrors the highlight — so focus
       // must stay put. `finalFocus` still returns it after a dismiss.
       initialFocus={false}
-      // The width is explicit because base-ui's Positioner sizes to the
-      // popup's own content, never the trigger — without `w-96` the list
-      // would collapse to the widest row. `max-w` keeps the list inside
-      // the viewport on narrow screens. The trailing classes are the same
-      // acrylic recipe the header's dropdown menus use (translucent
-      // surface + backdrop blur behind a pseudo-element): the plain
-      // `bg-popover` from the wrapper would render the panel opaque, which
-      // reads as a different material than the rest of the navbar.
-      className="bg-popover/70 dark:ring-foreground/10 relative w-96 max-w-[calc(100vw-2rem)] gap-0.5 p-1.5 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-2xl before:backdrop-saturate-150"
+      // Base UI's Positioner sizes to the popup's content, never the trigger;
+      // `w-96` gives suggestions a stable width and `max-w` keeps them inside
+      // narrow viewports. Surface, ring, radius and shadow stay owned by the
+      // generated shadcn Popover primitive.
+      className="w-96 max-w-[calc(100vw-2rem)] gap-0.5 p-1.5"
     >
       <SuggestionList {...props} />
     </PopoverContent>
@@ -387,10 +349,10 @@ function SuggestionPopover(props: {
 }
 
 /**
- * The header's live search box: a combobox input with a typeahead dropdown
- * of matching users and posts and a see-all entry into the /search results
- * page. Keyboard (arrows, Enter, Escape) and pointer (hover, click) share a
- * single highlight state, so either mode picks up where the other left off.
+ * The header's live search box: a combobox input with matching profiles and a
+ * see-all entry into the full people-and-posts results page. Keyboard (arrows,
+ * Enter, Escape) and pointer (hover, click) share a single highlight state, so
+ * either mode picks up where the other left off.
  */
 export function SearchBox() {
   const navigate = useNavigate();
