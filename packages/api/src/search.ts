@@ -201,15 +201,17 @@ export const searchRouter = {
       const filters = [
         ilike(post.content, containsPattern(input.q)),
         isNull(post.parentId),
-        // Removed posts are not search results — the one visibility rule
-        // search does NOT share with `post.list` (issue #48). The feed keeps
-        // a removed post as a stub because `postSelection` nulls its content
-        // by projection; the WHERE clause here matches the raw `content`
-        // column, which no projection touches, so a removed post's text
-        // would stay probeable by anyone who can guess it. The row itself
-        // must be unreachable: search is the one surface where matching on
-        // text the viewer may not read leaks it.
+        // Neither tombstone is a search result — the one visibility rule
+        // search does NOT share with `post.list` (issue #48, extended to
+        // author deletions by #148). The feed keeps both as stubs because
+        // `postSelection` nulls their content by projection; the WHERE clause
+        // here matches the raw `content` column, which no projection touches,
+        // so a removed or deleted post's text would stay probeable by anyone
+        // who can guess it. The rows themselves must be unreachable: search is
+        // the one surface where matching on text the viewer may not read
+        // leaks it.
         isNull(post.removedAt),
+        isNull(post.deletedAt),
         // The visibility filter (issue #38), same as `post.list`: a banned or
         // blocked author's posts are not search results.
         not(invisibleAuthor(viewerId)),

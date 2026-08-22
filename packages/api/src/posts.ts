@@ -59,16 +59,22 @@ function viewerHasLiked(viewerId: string) {
  */
 export const postSelection = (viewerId: string) => ({
   id: post.id,
-  // The tombstone projection (issue #38): a removed post keeps its row —
-  // removals are never hard deletes — but reads as null content here, which
-  // is what renders the stub. `removedReason` is null for everyone but the
-  // author, so a removed post can say why to the person it happened to and
-  // nothing to anyone else. The moderation case view reads a separate
-  // raw-content projection (moderator-gated), never this one.
+  // The tombstone projection (issue #38, widened by #148): a post that was
+  // removed by a moderator OR deleted by its author keeps its row — neither
+  // is a hard delete — but reads as null content here, which is what renders
+  // the stub. `removedReason` is null for everyone but the author, so a
+  // removed post can say why to the person it happened to and nothing to
+  // anyone else. The moderation case view reads a separate raw-content
+  // projection (moderator-gated), never this one.
   content: sql<
     string | null
-  >`case when ${post.removedAt} is not null then null else ${post.content} end`,
+  >`case when ${post.removedAt} is not null or ${post.deletedAt} is not null then null else ${post.content} end`,
   removed: sql<boolean>`${post.removedAt} is not null`,
+  // Two flags rather than one, because the two tombstones mean different
+  // things to the reader: a removal is a moderation action the author can
+  // appeal, a deletion is the author's own doing and has nothing to appeal.
+  // The stub copy differs accordingly (see `post-card.tsx`).
+  deleted: sql<boolean>`${post.deletedAt} is not null`,
   removedReason: sql<
     string | null
   >`case when ${post.removedAt} is not null and ${post.authorId} = ${viewerId} then ${post.removedReason} else null end`,
@@ -99,7 +105,7 @@ async function countLikes(db: Database, postId: string): Promise<number> {
 }
 
 /**
- * The `post` procedure group: create, list, thread, like, unlike.
+ * The `post` procedure group: create, delete, list, thread, like, unlike.
  */
 export const postRouter = {
   /**
@@ -163,8 +169,10 @@ export const postRouter = {
       return {
         ...created,
         // Matches the additive tombstone fields of `postSelection` — a fresh
-        // post is never removed, so these are constants rather than columns.
+        // post is neither removed nor deleted, so these are constants rather
+        // than columns.
         removed: false,
+        deleted: false,
         removedReason: null,
         author: {
           id: context.user.id,
@@ -177,6 +185,80 @@ export const postRouter = {
         replyCount: 0,
         viewerHasLiked: false,
       };
+    }),
+
+  /**
+   * Deletes the caller's own post (issue #148). Requires a session.
+   *
+   * A tombstone, not a row delete: `deleted_at` is stamped and the row stays,
+   * so the post's replies, its likes and the conversation above it keep their
+   * shape — exactly what a moderator's `removePost` does, and for the same
+   * reason. `post.parent_id` still cascades on delete (see the schema
+   * comment), so a real DELETE here would silently take the whole reply
+   * subtree with it.
+   *
+   * It is deliberately NOT a moderation action: no `moderation_action` row,
+   * no email, nothing to appeal. `postSelection` renders the stub, and
+   * `search.posts` excludes the row outright — the one surface where matching
+   * on text the viewer can no longer read would leak it back.
+   *
+   * The read-then-write is not locked. Two concurrent deletes of the same
+   * post can only come from its one author, and they agree on the end state;
+   * the worst case is the second restamping a tombstone nothing reads the
+   * exact time of. That is why this needs neither the transaction nor the
+   * `FOR UPDATE` every moderation effect takes: there is no audit row to
+   * double-write and no email to double-send.
+   */
+  delete: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.write))
+    .input(z.object({ postId: z.uuid() }))
+    .handler(async ({ input, context }) => {
+      const [target] = await context.db
+        .select({ authorId: post.authorId, removedAt: post.removedAt, deletedAt: post.deletedAt })
+        .from(post)
+        .where(eq(post.id, input.postId))
+        .limit(1);
+
+      if (!target) {
+        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
+      }
+
+      // Ownership is the whole authorisation rule: moderators take posts down
+      // through `moderation.removePost`, which is audited, appealable and
+      // reversible. FORBIDDEN rather than NOT_FOUND because the post's
+      // existence is not a secret — anyone who can see it in a feed already
+      // knows — and "not yours" is the answer that explains the refusal.
+      if (target.authorId !== context.user.id) {
+        throw new ORPCError("FORBIDDEN", { message: "You can only delete your own posts." });
+      }
+
+      // A moderator got there first. Deleting on top would strip the stub of
+      // the removal reason and the appeal link the author is owed, and gain
+      // them nothing: the content is already hidden from everyone.
+      if (target.removedAt) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "This post was removed by a moderator and can no longer be deleted.",
+        });
+      }
+
+      // Idempotent, like `like`/`unlike`: repeating states the same end state,
+      // so a double-click or a retry is a no-op that keeps the original
+      // tombstone rather than restamping it.
+      if (target.deletedAt) {
+        return { postId: input.postId, deletedAt: target.deletedAt };
+      }
+
+      const [updated] = await context.db
+        .update(post)
+        .set({ deletedAt: new Date() })
+        .where(eq(post.id, input.postId))
+        .returning({ deletedAt: post.deletedAt });
+
+      if (!updated?.deletedAt) {
+        throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Failed to delete post." });
+      }
+
+      return { postId: input.postId, deletedAt: updated.deletedAt };
     }),
 
   /**

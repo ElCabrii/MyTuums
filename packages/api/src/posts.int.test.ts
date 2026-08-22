@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
+import { eq } from "drizzle-orm";
 import { closeDb } from "@my-tuums/db";
+import { post } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   POST_MAX_LENGTH,
@@ -138,6 +140,197 @@ describe("post.create", () => {
         { context: contextFor(author) },
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("post.delete", () => {
+  it("rejects an anonymous caller", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await expect(
+      call(appRouter.post.delete, { postId: target.id }, { context: anonContext }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("is NOT_FOUND for a post that doesn't exist", async () => {
+    const author = await createTestUser();
+
+    await expect(
+      call(appRouter.post.delete, { postId: randomUUID() }, { context: contextFor(author) }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("refuses someone else's post and leaves it readable — ownership is server-enforced", async () => {
+    const author = await createTestUser();
+    const stranger = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await expect(
+      call(appRouter.post.delete, { postId: target.id }, { context: contextFor(stranger) }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const thread = await call(
+      appRouter.post.thread,
+      { postId: target.id },
+      { context: contextFor(stranger) },
+    );
+    expect(thread.post.deleted).toBe(false);
+    expect(thread.post.content).not.toBeNull();
+  });
+
+  it("tombstones the author's own post: the row stays, the content nulls for everyone", async () => {
+    const author = await createTestUser();
+    const viewer = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    const result = await call(
+      appRouter.post.delete,
+      { postId: target.id },
+      { context: contextFor(author) },
+    );
+    expect(result.postId).toBe(target.id);
+    expect(result.deletedAt).toBeInstanceOf(Date);
+
+    // Still a row — a hard delete would cascade the reply subtree away.
+    const [row] = await anonContext.db
+      .select({ content: post.content, deletedAt: post.deletedAt })
+      .from(post)
+      .where(eq(post.id, target.id));
+    expect(row?.deletedAt).not.toBeNull();
+    expect(row?.content).not.toBeNull();
+
+    // ...and a stub through the one projection every surface reads.
+    for (const context of [contextFor(author), contextFor(viewer)]) {
+      const feed = await call(appRouter.post.list, { feed: "global" }, { context });
+      const item = feed.items.find((p) => p.id === target.id);
+      expect(item?.deleted).toBe(true);
+      expect(item?.content).toBeNull();
+      // Nobody was moderated here, so nothing claims a moderator acted — and
+      // there is no reason to show and nothing to appeal.
+      expect(item?.removed).toBe(false);
+      expect(item?.removedReason).toBeNull();
+    }
+
+    const thread = await call(
+      appRouter.post.thread,
+      { postId: target.id },
+      { context: contextFor(viewer) },
+    );
+    expect(thread.post.deleted).toBe(true);
+    expect(thread.post.content).toBeNull();
+  });
+
+  it("keeps the conversation: replies survive with their content and stay listed under the deleted parent", async () => {
+    const author = await createTestUser();
+    const replier = await createTestUser();
+    const [parent] = await seedPosts(author.id, 1);
+    const replies = await seedPosts(replier.id, 2, { parentId: parent.id });
+
+    await call(appRouter.post.delete, { postId: parent.id }, { context: contextFor(author) });
+
+    const listed = await call(
+      appRouter.post.list,
+      { parentId: parent.id },
+      { context: contextFor(replier) },
+    );
+    expect(listed.items.map((item) => item.id).sort()).toEqual(replies.map((r) => r.id).sort());
+    for (const item of listed.items) {
+      expect(item.deleted).toBe(false);
+      expect(item.content).not.toBeNull();
+    }
+
+    // The deleted parent is still the reply's ancestor, so the thread above a
+    // reply reads as a conversation with a stub in it, not a broken chain.
+    const thread = await call(
+      appRouter.post.thread,
+      { postId: replies[0].id },
+      { context: contextFor(replier) },
+    );
+    expect(thread.ancestors.map((a) => a.id)).toEqual([parent.id]);
+    expect(thread.ancestors[0]?.deleted).toBe(true);
+  });
+
+  it("keeps the post's likes, and other posts by the same author", async () => {
+    const author = await createTestUser();
+    const liker = await createTestUser();
+    const [target, survivor] = await seedPosts(author.id, 2);
+    await call(appRouter.post.like, { postId: target.id }, { context: contextFor(liker) });
+
+    await call(appRouter.post.delete, { postId: target.id }, { context: contextFor(author) });
+
+    const feed = await call(
+      appRouter.post.list,
+      { authorId: author.id },
+      { context: contextFor(liker) },
+    );
+    const deletedItem = feed.items.find((p) => p.id === target.id);
+    expect(deletedItem?.likeCount).toBe(1);
+    expect(deletedItem?.viewerHasLiked).toBe(true);
+
+    const survivorItem = feed.items.find((p) => p.id === survivor.id);
+    expect(survivorItem?.deleted).toBe(false);
+    expect(survivorItem?.content).not.toBeNull();
+  });
+
+  it("deleting one author's post leaves another author's alone", async () => {
+    const author = await createTestUser();
+    const other = await createTestUser();
+    const [mine] = await seedPosts(author.id, 1);
+    const [theirs] = await seedPosts(other.id, 1);
+
+    await call(appRouter.post.delete, { postId: mine.id }, { context: contextFor(author) });
+
+    const thread = await call(
+      appRouter.post.thread,
+      { postId: theirs.id },
+      { context: contextFor(author) },
+    );
+    expect(thread.post.deleted).toBe(false);
+    expect(thread.post.content).not.toBeNull();
+  });
+
+  it("is idempotent: a repeat keeps the original tombstone rather than restamping it", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    const first = await call(
+      appRouter.post.delete,
+      { postId: target.id },
+      { context: contextFor(author) },
+    );
+    const second = await call(
+      appRouter.post.delete,
+      { postId: target.id },
+      { context: contextFor(author) },
+    );
+
+    expect(second.deletedAt.getTime()).toBe(first.deletedAt.getTime());
+  });
+
+  it("refuses a post a moderator already removed, so the author keeps the reason and the appeal link", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+    // The removal state is what the guard reads; how it got there belongs to
+    // moderation.int.test.ts, so this stamps it directly.
+    await anonContext.db
+      .update(post)
+      .set({ removedAt: new Date(), removedReason: "spam" })
+      .where(eq(post.id, target.id));
+
+    await expect(
+      call(appRouter.post.delete, { postId: target.id }, { context: contextFor(author) }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    const feed = await call(
+      appRouter.post.list,
+      { authorId: author.id },
+      { context: contextFor(author) },
+    );
+    const item = feed.items.find((p) => p.id === target.id);
+    expect(item?.removed).toBe(true);
+    expect(item?.deleted).toBe(false);
+    expect(item?.removedReason).toBe("spam");
   });
 });
 

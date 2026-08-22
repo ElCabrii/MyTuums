@@ -589,6 +589,30 @@ describe("search.posts", () => {
     expect(stub?.removed).toBe(true);
     expect(stub?.content).toBeNull();
   });
+
+  it("an author-deleted post's content is not matchable either, while the feed still shows the stub", async () => {
+    const author = await createTestUser();
+    const stranger = await createTestUser();
+    const tag = uniqueTag();
+    const deleted = await seedPostContent(author.id, `hello ${tag} world`);
+
+    await call(appRouter.post.delete, { postId: deleted.id }, { context: contextFor(author) });
+
+    // The same substring oracle the removal test above closes: search matches
+    // the raw `content` column, which no projection touches, so a deleted
+    // post's text must be unreachable rather than merely unrendered.
+    const posts = await call(appRouter.search.posts, { q: tag }, { context: contextFor(stranger) });
+    expect(posts.items).toEqual([]);
+
+    const feed = await call(
+      appRouter.post.list,
+      { authorId: author.id },
+      { context: contextFor(stranger) },
+    );
+    const stub = feed.items.find((p) => p.id === deleted.id);
+    expect(stub?.deleted).toBe(true);
+    expect(stub?.content).toBeNull();
+  });
 });
 
 describe("search viewer context", () => {
