@@ -25,21 +25,22 @@ over HTTP and imports only its browser-safe subpaths.
 
 ## Change map
 
-| Intent                                | Primary                                                                                  | Also touch                                                                              |
-| ------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`) | `src/router.ts` if it is a new group; an `.int.test.ts`                                 |
-| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                      | a matching index in `packages/db/src/schema/app.ts`                                     |
-| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                      | `src/rate-limit.test.ts`                                                                |
-| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                     | `src/users.int.test.ts` pins it — read the invariant first                              |
-| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)         | `src/constants.ts` (action code), `docs/product.md` glossary                            |
-| Change the queue or a case view       | `src/moderation-queue.ts`                                                                | `src/moderation-inputs.ts` if the input shape moves                                     |
-| Change how an appeal is opened        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                             | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface |
-| Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                             | `src/moderation-actions.ts` if the inverse effect changes                               |
-| Change upload rules                   | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                               |
-| Change the upload/remove lifecycle    | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes     |
-| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                    |
-| Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                        |
-| Change an account rule                | `../auth/src/rules.ts`                                                                   | not `src/constants.ts` — see the invariant below                                        |
+| Intent                                | Primary                                                                                  | Also touch                                                                                               |
+| ------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`) | `src/router.ts` if it is a new group; an `.int.test.ts`                                                  |
+| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                      | a matching index in `packages/db/src/schema/app.ts`                                                      |
+| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                      | `src/rate-limit.test.ts`                                                                                 |
+| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                     | `src/users.int.test.ts` pins it — read the invariant first                                               |
+| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)         | `src/constants.ts` (action code), `docs/product.md` glossary                                             |
+| Change the queue or a case view       | `src/moderation-queue.ts`                                                                | `src/moderation-inputs.ts` if the input shape moves                                                      |
+| Change how a user is matched by text  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                    | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking |
+| Change how an appeal is opened        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                             | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface                  |
+| Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                             | `src/moderation-actions.ts` if the inverse effect changes                                                |
+| Change upload rules                   | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                                                |
+| Change the upload/remove lifecycle    | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                      |
+| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                                     |
+| Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                                         |
+| Change an account rule                | `../auth/src/rules.ts`                                                                   | not `src/constants.ts` — see the invariant below                                                         |
 
 ## Invariants
 
@@ -83,6 +84,19 @@ over HTTP and imports only its browser-safe subpaths.
   database authority for outside writers and collisions; `isUniqueViolation`
   walks Drizzle's wrapped `cause` chain so a constraint rejection still reads
   as a caller-facing refusal.
+- **User matching has one definition.** `matchesUserQuery` in `src/search.ts`
+  is what "this account matches what you typed" means — a left-anchored match
+  on the normalised `username`, or a substring of either display field.
+  `search.typeahead`, `search.users` and `moderation.searchUsers` all filter
+  through it, so widening a match lands on all three instead of drifting.
+  The two bounded lookup surfaces (`search.typeahead` and
+  `moderation.searchUsers`) also share `userQueryRank`: exact handle, other
+  handle prefixes, then display-only matches. `search.users` deliberately
+  keeps its `(createdAt, id)` keyset order instead of relevance ranking. What
+  the moderation lookup does not share is the visibility filter: it is a
+  staff surface that has to reach a banned or blocked account, and it returns
+  `role` for the same reason `team` does — the caller cannot tell whether it
+  may manage a target without it.
 - **`publicUserColumns` is a privacy boundary.** Never add `email`,
   `twoFactorEnabled`, `lastLoginMethod`, `role` or a preference column; sign-in
   method is reconnaissance, not profile data. `src/users.int.test.ts` pins the

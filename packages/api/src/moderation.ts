@@ -7,6 +7,7 @@ import { follow, moderationAction, post, report, user, userBlock } from "@my-tuu
 import {
   MODERATION_NOTE_MAX_LENGTH,
   POST_REPORT_REASONS,
+  SEARCH_QUERY_MAX_LENGTH,
   SUSPENSION_MAX_SECONDS,
   SUSPENSION_MIN_SECONDS,
   USER_REPORT_REASONS,
@@ -27,6 +28,7 @@ import { keysetPage } from "./pagination.js";
 import { moderatorProcedure, protectedProcedure, rateLimit, staffProcedure } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { roleAtLeast, roleRank, USER_ROLES } from "./roles.js";
+import { matchesUserQuery, userQueryRank } from "./search.js";
 import { publicUserColumns } from "./users.js";
 
 /**
@@ -69,6 +71,28 @@ const reportInput = z.discriminatedUnion("targetType", [
     reason: z.enum(USER_REPORT_REASONS),
   }),
 ]);
+
+/**
+ * The columns both roster surfaces project: the team list and the account
+ * lookup that feeds it. One definition so a row picked out of a search
+ * renders exactly like a row of the roster it is about to join.
+ */
+const rosterColumns = {
+  id: user.id,
+  name: user.name,
+  username: user.username,
+  displayUsername: user.displayUsername,
+  image: user.image,
+  role: user.role,
+};
+
+/**
+ * How many accounts `searchUsers` returns. A picker, not a results page:
+ * enough rows to disambiguate a common name, few enough that the answer to a
+ * too-broad query is "type more", not a page to scroll. No cursor for the
+ * same reason.
+ */
+const USER_LOOKUP_LIMIT = 10;
 
 const suspensionInput = z.object({
   userId: z.string().min(1),
@@ -370,14 +394,7 @@ export const moderationRouter = {
   /** The moderation team: every account holding a role, ranked then by name. */
   team: staffProcedure.use(rateLimit(RATE_LIMITS.moderate)).handler(async ({ context }) => {
     const rows = await context.db
-      .select({
-        id: user.id,
-        name: user.name,
-        username: user.username,
-        displayUsername: user.displayUsername,
-        image: user.image,
-        role: user.role,
-      })
+      .select(rosterColumns)
       .from(user)
       .where(sql`${user.role} in ('moderator', 'staff', 'admin')`)
       .orderBy(
@@ -386,6 +403,44 @@ export const moderationRouter = {
       );
     return { items: rows };
   }),
+
+  /**
+   * Finds accounts by handle or name — how staff reach someone the roster
+   * does not list.
+   *
+   * `team` only returns accounts that already hold a role, so before this
+   * there was no way to target a plain `user` for a promotion at all: the
+   * only path into the hierarchy was the `db:promote` script (issue #145).
+   * Demotion goes on working off the roster; this is the other half.
+   *
+   * Rows carry `role`, which `publicUserColumns` deliberately withholds from
+   * every public surface. That is the same trade `team` already makes: this
+   * is staff-gated, and the caller cannot decide whether it may manage an
+   * account without knowing the rank it holds.
+   *
+   * No visibility filter, unlike `search.users`: a moderation surface has to
+   * reach a banned account, and hiding someone the viewer happens to have
+   * blocked would hide them from the person whose job is to act on them.
+   *
+   * The `search` tier rather than `moderate`, because this is what the tier
+   * is for — an ILIKE scan fired by a debounced field. Spending the
+   * moderation budget on keystrokes would lock the viewer out of the queue
+   * they came to work.
+   */
+  searchUsers: staffProcedure
+    .use(rateLimit(RATE_LIMITS.search))
+    .input(z.object({ q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH) }))
+    .handler(async ({ input, context }) => {
+      const rows = await context.db
+        .select(rosterColumns)
+        .from(user)
+        .where(matchesUserQuery(input.q))
+        // Exact handle first, then other handle prefixes, then name-only
+        // matches; alphabetical order breaks ties within each rank.
+        .orderBy(userQueryRank(input.q), asc(user.name))
+        .limit(USER_LOOKUP_LIMIT);
+      return { items: rows };
+    }),
 
   /** The audit log: every moderation action, newest first, keyset-paginated. */
   auditLog: staffProcedure

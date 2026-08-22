@@ -23,6 +23,7 @@ import {
   searchPostsQueryOptions,
   searchUsersQueryOptions,
   teamQueryOptions,
+  teamSearchQueryOptions,
   threadQueryOptions,
   userListQueryOptions,
 } from "@/lib/query-definitions";
@@ -172,6 +173,9 @@ export function queryFixtures(queryClient: QueryClient) {
       },
       team(items: TeamMember[]): void {
         queryClient.setQueryData(teamQueryOptions().queryKey, { items });
+      },
+      teamSearch(q: string, items: TeamMember[]): void {
+        queryClient.setQueryData(teamSearchQueryOptions(q).queryKey, { items });
       },
     },
     query: {
