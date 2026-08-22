@@ -239,3 +239,22 @@ describe("ProfileLayout role and ownership gates", () => {
     consoleError.mockRestore();
   });
 });
+
+describe("ProfileLayout bio", () => {
+  it("links mentions to canonical profiles and preserves the surrounding text", async () => {
+    const bio = "Building with @Alice,\none day at a time.";
+    const profile = makeProfile({ username: "author", displayUsername: "Author", bio });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("author", profile);
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@author",
+      signedInAs: true,
+    });
+
+    const mention = screen.getByRole("link", { name: "@Alice" });
+    expect(mention).toHaveAttribute("href", "/@alice");
+    expect(mention.closest("p")?.textContent).toBe(bio);
+  });
+});

@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Heart, MessageCircle, MoreHorizontal } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
+import { MentionText } from "@/components/mention-text";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import { isSignedInAtom, viewerIdAtom } from "@/atoms/session";
@@ -220,7 +221,7 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
             >
               {/* Null only for removed posts, which the stub branch above
                   owns; here the server guarantees content. */}
-              {post.content ?? ""}
+              <MentionText text={post.content ?? ""} />
             </p>
           )}
 
