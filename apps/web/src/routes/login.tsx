@@ -63,6 +63,13 @@ interface TwoFactorDestination {
   search?: { redirect: string };
 }
 
+/** The destination `/login` navigates to when the account's email is unverified. */
+interface VerifyEmailDestination {
+  to: "/verify-email";
+  replace: boolean;
+  search?: { redirect: string };
+}
+
 /**
  * The sign-in page: identifier + password form, the OAuth/passkey options, and
  * the `?error=` banner that surfaces a failed OAuth round trip. `?redirect=`
@@ -146,6 +153,22 @@ export function LoginPage() {
     // the dedicated screen instead of the form's error banner (issue #74).
     if (outcome.status === "banned") {
       void navigate({ to: "/banned", replace: true });
+      return;
+    }
+
+    // The unverified-account recovery path (issue #172): a correct password on
+    // an account whose email was never verified. Better Auth rejected the
+    // sign-in (no session) and `sendOnSignIn` has already re-sent the
+    // verification email, so send the person to the check-your-email screen
+    // rather than a "try again" banner. `signInAtom` set `verifyEmailAtom`
+    // when the identifier was an email, so the resend button is available then.
+    if (outcome.status === "verify-email") {
+      // The destination rides along, same as the `/two-factor` branch above:
+      // this person was sent to `/login` from somewhere, and verifying their
+      // email should not lose the trip.
+      const destination: VerifyEmailDestination = { to: "/verify-email", replace: true };
+      if (redirectFromSearch) destination.search = { redirect: redirectFromSearch };
+      void navigate(destination);
     }
   };
 

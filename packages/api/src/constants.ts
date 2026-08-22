@@ -250,6 +250,13 @@ export const MEDIA_URL_PREFIX = "/media/";
 export const SIGNED_OUT_PATHS = new Set([
   "/login",
   "/register",
+  // The check-your-email screen a password sign-up lands on before its email
+  // is verified, and the target a verification link redirects back to (issue
+  // #172). Signed-out by construction: a successful verification creates a
+  // session and `useRedirectWhenSignedIn` immediately moves the person on, so
+  // the only visitors who stay here are the pending and the bad-link states,
+  // both of which are signed out.
+  "/verify-email",
   "/two-factor",
   // `/forgot-password` is an auth page like the ones above; `/reset-password`
   // is exempt on purpose even though it is NOT — resetting your own password

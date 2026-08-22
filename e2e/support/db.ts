@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { and, desc, eq, like, sql } from "drizzle-orm";
 import { assertTestDatabase, databaseNameOf, resolveTestDatabaseUrl } from "@my-tuums/db/testing";
 import type { UserRole } from "@my-tuums/api/roles";
@@ -72,7 +73,10 @@ export interface CreatedUser {
   email: string;
 }
 
-export async function createUser(input: CreateUserInput): Promise<CreatedUser> {
+export async function createUser(
+  input: CreateUserInput,
+  options: { verifyEmail?: boolean } = {},
+): Promise<CreatedUser> {
   const response = await fetch(`${E2E.serverUrl}/api/auth/sign-up/email`, {
     method: "POST",
     headers: {
@@ -103,7 +107,39 @@ export async function createUser(input: CreateUserInput): Promise<CreatedUser> {
   // SAFETY: A successful Better Auth sign-up response owns this `user` contract;
   // failures have already been rejected above before the response is consumed.
   const body = (await response.json()) as { user: CreatedUser };
+
+  // With `requireEmailVerification` (packages/auth), a password sign-up creates
+  // the account but issues no session until the email is proved. Fixture
+  // accounts are meant to be usable — most are signed back in through the real
+  // login form (see welcome.spec.ts's `signedInWithoutHandle`), which an
+  // unverified account now fails — so this grandfathers each one the same way
+  // the `0014_grandfather_email_verified` migration grandfathered every real
+  // account. A spec that needs the pending state passes `{ verifyEmail: false }`
+  // and leaves the column alone.
+  if (options.verifyEmail ?? true) {
+    await markEmailVerified(body.user.id);
+  }
+
   return body.user;
+}
+
+/**
+ * Marks a user's email verified directly, reproducing what a clicked
+ * verification link does — the same grandfathering the
+ * `0014_grandfather_email_verified` migration applied to every real account.
+ *
+ * With `requireEmailVerification` (packages/auth), a password sign-up creates
+ * the account but issues no session until the email is proved. `createUser`
+ * calls this by default so fixture accounts can sign in; a spec that needs the
+ * pending, unverified state creates the account with `{ verifyEmail: false }`
+ * and later calls this to simulate the verification link being clicked.
+ */
+export async function markEmailVerified(userId: string): Promise<void> {
+  assertTestDatabase();
+  const db = await getDb();
+  const { user } = await schemaModulePromise;
+
+  await db.update(user).set({ emailVerified: true }).where(eq(user.id, userId));
 }
 
 /**
@@ -193,6 +229,40 @@ export async function getUserId(username: string): Promise<string> {
 
   if (!found) throw new Error(`getUserId: no user with username "${username}".`);
   return found.id;
+}
+
+/**
+ * Builds the verification URL a real verification email would carry, signed
+ * with the same secret the server signs them with — so a browser visiting it
+ * is verified exactly as if they had clicked the link in their inbox.
+ *
+ * Unlike `passwordResetTokenFor`, the email-verification token is NOT in the
+ * `verification` table: Better Auth mints it as a stateless HS256 JWT (header
+ * `{ alg: "HS256" }`, payload `{ email, iat, exp }`) signed with
+ * `auth.$context.secret`, so there is no row to read. The E2E stack has no
+ * mailbox, and the server's stdout (where the blank-`RESEND_API_KEY` fallback
+ * logs the link) is not readable from a spec, so the token is re-minted here
+ * with the same secret the server resolved — `BETTER_AUTH_SECRET`, or the E2E
+ * fallback default in playwright.config.ts which the worker process inherits
+ * (it forks from the main process that loaded the repo `.env`).
+ *
+ * Mirrors `signVerificationJwt` in packages/api/src/auth.int.test.ts rather
+ * than sharing it: the integration test resolves the secret from
+ * `auth.$context` (it can import `@my-tuums/auth`), while a worker spec cannot
+ * do the module-scope `DATABASE_URL` dance that import would trigger (see
+ * `createUser`). The expression below matches what create-context.mjs sets.
+ */
+export function emailVerificationLinkFor(email: string, callbackURL: string): string {
+  const secret = process.env.BETTER_AUTH_SECRET ?? "playwright-e2e-secret-at-least-32-characters";
+  const header = Buffer.from(JSON.stringify({ alg: "HS256" })).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const payload = Buffer.from(
+    JSON.stringify({ email: email.toLowerCase(), iat: now, exp: now + 3600 }),
+  ).toString("base64url");
+  const data = `${header}.${payload}`;
+  const signature = createHmac("sha256", secret).update(data).digest("base64url");
+  const token = `${data}.${signature}`;
+  return `${E2E.serverUrl}/api/auth/verify-email?token=${token}&callbackURL=${encodeURIComponent(callbackURL)}`;
 }
 
 /**

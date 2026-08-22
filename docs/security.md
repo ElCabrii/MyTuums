@@ -27,7 +27,7 @@ There are four, and only the first two carry untrusted input:
 | ----------------------------- | -------------------------------------------------------------- |
 | `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`              |
 | `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`         |
-| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/appeal`                       |
+| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`   |
 | Static assets                 | anything with a file extension — the SPA cannot boot otherwise |
 | `moderation.appealOpen` (RPC) | the one anonymous RPC — see below                              |
 
@@ -81,6 +81,20 @@ Anything else building on `baseProcedure` is a bug.
 - **No session cookie cache.** A revoked session must stop authenticating
   immediately; `revokeSessionsOnPasswordReset: true` is the other half of
   that. Every session check is a real lookup, including the `/media` gate.
+- **Password accounts must prove their email before they can do anything.**
+  `emailAndPassword.requireEmailVerification` is `true`, so a password sign-up
+  creates the account but issues **no session** — and a sign-in with the
+  correct password is refused until the address is verified. That single
+  control is what gates every access path: with no session, the server page
+  gate and `protectedProcedure` already refuse the account, so no separate
+  `emailVerified` check exists (and must not be added to `protectedProcedure`
+  — it would lock out OAuth accounts whose provider reports an unverified
+  address, a flow this app deliberately keeps). `sendOnSignIn: true` makes the
+  refused sign-in re-send the link, which is the whole recovery path; the
+  resend and the failure states are worded generically so neither becomes an
+  account-existence oracle. Every account predating this rule was
+  grandfathered by the `0014_grandfather_email_verified` migration rather than
+  locked out.
 - **OAuth credentials are all-or-nothing per provider.** A half-configured
   pair must not render a button that fails at the token exchange; the server
   refuses to boot on one.

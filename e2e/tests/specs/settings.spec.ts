@@ -1,5 +1,7 @@
 import { deflateSync } from "node:zlib";
 import { expect, test } from "../../support/fixtures";
+import { emailVerificationLinkFor } from "../../support/db";
+import { E2E } from "../../playwright.config";
 import { uniqueUser } from "../../support/users";
 
 /**
@@ -41,11 +43,18 @@ async function signUpFresh(page: import("@playwright/test").Page, prefix: string
   await page.getByRole("checkbox", { name: /I have read and agree/ }).check();
   await page.getByRole("main").getByRole("button", { name: "Register" }).click();
 
-  // A fresh sign-up is offered two-factor at /welcome before its profile — see
-  // the `signUpAtom` / `useRedirectWhenSignedIn` pairing. Declining is what
-  // gets us to the account we came to configure.
-  await expect(page).toHaveURL(/\/welcome$/);
-  await page.getByRole("button", { name: "Skip for now" }).click();
+  // requireEmailVerification (packages/auth): sign-up creates the account and
+  // sends the verification link but issues NO session, so the person lands on
+  // /verify-email rather than /welcome (issue #172). The post-signup two-factor
+  // offer is gone on the password path — a documented tradeoff; 2FA stays
+  // configurable from settings, which is what these specs exercise anyway.
+  await expect(page).toHaveURL(/\/verify-email$/);
+
+  // Complete verification by visiting the link a real email would carry:
+  // `autoSignInAfterVerification` mints the session and `useRedirectWhenSignedIn`
+  // lands the now-complete account on its profile — the state every test below
+  // starts from.
+  await page.goto(emailVerificationLinkFor(account.email, `${E2E.webUrl}/verify-email`));
   await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));
 
   return account;
@@ -384,21 +393,5 @@ test.describe("preferences", () => {
 
     await expect(fresh.locator("html")).toHaveClass(/dark/);
     await context.close();
-  });
-});
-
-test.describe("the two-factor offer", () => {
-  test("is shown once after sign-up and can be skipped", async ({ page }) => {
-    // `signUpFresh` already asserts the offer appears and skips it; this pins
-    // the other half — that it does not come back.
-    const account = await signUpFresh(page, "twofaskip");
-
-    await page.goto("/");
-    await expect(page).toHaveURL(/\/$/);
-
-    await page.goto("/welcome");
-    // Nothing outstanding, so the page has no business rendering: the redirect
-    // effect sends them to their profile instead of re-offering.
-    await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));
   });
 });

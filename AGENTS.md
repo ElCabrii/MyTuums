@@ -29,6 +29,9 @@ routing live in [CONTEXT.md](CONTEXT.md).
   useful atom-shaped representation.
 - Keep strict TypeScript, ESLint, and Oxlint anti-slop settings intact; resolve
   violations in code rather than weakening or suppressing rules.
+- Never hand-format to satisfy Prettier. Run `pnpm format`; it is the only
+  source of truth for formatting, and hand-matching its output wastes edits and
+  still drifts.
 - Regenerate generated artifacts with the commands listed in
   [CONTEXT.md](CONTEXT.md#generated-files).
 - Keep non-production tooling on non-production databases and buckets. Database
@@ -45,6 +48,9 @@ A change is complete when:
 - the requested behavior works through its caller-visible interface;
 - affected tests pass at the lowest relevant layer;
 - relevant lint, typecheck, build, and documentation checks pass;
+- `pnpm format` has been run. Formatting is a **separate CI step**
+  (`pnpm format:check`) that `pnpm lint` does not cover, so a change that
+  passes lint locally can still fail CI on formatting alone;
 - generated and documentation artifacts agree with their sources of truth;
 - the final report lists changed behavior, verification run, and remaining
   blockers or risks.

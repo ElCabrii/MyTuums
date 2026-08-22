@@ -92,10 +92,18 @@ export const auth = betterAuth({
     // before; pinning it means changing one no longer silently diverges from
     // the other.
     minPasswordLength: 8,
-    // Off deliberately. Turning this on would lock out every account that
-    // predates verification existing, which is all of them — it is a decision
-    // to make once there is a verified population, not part of this change.
-    requireEmailVerification: false,
+    // On: a password sign-up creates the account and sends the verification
+    // email, but issues NO session — and a password sign-in is rejected until
+    // the email is verified (see `sendOnSignIn` below for the recovery resend).
+    // An unverified password account therefore never holds a session, which is
+    // what lets the existing session gates — the server page gate and
+    // `protectedProcedure` in packages/api — cover every access path without a
+    // separate `emailVerified` check (a blanket one would lock out OAuth
+    // accounts whose provider returned an unverified email, which this config
+    // deliberately leaves alone). Existing accounts were grandfathered by the
+    // `email_verified = true` backfill migration so this flip did not lock
+    // them out; see packages/db/drizzle and docs/security.md.
+    requireEmailVerification: true,
     // Reset is the one moment the old password is known-or-likely-compromised;
     // leaving existing sessions alive would let whoever held the old password
     // (or the email inbox) keep acting as the user. Revoking every session
@@ -112,6 +120,12 @@ export const auth = betterAuth({
 
   emailVerification: {
     sendOnSignUp: true,
+    // The recovery path for an expired, lost, or never-arrived verification
+    // link: an unverified password sign-in is rejected (above) AND re-sends the
+    // verification email, so "try to sign in" is how someone asks for a new
+    // link without a separate surface. The sign-in error this produces is
+    // translated in apps/web/src/lib/auth-error-message.ts.
+    sendOnSignIn: true,
     autoSignInAfterVerification: true,
     sendVerificationEmail: async ({ user, url }, request) => {
       await sendEmail({

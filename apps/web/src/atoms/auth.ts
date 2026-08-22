@@ -16,6 +16,98 @@ export const authErrorAtom = atom<string | null>(null);
 export const authPendingAtom = atom(false);
 
 /**
+ * The email address awaiting verification, when a flow has one in hand.
+ *
+ * Set by `signUpAtom` on a successful password sign-up (the address just
+ * entered) and by `signInAtom` when an unverified account tries to sign in
+ * with an email identifier. The `/verify-email` route reads it to offer a
+ * resend without asking for the address again. `null` when unknown — a
+ * reload of the pending page, or a sign-in by username — so the route then
+ * shows the check-your-email state without a resend button (the server's
+ * `sendOnSignIn` already re-sent the link in the username case).
+ *
+ * In memory only, deliberately: it is the address of the sign-up in progress,
+ * not something to persist across sessions.
+ */
+export const verifyEmailAtom = atom<string | null>(null);
+
+/**
+ * True once a resend from `/verify-email` has been accepted. The route shows a
+ * generic "if an account exists, we've sent a new link" confirmation on it —
+ * generic on purpose, because `sendVerificationEmail` answers `{ status: true }`
+ * whether or not the address has an account, and so must the UI (issue #172:
+ * the flow must not become an account-enumeration oracle).
+ */
+export const verifyEmailSentAtom = atom(false);
+
+/**
+ * The absolute URL a verification link lands on, carrying the pre-login
+ * destination when there is one.
+ *
+ * Absolute for the reason on `SignUpEmailBody.callbackURL`: Better Auth
+ * resolves a relative callback against the API origin, which serves no HTML in
+ * dev. The `?redirect=` rides *inside* it so the trip to a protected page
+ * survives verification even when the link is opened in a different browser,
+ * where no atom or history entry exists to remember it — the same reason
+ * `/login` carries the param to `/two-factor`.
+ *
+ * Sanitized here rather than trusted: it reaches this function from a URL, and
+ * an unsanitized value would be baked into an emailed link. `sanitizeRedirect`
+ * rejects anything that is not a single-slash-relative path, so this cannot
+ * become an open redirect.
+ */
+function verifyEmailCallbackURL(redirect?: string | null): string {
+  const base = `${window.location.origin}/verify-email`;
+  const safe = sanitizeRedirect(redirect);
+  return safe ? `${base}?redirect=${encodeURIComponent(safe)}` : base;
+}
+
+/**
+ * Requests a fresh verification email for the address pending verification.
+ *
+ * The address comes from `verifyEmailAtom` (set by the sign-up or the
+ * unverified sign-in recovery), so the pending screen can offer a resend
+ * without a second field. `callbackURL` is absolute for the same reason every
+ * other callback URL in this module is — see `SignUpEmailBody.callbackURL`.
+ *
+ * Returns `true` only for transport-level success; the route shows the generic
+ * confirmation regardless, matching `requestPasswordResetAtom`'s shape. The
+ * server's `/send-verification-email` rate limit (packages/auth/src/index.ts)
+ * is the abuse control, not this atom.
+ */
+/** What the `/verify-email` resend button hands the atom: the address, and where to go after. */
+interface ResendVerificationArgs {
+  email: string;
+  redirect?: string | undefined;
+}
+
+export const resendVerificationEmailAtom = atom(
+  null,
+  async (_get, set, { email, redirect }: ResendVerificationArgs): Promise<boolean> => {
+    set(authErrorAtom, null);
+    set(authPendingAtom, true);
+    try {
+      const res = await authClient.sendVerificationEmail({
+        email,
+        callbackURL: verifyEmailCallbackURL(redirect),
+      });
+      if (res.error) {
+        set(authErrorAtom, res.error.message || m.common_something_went_wrong());
+        return false;
+      }
+      set(verifyEmailSentAtom, true);
+      return true;
+    } catch (err) {
+      console.error("Verification email resend error:", err);
+      set(authErrorAtom, m.common_something_went_wrong());
+      return false;
+    } finally {
+      set(authPendingAtom, false);
+    }
+  },
+);
+
+/**
  * True once a reset email has been sent; `/forgot-password` swaps to the
  * "check your email" panel on it. A plain flag rather than a string so the
  * route never shows anything but the generic message — see
@@ -63,11 +155,19 @@ type SignInArgs = { identifier: string; password: string };
  * `useRedirectWhenSignedIn` can react to. `/login` navigates to `/banned` on
  * this value instead of setting `authErrorAtom` — a banned account isn't
  * "try again", it's a different screen.
+ *
+ * `"verify-email"` (issue #172) is the recovery half of email verification: a
+ * correct password on an unverified account produces no session — Better Auth
+ * rejects the sign-in with `EMAIL_NOT_VERIFIED` and `sendOnSignIn` re-sends the
+ * verification email — so `isSignedInAtom` never flips. `/login` navigates to
+ * `/verify-email` on this value so the person lands on the check-your-email
+ * screen rather than a banner that says "try again".
  */
 export type SignInOutcome =
   | { status: "signed-in" }
   | { status: "two-factor"; methods: string[] }
   | { status: "banned" }
+  | { status: "verify-email" }
   | { status: "failed" };
 
 /** What BetterAuth returns in place of a session when it issues a 2FA challenge. */
@@ -103,6 +203,17 @@ interface SignUpEmailBody {
   dateOfBirth?: string;
   legalAcceptedAt?: string;
   legalVersion?: string;
+  /**
+   * Where the verification email link lands after the person clicks it. The
+   * server builds the link as `/api/auth/verify-email?token=…&callbackURL=…`
+   * and redirects there on success (and to `callbackURL?error=…` on a bad
+   * token), so this is what makes a verified sign-in arrive at `/verify-email`
+   * rather than `/`. Absolute, like every other callback URL in this module:
+   * Better Auth resolves a relative one against the API origin, which in dev
+   * serves no HTML. `webOrigin` is in `trustedOrigins`, so it passes the
+   * `originCheck` the verify endpoint applies.
+   */
+  callbackURL?: string;
 }
 
 /**
@@ -128,6 +239,16 @@ export const signInAtom = atom(
     set(twoFactorMethodsAtom, []);
     try {
       const isEmail = identifier.includes("@");
+      // Deliberately NO `callbackURL` here, even though `sendOnSignIn` uses it
+      // as the landing page of the verification link it re-sends. On the
+      // *success* path better-auth echoes `callbackURL` back as
+      // `{ redirect: true, url }`, and its always-on `redirectPlugin`
+      // (client/fetch-plugins.mjs) hard-assigns `window.location.href` to it —
+      // so passing one here would send every ordinary sign-in to
+      // `/verify-email` and blow away the SPA's own redirect. The resend's
+      // link therefore keeps better-auth's `/` default; a *valid* one still
+      // verifies and signs in, and `resendVerificationEmailAtom` — the resend
+      // this app actually drives — does pass `/verify-email`.
       const res = isEmail
         ? await authClient.signIn.email({ email: identifier.trim(), password })
         : await authClient.signIn.username({ username: identifier.trim(), password });
@@ -137,6 +258,21 @@ export const signInAtom = atom(
         // route navigates on this instead of showing it in the banner.
         if (errorCodeOf(res.error) === "BANNED_USER") {
           return { status: "banned" };
+        }
+        // The unverified-account recovery path (issue #172): a correct
+        // password on an account whose email was never verified. Better Auth
+        // rejects the sign-in (no session) and `sendOnSignIn` has already
+        // re-sent the verification email, so this navigates to the
+        // check-your-email screen rather than a "try again" banner.
+        //
+        // The username branch CLEARS the address rather than leaving it: a
+        // sign-up followed by a username sign-in for a different account would
+        // otherwise strand the first address here, and the resend button would
+        // mail the wrong one. Cleared, the page shows the pending state with no
+        // resend — correct, since `sendOnSignIn` just sent the link anyway.
+        if (errorCodeOf(res.error) === "EMAIL_NOT_VERIFIED") {
+          set(verifyEmailAtom, isEmail ? identifier.trim() : null);
+          return { status: "verify-email" };
         }
         set(authErrorAtom, res.error.message || m.common_something_went_wrong());
         return { status: "failed" };
@@ -279,6 +415,12 @@ type SignUpArgs = {
   dateOfBirth: string;
   /** The checked consent box; only true sends the server-side acceptance evidence. */
   legalAccepted: boolean;
+  /**
+   * The pre-login destination from `/register?redirect=`, baked into the
+   * verification link so the trip to a protected page survives verification —
+   * including when the link is opened in a different browser.
+   */
+  redirect?: string | undefined;
 };
 
 /**
@@ -295,14 +437,18 @@ export const signUpAtom = atom(null, async (_get, set, fields: SignUpArgs): Prom
       name: fields.name.trim(),
       username: fields.username.trim(),
       dateOfBirth: dateOfBirthToIso(fields.dateOfBirth),
+      // Absolute, and carrying the pre-login destination when there is one —
+      // see `verifyEmailCallbackURL`.
+      callbackURL: verifyEmailCallbackURL(fields.redirect),
     };
     if (fields.legalAccepted) {
       body.legalAcceptedAt = new Date().toISOString();
       body.legalVersion = LEGAL_VERSION;
     }
-    // SAFETY: The server accepts dateOfBirth (user.additionalFields in
-    // packages/auth/src/index.ts); better-auth 1.6.25's client types don't
-    // surface it on the sign-up body — see lib/auth-client.ts's sessionStore cast.
+    // SAFETY: The server accepts dateOfBirth and callbackURL
+    // (packages/auth/src/index.ts additionalFields + Better Auth's sign-up
+    // route); better-auth 1.6.25's client types don't surface either on the
+    // sign-up body — see lib/auth-client.ts's sessionStore cast.
     const res = await authClient.signUp.email(body);
 
     if (res.error) {
@@ -310,12 +456,12 @@ export const signUpAtom = atom(null, async (_get, set, fields: SignUpArgs): Prom
       return false;
     }
 
-    // Raised here rather than in the route because this is the one path that
-    // produces an account with a password, which `twoFactor.enable` requires
-    // — a social sign-up never runs this atom and so never sees the offer.
-    // `useRedirectWhenSignedIn` reads the flag and routes accordingly; this
-    // still does not navigate. See atoms/onboarding.ts.
-    set(offerTwoFactorAtom, true);
+    // A successful password sign-up no longer creates a session (issue #172:
+    // `requireEmailVerification`), so there is nothing for
+    // `useRedirectWhenSignedIn` to react to — the register route navigates to
+    // `/verify-email` on this `true`. Hold onto the address so that screen can
+    // offer a resend without asking for it again.
+    set(verifyEmailAtom, body.email);
     return true;
   } catch (err) {
     console.error("Registration error:", err);

@@ -80,7 +80,8 @@ jobs:
       - run: pnpm typecheck
       # The repo is formatted by Prettier (root .prettierrc); a stray
       # unformatted file fails the check rather than silently drifting.
-      - run: pnpm exec prettier --check .
+      # `pnpm format` is the one-command fix for whatever this reports.
+      - run: pnpm format:check
       # The agent-facing docs are checked against the code they describe:
       # dead links, paths and scripts that no longer exist, and documented
       # facts (router groups, Docker VITE_* args) that have drifted from
