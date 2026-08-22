@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, lastLoginMethod, oneTap, twoFactor, username } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
@@ -11,6 +12,7 @@ import { validateLegalAcceptanceHook } from "./legal.js";
 import {
   isAllowedUsernameCharset,
   normalizeUsername,
+  USERNAME_CANONICAL_WRITE_MESSAGE,
   USERNAME_MAX_LENGTH,
   USERNAME_MIN_LENGTH,
 } from "./rules.js";
@@ -48,12 +50,16 @@ const validateUserWrite = async (user: AuthUserWrite) => {
     return { data: { username, displayUsername: username } };
   }
 
-  return {
-    data:
-      user.displayUsername !== undefined && user.displayUsername !== null
-        ? { displayUsername: normalizeUsername(user.displayUsername) }
-        : {},
-  };
+  // The username plugin exposes displayUsername as an update-user input even
+  // though MyTuums treats it as a derived column. Letting that field through
+  // independently would give sessions and search a second, conflicting
+  // handle. Supported handle changes always carry username and take the branch
+  // above, which deliberately overwrites any supplied display value.
+  if (user.displayUsername !== undefined) {
+    throw new APIError("BAD_REQUEST", { message: USERNAME_CANONICAL_WRITE_MESSAGE });
+  }
+
+  return { data: {} };
 };
 
 /**

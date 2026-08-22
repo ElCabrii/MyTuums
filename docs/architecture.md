@@ -371,6 +371,12 @@ Migrations run as a pre-deploy step, never at server boot: N replicas would
 race the same DDL. The image ships `apps/server/dist/migrate.js` and the SQL
 so Railway and `docker-compose.yml` run the identical runner.
 
+Handle canonicalisation is also enforced by the database trigger installed in
+`0015_lowercase_usernames`: `username` is lowercased and `display_username` is
+derived from it on every handle write. This closes the pre-deploy interval in
+which Railway still routes traffic to the previous application version, and
+keeps direct database writers from splitting the two representations.
+
 ## Test topology
 
 **Source of truth:** `packages/api/vitest.config.ts`, `apps/web/vitest.config.ts`,

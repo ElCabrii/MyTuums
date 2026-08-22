@@ -55,8 +55,11 @@ to the owning context.
   Those four are the _only_ workspace modules in the SPA bundle, and they are
   the only ones `apps/web` may import from either package.
 - **Auth-owned user fields are written through the auth client only.**
-  `packages/auth`'s database hooks are the single enforcement point for
-  user-field rules; an oRPC procedure writing them bypasses validation.
+  `packages/auth`'s database hooks enforce their user-field rules; an oRPC
+  procedure writing them bypasses validation. The duplicated handle columns
+  have one additional database invariant: migration `0015_lowercase_usernames`
+  derives both lowercase values from `username`, including during a rolling
+  deploy while the previous server version can still write.
 - **The client's provider list and the server's credentials must agree.**
   `VITE_SOCIAL_PROVIDERS` is baked into the bundle at build time and the
   browser cannot see server env. CI asserts both halves.

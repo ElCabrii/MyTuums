@@ -181,6 +181,9 @@ export const USERNAME_LENGTH_MESSAGE = "Username must be between 3 and 20 charac
 /** Rejection for a handle carrying anything outside the allowed charset. */
 export const USERNAME_CHARACTERS_MESSAGE =
   "Username can only contain letters, numbers, underscores, and hyphens.";
+/** Rejection for trying to mutate Better Auth's derived display handle on its own. */
+export const USERNAME_CANONICAL_WRITE_MESSAGE =
+  "Change a handle through the username field, not the display username field.";
 
 /**
  * The canonical stored and displayed handle form.
