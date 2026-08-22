@@ -103,7 +103,9 @@ over HTTP and imports only its browser-safe subpaths.
   transaction, no `FOR UPDATE`, no `moderation_action` row, no email, nothing
   appealable — it is author-owned and idempotent, and it refuses a post a
   moderator already removed so the author keeps the stub's reason and appeal
-  link.
+  link. Its unlocked read/write pair is safe because the update compares both
+  tombstones; after losing to a concurrent delete or removal, it re-reads the
+  winner and preserves that outcome.
 - **Replies are a mode of `post.list` (`parentId`), not their own procedure.**
   The web app's optimistic like sweep covers every cached `post.list` by key
   prefix; a separate procedure would miss reply likes.

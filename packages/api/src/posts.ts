@@ -202,12 +202,13 @@ export const postRouter = {
    * `search.posts` excludes the row outright — the one surface where matching
    * on text the viewer can no longer read would leak it back.
    *
-   * The read-then-write is not locked. Two concurrent deletes of the same
-   * post can only come from its one author, and they agree on the end state;
-   * the worst case is the second restamping a tombstone nothing reads the
-   * exact time of. That is why this needs neither the transaction nor the
-   * `FOR UPDATE` every moderation effect takes: there is no audit row to
-   * double-write and no email to double-send.
+   * The read-then-write is not locked. Instead, the update is a compare-and-set
+   * against both tombstones. A racing author delete or moderator removal can
+   * win the row first; a zero-row update re-reads that winner and returns the
+   * original author tombstone or refuses the moderator tombstone. That is why
+   * this needs neither the transaction nor the `FOR UPDATE` every moderation
+   * effect takes: there is no audit row to double-write and no email to
+   * double-send.
    */
   delete: protectedProcedure
     .use(rateLimit(RATE_LIMITS.write))
@@ -251,14 +252,33 @@ export const postRouter = {
       const [updated] = await context.db
         .update(post)
         .set({ deletedAt: new Date() })
-        .where(eq(post.id, input.postId))
+        .where(and(eq(post.id, input.postId), isNull(post.removedAt), isNull(post.deletedAt)))
         .returning({ deletedAt: post.deletedAt });
 
-      if (!updated?.deletedAt) {
-        throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Failed to delete post." });
+      if (updated?.deletedAt) {
+        return { postId: input.postId, deletedAt: updated.deletedAt };
       }
 
-      return { postId: input.postId, deletedAt: updated.deletedAt };
+      // Another writer changed a tombstone after the guard read. PostgreSQL
+      // re-evaluates this UPDATE's predicate after waiting on that writer, so
+      // no returned row means the winner's committed state decides the result.
+      const [winner] = await context.db
+        .select({ removedAt: post.removedAt, deletedAt: post.deletedAt })
+        .from(post)
+        .where(eq(post.id, input.postId))
+        .limit(1);
+
+      if (winner?.removedAt) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "This post was removed by a moderator and can no longer be deleted.",
+        });
+      }
+
+      if (winner?.deletedAt) {
+        return { postId: input.postId, deletedAt: winner.deletedAt };
+      }
+
+      throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Failed to delete post." });
     }),
 
   /**

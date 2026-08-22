@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { closeDb } from "@my-tuums/db";
 import { post } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -72,6 +72,45 @@ async function buildChain(authorId: string, depth: number): Promise<string[]> {
   }
 
   return ids;
+}
+
+interface Deferred {
+  promise: Promise<void>;
+  resolve: () => void;
+}
+
+function deferred(): Deferred {
+  let resolve: (() => void) | undefined;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return {
+    promise,
+    resolve: () => {
+      if (!resolve) throw new Error("Deferred promise was not initialized");
+      resolve();
+    },
+  };
+}
+
+/** Waits until another connection is blocked on this test's post-row lock. */
+async function waitForPostLockWait(): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const rows = await anonContext.db.execute<{ blocked: boolean }>(sql`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND state = 'active'
+          AND wait_event_type = 'Lock'
+          AND query LIKE 'update "post" set%'
+      ) AS blocked
+    `);
+    if (rows[0]?.blocked) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Author deletion never reached the held post-row lock");
 }
 
 describe("post.create", () => {
@@ -331,6 +370,83 @@ describe("post.delete", () => {
     expect(item?.removed).toBe(true);
     expect(item?.deleted).toBe(false);
     expect(item?.removedReason).toBe("spam");
+  });
+
+  it("refuses when moderator removal commits after the guard read but before the tombstone update", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+    const holderReady = deferred();
+    const releaseHolder = deferred();
+    const holder = anonContext.db.transaction(async (tx) => {
+      await tx
+        .update(post)
+        .set({ removedAt: new Date(), removedReason: "spam" })
+        .where(eq(post.id, target.id));
+      holderReady.resolve();
+      await releaseHolder.promise;
+    });
+
+    await holderReady.promise;
+    const deletion = call(
+      appRouter.post.delete,
+      { postId: target.id },
+      {
+        context: contextFor(author),
+      },
+    );
+
+    try {
+      await waitForPostLockWait();
+    } finally {
+      releaseHolder.resolve();
+    }
+    await holder;
+
+    await expect(deletion).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This post was removed by a moderator and can no longer be deleted.",
+    });
+
+    const [row] = await anonContext.db
+      .select({ removedAt: post.removedAt, deletedAt: post.deletedAt })
+      .from(post)
+      .where(eq(post.id, target.id));
+    expect(row?.removedAt).not.toBeNull();
+    expect(row?.deletedAt).toBeNull();
+  });
+
+  it("returns the winning tombstone when another author deletion commits after the guard read", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+    const winningDeletedAt = new Date("2026-08-22T12:00:00.000Z");
+    const holderReady = deferred();
+    const releaseHolder = deferred();
+    const holder = anonContext.db.transaction(async (tx) => {
+      await tx.update(post).set({ deletedAt: winningDeletedAt }).where(eq(post.id, target.id));
+      holderReady.resolve();
+      await releaseHolder.promise;
+    });
+
+    await holderReady.promise;
+    const deletion = call(
+      appRouter.post.delete,
+      { postId: target.id },
+      {
+        context: contextFor(author),
+      },
+    );
+
+    try {
+      await waitForPostLockWait();
+    } finally {
+      releaseHolder.resolve();
+    }
+    await holder;
+
+    await expect(deletion).resolves.toEqual({
+      postId: target.id,
+      deletedAt: winningDeletedAt,
+    });
   });
 });
 
