@@ -24,6 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -206,11 +207,10 @@ export function ImageCropDialog({
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent
-        className={
-          kind === "banner"
-            ? "max-h-[calc(100dvh-2rem)] max-w-5xl overflow-y-auto [&>*]:shrink-0"
-            : undefined
-        }
+        className={cn(
+          "max-h-[calc(100dvh-2rem)] overflow-y-auto [&>*]:shrink-0",
+          kind === "banner" && "max-w-5xl",
+        )}
       >
         <DialogHeader>
           <DialogTitle>{m.settings_image_crop_title({ label })}</DialogTitle>

@@ -3,6 +3,7 @@ import { IMAGE_LIMITS } from "@my-tuums/api/constants";
 import {
   IMAGE_ACCEPT,
   ImageError,
+  calculateCropFrame,
   calculateCropRect,
   calculateDisplayLayout,
   clampCrop,
@@ -112,6 +113,19 @@ describe("IMAGE_ACCEPT", () => {
   });
 });
 
+describe("calculateCropFrame", () => {
+  it("uses a square avatar composition for portrait and landscape sources", () => {
+    expect(calculateCropFrame({ width: 400, height: 800 }, "avatar")).toEqual({
+      width: 400,
+      height: 400,
+    });
+    expect(calculateCropFrame({ width: 800, height: 400 }, "avatar")).toEqual({
+      width: 400,
+      height: 400,
+    });
+  });
+});
+
 describe("calculateCropRect", () => {
   // The crop editor's core: given source dims, a slot and a crop descriptor, it
   // picks the source rectangle the display variant is drawn from. Pinned here
@@ -147,10 +161,17 @@ describe("calculateCropRect", () => {
   });
 
   it("zooms in by shrinking the rect around the center", () => {
-    // An avatar keeps the whole square at zoom 1, so zoom 2 is the middle half.
+    // A portrait avatar starts from its centered square; zoom 2 keeps the
+    // middle half of that composition rather than reverting to source aspect.
     expect(
-      calculateCropRect({ width: 400, height: 400 }, "avatar", { x: 0.5, y: 0.5, scale: 2 }),
-    ).toEqual({ x: 100, y: 100, width: 200, height: 200 });
+      calculateCropRect({ width: 400, height: 800 }, "avatar", { x: 0.5, y: 0.5, scale: 2 }),
+    ).toEqual({ x: 100, y: 300, width: 200, height: 200 });
+  });
+
+  it("pans a square avatar composition within a portrait source", () => {
+    expect(
+      calculateCropRect({ width: 400, height: 800 }, "avatar", { x: 0.5, y: 0.25, scale: 1 }),
+    ).toEqual({ x: 0, y: 0, width: 400, height: 400 });
   });
 
   it("clamps the rect to the source when the center is near an edge", () => {
@@ -218,7 +239,7 @@ describe("calculateDisplayLayout", () => {
   // jsdom (see the file header) and covered end to end elsewhere, but the
   // arithmetic that decides sharpness is all here.
 
-  it("avatar: contains the whole image and never upscales", () => {
+  it("avatar: center-crops to a square and never upscales", () => {
     // A 4000x4000 source is scaled down to the 512x512 cap, keeping every row.
     expect(calculateDisplayLayout({ width: 4000, height: 4000 }, "avatar")).toEqual({
       sourceX: 0,
@@ -237,14 +258,14 @@ describe("calculateDisplayLayout", () => {
       width: 100,
       height: 100,
     });
-    // Portrait is height-limited but still whole-image: 200x400 -> 200x400.
+    // A portrait keeps its full width and crops the same-sized square from the center.
     expect(calculateDisplayLayout({ width: 200, height: 400 }, "avatar")).toEqual({
       sourceX: 0,
-      sourceY: 0,
+      sourceY: 100,
       sourceWidth: 200,
-      sourceHeight: 400,
+      sourceHeight: 200,
       width: 200,
-      height: 400,
+      height: 200,
     });
   });
 

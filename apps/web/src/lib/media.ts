@@ -185,12 +185,13 @@ export async function createDisplayVariantImpl(
  * Chooses the source rectangle and output size for one display variant.
  *
  * With a `crop` (the editor's output) the layout uses the chosen region, never
- * upscaled — see the branch at the top. The two branches below are the no-crop
- * defaults.
+ * upscaled — see the branch at the top. Without one it uses the slot's
+ * canonical centered composition.
  *
- * Avatars preserve the whole image (contain): the round frame's `object-cover`
- * already hides nothing worth keeping, so cropping at encode would only
- * permanently discard pixels a future refit wants.
+ * Avatars are always 1:1. Every avatar surface is square before applying its
+ * round mask, so baking the chosen square into the display variant keeps the
+ * editor and the rendered result on the same composition. The untouched
+ * original remains available for a future refit.
  *
  * Banners are always 3:1. The profile banner remains a full-bleed responsive
  * box, so its `object-cover` display may crop the 3:1 source differently at
@@ -219,27 +220,28 @@ function clamp(value: number, min: number, max: number): number {
 /**
  * The region the editor frames at zoom 1 — deliberately the same rectangle the
  * no-crop path encodes, so applying without touching anything is a no-op.
- * Avatars preserve the whole source. Banners cover-crop to the canonical 3:1.
+ * Avatars cover-crop to 1:1. Banners cover-crop to the canonical 3:1.
  */
 export function calculateCropFrame(
   source: { width: number; height: number },
   kind: ImageKind,
 ): ImageSize {
-  if (kind === "banner") {
-    const sourceAspect = source.width / source.height;
-    if (sourceAspect > BANNER_ASPECT_RATIO) {
-      return {
-        width: Math.max(1, Math.round(source.height * BANNER_ASPECT_RATIO)),
-        height: source.height,
-      };
-    }
+  if (kind === "avatar") {
+    const edge = Math.min(source.width, source.height);
+    return { width: edge, height: edge };
+  }
+
+  const sourceAspect = source.width / source.height;
+  if (sourceAspect > BANNER_ASPECT_RATIO) {
     return {
-      width: source.width,
-      height: Math.max(1, Math.round(source.width / BANNER_ASPECT_RATIO)),
+      width: Math.max(1, Math.round(source.height * BANNER_ASPECT_RATIO)),
+      height: source.height,
     };
   }
-  const layout = calculateDisplayLayout(source, kind);
-  return { width: layout.sourceWidth, height: layout.sourceHeight };
+  return {
+    width: source.width,
+    height: Math.max(1, Math.round(source.width / BANNER_ASPECT_RATIO)),
+  };
 }
 
 /**
@@ -314,11 +316,9 @@ export function calculateDisplayLayout(
     // WITHOUT a crop to find the frame, so this branch must never be reached
     // from there — it isn't, because that call omits `crop`.
     //
-    // Both caps are honoured independently rather than assuming the rect has
-    // the cap's aspect: at zoom 1 the rect is whatever the no-crop policy
-    // picked (any aspect at all), so scaling on width alone could leave a tall
-    // rect over the height cap and the server would reject the browser's own
-    // variant. Never upscales.
+    // Both caps are honoured independently, so changing a slot's dimensions
+    // cannot make the browser produce a variant the server rejects. Never
+    // upscales.
     const rect = calculateCropRect(source, kind, crop);
     const scale = Math.min(maxWidth / rect.width, maxHeight / rect.height, 1);
     return {
@@ -328,23 +328,6 @@ export function calculateDisplayLayout(
       sourceHeight: rect.height,
       width: Math.max(1, Math.round(rect.width * scale)),
       height: Math.max(1, Math.round(rect.height * scale)),
-    };
-  }
-
-  if (kind === "avatar") {
-    // `min(..., 1)` stops a small image being blown up to the bounds, which
-    // would add bytes and lose sharpness to gain nothing.
-    const scale = Math.min(maxWidth / source.width, maxHeight / source.height, 1);
-    const width = Math.max(1, Math.round(source.width * scale));
-    const height = Math.max(1, Math.round(source.height * scale));
-
-    return {
-      sourceX: 0,
-      sourceY: 0,
-      sourceWidth: source.width,
-      sourceHeight: source.height,
-      width,
-      height,
     };
   }
 
