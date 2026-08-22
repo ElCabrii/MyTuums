@@ -243,7 +243,10 @@ describe("search.typeahead", () => {
 
     // alpha/albert tie on the timestamp, so the id is the whole tie-break.
     const prefixUsers = [seeded[0], seeded[1]].sort((a, b) => b.id.localeCompare(a.id));
-    expect(Object.keys(result)).toEqual(["users"]);
+    // `posts` is retained as an empty compatibility field so an older SPA
+    // remains safe while the server rolls forward independently.
+    expect(Object.keys(result)).toEqual(["users", "posts"]);
+    expect(result.posts).toEqual([]);
     expect(result.users.map((u) => u.id)).toEqual([...prefixUsers.map((u) => u.id), seeded[2].id]);
   }, 20_000);
 

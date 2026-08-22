@@ -122,7 +122,11 @@ export const searchRouter = {
         )
         .limit(5);
 
-      return { users };
+      // Keep the legacy field until older, already-open SPAs can no longer be
+      // served by a rolling deployment. Those clients still read and map
+      // `posts`; an empty collection preserves that response contract without
+      // putting posts back into the profile-only dropdown.
+      return { users, posts: [] };
     }),
 
   /**

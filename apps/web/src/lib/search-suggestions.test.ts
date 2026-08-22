@@ -17,7 +17,7 @@ function makeUser(overrides: Partial<SearchUser> & { id: string }): SearchUser {
 }
 
 function typeahead(users: SearchUser[]): SearchTypeahead {
-  return { users };
+  return { users, posts: [] };
 }
 
 describe("suggestionRows", () => {
