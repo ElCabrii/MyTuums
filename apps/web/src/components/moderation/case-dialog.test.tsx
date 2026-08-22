@@ -59,6 +59,36 @@ function makeOpenReport() {
   return makeModerationReport();
 }
 
+describe("CaseDialog — mention rendering", () => {
+  it("links mentions in the raw post content shown to moderators", async () => {
+    const content = "Reported @Alice,\nwith context.";
+    const target: CaseRef = { targetType: "post", targetId: "post-1" };
+    await renderCase(target, makeModerationCaseDetail({ id: "post-1", content }));
+
+    const mention = screen.getByRole("link", { name: "@Alice" });
+    expect(mention).toHaveAttribute("href", "/@alice");
+    expect(mention.closest("p")?.textContent).toBe(content);
+  });
+
+  it("uses the same mention rendering for a target user's bio", async () => {
+    const bio = "Working with @Alice.";
+    const target: CaseRef = { targetType: "user", targetId: "user-1" };
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.case(
+      target,
+      makeUserModerationCaseDetail({ id: "user-1", bio }),
+    );
+    await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
+      queryClient,
+      signedInAs: { role: "moderator" },
+    });
+
+    const mention = screen.getByRole("link", { name: "@Alice" });
+    expect(mention).toHaveAttribute("href", "/@alice");
+    expect(mention.closest("p")?.textContent).toBe(bio);
+  });
+});
+
 describe("CaseDialog — role gating on user actions", () => {
   const target: CaseRef = { targetType: "user", targetId: "user-1" };
 

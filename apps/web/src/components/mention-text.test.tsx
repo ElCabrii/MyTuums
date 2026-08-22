@@ -30,6 +30,18 @@ describe("MentionText", () => {
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
+  it("checks mention boundaries by Unicode code point", async () => {
+    const text = "@alice𐐀 𐐀@example.com";
+    await renderWithProviders(
+      <article aria-label="Published content">
+        <MentionText text={text} />
+      </article>,
+    );
+
+    expect(screen.getByRole("article", { name: "Published content" }).textContent).toBe(text);
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
   it("renders untrusted markup as inert text", async () => {
     const text = '<img src=x onerror="alert(1)"> @alice';
     await renderWithProviders(

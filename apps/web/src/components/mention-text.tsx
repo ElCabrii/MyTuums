@@ -36,37 +36,46 @@ function isMentionWordCharacter(character: string | undefined): boolean {
 }
 
 function mentionSegments(text: string): Segment[] {
+  // Array.from iterates Unicode code points rather than UTF-16 code units.
+  // Boundary checks must see a supplementary-plane letter as one character;
+  // indexing the string directly would inspect one surrogate half and let an
+  // invalid adjacent mention or internationalized email through.
+  const characters = Array.from(text);
   const segments: Segment[] = [];
   let textStart = 0;
   let cursor = 0;
 
-  while (cursor < text.length) {
+  while (cursor < characters.length) {
     if (
-      text[cursor] !== "@" ||
-      text[cursor - 1] === "@" ||
-      isMentionWordCharacter(text[cursor - 1])
+      characters[cursor] !== "@" ||
+      characters[cursor - 1] === "@" ||
+      isMentionWordCharacter(characters[cursor - 1])
     ) {
       cursor += 1;
       continue;
     }
 
     let end = cursor + 1;
-    while (isUsernameCharacter(text[end])) end += 1;
+    while (isUsernameCharacter(characters[end])) end += 1;
 
-    const username = text.slice(cursor + 1, end);
+    const username = characters.slice(cursor + 1, end).join("");
     const hasValidLength =
       username.length >= USERNAME_MIN_LENGTH && username.length <= USERNAME_MAX_LENGTH;
-    if (!hasValidLength || isMentionWordCharacter(text[end])) {
+    if (!hasValidLength || isMentionWordCharacter(characters[end])) {
       cursor = end;
       continue;
     }
 
     if (textStart < cursor) {
-      segments.push({ kind: "text", start: textStart, value: text.slice(textStart, cursor) });
+      segments.push({
+        kind: "text",
+        start: textStart,
+        value: characters.slice(textStart, cursor).join(""),
+      });
     }
     segments.push({
       kind: "mention",
-      label: text.slice(cursor, end),
+      label: characters.slice(cursor, end).join(""),
       start: cursor,
       username: normalizeUsername(username),
     });
@@ -74,8 +83,12 @@ function mentionSegments(text: string): Segment[] {
     textStart = end;
   }
 
-  if (textStart < text.length) {
-    segments.push({ kind: "text", start: textStart, value: text.slice(textStart) });
+  if (textStart < characters.length) {
+    segments.push({
+      kind: "text",
+      start: textStart,
+      value: characters.slice(textStart).join(""),
+    });
   }
 
   return segments;
