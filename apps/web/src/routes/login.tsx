@@ -63,6 +63,13 @@ interface TwoFactorDestination {
   search?: { redirect: string };
 }
 
+/** The destination `/login` navigates to when the account's email is unverified. */
+interface VerifyEmailDestination {
+  to: "/verify-email";
+  replace: boolean;
+  search?: { redirect: string };
+}
+
 /**
  * The sign-in page: identifier + password form, the OAuth/passkey options, and
  * the `?error=` banner that surfaces a failed OAuth round trip. `?redirect=`
@@ -156,7 +163,12 @@ export function LoginPage() {
     // rather than a "try again" banner. `signInAtom` set `verifyEmailAtom`
     // when the identifier was an email, so the resend button is available then.
     if (outcome.status === "verify-email") {
-      void navigate({ to: "/verify-email", replace: true });
+      // The destination rides along, same as the `/two-factor` branch above:
+      // this person was sent to `/login` from somewhere, and verifying their
+      // email should not lose the trip.
+      const destination: VerifyEmailDestination = { to: "/verify-email", replace: true };
+      if (redirectFromSearch) destination.search = { redirect: redirectFromSearch };
+      void navigate(destination);
     }
   };
 

@@ -321,7 +321,7 @@ describe("resendVerificationEmailAtom", () => {
   it("requests a fresh link for the address and flags the generic confirmation", async () => {
     const store = createStore();
 
-    await expect(store.set(resendVerificationEmailAtom, "pending@example.com")).resolves.toBe(true);
+    await expect(store.set(resendVerificationEmailAtom, { email: "pending@example.com" })).resolves.toBe(true);
 
     expect(sendVerificationEmail).toHaveBeenCalledWith({
       email: "pending@example.com",
@@ -331,6 +331,40 @@ describe("resendVerificationEmailAtom", () => {
     expect(store.get(authErrorAtom)).toBeNull();
   });
 
+  it("bakes the pre-login destination into the verification link", async () => {
+    const store = createStore();
+
+    await store.set(resendVerificationEmailAtom, {
+      email: "pending@example.com",
+      redirect: "/settings/account",
+    });
+
+    // Inside the callbackURL, not merely in the SPA's history: a link opened
+    // in a different browser has no atom or history entry to remember where
+    // the person was headed.
+    expect(sendVerificationEmail).toHaveBeenCalledWith({
+      email: "pending@example.com",
+      callbackURL: `${window.location.origin}/verify-email?redirect=%2Fsettings%2Faccount`,
+    });
+  });
+
+  it("drops an unsafe destination rather than emailing it", async () => {
+    const store = createStore();
+
+    await store.set(resendVerificationEmailAtom, {
+      email: "pending@example.com",
+      redirect: "https://evil.example.com/phish",
+    });
+
+    // `?redirect=` arrives from a URL and would otherwise be baked into an
+    // emailed link — `sanitizeRedirect` is what stops that becoming an open
+    // redirect with our own domain's credibility behind it.
+    expect(sendVerificationEmail).toHaveBeenCalledWith({
+      email: "pending@example.com",
+      callbackURL: `${window.location.origin}/verify-email`,
+    });
+  });
+
   it("surfaces a rejected resend in the banner instead of claiming it was sent", async () => {
     const store = createStore();
     sendVerificationEmail.mockResolvedValueOnce({
@@ -338,7 +372,7 @@ describe("resendVerificationEmailAtom", () => {
       error: { code: "TOO_MANY_REQUESTS", message: "Too many requests" },
     });
 
-    await expect(store.set(resendVerificationEmailAtom, "pending@example.com")).resolves.toBe(
+    await expect(store.set(resendVerificationEmailAtom, { email: "pending@example.com" })).resolves.toBe(
       false,
     );
 

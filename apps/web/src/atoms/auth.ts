@@ -41,6 +41,28 @@ export const verifyEmailAtom = atom<string | null>(null);
 export const verifyEmailSentAtom = atom(false);
 
 /**
+ * The absolute URL a verification link lands on, carrying the pre-login
+ * destination when there is one.
+ *
+ * Absolute for the reason on `SignUpEmailBody.callbackURL`: Better Auth
+ * resolves a relative callback against the API origin, which serves no HTML in
+ * dev. The `?redirect=` rides *inside* it so the trip to a protected page
+ * survives verification even when the link is opened in a different browser,
+ * where no atom or history entry exists to remember it — the same reason
+ * `/login` carries the param to `/two-factor`.
+ *
+ * Sanitized here rather than trusted: it reaches this function from a URL, and
+ * an unsanitized value would be baked into an emailed link. `sanitizeRedirect`
+ * rejects anything that is not a single-slash-relative path, so this cannot
+ * become an open redirect.
+ */
+function verifyEmailCallbackURL(redirect?: string | null): string {
+  const base = `${window.location.origin}/verify-email`;
+  const safe = sanitizeRedirect(redirect);
+  return safe ? `${base}?redirect=${encodeURIComponent(safe)}` : base;
+}
+
+/**
  * Requests a fresh verification email for the address pending verification.
  *
  * The address comes from `verifyEmailAtom` (set by the sign-up or the
@@ -53,15 +75,21 @@ export const verifyEmailSentAtom = atom(false);
  * server's `/send-verification-email` rate limit (packages/auth/src/index.ts)
  * is the abuse control, not this atom.
  */
+/** What the `/verify-email` resend button hands the atom: the address, and where to go after. */
+interface ResendVerificationArgs {
+  email: string;
+  redirect?: string | undefined;
+}
+
 export const resendVerificationEmailAtom = atom(
   null,
-  async (_get, set, email: string): Promise<boolean> => {
+  async (_get, set, { email, redirect }: ResendVerificationArgs): Promise<boolean> => {
     set(authErrorAtom, null);
     set(authPendingAtom, true);
     try {
       const res = await authClient.sendVerificationEmail({
         email,
-        callbackURL: `${window.location.origin}/verify-email`,
+        callbackURL: verifyEmailCallbackURL(redirect),
       });
       if (res.error) {
         set(authErrorAtom, res.error.message || m.common_something_went_wrong());
@@ -387,6 +415,12 @@ type SignUpArgs = {
   dateOfBirth: string;
   /** The checked consent box; only true sends the server-side acceptance evidence. */
   legalAccepted: boolean;
+  /**
+   * The pre-login destination from `/register?redirect=`, baked into the
+   * verification link so the trip to a protected page survives verification —
+   * including when the link is opened in a different browser.
+   */
+  redirect?: string | undefined;
 };
 
 /**
@@ -403,10 +437,9 @@ export const signUpAtom = atom(null, async (_get, set, fields: SignUpArgs): Prom
       name: fields.name.trim(),
       username: fields.username.trim(),
       dateOfBirth: dateOfBirthToIso(fields.dateOfBirth),
-      // Absolute — see SignUpEmailBody.callbackURL. `${window.location.origin}`
-      // is the web origin in both dev and production, and matches
-      // `trustedOrigins`.
-      callbackURL: `${window.location.origin}/verify-email`,
+      // Absolute, and carrying the pre-login destination when there is one —
+      // see `verifyEmailCallbackURL`.
+      callbackURL: verifyEmailCallbackURL(fields.redirect),
     };
     if (fields.legalAccepted) {
       body.legalAcceptedAt = new Date().toISOString();

@@ -88,6 +88,27 @@ describe("VerifyEmailPage", () => {
     expect(store.get(verifyEmailAtom)).toBe("pending@example.com");
   });
 
+  it("carries the pre-login destination into the resend and the post-verify redirect", async () => {
+    const store = createStore();
+    act(() => store.set(verifyEmailAtom, "pending@example.com"));
+    await renderWithProviders(<VerifyEmailPage />, {
+      store,
+      initialPath: "/verify-email?redirect=%2Fsettings%2Faccount",
+    });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: m.auth_verify_resend() }));
+
+    // The destination someone was sent to /login from must survive the whole
+    // detour through email verification (issue #172 review).
+    await waitFor(() =>
+      expect(authClient.sendVerificationEmail).toHaveBeenCalledWith({
+        email: "pending@example.com",
+        callbackURL: `${window.location.origin}/verify-email?redirect=%2Fsettings%2Faccount`,
+      }),
+    );
+  });
+
   // The anti-enumeration property: Better Auth appends a different code for a
   // token that expired, one that was tampered with, and one whose account no
   // longer exists. A visitor must not be able to tell those apart — all three

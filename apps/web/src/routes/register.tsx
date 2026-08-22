@@ -38,6 +38,13 @@ export const Route = createFileRoute("/register")({
 
 const redirectSearchSchema = z.object({ redirect: z.string().optional() });
 
+/** Where `/register` navigates once the account exists but has no session yet. */
+interface VerifyEmailDestination {
+  to: "/verify-email";
+  replace: boolean;
+  search?: { redirect: string };
+}
+
 /**
  * The sign-up page: username, display name, email, password and date of birth,
  * plus the same OAuth/passkey options as `/login`. Success flows through the
@@ -80,8 +87,25 @@ export function RegisterPage() {
     // — the account exists but is held back until the email is verified. Move
     // the person to the check-your-email screen here; `signUpAtom` has stashed
     // the address in `verifyEmailAtom` so that screen can offer a resend.
-    const ok = await signUp({ username, name, email, password, dateOfBirth, legalAccepted });
-    if (ok) void navigate({ to: "/verify-email", replace: true });
+    // The pre-login destination rides along twice: into the verification
+    // link's `callbackURL` (so a link opened in another browser still lands
+    // there) and into this navigation (so the pending screen's own resend and
+    // its `useRedirectWhenSignedIn` know it too) — the same handoff `/login`
+    // makes to `/two-factor`.
+    const ok = await signUp({
+      username,
+      name,
+      email,
+      password,
+      dateOfBirth,
+      legalAccepted,
+      redirect: redirectFromSearch,
+    });
+    if (ok) {
+      const destination: VerifyEmailDestination = { to: "/verify-email", replace: true };
+      if (redirectFromSearch) destination.search = { redirect: redirectFromSearch };
+      void navigate(destination);
+    }
   };
 
   return (

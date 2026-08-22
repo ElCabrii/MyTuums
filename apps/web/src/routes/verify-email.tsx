@@ -33,6 +33,15 @@ export const Route = createFileRoute("/verify-email")({
 
 const verifyEmailSearchSchema = z.object({
   error: z.string().optional(),
+  /**
+   * The pre-login destination, carried from `/login` or `/register` so the
+   * trip survives email verification: this page hands it to
+   * `useRedirectWhenSignedIn`, and the resend puts it back in the
+   * verification link's `callbackURL` so a link opened in a *different*
+   * browser still lands the person where they were headed. Sanitized at every
+   * use by `lib/redirect.ts` — it arrives in the URL and is never trusted.
+   */
+  redirect: z.string().optional(),
 });
 
 /**
@@ -58,10 +67,12 @@ const verifyEmailSearchSchema = z.object({
  * the pending and error states to `/login` before this page can render them.
  */
 export function VerifyEmailPage() {
-  const { error: linkError } = Route.useSearch();
+  const { error: linkError, redirect: redirectFromSearch } = Route.useSearch();
   // A signed-in arrival is a successful verification — hand navigation to the
-  // shared redirect effect rather than navigating here.
-  useRedirectWhenSignedIn();
+  // shared redirect effect rather than navigating here. The destination rides
+  // along so a person who was sent to `/login` from a protected page still
+  // gets there once verified, the same way `/two-factor` carries it.
+  useRedirectWhenSignedIn(redirectFromSearch);
 
   const email = useAtomValue(verifyEmailAtom);
   const sent = useAtomValue(verifyEmailSentAtom);
@@ -124,7 +135,7 @@ export function VerifyEmailPage() {
             type="button"
             className="h-11 w-full gap-2 rounded-2xl text-base font-medium"
             disabled={isSubmitting}
-            onClick={() => void resend(email)}
+            onClick={() => void resend({ email, redirect: redirectFromSearch })}
           >
             {isSubmitting ? (
               <>
