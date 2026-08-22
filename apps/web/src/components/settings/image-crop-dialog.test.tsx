@@ -98,6 +98,10 @@ describe("ImageCropDialog", () => {
     expect(container.ownerDocument.querySelector<HTMLElement>(".touch-none")).toHaveStyle({
       aspectRatio: "1",
     });
+    const visibleArea = container.ownerDocument.querySelector<HTMLElement>(
+      '[aria-hidden="true"].rounded-full',
+    );
+    expect(visibleArea).toHaveStyle({ width: "100%", height: "100%" });
     expect(screen.getByRole("dialog")).toHaveClass(
       "max-h-[calc(100dvh-2rem)]",
       "overflow-y-auto",

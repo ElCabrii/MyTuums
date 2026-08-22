@@ -239,17 +239,18 @@ export function ImageCropDialog({
                     className="absolute max-w-none"
                     style={imageStyle(source.dims, kind, crop)}
                   />
-                  {kind === "banner" && (
-                    <div
-                      aria-hidden="true"
-                      className="pointer-events-none absolute top-1/2 left-1/2 border border-white/90 shadow-[0_0_0_9999px_rgb(0_0_0/0.28)]"
-                      style={{
-                        width: BANNER_SAFE_AREA.width,
-                        height: BANNER_SAFE_AREA.height,
-                        transform: "translate(-50%, -50%)",
-                      }}
-                    />
-                  )}
+                  <div
+                    aria-hidden="true"
+                    className={cn(
+                      "pointer-events-none absolute top-1/2 left-1/2 border border-white/90 shadow-[0_0_0_9999px_rgb(0_0_0/0.28)]",
+                      kind === "avatar" && "rounded-full",
+                    )}
+                    style={{
+                      width: kind === "avatar" ? "100%" : BANNER_SAFE_AREA.width,
+                      height: kind === "avatar" ? "100%" : BANNER_SAFE_AREA.height,
+                      transform: "translate(-50%, -50%)",
+                    }}
+                  />
                 </>
               )}
             </div>
