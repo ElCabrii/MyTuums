@@ -73,7 +73,9 @@ test.describe("email verification gate (issue #172)", () => {
     // The redirect target every real link carries; a bogus token makes the
     // server 302 to `<callbackURL>?error=INVALID_TOKEN` instead of signing in.
     const callbackURL = encodeURIComponent(`${E2E.webUrl}/verify-email`);
-    await page.goto(`${E2E.serverUrl}/api/auth/verify-email?token=not-a-real-token&callbackURL=${callbackURL}`);
+    await page.goto(
+      `${E2E.serverUrl}/api/auth/verify-email?token=not-a-real-token&callbackURL=${callbackURL}`,
+    );
 
     await expect(page).toHaveURL(/\/verify-email\?error=/);
     await expect(

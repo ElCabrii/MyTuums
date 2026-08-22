@@ -97,8 +97,7 @@ describe("TwoFactorSection", () => {
  */
 describe("TwoFactorSection — enrolment fallbacks (issue #169)", () => {
   /** A real enrolment URI — the fallback derives its key from the `secret` param. */
-  const TOTP_URI =
-    "otpauth://totp/MyTuums:alex@example.com?secret=JBSWY3DPEHPK3PXP&issuer=MyTuums";
+  const TOTP_URI = "otpauth://totp/MyTuums:alex@example.com?secret=JBSWY3DPEHPK3PXP&issuer=MyTuums";
 
   /**
    * Installs a clipboard stub. jsdom defines `navigator.clipboard` as a
@@ -171,7 +170,9 @@ describe("TwoFactorSection — enrolment fallbacks (issue #169)", () => {
     // The UNformatted value is copied — nothing depends on the authenticator
     // app stripping the display whitespace.
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("JBSWY3DPEHPK3PXP"));
-    expect(await screen.findByRole("button", { name: m.twofa_secret_copied() })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: m.twofa_secret_copied() }),
+    ).toBeInTheDocument();
   });
 
   it("leaves the revealed key on screen when the clipboard is unavailable", async () => {

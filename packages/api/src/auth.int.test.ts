@@ -266,7 +266,9 @@ describe("email verification", () => {
     expect(row).toBeDefined();
     // …but no session cookie was set. The whole gate is "no session until
     // verified", and a present session cookie here would mean a backdoor.
-    expect(headers.getSetCookie().some((c) => c.startsWith("better-auth.session_token="))).toBe(false);
+    expect(headers.getSetCookie().some((c) => c.startsWith("better-auth.session_token="))).toBe(
+      false,
+    );
   });
 
   it("rejects a sign-in on an unverified account and leaves it unusable", async () => {
@@ -283,7 +285,10 @@ describe("email verification", () => {
     );
 
     // And no session was created — the account is still unusable.
-    const [row] = await db.select({ emailVerified: user.emailVerified }).from(user).where(eq(user.email, email));
+    const [row] = await db
+      .select({ emailVerified: user.emailVerified })
+      .from(user)
+      .where(eq(user.email, email));
     expect(row?.emailVerified).toBe(false);
   });
 
@@ -302,7 +307,10 @@ describe("email verification", () => {
     expect(session?.user.id).toBeDefined();
     expect(session?.user.emailVerified).toBe(true);
 
-    const [row] = await db.select({ emailVerified: user.emailVerified }).from(user).where(eq(user.email, email));
+    const [row] = await db
+      .select({ emailVerified: user.emailVerified })
+      .from(user)
+      .where(eq(user.email, email));
     expect(row?.emailVerified).toBe(true);
   });
 
@@ -336,7 +344,9 @@ describe("email verification", () => {
     // the endpoint short-circuits to `{ status: true, user: null }` and sets NO
     // session cookie — a reused link can't mint a second session.
     const result = await auth.api.verifyEmail({ query: { token }, returnHeaders: true });
-    expect(result.headers.getSetCookie().some((c) => c.startsWith("better-auth.session_token="))).toBe(false);
+    expect(
+      result.headers.getSetCookie().some((c) => c.startsWith("better-auth.session_token=")),
+    ).toBe(false);
   });
 });
 

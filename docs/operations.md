@@ -203,7 +203,7 @@ request:
 
 | Job           | Does                                                                     |
 | ------------- | ------------------------------------------------------------------------ |
-| `check`       | build → lint → typecheck → Prettier → `pnpm docs:check`                  |
+| `check`       | build → lint → typecheck → `pnpm format:check` → `pnpm docs:check`       |
 | `unit`        | `pnpm test:unit` with **no** database service                            |
 | `integration` | Postgres service, schema-drift check, then `pnpm test:integration`       |
 | `e2e`         | Postgres + the ci bucket's secrets, capped at 60 minutes                 |

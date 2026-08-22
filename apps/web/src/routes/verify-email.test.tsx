@@ -129,7 +129,9 @@ describe("VerifyEmailPage", () => {
       expect(screen.queryByText(new RegExp(code, "i"))).not.toBeInTheDocument();
       // Pending copy belongs to the other state; showing both would tell the
       // visitor which failure they hit.
-      expect(screen.queryByRole("heading", { name: m.auth_verify_title() })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: m.auth_verify_title() }),
+      ).not.toBeInTheDocument();
     },
   );
 });

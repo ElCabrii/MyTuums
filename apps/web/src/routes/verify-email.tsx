@@ -94,9 +94,7 @@ export function VerifyEmailPage() {
         <PageCard className="space-y-6">
           <div className="space-y-2 text-center">
             <AlertCircle className="text-destructive mx-auto h-8 w-8" />
-            <h1 className="text-2xl font-bold tracking-tight">
-              {m.auth_verify_invalid_title()}
-            </h1>
+            <h1 className="text-2xl font-bold tracking-tight">{m.auth_verify_invalid_title()}</h1>
             <p className="text-muted-foreground text-sm">{m.auth_verify_invalid_hint()}</p>
           </div>
 
@@ -126,9 +124,7 @@ export function VerifyEmailPage() {
           <p className="text-muted-foreground text-center text-sm">{m.auth_verify_sent()}</p>
         )}
 
-        {error && (
-          <ErrorBanner title={m.auth_verify_title()} message={localizeAuthError(error)} />
-        )}
+        {error && <ErrorBanner title={m.auth_verify_title()} message={localizeAuthError(error)} />}
 
         {email && (
           <Button

@@ -50,6 +50,7 @@ unset; the traps worth knowing are collected in
 | --------------------------------------------------------------- | -------------------------------------------------------------- |
 | `pnpm build`                                                    | production builds across the workspace                         |
 | `pnpm lint` · `pnpm typecheck`                                  | Oxlint, ESLint, and TypeScript across the workspace            |
+| `pnpm format`                                                   | Prettier write; CI checks this separately from `pnpm lint`     |
 | `pnpm test:unit`                                                | vitest unit suites — pure logic, no database needed            |
 | `pnpm db:test:setup` then `pnpm test:integration`               | API integration suites against real Postgres                   |
 | `pnpm test:e2e`                                                 | Playwright; slow, own ports (`:3101` / `:5273`)                |

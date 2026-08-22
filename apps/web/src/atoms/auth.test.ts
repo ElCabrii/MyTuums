@@ -321,7 +321,9 @@ describe("resendVerificationEmailAtom", () => {
   it("requests a fresh link for the address and flags the generic confirmation", async () => {
     const store = createStore();
 
-    await expect(store.set(resendVerificationEmailAtom, { email: "pending@example.com" })).resolves.toBe(true);
+    await expect(
+      store.set(resendVerificationEmailAtom, { email: "pending@example.com" }),
+    ).resolves.toBe(true);
 
     expect(sendVerificationEmail).toHaveBeenCalledWith({
       email: "pending@example.com",
@@ -372,9 +374,9 @@ describe("resendVerificationEmailAtom", () => {
       error: { code: "TOO_MANY_REQUESTS", message: "Too many requests" },
     });
 
-    await expect(store.set(resendVerificationEmailAtom, { email: "pending@example.com" })).resolves.toBe(
-      false,
-    );
+    await expect(
+      store.set(resendVerificationEmailAtom, { email: "pending@example.com" }),
+    ).resolves.toBe(false);
 
     // The rate limit is the abuse control for this endpoint, and being told the
     // link was re-sent when it was not is worse than the error.

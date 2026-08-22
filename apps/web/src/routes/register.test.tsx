@@ -94,7 +94,6 @@ describe("RegisterPage — Legal acceptance (issue #153)", () => {
   });
 });
 
-
 /**
  * The `?redirect=` handoff through email verification (issue #172 review).
  * A visitor bounced to `/login` from a protected page, who then registers,
