@@ -10,13 +10,7 @@ import {
   searchInputAtom,
 } from "@/atoms/search";
 import { orpc, type SearchTypeahead } from "@/lib/orpc";
-import {
-  createTestQueryClient,
-  makeAuthor,
-  makePost,
-  makeUserSummary,
-  renderWithProviders,
-} from "@/test/render";
+import { createTestQueryClient, makeUserSummary, renderWithProviders } from "@/test/render";
 
 /**
  * Opens the typeahead dropdown the way a user does: a query already in the
@@ -42,22 +36,16 @@ async function openSuggestions(query: string, payload: SearchTypeahead) {
 }
 
 describe("SearchBox suggestions", () => {
-  it("renders the user, post and see-all rows from the typeahead cache", async () => {
+  it("renders profile and see-all rows from the typeahead cache", async () => {
     await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
-      posts: [
-        makePost({
-          content: "Hello, world!",
-          author: makeAuthor({ name: "Dana Scully", username: "dscully" }),
-        }),
-      ],
+      posts: [],
     });
 
     // The accessible name concatenates the avatar's initials fallback with
     // the display name and handle, so the queries match on a stable
     // substring rather than the exact computed name.
     expect(screen.getByRole("option", { name: /Alex Mercer/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Hello, world!/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "See all results" })).toBeInTheDocument();
   });
 
@@ -81,6 +69,17 @@ describe("SearchBox suggestions", () => {
     act(() => input.blur());
     act(() => input.focus());
     expect(screen.getByRole("option", { name: /Alex Mercer/ })).toBeInTheDocument();
+  });
+
+  it("dismisses the list when the user clicks outside", async () => {
+    const { user } = await openSuggestions("hello", {
+      users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      posts: [],
+    });
+
+    await user.click(document.body);
+
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
   });
 
   it("shows the no-results line instead of a lone see-all row for an empty payload", async () => {
@@ -171,7 +170,7 @@ describe("SearchBox debounce and keyboard contract", () => {
   it("wraps the shared highlight and exposes it through combobox ARIA state", async () => {
     const { store } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
-      posts: [makePost({ id: "post-1", content: "Hello post" })],
+      posts: [],
     });
     const press = (key: "ArrowDown" | "ArrowUp") => {
       // Base UI may replace its trigger element while reconciling the open
@@ -195,28 +194,24 @@ describe("SearchBox debounce and keyboard contract", () => {
     expectActive(1);
 
     press("ArrowDown");
-    expectActive(2);
-
-    press("ArrowDown");
     expect(store.get(searchHighlightAtom)).toBe(0);
     expectActive(0);
 
     press("ArrowUp");
-    expectActive(2);
+    expectActive(1);
   });
 
   it.each([
     { label: "user", arrows: "{ArrowDown}", pathname: "/@alexmercer" },
-    { label: "post", arrows: "{ArrowDown}{ArrowDown}", pathname: "/post/post-1" },
     {
       label: "see-all",
-      arrows: "{ArrowDown}{ArrowDown}{ArrowDown}",
+      arrows: "{ArrowDown}{ArrowDown}",
       pathname: "/search",
     },
   ])("Enter follows the highlighted $label row", async ({ arrows, pathname }) => {
     const { router, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
-      posts: [makePost({ id: "post-1", content: "Hello post" })],
+      posts: [],
     });
 
     await user.keyboard(`${arrows}{Enter}`);

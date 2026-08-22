@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Post, SearchTypeahead, SearchUser } from "@/lib/orpc";
+import type { SearchTypeahead, SearchUser } from "@/lib/orpc";
 import { nextHighlight, suggestionRows } from "@/lib/search-suggestions";
 
 function makeUser(overrides: Partial<SearchUser> & { id: string }): SearchUser {
@@ -16,30 +16,8 @@ function makeUser(overrides: Partial<SearchUser> & { id: string }): SearchUser {
   };
 }
 
-function makePost(overrides: Partial<Post> & { id: string }): Post {
-  return {
-    content: "hello",
-    createdAt: new Date("2026-01-01T00:00:00.000Z"),
-    parentId: null,
-    author: {
-      id: "author-1",
-      name: "Author",
-      username: "author",
-      displayUsername: "Author",
-      image: null,
-    },
-    likeCount: 0,
-    replyCount: 0,
-    viewerHasLiked: false,
-    // The tombstone fields (issue #38): never removed by default.
-    removed: false,
-    removedReason: null,
-    ...overrides,
-  };
-}
-
-function typeahead(users: SearchUser[], posts: Post[]): SearchTypeahead {
-  return { users, posts };
+function typeahead(users: SearchUser[]): SearchTypeahead {
+  return { users, posts: [] };
 }
 
 describe("suggestionRows", () => {
@@ -52,36 +30,27 @@ describe("suggestionRows", () => {
   // An empty payload is the API's "no matches" answer; the dropdown swaps in
   // its no-results line, so a bare see-all row would be a lie.
   it("returns [] for an empty payload", () => {
-    expect(suggestionRows(typeahead([], []))).toEqual([]);
+    expect(suggestionRows(typeahead([]))).toEqual([]);
   });
 
-  it("orders user rows, then post rows, then the see-all row, each in payload order", () => {
+  it("orders profile rows before the terminal see-all row", () => {
     const alice = makeUser({ id: "u-alice", username: "alice" });
     const bob = makeUser({ id: "u-bob", username: "bob" });
-    const postA = makePost({ id: "p-a" });
-    const postB = makePost({ id: "p-b" });
 
-    const rows = suggestionRows(typeahead([alice, bob], [postA, postB]));
+    const rows = suggestionRows(typeahead([alice, bob]));
 
     expect(rows).toEqual([
       { kind: "user", user: alice },
       { kind: "user", user: bob },
-      { kind: "post", post: postA },
-      { kind: "post", post: postB },
       { kind: "see-all" },
     ]);
   });
 
-  it("ends with the see-all row even when only one side matches", () => {
+  it("ends with the see-all row when a profile matches", () => {
     const alice = makeUser({ id: "u-alice" });
-    const postA = makePost({ id: "p-a" });
 
-    expect(suggestionRows(typeahead([alice], []))).toEqual([
+    expect(suggestionRows(typeahead([alice]))).toEqual([
       { kind: "user", user: alice },
-      { kind: "see-all" },
-    ]);
-    expect(suggestionRows(typeahead([], [postA]))).toEqual([
-      { kind: "post", post: postA },
       { kind: "see-all" },
     ]);
   });

@@ -2,14 +2,13 @@ import { test, expect } from "../../support/fixtures";
 import { uniqueUser } from "../../support/users";
 
 test.describe("search", () => {
-  test("typing shows user and post suggestions; Enter lands on the /search results page", async ({
+  test("typing shows only profile suggestions; Enter lands on the full search results page", async ({
     page,
     db,
   }) => {
-    // The marker is both the display name and the post content so one typed
-    // query matches both rows at once. The content carries a suffix past the
-    // marker so the post option stays textually distinct from the user option
-    // (whose row shows the marker in the avatar alt and the name).
+    // The marker is both the display name and the post content: typing finds
+    // the profile in the typeahead, then the full page finds both sections.
+    // The suffix keeps the post text uniquely identifiable there.
     const marker = `Searchprobe${Date.now().toString()}`;
     const searcher = await db.createUser({ ...uniqueUser("searcher"), name: marker });
     const [post] = await db.seedPosts(searcher.id, 1, {
@@ -25,14 +24,12 @@ test.describe("search", () => {
 
     const listbox = page.getByRole("listbox", { name: "Search suggestions" });
     await expect(listbox).toBeVisible();
-    // Rows are role="option" links, and an option's accessible name is the
-    // avatar alt + name + handle/content concatenated — so match on the piece
-    // each row alone shows: only the user row renders a handle, only the post
-    // row renders the content.
+    // The typeahead is profile-only even though Enter still opens the full
+    // search page, where both the People and Posts sections render.
     await expect(
       listbox.getByRole("option", { name: new RegExp(`@${searcher.username}`) }),
     ).toBeVisible();
-    await expect(listbox.getByRole("option", { name: new RegExp(post.content) })).toBeVisible();
+    await expect(listbox.getByText(post.content, { exact: true })).toHaveCount(0);
 
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(`/search?q=${marker}`);

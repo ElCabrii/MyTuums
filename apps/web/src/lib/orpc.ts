@@ -62,7 +62,10 @@ export type UserSummary = UserListPage["items"][number];
 /** A user profile as served by `user.byUsername`. */
 export type Profile = Awaited<ReturnType<typeof client.user.byUsername>>;
 
-/** The `search.typeahead` payload: up to five user and five post matches. */
+/**
+ * The `search.typeahead` payload: up to five matching profiles, plus a legacy
+ * always-empty `posts` field kept for rolling-deploy compatibility.
+ */
 export type SearchTypeahead = Awaited<ReturnType<typeof client.search.typeahead>>;
 /** One page of `search.users` — a keyset-paginated slice of user matches. */
 export type SearchUsersPage = Awaited<ReturnType<typeof client.search.users>>;

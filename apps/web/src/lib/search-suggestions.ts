@@ -1,24 +1,20 @@
-import type { Post, SearchTypeahead, SearchUser } from "@/lib/orpc";
+import type { SearchTypeahead, SearchUser } from "@/lib/orpc";
 
 /** One row the search dropdown renders, discriminated on `kind`. */
-export type SuggestionRow =
-  { kind: "user"; user: SearchUser } | { kind: "post"; post: Post } | { kind: "see-all" };
+export type SuggestionRow = { kind: "user"; user: SearchUser } | { kind: "see-all" };
 
 /**
- * The dropdown's rows for a typeahead payload: user rows first, then post
- * rows (each in payload order — the API already ranks users prefix-first,
- * so reordering here would only fight it), then the terminal see-all row.
- * `undefined` — a query that is pending, disabled, or errored — yields
- * nothing, and so does an empty payload: the dropdown renders its
- * no-results line instead of a lone see-all row.
+ * The dropdown's rows for a typeahead payload: profiles in the API's ranked
+ * order, then the terminal see-all row. `undefined` — a query that is pending,
+ * disabled, or errored — yields nothing, and so does an empty payload: the
+ * dropdown renders its no-results line instead of a lone see-all row.
  */
 export function suggestionRows(typeahead: SearchTypeahead | undefined): SuggestionRow[] {
-  if (!typeahead || (typeahead.users.length === 0 && typeahead.posts.length === 0)) {
+  if (!typeahead || typeahead.users.length === 0) {
     return [];
   }
   return [
     ...typeahead.users.map((user): SuggestionRow => ({ kind: "user", user })),
-    ...typeahead.posts.map((post): SuggestionRow => ({ kind: "post", post })),
     { kind: "see-all" },
   ];
 }

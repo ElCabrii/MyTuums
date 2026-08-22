@@ -199,7 +199,6 @@ describe("search input validation", () => {
       { context: contextFor(viewer) },
     );
     expect(result.users).toEqual([]);
-    expect(result.posts).toEqual([]);
 
     await expect(
       call(
@@ -244,6 +243,10 @@ describe("search.typeahead", () => {
 
     // alpha/albert tie on the timestamp, so the id is the whole tie-break.
     const prefixUsers = [seeded[0], seeded[1]].sort((a, b) => b.id.localeCompare(a.id));
+    // `posts` is retained as an empty compatibility field so an older SPA
+    // remains safe while the server rolls forward independently.
+    expect(Object.keys(result)).toEqual(["users", "posts"]);
+    expect(result.posts).toEqual([]);
     expect(result.users.map((u) => u.id)).toEqual([...prefixUsers.map((u) => u.id), seeded[2].id]);
   }, 20_000);
 
@@ -266,28 +269,6 @@ describe("search.typeahead", () => {
     // cap0 is the oldest — excluded by the cap, not by the filter.
     const expected = seeded.slice(1).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     expect(result.users.map((u) => u.id)).toEqual(expected.map((u) => u.id));
-  });
-
-  it("caps posts at 5 even when more match — the newest five win", async () => {
-    const author = await createTestUser();
-    const tag = uniqueTag();
-    const seeded = await seedPostContentMany(
-      author.id,
-      6,
-      `${tag} post`,
-      (i) => new Date(Date.UTC(2025, 0, 1, 0, 0, i)),
-    );
-
-    const result = await call(
-      appRouter.search.typeahead,
-      { q: tag },
-      { context: contextFor(author) },
-    );
-
-    expect(result.posts).toHaveLength(5);
-    // post0 is the oldest — excluded by the cap, not by the filter.
-    const expected = seeded.slice(1).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-    expect(result.posts.map((p) => p.id)).toEqual(expected.map((p) => p.id));
   });
 
   it("matches case-insensitively — aLice finds the alice username and the Alice name", async () => {
@@ -330,7 +311,7 @@ describe("search.typeahead", () => {
     expect(byPercent.items.map((p) => p.id)).toEqual([battery.id]);
   });
 
-  it("excludes replies from search results, mirroring the global feed", async () => {
+  it("excludes replies from post search results, mirroring the global feed", async () => {
     const author = await createTestUser();
     const tag = uniqueTag();
     const root = await seedPostContent(author.id, `${tag} root`);
@@ -338,16 +319,9 @@ describe("search.typeahead", () => {
 
     const posts = await call(appRouter.search.posts, { q: tag }, { context: contextFor(author) });
     expect(posts.items.map((p) => p.id)).toEqual([root.id]);
-
-    const typeahead = await call(
-      appRouter.search.typeahead,
-      { q: tag },
-      { context: contextFor(author) },
-    );
-    expect(typeahead.posts.map((p) => p.id)).toEqual([root.id]);
   });
 
-  it("serves a viewer with no relationship to the target, reporting viewerIsFollowing and viewerHasLiked as false", async () => {
+  it("serves a viewer with no relationship to the target, reporting viewer-relative state as false", async () => {
     const author = await createTestUser({ username: uniqueTag() });
     await seedPostContent(author.id, `${author.session.user.username} content`);
     const stranger = await createTestUser();
@@ -359,8 +333,6 @@ describe("search.typeahead", () => {
     );
     expect(matching.users.map((u) => u.id)).toEqual([author.id]);
     expect(matching.users[0].viewerIsFollowing).toBe(false);
-    expect(matching.posts).toHaveLength(1);
-    expect(matching.posts[0].viewerHasLiked).toBe(false);
 
     const users = await call(
       appRouter.search.users,
@@ -602,13 +574,6 @@ describe("search.posts", () => {
     const posts = await call(appRouter.search.posts, { q: tag }, { context: contextFor(stranger) });
     expect(posts.items).toEqual([]);
 
-    const typeahead = await call(
-      appRouter.search.typeahead,
-      { q: tag },
-      { context: contextFor(stranger) },
-    );
-    expect(typeahead.posts).toEqual([]);
-
     // The same post still shows in the feed as a bare stub — search is
     // different in kind from the feed, and this pins the distinction. The
     // feed is scoped to the author rather than the global timeline: earlier
@@ -643,7 +608,12 @@ describe("search viewer context", () => {
       { context: contextFor(viewer) },
     );
     expect(asViewer.users.find((u) => u.id === author.id)?.viewerIsFollowing).toBe(true);
-    expect(asViewer.posts.find((p) => p.id === targetPost.id)?.viewerHasLiked).toBe(true);
+    const viewerPosts = await call(
+      appRouter.search.posts,
+      { q: tag },
+      { context: contextFor(viewer) },
+    );
+    expect(viewerPosts.items.find((p) => p.id === targetPost.id)?.viewerHasLiked).toBe(true);
 
     const asStranger = await call(
       appRouter.search.typeahead,
@@ -651,7 +621,12 @@ describe("search viewer context", () => {
       { context: contextFor(stranger) },
     );
     expect(asStranger.users.find((u) => u.id === author.id)?.viewerIsFollowing).toBe(false);
-    expect(asStranger.posts.find((p) => p.id === targetPost.id)?.viewerHasLiked).toBe(false);
+    const strangerPosts = await call(
+      appRouter.search.posts,
+      { q: tag },
+      { context: contextFor(stranger) },
+    );
+    expect(strangerPosts.items.find((p) => p.id === targetPost.id)?.viewerHasLiked).toBe(false);
   });
 });
 
