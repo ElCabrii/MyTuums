@@ -98,6 +98,11 @@ describe("ImageCropDialog", () => {
     expect(container.ownerDocument.querySelector<HTMLElement>(".touch-none")).toHaveStyle({
       aspectRatio: "1",
     });
+    expect(screen.getByRole("dialog")).toHaveClass(
+      "max-h-[calc(100dvh-2rem)]",
+      "overflow-y-auto",
+      "[&>*]:shrink-0",
+    );
   });
 
   it("names the slot it is editing", async () => {

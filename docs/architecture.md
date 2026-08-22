@@ -239,6 +239,13 @@ sides by CI. See [operations.md](operations.md).
   post cards and settings preview for free. Re-cropping means re-uploading;
   the retained original is what makes that lossless. The server is unaffected:
   it validates the display object on its own bounds, exactly as before.
+- **Avatars have a canonical 1:1 composition.** The crop editor and encoder
+  share `calculateCropFrame`, which selects the same centered square at zoom 1
+  for portrait and landscape sources. Applying an untouched crop therefore
+  matches the no-crop encode, while pan and zoom change the square that every
+  avatar surface renders without a second hidden `object-cover` crop. Only the
+  display variant is square-cropped; the original remains untouched for a
+  future refit.
 - **Banners have a canonical 3:1 source and a responsive display crop.** At
   zoom 1 the editor rectangle is exactly the region the encoder stores
   (`calculateCropFrame`), so applying without adjusting anything is a no-op.
