@@ -17,7 +17,9 @@ import {
   moderationCaseQueryOptions,
   moderationQueueQueryOptions,
   teamQueryOptions,
+  teamSearchQueryOptions,
 } from "@/lib/query-definitions";
+import { debounceMs } from "@/atoms/search";
 
 /**
  * A reference to a moderation case target — what the queue rows hold, what the
@@ -105,6 +107,55 @@ export const caseAtom = (ref: CaseRef) => caseFamily(encodeCaseKey(ref));
 /** The moderation team roster, for the staff-only Team tab. */
 export const teamAtom = atomWithQuery(() => teamQueryOptions());
 
+/** The value shown in the Team tab's account-lookup field — written on every keystroke. */
+export const teamSearchInputAtom = atom("");
+
+/** The value the lookup runs against — lags {@link teamSearchInputAtom} by `debounceMs`. */
+export const debouncedTeamSearchAtom = atom("");
+
+// Module-scoped rather than store-scoped, for the same reason as the
+// SearchBox's timer in `atoms/search.ts` and safe on the same terms: the Team
+// tab is one mount inside the moderation page, so at most one debounce is
+// ever pending.
+let teamSearchTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * The one entry point for typing into the Team tab's lookup. Writes the field
+ * immediately; the query behind the results follows once typing has been
+ * still for `debounceMs` — the same delay as the header search box, read from
+ * it so the two fields cannot drift apart.
+ */
+export const setTeamSearchAtom = atom(null, (_get, set, q: string) => {
+  set(teamSearchInputAtom, q);
+  // Canonicalised here for the same reasons as `setSearchQueryAtom`: the
+  // procedure trims its own input, so equivalent queries should share one
+  // cache key and whitespace alone should stay disabled rather than becoming
+  // a request the server must reject.
+  const normalized = q.trim();
+  clearTimeout(teamSearchTimer);
+  teamSearchTimer = setTimeout(() => set(debouncedTeamSearchAtom, normalized), debounceMs);
+});
+
+/** Clears the pending debounce and both lookup values — the Team tab's unmount. */
+export const resetTeamSearchAtom = atom(null, (_get, set) => {
+  clearTimeout(teamSearchTimer);
+  set(teamSearchInputAtom, "");
+  set(debouncedTeamSearchAtom, "");
+});
+
+/**
+ * The accounts matching the Team tab's lookup, whatever role they hold —
+ * where a promotion starts, since the roster only lists accounts that already
+ * have one (issue #145).
+ *
+ * A single atom rather than a family, like `typeaheadAtom`: the lookup is one
+ * string, so there is nothing to key on, and `atomWithQuery` rebuilds the key
+ * whenever the debounced value changes.
+ */
+export const teamSearchAtom = atomWithQuery((get) =>
+  teamSearchQueryOptions(get(debouncedTeamSearchAtom)),
+);
+
 /**
  * The viewer's blocked users, newest block first — what the settings page's
  * "Blocked users" section renders. Not a family: one list per viewer, wiped
@@ -127,7 +178,11 @@ export const reportDialogAtom = atom<CaseRef | null>(null);
 export const blockDialogAtom = atom<{ userId: string; handle: string } | null>(null);
 
 /** Which set-role dialog is open: the team member whose role is changing, or null. */
-export const setRoleDialogAtom = atom<{ userId: string; handle: string } | null>(null);
+export const setRoleDialogAtom = atom<{
+  userId: string;
+  handle: string;
+  currentRole: string;
+} | null>(null);
 
 /** The suspension length the case dialog offers first: 24 hours. */
 export const DEFAULT_SUSPENSION_SECONDS = 24 * 60 * 60;
@@ -352,9 +407,12 @@ export const setRoleAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.moderation.setRole.mutationOptions({
     onSuccess: () => {
-      // The roster changes with the role; the swing is itself an audit row,
-      // so the shared moderation sweep covers the log (issue #50).
+      // The roster changes with the role; so does any lookup result showing
+      // the role that just changed, which is where a promotion is picked from
+      // in the first place. The swing is itself an audit row, so the shared
+      // moderation sweep covers the log (issue #50).
       void queryClient.invalidateQueries({ queryKey: orpc.moderation.team.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.moderation.searchUsers.key() });
       invalidateModerationQueries(queryClient);
     },
   });

@@ -1895,6 +1895,119 @@ describe("setRole, team, auditLog", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("searchUsers reaches accounts the roster does not list, and carries the role each holds", async () => {
+    const admin = await adminUser();
+    // A handle unique to this test: the suite shares one database and every
+    // other fixture is a `vitest<uuid>` account called "Vitest User", so a
+    // query that matched those would assert against whatever ran before it.
+    const tag = randomUUID().replace(/-/g, "").slice(0, 10);
+    const plain = await createTestUser({ username: `zz${tag}`, name: `Zz ${tag} Plain` });
+    const mod = await createTestUser({ username: `mm${tag}`, name: `Zz ${tag} Mod` });
+    await setUserRole(mod.id, "moderator");
+
+    // A plain `user` is invisible to `team` and reachable here — the whole
+    // point of the procedure (issue #145).
+    const roster = await call(appRouter.moderation.team, undefined, { context: contextFor(admin) });
+    expect(roster.items.map((member) => member.id)).not.toContain(plain.id);
+
+    const byHandle = await call(
+      appRouter.moderation.searchUsers,
+      { q: `zz${tag}` },
+      { context: contextFor(admin) },
+    );
+    expect(byHandle.items.map((row) => row.id)).toEqual([plain.id]);
+    expect(byHandle.items[0]?.role).toBe("user");
+
+    // A display-name substring finds both, handle-prefix match first: `mm…`
+    // matches the moderator's handle, the plain account only by name.
+    const byName = await call(
+      appRouter.moderation.searchUsers,
+      { q: `mm${tag}` },
+      { context: contextFor(admin) },
+    );
+    expect(byName.items.map((row) => row.id)).toEqual([mod.id]);
+    const byDisplayName = await call(
+      appRouter.moderation.searchUsers,
+      { q: `Zz ${tag}` },
+      { context: contextFor(admin) },
+    );
+    expect(byDisplayName.items.map((row) => row.role).sort()).toEqual(["moderator", "user"]);
+  });
+
+  it("searchUsers keeps an exact handle ahead of enough prefix matches to fill the limit", async () => {
+    const admin = await adminUser();
+    const tag = randomUUID().replace(/-/g, "").slice(0, 10);
+    const query = `sam${tag}`;
+    const exactId = `exact-${tag}`;
+    const prefixRows = Array.from({ length: 10 }, (_, index) => ({
+      id: `prefix-${tag}-${index}`,
+      name: `A Prefix ${String(index).padStart(2, "0")}`,
+      email: `prefix-${tag}-${index}@example.com`,
+      emailVerified: true,
+      username: `${query}${index}`,
+      displayUsername: `${query}${index}`,
+      role: "user",
+    }));
+    await anonContext.db.insert(user).values([
+      ...prefixRows,
+      {
+        id: exactId,
+        name: "Z Exact Handle",
+        email: `exact-${tag}@example.com`,
+        emailVerified: true,
+        username: query,
+        displayUsername: query,
+        role: "user",
+      },
+    ]);
+
+    const result = await call(
+      appRouter.moderation.searchUsers,
+      { q: query },
+      { context: contextFor(admin) },
+    );
+
+    expect(result.items[0]?.id).toBe(exactId);
+    expect(result.items.map((row) => row.id)).toContain(exactId);
+  });
+
+  it("searchUsers is staff-gated, like the roster it feeds", async () => {
+    const plain = await createTestUser();
+    const mod = await moderatorUser();
+
+    await expect(
+      call(appRouter.moderation.searchUsers, { q: "vitest" }, { context: contextFor(plain) }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      call(appRouter.moderation.searchUsers, { q: "vitest" }, { context: contextFor(mod) }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("an admin promotes an account found by search, and the roster then lists it", async () => {
+    const admin = await adminUser();
+    const tag = randomUUID().replace(/-/g, "").slice(0, 10);
+    const target = await createTestUser({ username: `pp${tag}`, name: `Pp ${tag}` });
+
+    const found = await call(
+      appRouter.moderation.searchUsers,
+      { q: `pp${tag}` },
+      { context: contextFor(admin) },
+    );
+    const picked = found.items[0];
+    expect(picked?.id).toBe(target.id);
+
+    await call(
+      appRouter.moderation.setRole,
+      { userId: picked?.id ?? "", role: "moderator" },
+      { context: contextFor(admin) },
+    );
+
+    const roster = await call(appRouter.moderation.team, undefined, { context: contextFor(admin) });
+    expect(roster.items.find((member) => member.id === target.id)?.role).toBe("moderator");
+    const action = await latestAction("role_changed", "user", target.id);
+    expect(action?.details).toEqual({ oldRole: "user", newRole: "moderator" });
+  });
+
   it("auditLog keyset walk returns every action exactly once, newest first — the boundary row is never dropped", async () => {
     // The walk asserts against the WHOLE table, and each page is a procedure
     // call against the `moderate` rate tier (60/min per user). The suite
