@@ -179,3 +179,19 @@ export function moderationCaseQueryOptions(ref: CaseRef) {
 export function teamQueryOptions() {
   return orpc.moderation.team.queryOptions();
 }
+
+/**
+ * The Team tab's account lookup — how staff reach someone the roster does not
+ * list, so they can be granted a role.
+ *
+ * `enabled` gates the empty query the same way `searchUsersQueryOptions` does:
+ * the field starts empty and the procedure rejects an empty `q`.
+ */
+export function teamSearchQueryOptions(q: string) {
+  const normalized = q.trim();
+  return {
+    ...orpc.moderation.searchUsers.queryOptions({ input: { q: normalized } }),
+    enabled: normalized.length > 0,
+    retry: retryUnlessClientError,
+  };
+}

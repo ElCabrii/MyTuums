@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { roleSelectAtom } from "@/atoms/moderation";
+import { createStore } from "jotai";
+import { debounceMs } from "@/atoms/search";
+import { debouncedTeamSearchAtom, roleSelectAtom, teamSearchInputAtom } from "@/atoms/moderation";
 import {
   createTestQueryClient,
   makeTeamMember,
@@ -13,7 +15,7 @@ import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
 
-const fakeClient = { moderation: { team: vi.fn(), setRole: vi.fn() } };
+const fakeClient = { moderation: { team: vi.fn(), setRole: vi.fn(), searchUsers: vi.fn() } };
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));
 
@@ -185,5 +187,135 @@ describe("TeamView — set-role dialog", () => {
       .getAllByRole("option", { hidden: true })
       .map((option) => option.textContent);
     expect(offered).toEqual([m.moderation_role_user(), m.moderation_role_moderator()]);
+  });
+});
+
+describe("TeamView — the account lookup", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("lands the debounced query and lists an account holding no role at all", async () => {
+    // The roster's own answer to "who is on the team" cannot contain this
+    // account — which is exactly why the lookup exists (issue #145).
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.team([]);
+    queryFixtures(queryClient).moderation.teamSearch("zoe", [
+      makeTeamMember({ id: "user-1", name: "Zoe Plain", username: "zoe", role: "user" }),
+    ]);
+    await renderWithProviders(<TeamView />, {
+      queryClient,
+      signedInAs: { id: "admin-1", role: "admin" },
+    });
+    // Same shape as the SearchBox's debounce test: fake timers and
+    // `fireEvent.change`, because userEvent drives its own clock.
+    vi.useFakeTimers();
+
+    const field = screen.getByLabelText(m.moderation_team_search_label());
+    fireEvent.change(field, { target: { value: "zoe" } });
+    // Nothing fires until the field has been still for the full delay — the
+    // roster is still what's on screen.
+    expect(screen.queryByText("Zoe Plain")).not.toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(debounceMs);
+    });
+
+    expect(screen.getByText("Zoe Plain")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: m.moderation_team_change_role() })).toBeEnabled();
+  });
+
+  it("promotes an account picked out of the lookup", async () => {
+    fakeClient.moderation.setRole.mockResolvedValue({ userId: "user-1", role: "moderator" });
+    // Both queries are invalidated by `setRole`'s onSuccess and both are
+    // mounted here, so both actually refetch (see the roster test above).
+    fakeClient.moderation.team.mockResolvedValue({ items: [] });
+    fakeClient.moderation.searchUsers.mockResolvedValue({ items: [] });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.teamSearch("zoe", [
+      makeTeamMember({
+        id: "user-1",
+        name: "Zoe Plain",
+        username: "zoe",
+        displayUsername: "Zoe",
+        role: "user",
+      }),
+    ]);
+    // The query written straight into the atoms, the way `openSuggestions`
+    // does in `search-box.test.tsx`: the debounce belongs to
+    // `setTeamSearchAtom` and is pinned by the test above, so this one starts
+    // from the state a settled keystroke leaves behind.
+    const store = createStore();
+    store.set(teamSearchInputAtom, "zoe");
+    store.set(debouncedTeamSearchAtom, "zoe");
+    await renderWithProviders(<TeamView />, {
+      store,
+      queryClient,
+      signedInAs: { id: "admin-1", role: "admin" },
+    });
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: m.moderation_team_change_role() }));
+    expect(
+      await screen.findByRole("heading", { name: m.moderation_set_role_title({ handle: "zoe" }) }),
+    ).toBeInTheDocument();
+
+    act(() => store.set(roleSelectAtom, "moderator"));
+    await user.click(screen.getByRole("button", { name: m.moderation_set_role_submit() }));
+
+    await waitFor(() =>
+      expect(fakeClient.moderation.setRole).toHaveBeenCalledWith(
+        { userId: "user-1", role: "moderator" },
+        expect.anything(),
+      ),
+    );
+  });
+
+  it("applies the same rank guard to lookup results as to the roster", async () => {
+    // The lookup reaches every account, including ones the viewer may not
+    // touch — the server refuses those, and the row must not offer a button
+    // that can only fail.
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.teamSearch("boss", [
+      makeTeamMember({ id: "admin-2", name: "Boss Admin", username: "boss", role: "admin" }),
+    ]);
+    const store = createStore();
+    store.set(teamSearchInputAtom, "boss");
+    store.set(debouncedTeamSearchAtom, "boss");
+    await renderWithProviders(<TeamView />, {
+      store,
+      queryClient,
+      signedInAs: { id: "staff-1", role: "staff" },
+    });
+
+    expect(await screen.findByText("Boss Admin")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: m.moderation_team_change_role() }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("brings the roster back when the field is cleared", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.team([
+      makeTeamMember({ id: "mod-1", name: "Mod One", username: "mod1", role: "moderator" }),
+    ]);
+    queryFixtures(queryClient).moderation.teamSearch("zoe", [
+      makeTeamMember({ id: "user-1", name: "Zoe Plain", username: "zoe", role: "user" }),
+    ]);
+    const store = createStore();
+    store.set(teamSearchInputAtom, "zoe");
+    store.set(debouncedTeamSearchAtom, "zoe");
+    await renderWithProviders(<TeamView />, {
+      store,
+      queryClient,
+      signedInAs: { id: "admin-1", role: "admin" },
+    });
+    await screen.findByText("Zoe Plain");
+
+    fireEvent.change(screen.getByLabelText(m.moderation_team_search_label()), {
+      target: { value: "" },
+    });
+
+    expect(await screen.findByText("Mod One")).toBeInTheDocument();
+    expect(screen.queryByText("Zoe Plain")).not.toBeInTheDocument();
   });
 });

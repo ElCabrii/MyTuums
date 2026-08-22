@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, isNull, like, not, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, like, not, or, type SQL, sql } from "drizzle-orm";
 import { post, user } from "@my-tuums/db/schema";
 import { z } from "zod";
 import { SEARCH_PAGE_SIZE, SEARCH_PAGE_SIZE_MAX, SEARCH_QUERY_MAX_LENGTH } from "./constants.js";
@@ -77,6 +77,37 @@ const prefixPattern = (pattern: string) => `${escapeLikePattern(pattern).toLower
 const containsPattern = (pattern: string) => `%${escapeLikePattern(pattern)}%`;
 
 /**
+ * Whether a user row matches a free-text query — the app's one definition of
+ * "this account is the one you typed": a left-anchored match on the
+ * normalised `username`, or a case-insensitive substring of either display
+ * field. The typeahead, the results page and the moderation team's account
+ * lookup all match on exactly this, so widening what counts as a match (a
+ * third column, trigram similarity) lands on all three at once instead of
+ * drifting between them.
+ */
+export function matchesUserQuery(q: string): SQL | undefined {
+  return or(
+    like(user.username, prefixPattern(q)),
+    ilike(user.name, containsPattern(q)),
+    ilike(user.displayUsername, containsPattern(q)),
+  );
+}
+
+/**
+ * Ranks a matched user row: 0 for a handle-prefix match, 1 for a
+ * substring-only one — the leading `orderBy` term wherever
+ * {@link matchesUserQuery} is the filter.
+ *
+ * This is what makes "al" offer the person actually called al ahead of
+ * everyone whose display name merely contains it. It is a rank, not a total
+ * order: each caller adds its own tie-breakers behind it.
+ */
+export function userQueryRank(q: string): SQL<number> {
+  const prefix = prefixPattern(q);
+  return sql`case when ${user.username} like ${prefix} then 0 else 1 end`;
+}
+
+/**
  * The `search` procedure group: typeahead, users, posts.
  */
 export const searchRouter = {
@@ -93,8 +124,6 @@ export const searchRouter = {
     .input(z.object({ q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH) }))
     .handler(async ({ input, context }) => {
       const viewerId = context.user.id;
-      const prefix = prefixPattern(input.q);
-      const contains = containsPattern(input.q);
 
       const users = await context.db
         .select(searchUserSelection(viewerId))
@@ -102,21 +131,14 @@ export const searchRouter = {
         .where(
           // Same visibility filter as the full results page: a banned or
           // blocked account never suggests itself in the dropdown.
-          and(
-            visibleUser(viewerId),
-            or(
-              like(user.username, prefix),
-              ilike(user.name, contains),
-              ilike(user.displayUsername, contains),
-            ),
-          ),
+          and(visibleUser(viewerId), matchesUserQuery(input.q)),
         )
         .orderBy(
-          // The CASE expression is the whole ranking rule: a prefix match on
-          // the normalised username ranks above any substring-only match, no
-          // matter how new the latter is. The timestamp + id tie-breakers are
-          // what the dropdown sees within each rank.
-          sql`case when ${user.username} like ${prefix} then 0 else 1 end`,
+          // A prefix match on the normalised username ranks above any
+          // substring-only match, no matter how new the latter is. The
+          // timestamp + id tie-breakers are what the dropdown sees within
+          // each rank.
+          userQueryRank(input.q),
           desc(user.createdAt),
           desc(user.id),
         )
@@ -151,11 +173,7 @@ export const searchRouter = {
       const viewerId = context.user.id;
 
       const filters = [
-        or(
-          like(user.username, prefixPattern(input.q)),
-          ilike(user.name, containsPattern(input.q)),
-          ilike(user.displayUsername, containsPattern(input.q)),
-        ),
+        matchesUserQuery(input.q),
         // The visibility filter (issue #38): banned and blocked accounts are
         // not search results, same as the typeahead above.
         visibleUser(viewerId),
