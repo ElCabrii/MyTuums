@@ -435,8 +435,8 @@ export const moderationRouter = {
         .select(rosterColumns)
         .from(user)
         .where(matchesUserQuery(input.q))
-        // Handle-prefix matches first, then alphabetical — the same rank the
-        // typeahead sorts on, over the roster's own ordering.
+        // Exact handle first, then other handle prefixes, then name-only
+        // matches; alphabetical order breaks ties within each rank.
         .orderBy(userQueryRank(input.q), asc(user.name))
         .limit(USER_LOOKUP_LIMIT);
       return { items: rows };

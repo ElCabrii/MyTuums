@@ -178,7 +178,11 @@ export const reportDialogAtom = atom<CaseRef | null>(null);
 export const blockDialogAtom = atom<{ userId: string; handle: string } | null>(null);
 
 /** Which set-role dialog is open: the team member whose role is changing, or null. */
-export const setRoleDialogAtom = atom<{ userId: string; handle: string } | null>(null);
+export const setRoleDialogAtom = atom<{
+  userId: string;
+  handle: string;
+  currentRole: string;
+} | null>(null);
 
 /** The suspension length the case dialog offers first: 24 hours. */
 export const DEFAULT_SUSPENSION_SECONDS = 24 * 60 * 60;

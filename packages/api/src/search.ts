@@ -94,9 +94,9 @@ export function matchesUserQuery(q: string): SQL | undefined {
 }
 
 /**
- * Ranks a matched user row: 0 for a handle-prefix match, 1 for a
- * substring-only one — the leading `orderBy` term wherever
- * {@link matchesUserQuery} is the filter.
+ * Ranks a matched user row: 0 for an exact handle, 1 for any other handle
+ * prefix, 2 for a substring-only match — the leading `orderBy` term on the
+ * two bounded lookup surfaces that use relevance ordering.
  *
  * This is what makes "al" offer the person actually called al ahead of
  * everyone whose display name merely contains it. It is a rank, not a total
@@ -104,7 +104,11 @@ export function matchesUserQuery(q: string): SQL | undefined {
  */
 export function userQueryRank(q: string): SQL<number> {
   const prefix = prefixPattern(q);
-  return sql`case when ${user.username} like ${prefix} then 0 else 1 end`;
+  return sql`case
+    when ${user.username} = ${q.toLowerCase()} then 0
+    when ${user.username} like ${prefix} then 1
+    else 2
+  end`;
 }
 
 /**
@@ -114,10 +118,9 @@ export const searchRouter = {
   /**
    * The header dropdown: up to 5 matching profiles for a query, no cursor.
    *
-   * Users rank username prefix matches ahead of substring-only matches, which
-   * is what makes "al" suggest the person actually called al over everyone
-   * whose name merely contains "al". The full results page goes through
-   * `users` and `posts` below; typing only suggests profiles.
+   * Users rank an exact username first, then other username prefixes, then
+   * substring-only matches. The full results page goes through `users` and
+   * `posts` below; typing only suggests profiles.
    */
   typeahead: protectedProcedure
     .use(rateLimit(RATE_LIMITS.search))
@@ -134,10 +137,9 @@ export const searchRouter = {
           and(visibleUser(viewerId), matchesUserQuery(input.q)),
         )
         .orderBy(
-          // A prefix match on the normalised username ranks above any
-          // substring-only match, no matter how new the latter is. The
-          // timestamp + id tie-breakers are what the dropdown sees within
-          // each rank.
+          // An exact normalised username ranks above longer prefixes, and
+          // both rank above substring-only matches. The timestamp + id
+          // tie-breakers are what the dropdown sees within each rank.
           userQueryRank(input.q),
           desc(user.createdAt),
           desc(user.id),

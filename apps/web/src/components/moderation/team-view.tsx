@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Search, SearchX, UserCog, Users } from "lucide-react";
 import {
+  debouncedTeamSearchAtom,
   resetRoleFormEffect,
   resetTeamSearchAtom,
   roleSelectAtom,
@@ -161,13 +162,17 @@ function TeamRoster() {
 /**
  * The accounts matching the lookup, whatever role they hold — the same rows
  * as the roster, so a candidate reads exactly like the member they are about
- * to become. The query stays pending through the debounce, which is what
- * holds the skeleton up between a keystroke and the request it fires.
+ * to become. While the immediate input is ahead of the debounced query, the
+ * prior query's rows are hidden so their actions cannot be mistaken for
+ * matches to the new input.
  */
 function LookupResults() {
   const query = useAtomValue(teamSearchInputAtom).trim();
+  const debouncedQuery = useAtomValue(debouncedTeamSearchAtom);
   const results = useAtomValue(teamSearchAtom);
   const items = results.data?.items ?? [];
+
+  if (query !== debouncedQuery) return <TeamSkeleton />;
 
   return (
     <PaginatedState
@@ -261,7 +266,7 @@ function ChangeRoleButton({
   member,
   handle,
 }: {
-  member: { id: string; username?: string | null };
+  member: { id: string; username?: string | null; role?: string | null };
   handle: string | null;
 }) {
   const setOpenTarget = useSetAtom(setRoleDialogAtom);
@@ -275,6 +280,7 @@ function ChangeRoleButton({
         setOpenTarget({
           userId: member.id,
           handle: handle ?? member.username ?? m.user_unknown(),
+          currentRole: member.role ?? "user",
         })
       }
     >
@@ -296,7 +302,9 @@ function SetRoleDialog() {
   const viewerRole = useAtomValue(viewerRoleAtom);
   const setRole = useAtomValue(setRoleAtom);
   const [role, setRolePick] = useAtom(roleSelectAtom);
-  const grantable: readonly string[] = viewerRole === "admin" ? ALL_ROLES : ["user", "moderator"];
+  const grantable = (viewerRole === "admin" ? ALL_ROLES : ["user", "moderator"]).filter(
+    (candidate) => candidate !== target?.currentRole,
+  );
 
   return (
     <Dialog

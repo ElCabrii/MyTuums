@@ -1934,6 +1934,43 @@ describe("setRole, team, auditLog", () => {
     expect(byDisplayName.items.map((row) => row.role).sort()).toEqual(["moderator", "user"]);
   });
 
+  it("searchUsers keeps an exact handle ahead of enough prefix matches to fill the limit", async () => {
+    const admin = await adminUser();
+    const tag = randomUUID().replace(/-/g, "").slice(0, 10);
+    const query = `sam${tag}`;
+    const exactId = `exact-${tag}`;
+    const prefixRows = Array.from({ length: 10 }, (_, index) => ({
+      id: `prefix-${tag}-${index}`,
+      name: `A Prefix ${String(index).padStart(2, "0")}`,
+      email: `prefix-${tag}-${index}@example.com`,
+      emailVerified: true,
+      username: `${query}${index}`,
+      displayUsername: `${query}${index}`,
+      role: "user",
+    }));
+    await anonContext.db.insert(user).values([
+      ...prefixRows,
+      {
+        id: exactId,
+        name: "Z Exact Handle",
+        email: `exact-${tag}@example.com`,
+        emailVerified: true,
+        username: query,
+        displayUsername: query,
+        role: "user",
+      },
+    ]);
+
+    const result = await call(
+      appRouter.moderation.searchUsers,
+      { q: query },
+      { context: contextFor(admin) },
+    );
+
+    expect(result.items[0]?.id).toBe(exactId);
+    expect(result.items.map((row) => row.id)).toContain(exactId);
+  });
+
   it("searchUsers is staff-gated, like the roster it feeds", async () => {
     const plain = await createTestUser();
     const mod = await moderatorUser();

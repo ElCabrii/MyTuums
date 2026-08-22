@@ -151,7 +151,7 @@ describe("TeamView — set-role dialog", () => {
     expect(fakeClient.moderation.setRole).not.toHaveBeenCalled();
   });
 
-  it("offers a staff viewer only user and moderator — never staff or admin", async () => {
+  it("offers a staff viewer only roles below their rank other than the target's current role", async () => {
     // Mirrors the server rule this dialog is a client mirror of
     // (`packages/api/src/moderation.ts`'s `setRole`: granting staff or above
     // requires admin, else FORBIDDEN). A staff viewer outranks this
@@ -186,7 +186,7 @@ describe("TeamView — set-role dialog", () => {
     const offered = within(listbox)
       .getAllByRole("option", { hidden: true })
       .map((option) => option.textContent);
-    expect(offered).toEqual([m.moderation_role_user(), m.moderation_role_moderator()]);
+    expect(offered).toEqual([m.moderation_role_user()]);
   });
 });
 
@@ -259,6 +259,16 @@ describe("TeamView — the account lookup", () => {
       await screen.findByRole("heading", { name: m.moderation_set_role_title({ handle: "zoe" }) }),
     ).toBeInTheDocument();
 
+    const listbox = await screen.findByRole("listbox", { hidden: true });
+    const offered = within(listbox)
+      .getAllByRole("option", { hidden: true })
+      .map((option) => option.textContent);
+    expect(offered).toEqual([
+      m.moderation_role_moderator(),
+      m.moderation_role_staff(),
+      m.moderation_role_admin(),
+    ]);
+
     act(() => store.set(roleSelectAtom, "moderator"));
     await user.click(screen.getByRole("button", { name: m.moderation_set_role_submit() }));
 
@@ -268,6 +278,32 @@ describe("TeamView — the account lookup", () => {
         expect.anything(),
       ),
     );
+  });
+
+  it("hides settled lookup rows while the next query is still debouncing", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.teamSearch("zoe", [
+      makeTeamMember({ id: "user-1", name: "Zoe Plain", username: "zoe", role: "user" }),
+    ]);
+    const store = createStore();
+    store.set(teamSearchInputAtom, "zoe");
+    store.set(debouncedTeamSearchAtom, "zoe");
+    await renderWithProviders(<TeamView />, {
+      store,
+      queryClient,
+      signedInAs: { id: "admin-1", role: "admin" },
+    });
+    await screen.findByText("Zoe Plain");
+    vi.useFakeTimers();
+
+    fireEvent.change(screen.getByLabelText(m.moderation_team_search_label()), {
+      target: { value: "alex" },
+    });
+
+    expect(screen.queryByText("Zoe Plain")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: m.moderation_team_change_role() }),
+    ).not.toBeInTheDocument();
   });
 
   it("applies the same rank guard to lookup results as to the roster", async () => {
