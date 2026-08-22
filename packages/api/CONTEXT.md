@@ -106,6 +106,20 @@ over HTTP and imports only its browser-safe subpaths.
   profile resolve to its suspended stub instead of 404ing.
 - **`like`/`unlike` and `follow`/`unfollow` are separate idempotent
   procedures, never a toggle** — ordering and retry safety.
+- **A post has two independent tombstones, and neither is a row delete.**
+  `moderation.removePost` stamps `removed_at`; `post.delete` (the author's own,
+  issue #148) stamps `deleted_at`. `postSelection` nulls the content for
+  either, and `search.posts` excludes both rows outright — it matches the raw
+  `content` column, which no projection touches, so a tombstoned post's text
+  would otherwise stay probeable. Keeping the row is what lets replies, likes
+  and the thread above survive, and it is why `post.parent_id` can still
+  cascade. `post.delete` is deliberately NOT a moderation effect: no
+  transaction, no `FOR UPDATE`, no `moderation_action` row, no email, nothing
+  appealable — it is author-owned and idempotent, and it refuses a post a
+  moderator already removed so the author keeps the stub's reason and appeal
+  link. Its unlocked read/write pair is safe because the update compares both
+  tombstones; after losing to a concurrent delete or removal, it re-reads the
+  winner and preserves that outcome.
 - **Replies are a mode of `post.list` (`parentId`), not their own procedure.**
   The web app's optimistic like sweep covers every cached `post.list` by key
   prefix; a separate procedure would miss reply likes.

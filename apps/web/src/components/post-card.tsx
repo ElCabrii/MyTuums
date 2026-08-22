@@ -6,6 +6,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { MentionText } from "@/components/mention-text";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
+import { deletePostDialogAtom } from "@/atoms/post-delete";
 import { isSignedInAtom, viewerIdAtom } from "@/atoms/session";
 import {
   DropdownMenu,
@@ -50,10 +51,19 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
   const toggleLike = useSetAtom(toggleLikeAtomFamily(post.id));
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
+  const setDeleteDialog = useSetAtom(deletePostDialogAtom);
   const authorHandle = handleOf(post.author);
   const authorName = post.author.name || authorHandle || m.user_unknown();
   const isOwnPost = viewerId === post.author.id;
   const isFocused = variant === "focused";
+  // Both tombstones hide the content and take the actions away with it — the
+  // server nulls `content` for either (see `postSelection`), so there is
+  // nothing left to like or reply to. Which stub renders still depends on
+  // which one it is; only "is it gone" is shared.
+  const isGone = post.removed || post.deleted;
+  // A post already gone has nothing left to delete, so the item is dropped
+  // rather than offered as a no-op the server would refuse anyway.
+  const canDelete = isOwnPost && !isGone;
 
   const handleCardClick = (e: MouseEvent<HTMLDivElement>) => {
     if (isFocused) return;
@@ -129,12 +139,16 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
             )}
             <span className="text-muted-foreground text-xs">• {timestamp}</span>
 
-            {/* Report / Block live in the shared dialogs mounted at the root
-                (identity atoms — see `atoms/moderation.ts`), so this menu only
-                has to set the target. Hidden on the viewer's own posts, and
-                shown even on removed ones: reporting the *author* of a removed
-                post is still a valid action. */}
-            {isSignedIn && !isOwnPost && (
+            {/* Every item here lives in a shared dialog mounted at the root
+                (identity atoms — see `atoms/moderation.ts` and
+                `atoms/post-delete.ts`), so this menu only has to set the
+                target. Which items it holds is decided by whose post it is:
+                Delete on the viewer's own, Report/Block on everyone else's —
+                you cannot report yourself, and a moderator takes other
+                people's posts down through the case queue, not from here.
+                Other people's posts keep the menu even when removed:
+                reporting the *author* of a removed post is still valid. */}
+            {isSignedIn && (canDelete || !isOwnPost) && (
               <DropdownMenu>
                 <DropdownMenuTrigger
                   aria-label={m.moderation_kebab()}
@@ -159,42 +173,54 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
                   // its own click, see above).
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <DropdownMenuItem
-                    className="cursor-pointer"
-                    onClick={() => setReportDialog({ targetType: "post", targetId: post.id })}
-                  >
-                    {m.moderation_kebab_report_post()}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="cursor-pointer"
-                    onClick={() =>
-                      setReportDialog({ targetType: "user", targetId: post.author.id })
-                    }
-                  >
-                    {m.moderation_kebab_report_author()}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="cursor-pointer"
-                    variant="destructive"
-                    onClick={() =>
-                      setBlockDialog({
-                        userId: post.author.id,
-                        handle: authorHandle ?? m.user_unknown(),
-                      })
-                    }
-                  >
-                    {m.moderation_kebab_block()}
-                  </DropdownMenuItem>
+                  {isOwnPost ? (
+                    <DropdownMenuItem
+                      className="cursor-pointer"
+                      variant="destructive"
+                      onClick={() => setDeleteDialog(post.id)}
+                    >
+                      {m.post_delete()}
+                    </DropdownMenuItem>
+                  ) : (
+                    <>
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        onClick={() => setReportDialog({ targetType: "post", targetId: post.id })}
+                      >
+                        {m.moderation_kebab_report_post()}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        onClick={() =>
+                          setReportDialog({ targetType: "user", targetId: post.author.id })
+                        }
+                      >
+                        {m.moderation_kebab_report_author()}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        variant="destructive"
+                        onClick={() =>
+                          setBlockDialog({
+                            userId: post.author.id,
+                            handle: authorHandle ?? m.user_unknown(),
+                          })
+                        }
+                      >
+                        {m.moderation_kebab_block()}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
           </div>
 
           {post.removed ? (
-            /* The stub. `removedReason` is author-only (the server nulls it
-                for everyone else), so its presence is also what gates the
-                appeal link — only the author can appeal from here. */
+            /* The removal stub. `removedReason` is author-only (the server
+                nulls it for everyone else), so its presence is also what gates
+                the appeal link — only the author can appeal from here. */
             <div className="border-border/60 bg-muted/30 mb-3 space-y-1.5 rounded-lg border p-3">
               <p className="text-muted-foreground text-sm">{m.moderation_post_removed_stub()}</p>
               {post.removedReason && (
@@ -213,19 +239,26 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
                 </Link>
               )}
             </div>
+          ) : post.deleted ? (
+            /* The author's own delete. Its own stub, not the removal one: no
+                reason to state, nothing to appeal, and calling it a removal
+                would tell every reader a moderator acted when none did. */
+            <div className="border-border/60 bg-muted/30 mb-3 rounded-lg border p-3">
+              <p className="text-muted-foreground text-sm">{m.post_deleted_stub()}</p>
+            </div>
           ) : (
             <p
               className={`text-foreground/90 mb-3 leading-relaxed break-words whitespace-pre-line ${
                 isFocused ? "text-base" : "text-sm"
               }`}
             >
-              {/* Null only for removed posts, which the stub branch above
-                  owns; here the server guarantees content. */}
+              {/* Null only for the two tombstones, which the stub branches
+                  above own; here the server guarantees content. */}
               <MentionText text={post.content ?? ""} />
             </p>
           )}
 
-          {!post.removed && (
+          {!isGone && (
             <div className="text-muted-foreground flex max-w-md items-center gap-6 text-xs">
               {/* Replying is a navigation, not a mutation — the composer lives
                 on the thread page — so this is a link, and the focused post

@@ -38,12 +38,13 @@ export const post = pgTable(
     // annotation and is referenced directly or indirectly in its own
     // initializer".
     //
-    // `onDelete: "cascade"` is correct *because* there is no delete-post
-    // procedure yet, so the only way a parent disappears today is its author
-    // being deleted — which is already cascading the whole subtree away. Once
-    // posts can be deleted individually this has to become a tombstone
-    // instead, or deleting one post silently takes an unrelated conversation
-    // with it.
+    // `onDelete: "cascade"` stays correct now that posts can be deleted
+    // individually (issue #148) *because* `post.delete` is a tombstone, not a
+    // row delete: the row survives, so a self-delete never fires this
+    // cascade. The only hard delete left is the author's account going away,
+    // which is already cascading the whole subtree with it. Turning
+    // `post.delete` into a real DELETE would have to change this first, or
+    // one author's delete silently takes an unrelated conversation with it.
     parentId: uuid("parent_id").references((): AnyPgColumn => post.id, { onDelete: "cascade" }),
     // The removal tombstone (issue #38): a removed post is never deleted —
     // it stays in feeds as a stub (see `postSelection` in packages/api) so
@@ -54,6 +55,18 @@ export const post = pgTable(
     removedAt: timestamp("removed_at", { withTimezone: true, precision: 3 }),
     removedBy: text("removed_by").references(() => user.id, { onDelete: "set null" }),
     removedReason: text("removed_reason"),
+    // The author's own delete (issue #148) — a second tombstone, independent
+    // of the removal one above and, like it, never a row delete.
+    //
+    // A separate column rather than reusing `removedAt` because the two are
+    // different events with different consequences: a self-delete writes no
+    // `moderation_action` row, is not appealable, cannot be restored, and its
+    // stub says something else entirely. Sharing one column would make every
+    // reader of the tombstone guess which of the two it was looking at.
+    //
+    // No `deletedBy`: the only account that can set this is `authorId`, which
+    // the row already carries. No reason either — nobody is owed one.
+    deletedAt: timestamp("deleted_at", { withTimezone: true, precision: 3 }),
     // `withTimezone` is not cosmetic. On a bare `timestamp` (no time zone),
     // Postgres resolves `now()` to the *database session's* local wall clock,
     // while Drizzle's `mapFromDriverValue` reads the column back by appending

@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
+import { createStore } from "jotai";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { renderWithProviders, makeAuthor, makePost } from "@/test/render";
 import { installTestOrpc, orpc } from "@/lib/orpc";
+import { deletePostDialogAtom } from "@/atoms/post-delete";
 import { PostCard } from "@/components/post-card";
 import { m } from "@/paraglide/messages.js";
 
@@ -149,6 +151,91 @@ describe("PostCard", () => {
       expect(screen.getByText(author.name)).toBeInTheDocument();
       // No profile link exists at all — not an empty/broken one.
       expect(screen.queryByRole("link", { name: new RegExp(author.name) })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("the kebab menu", () => {
+    it("offers Delete — and only Delete — on the viewer's own post, and names it as the dialog target", async () => {
+      const author = makeAuthor();
+      const post = makePost({ author });
+      const store = createStore();
+      await renderWithProviders(<PostCard post={post} />, {
+        store,
+        signedInAs: { id: author.id },
+      });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByLabelText(m.moderation_kebab()));
+      const deleteItem = await screen.findByRole("menuitem", { name: m.post_delete() });
+
+      // You cannot report or block yourself, so neither item belongs here.
+      expect(
+        screen.queryByRole("menuitem", { name: m.moderation_kebab_report_post() }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("menuitem", { name: m.moderation_kebab_block() }),
+      ).not.toBeInTheDocument();
+
+      await user.click(deleteItem);
+
+      // The card only sets the target; the dialog itself is mounted at the
+      // root layout (see `atoms/post-delete.ts`).
+      expect(store.get(deletePostDialogAtom)).toBe(post.id);
+    });
+
+    it("offers Report/Block — and no Delete — on someone else's post", async () => {
+      const post = makePost();
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: { id: "viewer-1" } });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByLabelText(m.moderation_kebab()));
+
+      expect(
+        await screen.findByRole("menuitem", { name: m.moderation_kebab_report_post() }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("menuitem", { name: m.moderation_kebab_block() }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: m.post_delete() })).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ["already deleted", { deleted: true }],
+      ["already removed by a moderator", { removed: true }],
+    ])("hides the menu entirely on the viewer's own post that is %s", async (_state, tombstone) => {
+      const author = makeAuthor();
+      const post = makePost({ author, content: null, ...tombstone });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: { id: author.id } });
+
+      expect(screen.queryByLabelText(m.moderation_kebab())).not.toBeInTheDocument();
+    });
+
+    it("keeps the report/block menu on someone else's removed post — the author is still reportable", async () => {
+      const post = makePost({ removed: true, content: null });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: { id: "viewer-1" } });
+
+      expect(screen.getByLabelText(m.moderation_kebab())).toBeInTheDocument();
+    });
+  });
+
+  describe("the deleted stub", () => {
+    it("says the author deleted it, never that it was removed, and offers no appeal", async () => {
+      const post = makePost({ deleted: true, content: null, likeCount: 2, replyCount: 3 });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(screen.getByText(m.post_deleted_stub())).toBeInTheDocument();
+      expect(screen.queryByText(m.moderation_post_removed_stub())).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: m.moderation_post_removed_appeal() }),
+      ).not.toBeInTheDocument();
+
+      // Nothing left to like or reply to, same as the removal stub.
+      expect(
+        screen.queryByRole("button", { name: m.post_like({ count: "2" }) }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: m.reply_to_post({ count: "3" }) }),
+      ).not.toBeInTheDocument();
     });
   });
 

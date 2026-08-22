@@ -137,7 +137,7 @@ The router's top-level groups:
 <!-- docs:check=router-groups -->
 
 - `me` — the caller's own session user
-- `post` — `create`, `list`, `thread`, `like`, `unlike`
+- `post` — `create`, `delete`, `list`, `thread`, `like`, `unlike`
 - `user` — `byUsername`, `uploadImage`, `removeImage`, `follow`, `unfollow`, `followers`, `following`
 - `search` — `typeahead`, `users`, `posts`
 - `moderation` — reports, blocks, the queue, the staff actions, the audit log, appeals
