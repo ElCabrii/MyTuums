@@ -96,7 +96,7 @@ describe("user.byUsername", () => {
     }
   });
 
-  it("resolves case-insensitively and preserves the typed display casing", async () => {
+  it("resolves case-insensitively and returns the canonical lowercase handle", async () => {
     const created = await createTestUser({ username: "AlexMercer" });
     const viewer = await createTestUser();
 
@@ -114,7 +114,7 @@ describe("user.byUsername", () => {
     expect(byMixed.id).toBe(created.id);
     expect(byLower.id).toBe(created.id);
     expect(byMixed.username).toBe("alexmercer");
-    expect(byMixed.displayUsername).toBe("AlexMercer");
+    expect(byMixed.displayUsername).toBe("alexmercer");
   });
 
   it("an unknown handle is NOT_FOUND", async () => {

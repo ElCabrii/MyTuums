@@ -8,7 +8,12 @@ import { authRateLimitEnabled, passkeyRpId, webOrigin } from "./env.js";
 import { validateDateOfBirthHook } from "./dob.js";
 import { validateProfileFieldsHook } from "./profile.js";
 import { validateLegalAcceptanceHook } from "./legal.js";
-import { isAllowedUsernameCharset, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "./rules.js";
+import {
+  isAllowedUsernameCharset,
+  normalizeUsername,
+  USERNAME_MAX_LENGTH,
+  USERNAME_MIN_LENGTH,
+} from "./rules.js";
 import {
   localeFromRequest,
   otpEmail,
@@ -29,11 +34,26 @@ import { socialProviders, trustedProviders } from "./social.js";
  * validate disjoint fields, and the first violation throws.
  */
 type AuthUserWrite = Parameters<typeof validateDateOfBirthHook>[0] &
-  Parameters<typeof validateProfileFieldsHook>[0];
+  Parameters<typeof validateProfileFieldsHook>[0] & {
+    username?: string | null;
+    displayUsername?: string | null;
+  };
 
-const validateUserWrite = async (user: AuthUserWrite): Promise<void> => {
+const validateUserWrite = async (user: AuthUserWrite) => {
   await validateDateOfBirthHook(user);
   await validateProfileFieldsHook(user);
+
+  if (user.username !== undefined && user.username !== null) {
+    const username = normalizeUsername(user.username);
+    return { data: { username, displayUsername: username } };
+  }
+
+  return {
+    data:
+      user.displayUsername !== undefined && user.displayUsername !== null
+        ? { displayUsername: normalizeUsername(user.displayUsername) }
+        : {},
+  };
 };
 
 /**
@@ -48,9 +68,10 @@ const validateUserWrite = async (user: AuthUserWrite): Promise<void> => {
 const validateUserCreate = async (
   user: AuthUserWrite & Parameters<typeof validateLegalAcceptanceHook>[0],
   context: Parameters<typeof validateLegalAcceptanceHook>[1],
-): Promise<void> => {
-  await validateUserWrite(user);
+): ReturnType<typeof validateUserWrite> => {
+  const normalized = await validateUserWrite(user);
   await validateLegalAcceptanceHook(user, context);
+  return normalized;
 };
 
 /**
@@ -212,15 +233,19 @@ export const auth = betterAuth({
   },
 
   plugins: [
-    // Registration only — the bounds and the charset come from ./rules.js, so
-    // the plugin, `usernameInput` in packages/api/src/users.ts and the two
-    // forms that claim a handle cannot disagree about what a handle is. The
-    // plugin's own normalisation (lowercasing into `username`, keeping the
-    // typed form in `displayUsername`) is deliberately left to it.
+    // The bounds, charset and canonical lowercase form come from ./rules.js,
+    // so the plugin, `usernameInput` in packages/api/src/users.ts and the two
+    // forms that claim a handle cannot disagree. Both database columns are
+    // normalised: profile URLs, visible @handles and session data therefore
+    // carry one representation. `databaseHooks.user.update.before` above also
+    // mirrors a changed username into displayUsername because Better Auth's
+    // update hook otherwise leaves the old display value in place.
     username({
       minUsernameLength: USERNAME_MIN_LENGTH,
       maxUsernameLength: USERNAME_MAX_LENGTH,
       usernameValidator: isAllowedUsernameCharset,
+      usernameNormalization: normalizeUsername,
+      displayUsernameNormalization: normalizeUsername,
     }),
 
     // The roles and ban fields the moderation system runs on (issue #38).

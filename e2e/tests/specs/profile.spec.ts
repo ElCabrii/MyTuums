@@ -2,12 +2,21 @@ import { test, expect } from "../../support/fixtures";
 import { ALICE, uniqueUser } from "../../support/users";
 
 test.describe("profile", () => {
-  test("/@Handle and /@handle resolve to the same profile", async ({ page, db }) => {
-    const target = await db.createUser(uniqueUser("casetest"));
+  test("mixed-case input is stored lowercase and either URL casing resolves", async ({
+    page,
+    db,
+  }) => {
+    const input = uniqueUser("casetest");
+    input.username = `${input.username.charAt(0).toUpperCase()}${input.username.slice(1)}`;
+    const target = await db.createUser(input);
     const mixedCase = target.username.charAt(0).toUpperCase() + target.username.slice(1);
+
+    expect(target.username).toBe(input.username.toLowerCase());
+    expect(target.displayUsername).toBe(target.username);
 
     await page.goto(`/@${mixedCase}`);
     await expect(page.getByRole("heading", { name: target.name })).toBeVisible();
+    await expect(page.getByText(`@${target.username}`, { exact: true })).toBeVisible();
 
     await page.goto(`/@${target.username}`);
     await expect(page.getByRole("heading", { name: target.name })).toBeVisible();

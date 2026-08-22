@@ -485,6 +485,36 @@ describe("handles", () => {
     expect(row).toBeDefined();
     expect(headers).toBeDefined();
   });
+
+  it("stores and returns lowercase handles after sign-up and handle changes", async () => {
+    const { email, headers } = await signUp({ username: "AlexMercer" });
+
+    const [created] = await db
+      .select({ username: user.username, displayUsername: user.displayUsername })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(created).toEqual({ username: "alexmercer", displayUsername: "alexmercer" });
+
+    const firstSession = await auth.api.getSession({ headers });
+    expect(firstSession?.user).toMatchObject({
+      username: "alexmercer",
+      displayUsername: "alexmercer",
+    });
+
+    await auth.api.updateUser({ body: { username: "NewHandle" }, headers });
+
+    const [updated] = await db
+      .select({ username: user.username, displayUsername: user.displayUsername })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(updated).toEqual({ username: "newhandle", displayUsername: "newhandle" });
+
+    const updatedSession = await auth.api.getSession({ headers });
+    expect(updatedSession?.user).toMatchObject({
+      username: "newhandle",
+      displayUsername: "newhandle",
+    });
+  });
 });
 
 /**

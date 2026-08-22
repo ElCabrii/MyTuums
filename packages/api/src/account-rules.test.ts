@@ -12,6 +12,7 @@ import {
   LOCALE_PREFERENCE_INVALID_MESSAGE,
   LOCALE_PREFERENCES,
   MINIMUM_AGE_YEARS,
+  normalizeUsername,
   parseDateOfBirthParts,
   parseDateOnlyParts,
   LEGAL_ACCEPTANCE_REQUIRED_MESSAGE,
@@ -123,6 +124,10 @@ describe("age comparison", () => {
 });
 
 describe("username rules", () => {
+  it("normalizes valid mixed-case input to the one stored and displayed form", () => {
+    expect(normalizeUsername("Alex-Mercer_1")).toBe("alex-mercer_1");
+  });
+
   it("enforces the bounds inclusively, then the charset", () => {
     const cases: readonly (readonly [string, string | null])[] = [
       ["alice", null],

@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { and, desc, eq, like, sql } from "drizzle-orm";
 import { assertTestDatabase, databaseNameOf, resolveTestDatabaseUrl } from "@my-tuums/db/testing";
 import type { UserRole } from "@my-tuums/api/roles";
+import { normalizeUsername } from "@my-tuums/auth/rules";
 import { E2E } from "../playwright.config";
 import { legalConsentBody } from "./users";
 
@@ -62,8 +63,8 @@ export interface CreateUserInput {
 }
 
 /**
- * A user as `createUser` returns it — id, the normalised and display
- * username pair, display name, and email.
+ * A user as `createUser` returns it — id, the identical canonical username
+ * pair, display name, and email.
  */
 export interface CreatedUser {
   id: string;
@@ -224,7 +225,7 @@ export async function getUserId(username: string): Promise<string> {
   const [found] = await db
     .select({ id: user.id })
     .from(user)
-    .where(eq(user.username, username.toLowerCase()))
+    .where(eq(user.username, normalizeUsername(username)))
     .limit(1);
 
   if (!found) throw new Error(`getUserId: no user with username "${username}".`);

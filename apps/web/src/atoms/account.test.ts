@@ -101,15 +101,15 @@ describe("changeHandleAtom", () => {
     store.set(handleChangeDraftAtom, "AlexMercer2");
 
     updateUser.mockImplementationOnce(() => {
-      // Better Auth's own refetch, which `waitForSession` is waiting on. The
-      // plugin lower-cases `username`; `displayUsername` keeps what was typed.
+      // Better Auth's own refetch, which `waitForSession` is waiting on. Both
+      // handle fields now carry the canonical lowercase representation.
       setSession({
         data: {
           user: {
             id: "u1",
             name: "Alex Mercer",
             username: "alexmercer2",
-            displayUsername: "AlexMercer2",
+            displayUsername: "alexmercer2",
           },
         },
         isPending: false,
@@ -122,7 +122,7 @@ describe("changeHandleAtom", () => {
     // The lower-cased form is what profile URLs and `profileAtomFamily` key on,
     // so returning the typed casing would fragment the cache.
     await expect(store.set(changeHandleAtom)).resolves.toBe("alexmercer2");
-    expect(updateUser).toHaveBeenCalledWith({ username: "AlexMercer2" });
+    expect(updateUser).toHaveBeenCalledWith({ username: "alexmercer2" });
   });
 
   it("short-circuits when the handle differs only in casing from the current one", async () => {

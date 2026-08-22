@@ -67,13 +67,13 @@ to the owning context.
 - **Migrations run as a pre-deploy step, never at server boot.** N replicas
   would race the same DDL.
 - **The account rules have exactly one definition.**
-  `packages/auth/src/rules.ts` (`@my-tuums/auth/rules`) owns the handle bounds
-  and charset, the date-of-birth parse and age comparison, the bio limit, the
-  preference lists, and every English rejection string. The browser forms, the
-  better-auth hooks and plugin config, and `usernameInput` in
-  `packages/api/src/users.ts` all read it. Those strings are also the keys of
-  `apps/web/src/lib/auth-error-message.ts`; restate one anywhere and server
-  rejections render untranslated.
+  `packages/auth/src/rules.ts` (`@my-tuums/auth/rules`) owns the handle bounds,
+  charset and lowercase normalization, the date-of-birth parse and age
+  comparison, the bio limit, the preference lists, and every English rejection
+  string. The browser forms, the better-auth hooks and plugin config, and
+  `usernameInput` in `packages/api/src/users.ts` all read it. Those strings are
+  also the keys of `apps/web/src/lib/auth-error-message.ts`; restate one
+  anywhere and server rejections render untranslated.
 
 ## Generated files
 

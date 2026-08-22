@@ -106,6 +106,7 @@ describe("ProfileLayout role and ownership gates", () => {
     });
 
     expect(screen.getByText(m.profile_suspended_body())).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "@suspended" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: m.moderation_unban() })).not.toBeInTheDocument();
   });
 
@@ -177,7 +178,7 @@ describe("ProfileLayout role and ownership gates", () => {
 
     await user.click(screen.getByLabelText(m.moderation_kebab()));
     await user.click(await screen.findByRole("menuitem", { name: m.moderation_kebab_block() }));
-    expect(store.get(blockDialogAtom)).toEqual({ userId: other.id, handle: "Other" });
+    expect(store.get(blockDialogAtom)).toEqual({ userId: other.id, handle: "other" });
   });
 
   it("signs out from the viewer's own profile and lands on /login", async () => {

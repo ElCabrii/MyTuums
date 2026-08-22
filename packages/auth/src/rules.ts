@@ -183,6 +183,17 @@ export const USERNAME_CHARACTERS_MESSAGE =
   "Username can only contain letters, numbers, underscores, and hyphens.";
 
 /**
+ * The canonical stored and displayed handle form.
+ *
+ * Handles are ASCII-only, so locale-independent lowercasing is sufficient.
+ * Callers still validate the raw value: uppercase input is accepted and
+ * normalised rather than forcing someone to retype an otherwise valid handle.
+ */
+export function normalizeUsername(username: string): string {
+  return username.toLowerCase();
+}
+
+/**
  * The handle charset. Anchored and without the `g` flag on purpose — `test` on
  * a global regex carries `lastIndex` between calls, which would make this
  * return alternating answers for the same input.

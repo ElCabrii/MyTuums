@@ -51,6 +51,13 @@ Each of these is a deliberate, non-default setting. The inline comment in
   none of them. `imageOriginal` and `bannerImageOriginal` are `input: false` —
   only the upload procedure in `packages/api` writes them, via Drizzle,
   bypassing hooks.
+- **Handles have one lowercase representation.** `normalizeUsername` in
+  `src/rules.ts` is shared by the Better Auth username plugin, the browser's
+  three handle-claiming writes and API lookups. The plugin normalises both
+  `username` and `displayUsername`; the user update hook also mirrors a changed
+  username into the display column because Better Auth otherwise leaves the
+  previous display value in place. Migration `0015_lowercase_usernames` audits
+  case-folded collisions before backfilling existing rows.
 - **Legal acceptance is required only on `/sign-up/email`, and only on
   create.** The consent timestamp and version are nullable so existing
   accounts and OAuth/passkey sign-ups remain `NULL` until the web app's global

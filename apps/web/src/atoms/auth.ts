@@ -4,7 +4,7 @@ import { clearViewerState } from "@/atoms/session-teardown";
 import { authClient, type SocialProviderId } from "@/lib/auth-client";
 import { waitForSignedOut } from "@/lib/session-sync";
 import { dateOfBirthToIso } from "@/lib/auth-validation";
-import { LEGAL_VERSION } from "@my-tuums/auth/rules";
+import { LEGAL_VERSION, normalizeUsername } from "@my-tuums/auth/rules";
 import { sanitizeRedirect } from "@/lib/redirect";
 import { offerTwoFactorAtom } from "@/atoms/onboarding";
 import { m } from "@/paraglide/messages.js";
@@ -435,7 +435,7 @@ export const signUpAtom = atom(null, async (_get, set, fields: SignUpArgs): Prom
       email: fields.email.trim(),
       password: fields.password,
       name: fields.name.trim(),
-      username: fields.username.trim(),
+      username: normalizeUsername(fields.username.trim()),
       dateOfBirth: dateOfBirthToIso(fields.dateOfBirth),
       // Absolute, and carrying the pre-login destination when there is one —
       // see `verifyEmailCallbackURL`.
