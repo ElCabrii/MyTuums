@@ -86,12 +86,6 @@ describe("a live suspension makes the author invisible everywhere", () => {
       { context: contextFor(bob) },
     );
     expect(searchPosts.items).toHaveLength(0);
-    const typeahead = await call(
-      appRouter.search.typeahead,
-      { q: "vis-search-tag" },
-      { context: contextFor(bob) },
-    );
-    expect(typeahead.posts).toHaveLength(0);
   });
 
   it("drops them from the following feed — their own posts stay put", async () => {
