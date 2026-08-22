@@ -33,6 +33,7 @@ import {
   type CaseRef,
 } from "@/atoms/moderation";
 import { isStaffAtom } from "@/atoms/session";
+import { MentionText } from "@/components/mention-text";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -264,7 +265,9 @@ function TargetPostCard({
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm break-words whitespace-pre-line">{target.content}</p>
+        <p className="text-sm break-words whitespace-pre-line">
+          <MentionText text={target.content} />
+        </p>
         {target.removedAt && (
           <Alert variant="destructive">
             <Trash2 />
@@ -351,7 +354,7 @@ function TargetUserCard({
       <CardContent className="space-y-3">
         {target.bio && (
           <p className="text-muted-foreground text-sm break-words whitespace-pre-line">
-            {target.bio}
+            <MentionText text={target.bio} />
           </p>
         )}
         {target.banned && target.banReason && (

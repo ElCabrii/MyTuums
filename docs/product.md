@@ -41,7 +41,10 @@ both by the server's page gate and by the client.
 
 ## Posts, replies, likes, follows
 
-- Posts are plain text, up to 500 characters, trimmed.
+- Posts are plain text, up to 500 characters, trimmed. Syntactically valid
+  `@handles` render as links to lowercase canonical profile routes; malformed
+  handles stay as plain text, and an unknown handle lands on the profile
+  route's existing not-found state.
 - A reply is a post with a parent. Threads show the focused post, its replies,
   and up to 20 ancestors of context.
 - Likes are two idempotent operations, `like` and `unlike`, never a toggle —
@@ -55,7 +58,8 @@ both by the server's page gate and by the client.
 ## Profiles and search
 
 - A profile carries a display name, lowercase handle, bio (160 characters),
-  avatar, banner, join date, and follower/following counts.
+  avatar, banner, join date, and follower/following counts. Bios use the same
+  safe `@handle` linkification as posts and replies.
 - Profiles are addressed by handle. A profile hidden by a block reads as "no
   such user"; a banned profile resolves to a suspended stub instead.
 - Search has three surfaces: a profile-only header typeahead (up to five
