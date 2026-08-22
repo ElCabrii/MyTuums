@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
 import { auth } from "@my-tuums/auth";
 import { closeDb, type Database } from "@my-tuums/db";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   appeal,
   follow,
@@ -2138,6 +2138,56 @@ describe("appeal flow", () => {
     await clearQueueFixtures();
   });
 
+  it("appeal creation racing manual restore never leaves a stale open appeal", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const removals: Array<{ actionId: string; postId: string }> = [];
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const postRow = await seedPostContent(author.id, `appeal-open race ${attempt}`);
+      await call(
+        appRouter.moderation.removePost,
+        { postId: postRow.id, reason: "rules violation" },
+        { context: contextFor(mod) },
+      );
+      const removal = await latestAction("post_removed", "post", postRow.id);
+      removals.push({ actionId: removal!.id, postId: postRow.id });
+    }
+
+    await Promise.all(
+      removals.map(({ actionId, postId }) =>
+        Promise.allSettled([
+          call(
+            appRouter.moderation.appealOpen,
+            {
+              token: appealLink(actionId, author.id),
+              reason: "This removal should be reversed",
+            },
+            { context: anonContext },
+          ),
+          call(appRouter.moderation.restorePost, { postId }, { context: contextFor(mod) }),
+        ]),
+      ),
+    );
+
+    try {
+      const staleAppeals = await anonContext.db
+        .select({ id: appeal.id })
+        .from(appeal)
+        .where(
+          and(
+            eq(appeal.status, "open"),
+            inArray(
+              appeal.actionId,
+              removals.map(({ actionId }) => actionId),
+            ),
+          ),
+        );
+      expect(staleAppeals).toHaveLength(0);
+    } finally {
+      await clearQueueFixtures();
+    }
+  });
+
   it("a manual restore racing an appeal overturn resolves once without duplicate effects", async () => {
     const author = await createTestUser();
     const actingMod = await moderatorUser();
@@ -3049,6 +3099,16 @@ interface CapturedThenable extends PromiseLike<readonly object[]> {
   toSQL(): CapturedQuery;
 }
 
+type CapturedTransactionHandle = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type CapturedTransactionConfig = NonNullable<Parameters<Database["transaction"]>[1]>;
+
+interface CapturedTransaction {
+  <Result>(
+    callback: (transaction: CapturedTransactionHandle) => Promise<Result>,
+    config?: CapturedTransactionConfig,
+  ): Promise<Result>;
+}
+
 /**
  * A real Database handle that records the SQL of every executed query builder.
  * Chained builder methods stay wrapped, while all operations use the original connection.
@@ -3067,6 +3127,23 @@ function capturingDb(target: Database, capture: (query: CapturedQuery) => void):
         // SAFETY: A Proxy get trap receives a property belonging to its wrapped Drizzle object.
         const member = owner[property as keyof Value];
         if (!(member instanceof Function)) return member;
+
+        if (property === "transaction") {
+          // A transaction returns a Promise rather than a query builder. Wrap
+          // the transaction handle handed to its callback so the inner real
+          // queries are captured, and let the outer Promise pass through.
+          // SAFETY: this branch is reached only for Drizzle's Database.transaction member.
+          const transaction = member as CapturedTransaction;
+          return <Result>(
+            callback: (transaction: CapturedTransactionHandle) => Promise<Result>,
+            config?: CapturedTransactionConfig,
+          ) =>
+            transaction.call(
+              owner,
+              (transactionHandle) => callback(wrap(transactionHandle)),
+              config,
+            );
+        }
 
         // SAFETY: Drizzle's fluent builder methods return another builder object; terminal execution
         // is handled by the `then` branch above rather than this wrapper.

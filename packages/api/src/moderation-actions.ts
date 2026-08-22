@@ -1049,9 +1049,11 @@ async function runEffect(
  * stay empty and the inverse action's audit row remains the honest record of
  * who acted and why. The stamp and inverse action share one transaction.
  *
- * The appeal rows are updated before the effect locks its post/user target.
- * Appeal review takes those locks in the same order, preventing a concurrent
- * manual reversal and review from deadlocking each other.
+ * The contested action rows are locked first, matching appeal intake's
+ * synchronization point and preventing a not-yet-inserted appeal from racing
+ * past the reversal. Appeal rows are then updated before the effect locks its
+ * post/user target. Appeal review takes the latter two locks in the same order,
+ * preventing a concurrent manual reversal and review from deadlocking.
  */
 async function runManualReversal(
   context: EffectContext,
@@ -1067,7 +1069,7 @@ async function runManualReversal(
       args.targetType === "post"
         ? eq(moderationAction.targetPostId, args.targetId)
         : eq(moderationAction.targetUserId, args.targetId);
-    const reversedActionIds = db
+    const reversedActions = await db
       .select({ id: moderationAction.id })
       .from(moderationAction)
       .where(
@@ -1076,12 +1078,24 @@ async function runManualReversal(
           targetMatch,
           inArray(moderationAction.action, args.actionCodes),
         ),
-      );
+      )
+      .orderBy(moderationAction.createdAt, moderationAction.id)
+      .for("update");
 
-    await db
-      .update(appeal)
-      .set({ status: "reversed" })
-      .where(and(eq(appeal.status, "open"), inArray(appeal.actionId, reversedActionIds)));
+    if (reversedActions.length > 0) {
+      await db
+        .update(appeal)
+        .set({ status: "reversed" })
+        .where(
+          and(
+            eq(appeal.status, "open"),
+            inArray(
+              appeal.actionId,
+              reversedActions.map(({ id }) => id),
+            ),
+          ),
+        );
+    }
 
     const { pending } = await run(db);
     return { result: undefined, pending };

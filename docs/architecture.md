@@ -338,10 +338,11 @@ sides by CI. See [operations.md](operations.md).
    adapters: each authenticates its own claim and spends its own
    capability-keyed budget, and both normalise to one internal target — the
    contested action, its appellant, and the nonce that makes the attempt
-   replayable exactly once. Everything after that is source-blind: appealable,
-   still current, still latest, not already appealed, then an insert whose
-   unique constraints settle the races the pre-read cannot. Intake sends no
-   email and changes no moderation state.
+   replayable exactly once. Everything after that is source-blind and one
+   transaction: lock the contested action row, prove it appealable, still
+   current and still latest, refuse a replay, then insert. The action lock is
+   shared with manual reversal; database uniqueness remains the final backstop.
+   Intake sends no email and changes no moderation state.
 6. **Appeal review.** `moderation.appealReview` upholds or overturns, in one
    transaction with the inverse effect and the `appeal_resolved` audit row,
    and excludes the moderator who took the original action. It runs that
@@ -349,7 +350,9 @@ sides by CI. See [operations.md](operations.md).
    out after the REVIEW's commit — never an inner savepoint.
 7. **Manual reversal.** Restoring a post, unbanning or unsuspending an account,
    or changing a role that an open appeal contests stamps that appeal
-   `reversed` in the same transaction. It leaves the review fields empty and
+   `reversed` in the same transaction. The wrapper first locks the contested
+   action rows — the same synchronization point appeal intake holds through
+   insert — then the appeal and target. It leaves the review fields empty and
    does not add an `appeal_resolved` row because no appeal review occurred;
    the inverse action's audit row and post-commit email record what happened.
 

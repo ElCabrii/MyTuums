@@ -9,13 +9,13 @@
  *
  * - the two sources normalising to the SAME appeal target, so an action
  *   appealed through one capability is closed to the other;
- * - the insert race, where the database's unique constraints — not the
- *   pre-read — are what make an appeal exactly-once.
+ * - concurrent opens, where the contested action-row lock serializes intake
+ *   and the database constraints remain the final exactly-once backstop.
  *
- * Everything runs against real Postgres. The race tests deliberately use real
- * concurrent calls rather than a stubbed constraint: what is being verified is
- * that the `appeal` table's unique `token_nonce` and its partial unique
- * open-per-action index actually settle the race, which a fake cannot show.
+ * Everything runs against real Postgres. The concurrency tests deliberately
+ * use real calls rather than a stubbed lock: what is being verified is that
+ * callers serialize on the real `moderation_action` row and still produce one
+ * appeal with caller-facing refusals for every loser.
  */
 import { randomUUID } from "node:crypto";
 import { closeDb } from "@my-tuums/db";
@@ -133,15 +133,12 @@ describe("appeal intake — one target from two sources", () => {
   });
 });
 
-describe("appeal intake — the insert race", () => {
+describe("appeal intake — concurrent exactly-once", () => {
   const refusalSchema = z.object({ code: z.string(), message: z.string() });
   /**
-   * The refusals a loser may legitimately get. Which one it is depends on
-   * whether it lost at the pre-read or at the constraint, and that is a real
-   * interleaving the test does not pin: what must hold either way is that the
-   * loser gets a caller-facing BAD_REQUEST and never an untranslated database
-   * error. Deleting the unique-violation branch in `insertAppeal` turns the
-   * constraint loser into a 500 and fails this.
+   * The refusal depends on whether the loser presented the winning nonce or a
+   * different link for the same action. Either way it must get a caller-facing
+   * BAD_REQUEST after the action-row lock lets it observe the winner.
    */
   const LOSER_MESSAGES = [
     "This appeal link has already been used.",
@@ -158,8 +155,9 @@ describe("appeal intake — the insert race", () => {
     const author = await createTestUser();
     const { actionId } = await removedPost(author);
 
-    // Eight fresh links — distinct nonces, so each spends its own budget and
-    // the only thing that can separate them is the open-per-action index.
+    // Eight fresh links — distinct nonces, so each spends its own budget. The
+    // action-row lock serializes their replay reads; the open-per-action index
+    // remains the database backstop.
     const results = await Promise.allSettled(
       Array.from({ length: 8 }, (_, i) =>
         openAppeal(anonContext, {
@@ -184,8 +182,9 @@ describe("appeal intake — the insert race", () => {
     const { actionId } = await removedPost(author);
     const token = link(actionId, author.id);
 
-    // The same link eight times — one nonce, so the unique `token_nonce`
-    // column is the constraint in play. All eight share one rate-limit key
+    // The same link eight times — all serialize on the action row and then see
+    // the winning nonce as spent. The unique `token_nonce` column remains the
+    // database backstop. All eight share one rate-limit key
     // (`report:appeal:<nonce>`), which the report tier's 20/min clears.
     const results = await Promise.allSettled(
       Array.from({ length: 8 }, () =>
