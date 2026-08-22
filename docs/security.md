@@ -249,6 +249,12 @@ never existed, so the block itself does not leak.
   `setRoleEffect` can never be clobbered by an appeal that already passed its
   currency check. Moving any of these reads out of the transaction re-opens
   the race.
+- Appeal intake and manual reversal lock the contested `moderation_action` row
+  before touching appeals. Holding that stable row through intake's validation
+  and insert prevents a reversal from observing no appeal and then committing
+  before a concurrent intake creates one. Manual reversal continues with the
+  appeal row and then the target row, matching review's appeal-before-target
+  order.
 - Appeal review excludes the moderator who took the original action.
 - The bootstrap promotion (`pnpm db:promote` / `node apps/server/dist/promote.js`)
   is the one deliberate exception to "role changes go through `/rpc`": it

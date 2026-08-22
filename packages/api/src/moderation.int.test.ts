@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
 import { auth } from "@my-tuums/auth";
 import { closeDb, type Database } from "@my-tuums/db";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   appeal,
   follow,
@@ -16,7 +16,7 @@ import {
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { APPEAL_TOKEN_MAX_LENGTH, appealToken } from "./appeal-token.js";
-import { isActionLatest, unbanEffect } from "./moderation-actions.js";
+import { isActionLatest, restorePostEffect, unbanEffect } from "./moderation-actions.js";
 import type { Context } from "./context.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { appRouter } from "./router.js";
@@ -2083,8 +2083,271 @@ describe("appeal flow", () => {
       ),
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
-      message: "This appeal has already been reviewed.",
+      message: "This appeal has already been resolved.",
     });
+  });
+
+  it("a manual post restore closes its open appeal and removes the case from the queue", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "restore outside appeal review");
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "rules violation" },
+      { context: contextFor(mod) },
+    );
+    const removal = await latestAction("post_removed", "post", postRow.id);
+    const opened = await call(
+      appRouter.moderation.appealOpen,
+      {
+        token: appealLink(removal!.id, author.id),
+        reason: "This removal should be reversed",
+      },
+      { context: anonContext },
+    );
+
+    expect(await walkAllQueuePages(contextFor(mod), 1)).toContainEqual({
+      targetType: "post",
+      targetId: postRow.id,
+    });
+
+    await call(
+      appRouter.moderation.restorePost,
+      { postId: postRow.id, note: "restored after another review" },
+      { context: contextFor(mod) },
+    );
+
+    const [closed] = await anonContext.db
+      .select({
+        status: appeal.status,
+        reviewedBy: appeal.reviewedBy,
+        reviewedAt: appeal.reviewedAt,
+      })
+      .from(appeal)
+      .where(eq(appeal.id, opened.appealId));
+    expect(closed).toEqual({ status: "reversed", reviewedBy: null, reviewedAt: null });
+    expect(await walkAllQueuePages(contextFor(mod), 1)).not.toContainEqual({
+      targetType: "post",
+      targetId: postRow.id,
+    });
+    const restoreEmails = vi
+      .mocked(testEmailSender.send)
+      .mock.calls.filter(([mail]) => mail.subject === "Your post was restored");
+    expect(restoreEmails).toHaveLength(1);
+
+    await clearQueueFixtures();
+  });
+
+  it("appeal creation racing manual restore never leaves a stale open appeal", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const removals: Array<{ actionId: string; postId: string }> = [];
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const postRow = await seedPostContent(author.id, `appeal-open race ${attempt}`);
+      await call(
+        appRouter.moderation.removePost,
+        { postId: postRow.id, reason: "rules violation" },
+        { context: contextFor(mod) },
+      );
+      const removal = await latestAction("post_removed", "post", postRow.id);
+      removals.push({ actionId: removal!.id, postId: postRow.id });
+    }
+
+    await Promise.all(
+      removals.map(({ actionId, postId }) =>
+        Promise.allSettled([
+          call(
+            appRouter.moderation.appealOpen,
+            {
+              token: appealLink(actionId, author.id),
+              reason: "This removal should be reversed",
+            },
+            { context: anonContext },
+          ),
+          call(appRouter.moderation.restorePost, { postId }, { context: contextFor(mod) }),
+        ]),
+      ),
+    );
+
+    try {
+      const staleAppeals = await anonContext.db
+        .select({ id: appeal.id })
+        .from(appeal)
+        .where(
+          and(
+            eq(appeal.status, "open"),
+            inArray(
+              appeal.actionId,
+              removals.map(({ actionId }) => actionId),
+            ),
+          ),
+        );
+      expect(staleAppeals).toHaveLength(0);
+    } finally {
+      await clearQueueFixtures();
+    }
+  });
+
+  it("a manual restore racing an appeal overturn resolves once without duplicate effects", async () => {
+    const author = await createTestUser();
+    const actingMod = await moderatorUser();
+    const reviewingMod = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "restore race with appeal review");
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "rules violation" },
+      { context: contextFor(actingMod) },
+    );
+    const removal = await latestAction("post_removed", "post", postRow.id);
+    const opened = await call(
+      appRouter.moderation.appealOpen,
+      {
+        token: appealLink(removal!.id, author.id),
+        reason: "This removal should be reversed",
+      },
+      { context: anonContext },
+    );
+
+    const [manual, review] = await Promise.allSettled([
+      call(
+        appRouter.moderation.restorePost,
+        { postId: postRow.id, note: "manual review" },
+        { context: contextFor(actingMod) },
+      ),
+      call(
+        appRouter.moderation.appealReview,
+        { appealId: opened.appealId, outcome: "overturned", note: "appeal review" },
+        { context: contextFor(reviewingMod) },
+      ),
+    ]);
+
+    expect(manual.status).toBe("fulfilled");
+    if (review.status === "rejected") {
+      expect(review.reason).toMatchObject({
+        code: "BAD_REQUEST",
+        message: "This appeal has already been resolved.",
+      });
+    }
+
+    const [closed] = await anonContext.db
+      .select({ status: appeal.status })
+      .from(appeal)
+      .where(eq(appeal.id, opened.appealId));
+    expect(["overturned", "reversed"]).toContain(closed?.status);
+    const restoredRows = await anonContext.db
+      .select({ id: moderationAction.id })
+      .from(moderationAction)
+      .where(
+        and(
+          eq(moderationAction.action, "post_restored"),
+          eq(moderationAction.targetType, "post"),
+          eq(moderationAction.targetPostId, postRow.id),
+        ),
+      );
+    expect(restoredRows).toHaveLength(1);
+    const restoreEmails = vi
+      .mocked(testEmailSender.send)
+      .mock.calls.filter(([mail]) => mail.subject === "Your post was restored");
+    expect(restoreEmails).toHaveLength(1);
+
+    await clearQueueFixtures();
+  });
+
+  it("manual unban and unsuspend close their open appeals as reversed", async () => {
+    const suspendedUser = await createTestUser();
+    const bannedUser = await createTestUser();
+    const staff = await staffUser();
+    await call(
+      appRouter.moderation.suspendUser,
+      { userId: suspendedUser.id, reason: "temporary spam", durationSeconds: 3600 },
+      { context: contextFor(staff) },
+    );
+    await call(
+      appRouter.moderation.banUser,
+      { userId: bannedUser.id, reason: "permanent spam" },
+      { context: contextFor(staff) },
+    );
+    const suspension = await latestAction("user_suspended", "user", suspendedUser.id);
+    const ban = await latestAction("user_banned", "user", bannedUser.id);
+    const suspensionAppeal = await call(
+      appRouter.moderation.appealOpen,
+      {
+        token: appealLink(suspension!.id, suspendedUser.id),
+        reason: "The suspension should be reversed",
+      },
+      { context: anonContext },
+    );
+    const banAppeal = await call(
+      appRouter.moderation.appealOpen,
+      {
+        token: appealLink(ban!.id, bannedUser.id),
+        reason: "The ban should be reversed",
+      },
+      { context: anonContext },
+    );
+
+    await call(
+      appRouter.moderation.unbanUser,
+      { userId: suspendedUser.id },
+      { context: contextFor(staff) },
+    );
+    await call(
+      appRouter.moderation.unbanUser,
+      { userId: bannedUser.id },
+      { context: contextFor(staff) },
+    );
+
+    const closed = await anonContext.db
+      .select({ id: appeal.id, status: appeal.status, reviewedBy: appeal.reviewedBy })
+      .from(appeal);
+    expect(closed).toEqual(
+      expect.arrayContaining([
+        { id: suspensionAppeal.appealId, status: "reversed", reviewedBy: null },
+        { id: banAppeal.appealId, status: "reversed", reviewedBy: null },
+      ]),
+    );
+    const queue = await walkAllQueuePages(contextFor(staff), 1);
+    expect(queue).not.toContainEqual({ targetType: "user", targetId: suspendedUser.id });
+    expect(queue).not.toContainEqual({ targetType: "user", targetId: bannedUser.id });
+
+    await clearQueueFixtures();
+  });
+
+  it("a manual role change closes an appeal against the role it supersedes", async () => {
+    const userToPromote = await createTestUser();
+    const admin = await adminUser();
+    await call(
+      appRouter.moderation.setRole,
+      { userId: userToPromote.id, role: "moderator" },
+      { context: contextFor(admin) },
+    );
+    const promotion = await latestAction("role_changed", "user", userToPromote.id);
+    const opened = await call(
+      appRouter.moderation.appealOpen,
+      {
+        token: appealLink(promotion!.id, userToPromote.id),
+        reason: "I do not want this role change",
+      },
+      { context: anonContext },
+    );
+
+    await call(
+      appRouter.moderation.setRole,
+      { userId: userToPromote.id, role: "user" },
+      { context: contextFor(admin) },
+    );
+
+    const [closed] = await anonContext.db
+      .select({ status: appeal.status, reviewedBy: appeal.reviewedBy })
+      .from(appeal)
+      .where(eq(appeal.id, opened.appealId));
+    expect(closed).toEqual({ status: "reversed", reviewedBy: null });
+    expect(await walkAllQueuePages(contextFor(admin), 1)).not.toContainEqual({
+      targetType: "user",
+      targetId: userToPromote.id,
+    });
+
+    await clearQueueFixtures();
   });
 
   it("upholding leaves the action in force", async () => {
@@ -2309,15 +2572,10 @@ describe("appeal flow", () => {
       { context: anonContext },
     );
 
-    // Manual restore, then a SECOND removal: the contested action no longer
-    // governs the post's state, and overturning it would clear the NEWER
-    // tombstone — the live-state currency check cannot see this, the action
-    // log can.
-    await call(
-      appRouter.moderation.restorePost,
-      { postId: postRow.id },
-      { context: contextFor(mod) },
-    );
+    // Use the raw effect as a fixture so this test can isolate the latest-
+    // action gate. The public manual-restore wrapper now closes the appeal,
+    // which is covered separately above.
+    await restorePostEffect(anonContext.db, { postId: postRow.id, actorId: mod.id });
     await call(
       appRouter.moderation.removePost,
       { postId: postRow.id, reason: "second offense" },
@@ -2841,6 +3099,16 @@ interface CapturedThenable extends PromiseLike<readonly object[]> {
   toSQL(): CapturedQuery;
 }
 
+type CapturedTransactionHandle = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type CapturedTransactionConfig = NonNullable<Parameters<Database["transaction"]>[1]>;
+
+interface CapturedTransaction {
+  <Result>(
+    callback: (transaction: CapturedTransactionHandle) => Promise<Result>,
+    config?: CapturedTransactionConfig,
+  ): Promise<Result>;
+}
+
 /**
  * A real Database handle that records the SQL of every executed query builder.
  * Chained builder methods stay wrapped, while all operations use the original connection.
@@ -2859,6 +3127,23 @@ function capturingDb(target: Database, capture: (query: CapturedQuery) => void):
         // SAFETY: A Proxy get trap receives a property belonging to its wrapped Drizzle object.
         const member = owner[property as keyof Value];
         if (!(member instanceof Function)) return member;
+
+        if (property === "transaction") {
+          // A transaction returns a Promise rather than a query builder. Wrap
+          // the transaction handle handed to its callback so the inner real
+          // queries are captured, and let the outer Promise pass through.
+          // SAFETY: this branch is reached only for Drizzle's Database.transaction member.
+          const transaction = member as CapturedTransaction;
+          return <Result>(
+            callback: (transaction: CapturedTransactionHandle) => Promise<Result>,
+            config?: CapturedTransactionConfig,
+          ) =>
+            transaction.call(
+              owner,
+              (transactionHandle) => callback(wrap(transactionHandle)),
+              config,
+            );
+        }
 
         // SAFETY: Drizzle's fluent builder methods return another builder object; terminal execution
         // is handled by the `then` branch above rather than this wrapper.

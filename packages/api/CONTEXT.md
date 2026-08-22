@@ -72,19 +72,17 @@ over HTTP and imports only its browser-safe subpaths.
   its own capability budget (`appeal:<nonce>`, `appeal:<actionId>`) — and
   normalises both to one target, after which the appealable/current/latest
   gates, the replay policy and the insert are source-blind. The ordering is
-  load-bearing: the HMAC comparison happens before any database work, and each
-  budget is consumed at the exact point its key comes into existence, so
-  everything after it is paid for. Intake never sends a notice and never
-  reverses an action — that is `appealReview`'s half, in
-  `src/moderation-appeals.ts`.
-- **A unique-constraint race must read back as a caller-facing refusal.**
-  `appeal` has a unique `token_nonce` and a partial unique open-per-action
-  index, and they — not intake's pre-read — are what make an appeal
-  exactly-once. Drizzle wraps driver failures in a `DrizzleQueryError` whose
-  `cause` carries postgres' SQLSTATE, so `isUniqueViolation` walks the cause
-  chain; matching only the top level let a real race escape as a 500.
-  `src/appeal-intake.int.test.ts` races real concurrent opens against real
-  Postgres to pin it.
+  load-bearing: the HMAC comparison happens before any database work, each
+  budget is consumed at the exact point its key comes into existence, and the
+  common tail locks the contested `moderation_action` through validation and
+  insert. Intake never sends a notice and never reverses an action — that is
+  `appealReview`'s half, in `src/moderation-appeals.ts`.
+- **Appeal intake is exactly-once at two layers.** The action-row lock
+  serializes concurrent application opens before their replay read. The
+  unique `token_nonce` and partial unique open-per-action indexes remain the
+  database authority for outside writers and collisions; `isUniqueViolation`
+  walks Drizzle's wrapped `cause` chain so a constraint rejection still reads
+  as a caller-facing refusal.
 - **`publicUserColumns` is a privacy boundary.** Never add `email`,
   `twoFactorEnabled`, `lastLoginMethod`, `role` or a preference column; sign-in
   method is reconnaissance, not profile data. `src/users.int.test.ts` pins the
@@ -130,6 +128,14 @@ over HTTP and imports only its browser-safe subpaths.
   goes through the wrappers. The raw effects remain exported for the appeal
   intake and the tests, which compose them directly; a new procedure must go
   through the wrappers, not call an effect and hand-thread the send.
+- **A manual inverse action closes appeals under a shared action lock.** The
+  `restorePost`, `unbanUser` and `setRole` wrappers lock the contested action
+  rows, then stamp linked open appeals `reversed`, then lock/change the target,
+  all in one transaction. Intake takes the same action lock through its insert,
+  so reversal cannot miss an appeal being created. The wrappers do not fill
+  review fields or log `appeal_resolved`; the inverse action's audit row and
+  notice are the source of truth. The remaining appeal-before-target order
+  matches `appealReview`, avoiding a review/reversal deadlock.
 - **Cursor bounds go through `sql.param(value, column)`.** Interpolating a JS
   `Date` hands postgres.js something it cannot serialise.
 - **`keysetPage`'s `createdAtField` is type-tied to the `createdAt` column**, so

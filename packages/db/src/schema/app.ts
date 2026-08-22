@@ -389,7 +389,9 @@ export const appeal = pgTable(
     tokenNonce: text("token_nonce").notNull().unique(),
     // The appellant's own words; 10..2000 characters enforced at input.
     reason: text("reason").notNull(),
-    // `'open'`, `'upheld'` or `'overturned'` (checked below).
+    // `'open'`, `'upheld'`, `'overturned'` or `'reversed'` (checked below).
+    // `reversed` means the action was undone outside appeal review, so the
+    // nullable review fields deliberately remain empty.
     status: text("status").default("open").notNull(),
     reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
     reviewNote: text("review_note"),
@@ -399,7 +401,7 @@ export const appeal = pgTable(
     reviewedAt: timestamp("reviewed_at", { withTimezone: true, precision: 3 }),
   },
   (t) => [
-    check("appeal_status", sql`${t.status} in ('open', 'upheld', 'overturned')`),
+    check("appeal_status", sql`${t.status} in ('open', 'upheld', 'overturned', 'reversed')`),
     // The queue scans open appeals, newest first — the sort column is in
     // the index so the partial scan never needs a heap sort.
     index("appeal_open_idx")
