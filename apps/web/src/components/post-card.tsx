@@ -15,7 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatRelativeTime } from "@/lib/format";
+import { formatDateTime, formatRelativeTime } from "@/lib/format";
 import type { Post } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
@@ -31,8 +31,10 @@ import { getLocale } from "@/paraglide/runtime.js";
  * - `ancestor` — context above the focused post. Borderless and tighter, so
  *   the chain reads as one conversation rather than a stack of separate
  *   cards.
- * - `focused` — the post the URL points at. Larger body text, and its own
- *   timestamp is not a link, because it would link to the page you are on.
+ * - `focused` — the post the URL points at. Larger body text, the exact
+ *   creation date and time rather than the compact relative label, and
+ *   neither its timestamp nor its reply count links anywhere, because both
+ *   would point at the page you are already on.
  */
 type PostCardVariant = "feed" | "ancestor" | "focused";
 
@@ -97,7 +99,14 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
           isFocused ? "" : "hover:border-primary/30 cursor-pointer"
         }`;
 
-  const timestamp = formatRelativeTime(post.createdAt, getLocale(), m.post_just_now());
+  const locale = getLocale();
+  // The permalink is the durable surface for a post: a relative label is
+  // enough while scrolling a feed, but the page a link points at is where the
+  // exact date and time belong. `Intl` resolves both in the reader's own
+  // timezone.
+  const timestamp = isFocused
+    ? formatDateTime(post.createdAt, locale)
+    : formatRelativeTime(post.createdAt, locale, m.post_just_now());
   const authorAvatar = (
     <UserAvatar
       user={post.author}
@@ -137,7 +146,12 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
             ) : (
               <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
             )}
-            <span className="text-muted-foreground text-xs">• {timestamp}</span>
+            {/* `<time>` regardless of variant: the rendered label differs, but
+                the machine-readable value assistive technology and tooling
+                read is `post.createdAt` either way. */}
+            <span className="text-muted-foreground text-xs">
+              • <time dateTime={post.createdAt.toISOString()}>{timestamp}</time>
+            </span>
 
             {/* Every item here lives in a shared dialog mounted at the root
                 (identity atoms — see `atoms/moderation.ts` and
