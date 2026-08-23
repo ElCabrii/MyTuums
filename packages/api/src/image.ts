@@ -14,7 +14,6 @@
  */
 import { randomUUID } from "node:crypto";
 import {
-  ALLOWED_IMAGE_TYPES,
   IMAGE_LIMITS,
   MAX_IMAGE_MEGAPIXELS,
   MEDIA_URL_PREFIX,
@@ -22,6 +21,15 @@ import {
   type ImageKind,
 } from "./constants.js";
 import { imageDimensions } from "./dimensions.js";
+import { isAllowedImageType, sniffImageType, type ImageRejection } from "./post-image.js";
+
+export {
+  acceptPostImage,
+  isAllowedImageType,
+  sniffImageType,
+  type ImageRejection,
+  type PostImageAcceptance,
+} from "./post-image.js";
 
 /** Where each slot's objects live. The kind is the key's first segment. */
 const KEY_PREFIX = {
@@ -42,61 +50,6 @@ const EXTENSION = {
   "image/png": "png",
   "image/jpeg": "jpg",
 } satisfies Record<AllowedImageType, string>;
-
-/**
- * The leading bytes that actually identify each format, checked because a
- * `Content-Type` is whatever the caller typed. An SVG or an HTML document
- * renamed `.png` and declared `image/png` passes every other check in the
- * chain and would then be served back from our origin; this is what stops it.
- *
- * WebP is a RIFF container: bytes 0-3 are `RIFF`, 8-11 are `WEBP`, and the
- * four in between are a length, so the check has to skip them.
- */
-const SIGNATURES: { type: AllowedImageType; test: (bytes: Uint8Array) => boolean }[] = [
-  {
-    type: "image/png",
-    test: (b) =>
-      b.length >= 8 &&
-      b[0] === 0x89 &&
-      b[1] === 0x50 &&
-      b[2] === 0x4e &&
-      b[3] === 0x47 &&
-      b[4] === 0x0d &&
-      b[5] === 0x0a &&
-      b[6] === 0x1a &&
-      b[7] === 0x0a,
-  },
-  {
-    type: "image/jpeg",
-    test: (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
-  },
-  {
-    type: "image/webp",
-    test: (b) =>
-      b.length >= 12 &&
-      b[0] === 0x52 &&
-      b[1] === 0x49 &&
-      b[2] === 0x46 &&
-      b[3] === 0x46 &&
-      b[8] === 0x57 &&
-      b[9] === 0x45 &&
-      b[10] === 0x42 &&
-      b[11] === 0x50,
-  },
-];
-
-/** The format the bytes actually are, or `null` if they are none of the three. */
-export function sniffImageType(bytes: Uint8Array): AllowedImageType | null {
-  return SIGNATURES.find((signature) => signature.test(bytes))?.type ?? null;
-}
-
-/** Narrows an arbitrary string to an `AllowedImageType`. */
-export function isAllowedImageType(value: string): value is AllowedImageType {
-  return ALLOWED_IMAGE_TYPES.some((allowedType) => allowedType === value);
-}
-
-/** The reason codes `acceptImage` can refuse an upload with. */
-export type ImageRejection = "type" | "size" | "content";
 
 /** The verdict of `acceptImage`: accepted with the sniffed type, or refused with a reason. */
 export interface ImageAcceptance {
@@ -224,7 +177,12 @@ export function objectKeyFromMediaPath(value: string | null | undefined): string
  * `imageObjectKey`).
  */
 export function isSafeObjectKey(key: string): boolean {
-  return /^(avatars|banners)\/[A-Za-z0-9_-]+\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?:\.orig)?\.(webp|png|jpg)$/.test(
-    key,
+  return (
+    /^(?:avatars|banners)\/[A-Za-z0-9_-]+\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?:\.orig)?\.(webp|png|jpg)$/.test(
+      key,
+    ) ||
+    /^posts\/[A-Za-z0-9_-]+\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(webp|png|jpg)$/.test(
+      key,
+    )
   );
 }

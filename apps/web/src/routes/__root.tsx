@@ -1,4 +1,4 @@
-import { createRootRoute, Outlet } from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 import { useAtomValue } from "jotai";
 import { Header } from "@/components/header";
@@ -10,6 +10,7 @@ import { localeDocumentEffect, localePreferenceEffect } from "@/atoms/locale";
 import { isSignedInAtom, sessionSettledAtom, sessionSettledEffect } from "@/atoms/session";
 import { useRequireHandle } from "@/hooks/use-require-handle";
 import { useRequireSignedIn } from "@/hooks/use-require-signed-in";
+import { fallbackHead } from "@/lib/document-head";
 
 // The kebab dialogs open from a card anywhere (feeds, threads, profile
 // pages) yet must exist in exactly one place: they are bound to shared
@@ -30,6 +31,7 @@ const DeletePostDialog = lazy(() =>
 );
 
 export const Route = createRootRoute({
+  head: fallbackHead,
   component: RootLayout,
   // Rendered through this layout's own <Outlet/>, so an unmatched URL gets
   // the normal header/footer chrome instead of the router's bare default.
@@ -74,34 +76,37 @@ function RootLayout() {
   // the session lands. `<Outlet/>` not rendering means no route fires its
   // queries against a session that is about to change under it — this is the
   // fix for the signed-out flash on cold load, see sessionSettledAtom.
-  if (!settled) return null;
+  if (!settled) return <HeadContent />;
 
   // The header renders only for a real session — never the Log in / Register
   // chrome. Signed-out visitors (on /login and friends) get a bare page; see
   // header.tsx, which narrows `viewerAtom` rather than branching on it.
 
   return (
-    <div className="bg-background text-foreground flex min-h-screen flex-col antialiased">
-      {signedIn && <Header />}
-      <main className="flex-1">
-        <Outlet />
-      </main>
-      <Footer />
-      {/* Mounted here, not per-call-site: the dialogs own the shared
-          `reportDialogAtom`/`blockDialogAtom`/`deletePostDialogAtom`
-          identities, and every kebab and profile menu only sets the target.
-          The Suspense fallback is null — the dialogs are closed until a target
-          lands, so there is nothing to flash. */}
-      <Suspense fallback={null}>
-        <ReportDialog />
-        <BlockDialog />
-        <DeletePostDialog />
-      </Suspense>
-      {/* Mounted unconditionally: the dialog owns the whole decision — signed
-          in, consent missing or stale, and not currently on one of the legal
-          documents itself. Duplicating half of that here would let the two
-          drift. */}
-      <LegalConsentDialog />
-    </div>
+    <>
+      <HeadContent />
+      <div className="bg-background text-foreground flex min-h-screen flex-col antialiased">
+        {signedIn && <Header />}
+        <main className="flex-1">
+          <Outlet />
+        </main>
+        <Footer />
+        {/* Mounted here, not per-call-site: the dialogs own the shared
+            `reportDialogAtom`/`blockDialogAtom`/`deletePostDialogAtom`
+            identities, and every kebab and profile menu only sets the target.
+            The Suspense fallback is null — the dialogs are closed until a target
+            lands, so there is nothing to flash. */}
+        <Suspense fallback={null}>
+          <ReportDialog />
+          <BlockDialog />
+          <DeletePostDialog />
+        </Suspense>
+        {/* Mounted unconditionally: the dialog owns the whole decision — signed
+            in, consent missing or stale, and not currently on one of the legal
+            documents itself. Duplicating half of that here would let the two
+            drift. */}
+        <LegalConsentDialog />
+      </div>
+    </>
   );
 }

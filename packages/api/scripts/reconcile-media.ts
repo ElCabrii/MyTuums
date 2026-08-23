@@ -4,8 +4,9 @@
  * Uploads leave orphans on failure paths the app deliberately tolerates — a
  * failed row write after the objects were stored, a swallowed delete error
  * (see packages/api/src/users.ts). This script is the reaper: it lists every
- * object under `avatars/` and `banners/` and deletes the keys no user row
- * references.
+ * object under `avatars/`, `banners/`, and `posts/`, then deletes keys no
+ * profile or post-attachment row references. This also reaps objects left
+ * behind when a hard account delete cascades its post rows.
  *
  * THE GUARD IS THE POINT. A wrong bucket here means deleting real users'
  * avatars, so the script refuses to run unless it is pointed at the bucket
@@ -23,8 +24,9 @@
  * This file is only the guard and the wiring.
  */
 import { closeDb, db } from "@my-tuums/db";
-import { user } from "@my-tuums/db/schema";
+import { postAttachment, user } from "@my-tuums/db/schema";
 import { reconcileMedia } from "../src/reconcile-media.ts";
+import { withPostMediaLifecycleLock } from "../src/post-media-lock.ts";
 import { createDestructiveStorage } from "@my-tuums/api/storage";
 
 const bucketArg = process.argv
@@ -58,17 +60,24 @@ const storage = createDestructiveStorage({
   region: process.env.S3_REGION,
 });
 
-const { listed, deleted } = await reconcileMedia({
-  storage,
-  readUserRows: () =>
-    db
-      .select({
-        image: user.image,
-        bannerImage: user.bannerImage,
-        imageOriginal: user.imageOriginal,
-        bannerImageOriginal: user.bannerImageOriginal,
-      })
-      .from(user),
+const { listed, deleted } = await withPostMediaLifecycleLock(db, async (tx) => {
+  // Post creates hold this transaction-scoped lock while their objects and
+  // attachment rows become durable. Keeping it through list/read/delete
+  // means reconciliation can never delete an object in that write window.
+  return reconcileMedia({
+    storage,
+    readUserRows: () =>
+      tx
+        .select({
+          image: user.image,
+          bannerImage: user.bannerImage,
+          imageOriginal: user.imageOriginal,
+          bannerImageOriginal: user.bannerImageOriginal,
+        })
+        .from(user),
+    readPostAttachmentRows: () =>
+      tx.select({ mediaPath: postAttachment.mediaPath }).from(postAttachment),
+  });
 });
 
 console.log(`done: listed ${listed}, deleted ${deleted}, kept ${listed - deleted}`);

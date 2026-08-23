@@ -66,7 +66,12 @@ export interface RequestHandlerDeps {
    * not need object storage, credentials or a network. The real implementation
    * is `createMediaResolver` in `@my-tuums/api`.
    */
-  resolveMediaUrl: (key: string) => Promise<{ url: string; cacheSeconds: number } | null>;
+  resolveMediaUrl: (
+    key: string,
+    viewerId?: string,
+  ) => Promise<{ url: string; cacheSeconds: number } | null>;
+  /** Resolves the authenticated media viewer for post-level authorization. */
+  getSessionUserId?: (req: IncomingMessage) => Promise<string | null>;
   /**
    * Serves the built web app, when this deployment bundles it.
    *
@@ -421,7 +426,14 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         }
 
         const key = mediaKeyOf(req.url);
-        const media = key ? await deps.resolveMediaUrl(key) : null;
+        const viewerId = deps.getSessionUserId
+          ? ((await deps.getSessionUserId(req)) ?? undefined)
+          : undefined;
+        const media = key
+          ? viewerId === undefined
+            ? await deps.resolveMediaUrl(key)
+            : await deps.resolveMediaUrl(key, viewerId)
+          : null;
 
         if (!media) {
           res.writeHead(404, { "Content-Type": "text/plain" });

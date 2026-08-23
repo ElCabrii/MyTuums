@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import { LinkedText } from "@/components/linked-text";
+import { insertMention, mentionAtCaret } from "@/lib/composer-mentions";
 import { renderWithProviders } from "@/test/render";
 
 describe("LinkedText", () => {
@@ -131,5 +132,21 @@ describe("LinkedText", () => {
     const external = screen.getByRole("link", { name: "https://example.com" });
     expect(external).toHaveAttribute("href", "https://example.com/");
     expect(external).toHaveAttribute("rel", "noopener noreferrer nofollow ugc");
+  });
+
+  it("round-trips an accepted composer mention as a profile link", async () => {
+    const draft = "Say hi @al after";
+    const token = mentionAtCaret(draft, 10);
+    expect(token).not.toBeNull();
+    const accepted = insertMention(draft, token!, "alice").value;
+
+    await renderWithProviders(
+      <article aria-label="Published content">
+        <LinkedText text={accepted} />
+      </article>,
+    );
+
+    expect(screen.getByRole("article", { name: "Published content" })).toHaveTextContent(accepted);
+    expect(screen.getByRole("link", { name: "@alice" })).toHaveAttribute("href", "/@alice");
   });
 });

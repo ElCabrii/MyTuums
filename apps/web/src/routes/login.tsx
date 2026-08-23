@@ -19,8 +19,10 @@ import { Input } from "@/components/ui/input";
 import { LogIn, Loader2, User, Lock } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 import { z } from "zod";
+import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/login")({
+  head: () => pageHead(m.auth_log_in()),
   component: LoginPage,
   /**
    * Two search params, and together they prove the rule CONTEXT.md states:

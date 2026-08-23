@@ -1,7 +1,6 @@
-import { useEffect } from "react";
-import { Link } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { Search, SearchX, UserCog, Users } from "lucide-react";
+import { Search, SearchX, UserCog, Users, X } from "lucide-react";
 import {
   debouncedTeamSearchAtom,
   resetRoleFormEffect,
@@ -46,6 +45,7 @@ import { PaginatedState } from "@/components/paginated-state";
 import { roleIcon, roleLabel } from "@/components/moderation/labels";
 import { canManageRole, roleRank } from "@my-tuums/api/roles";
 import { UserAvatar } from "@/components/user-avatar";
+import { ProfileLink } from "@/components/profile-link";
 import type { TeamMember } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
@@ -105,6 +105,7 @@ export function TeamView() {
 function AccountLookup() {
   const value = useAtomValue(teamSearchInputAtom);
   const setQuery = useSetAtom(setTeamSearchAtom);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   return (
     <Field>
@@ -112,13 +113,27 @@ function AccountLookup() {
       <div className="relative">
         <Search className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
         <Input
+          ref={inputRef}
           id="team-account-search"
           type="search"
-          className="w-full pl-9"
+          className="w-full pr-9 pl-9 [&::-webkit-search-cancel-button]:hidden"
           placeholder={m.moderation_team_search_placeholder()}
           value={value}
           onChange={(event) => setQuery(event.target.value)}
         />
+        {value !== "" && (
+          <button
+            type="button"
+            aria-label={m.search_clear()}
+            onClick={() => {
+              setQuery("");
+              inputRef.current?.focus();
+            }}
+            className="text-muted-foreground hover:bg-muted/60 hover:text-foreground absolute top-1/2 right-2 flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full transition-colors"
+          >
+            <X className="pointer-events-none h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
       <FieldDescription>{m.moderation_team_search_hint()}</FieldDescription>
     </Field>
@@ -212,14 +227,13 @@ function MemberRow({ member }: { member: TeamMember }) {
     <Item variant="outline">
       <ItemMedia>
         {memberHandle ? (
-          <Link
-            to="/@{$username}"
-            params={{ username: memberHandle }}
+          <ProfileLink
+            username={memberHandle}
             aria-label={displayName}
             className="focus-visible:ring-ring/50 rounded-full outline-none hover:opacity-80 focus-visible:ring-[3px]"
           >
             <UserAvatar user={member} alt={displayName} className="size-9" />
-          </Link>
+          </ProfileLink>
         ) : (
           <UserAvatar user={member} alt={displayName} className="size-9" />
         )}
@@ -227,13 +241,12 @@ function MemberRow({ member }: { member: TeamMember }) {
       <ItemContent className="min-w-0">
         <ItemTitle className="flex-wrap">
           {memberHandle ? (
-            <Link
-              to="/@{$username}"
-              params={{ username: memberHandle }}
+            <ProfileLink
+              username={memberHandle}
               className="focus-visible:ring-ring/50 min-w-0 truncate rounded-sm outline-none hover:underline focus-visible:ring-[3px]"
             >
               {displayName}
-            </Link>
+            </ProfileLink>
           ) : (
             <span className="truncate">{displayName}</span>
           )}

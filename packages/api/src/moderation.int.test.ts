@@ -8,6 +8,7 @@ import {
   follow,
   moderationAction,
   post,
+  postAttachment,
   postLike,
   report,
   user,
@@ -970,6 +971,16 @@ describe("case", () => {
     const reporter = await createTestUser();
     const mod = await moderatorUser();
     const postRow = await seedPostContent(author.id, "this is the raw body");
+    const attachmentPath = `/media/posts/${author.id}/${postRow.id}/${randomUUID()}.png`;
+    await anonContext.db.insert(postAttachment).values({
+      postId: postRow.id,
+      position: 0,
+      mediaPath: attachmentPath,
+      contentType: "image/png",
+      byteSize: 24,
+      width: 256,
+      height: 128,
+    });
     await call(
       appRouter.moderation.report,
       { targetType: "post", targetId: postRow.id, reason: "spam" },
@@ -993,6 +1004,9 @@ describe("case", () => {
     expect(result.target.removedAt).not.toBeNull();
     expect(result.target.removedBy).toBe(mod.id);
     expect(result.target.removedReason).toBe("rule break");
+    expect(result.target.attachments).toEqual([
+      expect.objectContaining({ position: 0, url: attachmentPath }),
+    ]);
     expect(result.target.author.username).toBe(author.session.user.username);
     expect(result.reports).toHaveLength(1);
     expect(result.reports[0].reporterId).toBe(reporter.id);
@@ -1291,6 +1305,16 @@ describe("removePost and restorePost", () => {
     const author = await createTestUser();
     const mod = await moderatorUser();
     const postRow = await seedPostContent(author.id, "round trip");
+    const attachmentPath = `/media/posts/${author.id}/${postRow.id}/${randomUUID()}.png`;
+    await anonContext.db.insert(postAttachment).values({
+      postId: postRow.id,
+      position: 0,
+      mediaPath: attachmentPath,
+      contentType: "image/png",
+      byteSize: 24,
+      width: 256,
+      height: 128,
+    });
     await call(
       appRouter.moderation.removePost,
       { postId: postRow.id, reason: "rule break" },
@@ -1322,6 +1346,9 @@ describe("removePost and restorePost", () => {
     const item = feed.items.find((p) => p.id === postRow.id);
     expect(item?.removed).toBe(false);
     expect(item?.content).toBe("round trip");
+    expect(item?.attachments).toEqual([
+      expect.objectContaining({ position: 0, url: attachmentPath }),
+    ]);
   });
 
   it("removing twice is refused, restoring twice is a silent no-op", async () => {

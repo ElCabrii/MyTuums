@@ -13,6 +13,7 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     content: "hello",
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     parentId: null,
+    parent: null,
     author: {
       id: "author-1",
       name: "Author",
@@ -28,6 +29,7 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     removed: false,
     deleted: false,
     removedReason: null,
+    attachments: [],
     ...overrides,
   };
 }

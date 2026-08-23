@@ -3,6 +3,7 @@ import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
+import { POST_PAGE_SIZE } from "@my-tuums/api/constants";
 
 const fakeClient = {
   user: {
@@ -435,10 +436,11 @@ describe("toggleFollowAtomFamily", () => {
   // Following someone changes which posts belong in the Following feed, and
   // there's no way to synthesise that client-side — so unlike every other
   // cache this module touches, `post.list` has to actually be refetched.
-  it("resets the post.list queries once the mutation settles", async () => {
+  it("invalidates exactly the Following feed without resetting its rendered rows", async () => {
     const { store, queryClient } = freshStoreWithTarget(
       makeProfile({ id: "target-1", username: "target", viewerIsFollowing: false }),
     );
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     const resetSpy = vi.spyOn(queryClient, "resetQueries");
     fakeClient.user.follow.mockResolvedValue({
       userId: "target-1",
@@ -449,26 +451,32 @@ describe("toggleFollowAtomFamily", () => {
     store.set(toggleFollowAtomFamily("target-1"));
 
     await waitFor(() => {
-      expect(resetSpy).toHaveBeenCalledWith({ queryKey: orpc.post.list.key() });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: orpc.post.list.key({
+          input: { limit: POST_PAGE_SIZE, feed: "following" },
+        }),
+        exact: true,
+      });
     });
+    expect(resetSpy).not.toHaveBeenCalled();
   });
 
-  it("does not reset the post.list queries when the mutation fails", async () => {
+  it("does not invalidate the post.list queries when the mutation fails", async () => {
     const { store, queryClient } = freshStoreWithTarget(
       makeProfile({ id: "target-1", username: "target", viewerIsFollowing: false }),
     );
-    const resetSpy = vi.spyOn(queryClient, "resetQueries");
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     fakeClient.user.follow.mockRejectedValue(new Error("network down"));
 
     store.set(toggleFollowAtomFamily("target-1"));
 
-    // The rollback runs, but the feed membership never changed, so no reset.
+    // The rollback runs, but the feed membership never changed, so no refresh.
     await waitFor(() => {
       expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(
         false,
       );
     });
-    expect(resetSpy).not.toHaveBeenCalled();
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 });
 

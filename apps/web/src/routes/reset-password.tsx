@@ -23,8 +23,10 @@ import { Input } from "@/components/ui/input";
 import { AlertCircle, CheckCircle2, KeyRound, Loader2, Lock } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 import { z } from "zod";
+import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/reset-password")({
+  head: () => pageHead(m.auth_reset_title()),
   component: ResetPasswordPage,
   /**
    * Two params, and both arrive from *outside*: BetterAuth's own server

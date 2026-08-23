@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { reconcileMedia, type MediaImageRow } from "./reconcile-media.js";
+import { reconcileMedia, type MediaAttachmentRow, type MediaImageRow } from "./reconcile-media.js";
 
 /** A realistic key: `isSafeObjectKey` requires the slug and grouped-uuid shape. */
 const LIVE_KEY = "avatars/alicemedia/11111111-1111-4111-8111-111111111111.webp";
 const ORPHAN_KEY = "avatars/bobmedia/22222222-2222-4222-8222-222222222222.webp";
 const FRESH_KEY = "avatars/carolmedia/33333333-3333-4333-8333-333333333333.webp";
+const POST_LIVE_KEY =
+  "posts/alice/44444444-4444-4444-8444-444444444444/55555555-5555-4555-8555-555555555555.webp";
+const POST_ORPHAN_KEY =
+  "posts/bob/66666666-6666-4666-8666-666666666666/77777777-7777-4777-8777-777777777777.png";
 
 /**
  * A bucket that exists only in memory, plus the destructive-storage surface
@@ -84,5 +88,34 @@ describe("reconcileMedia", () => {
     expect(deleted).toEqual([ORPHAN_KEY]);
     expect(bucket.has(FRESH_KEY)).toBe(true);
     expect(bucket.has(LIVE_KEY)).toBe(true);
+  });
+
+  it("keeps referenced post attachments and reaps failed/account-deleted objects", async () => {
+    const { bucket, deleted, storage } = fakeBucket([POST_LIVE_KEY, POST_ORPHAN_KEY]);
+    const attachments: MediaAttachmentRow[] = [{ mediaPath: `/media/${POST_LIVE_KEY}` }];
+
+    const result = await reconcileMedia({
+      storage,
+      readUserRows: () => Promise.resolve([]),
+      readPostAttachmentRows: () => Promise.resolve(attachments),
+    });
+
+    expect(deleted).toEqual([POST_ORPHAN_KEY]);
+    expect(bucket.has(POST_LIVE_KEY)).toBe(true);
+    expect(bucket.has(POST_ORPHAN_KEY)).toBe(false);
+    expect(result).toEqual({ rows: 0, referenced: 1, listed: 2, deleted: 1 });
+  });
+
+  it("reaps post objects after a hard account cascade removes their rows", async () => {
+    const { bucket, deleted, storage } = fakeBucket([POST_ORPHAN_KEY]);
+
+    await reconcileMedia({
+      storage,
+      readUserRows: () => Promise.resolve([]),
+      readPostAttachmentRows: () => Promise.resolve([]),
+    });
+
+    expect(deleted).toEqual([POST_ORPHAN_KEY]);
+    expect(bucket.has(POST_ORPHAN_KEY)).toBe(false);
   });
 });

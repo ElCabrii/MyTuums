@@ -1,8 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { SearchPage } from "@/components/search-page";
+import { pageHead } from "@/lib/document-head";
+import { m } from "@/paraglide/messages.js";
 
 export const Route = createFileRoute("/search")({
+  head: () => pageHead(m.search_input_aria()),
   component: SearchPage,
   /**
    * `q` arrives from *outside* — the header's search box navigates here with

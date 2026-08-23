@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { atomFamily } from "jotai-family";
 import { atomWithInfiniteQuery, atomWithQuery } from "jotai-tanstack-query";
-import { orpc, retryUnlessClientError } from "@/lib/orpc";
+import { orpc, retryUnlessClientError, type SearchTypeahead } from "@/lib/orpc";
 import { searchPostsQueryOptions, searchUsersQueryOptions } from "@/lib/query-definitions";
 
 /** How long a keystroke may sit before its query fires, in milliseconds. */
@@ -45,27 +45,45 @@ export const resetSearchAtomsAtom = atom(null, (_get, set) => {
   set(debouncedSearchQueryAtom, "");
 });
 
-/**
- * The typeahead query for the current debounced input.
- *
- * A single atom, not a family: the input is one string, so there is nothing
- * to key a family on — `atomWithQuery` re-runs and rebuilds the query key
- * whenever the debounced value changes on its own.
- *
- * `enabled` gates the empty query rather than letting it hit the server: the
- * procedure rejects an empty `q` with BAD_REQUEST, and the box is empty on
- * first render. `retry` is spread after `queryOptions` for the same reason as
- * `profileAtomFamily` — oRPC's trailing spread of `optionsIn` would otherwise
- * clobber it back to its default.
- */
-export const typeaheadAtom = atomWithQuery((get) => {
-  const q = get(debouncedSearchQueryAtom);
+/** The query options shared by the header and composer mention lookups. */
+export function typeaheadQueryOptions(q: string) {
+  const normalized = q.trim();
+  if (!normalized) {
+    // Keep the disabled atom safe for small component tests and signed-out
+    // chrome that do not install the full search client. Calling into oRPC to
+    // build an unused query would still dereference `search.typeahead` before
+    // TanStack Query has a chance to honour `enabled: false`.
+    return {
+      queryKey: ["search.typeahead", "disabled"],
+      queryFn: (): Promise<SearchTypeahead> => Promise.resolve({ users: [], posts: [] }),
+      enabled: false,
+      retry: false,
+    };
+  }
+
   return {
-    ...orpc.search.typeahead.queryOptions({ input: { q } }),
-    enabled: q.trim().length > 0,
+    ...orpc.search.typeahead.queryOptions({ input: { q: normalized } }),
+    enabled: normalized.length > 0,
     retry: retryUnlessClientError,
   };
-});
+}
+
+/**
+ * The header's typeahead query for its debounced input. The input is one
+ * string, so this surface remains a single atom for the existing SearchBox.
+ */
+export const typeaheadAtom = atomWithQuery((get) =>
+  typeaheadQueryOptions(get(debouncedSearchQueryAtom)),
+);
+
+/**
+ * Typeahead queries keyed by a composer token. Unlike the header's atom, this
+ * family lets the home and reply composers query independently without
+ * sharing their draft text with the global search box.
+ */
+export const typeaheadQueryAtomFamily = atomFamily((q: string) =>
+  atomWithQuery(() => typeaheadQueryOptions(q)),
+);
 
 /**
  * One infinite-query atom per search query string, shared by every component
@@ -112,6 +130,7 @@ export const searchPostsAtom = (q: string) => searchPostsFamily(q.trim());
 export function clearSearchFamilies(): void {
   for (const key of searchUsersFamily.getParams()) searchUsersFamily.remove(key);
   for (const key of searchPostsFamily.getParams()) searchPostsFamily.remove(key);
+  for (const key of typeaheadQueryAtomFamily.getParams()) typeaheadQueryAtomFamily.remove(key);
 }
 
 /** Whether the typeahead dropdown is open, app-wide — at most one SearchBox exists. */

@@ -399,4 +399,26 @@ describe("TeamView — the account lookup", () => {
     expect(await screen.findByText("Mod One")).toBeInTheDocument();
     expect(screen.queryByText("Zoe Plain")).not.toBeInTheDocument();
   });
+
+  it("uses a themed clear button for a populated lookup", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.team([
+      makeTeamMember({ id: "mod-1", name: "Mod One", username: "mod1", role: "moderator" }),
+    ]);
+    const store = createStore();
+    store.set(teamSearchInputAtom, "zoe");
+    store.set(debouncedTeamSearchAtom, "zoe");
+    await renderWithProviders(<TeamView />, {
+      store,
+      queryClient,
+      signedInAs: { id: "admin-1", role: "admin" },
+    });
+
+    const user = userEvent.setup();
+    const clear = await screen.findByRole("button", { name: m.search_clear() });
+    await user.click(clear);
+
+    expect(screen.getByLabelText(m.moderation_team_search_label())).toHaveValue("");
+    expect(screen.getByText("Mod One")).toBeInTheDocument();
+  });
 });

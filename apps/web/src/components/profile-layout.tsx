@@ -1,4 +1,13 @@
+import { useState } from "react";
 import { getRouteApi, Link, Outlet } from "@tanstack/react-router";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { useAtomValue, useSetAtom } from "jotai";
 import { ORPCError } from "@orpc/client";
 import { authPendingAtom } from "@/atoms/auth";
@@ -21,6 +30,7 @@ import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
 import { LinkedText } from "@/components/linked-text";
 import { useSignOut } from "@/hooks/use-sign-out";
+import { useDocumentHead } from "@/hooks/use-document-head";
 import {
   UserX,
   Mail,
@@ -35,6 +45,7 @@ import {
 } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 import { getLocale } from "@/paraglide/runtime.js";
+import { profilePageDescription } from "@/lib/document-head";
 
 const routeApi = getRouteApi("/@{$username}");
 
@@ -53,8 +64,11 @@ export function ProfileLayout() {
   const setBlockDialog = useSetAtom(blockDialogAtom);
   const isStaff = useAtomValue(isStaffAtom);
   const unbanUser = useAtomValue(unbanUserAtom);
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
 
   const profileQuery = useAtomValue(profileAtomFamily(username));
+  const documentHandle = handleOf(profileQuery.data) || username;
+  useDocumentHead(`@${documentHandle}`, profilePageDescription(profileQuery.data?.bio));
 
   if (profileQuery.isPending) {
     return (
@@ -91,6 +105,7 @@ export function ProfileLayout() {
   const isOwnProfile = viewer?.id === profile.id;
   const handle = handleOf(profile) || username;
   const displayName = profile.name || handle;
+  const hasViewableAvatar = Boolean(profile.image && failedAvatarUrl !== profile.image);
 
   // The `suspended` flag is the server's contract for a banned profile (see
   // `user.byUsername`): the profile resolves instead of 404ing, and the page
@@ -154,12 +169,44 @@ export function ProfileLayout() {
       <div className="mx-auto max-w-[1500px] px-4 sm:px-8">
         {/* Avatar & Action buttons */}
         <div className="relative -mt-16 mb-4 flex items-end justify-between sm:-mt-20">
-          <UserAvatar
-            user={profile}
-            alt={displayName}
-            className="border-background ring-primary/20 bg-background h-28 w-28 border-4 shadow-xl ring-2 sm:h-36 sm:w-36"
-            fallbackClassName="text-2xl sm:text-3xl font-bold bg-primary text-primary-foreground"
-          />
+          {hasViewableAvatar && profile.image ? (
+            <Dialog>
+              <DialogTrigger
+                aria-label={m.profile_avatar_view({ name: displayName })}
+                className="focus-visible:ring-ring/60 h-auto w-auto cursor-zoom-in rounded-full border-0 bg-transparent p-0 outline-none focus-visible:ring-2"
+              >
+                <UserAvatar
+                  user={profile}
+                  alt={m.profile_avatar_alt({ name: displayName })}
+                  className="border-background ring-primary/20 bg-background h-28 w-28 border-4 shadow-xl ring-2 sm:h-36 sm:w-36"
+                  fallbackClassName="text-2xl sm:text-3xl font-bold bg-primary text-primary-foreground"
+                  onImageLoadingStatusChange={(status) => {
+                    if (status === "error") setFailedAvatarUrl(profile.image);
+                  }}
+                />
+              </DialogTrigger>
+              <DialogContent className="max-w-4xl overflow-hidden border-none bg-transparent p-2 shadow-none sm:p-4">
+                <DialogHeader className="sr-only">
+                  <DialogTitle>{m.profile_avatar_title({ name: displayName })}</DialogTitle>
+                  <DialogDescription>
+                    {m.profile_avatar_view({ name: displayName })}
+                  </DialogDescription>
+                </DialogHeader>
+                <img
+                  src={profile.image}
+                  alt={m.profile_avatar_alt({ name: displayName })}
+                  className="max-h-[80vh] w-full rounded-xl object-contain"
+                />
+              </DialogContent>
+            </Dialog>
+          ) : (
+            <UserAvatar
+              user={{ name: profile.name, image: null }}
+              alt={displayName}
+              className="border-background ring-primary/20 bg-background h-28 w-28 border-4 shadow-xl ring-2 sm:h-36 sm:w-36"
+              fallbackClassName="text-2xl sm:text-3xl font-bold bg-primary text-primary-foreground"
+            />
+          )}
 
           {isOwnProfile ? (
             <div className="mb-2 flex gap-2.5">

@@ -522,7 +522,11 @@ async function purgeUploadedImages(): Promise<void> {
       region: process.env.S3_REGION,
     });
 
-    await Promise.all([storage.removeByPrefix("avatars/"), storage.removeByPrefix("banners/")]);
+    await Promise.all([
+      storage.removeByPrefix("avatars/"),
+      storage.removeByPrefix("banners/"),
+      storage.removeByPrefix("posts/"),
+    ]);
   } catch (error) {
     console.warn("Could not purge uploaded test images from the bucket:", error);
   }

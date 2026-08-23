@@ -3,7 +3,9 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Heart, MessageCircle, MoreHorizontal } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
+import { ProfileLink } from "@/components/profile-link";
 import { LinkedText } from "@/components/linked-text";
+import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import { deletePostDialogAtom } from "@/atoms/post-delete";
@@ -43,7 +45,16 @@ type PostCardVariant = "feed" | "ancestor" | "focused";
  * like/reply actions — in the `feed`, `ancestor` or `focused` variants (see
  * `PostCardVariant`).
  */
-export function PostCard({ post, variant = "feed" }: { post: Post; variant?: PostCardVariant }) {
+export function PostCard({
+  post,
+  variant = "feed",
+  showParentContext = true,
+}: {
+  post: Post;
+  variant?: PostCardVariant;
+  /** Whether to render the immediate-parent preview; feed lists choose their surface explicitly. */
+  showParentContext?: boolean;
+}) {
   const navigate = useNavigate();
   const isSignedIn = useAtomValue(isSignedInAtom);
   // `viewerIdAtom`, not `viewerAtom`: the card only needs "is this my post?",
@@ -56,6 +67,9 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
   const setDeleteDialog = useSetAtom(deletePostDialogAtom);
   const authorHandle = handleOf(post.author);
   const authorName = post.author.name || authorHandle || m.user_unknown();
+  const parentAuthorName = post.parent
+    ? post.parent.author.name || handleOf(post.parent.author) || m.user_unknown()
+    : null;
   const isOwnPost = viewerId === post.author.id;
   const isFocused = variant === "focused";
   // Both tombstones hide the content and take the actions away with it — the
@@ -120,29 +134,27 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
     <div className={containerClass} onClick={handleCardClick}>
       <div className="flex gap-3">
         {authorHandle ? (
-          <Link
-            to="/@{$username}"
-            params={{ username: authorHandle }}
+          <ProfileLink
+            username={authorHandle}
             className="shrink-0 rounded-full transition-opacity hover:opacity-90"
             onClick={(e) => e.stopPropagation()}
           >
             {authorAvatar}
-          </Link>
+          </ProfileLink>
         ) : (
           authorAvatar
         )}
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex flex-wrap items-center gap-1.5">
             {authorHandle ? (
-              <Link
-                to="/@{$username}"
-                params={{ username: authorHandle }}
+              <ProfileLink
+                username={authorHandle}
                 className="flex items-center gap-1.5 hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
                 <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
                 <span className="text-muted-foreground text-xs">@{authorHandle}</span>
-              </Link>
+              </ProfileLink>
             ) : (
               <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
             )}
@@ -231,6 +243,31 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
             )}
           </div>
 
+          {variant === "feed" && showParentContext && post.parentId && (
+            <Link
+              to="/post/$postId"
+              params={{ postId: post.parentId }}
+              className="border-border/60 bg-muted/20 hover:border-primary/40 mb-3 block rounded-lg border px-3 py-2 text-sm transition-colors"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="text-muted-foreground mb-1 text-xs font-medium">
+                {post.parent
+                  ? m.reply_parent_label({ name: parentAuthorName ?? m.user_unknown() })
+                  : m.reply_parent_unavailable()}
+              </p>
+              {post.parent?.removed ? (
+                <p className="text-muted-foreground text-xs">{m.moderation_post_removed_stub()}</p>
+              ) : post.parent?.deleted ? (
+                <p className="text-muted-foreground text-xs">{m.post_deleted_stub()}</p>
+              ) : post.parent ? (
+                <p className="text-foreground/80 line-clamp-2 text-xs leading-relaxed">
+                  {post.parent.excerpt}
+                  {post.parent.truncated && "…"}
+                </p>
+              ) : null}
+            </Link>
+          )}
+
           {post.removed ? (
             /* The removal stub. `removedReason` is author-only (the server
                 nulls it for everyone else), so its presence is also what gates
@@ -261,15 +298,18 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
               <p className="text-muted-foreground text-sm">{m.post_deleted_stub()}</p>
             </div>
           ) : (
-            <p
-              className={`text-foreground/90 mb-3 leading-relaxed break-words whitespace-pre-line ${
-                isFocused ? "text-base" : "text-sm"
-              }`}
-            >
-              {/* Null only for the two tombstones, which the stub branches
-                  above own; here the server guarantees content. */}
-              <LinkedText text={post.content ?? ""} />
-            </p>
+            <>
+              <p
+                className={`text-foreground/90 mb-3 leading-relaxed break-words whitespace-pre-line ${
+                  isFocused ? "text-base" : "text-sm"
+                }`}
+              >
+                {/* Null only for the two tombstones, which the stub branches
+                    above own; here the server guarantees content. */}
+                <LinkedText text={post.content ?? ""} />
+              </p>
+              <PostAttachmentGrid attachments={post.attachments} />
+            </>
           )}
 
           {!isGone && (

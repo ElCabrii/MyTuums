@@ -128,6 +128,9 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   loaded script makes its own requests (credential fetch, FedCM
  *   `.well-known` discovery) back to Google from the page's origin context,
  *   so it needs the same host as `script-src`.
+ * - `worker-src 'self'`: the production web build emits one same-origin
+ *   service worker for the offline app shell. Keeping this explicit prevents
+ *   a future widening of `default-src` from silently widening worker code.
  * - `frame-src https://accounts.google.com`: One Tap's prompt UI itself
  *   renders in a Google-hosted iframe the loaded script creates. Nothing
  *   else in this app frames anything.
@@ -159,6 +162,7 @@ const CONTENT_SECURITY_POLICY = [
   `script-src 'self' https://accounts.google.com 'unsafe-hashes' '${STYLESHEET_SWAP_HANDLER_HASH}'`,
   "style-src 'self' 'unsafe-inline' https://accounts.google.com",
   "connect-src 'self' https://accounts.google.com",
+  "worker-src 'self'",
   "frame-src https://accounts.google.com",
   "form-action 'self'",
   "frame-ancestors 'none'",

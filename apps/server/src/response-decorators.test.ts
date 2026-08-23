@@ -109,6 +109,7 @@ function expectContentSecurityPolicy(headers: RawResponse["headers"]): void {
   expect(directives).toContain("font-src 'self'");
   expect(directives).toContain("style-src 'self' 'unsafe-inline' https://accounts.google.com");
   expect(directives).toContain("connect-src 'self' https://accounts.google.com");
+  expect(directives).toContain("worker-src 'self'");
   expect(directives).toContain("frame-src https://accounts.google.com");
   expect(directives).toContain("form-action 'self'");
   expect(directives).toContain("frame-ancestors 'none'");

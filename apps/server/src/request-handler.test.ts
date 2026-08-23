@@ -510,6 +510,32 @@ describe("createRequestHandler", () => {
     });
   });
 
+  it("passes the authenticated viewer to post-media authorization", async () => {
+    const { res, calls } = resStub();
+    const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
+    const getSessionUserId = vi.fn().mockResolvedValue("viewer-1");
+    const session = signedIn();
+    const handle = createRequestHandler(
+      deps({
+        resolveMediaUrl,
+        getSessionUserId,
+        hasValidSession: session.hasValidSession,
+      }),
+    );
+
+    await handle(
+      reqStub("/media/posts/author-1/post-1/attachment-1.png", "GET", session.headers),
+      res,
+    );
+
+    expect(getSessionUserId).toHaveBeenCalledOnce();
+    expect(resolveMediaUrl).toHaveBeenCalledWith(
+      "posts/author-1/post-1/attachment-1.png",
+      "viewer-1",
+    );
+    expect(calls.statusCode).toBe(302);
+  });
+
   it("strips the query string before resolving a media key", async () => {
     const { res } = resStub();
     const resolveMediaUrl = vi

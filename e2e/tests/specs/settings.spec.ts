@@ -1,6 +1,6 @@
-import { deflateSync } from "node:zlib";
 import { expect, test } from "../../support/fixtures";
 import { emailVerificationLinkFor } from "../../support/db";
+import { solidPng } from "../../support/image";
 import { E2E } from "../../playwright.config";
 import { uniqueUser } from "../../support/users";
 
@@ -106,59 +106,6 @@ const PNG_1X1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64",
 );
-
-function crc32(bytes: Buffer): number {
-  let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function pngChunk(type: string, data: Buffer): Buffer {
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(data.length);
-  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(body));
-  return Buffer.concat([length, body, crc]);
-}
-
-/**
- * A genuine PNG of arbitrary size, built here rather than committed as a
- * fixture file so the dimensions that matter are visible at the call site.
- *
- * A gradient rather than a flat colour: a flat image compresses to almost
- * nothing and would not exercise the byte caps at a realistic ratio.
- */
-function solidPng(width: number, height: number): Buffer {
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // colour type 2: truecolour RGB
-
-  const stride = width * 3;
-  const raw = Buffer.alloc(height * (stride + 1));
-  for (let y = 0; y < height; y++) {
-    const row = y * (stride + 1);
-    raw[row] = 0; // filter: none
-    for (let x = 0; x < width; x++) {
-      const pixel = row + 1 + x * 3;
-      raw[pixel] = Math.floor((x * 255) / width);
-      raw[pixel + 1] = Math.floor((y * 255) / height);
-      raw[pixel + 2] = 0x80;
-    }
-  }
-
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    pngChunk("IHDR", ihdr),
-    pngChunk("IDAT", deflateSync(raw)),
-    pngChunk("IEND", Buffer.alloc(0)),
-  ]);
-}
 
 /**
  * These hit the real Storage Bucket — there is no fake in the browser path.

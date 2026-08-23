@@ -20,12 +20,19 @@ export type { PostFeedParams } from "@/lib/query-definitions";
  * principle contain "|". It is therefore kept LAST and `decode` consumes only
  * the three leading delimiters, treating everything after them as the id —
  * so the round trip stays total instead of silently truncating one. The three
- * fields ahead of it are all constrained (an enum, a flag, a uuid) and cannot
+ * fields ahead of it are all constrained (an enum, a mode flag, a uuid) and cannot
  * contain a delimiter.
  */
 /** Encodes feed params into the family key string — layout described above. */
 export const encode = (p: PostFeedParams): string =>
-  `${p.feed}|${p.includeReplies ? "r" : ""}|${p.parentId ?? ""}|${p.authorId ?? ""}`;
+  `${p.feed}|${encodeKind(p)}|${p.parentId ?? ""}|${p.authorId ?? ""}`;
+
+function encodeKind(p: PostFeedParams): string {
+  if (p.kind === "posts") return "p";
+  if (p.kind === "replies") return "q";
+  if (p.kind === "both") return "a";
+  return p.includeReplies ? "r" : "";
+}
 
 /** Decodes a family key string back into feed params — the inverse of {@link encode}. */
 export const decode = (key: string): PostFeedParams => {
@@ -40,6 +47,9 @@ export const decode = (key: string): PostFeedParams => {
   if (authorId) params.authorId = authorId;
   if (parentId) params.parentId = parentId;
   if (replies === "r") params.includeReplies = true;
+  if (replies === "p") params.kind = "posts";
+  if (replies === "q") params.kind = "replies";
+  if (replies === "a") params.kind = "both";
   return params;
 };
 

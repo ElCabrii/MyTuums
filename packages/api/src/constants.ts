@@ -12,6 +12,19 @@
 /** Maximum length of a post, in characters, after trimming. */
 export const POST_MAX_LENGTH = 500;
 
+/**
+ * Initial post-media scope. The same limits apply to top-level posts and
+ * replies because both are rows in `post` and share one composer contract.
+ * Attachments are stored as the validated raster bytes the user selected; no
+ * client-supplied URL or data URI is ever persisted.
+ */
+export const POST_ATTACHMENT_MAX_COUNT = 4;
+export const POST_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+export const POST_ATTACHMENT_MAX_TOTAL_BYTES = 12 * 1024 * 1024;
+export const POST_ATTACHMENT_MAX_WIDTH = 4096;
+export const POST_ATTACHMENT_MAX_HEIGHT = 4096;
+export const POST_ATTACHMENT_MAX_MEGAPIXELS = 50;
+
 /** Default and maximum page sizes for `post.list`. */
 export const POST_PAGE_SIZE = 20;
 export const POST_PAGE_SIZE_MAX = 50;
@@ -211,6 +224,7 @@ export const MAX_IMAGE_MEGAPIXELS = 50;
  */
 export const RPC_MAX_BODY_BYTES =
   Math.max(
+    POST_ATTACHMENT_MAX_TOTAL_BYTES,
     ...Object.values(IMAGE_LIMITS).map((slot) => slot.maxOriginalBytes + slot.maxDisplayBytes),
   ) +
   1024 * 1024;

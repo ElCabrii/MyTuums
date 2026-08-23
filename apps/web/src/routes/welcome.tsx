@@ -36,8 +36,10 @@ import { Input } from "@/components/ui/input";
 import { AtSign, Calendar, Check, Loader2, ShieldCheck } from "lucide-react";
 import QRCode from "react-qr-code";
 import { m } from "@/paraglide/messages.js";
+import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/welcome")({
+  head: () => pageHead(m.welcome_title()),
   component: WelcomePage,
 });
 

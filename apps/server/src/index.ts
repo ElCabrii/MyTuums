@@ -6,11 +6,17 @@ import { IncomingMessage, createServer } from "node:http";
 import { BodyLimitPlugin, RPCHandler } from "@orpc/server/node";
 import { CORSPlugin, SimpleCsrfProtectionHandlerPlugin } from "@orpc/server/plugins";
 import { ORPCError, onError } from "@orpc/server";
-import { appRouter, createContext, createMediaResolver, defaultStorage } from "@my-tuums/api";
+import {
+  appRouter,
+  canViewPostMedia,
+  createContext,
+  createMediaResolver,
+  defaultStorage,
+} from "@my-tuums/api";
 import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "@my-tuums/auth";
-import { closeDb, pingDb } from "@my-tuums/db";
+import { closeDb, db, pingDb } from "@my-tuums/db";
 import { createErrorObserver, normalizeObservedError } from "./error-observation.js";
 import { attachAccessLog, responseHeaderText } from "./observability.js";
 import { flushSentry, initSentry, reportError } from "./sentry.js";
@@ -115,7 +121,11 @@ const handleRequest = createRequestHandler({
 
     return handler.handle(req, nodeResponse(res), { prefix: "/rpc", context });
   },
-  resolveMediaUrl: createMediaResolver(defaultStorage),
+  resolveMediaUrl: createMediaResolver(defaultStorage, (key, viewerId) =>
+    canViewPostMedia(db, key, viewerId),
+  ),
+  getSessionUserId: async (req) =>
+    (await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }))?.user.id ?? null,
   // Only when this deployment bundles the built web app. Unset in dev, where
   // Vite serves it and proxies /rpc, /api/auth and /media back here — see
   // ./static-files.ts for why one origin is a requirement rather than a

@@ -37,7 +37,7 @@ export function FooterLocaleMenu() {
             size="sm"
             aria-label={`${m.locale_label()}: ${labelForLocale(currentLocale)}`}
             title={m.locale_label()}
-            className="gap-1.5"
+            className="min-w-32 justify-center gap-1.5"
           />
         }
       >

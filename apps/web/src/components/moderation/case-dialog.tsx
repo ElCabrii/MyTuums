@@ -34,6 +34,7 @@ import {
 } from "@/atoms/moderation";
 import { isStaffAtom } from "@/atoms/session";
 import { LinkedText } from "@/components/linked-text";
+import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -268,6 +269,7 @@ function TargetPostCard({
         <p className="text-sm break-words whitespace-pre-line">
           <LinkedText text={target.content} />
         </p>
+        <PostAttachmentGrid attachments={target.attachments} />
         {target.removedAt && (
           <Alert variant="destructive">
             <Trash2 />

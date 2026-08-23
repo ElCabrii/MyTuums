@@ -1,12 +1,12 @@
 import { Fragment } from "react";
 import type { ReactNode } from "react";
-import { Link } from "@tanstack/react-router";
 import {
   isAllowedUsernameCharset,
   normalizeUsername,
   USERNAME_MAX_LENGTH,
   USERNAME_MIN_LENGTH,
 } from "@my-tuums/auth/rules";
+import { ProfileLink } from "@/components/profile-link";
 
 type TextSegment = {
   kind: "text";
@@ -235,13 +235,9 @@ function renderSegment(segment: Segment): ReactNode {
   switch (segment.kind) {
     case "mention":
       return (
-        <Link
-          to="/@{$username}"
-          params={{ username: segment.username }}
-          className="text-primary hover:underline"
-        >
+        <ProfileLink username={segment.username} className="text-primary hover:underline">
           {segment.label}
-        </Link>
+        </ProfileLink>
       );
     case "url":
       // The label is what the author typed and the `href` is what the parser

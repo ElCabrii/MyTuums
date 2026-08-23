@@ -1,21 +1,27 @@
 /**
- * The reconcile-media core: list the media bucket, read the `user` rows,
- * delete the objects no row references.
+ * The reconcile-media core: list the media bucket, read the profile and post
+ * media rows, delete the objects no row references.
  *
  * Lives in `src/` rather than inside `scripts/reconcile-media.ts` so the
  * ordering below is unit-tested (`src/reconcile-media.test.ts`) — the script
  * is the thin guarded wrapper that arms this against the bucket named on the
  * command line.
  *
- * LIST BEFORE READING THE ROWS, and delete only after both snapshots exist —
- * the order is load-bearing (issue #52). The delete set is `listed \
+ * The maintenance command holds the shared post-media advisory transaction
+ * lock while this pass runs, so attachment writes cannot land between the
+ * object listing and the attachment-row read. LIST BEFORE READING THE ROWS,
+ * and delete only after both snapshots exist — the order remains load-bearing
+ * for the existing profile-media lifecycle (issue #52). The delete set is
+ * `listed \
  * referenced`, so a concurrent upload survives exactly when the listing ran
  * first:
  *
  * - listed first: an object uploaded after the listing is not in `keys`, so
  *   it cannot be a deletion candidate; one uploaded before the listing but
  *   after the row read IS in `keys` AND in `referenced` (the row read sees
- *   the committed row), so it is kept either way.
+ *   the committed row), so it is kept either way. Post attachment writers
+ *   cannot occupy that window because the command and writer share the
+ *   advisory lock.
  * - rows first: an object uploaded between the row read and the listing is
  *   in `keys`, missing from `referenced` — a perfect orphan — and is deleted
  *   while the row that points at it is live. Broken avatar, no error
@@ -30,7 +36,7 @@
 import type { DestructiveStorage } from "./storage.js";
 import { objectKeyFromMediaPath } from "./image.js";
 
-/** The four image slots the reconcile script scans. */
+/** The four profile image slots the reconcile script scans. */
 export interface MediaImageRow {
   image: string | null;
   bannerImage: string | null;
@@ -38,9 +44,15 @@ export interface MediaImageRow {
   bannerImageOriginal: string | null;
 }
 
+/** One authoritative post attachment path. */
+export interface MediaAttachmentRow {
+  mediaPath: string | null;
+}
+
 export interface ReconcileMediaDeps {
   storage: Pick<DestructiveStorage, "listByPrefix" | "removeMany">;
   readUserRows: () => Promise<MediaImageRow[]>;
+  readPostAttachmentRows?: () => Promise<MediaAttachmentRow[]>;
 }
 
 export interface ReconcileMediaResult {
@@ -50,11 +62,12 @@ export interface ReconcileMediaResult {
   deleted: number;
 }
 
-const PREFIXES = ["avatars/", "banners/"] as const;
+const PREFIXES = ["avatars/", "banners/", "posts/"] as const;
 
 export async function reconcileMedia({
   storage,
   readUserRows,
+  readPostAttachmentRows = () => Promise.resolve([]),
 }: ReconcileMediaDeps): Promise<ReconcileMediaResult> {
   // Order matters: list the bucket BEFORE reading the rows. Anything not
   // listed here is not a deletion candidate, no matter what the rows say a
@@ -71,6 +84,7 @@ export async function reconcileMedia({
   // lands between the two steps is in `referenced` and kept. Reversing the
   // two deletes an object whose row points at it (issue #52).
   const rows = await readUserRows();
+  const attachmentRows = await readPostAttachmentRows();
 
   const referenced = new Set<string>();
   for (const row of rows) {
@@ -79,8 +93,14 @@ export async function reconcileMedia({
       if (key) referenced.add(key);
     }
   }
+  for (const row of attachmentRows) {
+    const key = objectKeyFromMediaPath(row.mediaPath);
+    if (key) referenced.add(key);
+  }
 
-  console.log(`scanning ${rows.length} user rows; ${referenced.size} referenced objects`);
+  console.log(
+    `scanning ${rows.length} user rows and ${attachmentRows.length} post attachments; ${referenced.size} referenced objects`,
+  );
 
   let deleted = 0;
   for (const prefix of PREFIXES) {

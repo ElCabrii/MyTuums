@@ -76,6 +76,12 @@ In production there is no proxy and no second origin. The Docker image sets
 `WEB_DIST=/app/apps/web/dist` and the same Node process serves the SPA, the
 auth endpoints, the RPC API and media redirects.
 
+The Vite build also emits `/service-worker.js`, whose generated precache list
+contains the hashed app-shell assets. The worker never caches RPC, auth, or
+media responses; it only supplies the cached SPA shell when a document
+navigation is offline. The worker and manifest are root files with `no-cache`
+headers so browser update checks cannot be pinned to an old release.
+
 This is a requirement, not a packaging preference: `apps/web/src/lib/orpc.ts`
 resolves `/rpc` against `window.location.origin`, and uploaded images are
 stored as relative `/media/<key>` paths. Split the two across origins and RPC

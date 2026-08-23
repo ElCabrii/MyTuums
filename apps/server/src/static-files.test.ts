@@ -27,6 +27,8 @@ beforeAll(() => {
     `export const v = ${JSON.stringify("x".repeat(3000))};\n`,
   );
   writeFileSync(path.join(root, "mytuums.svg"), "<svg/>");
+  writeFileSync(path.join(root, "manifest.webmanifest"), '{"name":"MyTuums"}');
+  writeFileSync(path.join(root, "service-worker.js"), "self.addEventListener('fetch', () => {})");
 });
 
 interface StaticResponseRecord {
@@ -100,6 +102,18 @@ describe("createStaticFileHandler", () => {
     const index = resStub();
     await createStaticFileHandler(root)(req("/index.html"), index.res);
     expect(index.calls.headers["Cache-Control"]).toBe("no-cache");
+  });
+
+  it("serves the manifest and service worker with revalidation-safe headers", async () => {
+    const manifest = resStub();
+    await createStaticFileHandler(root)(req("/manifest.webmanifest"), manifest.res);
+    expect(manifest.calls.headers["Content-Type"]).toBe("application/manifest+json");
+    expect(manifest.calls.headers["Cache-Control"]).toBe("no-cache");
+
+    const worker = resStub();
+    await createStaticFileHandler(root)(req("/service-worker.js"), worker.res);
+    expect(worker.calls.headers["Content-Type"]).toBe("text/javascript; charset=utf-8");
+    expect(worker.calls.headers["Cache-Control"]).toBe("no-cache");
   });
 
   it("falls back to index.html for a client route, so a refresh works", async () => {

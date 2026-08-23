@@ -41,6 +41,14 @@ export const composerDraftAtom = atom(
   },
 );
 
+/** Selected post images stay in memory until the mutation succeeds or the user removes them. */
+export type ComposerAttachment = { id: string; file: File };
+export const composerAttachmentsAtom = atom<ComposerAttachment[]>([]);
+
+export function clearComposerAttachments(): void {
+  store.set(composerAttachmentsAtom, []);
+}
+
 /**
  * `post.create` as a mutation atom. Unlike like/follow this has no `scope`,
  * no optimistic update, and no rollback.
@@ -56,6 +64,7 @@ export const createPostAtom = atomWithMutation((get) => {
   return orpc.post.create.mutationOptions({
     onSuccess: async () => {
       store.set(composerDraftAtom, "");
+      clearComposerAttachments();
       // A new post belongs at the top of every feed it qualifies for, and
       // its position depends on server ordering — refetch rather than
       // guess where to splice it in.

@@ -10,6 +10,8 @@ import { ProfileMessage } from "@/components/profile-message";
 import { ReplyComposer } from "@/components/reply-composer";
 import { postFeedAtom } from "@/atoms/post-feed";
 import { threadAtomFamily } from "@/atoms/thread";
+import { useDocumentHead } from "@/hooks/use-document-head";
+import { postPageDescription, postPageName } from "@/lib/document-head";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
@@ -24,6 +26,8 @@ const routeApi = getRouteApi("/post/$postId");
 export function ThreadPage() {
   const { postId } = routeApi.useParams();
   const threadQuery = useAtomValue(threadAtomFamily(postId));
+  const focusedPost = threadQuery.data?.post;
+  useDocumentHead(postPageName(focusedPost?.content), postPageDescription(focusedPost?.content));
 
   if (threadQuery.isPending) {
     return (

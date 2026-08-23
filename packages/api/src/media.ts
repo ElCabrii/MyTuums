@@ -21,7 +21,11 @@ import { DEFAULT_SIGNED_URL_TTL, secondsUntilWindowEnd, type Storage } from "./s
  * may be cached, bounded by the signing window so a cached redirect never
  * outlives the signature it points at.
  */
-export type MediaResolver = (key: string) => Promise<{ url: string; cacheSeconds: number } | null>;
+export type MediaAuthorizer = (key: string, viewerId: string) => Promise<boolean>;
+export type MediaResolver = (
+  key: string,
+  viewerId?: string,
+) => Promise<{ url: string; cacheSeconds: number } | null>;
 
 /**
  * `null` means "404 this" and is deliberately the answer to every failure
@@ -43,10 +47,16 @@ export type MediaResolver = (key: string) => Promise<{ url: string; cacheSeconds
  * to convert a 403-from-the-bucket into a 404-from-us. The bucket answers that
  * question for free when the browser follows the redirect.
  */
-export function createMediaResolver(storage: Storage | null): MediaResolver {
-  return async (key: string) => {
+export function createMediaResolver(
+  storage: Storage | null,
+  authorize?: MediaAuthorizer,
+): MediaResolver {
+  return async (key: string, viewerId?: string) => {
     if (!storage) return null;
     if (!isSafeObjectKey(key)) return null;
+    if (key.startsWith("posts/")) {
+      if (!viewerId || !authorize || !(await authorize(key, viewerId))) return null;
+    }
     return {
       url: await storage.signedGetUrl(key, DEFAULT_SIGNED_URL_TTL),
       // The URL stays byte-identical only until the signing window rolls (see

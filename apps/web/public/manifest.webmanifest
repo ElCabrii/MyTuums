@@ -1,0 +1,25 @@
+{
+  "id": "/",
+  "name": "MyTuums",
+  "short_name": "MyTuums",
+  "description": "The social media platform built for gamers.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#a9005d",
+  "icons": [
+    {
+      "src": "/mytuums-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/mytuums-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
