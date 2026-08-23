@@ -284,6 +284,22 @@ describe("PostCard", () => {
       expect(router.state.location.pathname).not.toBe(`/post/${post.id}`);
     });
 
+    // Not clicked: jsdom cannot follow an external navigation, and the
+    // card-level guard that keeps an anchor click off `navigate()` is already
+    // covered above — it matches any `<a>`, mention or URL alike.
+    it.each([
+      ["post", null],
+      ["reply", "parent-1"],
+    ])("renders a URL in a published %s as a safe external link", async (_kind, parentId) => {
+      const post = makePost({ content: "docs at https://example.com/a, worth a read", parentId });
+      await renderWithProviders(<PostCard post={post} />);
+
+      const link = screen.getByRole("link", { name: "https://example.com/a" });
+      expect(link).toHaveAttribute("href", "https://example.com/a");
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow ugc");
+    });
+
     it("preserves line breaks in the raw DOM text", async () => {
       const post = makePost({ content: "line one\nline two\nline three" });
       const { container } = await renderWithProviders(<PostCard post={post} />);

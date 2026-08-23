@@ -41,10 +41,15 @@ both by the server's page gate and by the client.
 
 ## Posts, replies, likes, follows
 
-- Posts are plain text, up to 500 characters, trimmed. Syntactically valid
-  `@handles` render as links to lowercase canonical profile routes; malformed
-  handles stay as plain text, and an unknown handle lands on the profile
-  route's existing not-found state.
+- Posts are plain text, up to 500 characters, trimmed. Rendering recognizes
+  two link shapes in that text and nothing else. Syntactically valid `@handles`
+  become links to lowercase canonical profile routes; malformed handles stay as
+  plain text, and an unknown handle lands on the profile route's existing
+  not-found state. Absolute `http` and `https` URLs become external links that
+  open in a new tab, keeping the address as it was typed and leaving the
+  sentence punctuation around it outside the link. Every other scheme —
+  `javascript:`, `data:`, `ftp:` — stays inert text, and a recognized URL never
+  gets a preview, unfurl or link card.
 - A reply is a post with a parent. Threads show the focused post, its replies,
   and up to 20 ancestors of context.
 - An author can delete their own post. Deletion is a tombstone, not a row
@@ -66,7 +71,7 @@ both by the server's page gate and by the client.
 
 - A profile carries a display name, lowercase handle, bio (160 characters),
   avatar, banner, join date, and follower/following counts. Bios use the same
-  safe `@handle` linkification as posts and replies.
+  safe linkification as posts and replies.
 - Profiles are addressed by handle. A profile hidden by a block reads as "no
   such user"; a banned profile resolves to a suspended stub instead.
 - Search has three surfaces: a profile-only header typeahead (up to five
