@@ -23,6 +23,51 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+describe("TeamView — profile links", () => {
+  it("links a member's avatar and name through their canonical handle", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.team([
+      makeTeamMember({
+        id: "staff-1",
+        name: "Staff One",
+        username: "staff-one",
+        displayUsername: "Staff-One",
+        role: "staff",
+      }),
+    ]);
+    await renderWithProviders(<TeamView />, {
+      queryClient,
+      signedInAs: { id: "admin-1", role: "admin" },
+    });
+
+    const profileLinks = await screen.findAllByRole("link", { name: "Staff One" });
+    expect(profileLinks).toHaveLength(2);
+    for (const profileLink of profileLinks) {
+      expect(profileLink).toHaveAttribute("href", "/@staff-one");
+    }
+  });
+
+  it("leaves a member without a handle non-interactive", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.team([
+      makeTeamMember({
+        id: "staff-1",
+        name: "Staff One",
+        username: null,
+        displayUsername: null,
+        role: "staff",
+      }),
+    ]);
+    await renderWithProviders(<TeamView />, {
+      queryClient,
+      signedInAs: { id: "admin-1", role: "admin" },
+    });
+
+    expect(await screen.findByText("Staff One")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Staff One" })).not.toBeInTheDocument();
+  });
+});
+
 describe("TeamView — rank gating on Change role", () => {
   it("lets an admin manage a staff member", async () => {
     const queryClient = createTestQueryClient();

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Link } from "@tanstack/react-router";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Search, SearchX, UserCog, Users } from "lucide-react";
 import {
@@ -200,6 +201,7 @@ function MemberRow({ member }: { member: TeamMember }) {
   const viewerId = useAtomValue(viewerIdAtom);
   const viewerRole = useAtomValue(viewerRoleAtom);
   const memberHandle = handleOf(member);
+  const displayName = member.name || memberHandle || m.user_unknown();
   const memberRole = member.role ?? "user";
   const isViewer = member.id === viewerId;
   // `canManageRole` is strictly-greater, so it already refuses the viewer's
@@ -209,15 +211,32 @@ function MemberRow({ member }: { member: TeamMember }) {
   return (
     <Item variant="outline">
       <ItemMedia>
-        <UserAvatar
-          user={member}
-          alt={member.name || memberHandle || m.user_unknown()}
-          className="size-9"
-        />
+        {memberHandle ? (
+          <Link
+            to="/@{$username}"
+            params={{ username: memberHandle }}
+            aria-label={displayName}
+            className="focus-visible:ring-ring/50 rounded-full outline-none hover:opacity-80 focus-visible:ring-[3px]"
+          >
+            <UserAvatar user={member} alt={displayName} className="size-9" />
+          </Link>
+        ) : (
+          <UserAvatar user={member} alt={displayName} className="size-9" />
+        )}
       </ItemMedia>
       <ItemContent className="min-w-0">
         <ItemTitle className="flex-wrap">
-          <span className="truncate">{member.name || memberHandle || m.user_unknown()}</span>
+          {memberHandle ? (
+            <Link
+              to="/@{$username}"
+              params={{ username: memberHandle }}
+              className="focus-visible:ring-ring/50 min-w-0 truncate rounded-sm outline-none hover:underline focus-visible:ring-[3px]"
+            >
+              {displayName}
+            </Link>
+          ) : (
+            <span className="truncate">{displayName}</span>
+          )}
           {/* Beside the name rather than in the actions column: only
               manageable members carry a button, so a role badge parked
               against the right edge would sit at two different positions
