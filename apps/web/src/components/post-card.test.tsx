@@ -9,6 +9,8 @@ import { installTestOrpc, orpc } from "@/lib/orpc";
 import { deletePostDialogAtom } from "@/atoms/post-delete";
 import { PostCard } from "@/components/post-card";
 import { m } from "@/paraglide/messages.js";
+import { getLocale } from "@/paraglide/runtime.js";
+import { formatDateTime, formatRelativeTime } from "@/lib/format";
 
 // PostCard's like button is a write-only atom (`useSetAtom`, never
 // `useAtom`) — see `atoms/like.ts`. Running the real atom against this fake
@@ -96,6 +98,32 @@ describe("PostCard", () => {
       expect(
         screen.queryByRole("link", { name: m.reply_to_post({ count: String(post.replyCount) }) }),
       ).not.toBeInTheDocument();
+    });
+
+    it("shows the exact creation date and time, tied to createdAt through a <time> element", async () => {
+      const createdAt = new Date("2026-08-06T14:30:00Z");
+      const post = makePost({ createdAt });
+      await renderWithProviders(<PostCard post={post} variant="focused" />, { signedInAs: true });
+
+      // The permalink is where the durable value belongs — a reader following
+      // a link here should see when the post was written, not "2 days ago".
+      const timestamp = screen.getByText(formatDateTime(createdAt, getLocale()));
+      expect(timestamp.tagName).toBe("TIME");
+      expect(timestamp).toHaveAttribute("datetime", createdAt.toISOString());
+    });
+  });
+
+  describe("variant=feed", () => {
+    it("keeps the compact relative timestamp while still exposing the ISO value", async () => {
+      const createdAt = new Date(Date.now() - 5 * 60 * 1000);
+      const post = makePost({ createdAt });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      const timestamp = screen.getByText(
+        formatRelativeTime(createdAt, getLocale(), m.post_just_now()),
+      );
+      expect(timestamp.tagName).toBe("TIME");
+      expect(timestamp).toHaveAttribute("datetime", createdAt.toISOString());
     });
   });
 
