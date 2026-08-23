@@ -3,7 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Heart, MessageCircle, MoreHorizontal } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
-import { MentionText } from "@/components/mention-text";
+import { LinkedText } from "@/components/linked-text";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import { deletePostDialogAtom } from "@/atoms/post-delete";
@@ -268,7 +268,7 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
             >
               {/* Null only for the two tombstones, which the stub branches
                   above own; here the server guarantees content. */}
-              <MentionText text={post.content ?? ""} />
+              <LinkedText text={post.content ?? ""} />
             </p>
           )}
 

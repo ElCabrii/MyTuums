@@ -19,7 +19,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
-import { MentionText } from "@/components/mention-text";
+import { LinkedText } from "@/components/linked-text";
 import { useSignOut } from "@/hooks/use-sign-out";
 import {
   UserX,
@@ -236,12 +236,12 @@ export function ProfileLayout() {
             <p className="text-muted-foreground text-sm font-medium">@{handle}</p>
           </div>
 
-          {/* `whitespace-pre-line` keeps authored line breaks. MentionText
+          {/* `whitespace-pre-line` keeps authored line breaks. LinkedText
               emits React text children and profile links rather than HTML, so
               linkification does not create an escaping boundary. */}
           {profile.bio && (
             <p className="max-w-2xl text-sm leading-relaxed whitespace-pre-line">
-              <MentionText text={profile.bio} />
+              <LinkedText text={profile.bio} />
             </p>
           )}
 
