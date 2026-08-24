@@ -68,7 +68,10 @@ export function ProfileLayout() {
 
   const profileQuery = useAtomValue(profileAtomFamily(username));
   const documentHandle = handleOf(profileQuery.data) || username;
-  useDocumentHead(`@${documentHandle}`, profilePageDescription(profileQuery.data?.bio));
+  useDocumentHead(
+    `@${documentHandle}`,
+    profilePageDescription(profileQuery.data?.suspended ? undefined : profileQuery.data?.bio),
+  );
 
   if (profileQuery.isPending) {
     return (

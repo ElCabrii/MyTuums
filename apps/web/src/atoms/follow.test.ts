@@ -3,7 +3,6 @@ import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
-import { POST_PAGE_SIZE } from "@my-tuums/api/constants";
 
 const fakeClient = {
   user: {
@@ -46,6 +45,7 @@ import {
   type UserSummary,
 } from "@/lib/orpc";
 import { readCachedIsFollowing } from "@/lib/follow-cache";
+import { postListQueryOptions } from "@/lib/query-definitions";
 import { clearFollowFamilies, toggleFollowAtomFamily } from "@/atoms/follow";
 import { sessionAtom } from "@/atoms/session";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
@@ -440,6 +440,10 @@ describe("toggleFollowAtomFamily", () => {
     const { store, queryClient } = freshStoreWithTarget(
       makeProfile({ id: "target-1", username: "target", viewerIsFollowing: false }),
     );
+    const followingKey = postListQueryOptions({ feed: "following" }).queryKey;
+    const globalKey = postListQueryOptions({ feed: "global" }).queryKey;
+    queryClient.setQueryData(followingKey, { pages: [], pageParams: [] });
+    queryClient.setQueryData(globalKey, { pages: [], pageParams: [] });
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     const resetSpy = vi.spyOn(queryClient, "resetQueries");
     fakeClient.user.follow.mockResolvedValue({
@@ -452,12 +456,12 @@ describe("toggleFollowAtomFamily", () => {
 
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: orpc.post.list.key({
-          input: { limit: POST_PAGE_SIZE, feed: "following" },
-        }),
+        queryKey: followingKey,
         exact: true,
       });
+      expect(queryClient.getQueryState(followingKey)?.isInvalidated).toBe(true);
     });
+    expect(queryClient.getQueryState(globalKey)?.isInvalidated).toBe(false);
     expect(resetSpy).not.toHaveBeenCalled();
   });
 

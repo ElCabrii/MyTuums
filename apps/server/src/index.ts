@@ -124,8 +124,6 @@ const handleRequest = createRequestHandler({
   resolveMediaUrl: createMediaResolver(defaultStorage, (key, viewerId) =>
     canViewPostMedia(db, key, viewerId),
   ),
-  getSessionUserId: async (req) =>
-    (await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }))?.user.id ?? null,
   // Only when this deployment bundles the built web app. Unset in dev, where
   // Vite serves it and proxies /rpc, /api/auth and /media back here — see
   // ./static-files.ts for why one origin is a requirement rather than a
@@ -134,22 +132,19 @@ const handleRequest = createRequestHandler({
     const staticHandler = env.WEB_DIST ? createStaticFileHandler(env.WEB_DIST) : noStaticFiles;
     return staticHandler(req, nodeResponse(res));
   },
-  // Deliberately fails OPEN (`true`) on any error — a database blip must
-  // degrade to "the client gate decides", the behaviour every visitor already
-  // had before this server-side gate existed, never to "every signed-in
-  // visitor gets bounced to /login and reads it as a mass logout". The page
-  // gate leaks nothing on a false positive: the served shell carries no data
-  // (see request-handler.ts), and every `/rpc` procedure still requires its
-  // own session independently.
-  hasValidSession: async (req) => {
+  // Preserve an unavailable lookup as its own state. The routing boundary can
+  // then fail open for the shell and profile media without mistaking a stale
+  // cookie for a session or admitting post media without a viewer identity.
+  resolveSession: async (req) => {
     try {
-      return (await auth.api.getSession({ headers: fromNodeHeaders(req.headers) })) !== null;
+      const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+      return session ? { kind: "authenticated", userId: session.user.id } : { kind: "anonymous" };
     } catch (error) {
       console.error(
-        "Page gate: session check failed; serving the app and letting its own gate decide:",
+        "Session check failed; serving only the shell and profile media until it recovers:",
         error,
       );
-      return true;
+      return { kind: "unavailable" };
     }
   },
   observeError,

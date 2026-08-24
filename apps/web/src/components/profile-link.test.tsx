@@ -83,6 +83,41 @@ describe("ProfileLink", () => {
     });
     expect(screen.queryByText("@keyboarduser")).not.toBeInTheDocument();
   });
+
+  it("renders only the suspension stub for a suspended profile", async () => {
+    const queryClient = renderQueryClient();
+    queryFixtures(queryClient).profile.data(
+      "suspended",
+      makeProfile({
+        id: "suspended-1",
+        username: "suspended",
+        name: "Private display name",
+        bio: "Private suspended bio",
+        image: "/media/avatars/suspended/private.webp",
+        followerCount: 99,
+        suspended: true,
+      }),
+    );
+
+    await renderWithProviders(<ProfileLink username="suspended">Suspended profile</ProfileLink>, {
+      queryClient,
+      signedInAs: true,
+    });
+    vi.useFakeTimers();
+
+    fireEvent.mouseEnter(screen.getByRole("link", { name: "Suspended profile" }));
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    expect(screen.getByText(m.profile_suspended_body())).toBeInTheDocument();
+    expect(screen.queryByText("Private suspended bio")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(m.profile_hover_follower_many({ count: "99" })),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Private display name" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: m.follow_action() })).not.toBeInTheDocument();
+  });
 });
 
 function renderQueryClient(): QueryClient {

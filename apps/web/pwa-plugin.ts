@@ -46,7 +46,7 @@ export function pwaPlugin(): Plugin {
   };
 }
 
-function serviceWorkerSource(cacheName: string, resources: string[]): string {
+export function serviceWorkerSource(cacheName: string, resources: string[]): string {
   return `const CACHE_NAME = ${JSON.stringify(cacheName)};
 const APP_SHELL = ${JSON.stringify(resources)};
 
@@ -71,7 +71,8 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response.ok) {
+          const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+          if (response.ok && new URL(response.url).origin === self.location.origin && contentType === "text/html") {
             event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put("/", response.clone())));
           }
           return response;

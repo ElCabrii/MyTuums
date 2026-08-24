@@ -274,6 +274,35 @@ describe("ProfileLayout bio", () => {
     });
   });
 
+  it("does not publish a suspended profile bio in document metadata", async () => {
+    const privateBio = "This suspended bio must not reach page metadata.";
+    const profile = makeProfile({
+      username: "suspended",
+      displayUsername: "Suspended",
+      bio: privateBio,
+      suspended: true,
+    });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("suspended", profile);
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@suspended",
+      signedInAs: true,
+    });
+
+    await waitFor(() => {
+      expect(document.head.querySelector('meta[name="description"]')).toHaveAttribute(
+        "content",
+        m.app_document_description(),
+      );
+    });
+    expect(document.head.querySelector('meta[name="description"]')).not.toHaveAttribute(
+      "content",
+      privateBio,
+    );
+  });
+
   it("links mentions to canonical profiles and preserves the surrounding text", async () => {
     const bio = "Building with @Alice,\none day at a time.";
     const profile = makeProfile({ username: "author", displayUsername: "Author", bio });

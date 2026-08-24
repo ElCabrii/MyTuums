@@ -489,7 +489,7 @@ export function ComposerForm({
                           type="button"
                           aria-label={m.post_image_move_left({ name: attachment.file.name })}
                           title={m.post_image_move_left({ name: attachment.file.name })}
-                          disabled={index === 0 || isPending}
+                          disabled={index === 0 || isPending || attachmentsAreValidating}
                           onClick={() => moveAttachment(index, -1)}
                           className="bg-background/90 text-foreground hover:bg-background rounded-full p-1 shadow disabled:opacity-40"
                         >
@@ -499,7 +499,11 @@ export function ComposerForm({
                           type="button"
                           aria-label={m.post_image_move_right({ name: attachment.file.name })}
                           title={m.post_image_move_right({ name: attachment.file.name })}
-                          disabled={index === attachments.length - 1 || isPending}
+                          disabled={
+                            index === attachments.length - 1 ||
+                            isPending ||
+                            attachmentsAreValidating
+                          }
                           onClick={() => moveAttachment(index, 1)}
                           className="bg-background/90 text-foreground hover:bg-background rounded-full p-1 shadow disabled:opacity-40"
                         >
@@ -510,7 +514,7 @@ export function ComposerForm({
                         type="button"
                         aria-label={m.post_image_remove({ name: attachment.file.name })}
                         title={m.post_image_remove({ name: attachment.file.name })}
-                        disabled={isPending}
+                        disabled={isPending || attachmentsAreValidating}
                         onClick={() =>
                           updateAttachments(attachments.filter(({ id }) => id !== attachment.id))
                         }

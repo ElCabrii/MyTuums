@@ -156,9 +156,9 @@ export const userRouter = {
     .handler(async ({ input, context }) => {
       // A profile blocked in either direction reads as nonexistent — the
       // same "no such user" as a missing handle, so the block doesn't leak
-      // that the profile exists. A banned profile DOES resolve, carrying
-      // `suspended: true` (additive — `publicUserColumns` is untouched): the
-      // profile page renders a stub instead of an existence leak.
+      // that the profile exists. A banned profile still resolves so the page
+      // can render a stub, but authored fields and relationship state are
+      // redacted before they cross the procedure boundary.
       const [found] = await context.db
         .select({
           ...publicUserColumns,
@@ -180,7 +180,18 @@ export const userRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
-      return found;
+      return found.suspended
+        ? {
+            ...found,
+            name: found.username ?? "",
+            image: null,
+            bio: null,
+            bannerImage: null,
+            followerCount: 0,
+            followingCount: 0,
+            viewerIsFollowing: false,
+          }
+        : found;
     }),
 
   /**

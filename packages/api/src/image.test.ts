@@ -146,6 +146,24 @@ const POST_WEBP = new Uint8Array(
     "base64",
   ),
 );
+const POST_WEBP_LOSSLESS = new Uint8Array(
+  Buffer.from("UklGRhwAAABXRUJQVlA4TA8AAAAvAUAAAAcQ9Y/+ByKi/wEA", "base64"),
+);
+
+function webpWithSingleChunk(type: "VP8 " | "VP8L", payload: readonly number[]): Uint8Array {
+  const paddedLength = payload.length + (payload.length & 1);
+  const bytes = new Uint8Array(20 + paddedLength);
+  bytes.set([0x52, 0x49, 0x46, 0x46], 0); // RIFF
+  new DataView(bytes.buffer).setUint32(4, bytes.length - 8, true);
+  bytes.set([0x57, 0x45, 0x42, 0x50], 8); // WEBP
+  bytes.set(
+    [...type].map((character) => character.charCodeAt(0)),
+    12,
+  );
+  new DataView(bytes.buffer).setUint32(16, payload.length, true);
+  bytes.set(payload, 20);
+  return bytes;
+}
 
 /** Rewrites the dimensions of a real PNG fixture and keeps its IHDR CRC valid. */
 function postPngWithDimensions(width: number, height: number): Uint8Array {
@@ -429,11 +447,12 @@ describe("object keys", () => {
 });
 
 describe("post attachment acceptance", () => {
-  it("accepts structurally valid PNG, JPEG, and WebP files", () => {
+  it("accepts structurally valid PNG, JPEG, and lossy or lossless WebP files", () => {
     const fixtures = [
       [POST_PNG, "image/png", 2, 2],
       [POST_JPEG, "image/jpeg", 2, 2],
       [POST_WEBP, "image/webp", 2, 2],
+      [POST_WEBP_LOSSLESS, "image/webp", 2, 2],
     ] as const;
 
     for (const [bytes, type, width, height] of fixtures) {
@@ -454,6 +473,31 @@ describe("post attachment acceptance", () => {
     for (const [bytes, type] of cases) {
       expect(acceptPostImage(bytes, type)).toEqual({ ok: false, reason: "content" });
     }
+  });
+
+  it("rejects WebP frame chunks that contain dimensions but no encoded pixels", () => {
+    const losslessHeaderOnly = webpWithSingleChunk("VP8L", [0x2f, 0x00, 0x00, 0x00, 0x00]);
+    const lossyHeaderOnly = webpWithSingleChunk("VP8 ", [
+      0xe0,
+      0x00,
+      0x00, // key frame whose first partition claims only the 7-byte frame header
+      0x9d,
+      0x01,
+      0x2a,
+      0x01,
+      0x00,
+      0x01,
+      0x00,
+    ]);
+
+    expect(acceptPostImage(losslessHeaderOnly, "image/webp")).toEqual({
+      ok: false,
+      reason: "content",
+    });
+    expect(acceptPostImage(lossyHeaderOnly, "image/webp")).toEqual({
+      ok: false,
+      reason: "content",
+    });
   });
 
   it("rejects a PNG with a corrupt chunk CRC", () => {

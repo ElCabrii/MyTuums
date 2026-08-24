@@ -367,6 +367,39 @@ describe("ComposerForm", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Post" })).not.toBeDisabled());
   });
 
+  it("locks attachment edits while a selection is being validated", async () => {
+    const first = new File([VALID_PNG_BYTES], "first.png", { type: "image/png" });
+    const second = new File([VALID_PNG_BYTES], "second.png", { type: "image/png" });
+    const selected = new File([VALID_PNG_BYTES], "selected.png", { type: "image/png" });
+
+    await renderComposer({
+      value: "hello",
+      onAttachmentsChange: vi.fn(),
+      attachments: [
+        { id: "first", file: first },
+        { id: "second", file: second },
+      ],
+    });
+
+    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+      target: { files: [selected] },
+    });
+
+    const moveFirstRight = screen.getByRole("button", {
+      name: m.post_image_move_right({ name: first.name }),
+    });
+    const removeFirst = screen.getByRole("button", {
+      name: m.post_image_remove({ name: first.name }),
+    });
+    expect(moveFirstRight).toBeDisabled();
+    expect(removeFirst).toBeDisabled();
+
+    await waitFor(() => {
+      expect(moveFirstRight).not.toBeDisabled();
+      expect(removeFirst).not.toBeDisabled();
+    });
+  });
+
   it("rejects malformed and declared-type-mismatched image bytes", async () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });

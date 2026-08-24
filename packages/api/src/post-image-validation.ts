@@ -278,8 +278,14 @@ function validWebp(bytes: Uint8Array): boolean {
     if (dataEnd < dataStart || chunkEnd > bytes.length) return false;
 
     if (ascii(bytes, offset, "VP8 ")) {
+      const frameTag =
+        bytes[dataStart] | (bytes[dataStart + 1] << 8) | (bytes[dataStart + 2] << 16);
+      const firstPartitionLength = frameTag >>> 5;
       if (
-        length < 10 ||
+        length <= 10 ||
+        (frameTag & 1) !== 0 ||
+        firstPartitionLength < 7 ||
+        3 + firstPartitionLength >= length ||
         bytes[dataStart + 3] !== 0x9d ||
         bytes[dataStart + 4] !== 0x01 ||
         bytes[dataStart + 5] !== 0x2a ||
@@ -290,7 +296,7 @@ function validWebp(bytes: Uint8Array): boolean {
       }
       hasFrame = true;
     } else if (ascii(bytes, offset, "VP8L")) {
-      if (length < 5 || bytes[dataStart] !== 0x2f) return false;
+      if (length <= 5 || bytes[dataStart] !== 0x2f) return false;
       hasFrame = true;
     } else if (ascii(bytes, offset, "VP8X")) {
       if (length !== 10) return false;

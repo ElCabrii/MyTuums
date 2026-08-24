@@ -232,7 +232,9 @@ it fails a test rather than shipping.
 Visibility filtering is centralised in `packages/api/src/visibility.ts` so
 banned or blocked content cannot leak through a surface that forgot to filter.
 A blocked profile reads as "no such user" — the same response as a handle that
-never existed, so the block itself does not leak.
+never existed, so the block itself does not leak. A banned profile resolves so
+the UI can show a suspension stub, but `user.byUsername` redacts its authored
+profile fields, relationship counts and viewer relationship state first.
 
 ## Moderation authority
 

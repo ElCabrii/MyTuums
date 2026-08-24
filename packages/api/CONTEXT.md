@@ -105,7 +105,9 @@ over HTTP and imports only its browser-safe subpaths.
   exact shape.
 - **Every surface filters through `src/visibility.ts`.** `invisibleUser` is the
   stricter of the two per-user filters — it is what lets a banned-but-not-blocked
-  profile resolve to its suspended stub instead of 404ing.
+  profile resolve to its suspended stub instead of 404ing. `user.byUsername`
+  redacts authored profile fields, relationship counts and viewer state from
+  that stub before it crosses the API boundary.
 - **`like`/`unlike` and `follow`/`unfollow` are separate idempotent
   procedures, never a toggle** — ordering and retry safety.
 - **A post has two independent tombstones, and neither is a row delete.**

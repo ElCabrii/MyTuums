@@ -1,8 +1,8 @@
 import { atom, type PrimitiveAtom } from "jotai";
 import { atomFamily } from "jotai-family";
 import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
-import { POST_PAGE_SIZE } from "@my-tuums/api/constants";
 import { viewerIdAtom } from "@/atoms/session";
+import { postListQueryOptions } from "@/lib/query-definitions";
 import { store } from "@/lib/store";
 import {
   beginFollowPatch,
@@ -98,9 +98,7 @@ function toggleMutationAtom(userId: string, direction: "follow" | "unfollow") {
         // The global timeline, profile feeds and reply lists remain valid and
         // should keep their rendered rows rather than flashing to skeletons.
         void queryClient.invalidateQueries({
-          queryKey: orpc.post.list.key({
-            input: { limit: POST_PAGE_SIZE, feed: "following" },
-          }),
+          queryKey: postListQueryOptions({ feed: "following" }).queryKey,
           exact: true,
         });
       },

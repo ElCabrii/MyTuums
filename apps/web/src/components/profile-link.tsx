@@ -97,6 +97,14 @@ function ProfileHoverCardContent({ username }: { username: string }) {
   }
 
   const profile = profileQuery.data;
+  if (profile.suspended) {
+    return (
+      <p className="text-muted-foreground text-sm" role="status">
+        {m.profile_suspended_body()}
+      </p>
+    );
+  }
+
   const handle = handleOf(profile) ?? username;
   const displayName = profile.name || handle;
   const followerCount = new Intl.NumberFormat(getLocale()).format(profile.followerCount);
@@ -142,13 +150,11 @@ function ProfileHoverCardContent({ username }: { username: string }) {
 
       <div className="flex items-center justify-between gap-3">
         <span className="text-muted-foreground text-xs">{followers}</span>
-        {!profile.suspended && (
-          <FollowButton
-            userId={profile.id}
-            isFollowing={profile.viewerIsFollowing}
-            className="shrink-0"
-          />
-        )}
+        <FollowButton
+          userId={profile.id}
+          isFollowing={profile.viewerIsFollowing}
+          className="shrink-0"
+        />
       </div>
     </div>
   );
