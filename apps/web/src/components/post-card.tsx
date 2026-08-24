@@ -132,6 +132,35 @@ export function PostCard({
 
   return (
     <div className={containerClass} onClick={handleCardClick}>
+      {variant === "feed" && showParentContext && post.parentId && (
+        // A quiet one-line "Replying to …" above the whole card header —
+        // avatar, name and timestamp included — so a profile feed of replies
+        // reads as one conversation rather than a stack of boxed quotes. The
+        // name stays a link to the parent thread, and a removed/deleted
+        // parent keeps its inline why.
+        <p className="text-muted-foreground mb-2 text-xs">
+          {post.parent ? (
+            <>
+              <Link
+                to="/post/$postId"
+                params={{ postId: post.parentId }}
+                className="hover:text-foreground transition-colors hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {m.reply_parent_label({ name: parentAuthorName ?? m.user_unknown() })}
+              </Link>
+              {(post.parent.removed || post.parent.deleted) && (
+                <span>
+                  {" · "}
+                  {post.parent.removed ? m.moderation_post_removed_stub() : m.post_deleted_stub()}
+                </span>
+              )}
+            </>
+          ) : (
+            m.reply_parent_unavailable()
+          )}
+        </p>
+      )}
       <div className="flex gap-3">
         {authorHandle ? (
           <ProfileLink
@@ -242,38 +271,6 @@ export function PostCard({
               </DropdownMenu>
             )}
           </div>
-
-          {variant === "feed" && showParentContext && post.parentId && (
-            // A quiet one-line "Replying to …" above the content, not a boxed
-            // quote of the parent: in a profile feed of replies, boxes made
-            // every card read as two posts and buried the reply itself. The
-            // name stays a link to the parent thread, and a removed/deleted
-            // parent keeps its inline why.
-            <p className="text-muted-foreground mb-1 text-xs">
-              {post.parent ? (
-                <>
-                  <Link
-                    to="/post/$postId"
-                    params={{ postId: post.parentId }}
-                    className="hover:text-foreground transition-colors hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {m.reply_parent_label({ name: parentAuthorName ?? m.user_unknown() })}
-                  </Link>
-                  {(post.parent.removed || post.parent.deleted) && (
-                    <span>
-                      {" · "}
-                      {post.parent.removed
-                        ? m.moderation_post_removed_stub()
-                        : m.post_deleted_stub()}
-                    </span>
-                  )}
-                </>
-              ) : (
-                m.reply_parent_unavailable()
-              )}
-            </p>
-          )}
 
           {post.removed ? (
             /* The removal stub. `removedReason` is author-only (the server
