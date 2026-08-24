@@ -381,8 +381,8 @@ describe("ComposerForm", () => {
 
     const mismatch = new File([VALID_PNG_BYTES], "mismatch.jpg", { type: "image/jpeg" });
     fireEvent.change(input, { target: { files: [mismatch] } });
-    await waitFor(() => expect(onAttachmentsChange).not.toHaveBeenCalled());
-    expect(screen.getByRole("alert")).toHaveTextContent(m.post_image_invalid());
+    expect(await screen.findByRole("alert")).toHaveTextContent(m.post_image_invalid());
+    expect(onAttachmentsChange).not.toHaveBeenCalled();
   });
 
   it("clears a stale image error after a later valid selection", async () => {
