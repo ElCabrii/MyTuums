@@ -12,7 +12,7 @@ import { m } from "@/paraglide/messages.js";
 
 const routeApi = getRouteApi("/@{$username}/");
 
-type ProfilePostsFilter = "posts" | "replies" | "both";
+type ProfilePostsFilter = "all" | "posts" | "reply";
 
 /**
  * The default profile tab. The surrounding header lives in the layout route
@@ -20,7 +20,7 @@ type ProfilePostsFilter = "posts" | "replies" | "both";
  */
 export function ProfilePosts() {
   const { username } = routeApi.useParams();
-  const { filter = "both" } = routeApi.useSearch();
+  const { filter = "all" } = routeApi.useSearch();
   const navigate = routeApi.useNavigate();
   const viewerId = useAtomValue(viewerIdAtom);
 
@@ -40,11 +40,11 @@ export function ProfilePosts() {
   const feedParams: PostFeedParams =
     filter === "posts"
       ? { authorId: profile.id, feed: "global", kind: "posts" }
-      : filter === "replies"
+      : filter === "reply"
         ? { authorId: profile.id, feed: "global", kind: "replies" }
         : { authorId: profile.id, feed: "global", includeReplies: true };
   const emptyMessage =
-    filter === "replies"
+    filter === "reply"
       ? isOwnProfile
         ? m.profile_own_replies_empty()
         : m.profile_replies_empty({ handle })
@@ -67,18 +67,18 @@ export function ProfilePosts() {
       </div>
 
       <SegmentedControl label={m.profile_posts_filter_label()}>
+        <SegmentedControlItem active={filter === "all"} onClick={() => selectFilter("all")}>
+          {m.profile_posts_filter_all()}
+        </SegmentedControlItem>
         <SegmentedControlItem active={filter === "posts"} onClick={() => selectFilter("posts")}>
           {m.profile_posts_filter_posts()}
         </SegmentedControlItem>
-        <SegmentedControlItem active={filter === "replies"} onClick={() => selectFilter("replies")}>
-          {m.profile_posts_filter_replies()}
-        </SegmentedControlItem>
-        <SegmentedControlItem active={filter === "both"} onClick={() => selectFilter("both")}>
-          {m.profile_posts_filter_both()}
+        <SegmentedControlItem active={filter === "reply"} onClick={() => selectFilter("reply")}>
+          {m.profile_posts_filter_reply()}
         </SegmentedControlItem>
       </SegmentedControl>
 
-      {isOwnProfile && filter !== "replies" && <PostComposer />}
+      {isOwnProfile && filter !== "reply" && <PostComposer />}
 
       {/*
         The selected profile view maps to the corresponding `post.list` mode;

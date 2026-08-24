@@ -8,7 +8,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#171719" media="(prefers-color-scheme: dark)" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- `mobile-web-app-capable` is the surviving spelling: Chromium deprecation-warns
+         on the `apple-` one, and standalone mode is driven by the manifest's
+         `display: standalone` everywhere that still matters. -->
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title id="app-title-fallback">MyTuums — Social Media for Gamers</title>
     <meta

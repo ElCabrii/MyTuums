@@ -10,5 +10,8 @@ export const Route = createFileRoute("/@{$username}/")({
 });
 
 const profilePostsSearchSchema = z.object({
-  filter: z.enum(["posts", "replies", "both"]).optional(),
+  // The values mirror the tab labels (All / Posts / Reply). `.catch()` degrades
+  // links minted before the relabel (`both`, `replies`) to the default view
+  // instead of erroring the route.
+  filter: z.enum(["all", "posts", "reply"]).optional().catch(undefined),
 });

@@ -171,7 +171,7 @@ describe("PostCard", () => {
   });
 
   describe("reply parent context", () => {
-    it("shows the immediate parent excerpt and links it to the parent's thread", async () => {
+    it("labels the reply with its parent and links the label to the parent's thread", async () => {
       const parentAuthor = makeAuthor({ name: "Parent Author", username: "parent" });
       const post = makePost({
         id: "reply-1",
@@ -187,12 +187,13 @@ describe("PostCard", () => {
       });
       const { router } = await renderWithProviders(<PostCard post={post} />);
 
-      expect(
-        screen.getByText(m.reply_parent_label({ name: parentAuthor.name })),
-      ).toBeInTheDocument();
-      expect(screen.getByText("The original post")).toBeInTheDocument();
-      const parentLink = screen.getByRole("link", { name: /The original post/ });
+      // The quiet one-line label replaced the boxed excerpt: the parent's
+      // text is no longer quoted into every reply card.
+      const parentLink = screen.getByRole("link", {
+        name: m.reply_parent_label({ name: parentAuthor.name }),
+      });
       expect(parentLink).toHaveAttribute("href", "/post/parent-1");
+      expect(screen.queryByText("The original post")).not.toBeInTheDocument();
 
       const user = userEvent.setup();
       await user.click(parentLink);
@@ -200,7 +201,8 @@ describe("PostCard", () => {
       expect(router.state.location.pathname).not.toBe("/post/reply-1");
     });
 
-    it("renders a removed-parent stub instead of a blank excerpt", async () => {
+    it("keeps an inline why next to the label when the parent was removed", async () => {
+      const parentAuthor = makeAuthor({ name: "Parent Author", username: "parent" });
       const post = makePost({
         parentId: "parent-1",
         parent: {
@@ -209,13 +211,16 @@ describe("PostCard", () => {
           truncated: false,
           removed: true,
           deleted: false,
-          author: makeAuthor(),
+          author: parentAuthor,
         },
       });
       await renderWithProviders(<PostCard post={post} />);
 
-      expect(screen.getByText(m.moderation_post_removed_stub())).toBeInTheDocument();
-      expect(screen.queryByText("null")).not.toBeInTheDocument();
+      const label = screen.getByRole("link", {
+        name: m.reply_parent_label({ name: parentAuthor.name }),
+      });
+      // The why rides the same line as the label, not a separate box.
+      expect(label.closest("p")).toHaveTextContent(m.moderation_post_removed_stub());
     });
 
     it("does not add parent context to a top-level post", async () => {

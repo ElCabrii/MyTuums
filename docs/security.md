@@ -218,6 +218,19 @@ local image preview in the crop editor), `frame-ancestors 'none'`,
 `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`
 and HSTS. Inner handlers win, so a handler setting its own header keeps it.
 
+**The CSP is hash-based, which constrains the edge in front of the app.**
+Cloudflare's JavaScript Detections injects its own inline `<script>` into every
+HTML response at their edge, after our headers are written. Its source embeds
+the per-request ray ID, so no static hash can allow it; Cloudflare only
+nonce-matches when the policy itself uses nonces, which this policy does not
+(nonces would mean templating `index.html` on every request instead of serving
+the prebuilt file). With JS Detections on, every page load logs an inline-script
+CSP violation. The mytuums.com zone must therefore keep **JavaScript Detections
+off** (Security → Bots → Configure Bot Management); note that enabling Bot Fight
+Mode force-enables it on some plans. If bot fingerprinting is ever genuinely
+needed, revisit the policy's design (per-response nonces) rather than adding
+`'unsafe-inline'`.
+
 ## Privacy projection
 
 `publicUserColumns` in `packages/api/src/users.ts` is a privacy boundary, not

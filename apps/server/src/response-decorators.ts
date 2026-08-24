@@ -152,6 +152,13 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  * which is why this policy already uses the bare host) — and whether a
  * future `S3_ENDPOINT` migration needs `img-src` narrowed again once a stable
  * per-environment origin is worth threading into this module.
+ *
+ * One edge constraint, learned the hard way (observed as an inline-script
+ * violation on every production page): Cloudflare's JavaScript Detections
+ * injects its own inline `<script>` into HTML responses, and its source embeds
+ * the per-request ray ID — no static hash can allow it, and their nonce
+ * matching only works for policies that use nonces. The mytuums.com zone must
+ * keep JS Detections off; see docs/security.md.
  */
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",

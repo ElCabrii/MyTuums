@@ -244,28 +244,35 @@ export function PostCard({
           </div>
 
           {variant === "feed" && showParentContext && post.parentId && (
-            <Link
-              to="/post/$postId"
-              params={{ postId: post.parentId }}
-              className="border-border/60 bg-muted/20 hover:border-primary/40 mb-3 block rounded-lg border px-3 py-2 text-sm transition-colors"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <p className="text-muted-foreground mb-1 text-xs font-medium">
-                {post.parent
-                  ? m.reply_parent_label({ name: parentAuthorName ?? m.user_unknown() })
-                  : m.reply_parent_unavailable()}
-              </p>
-              {post.parent?.removed ? (
-                <p className="text-muted-foreground text-xs">{m.moderation_post_removed_stub()}</p>
-              ) : post.parent?.deleted ? (
-                <p className="text-muted-foreground text-xs">{m.post_deleted_stub()}</p>
-              ) : post.parent ? (
-                <p className="text-foreground/80 line-clamp-2 text-xs leading-relaxed">
-                  {post.parent.excerpt}
-                  {post.parent.truncated && "…"}
-                </p>
-              ) : null}
-            </Link>
+            // A quiet one-line "Replying to …" above the content, not a boxed
+            // quote of the parent: in a profile feed of replies, boxes made
+            // every card read as two posts and buried the reply itself. The
+            // name stays a link to the parent thread, and a removed/deleted
+            // parent keeps its inline why.
+            <p className="text-muted-foreground mb-1 text-xs">
+              {post.parent ? (
+                <>
+                  <Link
+                    to="/post/$postId"
+                    params={{ postId: post.parentId }}
+                    className="hover:text-foreground transition-colors hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {m.reply_parent_label({ name: parentAuthorName ?? m.user_unknown() })}
+                  </Link>
+                  {(post.parent.removed || post.parent.deleted) && (
+                    <span>
+                      {" · "}
+                      {post.parent.removed
+                        ? m.moderation_post_removed_stub()
+                        : m.post_deleted_stub()}
+                    </span>
+                  )}
+                </>
+              ) : (
+                m.reply_parent_unavailable()
+              )}
+            </p>
           )}
 
           {post.removed ? (

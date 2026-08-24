@@ -440,11 +440,95 @@ export function ComposerForm({
         </div>
       </div>
 
-      {onAttachmentsChange && (
+      {/*
+        Attachments surface only once there is something to show: before a
+        selection the image affordance lives in the footer's action row (see
+        below), and the size/count hint only matters while managing images.
+      */}
+      {onAttachmentsChange && attachments.length > 0 && (
         <div className="space-y-2">
-          <label className="text-muted-foreground inline-flex cursor-pointer items-center gap-2 text-xs">
+          <p className="text-muted-foreground text-xs">{m.post_images_hint()}</p>
+          <ol className="grid grid-cols-2 gap-2" aria-label={m.post_images_hint()}>
+            {attachments.map((attachment, index) => {
+              const preview = previewUrls.find(({ id }) => id === attachment.id);
+              return (
+                <li key={attachment.id} className="bg-muted/30 relative overflow-hidden rounded-lg">
+                  {preview?.url ? (
+                    <img
+                      src={preview.url}
+                      alt={attachment.file.name}
+                      className="aspect-square w-full object-cover"
+                    />
+                  ) : (
+                    <div className="text-muted-foreground flex aspect-square items-center justify-center p-2 text-center text-xs">
+                      {attachment.file.name}
+                    </div>
+                  )}
+                  <div className="absolute top-1 right-1 left-1 flex justify-between gap-1">
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        aria-label={m.post_image_move_left({ name: attachment.file.name })}
+                        title={m.post_image_move_left({ name: attachment.file.name })}
+                        disabled={index === 0 || isPending || attachmentsAreValidating}
+                        onClick={() => moveAttachment(index, -1)}
+                        className="bg-background/90 text-foreground hover:bg-background rounded-full p-1 shadow disabled:opacity-40"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={m.post_image_move_right({ name: attachment.file.name })}
+                        title={m.post_image_move_right({ name: attachment.file.name })}
+                        disabled={
+                          index === attachments.length - 1 || isPending || attachmentsAreValidating
+                        }
+                        onClick={() => moveAttachment(index, 1)}
+                        className="bg-background/90 text-foreground hover:bg-background rounded-full p-1 shadow disabled:opacity-40"
+                      >
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label={m.post_image_remove({ name: attachment.file.name })}
+                      title={m.post_image_remove({ name: attachment.file.name })}
+                      disabled={isPending || attachmentsAreValidating}
+                      onClick={() =>
+                        updateAttachments(attachments.filter(({ id }) => id !== attachment.id))
+                      }
+                      className="bg-background/90 text-foreground hover:bg-background rounded-full p-1 shadow disabled:opacity-40"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      )}
+
+      {(attachmentError || errorMessage) && (
+        <div
+          role="alert"
+          className="bg-destructive/10 border-destructive/20 text-destructive flex items-start gap-2 rounded-lg border p-2.5 text-xs"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{attachmentError || errorMessage}</span>
+        </div>
+      )}
+
+      <div className="border-border flex items-center justify-between gap-3 border-t pt-3">
+        {/* The image picker rides the footer's action row like on every other
+            platform: a pill button with a real hit target and focus ring,
+            rather than the bare inline link this used to be. The hidden input
+            stays inside the label so clicks and the accessible name keep
+            working without JS wiring. */}
+        {onAttachmentsChange && (
+          <label className="border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring focus-visible:ring-ring/50 inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors outline-none select-none focus-visible:ring-[3px] has-[:disabled]:pointer-events-none has-[:disabled]:opacity-50">
             <ImagePlus className="h-4 w-4" />
-            <span>{m.post_add_images()}</span>
+            <span className="hidden sm:inline">{m.post_add_images()}</span>
             <input
               type="file"
               accept={ALLOWED_IMAGE_TYPES.join(",")}
@@ -462,106 +546,34 @@ export function ComposerForm({
               }}
             />
           </label>
-          <p className="text-muted-foreground text-xs">{m.post_images_hint()}</p>
-          {attachments.length > 0 && (
-            <ol className="grid grid-cols-2 gap-2" aria-label={m.post_images_hint()}>
-              {attachments.map((attachment, index) => {
-                const preview = previewUrls.find(({ id }) => id === attachment.id);
-                return (
-                  <li
-                    key={attachment.id}
-                    className="bg-muted/30 relative overflow-hidden rounded-lg"
-                  >
-                    {preview?.url ? (
-                      <img
-                        src={preview.url}
-                        alt={attachment.file.name}
-                        className="aspect-square w-full object-cover"
-                      />
-                    ) : (
-                      <div className="text-muted-foreground flex aspect-square items-center justify-center p-2 text-center text-xs">
-                        {attachment.file.name}
-                      </div>
-                    )}
-                    <div className="absolute top-1 right-1 left-1 flex justify-between gap-1">
-                      <div className="flex gap-1">
-                        <button
-                          type="button"
-                          aria-label={m.post_image_move_left({ name: attachment.file.name })}
-                          title={m.post_image_move_left({ name: attachment.file.name })}
-                          disabled={index === 0 || isPending || attachmentsAreValidating}
-                          onClick={() => moveAttachment(index, -1)}
-                          className="bg-background/90 text-foreground hover:bg-background rounded-full p-1 shadow disabled:opacity-40"
-                        >
-                          <ChevronLeft className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={m.post_image_move_right({ name: attachment.file.name })}
-                          title={m.post_image_move_right({ name: attachment.file.name })}
-                          disabled={
-                            index === attachments.length - 1 ||
-                            isPending ||
-                            attachmentsAreValidating
-                          }
-                          onClick={() => moveAttachment(index, 1)}
-                          className="bg-background/90 text-foreground hover:bg-background rounded-full p-1 shadow disabled:opacity-40"
-                        >
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                      <button
-                        type="button"
-                        aria-label={m.post_image_remove({ name: attachment.file.name })}
-                        title={m.post_image_remove({ name: attachment.file.name })}
-                        disabled={isPending || attachmentsAreValidating}
-                        onClick={() =>
-                          updateAttachments(attachments.filter(({ id }) => id !== attachment.id))
-                        }
-                        className="bg-background/90 text-foreground hover:bg-background rounded-full p-1 shadow disabled:opacity-40"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
-          )}
+        )}
+        <div className="flex items-center gap-3">
+          <span
+            aria-live="polite"
+            className={`text-xs tabular-nums ${
+              isTooLong
+                ? "text-destructive font-semibold"
+                : remaining <= 50
+                  ? "text-foreground"
+                  : "text-muted-foreground"
+            }`}
+          >
+            {remaining}
+          </span>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!canSubmit}
+            className="gap-1.5 rounded-full px-4"
+          >
+            {isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+            <span>{submitLabel}</span>
+          </Button>
         </div>
-      )}
-
-      {(attachmentError || errorMessage) && (
-        <div
-          role="alert"
-          className="bg-destructive/10 border-destructive/20 text-destructive flex items-start gap-2 rounded-lg border p-2.5 text-xs"
-        >
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{attachmentError || errorMessage}</span>
-        </div>
-      )}
-
-      <div className="border-border flex items-center justify-between border-t pt-3">
-        <span
-          aria-live="polite"
-          className={`text-xs tabular-nums ${
-            isTooLong
-              ? "text-destructive font-semibold"
-              : remaining <= 50
-                ? "text-foreground"
-                : "text-muted-foreground"
-          }`}
-        >
-          {remaining}
-        </span>
-        <Button type="submit" size="sm" disabled={!canSubmit} className="gap-1.5 rounded-full px-4">
-          {isPending ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Send className="h-3.5 w-3.5" />
-          )}
-          <span>{submitLabel}</span>
-        </Button>
       </div>
     </form>
   );

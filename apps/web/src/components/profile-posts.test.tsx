@@ -75,13 +75,13 @@ describe("ProfilePosts", () => {
 
     const { router } = await renderWithProviders(<ProfilePosts />, {
       queryClient,
-      initialPath: "/@alex/?filter=replies",
+      initialPath: "/@alex/?filter=reply",
       signedInAs: { id: profile.id, username: "alex" },
     });
 
     expect(screen.getByText(m.profile_own_replies_empty())).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(m.post_placeholder())).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: m.profile_posts_filter_replies() })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: m.profile_posts_filter_reply() })).toHaveAttribute(
       "aria-pressed",
       "true",
     );

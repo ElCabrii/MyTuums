@@ -37,11 +37,13 @@ export function FooterLocaleMenu() {
             size="sm"
             aria-label={`${m.locale_label()}: ${labelForLocale(currentLocale)}`}
             title={m.locale_label()}
-            className="min-w-32 justify-center gap-1.5"
+            className="relative min-w-32 justify-center"
           />
         }
       >
-        <Languages className="size-4" />
+        {/* Pinned to the button's left edge rather than centred with the text:
+            centring icon and label together pushed the locale name off-centre. */}
+        <Languages className="absolute left-2.5 size-4" />
         <span>{labelForLocale(currentLocale)}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-36">
