@@ -1116,23 +1116,30 @@ async function supersedeOpenAppeals(
 }
 
 /**
- * The appealable actions that contest the same state, grouped by what they
- * govern. A newer action in a family supersedes an open appeal against any
- * older member: `user_suspended` and `user_banned` are one sanction on an
- * account (re-banning a suspended user replaces the sentence, it does not add
- * a second one), while a removal governs one post and a role change one role.
+ * The appealable actions whose wrapper routes through
+ * {@link runSupersedingEffect}, grouped by what they govern. A newer action in
+ * a family supersedes an open appeal against any older member:
+ * `user_suspended` and `user_banned` are one sanction on an account
+ * (re-banning a suspended user replaces the sentence, it does not add a second
+ * one), while a removal governs one post.
  *
- * Derived per forward action rather than by target type, because
- * `user_banned` and `role_changed` share a target type and govern entirely
- * different things — superseding a role appeal because someone got banned
- * would close a live grievance that still stands.
+ * Deliberately partial over the action codes: `role_changed` has no entry
+ * because `setRole` does not supersede. A fresh role grant replaces the single
+ * role column wholesale, so there is no stacked sanction for a newer grant to
+ * replace — and `setRole` is also the staff remedy for a bad earlier grant,
+ * which must read as `reversed` (the manual-inverse path,
+ * {@link runManualReversal}), never as `superseded`. A ban and a role change
+ * share a target type but govern entirely different things; keeping them in
+ * separate maps is what stops a role appeal from closing because someone got
+ * banned.
  */
 const SUPERSEDING_FAMILY = {
   post_removed: ["post_removed"],
   user_suspended: ["user_suspended", "user_banned"],
   user_banned: ["user_suspended", "user_banned"],
-  role_changed: ["role_changed"],
-} as const satisfies Record<keyof typeof INVERSE_ACTION, readonly ModerationActionCode[]>;
+} as const satisfies Partial<Record<ModerationActionCode, readonly ModerationActionCode[]>>;
+
+type SupersedingAction = keyof typeof SUPERSEDING_FAMILY;
 
 /**
  * Runs a forward sanction that replaces whatever earlier sanction of its
@@ -1147,7 +1154,7 @@ async function runSupersedingEffect(
   args: {
     targetType: "post" | "user";
     targetId: string;
-    action: keyof typeof SUPERSEDING_FAMILY;
+    action: SupersedingAction;
   },
   run: (db: DbLike) => Promise<{ pending: PendingEmail[] }>,
 ): Promise<void> {
