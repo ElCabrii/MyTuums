@@ -648,21 +648,13 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // bucket to the browser, which costs no service egress and never holds
         // an image in this process's memory.
         //
-        // Every redirect is viewer-authorized, so a browser's private HTTP
-        // cache must never hand one to a different viewer after account
-        // switching: post media always carry `no-store`, and so does a
-        // profile `.orig` original, which is its owner's private file. A
-        // profile display object is public among authenticated viewers who
-        // can see the owner, so its redirect may cache for the signing
-        // window the resolver budgeted.
-        const isPostMedia = key?.startsWith("posts/") ?? false;
-        const isProfileOriginal = key?.includes(".orig.") ?? false;
+        // Every redirect is viewer-authorized, and the decision can change
+        // after account switching, blocking, banning, or profile updates. A
+        // browser must therefore never reuse a bearer redirect without asking
+        // this route to authorize the current viewer again.
         res.writeHead(302, {
           Location: media.url,
-          "Cache-Control":
-            isPostMedia || isProfileOriginal
-              ? "private, no-store"
-              : `private, max-age=${media.cacheSeconds}`,
+          "Cache-Control": "private, no-store",
         });
         res.end();
         return;

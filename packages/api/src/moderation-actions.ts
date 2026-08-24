@@ -19,6 +19,7 @@ import type { Database } from "@my-tuums/db";
 import { appeal, moderationAction, post, report, session, user } from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
 import type { Context } from "./context.js";
+import { lockModerationTarget } from "./moderation-target-lock.js";
 import { canManageRole, type UserRole } from "./roles.js";
 
 /**
@@ -1146,10 +1147,9 @@ export async function refuseIfAuthorDeleted(db: Database, postId: string): Promi
  *
  * `actionCodes` is the *control family*, not just the code being written: a
  * ban and a suspension are one sanction on the account, so either supersedes
- * an open appeal against the other. The action rows are locked first — the
- * same synchronization point appeal intake and `runManualReversal` use — so
- * an appeal cannot be inserted against an action between this read and the
- * new action landing.
+ * an open appeal against the other. The target row is locked before the action
+ * scan. Appeal intake and manual reversal use the same target-first order, so
+ * a new action cannot be inserted between this read and the new action landing.
  */
 async function supersedeOpenAppeals(
   db: DbLike,
@@ -1237,6 +1237,7 @@ async function runSupersedingEffect(
   run: (db: DbLike) => Promise<{ pending: PendingEmail[] }>,
 ): Promise<void> {
   await applyModerationEffect(context, async (db) => {
+    await lockModerationTarget(db, { targetType: args.targetType, targetId: args.targetId });
     await supersedeOpenAppeals(db, {
       targetType: args.targetType,
       targetId: args.targetId,
@@ -1255,11 +1256,11 @@ async function runSupersedingEffect(
  * stay empty and the inverse action's audit row remains the honest record of
  * who acted and why. The stamp and inverse action share one transaction.
  *
- * The contested action rows are locked first, matching appeal intake's
- * synchronization point and preventing a not-yet-inserted appeal from racing
- * past the reversal. Appeal rows are then updated before the effect locks its
- * post/user target. Appeal review takes the latter two locks in the same order,
- * preventing a concurrent manual reversal and review from deadlocking.
+ * The target row is locked first, matching appeal intake and forward sanctions.
+ * The action rows are then locked and the appeals are updated before the effect
+ * runs, so a concurrent writer cannot insert a new action into the scan gap.
+ * Keeping this target-first order across moderation workflows also prevents
+ * deadlocks between reversal, appeal intake, and review.
  */
 async function runManualReversal(
   context: EffectContext,
@@ -1271,6 +1272,7 @@ async function runManualReversal(
   run: (db: DbLike) => Promise<{ pending: PendingEmail[] }>,
 ): Promise<void> {
   await applyModerationEffect(context, async (db) => {
+    await lockModerationTarget(db, { targetType: args.targetType, targetId: args.targetId });
     const targetMatch =
       args.targetType === "post"
         ? eq(moderationAction.targetPostId, args.targetId)
@@ -1359,6 +1361,7 @@ export function suspendUser(
   },
 ): Promise<Date> {
   return applyModerationEffect(context, async (db) => {
+    await lockModerationTarget(db, { targetType: "user", targetId: args.userId });
     await supersedeOpenAppeals(db, {
       targetType: "user",
       targetId: args.userId,

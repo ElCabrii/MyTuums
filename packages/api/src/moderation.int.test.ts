@@ -1026,6 +1026,68 @@ describe("queue", () => {
     await clearQueueFixtures();
   });
 
+  it("paginates distinct cases when one target has multiple open appeals", async () => {
+    const author = await createTestUser();
+    const olderMod = await moderatorUser();
+    const admin = await adminUser();
+    const victim = await createTestUser();
+
+    try {
+      // This appeal is older than the two appeals that will share one target.
+      const olderPost = await seedPostContent(author.id, "older appeal case");
+      await call(
+        appRouter.moderation.removePost,
+        { postId: olderPost.id, reason: "rule break" },
+        { context: contextFor(olderMod) },
+      );
+      const olderRemoval = await latestAction("post_removed", "post", olderPost.id);
+      await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(olderRemoval!.id, author.id), reason: "The removal was mistaken" },
+        { context: anonContext },
+      );
+
+      await call(
+        appRouter.moderation.setRole,
+        { userId: victim.id, role: "moderator" },
+        { context: contextFor(admin) },
+      );
+      const roleChange = await latestAction("role_changed", "user", victim.id);
+      await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(roleChange!.id, victim.id), reason: "The role change was mistaken" },
+        { context: anonContext },
+      );
+
+      await call(
+        appRouter.moderation.banUser,
+        { userId: victim.id, reason: "account violation" },
+        { context: contextFor(admin) },
+      );
+      const ban = await latestAction("user_banned", "user", victim.id);
+      await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(ban!.id, victim.id), reason: "The ban was mistaken" },
+        { context: anonContext },
+      );
+
+      const firstPage = await call(
+        appRouter.moderation.queue,
+        { limit: 1 },
+        { context: contextFor(olderMod) },
+      );
+      expect(firstPage.items.map(({ targetId }) => targetId)).toEqual([victim.id]);
+      expect(firstPage.items[0]?.appeals).toHaveLength(2);
+      expect(firstPage.nextCursor).not.toBeNull();
+
+      const walked = await walkAllQueuePages(contextFor(olderMod), 1);
+      expect(walked).toContainEqual({ targetType: "post", targetId: olderPost.id });
+      expect(walked).toContainEqual({ targetType: "user", targetId: victim.id });
+    } finally {
+      await clearQueueFixtures();
+    }
+  });
+
   it("drops cases once their reports are resolved", async () => {
     const author = await createTestUser();
     const reporter = await createTestUser();

@@ -17,6 +17,7 @@ import {
   type PendingEmail,
 } from "./moderation-actions.js";
 import { noteInput } from "./moderation-inputs.js";
+import { lockModerationTarget } from "./moderation-target-lock.js";
 import { baseProcedure, moderatorProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 
@@ -128,6 +129,16 @@ export const appealsRouter = {
       // happened.
       await applyModerationEffect(context, async (db) => {
         let pending: PendingEmail[] = [];
+        const targetId = action.targetType === "post" ? action.targetPostId : action.targetUserId;
+        if (!targetId) {
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: "Moderation action has no target.",
+          });
+        }
+        // Review takes the same target-first order as intake and forward
+        // sanctions. This prevents a review holding an appeal row while a
+        // sanction holds the target and waits to supersede that appeal.
+        await lockModerationTarget(db, { targetType: action.targetType, targetId });
         // Serialize on the appeal row: two reviewers who both passed the
         // "still open" check above would otherwise stamp the same appeal
         // twice — the second transaction must observe the first's commit and

@@ -148,21 +148,37 @@ export const queueRouter = {
       `);
 
       const openAppeals = await context.db.execute<OpenAppealRow>(sql`
+        with appeal_cases as (
+          select ${moderationAction.targetType} as target_type,
+                 coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId}) as target_id,
+                 max(${appeal.createdAt}) as newest_at
+          from ${appeal}
+          inner join ${moderationAction} on ${moderationAction.id} = ${appeal.actionId}
+          where ${appeal.status} = 'open' ${appealSideExclusion}
+          ${
+            decoded
+              ? sql`group by ${moderationAction.targetType}, coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})
+                    having (max(${appeal.createdAt}), coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})) < (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, user.id)})`
+              : sql`group by ${moderationAction.targetType}, coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})`
+          }
+          order by newest_at desc, target_id desc
+          limit ${limit + 1}
+        )
         select ${appeal.id} as id,
                ${appeal.reason} as reason,
                ${appeal.createdAt} as created_at,
-               ${moderationAction.targetType} as target_type,
-               coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId}) as target_id
+               appeal_cases.target_type,
+               appeal_cases.target_id
         from ${appeal}
         inner join ${moderationAction} on ${moderationAction.id} = ${appeal.actionId}
-        where ${appeal.status} = 'open' ${appealSideExclusion}
-        ${
-          decoded
-            ? sql`and (${appeal.createdAt}, coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})) < (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, user.id)})`
-            : sql``
-        }
-        order by ${appeal.createdAt} desc, target_id desc
-        limit ${limit + 1}
+        inner join appeal_cases
+          on appeal_cases.target_type = ${moderationAction.targetType}
+         and appeal_cases.target_id = coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})
+        where ${appeal.status} = 'open'
+        order by appeal_cases.newest_at desc,
+                 appeal_cases.target_id desc,
+                 ${appeal.createdAt} desc,
+                 ${appeal.id} desc
       `);
 
       // Merge on the case key, keeping the newer half's timestamp as the
@@ -213,8 +229,9 @@ export const queueRouter = {
       // cursor — the house rule `keysetPage` (./pagination.ts) owns for the
       // simple feeds. Anchoring on the first case past the page instead
       // would drop exactly that case at every boundary. The merged length
-      // decides hasMore: each side fetched `limit + 1`, so a merged list
-      // past the page proves another page exists.
+      // Each side fetched `limit + 1` distinct target cases. The appeal side
+      // then expands those cases back to every open appeal, so one target with
+      // multiple appeals cannot consume the lookahead and hide an older case.
       const hasMore = sorted.length > limit;
       const items = sorted.slice(0, limit);
       const last = items.at(-1);

@@ -798,7 +798,7 @@ describe("createRequestHandler", () => {
     expect(afterCalls.statusCode).toBeUndefined();
   });
 
-  it("redirects a /media hit to the presigned URL, privately for the window — once signed in", async () => {
+  it("redirects a /media hit to the presigned URL without caching a viewer decision", async () => {
     const { res, calls } = resStub();
     const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
     const session = signedIn();
@@ -812,10 +812,9 @@ describe("createRequestHandler", () => {
     expect(calls.statusCode).toBe(302);
     expect(calls.headers).toMatchObject({
       Location: MEDIA_HIT.url,
-      // Private, because the presigned URL it points at is a bearer credential:
-      // a shared cache handing this to another viewer would hand out access.
-      // The max-age is the resolver's signing-window budget, never beyond it.
-      "Cache-Control": `private, max-age=${MEDIA_HIT.cacheSeconds}`,
+      // The resolver authorizes against the current viewer, so a browser must
+      // not reuse this bearer redirect after an account or visibility change.
+      "Cache-Control": "private, no-store",
     });
   });
 
