@@ -1,0 +1,2 @@
+ALTER TABLE "appeal" DROP CONSTRAINT "appeal_status";--> statement-breakpoint
+ALTER TABLE "appeal" ADD CONSTRAINT "appeal_status" CHECK ("appeal"."status" in ('open', 'upheld', 'overturned', 'reversed', 'superseded'));

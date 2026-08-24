@@ -128,17 +128,24 @@ export const appealsRouter = {
           throw new ORPCError("BAD_REQUEST", { message: "This appeal has already been resolved." });
         }
 
+        // The appeal contests a specific logged action. If a newer action of
+        // the same kind has since replaced it (remove → restore → remove,
+        // ban → unban → re-ban), it no longer governs anything — the same
+        // hazard `isActionCurrent`'s live-state read cannot see. Checked for
+        // BOTH outcomes, not just the overturn: upholding a superseded action
+        // stamps a final decision on a grievance the reviewer did not
+        // actually adjudicate, and tells the appellant their appeal was
+        // considered on its merits when the sanction they are serving came
+        // from a different decision. Forward sanctions now close such appeals
+        // as `superseded` (see `supersedeOpenAppeals`), so this is the
+        // narrowed race window rather than the ordinary path.
+        if (!(await isActionLatest(db, action))) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "A newer moderation action has superseded this one.",
+          });
+        }
+
         if (input.outcome === "overturned") {
-          // The appeal contests a specific logged action. If a newer action of
-          // the same kind has since replaced it (remove → restore → remove,
-          // ban → unban → re-ban), overturning would reverse the NEWER state,
-          // not the contested one — the same hazard `isActionCurrent`'s
-          // live-state read cannot see.
-          if (!(await isActionLatest(db, action))) {
-            throw new ORPCError("BAD_REQUEST", {
-              message: "A newer moderation action has superseded this one.",
-            });
-          }
           // `undoAction` runs on the runner's transaction, so its inverse
           // effects open savepoints, not real transactions — the send follows
           // the review's commit above, never an inner savepoint.
@@ -149,6 +156,22 @@ export const appealsRouter = {
             context.user.role ?? "user",
             input.note,
           );
+
+          // An overturn that changed nothing must not be recorded as one. The
+          // inverse effects are deliberately race-tolerant — each returns an
+          // empty notice list when the state it would have reversed was
+          // already cleared — so an empty result here means the reversal was
+          // a no-op. Stamping the appeal `overturned` anyway would email the
+          // appellant that their sanction was lifted while they are still
+          // serving it (a ban re-imposed as a suspension is the same account
+          // state from their side, and a different action row from ours), and
+          // would leave a final decision with no inverse action behind it.
+          // Refusing lets the reviewer act on the state that actually stands.
+          if (pending.length === 0) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: "There's nothing left to overturn — this action was already undone.",
+            });
+          }
         }
 
         await db

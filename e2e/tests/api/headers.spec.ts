@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { request as httpRequest } from "node:http";
 import { gunzipSync } from "node:zlib";
 import { E2E } from "../../playwright.config";
-import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
+import { RPC_MAX_BODY_BYTES, RPC_SMALL_BODY_BYTES } from "@my-tuums/api/constants";
 import { signUpVerifiedSession } from "../../support/auth";
 
 // This project's baseURL is the server (E2E.serverUrl) — see the `api`
@@ -143,6 +143,39 @@ test.describe("request body cap", () => {
 
     expect(wire.status).toBe(413);
     expect(wire.body.toString()).toContain("PAYLOAD_TOO_LARGE");
+  });
+
+  test("an anonymous upload-sized /rpc body is refused with 401 before it is buffered", async ({
+    request,
+  }) => {
+    // The pre-auth gate (apps/server/src/request-handler.ts): every upload
+    // procedure is session-gated, so a declared body above
+    // RPC_SMALL_BODY_BYTES from an anonymous caller has no legitimate use and
+    // must be refused before oRPC parses it — not buffered and then rejected
+    // as UNAUTHORIZED. Playwright's `request` sends Content-Length, which is
+    // what the gate reads.
+    const response = await request.post("/rpc/user/uploadImage", {
+      headers: RPC_HEADERS,
+      data: { json: { padding: "x".repeat(RPC_SMALL_BODY_BYTES) } },
+    });
+
+    expect(response.status()).toBe(401);
+  });
+
+  test("an oversized appeal body is refused with 413 — the public surface keeps its own low limit", async ({
+    request,
+  }) => {
+    // Pins the appeal wire path the gate holds as a literal
+    // (`RPC_APPEAL_OPEN_PATH`) against the real router: a suspended person
+    // cannot sign in, so this one procedure is exempt from the session demand
+    // and gets the small bound as its own ceiling instead. If the router path
+    // ever moved, this body would meet the session demand and answer 401.
+    const response = await request.post("/rpc/moderation/appealOpen", {
+      headers: RPC_HEADERS,
+      data: { json: { reason: "x".repeat(RPC_SMALL_BODY_BYTES) } },
+    });
+
+    expect(response.status()).toBe(413);
   });
 });
 

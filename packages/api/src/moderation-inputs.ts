@@ -3,6 +3,7 @@ import {
   MODERATION_NOTE_MAX_LENGTH,
   MODERATION_PAGE_SIZE,
   MODERATION_PAGE_SIZE_MAX,
+  CURSOR_MAX_ENCODED_LENGTH,
 } from "./constants.js";
 
 /**
@@ -22,6 +23,6 @@ export const noteInput = z.string().trim().max(MODERATION_NOTE_MAX_LENGTH).optio
 
 /** The cursor + limit pair every paginated moderation list takes. */
 export const queueInput = z.object({
-  cursor: z.string().min(1).optional(),
+  cursor: z.string().min(1).max(CURSOR_MAX_ENCODED_LENGTH).optional(),
   limit: z.number().int().min(1).max(MODERATION_PAGE_SIZE_MAX).default(MODERATION_PAGE_SIZE),
 });

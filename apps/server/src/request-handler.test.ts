@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { IncomingMessage, type OutgoingHttpHeaders } from "node:http";
 import { Socket } from "node:net";
-import { RPC_MAX_BODY_BYTES, SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
+import {
+  RPC_MAX_BODY_BYTES,
+  RPC_SMALL_BODY_BYTES,
+  SIGNED_OUT_PATHS,
+} from "@my-tuums/api/constants";
 import {
   AUTH_MAX_BODY_BYTES,
+  MAX_RPC_IN_FLIGHT,
   createRequestHandler,
   type AuthRequestSurface,
   type RequestHandlerDeps,
@@ -412,6 +417,51 @@ describe("createRequestHandler", () => {
     expect(calls.body).toBe("Not found");
   });
 
+  it("404s every canonical spelling of an admin route, not just the literal one", async () => {
+    // The denylist compares the CANONICALIZED path — decoded, dot segments
+    // resolved, slashes collapsed — because better-auth routes on that form.
+    // Each of these decodes/normalizes to `/api/auth/admin/...` while having
+    // a raw spelling that a plain startsWith would let past: an encoded
+    // slash, an encoded letter, a doubled slash, an encoded dot segment, and
+    // the bare prefix with no trailing slash.
+    const adminSpellings = [
+      "/api/auth/admin",
+      "/api/auth/admin/",
+      "/api/auth/admin%2Fban-user",
+      "/api/auth/admin%2fban-user",
+      "/api/auth/%61dmin/ban-user",
+      "/api/auth//admin/ban-user",
+      // Dot segments — literal and fully encoded — whose cancellation lands
+      // back on the admin prefix: the four `..` cancel `api/auth/admin`.
+      "/api/auth/admin/../../../../api/auth/admin/list-users",
+      "/api/auth/admin%2f..%2f..%2f..%2f..%2fapi%2fauth%2fadmin%2fban-user",
+    ];
+    for (const url of adminSpellings) {
+      const { res, calls } = resStub();
+      const authNodeHandler = vi.fn().mockResolvedValue(undefined);
+      const handle = createRequestHandler(deps({ authNodeHandler }));
+
+      await handle(reqStub(url, "POST"), res);
+
+      expect(authNodeHandler, `expected ${url} to be denied`).not.toHaveBeenCalled();
+      expect(calls.statusCode, `expected ${url} to 404`).toBe(404);
+    }
+  });
+
+  it("still passes a non-admin /api/auth path through, even one whose raw spelling contains a dot segment", async () => {
+    // The canonical form of /api/auth/admin/../get-session is
+    // /api/auth/get-session — not an admin route, so the denylist must not
+    // touch it. Over-blocking here would be its own regression: a legitimate
+    // auth path that happens to normalize oddly must still reach BetterAuth.
+    const { res } = resStub();
+    const authNodeHandler = vi.fn().mockResolvedValue(undefined);
+    const handle = createRequestHandler(deps({ authNodeHandler }));
+
+    await handle(reqStub("/api/auth/admin/../get-session", "GET"), res);
+
+    expect(authNodeHandler).toHaveBeenCalledOnce();
+  });
+
   it("rejects an oversized RPC body with 413 before handleRpc ever runs", async () => {
     // oRPC buffers a multipart body before auth, rate limiting or any payload
     // check — so the ceiling must hold in the router, ahead of everything. The
@@ -457,7 +507,133 @@ describe("createRequestHandler", () => {
     expect(calls.statusCode).toBe(200);
   });
 
-  it("accepts an RPC body at exactly the ceiling", async () => {
+  it("accepts an upload-sized RPC body at exactly the ceiling once signed in", async () => {
+    // Above RPC_SMALL_BODY_BYTES the router demands a valid session before a
+    // non-appeal body is buffered — a body this large is an upload by
+    // definition, and uploads are session-gated. The ceiling itself is still
+    // the streaming hard cap.
+    const { res, calls } = resStub();
+    const handleRpc = vi.fn().mockImplementation((_req: IncomingMessage, r: RequestResponse) => {
+      r.writeHead(200, { "Content-Type": "application/json" });
+      r.end("{}");
+      return Promise.resolve({ matched: true });
+    });
+    const session = signedIn();
+    const handle = createRequestHandler(
+      deps({ handleRpc, resolveSession: session.resolveSession }),
+    );
+
+    await handle(
+      reqStub("/rpc/user.uploadImage", "POST", {
+        "content-length": String(RPC_MAX_BODY_BYTES),
+        ...session.headers,
+      }),
+      res,
+    );
+
+    expect(handleRpc).toHaveBeenCalledOnce();
+    expect(calls.statusCode).toBe(200);
+  });
+
+  it("refuses an upload-sized non-appeal body with 401 before handleRpc, when no session cookie is present", async () => {
+    // The pre-auth gate: a declared body above RPC_SMALL_BODY_BYTES on any
+    // path other than the public appeal surface is an upload by definition,
+    // and every upload is session-gated. Refusing it before oRPC parses it is
+    // what stops an anonymous upload-sized body from ever being buffered. The
+    // cookie pre-check must keep the session store out of it.
+    const { res, calls } = resStub();
+    const handleRpc = vi.fn();
+    const resolveSession = vi.fn();
+    const handle = createRequestHandler(deps({ handleRpc, resolveSession }));
+
+    await handle(
+      reqStub("/rpc/user.uploadImage", "POST", {
+        "content-length": String(RPC_SMALL_BODY_BYTES + 1),
+      }),
+      res,
+    );
+
+    expect(resolveSession).not.toHaveBeenCalled();
+    expect(handleRpc).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(401);
+    expect(calls.body).toBe("Unauthorized");
+  });
+
+  it("refuses an upload-sized body with 401 even with a stale session cookie — and only then pays for the session lookup", async () => {
+    // A cookie is not a session; the gate must fail closed on whatever the
+    // session store says, including an unavailable one. The cookie only earns
+    // the lookup, it does not skip it.
+    const { res, calls } = resStub();
+    const handleRpc = vi.fn();
+    const handle = createRequestHandler(
+      deps({
+        handleRpc,
+        resolveSession: vi.fn().mockResolvedValue({ kind: "unavailable" }),
+      }),
+    );
+
+    await handle(
+      reqStub("/rpc/user.uploadImage", "POST", {
+        "content-length": String(RPC_SMALL_BODY_BYTES + 1),
+        cookie: "better-auth.session_token=stale",
+      }),
+      res,
+    );
+
+    expect(handleRpc).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(401);
+  });
+
+  it("lets a signed-in upload-sized non-appeal body through to handleRpc", async () => {
+    const { res, calls } = resStub();
+    const handleRpc = vi.fn().mockImplementation((_req: IncomingMessage, r: RequestResponse) => {
+      r.writeHead(200, { "Content-Type": "application/json" });
+      r.end("{}");
+      return Promise.resolve({ matched: true });
+    });
+    const session = signedIn();
+    const handle = createRequestHandler(
+      deps({ handleRpc, resolveSession: session.resolveSession }),
+    );
+
+    await handle(
+      reqStub("/rpc/user.uploadImage", "POST", {
+        "content-length": String(RPC_SMALL_BODY_BYTES + 1),
+        ...session.headers,
+      }),
+      res,
+    );
+
+    expect(session.resolveSession).toHaveBeenCalledOnce();
+    expect(handleRpc).toHaveBeenCalledOnce();
+    expect(calls.statusCode).toBe(200);
+  });
+
+  it("refuses an oversized appeal body with 413 — the appeal surface keeps its own low limit", async () => {
+    // The one anonymous procedure is small by construction (token 4 KiB plus a
+    // 2000-character reason), so it gets its own low ceiling instead of being
+    // handed to the session demand — the person appealing cannot sign in.
+    const { res, calls } = resStub();
+    const handleRpc = vi.fn();
+    const handle = createRequestHandler(deps({ handleRpc }));
+
+    await handle(
+      reqStub("/rpc/moderation/appealOpen", "POST", {
+        "content-length": String(RPC_SMALL_BODY_BYTES + 1),
+      }),
+      res,
+    );
+
+    expect(handleRpc).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(413);
+    expect(calls.body).toBe("Payload too large");
+  });
+
+  it("holds the appeal limit on an encoded spelling of the appeal path, and lets a small appeal body through", async () => {
+    // The gate judges the canonical path, so a percent-encoded segment can
+    // neither escape the appeal surface's low limit nor be mistaken for a
+    // different procedure. A body that fails to canonicalise at all falls to
+    // the session demand, which is the closed direction.
     const { res, calls } = resStub();
     const handleRpc = vi.fn().mockImplementation((_req: IncomingMessage, r: RequestResponse) => {
       r.writeHead(200, { "Content-Type": "application/json" });
@@ -467,12 +643,40 @@ describe("createRequestHandler", () => {
     const handle = createRequestHandler(deps({ handleRpc }));
 
     await handle(
-      reqStub("/rpc/user.uploadImage", "POST", {
-        "content-length": String(RPC_MAX_BODY_BYTES),
+      reqStub("/rpc/moderation%2FappealOpen", "POST", {
+        "content-length": String(RPC_SMALL_BODY_BYTES + 1),
       }),
       res,
     );
+    expect(handleRpc).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(413);
 
+    // A body within the appeal limit passes straight through to the router:
+    // the public surface stays reachable by the signed-out person it exists for.
+    const { res: resSmall, calls: callsSmall } = resStub();
+    await handle(
+      reqStub("/rpc/moderation/appealOpen", "POST", { "content-length": "100" }),
+      resSmall,
+    );
+    expect(handleRpc).toHaveBeenCalledOnce();
+    expect(callsSmall.statusCode).toBe(200);
+  });
+
+  it("sends a small body through to handleRpc without touching the session store", async () => {
+    // The whole point of the pre-auth gate is that only upload-sized bodies
+    // pay for it; ordinary JSON stays on the fast path.
+    const { res, calls } = resStub();
+    const handleRpc = vi.fn().mockImplementation((_req: IncomingMessage, r: RequestResponse) => {
+      r.writeHead(200, { "Content-Type": "application/json" });
+      r.end("{}");
+      return Promise.resolve({ matched: true });
+    });
+    const resolveSession = vi.fn();
+    const handle = createRequestHandler(deps({ handleRpc, resolveSession }));
+
+    await handle(reqStub("/rpc/post.list", "GET", { "content-length": "40" }), res);
+
+    expect(resolveSession).not.toHaveBeenCalled();
     expect(handleRpc).toHaveBeenCalledOnce();
     expect(calls.statusCode).toBe(200);
   });
@@ -504,7 +708,58 @@ describe("createRequestHandler", () => {
     expect(calls.body).toBe("Not found");
   });
 
-  it("redirects a /media hit to the presigned URL, cached privately for the window — once signed in", async () => {
+  it("refuses /rpc with 503 once MAX_RPC_IN_FLIGHT dispatches are already buffering, and admits again as they finish", async () => {
+    // The backpressure the chunked path rests on: a Transfer-Encoding body
+    // carries no declared length for either size gate to read, so the only
+    // bound on how many 17 MiB buffers can exist at once is this cap. The
+    // release proves it is a live counter, not a one-way latch.
+    const release: (() => void)[] = [];
+    const handleRpc = vi.fn().mockImplementation(
+      () =>
+        new Promise<{ matched: boolean }>((resolve) => {
+          release.push(() => {
+            resolve({ matched: true });
+          });
+        }),
+    );
+    const handle = createRequestHandler(deps({ handleRpc }));
+
+    const inFlight = Array.from({ length: MAX_RPC_IN_FLIGHT }, () => {
+      const { res } = resStub();
+      return handle(
+        reqStub("/rpc/user.uploadImage", "POST", { "transfer-encoding": "chunked" }),
+        res,
+      );
+    });
+    // Let each admitted dispatch reach its pending handleRpc call.
+    await Promise.resolve();
+    expect(handleRpc).toHaveBeenCalledTimes(MAX_RPC_IN_FLIGHT);
+
+    const { res: refused, calls: refusedCalls } = resStub();
+    await handle(
+      reqStub("/rpc/user.uploadImage", "POST", { "transfer-encoding": "chunked" }),
+      refused,
+    );
+    expect(handleRpc).toHaveBeenCalledTimes(MAX_RPC_IN_FLIGHT);
+    expect(refusedCalls.statusCode).toBe(503);
+    expect(refusedCalls.body).toBe("Server busy");
+
+    for (const resolve of release) resolve();
+    await Promise.all(inFlight);
+
+    const { res: after, calls: afterCalls } = resStub();
+    const admitted = handle(
+      reqStub("/rpc/user.uploadImage", "POST", { "transfer-encoding": "chunked" }),
+      after,
+    );
+    await Promise.resolve();
+    expect(handleRpc).toHaveBeenCalledTimes(MAX_RPC_IN_FLIGHT + 1);
+    release[release.length - 1]?.();
+    await admitted;
+    expect(afterCalls.statusCode).toBeUndefined();
+  });
+
+  it("redirects a /media hit to the presigned URL, privately for the window — once signed in", async () => {
     const { res, calls } = resStub();
     const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
     const session = signedIn();
@@ -514,7 +769,7 @@ describe("createRequestHandler", () => {
 
     await handle(reqStub("/media/avatars/user-1/abc.webp", "GET", session.headers), res);
 
-    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/user-1/abc.webp");
+    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/user-1/abc.webp", "viewer-1");
     expect(calls.statusCode).toBe(302);
     expect(calls.headers).toMatchObject({
       Location: MEDIA_HIT.url,
@@ -562,7 +817,7 @@ describe("createRequestHandler", () => {
 
     await handle(reqStub("/media/avatars/user-1/abc.webp?v=2", "GET", session.headers), res);
 
-    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/user-1/abc.webp");
+    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/user-1/abc.webp", "viewer-1");
   });
 
   it("decodes percent-escapes so an encoded separator cannot slip past the key check", async () => {
@@ -577,7 +832,7 @@ describe("createRequestHandler", () => {
 
     // The resolver must see the decoded form — that is what `isSafeObjectKey`
     // is written against. Checking the encoded string would let `%2F` through.
-    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/../secret.webp");
+    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/../secret.webp", "viewer-1");
   });
 
   it("responds 404 when the resolver rejects the key or no bucket is configured — for a signed-in caller past the gate", async () => {
@@ -623,9 +878,9 @@ describe("createRequestHandler", () => {
     expect(calls.statusCode).toBe(401);
   });
 
-  it("keeps profile media available when the session store is unavailable", async () => {
+  it("fails profile media closed when the session store cannot establish a viewer", async () => {
     const { res, calls } = resStub();
-    const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
+    const resolveMediaUrl = vi.fn();
     const handle = createRequestHandler(
       deps({
         resolveMediaUrl,
@@ -640,8 +895,30 @@ describe("createRequestHandler", () => {
       res,
     );
 
-    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/user-1/abc.webp");
+    // An unavailable lookup yields a cookie but no viewer identity, and every
+    // media key — profile included — is authorized per viewer. No viewer, no
+    // object: fail closed rather than fall back to a viewer-less resolution.
+    expect(resolveMediaUrl).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(503);
+    expect(calls.headers).toMatchObject({ "Cache-Control": "no-store" });
+  });
+
+  it("serves a profile original to the signed-in viewer, but never caches the redirect", async () => {
+    const { res, calls } = resStub();
+    const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
+    const session = signedIn();
+    const handle = createRequestHandler(
+      deps({ resolveMediaUrl, resolveSession: session.resolveSession }),
+    );
+
+    await handle(reqStub("/media/avatars/user-1/abc.orig.webp", "GET", session.headers), res);
+
+    // The `.orig` infix is what marks the owner's untouched file; its redirect
+    // is never cached, matching the post-media rule, so a shared browser
+    // cannot hand the owner's private object to a later viewer.
+    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/user-1/abc.orig.webp", "viewer-1");
     expect(calls.statusCode).toBe(302);
+    expect(calls.headers).toMatchObject({ "Cache-Control": "private, no-store" });
   });
 
   it("fails post media closed when the session store cannot establish a viewer", async () => {

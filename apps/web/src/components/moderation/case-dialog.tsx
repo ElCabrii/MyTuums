@@ -200,7 +200,13 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
 
       <ReportsSection reports={detail.reports} />
 
-      {detail.appeal && <AppealSection appeal={detail.appeal} />}
+      {/* One section per open appeal. Two control families can be appealed
+          against the same target at once (a ban and a role change), and each
+          is reviewed on its own — rendering only one left the other
+          unreachable from the case it belongs to. */}
+      {detail.appeals.map((appeal) => (
+        <AppealSection key={appeal.id} appeal={appeal} />
+      ))}
 
       <ActionsSection detail={detail} />
     </div>
@@ -434,7 +440,7 @@ function ReportsSection({ reports }: { reports: ModerationCaseDetail["reports"] 
  * an open appeal is someone waiting on a reply, and it is the one thing on
  * this dialog with a person on the other end of it.
  */
-function AppealSection({ appeal }: { appeal: NonNullable<ModerationCaseDetail["appeal"]> }) {
+function AppealSection({ appeal }: { appeal: ModerationCaseDetail["appeals"][number] }) {
   const appealReview = useAtomValue(appealReviewAtom);
   const [reviewNote, setReviewNote] = useAtom(caseReviewNoteAtom);
   const isOpen = appeal.status === "open";

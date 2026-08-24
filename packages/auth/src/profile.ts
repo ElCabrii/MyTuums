@@ -30,6 +30,21 @@ import {
 /** Message for any attempt to set an image field by hand — uploads are the only legitimate writer. */
 export const MANAGED_IMAGE_MESSAGE = "Profile images are set by uploading a file.";
 
+/**
+ * The longest provider image URL this hook will store, measured in UTF-16 code
+ * units (the same unit `String.length` gives the bio bound).
+ *
+ * `image` and `bannerImage` are bare `text` columns that the feed repeats on
+ * every post row of a page (the author avatar join), so a URL anywhere near
+ * the request body limit stored once becomes a persistent per-row
+ * amplification on reads — one account's avatar would inflate every feed
+ * response that includes a post by that author. A real OAuth provider avatar
+ * is a couple of hundred characters; 4096 code units is slack on top of that,
+ * while still capping the stored value at a few KiB no matter how the bytes
+ * are encoded.
+ */
+export const PROVIDER_IMAGE_MAX_URL_LENGTH = 4096;
+
 type BetterAuthFieldValue = string | number | boolean | Date | object | null | undefined;
 
 export interface ProfileFieldWrite {
@@ -75,6 +90,12 @@ function assertProviderImage<Value>(value: Value): void {
   if (isBlank(value)) return;
   const image = stringFieldValue(value);
   if (image === null) {
+    throw new APIError("BAD_REQUEST", { message: MANAGED_IMAGE_MESSAGE });
+  }
+  // Length before parsing: the cheapest rejection first, and the bound that
+  // keeps the feed's per-row avatar amplification constant no matter what the
+  // string is made of (see the constant's comment).
+  if (image.length > PROVIDER_IMAGE_MAX_URL_LENGTH) {
     throw new APIError("BAD_REQUEST", { message: MANAGED_IMAGE_MESSAGE });
   }
 

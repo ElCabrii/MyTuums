@@ -11,7 +11,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { base32 } from "@better-auth/utils/base32";
 import { createOTP } from "@better-auth/utils/otp";
 import { desc, eq, like } from "drizzle-orm";
-import { auth } from "@my-tuums/auth";
+import { auth, PROVIDER_IMAGE_MAX_URL_LENGTH } from "@my-tuums/auth";
 import {
   BIO_MAX_LENGTH,
   LOCALE_PREFERENCES,
@@ -769,6 +769,32 @@ describe("profile field rules", () => {
     await expect(
       auth.api.updateUser({ body: { bio: "x".repeat(BIO_MAX_LENGTH) }, headers }),
     ).resolves.toBeDefined();
+  });
+
+  it("rejects an image or banner URL long enough to amplify every feed row, and accepts one exactly at the bound", async () => {
+    const { headers } = await signUp();
+
+    // A provider avatar is a couple of hundred characters; this is orders of
+    // magnitude past that, still shaped like a real URL so only the length
+    // bound (not the scheme or parse checks) can trip.
+    const prefix = "https://cdn.example.test/avatar/";
+    const suffix = ".png";
+    const oversized = `${prefix}${"a".repeat(PROVIDER_IMAGE_MAX_URL_LENGTH - prefix.length - suffix.length + 1)}${suffix}`;
+    expect(oversized.length).toBe(PROVIDER_IMAGE_MAX_URL_LENGTH + 1);
+    // Asserted as the literal, because the web app's render-boundary lookup
+    // (lib/auth-error-message.ts) is keyed on exactly this sentence — a drift
+    // here must fail this test so the translation table is updated too.
+    await expect(auth.api.updateUser({ body: { image: oversized }, headers })).rejects.toThrow(
+      "Profile images are set by uploading a file.",
+    );
+    await expect(
+      auth.api.updateUser({ body: { bannerImage: oversized }, headers }),
+    ).rejects.toThrow("Profile images are set by uploading a file.");
+
+    // The bound is inclusive, like the bio's — a URL exactly at it passes.
+    const atBound = `${prefix}${"a".repeat(PROVIDER_IMAGE_MAX_URL_LENGTH - prefix.length - suffix.length)}${suffix}`;
+    expect(atBound.length).toBe(PROVIDER_IMAGE_MAX_URL_LENGTH);
+    await expect(auth.api.updateUser({ body: { image: atBound }, headers })).resolves.toBeDefined();
   });
 
   it("rejects a theme or locale outside the offered values", async () => {

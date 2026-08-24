@@ -221,7 +221,7 @@ function QueueRow({ item }: { item: ModerationCase }) {
               ? m.moderation_case_reports_one({ count: "1" })
               : m.moderation_case_reports_many({ count: String(item.reportCount) })}
           </span>
-          {item.appeal && (
+          {item.appeals.length > 0 && (
             <Badge variant="destructive">
               <Gavel />
               {m.moderation_queue_appeal()}
@@ -242,9 +242,14 @@ function QueueRow({ item }: { item: ModerationCase }) {
           ))}
         </ItemTitle>
         <TargetLine preview={preview} />
-        {item.appeal && (
-          <ItemDescription className="text-xs italic">{item.appeal.reason}</ItemDescription>
-        )}
+        {/* One line per open appeal: a target can carry appeals from two
+            control families at once (a ban and a role change), and showing
+            only the newest hid the other from triage entirely. */}
+        {item.appeals.map((appeal) => (
+          <ItemDescription key={appeal.id} className="text-xs italic">
+            {appeal.reason}
+          </ItemDescription>
+        ))}
       </ItemContent>
       {/* `self-start`: the content column is one to four lines depending on
           the excerpt and the appeal, and a vertically centred timestamp

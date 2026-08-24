@@ -65,7 +65,11 @@ export const moderationQueueAtom = queueFamily("");
 export interface QueueSummary {
   /** Cases in the pages fetched so far. */
   loaded: number;
-  /** How many of those carry an open appeal. */
+  /**
+   * Open appeals across those cases — appeals, not cases carrying one: a
+   * single target can have two open at once (one per control family), and
+   * both are someone waiting on a reply.
+   */
   appeals: number;
   /** Whether the server has at least one more page. */
   hasMore: boolean;
@@ -77,7 +81,7 @@ export const moderationQueueSummaryAtom = atom<QueueSummary>((get) => {
   const cases = queue.data?.pages.flatMap((page) => page.items) ?? [];
   return {
     loaded: cases.length,
-    appeals: cases.filter((item) => item.appeal !== null).length,
+    appeals: cases.reduce((total, item) => total + item.appeals.length, 0),
     hasMore: queue.hasNextPage,
   };
 });

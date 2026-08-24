@@ -272,6 +272,51 @@ export function hasCurrentLegalConsent(consent: {
 }
 
 // --------------------------------------------------------------------------
+// Onboarding completeness
+// --------------------------------------------------------------------------
+
+/**
+ * Refusal for a signed-in account that never finished onboarding — no claimed
+ * handle, or no date of birth old enough for {@link MINIMUM_AGE_YEARS}.
+ * Distinct from the sign-up strings above, which talk about creating an
+ * account: by the time this one is reached the account exists, and the ask is
+ * to finish `/welcome` before carrying on.
+ */
+export const ONBOARDING_REQUIRED_MESSAGE =
+  "You must finish setting up your account before you can do that.";
+
+/**
+ * Whether a session user has completed onboarding.
+ *
+ * OAuth and passkey sign-ups land with neither a handle nor a date of birth —
+ * no form exists to put them in — so the web app holds them at `/welcome`
+ * until both are declared (`needsCompletionAtom`). A client-side redirect is a
+ * courtesy anyone can skip, so this is the half that holds: the oRPC
+ * `protectedProcedure` gate in packages/api reads it off the session user
+ * fresh on every request, the same way it reads `hasCurrentLegalConsent`, and
+ * an incomplete account gets FORBIDDEN rather than reaching a product RPC by
+ * calling it directly.
+ *
+ * `dateOfBirth` arrives on the session user as whatever the adapter handed
+ * back — a `Date` for the timestamp column, or an ISO string — so it is run
+ * through {@link parseDateOfBirthParts} rather than compared raw, and the age
+ * check reuses {@link isAtLeastYearsOld} so the 15+ boundary cannot differ
+ * between the write hook and this read.
+ */
+export function hasCompletedOnboarding(
+  user: {
+    username?: string | null;
+    dateOfBirth?: unknown;
+  },
+  today: Date = new Date(),
+): boolean {
+  if (!user.username) return false;
+  const dob = parseDateOfBirthParts(user.dateOfBirth);
+  if (!dob) return false;
+  return isAtLeastYearsOld(dob, MINIMUM_AGE_YEARS, today);
+}
+
+// --------------------------------------------------------------------------
 // Bio
 // --------------------------------------------------------------------------
 

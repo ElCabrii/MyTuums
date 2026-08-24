@@ -12,6 +12,7 @@ import {
   POST_ATTACHMENT_MAX_TOTAL_BYTES,
   POST_PAGE_SIZE,
   POST_PAGE_SIZE_MAX,
+  CURSOR_MAX_ENCODED_LENGTH,
   THREAD_ANCESTOR_MAX,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
@@ -554,7 +555,7 @@ export const postRouter = {
     .use(rateLimit(RATE_LIMITS.read))
     .input(
       z.object({
-        cursor: z.string().optional(),
+        cursor: z.string().max(CURSOR_MAX_ENCODED_LENGTH).optional(),
         limit: z.number().int().min(1).max(POST_PAGE_SIZE_MAX).default(POST_PAGE_SIZE),
         /**
          * Omit for the global feed; set to scope the feed to one author.

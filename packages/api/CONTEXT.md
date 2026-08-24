@@ -15,7 +15,7 @@ over HTTP and imports only its browser-safe subpaths.
 | File                        | Why                                                                                                                                                                                      |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/router.ts`             | The five groups and what owns each.                                                                                                                                                      |
-| `src/procedures.ts`         | The four gates, the legal consent gate, the two rate-limit mechanisms, the one exception.                                                                                                |
+| `src/procedures.ts`         | The four gates, the legal consent and onboarding gates, the two rate-limit mechanisms, the one exception.                                                                                |
 | `src/context.ts`            | What every handler is handed, and why nothing is a module global.                                                                                                                        |
 | `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                                                                                                                                  |
 | `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                                                                                                                       |
@@ -40,6 +40,7 @@ over HTTP and imports only its browser-safe subpaths.
 | Change post-attachment upload rules   | `src/post-image.ts`, `src/constants.ts` (`POST_ATTACHMENT_*`)                            | `src/image.test.ts`; `src/posts.int.test.ts`                                                             |
 | Change the profile upload lifecycle   | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                      |
 | Change the post attachment lifecycle  | `src/post-media.ts`, `src/post-media-lock.ts`                                            | `src/posts.int.test.ts`; `src/reconcile-media.ts`; `scripts/reconcile-media.ts`                          |
+| Change follow, block or unblock       | `src/users.ts`, `src/moderation.ts`                                                      | `src/relationship-lock.ts` — every relationship writer must take the pair lock                           |
 | Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                                     |
 | Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                                         |
 | Change an account rule                | `../auth/src/rules.ts`                                                                   | not `src/constants.ts` — see the invariant below                                                         |
@@ -68,6 +69,15 @@ over HTTP and imports only its browser-safe subpaths.
   is the single reader the web dialog shares. Accepting, the `/welcome` claim,
   signing out and reading the documents all run outside oRPC, which is what
   keeps the gate from locking out the very people it is asking.
+- **`protectedProcedure` also carries the onboarding gate.** An OAuth or
+  passkey account lands with neither a claimed handle nor a date of birth, and
+  the client-side `/welcome` redirect is a courtesy anyone can skip — so the
+  gate refuses FORBIDDEN until `hasCompletedOnboarding` (in
+  `@my-tuums/auth/rules`) reads both off the session user, re-using the same
+  15+ parse and boundary as the write hook. The `/welcome` claim still runs
+  through `authClient.updateUser` outside oRPC, and `appealOpen` builds from
+  `baseProcedure`, so neither the people the gate is asking nor the banned
+  accounts that must be heard are locked out.
 - **Appeal intake lives in `src/appeal-intake.ts`, and only there.**
   `moderation.appealOpen` validates its input shape and calls `openAppeal`;
   it owns nothing else. The module treats the email link and the removed-post
@@ -110,6 +120,16 @@ over HTTP and imports only its browser-safe subpaths.
   that stub before it crosses the API boundary.
 - **`like`/`unlike` and `follow`/`unfollow` are separate idempotent
   procedures, never a toggle** — ordering and retry safety.
+- **Relationship writes for a pair are serialized by one advisory lock.**
+  "A blocked pair has no follow edge" spans `follow` and `user_block`, so no
+  database constraint can hold it. `follow`, `block` and `unblock` all take
+  `acquireRelationshipLock` (`src/relationship-lock.ts`) on the _unordered_
+  pair, inside the transaction that does the write. Unlocked, `follow`'s block
+  check and its insert straddle a concurrent `block`: the block severs the
+  existing edges, `follow` inserts a new one, and a prohibited edge stands
+  behind the block until the unblock puts it back in view. Any future writer
+  of either table must take the same lock — the key must come from the sorted
+  pair, or the two directions would take different locks and never meet.
 - **A post has two independent tombstones, and neither is a row delete.**
   `moderation.removePost` stamps `removed_at`; `post.delete` (the author's own,
   issue #148) stamps `deleted_at`. `postSelection` nulls the content for
@@ -121,9 +141,12 @@ over HTTP and imports only its browser-safe subpaths.
   transaction, no `FOR UPDATE`, no `moderation_action` row, no email, nothing
   appealable — it is author-owned and idempotent, and it refuses a post a
   moderator already removed so the author keeps the stub's reason and appeal
-  link. Its unlocked read/write pair is safe because the update compares both
-  tombstones; after losing to a concurrent delete or removal, it re-reads the
-  winner and preserves that outcome.
+  link. The moderation effects make the inverse check too: a deleted post is
+  refused before `post_removed` or `post_restored` can be logged, including a
+  legacy row that happens to carry both tombstones. Its unlocked read/write
+  pair is safe because the update compares both tombstones; after losing to a
+  concurrent delete or removal, it re-reads the winner and preserves that
+  outcome.
 - **Replies are a mode of `post.list` (`parentId` or the profile `kind`), not
   their own procedure.** The web app's optimistic like sweep covers every
   cached `post.list` by key prefix; a separate procedure would miss reply
@@ -174,6 +197,13 @@ over HTTP and imports only its browser-safe subpaths.
   goes through the wrappers. The raw effects remain exported for the appeal
   intake and the tests, which compose them directly; a new procedure must go
   through the wrappers, not call an effect and hand-thread the send.
+- **Forward sanctions supersede older appeals in their control family.** The
+  `removePost`, `suspendUser` and `banUser` wrappers lock the prior action rows
+  and stamp their open appeals `superseded` in the same transaction as the new
+  action. Suspension and ban are one account-sanction family; role changes
+  remain a separate family. Review checks both live state and action ordering
+  for either outcome, and the queue/case response carries every independently
+  open appeal rather than one appeal slot per target.
 - **A manual inverse action closes appeals under a shared action lock.** The
   `restorePost`, `unbanUser` and `setRole` wrappers lock the contested action
   rows, then stamp linked open appeals `reversed`, then lock/change the target,
@@ -182,8 +212,12 @@ over HTTP and imports only its browser-safe subpaths.
   review fields or log `appeal_resolved`; the inverse action's audit row and
   notice are the source of truth. The remaining appeal-before-target order
   matches `appealReview`, avoiding a review/reversal deadlock.
-- **Cursor bounds go through `sql.param(value, column)`.** Interpolating a JS
-  `Date` hands postgres.js something it cannot serialise.
+- **Cursors are bounded before they are decoded.** Every cursor input schema
+  caps the encoded value at `CURSOR_MAX_ENCODED_LENGTH`, and the shared codec
+  repeats that check before base64 decoding or JSON parsing. Decoded textual
+  ids have their own bound, and all SQL cursor values still go through
+  `sql.param(value, column)` — interpolating a JS `Date` hands postgres.js
+  something it cannot serialise.
 - **`keysetPage`'s `createdAtField` is type-tied to the `createdAt` column**, so
   a cursor can never encode a different timestamp than the SQL compares. One
   list bypasses the skeleton on purpose: `moderation.queue` merges two shapes

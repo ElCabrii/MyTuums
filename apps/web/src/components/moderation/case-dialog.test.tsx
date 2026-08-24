@@ -442,7 +442,9 @@ describe("CaseDialog — appeal review", () => {
       makeUserModerationCaseDetail(
         { id: "user-1" },
         {
-          appeal: { id: "appeal-1", reason: "It wasn't me", createdAt: new Date(), status: "open" },
+          appeals: [
+            { id: "appeal-1", reason: "It wasn't me", createdAt: new Date(), status: "open" },
+          ],
         },
       ),
     );
@@ -471,12 +473,14 @@ describe("CaseDialog — appeal review", () => {
       makeUserModerationCaseDetail(
         { id: "user-1" },
         {
-          appeal: {
-            id: "appeal-1",
-            reason: "It wasn't me",
-            createdAt: new Date(),
-            status: "overturned",
-          },
+          appeals: [
+            {
+              id: "appeal-1",
+              reason: "It wasn't me",
+              createdAt: new Date(),
+              status: "overturned",
+            },
+          ],
         },
       ),
     );

@@ -175,7 +175,7 @@ export const queueRouter = {
           newestAt: new Date(group.newest_at),
           reportCount: group.report_count,
           reasons: [...new Set(group.reasons)],
-          appeal: null,
+          appeals: [],
         });
       }
       for (const open of openAppeals) {
@@ -189,9 +189,13 @@ export const queueRouter = {
           newestAt: createdAt,
           reportCount: 0,
           reasons: [],
-          appeal: null,
+          appeals: [],
         };
-        entry.appeal = { id: open.id, reason: open.reason, createdAt };
+        // Appended, never assigned: two open appeals against one target are
+        // two people-waiting-on-a-reply, and overwriting dropped one of them
+        // out of the queue entirely. The query orders by created_at desc, so
+        // pushing preserves newest-first.
+        entry.appeals.push({ id: open.id, reason: open.reason, createdAt });
         if (createdAt.getTime() > entry.newestAt.getTime()) entry.newestAt = createdAt;
         byKey.set(key, entry);
       }
@@ -254,7 +258,12 @@ export const queueRouter = {
         input.targetType === "post"
           ? eq(moderationAction.targetPostId, input.targetId)
           : eq(moderationAction.targetUserId, input.targetId);
-      const [openAppeal] = await context.db
+      // Every open appeal against this target, newest first — not just one.
+      // Two control families can be appealed at once (a ban and a role
+      // change against the same account), and the reviewer needs to see and
+      // answer both; taking the newest silently hid the other, which is how
+      // an appeal could sit open forever with nobody able to reach it.
+      const openAppeals = await context.db
         .select({
           id: appeal.id,
           reason: appeal.reason,
@@ -270,8 +279,7 @@ export const queueRouter = {
             appealWhere,
           ),
         )
-        .orderBy(desc(appeal.createdAt))
-        .limit(1);
+        .orderBy(desc(appeal.createdAt), desc(appeal.id));
 
       const target =
         input.targetType === "post"
@@ -325,7 +333,7 @@ export const queueRouter = {
         targetType: input.targetType,
         targetId: input.targetId,
         reports,
-        appeal: openAppeal ?? null,
+        appeals: openAppeals,
         target,
       };
     }),
@@ -389,14 +397,25 @@ export const queueRouter = {
     }),
 };
 
-/** One merged queue case: reports and/or an appeal against a single target. */
+/**
+ * One merged queue case: reports and/or open appeals against a single target.
+ *
+ * `appeals` is a list, not one appeal. A target can carry open appeals from
+ * two different control families at once — a ban appeal and a role-change
+ * appeal are separate grievances against the same account, and superseding
+ * one because of the other would close a complaint that still stands (see
+ * `SUPERSEDING_FAMILY` in ./moderation-actions.ts). Keeping a single appeal
+ * per case key silently hid whichever one the merge happened to overwrite,
+ * so a moderator could never see it existed. Ordered newest first, matching
+ * the query.
+ */
 type MergedCase = {
   targetType: "post" | "user";
   targetId: string;
   newestAt: Date;
   reportCount: number;
   reasons: string[];
-  appeal: { id: string; reason: string; createdAt: Date } | null;
+  appeals: { id: string; reason: string; createdAt: Date }[];
 };
 
 /**
