@@ -8,6 +8,7 @@ import {
   objectKeyFromMediaPath,
   sniffImageType,
 } from "./image.js";
+import { acceptPostImage } from "./post-image.js";
 
 /**
  * A unit suite, not an integration one — none of this touches Postgres or a
@@ -123,6 +124,71 @@ function pngWithDimensions(width: number, height: number, size = 24): Uint8Array
     [(height >>> 24) & 0xff, (height >>> 16) & 0xff, (height >>> 8) & 0xff, height & 0xff],
     20,
   );
+  return bytes;
+}
+
+/** Genuine files for the post-attachment path, decoded from small fixtures. */
+const POST_PNG = new Uint8Array(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAEElEQVR4nGP4y8AARAwQCgAfrgP19hgqWQAAAABJRU5ErkJggg==",
+    "base64",
+  ),
+);
+const POST_JPEG = new Uint8Array(
+  Buffer.from(
+    "/9j/4AAQSkZJRgABAgAAAQABAAD//gAQTGF2YzYwLjMxLjEwMgD/2wBDAAgEBAQEBAUFBQUFBQYGBgYGBgYGBgYGBgYHBwcICAgHBwcGBgcHCAgICAkJCQgICAgJCQoKCgwMCwsODg4RERT/xABMAAEBAAAAAAAAAAAAAAAAAAAABgEBAQAAAAAAAAAAAAAAAAAABgcQAQAAAAAAAAAAAAAAAAAAAAARAQAAAAAAAAAAAAAAAAAAAAD/wAARCAACAAIDASIAAhEAAxEA/9oADAMBAAIRAxEAPwCLAFF/f//Z",
+    "base64",
+  ),
+);
+const POST_WEBP = new Uint8Array(
+  Buffer.from(
+    "UklGRjwAAABXRUJQVlA4IDAAAADQAQCdASoCAAIAAgA0JaACdLoB+AADsAD+8Oj3/yC5YXXI1/8gP+QH/ID/+PIAAAA=",
+    "base64",
+  ),
+);
+const POST_WEBP_LOSSLESS = new Uint8Array(
+  Buffer.from("UklGRhwAAABXRUJQVlA4TA8AAAAvAUAAAAcQ9Y/+ByKi/wEA", "base64"),
+);
+
+function webpWithSingleChunk(type: "VP8 " | "VP8L", payload: readonly number[]): Uint8Array {
+  const paddedLength = payload.length + (payload.length & 1);
+  const bytes = new Uint8Array(20 + paddedLength);
+  bytes.set([0x52, 0x49, 0x46, 0x46], 0); // RIFF
+  new DataView(bytes.buffer).setUint32(4, bytes.length - 8, true);
+  bytes.set([0x57, 0x45, 0x42, 0x50], 8); // WEBP
+  bytes.set(
+    [...type].map((character) => character.charCodeAt(0)),
+    12,
+  );
+  new DataView(bytes.buffer).setUint32(16, payload.length, true);
+  bytes.set(payload, 20);
+  return bytes;
+}
+
+/** Rewrites the dimensions of a real PNG fixture and keeps its IHDR CRC valid. */
+function postPngWithDimensions(width: number, height: number): Uint8Array {
+  const bytes = new Uint8Array(POST_PNG);
+  bytes[16] = (width >>> 24) & 0xff;
+  bytes[17] = (width >>> 16) & 0xff;
+  bytes[18] = (width >>> 8) & 0xff;
+  bytes[19] = width & 0xff;
+  bytes[20] = (height >>> 24) & 0xff;
+  bytes[21] = (height >>> 16) & 0xff;
+  bytes[22] = (height >>> 8) & 0xff;
+  bytes[23] = height & 0xff;
+
+  let crc = 0xffffffff;
+  for (let offset = 12; offset < 29; offset += 1) {
+    crc ^= bytes[offset];
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+    }
+  }
+  crc = (crc ^ 0xffffffff) >>> 0;
+  bytes[29] = (crc >>> 24) & 0xff;
+  bytes[30] = (crc >>> 16) & 0xff;
+  bytes[31] = (crc >>> 8) & 0xff;
+  bytes[32] = crc & 0xff;
   return bytes;
 }
 
@@ -262,9 +328,9 @@ describe("acceptImage", () => {
   });
 
   it("accepts the banner's enlarged display bounds and byte budget", () => {
-    // A 3 MB 3840x512 PNG is larger than the old 2 MB cap, so this catches
+    // A 3 MB 3840x1280 PNG is larger than the old 2 MB cap, so this catches
     // the client/server display-byte limit falling behind the new resolution.
-    const fullResolution = pngWithDimensions(3840, 512, 3 * 1024 * 1024);
+    const fullResolution = pngWithDimensions(3840, 1280, 3 * 1024 * 1024);
     expect(acceptImage(fullResolution, "image/png", "banner", "display")).toMatchObject({
       ok: true,
     });
@@ -272,16 +338,16 @@ describe("acceptImage", () => {
     expect(IMAGE_LIMITS.banner).toMatchObject({
       maxDisplayBytes: 8 * 1024 * 1024,
       maxWidth: 3840,
-      maxHeight: 512,
+      maxHeight: 1280,
     });
     expect(
-      acceptImage(pngWithDimensions(3841, 512), "image/png", "banner", "display"),
+      acceptImage(pngWithDimensions(3841, 1280), "image/png", "banner", "display"),
     ).toMatchObject({
       ok: false,
       reason: "size",
     });
     expect(
-      acceptImage(pngWithDimensions(3840, 513), "image/png", "banner", "display"),
+      acceptImage(pngWithDimensions(3840, 1281), "image/png", "banner", "display"),
     ).toMatchObject({
       ok: false,
       reason: "size",
@@ -380,6 +446,81 @@ describe("object keys", () => {
   });
 });
 
+describe("post attachment acceptance", () => {
+  it("accepts structurally valid PNG, JPEG, and lossy or lossless WebP files", () => {
+    const fixtures = [
+      [POST_PNG, "image/png", 2, 2],
+      [POST_JPEG, "image/jpeg", 2, 2],
+      [POST_WEBP, "image/webp", 2, 2],
+      [POST_WEBP_LOSSLESS, "image/webp", 2, 2],
+    ] as const;
+
+    for (const [bytes, type, width, height] of fixtures) {
+      expect(acceptPostImage(bytes, type)).toEqual({ ok: true, type, width, height });
+    }
+  });
+
+  it("rejects header-only and truncated files for every allowed raster type", () => {
+    const cases = [
+      [new Uint8Array(POST_PNG.slice(0, 8)), "image/png"],
+      [POST_PNG.slice(0, -1), "image/png"],
+      [new Uint8Array([0xff, 0xd8, 0xff]), "image/jpeg"],
+      [POST_JPEG.slice(0, -2), "image/jpeg"],
+      [POST_WEBP.slice(0, 12), "image/webp"],
+      [POST_WEBP.slice(0, -1), "image/webp"],
+    ] as const;
+
+    for (const [bytes, type] of cases) {
+      expect(acceptPostImage(bytes, type)).toEqual({ ok: false, reason: "content" });
+    }
+  });
+
+  it("rejects WebP frame chunks that contain dimensions but no encoded pixels", () => {
+    const losslessHeaderOnly = webpWithSingleChunk("VP8L", [0x2f, 0x00, 0x00, 0x00, 0x00]);
+    const lossyHeaderOnly = webpWithSingleChunk("VP8 ", [
+      0xe0,
+      0x00,
+      0x00, // key frame whose first partition claims only the 7-byte frame header
+      0x9d,
+      0x01,
+      0x2a,
+      0x01,
+      0x00,
+      0x01,
+      0x00,
+    ]);
+
+    expect(acceptPostImage(losslessHeaderOnly, "image/webp")).toEqual({
+      ok: false,
+      reason: "content",
+    });
+    expect(acceptPostImage(lossyHeaderOnly, "image/webp")).toEqual({
+      ok: false,
+      reason: "content",
+    });
+  });
+
+  it("rejects a PNG with a corrupt chunk CRC", () => {
+    const corrupt = new Uint8Array(POST_PNG);
+    corrupt[32] ^= 0xff;
+    expect(acceptPostImage(corrupt, "image/png")).toEqual({ ok: false, reason: "content" });
+  });
+
+  it("requires the declared type to match the bytes", () => {
+    expect(acceptPostImage(PNG, "image/jpeg")).toEqual({ ok: false, reason: "content" });
+    expect(acceptPostImage(new Uint8Array([1, 2, 3]), "image/png")).toEqual({
+      ok: false,
+      reason: "content",
+    });
+  });
+
+  it("rejects dimensions over the post attachment bounds", () => {
+    const oversized = postPngWithDimensions(0x1001, 2);
+
+    expect(acceptPostImage(oversized, "image/png")).toEqual({ ok: false, reason: "size" });
+  });
+});
+
 /**
  * This is the guard on the /media route, where the segment after the prefix
  * reaches the S3 client directly — so the table is the allowlist, read as one.
@@ -400,6 +541,7 @@ describe("isSafeObjectKey", () => {
       // The `.orig` infix is the original's key shape.
       [`avatars/user-1/${UUID}.orig.jpg`, true],
       [`banners/user-1/${UUID}.orig.webp`, true],
+      [`posts/user-1/${UUID}/${UUID}.png`, true],
     ]);
   });
 
@@ -411,6 +553,8 @@ describe("isSafeObjectKey", () => {
       [`backups/u/${UUID}.webp`, false],
       [`avatars/u/${UUID}.svg`, false],
       [`avatars/u/${UUID}.html`, false],
+      [`posts/u/${UUID}.svg`, false],
+      [`posts/u/${UUID}/not-a-uuid.webp`, false],
       // The old `[a-f0-9-]{36}` also matched 36 hyphens; the shape must be the
       // grouped uuid `randomUUID()` actually produces.
       ["avatars/u/------------------------------------.webp", false],

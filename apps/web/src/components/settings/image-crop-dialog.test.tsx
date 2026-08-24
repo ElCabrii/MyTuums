@@ -86,6 +86,29 @@ describe("ImageCropDialog", () => {
     expect(onApply).toHaveBeenCalledWith({ x: 0.5, y: 0.5, scale: 1 });
   });
 
+  it("previews a portrait avatar in the square frame used by avatar surfaces", async () => {
+    stubDecode(400, 800);
+    const { container } = await renderWithProviders(
+      <ImageCropDialog kind="avatar" file={file()} onApply={vi.fn()} onCancel={vi.fn()} />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: m.settings_image_crop_apply() })).toBeEnabled(),
+    );
+    expect(container.ownerDocument.querySelector<HTMLElement>(".touch-none")).toHaveStyle({
+      aspectRatio: "1",
+    });
+    const visibleArea = container.ownerDocument.querySelector<HTMLElement>(
+      '[aria-hidden="true"].rounded-full',
+    );
+    expect(visibleArea).toHaveStyle({ width: "100%", height: "100%" });
+    expect(screen.getByRole("dialog")).toHaveClass(
+      "max-h-[calc(100dvh-2rem)]",
+      "overflow-y-auto",
+      "[&>*]:shrink-0",
+    );
+  });
+
   it("names the slot it is editing", async () => {
     stubDecode(2000, 1200);
     await renderWithProviders(
@@ -97,6 +120,12 @@ describe("ImageCropDialog", () => {
         name: m.settings_image_crop_title({ label: m.settings_banner_label() }),
       }),
     ).toBeInTheDocument();
+    expect(screen.getByText(m.settings_banner_crop_safe_area())).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveClass(
+      "max-h-[calc(100dvh-2rem)]",
+      "overflow-y-auto",
+      "[&>*]:shrink-0",
+    );
   });
 
   it("cancels without applying a crop", async () => {
@@ -115,12 +144,11 @@ describe("ImageCropDialog", () => {
   });
 
   it("pans the crop center when the image is dragged", async () => {
-    // A 1000x1000 source in a banner slot: the encoder keeps 1000x512 of it, so
-    // there are 488 rows of vertical slack to reposition — which is the whole
-    // point of the editor for a banner. (An avatar has no slack at zoom 1: it
-    // frames the entire source, so there is nothing to pan until you zoom.)
+    // A 1000x1000 source in a banner slot: the encoder keeps a 1000x333 3:1
+    // region, so there is vertical slack to reposition — which is the whole
+    // point of the editor for a banner.
     stubDecode(1000, 1000);
-    stubFrameSize(1000, 512);
+    stubFrameSize(1000, 333);
     const onApply = vi.fn<(crop: Crop) => void>();
     const { container } = await renderWithProviders(
       <ImageCropDialog kind="banner" file={file()} onApply={onApply} onCancel={vi.fn()} />,
@@ -142,16 +170,39 @@ describe("ImageCropDialog", () => {
     await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
 
     const crop = onApply.mock.calls.at(-1)![0];
-    // The frame is rendered 1:1 with the 512-row crop rect, so 100 CSS px is
-    // 100 source rows — a tenth of the 1000px source.
+    // The frame and crop rect share the same 3:1 scale, so a 100px drag moves
+    // the center by one tenth of the 1000px source.
     expect(crop.y).toBeCloseTo(0.4, 5);
     // Nothing to pan horizontally: the rect already spans the full width.
     expect(crop.x).toBe(0.5);
     expect(crop.scale).toBe(1);
   });
 
+  it("pans a portrait avatar within its square composition", async () => {
+    stubDecode(400, 800);
+    stubFrameSize(400, 400);
+    const onApply = vi.fn<(crop: Crop) => void>();
+    const { container } = await renderWithProviders(
+      <ImageCropDialog kind="avatar" file={file()} onApply={onApply} onCancel={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: m.settings_image_crop_apply() })).toBeEnabled(),
+    );
+
+    const frame = container.ownerDocument.querySelector<HTMLElement>(".touch-none");
+    await user.pointer([
+      { target: frame!, coords: { clientX: 200, clientY: 150 }, keys: "[MouseLeft>]" },
+      { target: frame!, coords: { clientX: 200, clientY: 250 } },
+      { target: frame!, keys: "[/MouseLeft]" },
+    ]);
+    await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
+
+    expect(onApply).toHaveBeenLastCalledWith({ x: 0.5, y: 0.375, scale: 1 });
+  });
+
   it("zooms on wheel, and never below the cover rect", async () => {
-    stubDecode(800, 800);
+    stubDecode(400, 800);
     stubFrameSize(400, 400);
     const onApply = vi.fn<(crop: Crop) => void>();
     const { container } = await renderWithProviders(

@@ -53,6 +53,12 @@ databases. It serves data only — no HTTP, no business logic.
   page fetch into a table scan.
 - **Migrations are committed and shipped**, applied once by the pre-deploy
   step — never at server boot, where N replicas would race the same DDL.
+- **The two handle columns cannot diverge.** Migration
+  `0015_lowercase_usernames` installs `user_normalize_handle_before_write`,
+  which lowercases `username` and derives `display_username` from it on every
+  handle insert or update. The database boundary is intentional: Railway runs
+  migrations before the new application takes traffic, while the previous
+  version may still write rows.
 - **Destructive helpers refuse anything not ending in `_test`**
   (`assertTestDatabase`, `scripts/setup-test-db.ts`). This is the guard
   standing between a test run and the development database.

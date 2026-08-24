@@ -1,5 +1,7 @@
-import { deflateSync } from "node:zlib";
 import { expect, test } from "../../support/fixtures";
+import { emailVerificationLinkFor } from "../../support/db";
+import { solidPng } from "../../support/image";
+import { E2E } from "../../playwright.config";
 import { uniqueUser } from "../../support/users";
 
 /**
@@ -41,11 +43,18 @@ async function signUpFresh(page: import("@playwright/test").Page, prefix: string
   await page.getByRole("checkbox", { name: /I have read and agree/ }).check();
   await page.getByRole("main").getByRole("button", { name: "Register" }).click();
 
-  // A fresh sign-up is offered two-factor at /welcome before its profile — see
-  // the `signUpAtom` / `useRedirectWhenSignedIn` pairing. Declining is what
-  // gets us to the account we came to configure.
-  await expect(page).toHaveURL(/\/welcome$/);
-  await page.getByRole("button", { name: "Skip for now" }).click();
+  // requireEmailVerification (packages/auth): sign-up creates the account and
+  // sends the verification link but issues NO session, so the person lands on
+  // /verify-email rather than /welcome (issue #172). The post-signup two-factor
+  // offer is gone on the password path — a documented tradeoff; 2FA stays
+  // configurable from settings, which is what these specs exercise anyway.
+  await expect(page).toHaveURL(/\/verify-email$/);
+
+  // Complete verification by visiting the link a real email would carry:
+  // `autoSignInAfterVerification` mints the session and `useRedirectWhenSignedIn`
+  // lands the now-complete account on its profile — the state every test below
+  // starts from.
+  await page.goto(emailVerificationLinkFor(account.email, `${E2E.webUrl}/verify-email`));
   await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));
 
   return account;
@@ -97,59 +106,6 @@ const PNG_1X1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64",
 );
-
-function crc32(bytes: Buffer): number {
-  let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function pngChunk(type: string, data: Buffer): Buffer {
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(data.length);
-  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(body));
-  return Buffer.concat([length, body, crc]);
-}
-
-/**
- * A genuine PNG of arbitrary size, built here rather than committed as a
- * fixture file so the dimensions that matter are visible at the call site.
- *
- * A gradient rather than a flat colour: a flat image compresses to almost
- * nothing and would not exercise the byte caps at a realistic ratio.
- */
-function solidPng(width: number, height: number): Buffer {
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // colour type 2: truecolour RGB
-
-  const stride = width * 3;
-  const raw = Buffer.alloc(height * (stride + 1));
-  for (let y = 0; y < height; y++) {
-    const row = y * (stride + 1);
-    raw[row] = 0; // filter: none
-    for (let x = 0; x < width; x++) {
-      const pixel = row + 1 + x * 3;
-      raw[pixel] = Math.floor((x * 255) / width);
-      raw[pixel + 1] = Math.floor((y * 255) / height);
-      raw[pixel + 2] = 0x80;
-    }
-  }
-
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    pngChunk("IHDR", ihdr),
-    pngChunk("IDAT", deflateSync(raw)),
-    pngChunk("IEND", Buffer.alloc(0)),
-  ]);
-}
 
 /**
  * These hit the real Storage Bucket — there is no fake in the browser path.
@@ -210,13 +166,13 @@ test.describe("images", () => {
 
     await page.goto("/settings/account");
     // A landscape banner, which is the shape a banner actually is — and the
-    // shape that regressed. The display object encodes at 1200x400, so its
-    // width is just past the slot's 1000px HEIGHT bound: a parser that confuses
-    // the two axes rejects this as "too large" and passes a square or a 1x1.
+    // shape that regressed. The display object encodes at 1500x500, so swapping
+    // its axes produces a 500x1500 image beyond the 1280px height bound. A
+    // square or smaller landscape fixture would let that parser bug pass.
     await page.getByLabel("Banner").setInputFiles({
       name: "banner.png",
       mimeType: "image/png",
-      buffer: solidPng(1200, 400),
+      buffer: solidPng(1500, 500),
     });
     await applyCrop(page);
     await expect(page.getByRole("button", { name: "Remove Banner" })).toBeVisible({
@@ -384,21 +340,5 @@ test.describe("preferences", () => {
 
     await expect(fresh.locator("html")).toHaveClass(/dark/);
     await context.close();
-  });
-});
-
-test.describe("the two-factor offer", () => {
-  test("is shown once after sign-up and can be skipped", async ({ page }) => {
-    // `signUpFresh` already asserts the offer appears and skips it; this pins
-    // the other half — that it does not come back.
-    const account = await signUpFresh(page, "twofaskip");
-
-    await page.goto("/");
-    await expect(page).toHaveURL(/\/$/);
-
-    await page.goto("/welcome");
-    // Nothing outstanding, so the page has no business rendering: the redirect
-    // effect sends them to their profile instead of re-offering.
-    await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));
   });
 });

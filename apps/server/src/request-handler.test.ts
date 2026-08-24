@@ -106,15 +106,15 @@ function streamReqStub(
 const MEDIA_HIT = { url: "https://bucket.example/signed?sig=abc", cacheSeconds: 300 };
 
 /**
- * The cookie header plus the `hasValidSession` override a signed-in request
+ * The cookie header plus the `resolveSession` override a signed-in request
  * needs for both gates (`/media` and pages) — pairs with `reqStub`'s headers
  * argument and `deps`'s override, so a test proving "this path is reachable
  * once signed in" doesn't have to repeat both by hand.
  */
-function signedIn() {
+function signedIn(userId = "viewer-1") {
   return {
     headers: { cookie: "better-auth.session_token=live" },
-    hasValidSession: vi.fn().mockResolvedValue(true),
+    resolveSession: vi.fn().mockResolvedValue({ kind: "authenticated", userId }),
   };
 }
 
@@ -131,7 +131,7 @@ function deps(overrides: Partial<RequestHandlerDeps> = {}): RequestHandlerDeps {
     serveStatic: vi.fn().mockResolvedValue({ served: false }),
     // Defaults to "no session" — the tests that care about a signed-in
     // visitor override it.
-    hasValidSession: vi.fn().mockResolvedValue(false),
+    resolveSession: vi.fn().mockResolvedValue({ kind: "anonymous" }),
     observeError: vi.fn().mockReturnValue({ action: "continue" }),
     ...overrides,
   };
@@ -168,15 +168,15 @@ describe("createRequestHandler", () => {
     // ask the session store at all.
     const { res, calls } = resStub();
     const serveStatic = vi.fn().mockResolvedValue({ served: false });
-    const hasValidSession = vi.fn();
-    const handle = createRequestHandler(deps({ serveStatic, hasValidSession }));
+    const resolveSession = vi.fn();
+    const handle = createRequestHandler(deps({ serveStatic, resolveSession }));
 
     await handle(reqStub("/"), res);
 
     expect(calls.statusCode).toBe(302);
     expect(calls.headers).toMatchObject({ Location: "/login?redirect=%2F" });
     expect(serveStatic).not.toHaveBeenCalled();
-    expect(hasValidSession).not.toHaveBeenCalled();
+    expect(resolveSession).not.toHaveBeenCalled();
   });
 
   it("redirects any other extension-less page path the same way, with its own path percent-encoded into the target", async () => {
@@ -220,24 +220,38 @@ describe("createRequestHandler", () => {
     // this is the whole reason the gate now asks the session store instead
     // of stopping at the cookie name.
     const { res, calls } = resStub();
-    const hasValidSession = vi.fn().mockResolvedValue(false);
-    const handle = createRequestHandler(deps({ hasValidSession }));
+    const resolveSession = vi.fn().mockResolvedValue({ kind: "anonymous" });
+    const handle = createRequestHandler(deps({ resolveSession }));
 
     await handle(reqStub("/@alice", "GET", { cookie: "better-auth.session_token=stale" }), res);
 
-    expect(hasValidSession).toHaveBeenCalledOnce();
+    expect(resolveSession).toHaveBeenCalledOnce();
     expect(calls.statusCode).toBe(302);
   });
 
   it("falls through to serveStatic when the cookie names a genuinely live session", async () => {
     const { res, calls } = resStub();
     const serveStatic = vi.fn().mockResolvedValue({ served: true });
+    const session = signedIn();
     const handle = createRequestHandler(
-      deps({ serveStatic, hasValidSession: vi.fn().mockResolvedValue(true) }),
+      deps({ serveStatic, resolveSession: session.resolveSession }),
     );
 
     await handle(reqStub("/@alice", "GET", { cookie: "better-auth.session_token=live" }), res);
 
+    expect(serveStatic).toHaveBeenCalledOnce();
+    expect(calls.statusCode).not.toBe(302);
+  });
+
+  it("fails the page gate open when the session store is unavailable", async () => {
+    const { res, calls } = resStub();
+    const serveStatic = vi.fn().mockResolvedValue({ served: true });
+    const resolveSession = vi.fn().mockResolvedValue({ kind: "unavailable" });
+    const handle = createRequestHandler(deps({ serveStatic, resolveSession }));
+
+    await handle(reqStub("/@alice", "GET", { cookie: "better-auth.session_token=live" }), res);
+
+    expect(resolveSession).toHaveBeenCalledOnce();
     expect(serveStatic).toHaveBeenCalledOnce();
     expect(calls.statusCode).not.toBe(302);
   });
@@ -249,8 +263,9 @@ describe("createRequestHandler", () => {
     // or not — see the doc comment on SESSION_COOKIE_NAME.
     const { res, calls } = resStub();
     const serveStatic = vi.fn().mockResolvedValue({ served: true });
+    const session = signedIn();
     const handle = createRequestHandler(
-      deps({ serveStatic, hasValidSession: vi.fn().mockResolvedValue(true) }),
+      deps({ serveStatic, resolveSession: session.resolveSession }),
     );
 
     await handle(
@@ -494,7 +509,7 @@ describe("createRequestHandler", () => {
     const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
     const session = signedIn();
     const handle = createRequestHandler(
-      deps({ resolveMediaUrl, hasValidSession: session.hasValidSession }),
+      deps({ resolveMediaUrl, resolveSession: session.resolveSession }),
     );
 
     await handle(reqStub("/media/avatars/user-1/abc.webp", "GET", session.headers), res);
@@ -510,6 +525,31 @@ describe("createRequestHandler", () => {
     });
   });
 
+  it("passes the authenticated viewer to post-media authorization", async () => {
+    const { res, calls } = resStub();
+    const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
+    const session = signedIn();
+    const handle = createRequestHandler(
+      deps({
+        resolveMediaUrl,
+        resolveSession: session.resolveSession,
+      }),
+    );
+
+    await handle(
+      reqStub("/media/posts/author-1/post-1/attachment-1.png", "GET", session.headers),
+      res,
+    );
+
+    expect(session.resolveSession).toHaveBeenCalledOnce();
+    expect(resolveMediaUrl).toHaveBeenCalledWith(
+      "posts/author-1/post-1/attachment-1.png",
+      "viewer-1",
+    );
+    expect(calls.statusCode).toBe(302);
+    expect(calls.headers).toMatchObject({ "Cache-Control": "private, no-store" });
+  });
+
   it("strips the query string before resolving a media key", async () => {
     const { res } = resStub();
     const resolveMediaUrl = vi
@@ -517,7 +557,7 @@ describe("createRequestHandler", () => {
       .mockResolvedValue({ ...MEDIA_HIT, url: "https://bucket.example/signed" });
     const session = signedIn();
     const handle = createRequestHandler(
-      deps({ resolveMediaUrl, hasValidSession: session.hasValidSession }),
+      deps({ resolveMediaUrl, resolveSession: session.resolveSession }),
     );
 
     await handle(reqStub("/media/avatars/user-1/abc.webp?v=2", "GET", session.headers), res);
@@ -530,7 +570,7 @@ describe("createRequestHandler", () => {
     const resolveMediaUrl = vi.fn().mockResolvedValue(null);
     const session = signedIn();
     const handle = createRequestHandler(
-      deps({ resolveMediaUrl, hasValidSession: session.hasValidSession }),
+      deps({ resolveMediaUrl, resolveSession: session.resolveSession }),
     );
 
     await handle(reqStub("/media/avatars%2F..%2Fsecret.webp", "GET", session.headers), res);
@@ -543,7 +583,7 @@ describe("createRequestHandler", () => {
   it("responds 404 when the resolver rejects the key or no bucket is configured — for a signed-in caller past the gate", async () => {
     const { res, calls } = resStub();
     const session = signedIn();
-    const handle = createRequestHandler(deps({ hasValidSession: session.hasValidSession }));
+    const handle = createRequestHandler(deps({ resolveSession: session.resolveSession }));
 
     await handle(reqStub("/media/avatars/../../etc/passwd", "GET", session.headers), res);
 
@@ -569,8 +609,8 @@ describe("createRequestHandler", () => {
 
   it("refuses a GET whose cookie names a session that is not actually valid", async () => {
     const { res, calls } = resStub();
-    const hasValidSession = vi.fn().mockResolvedValue(false);
-    const handle = createRequestHandler(deps({ hasValidSession }));
+    const resolveSession = vi.fn().mockResolvedValue({ kind: "anonymous" });
+    const handle = createRequestHandler(deps({ resolveSession }));
 
     await handle(
       reqStub("/media/avatars/user-1/abc.webp", "GET", {
@@ -579,24 +619,17 @@ describe("createRequestHandler", () => {
       res,
     );
 
-    expect(hasValidSession).toHaveBeenCalledOnce();
+    expect(resolveSession).toHaveBeenCalledOnce();
     expect(calls.statusCode).toBe(401);
   });
 
-  it("a rejecting hasValidSession hits the top-level safety net, not a silent fall-through — fail-open is index.ts's job, not this module's", async () => {
-    // The `hasValidSession` contract (see its doc comment above) promises to
-    // never reject — the real implementation in index.ts catches internally
-    // and resolves `true` on error. This module has no special handling for a
-    // broken contract: a rejection here propagates exactly like any other
-    // unhandled exception, the same as the existing handleRpc-throws test
-    // below. Fail-open is entirely index.ts's responsibility; that behaviour
-    // is out of this file's reach to test (index.ts is deliberately excluded
-    // from unit tests — see vitest.config.ts) and is instead verified by
-    // reasoning about the try/catch in its own doc comment.
+  it("keeps profile media available when the session store is unavailable", async () => {
     const { res, calls } = resStub();
+    const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
     const handle = createRequestHandler(
       deps({
-        hasValidSession: vi.fn().mockRejectedValue(new Error("session store unreachable")),
+        resolveMediaUrl,
+        resolveSession: vi.fn().mockResolvedValue({ kind: "unavailable" }),
       }),
     );
 
@@ -607,7 +640,30 @@ describe("createRequestHandler", () => {
       res,
     );
 
-    expect(calls.statusCode).toBe(500);
+    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/user-1/abc.webp");
+    expect(calls.statusCode).toBe(302);
+  });
+
+  it("fails post media closed when the session store cannot establish a viewer", async () => {
+    const { res, calls } = resStub();
+    const resolveMediaUrl = vi.fn();
+    const handle = createRequestHandler(
+      deps({
+        resolveMediaUrl,
+        resolveSession: vi.fn().mockResolvedValue({ kind: "unavailable" }),
+      }),
+    );
+
+    await handle(
+      reqStub("/media/posts/author-1/post-1/attachment-1.png", "GET", {
+        cookie: "better-auth.session_token=live",
+      }),
+      res,
+    );
+
+    expect(resolveMediaUrl).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(503);
+    expect(calls.headers).toMatchObject({ "Cache-Control": "no-store" });
   });
 
   it("refuses a write verb on /media rather than letting it reach object storage, even signed out", async () => {
@@ -627,7 +683,8 @@ describe("createRequestHandler", () => {
     // page gate first and redirects (see the gate tests above) — this test is
     // about the fallback 404 underneath the gate, so it goes in signed in.
     const { res, calls } = resStub();
-    const handle = createRequestHandler(deps({ hasValidSession: vi.fn().mockResolvedValue(true) }));
+    const session = signedIn();
+    const handle = createRequestHandler(deps({ resolveSession: session.resolveSession }));
 
     await handle(reqStub("/nonsense", "GET", { cookie: "better-auth.session_token=live" }), res);
 

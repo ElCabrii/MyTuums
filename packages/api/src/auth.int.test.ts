@@ -7,7 +7,7 @@
  * test-only instance with a smaller plugin list would be asserting nothing.
  * `authTest` appears here only where a test needs a fixture minted cheaply.
  */
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { base32 } from "@better-auth/utils/base32";
 import { createOTP } from "@better-auth/utils/otp";
 import { desc, eq, like } from "drizzle-orm";
@@ -18,6 +18,7 @@ import {
   LEGAL_ACCEPTANCE_REQUIRED_MESSAGE,
   LEGAL_VERSION,
   THEME_PREFERENCES,
+  USERNAME_CANONICAL_WRITE_MESSAGE,
 } from "@my-tuums/auth/rules";
 import { authTest, testHelpers } from "@my-tuums/auth/testing";
 import { closeDb, db } from "@my-tuums/db";
@@ -67,21 +68,22 @@ class CookieJar {
   }
 }
 
-/** Signs up through the real instance and returns a jar carrying the session. */
-async function signUp(
-  overrides: {
-    username?: string;
-    email?: string;
-    password?: string;
-    dateOfBirth?: Date;
-    legalAcceptedAt?: Date | string | null;
-    legalVersion?: string | null;
-  } = {},
-) {
+/**
+ * Builds the sign-up body from the overrides, shared by every helper below so
+ * the wire format (and the `as never` bridge for the typed client boundary)
+ * lives in one place.
+ */
+function signUpBody(overrides: {
+  email?: string;
+  password?: string;
+  username?: string;
+  dateOfBirth?: Date;
+  legalAcceptedAt?: Date | string | null;
+  legalVersion?: string | null;
+}) {
   const uuid = randomUUID();
   const email = overrides.email ?? `vitest+${uuid}@example.com`;
   const username = overrides.username ?? `vitest${uuid.replace(/-/g, "").slice(0, 8)}`;
-
   const body: NonNullable<Parameters<typeof auth.api.signUpEmail>[0]>["body"] = {
     email,
     password: overrides.password ?? PASSWORD,
@@ -101,14 +103,92 @@ async function signUp(
   if (overrides.legalVersion !== undefined) {
     body.legalVersion = overrides.legalVersion;
   }
+  return { email, username, body };
+}
 
-  const result = await auth.api.signUpEmail({
-    body,
+/**
+ * Signs up through the real instance and returns a jar carrying a USABLE
+ * session — the shape every test that calls `enableTwoFactor`, `updateUser`
+ * or `getSession` needs.
+ *
+ * With `requireEmailVerification: true`, `signUpEmail` creates the account and
+ * sends the verification email but issues NO session, so this grandfatheres the
+ * fixture the same way `createTestUser` does (mirrors the 0014 migration): flip
+ * `email_verified` directly, then sign in through the real instance. The
+ * sign-in is unrate-limited because direct `auth.api.*` calls bypass the
+ * router's `onRequest` rate limiter (see the password-reset block below).
+ */
+async function signUp(overrides: Parameters<typeof signUpBody>[0] = {}) {
+  const { email, username, body } = signUpBody(overrides);
+
+  const result = await auth.api.signUpEmail({ body, returnHeaders: true });
+  // The unverified sign-up carries no session cookie — verified in the
+  // "email verification" suite below — so mark the account verified and sign
+  // in to mint the session the jar is for.
+  await markEmailVerified(email);
+  const signedIn = await auth.api.signInEmail({
+    body: { email, password: overrides.password ?? PASSWORD },
     returnHeaders: true,
   });
-
-  const jar = new CookieJar().absorb(result.headers);
+  const jar = new CookieJar().absorb(result.headers).absorb(signedIn.headers);
   return { email, username, jar, headers: jar.headers };
+}
+
+/**
+ * Signs up through the real instance and leaves the account UNVERIFIED — no
+ * session, no sign-in. For the tests that assert the pre-verification state
+ * (sign-up carries no session, unverified sign-in is rejected and re-sends)
+ * and the one that needs sign-up alone with no sign-in after it
+ * (`lastLoginMethod`).
+ */
+async function signUpUnverified(overrides: Parameters<typeof signUpBody>[0] = {}) {
+  const { email, username, body } = signUpBody(overrides);
+  const result = await auth.api.signUpEmail({ body, returnHeaders: true });
+  return { email, username, headers: result.headers };
+}
+
+/** Flips `email_verified` directly — the fixture half of the 0014 grandfather. */
+async function markEmailVerified(email: string) {
+  await db.update(user).set({ emailVerified: true }).where(eq(user.email, email));
+}
+
+/**
+ * Mints a verification JWT exactly the way Better Auth's
+ * `createEmailVerificationToken` does: an HS256 token signed with the
+ * production instance's own secret, payload `{ email }`, expiring in
+ * `expiresInSec`. The token is stateless (the verify-email endpoint verifies it
+ * purely from the signature, no `verification` row), so a test can mint one for
+ * any address and drive `/verify-email` directly — the same shape a real
+ * verification link carries. A negative `expiresInSec` produces an already-
+ * expired token for the failure-path tests; `secretOverride` signs with a
+ * different key to produce an INVALID_TOKEN.
+ *
+ * Built with `node:crypto` rather than `jose` (which better-auth uses
+ * internally) so this package takes no new dependency for a test-only helper —
+ * HS256 is just HMAC-SHA256 over `base64url(header).base64url(payload)`, which
+ * is what `jose`'s `SignJWT` produces and `jwtVerify` checks.
+ */
+function signVerificationJwt(email: string, expiresInSec: number, secret: string): string {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256" })).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const payload = Buffer.from(
+    JSON.stringify({ email: email.toLowerCase(), iat: now, exp: now + expiresInSec }),
+  ).toString("base64url");
+  const data = `${header}.${payload}`;
+  const signature = createHmac("sha256", secret).update(data).digest("base64url");
+  return `${data}.${signature}`;
+}
+
+async function verificationToken(email: string, expiresInSec = 3600): Promise<string> {
+  // SAFETY: `auth.$context` is the resolved context the endpoints close over,
+  // and better-auth's create-context.mjs always sets `.secret` to a string
+  // (from BETTER_AUTH_SECRET) before the context resolves — it is the same
+  // value `createEmailVerificationToken` signs with, so a token minted here
+  // validates against the real flow. The narrowing reads that one field; a
+  // shape change upstream surfaces as the signature check failing in the
+  // tests below, not as a silent pass.
+  const context = (await auth.$context) as { secret: string };
+  return signVerificationJwt(email, expiresInSec, context.secret);
 }
 
 /**
@@ -159,6 +239,117 @@ async function totpFor(totpURI: string): Promise<string> {
   const secret = new TextDecoder().decode(base32.decode(encoded));
   return createOTP(secret, { digits: 6, period: 30 }).totp();
 }
+
+/**
+ * The email-verification gate (issue #172), against the production instance.
+ *
+ * With `requireEmailVerification: true`, a password sign-up creates the account
+ * and sends the verification email but issues NO session, and a password
+ * sign-in on an unverified account is rejected (re-sending the verification
+ * email via `sendOnSignIn`). The security property is that an unverified
+ * password account never holds a session; these pin both halves of it plus the
+ * recovery path (verify creates a session) and the failure modes (expired,
+ * invalid, already-verified) so a bad link can't be an oracle or a backdoor.
+ *
+ * The sends themselves (`sendOnSignUp`, the `sendOnSignIn` resend) are not
+ * asserted here: Better Auth's `sendEmail` has no injectable seam (the
+ * production instance captures it in its config closure), and the repo forbids
+ * module mocking (oxlint `anti-slop/no-module-mocking`). The `sendOnSignUp` /
+ * `sendOnSignIn` config is the contract; the observable gate — no session until
+ * verified — is what these tests hold.
+ */
+describe("email verification", () => {
+  it("sign-up creates the account but issues no session cookie", async () => {
+    const { email, headers } = await signUpUnverified();
+
+    // The account exists…
+    const [row] = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
+    expect(row).toBeDefined();
+    // …but no session cookie was set. The whole gate is "no session until
+    // verified", and a present session cookie here would mean a backdoor.
+    expect(headers.getSetCookie().some((c) => c.startsWith("better-auth.session_token="))).toBe(
+      false,
+    );
+  });
+
+  it("rejects a sign-in on an unverified account and leaves it unusable", async () => {
+    const { email } = await signUpUnverified();
+
+    // Correct password, unverified account: Better Auth verifies the password
+    // first, THEN hits the `requireEmailVerification` check — so this is the
+    // EMAIL_NOT_VERIFIED rejection, not a wrong-password one. `sendOnSignIn`
+    // re-sends the verification email as part of this same rejection (the
+    // recovery path); the resend is config, not asserted here (see the suite
+    // docblock).
+    await expect(auth.api.signInEmail({ body: { email, password: PASSWORD } })).rejects.toThrow(
+      /EMAIL_NOT_VERIFIED|not verified/i,
+    );
+
+    // And no session was created — the account is still unusable.
+    const [row] = await db
+      .select({ emailVerified: user.emailVerified })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(row?.emailVerified).toBe(false);
+  });
+
+  it("creates a session when the verification link is followed", async () => {
+    const { email } = await signUpUnverified();
+
+    // No callbackURL: the endpoint returns JSON and sets the session cookie
+    // (autoSignInAfterVerification) rather than redirecting, so the jar can
+    // capture it. A real link carries callbackURL and redirects; the session
+    // creation is the same either way.
+    const token = await verificationToken(email);
+    const result = await auth.api.verifyEmail({ query: { token }, returnHeaders: true });
+    const jar = new CookieJar().absorb(result.headers);
+
+    const session = await auth.api.getSession({ headers: jar.headers });
+    expect(session?.user.id).toBeDefined();
+    expect(session?.user.emailVerified).toBe(true);
+
+    const [row] = await db
+      .select({ emailVerified: user.emailVerified })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(row?.emailVerified).toBe(true);
+  });
+
+  it("rejects an expired token with TOKEN_EXPIRED", async () => {
+    const { email } = await signUpUnverified();
+    const token = await verificationToken(email, -10);
+
+    // No callbackURL, so the endpoint throws the APIError straight (a real
+    // link carries callbackURL and redirects to `?error=TOKEN_EXPIRED`); the
+    // message is Better Auth's stable base text for the code.
+    await expect(auth.api.verifyEmail({ query: { token } })).rejects.toThrow(/Token expired/i);
+  });
+
+  it("rejects an invalid token with INVALID_TOKEN", async () => {
+    const { email } = await signUpUnverified();
+    // A token signed with the wrong secret is invalid rather than expired —
+    // the same class a tampered or truncated link falls into.
+    const token = signVerificationJwt(email, 60, "definitely-not-the-real-secret");
+
+    await expect(auth.api.verifyEmail({ query: { token } })).rejects.toThrow(/Invalid token/i);
+  });
+
+  it("treats a second verification of an already-verified account as a no-op, not a session", async () => {
+    const { email } = await signUpUnverified();
+    const token = await verificationToken(email);
+
+    // First verify: creates the session and marks the account verified.
+    await auth.api.verifyEmail({ query: { token }, returnHeaders: true });
+
+    // Second verify with the same token: the account is already verified, so
+    // the endpoint short-circuits to `{ status: true, user: null }` and sets NO
+    // session cookie — a reused link can't mint a second session.
+    const result = await auth.api.verifyEmail({ query: { token }, returnHeaders: true });
+    expect(
+      result.headers.getSetCookie().some((c) => c.startsWith("better-auth.session_token=")),
+    ).toBe(false);
+  });
+});
 
 describe("two-factor enrolment", () => {
   it("does not enable 2FA until a code is verified — the guard against locking yourself out with a secret you never scanned", async () => {
@@ -294,6 +485,80 @@ describe("handles", () => {
     const [row] = await db.select({ id: user.id }).from(user).where(eq(user.username, username));
     expect(row).toBeDefined();
     expect(headers).toBeDefined();
+  });
+
+  it("stores and returns lowercase handles after sign-up and handle changes", async () => {
+    const { email, headers } = await signUp({ username: "AlexMercer" });
+
+    const [created] = await db
+      .select({ username: user.username, displayUsername: user.displayUsername })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(created).toEqual({ username: "alexmercer", displayUsername: "alexmercer" });
+
+    const firstSession = await auth.api.getSession({ headers });
+    expect(firstSession?.user).toMatchObject({
+      username: "alexmercer",
+      displayUsername: "alexmercer",
+    });
+
+    await auth.api.updateUser({ body: { username: "NewHandle" }, headers });
+
+    const [updated] = await db
+      .select({ username: user.username, displayUsername: user.displayUsername })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(updated).toEqual({ username: "newhandle", displayUsername: "newhandle" });
+
+    const updatedSession = await auth.api.getSession({ headers });
+    expect(updatedSession?.user).toMatchObject({
+      username: "newhandle",
+      displayUsername: "newhandle",
+    });
+  });
+
+  it("rejects display-only handle updates instead of splitting the two handle columns", async () => {
+    const { email, headers } = await signUp({ username: "AlexMercer" });
+
+    await expect(
+      auth.api.updateUser({ body: { displayUsername: "AlternateHandle" }, headers }),
+    ).rejects.toThrow(USERNAME_CANONICAL_WRITE_MESSAGE);
+
+    const [unchanged] = await db
+      .select({ username: user.username, displayUsername: user.displayUsername })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(unchanged).toEqual({ username: "alexmercer", displayUsername: "alexmercer" });
+  });
+
+  it("normalizes legacy writes at the database boundary during a rolling deploy", async () => {
+    const { email } = await signUp({ username: "InitialHandle" });
+
+    // Models the version that remains live while Railway's pre-deploy
+    // migration runs: it canonicalises username but preserves typed casing in
+    // displayUsername. The migration trigger must make that old write safe.
+    await db
+      .update(user)
+      .set({ username: "legacyhandle", displayUsername: "LegacyHandle" })
+      .where(eq(user.email, email));
+
+    const [updated] = await db
+      .select({ username: user.username, displayUsername: user.displayUsername })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(updated).toEqual({ username: "legacyhandle", displayUsername: "legacyhandle" });
+
+    // Direct display-only writes cannot split the columns either.
+    await db.update(user).set({ displayUsername: "AlternateHandle" }).where(eq(user.email, email));
+
+    const [resynchronized] = await db
+      .select({ username: user.username, displayUsername: user.displayUsername })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(resynchronized).toEqual({
+      username: "legacyhandle",
+      displayUsername: "legacyhandle",
+    });
   });
 });
 
@@ -459,7 +724,12 @@ describe("legal acceptance", () => {
    * populated by sign-up alone is the behaviour worth pinning.
    */
   it("records lastLoginMethod on sign-up alone, with no sign-in after it", async () => {
-    const { email } = await signUp();
+    // `signUpUnverified` rather than `signUp`: with `requireEmailVerification`
+    // sign-up issues no session, so this is genuinely sign-up alone — no
+    // sign-in, no session-create hook — and the column must still land. (The
+    // verified+signed-in `signUp` would let `session.create.after` write it
+    // too, which is exactly the "sign-in after it" this test says it isn't.)
+    const { email } = await signUpUnverified();
 
     const [row] = await db.select().from(user).where(eq(user.email, email));
     expect(row?.lastLoginMethod).toBe("email");

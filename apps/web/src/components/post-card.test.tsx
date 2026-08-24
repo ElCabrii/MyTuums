@@ -2,11 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
+import { createStore } from "jotai";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { renderWithProviders, makeAuthor, makePost } from "@/test/render";
 import { installTestOrpc, orpc } from "@/lib/orpc";
+import { deletePostDialogAtom } from "@/atoms/post-delete";
 import { PostCard } from "@/components/post-card";
 import { m } from "@/paraglide/messages.js";
+import { getLocale } from "@/paraglide/runtime.js";
+import { formatDateTime, formatRelativeTime } from "@/lib/format";
 
 // PostCard's like button is a write-only atom (`useSetAtom`, never
 // `useAtom`) — see `atoms/like.ts`. Running the real atom against this fake
@@ -95,6 +99,32 @@ describe("PostCard", () => {
         screen.queryByRole("link", { name: m.reply_to_post({ count: String(post.replyCount) }) }),
       ).not.toBeInTheDocument();
     });
+
+    it("shows the exact creation date and time, tied to createdAt through a <time> element", async () => {
+      const createdAt = new Date("2026-08-06T14:30:00Z");
+      const post = makePost({ createdAt });
+      await renderWithProviders(<PostCard post={post} variant="focused" />, { signedInAs: true });
+
+      // The permalink is where the durable value belongs — a reader following
+      // a link here should see when the post was written, not "2 days ago".
+      const timestamp = screen.getByText(formatDateTime(createdAt, getLocale()));
+      expect(timestamp.tagName).toBe("TIME");
+      expect(timestamp).toHaveAttribute("datetime", createdAt.toISOString());
+    });
+  });
+
+  describe("variant=feed", () => {
+    it("keeps the compact relative timestamp while still exposing the ISO value", async () => {
+      const createdAt = new Date(Date.now() - 5 * 60 * 1000);
+      const post = makePost({ createdAt });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      const timestamp = screen.getByText(
+        formatRelativeTime(createdAt, getLocale(), m.post_just_now()),
+      );
+      expect(timestamp.tagName).toBe("TIME");
+      expect(timestamp).toHaveAttribute("datetime", createdAt.toISOString());
+    });
   });
 
   describe("variant=ancestor", () => {
@@ -140,6 +170,67 @@ describe("PostCard", () => {
     });
   });
 
+  describe("reply parent context", () => {
+    it("labels the reply with its parent and links the label to the parent's thread", async () => {
+      const parentAuthor = makeAuthor({ name: "Parent Author", username: "parent" });
+      const post = makePost({
+        id: "reply-1",
+        parentId: "parent-1",
+        parent: {
+          id: "parent-1",
+          excerpt: "The original post",
+          truncated: false,
+          removed: false,
+          deleted: false,
+          author: parentAuthor,
+        },
+      });
+      const { router } = await renderWithProviders(<PostCard post={post} />);
+
+      // The quiet one-line label replaced the boxed excerpt: the parent's
+      // text is no longer quoted into every reply card.
+      const parentLink = screen.getByRole("link", {
+        name: m.reply_parent_label({ name: parentAuthor.name }),
+      });
+      expect(parentLink).toHaveAttribute("href", "/post/parent-1");
+      expect(screen.queryByText("The original post")).not.toBeInTheDocument();
+
+      const user = userEvent.setup();
+      await user.click(parentLink);
+      expect(router.state.location.pathname).toBe("/post/parent-1");
+      expect(router.state.location.pathname).not.toBe("/post/reply-1");
+    });
+
+    it("keeps an inline why next to the label when the parent was removed", async () => {
+      const parentAuthor = makeAuthor({ name: "Parent Author", username: "parent" });
+      const post = makePost({
+        parentId: "parent-1",
+        parent: {
+          id: "parent-1",
+          excerpt: null,
+          truncated: false,
+          removed: true,
+          deleted: false,
+          author: parentAuthor,
+        },
+      });
+      await renderWithProviders(<PostCard post={post} />);
+
+      const label = screen.getByRole("link", {
+        name: m.reply_parent_label({ name: parentAuthor.name }),
+      });
+      // The why rides the same line as the label, not a separate box.
+      expect(label.closest("p")).toHaveTextContent(m.moderation_post_removed_stub());
+    });
+
+    it("does not add parent context to a top-level post", async () => {
+      const post = makePost({ parentId: null, parent: null });
+      await renderWithProviders(<PostCard post={post} />);
+
+      expect(screen.queryByText(m.reply_parent_unavailable())).not.toBeInTheDocument();
+    });
+  });
+
   describe("author without a handle", () => {
     it("degrades to a non-link name and still renders", async () => {
       const author = makeAuthor({ username: null, displayUsername: null });
@@ -152,7 +243,124 @@ describe("PostCard", () => {
     });
   });
 
+  describe("the kebab menu", () => {
+    it("offers Delete — and only Delete — on the viewer's own post, and names it as the dialog target", async () => {
+      const author = makeAuthor();
+      const post = makePost({ author });
+      const store = createStore();
+      await renderWithProviders(<PostCard post={post} />, {
+        store,
+        signedInAs: { id: author.id },
+      });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByLabelText(m.moderation_kebab()));
+      const deleteItem = await screen.findByRole("menuitem", { name: m.post_delete() });
+
+      // You cannot report or block yourself, so neither item belongs here.
+      expect(
+        screen.queryByRole("menuitem", { name: m.moderation_kebab_report_post() }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("menuitem", { name: m.moderation_kebab_block() }),
+      ).not.toBeInTheDocument();
+
+      await user.click(deleteItem);
+
+      // The card only sets the target; the dialog itself is mounted at the
+      // root layout (see `atoms/post-delete.ts`).
+      expect(store.get(deletePostDialogAtom)).toBe(post.id);
+    });
+
+    it("offers Report/Block — and no Delete — on someone else's post", async () => {
+      const post = makePost();
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: { id: "viewer-1" } });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByLabelText(m.moderation_kebab()));
+
+      expect(
+        await screen.findByRole("menuitem", { name: m.moderation_kebab_report_post() }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("menuitem", { name: m.moderation_kebab_block() }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: m.post_delete() })).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ["already deleted", { deleted: true }],
+      ["already removed by a moderator", { removed: true }],
+    ])("hides the menu entirely on the viewer's own post that is %s", async (_state, tombstone) => {
+      const author = makeAuthor();
+      const post = makePost({ author, content: null, ...tombstone });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: { id: author.id } });
+
+      expect(screen.queryByLabelText(m.moderation_kebab())).not.toBeInTheDocument();
+    });
+
+    it("keeps the report/block menu on someone else's removed post — the author is still reportable", async () => {
+      const post = makePost({ removed: true, content: null });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: { id: "viewer-1" } });
+
+      expect(screen.getByLabelText(m.moderation_kebab())).toBeInTheDocument();
+    });
+  });
+
+  describe("the deleted stub", () => {
+    it("says the author deleted it, never that it was removed, and offers no appeal", async () => {
+      const post = makePost({ deleted: true, content: null, likeCount: 2, replyCount: 3 });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(screen.getByText(m.post_deleted_stub())).toBeInTheDocument();
+      expect(screen.queryByText(m.moderation_post_removed_stub())).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: m.moderation_post_removed_appeal() }),
+      ).not.toBeInTheDocument();
+
+      // Nothing left to like or reply to, same as the removal stub.
+      expect(
+        screen.queryByRole("button", { name: m.post_like({ count: "2" }) }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: m.reply_to_post({ count: "3" }) }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   describe("content rendering", () => {
+    it.each([
+      ["post", null],
+      ["reply", "parent-1"],
+    ])("links mentions in a published %s to canonical profiles", async (_kind, parentId) => {
+      const post = makePost({ content: "Hello @Alice!", parentId });
+      const { router } = await renderWithProviders(<PostCard post={post} />);
+
+      const user = userEvent.setup();
+      const mention = screen.getByRole("link", { name: "@Alice" });
+      expect(mention).toHaveAttribute("href", "/@alice");
+      await user.click(mention);
+
+      expect(router.state.location.pathname).toBe("/@alice");
+      expect(router.state.location.pathname).not.toBe(`/post/${post.id}`);
+    });
+
+    // Not clicked: jsdom cannot follow an external navigation, and the
+    // card-level guard that keeps an anchor click off `navigate()` is already
+    // covered above — it matches any `<a>`, mention or URL alike.
+    it.each([
+      ["post", null],
+      ["reply", "parent-1"],
+    ])("renders a URL in a published %s as a safe external link", async (_kind, parentId) => {
+      const post = makePost({ content: "docs at https://example.com/a, worth a read", parentId });
+      await renderWithProviders(<PostCard post={post} />);
+
+      const link = screen.getByRole("link", { name: "https://example.com/a" });
+      expect(link).toHaveAttribute("href", "https://example.com/a");
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow ugc");
+    });
+
     it("preserves line breaks in the raw DOM text", async () => {
       const post = makePost({ content: "line one\nline two\nline three" });
       const { container } = await renderWithProviders(<PostCard post={post} />);
@@ -167,6 +375,39 @@ describe("PostCard", () => {
       await renderWithProviders(<PostCard post={post} />);
 
       expect(screen.getByText("a".repeat(2000))).toBeInTheDocument();
+    });
+
+    it("renders authoritative post attachments as accessible media links", async () => {
+      const post = makePost({
+        attachments: [
+          {
+            id: "attachment-1",
+            url: "/media/posts/author/post/attachment-1.png",
+            position: 0,
+            contentType: "image/png",
+            byteSize: 24,
+            width: 256,
+            height: 128,
+          },
+          {
+            id: "attachment-2",
+            url: "/media/posts/author/post/attachment-2.webp",
+            position: 1,
+            contentType: "image/webp",
+            byteSize: 32,
+            width: 128,
+            height: 256,
+          },
+        ],
+      });
+      await renderWithProviders(<PostCard post={post} />);
+
+      const first = screen.getByAltText(m.post_attachment_alt({ position: "1" }));
+      const second = screen.getByAltText(m.post_attachment_alt({ position: "2" }));
+      expect(first).toHaveAttribute("src", post.attachments[0]?.url);
+      expect(second).toHaveAttribute("src", post.attachments[1]?.url);
+      expect(first.closest("a")).toHaveAttribute("href", post.attachments[0]?.url);
+      expect(first.closest("a")).toHaveAttribute("target", "_blank");
     });
   });
 });

@@ -5,6 +5,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   pgTable,
   text,
+  integer,
   uuid,
   timestamp,
   index,
@@ -38,12 +39,13 @@ export const post = pgTable(
     // annotation and is referenced directly or indirectly in its own
     // initializer".
     //
-    // `onDelete: "cascade"` is correct *because* there is no delete-post
-    // procedure yet, so the only way a parent disappears today is its author
-    // being deleted — which is already cascading the whole subtree away. Once
-    // posts can be deleted individually this has to become a tombstone
-    // instead, or deleting one post silently takes an unrelated conversation
-    // with it.
+    // `onDelete: "cascade"` stays correct now that posts can be deleted
+    // individually (issue #148) *because* `post.delete` is a tombstone, not a
+    // row delete: the row survives, so a self-delete never fires this
+    // cascade. The only hard delete left is the author's account going away,
+    // which is already cascading the whole subtree with it. Turning
+    // `post.delete` into a real DELETE would have to change this first, or
+    // one author's delete silently takes an unrelated conversation with it.
     parentId: uuid("parent_id").references((): AnyPgColumn => post.id, { onDelete: "cascade" }),
     // The removal tombstone (issue #38): a removed post is never deleted —
     // it stays in feeds as a stub (see `postSelection` in packages/api) so
@@ -54,6 +56,18 @@ export const post = pgTable(
     removedAt: timestamp("removed_at", { withTimezone: true, precision: 3 }),
     removedBy: text("removed_by").references(() => user.id, { onDelete: "set null" }),
     removedReason: text("removed_reason"),
+    // The author's own delete (issue #148) — a second tombstone, independent
+    // of the removal one above and, like it, never a row delete.
+    //
+    // A separate column rather than reusing `removedAt` because the two are
+    // different events with different consequences: a self-delete writes no
+    // `moderation_action` row, is not appealable, cannot be restored, and its
+    // stub says something else entirely. Sharing one column would make every
+    // reader of the tombstone guess which of the two it was looking at.
+    //
+    // No `deletedBy`: the only account that can set this is `authorId`, which
+    // the row already carries. No reason either — nobody is owed one.
+    deletedAt: timestamp("deleted_at", { withTimezone: true, precision: 3 }),
     // `withTimezone` is not cosmetic. On a bare `timestamp` (no time zone),
     // Postgres resolves `now()` to the *database session's* local wall clock,
     // while Drizzle's `mapFromDriverValue` reads the column back by appending
@@ -90,6 +104,44 @@ export const post = pgTable(
     index("post_author_created_idx").on(t.authorId, t.createdAt.desc(), t.id.desc()),
     // The reply list under a single post.
     index("post_parent_created_idx").on(t.parentId, t.createdAt.desc(), t.id.desc()),
+  ],
+);
+
+/**
+ * A raster image attached to a post or reply. The object itself lives in the
+ * private media bucket; this relation is the authoritative projection used by
+ * every post reader and by the media authorization gate.
+ *
+ * Positions are explicit so the composer can preserve a user's ordering. A
+ * moderation-tombstoned post keeps its attachment rows so restore is lossless;
+ * the author's non-restorable deletion removes its rows after the post
+ * tombstone commits. The API projection and media gate hide moderation rows
+ * until the post is visible again, so neither tombstone exposes a copied URL.
+ */
+export const postAttachment = pgTable(
+  "post_attachment",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => post.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    mediaPath: text("media_path").notNull(),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("post_attachment_position_idx").on(t.postId, t.position),
+    check("post_attachment_position", sql`${t.position} >= 0`),
+    check("post_attachment_byte_size", sql`${t.byteSize} > 0`),
+    check("post_attachment_dimensions", sql`${t.width} > 0 and ${t.height} > 0`),
+    check(
+      "post_attachment_content_type",
+      sql`${t.contentType} in ('image/png', 'image/jpeg', 'image/webp')`,
+    ),
   ],
 );
 
@@ -389,7 +441,9 @@ export const appeal = pgTable(
     tokenNonce: text("token_nonce").notNull().unique(),
     // The appellant's own words; 10..2000 characters enforced at input.
     reason: text("reason").notNull(),
-    // `'open'`, `'upheld'` or `'overturned'` (checked below).
+    // `'open'`, `'upheld'`, `'overturned'` or `'reversed'` (checked below).
+    // `reversed` means the action was undone outside appeal review, so the
+    // nullable review fields deliberately remain empty.
     status: text("status").default("open").notNull(),
     reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
     reviewNote: text("review_note"),
@@ -399,7 +453,7 @@ export const appeal = pgTable(
     reviewedAt: timestamp("reviewed_at", { withTimezone: true, precision: 3 }),
   },
   (t) => [
-    check("appeal_status", sql`${t.status} in ('open', 'upheld', 'overturned')`),
+    check("appeal_status", sql`${t.status} in ('open', 'upheld', 'overturned', 'reversed')`),
     // The queue scans open appeals, newest first — the sort column is in
     // the index so the partial scan never needs a heap sort.
     index("appeal_open_idx")
@@ -417,6 +471,7 @@ export const appeal = pgTable(
 export const postRelations = relations(post, ({ one, many }) => ({
   author: one(user, { fields: [post.authorId], references: [user.id] }),
   likes: many(postLike),
+  attachments: many(postAttachment),
   // Named for the direction they point, like followRelations below: `parent`
   // is the post being replied to, `replies` the posts replying to this one.
   // Both sides need the same `relationName` for Drizzle to pair them up as
@@ -427,6 +482,11 @@ export const postRelations = relations(post, ({ one, many }) => ({
     relationName: "replies",
   }),
   replies: many(post, { relationName: "replies" }),
+}));
+
+/** Drizzle relations for post attachments — the owning post. */
+export const postAttachmentRelations = relations(postAttachment, ({ one }) => ({
+  post: one(post, { fields: [postAttachment.postId], references: [post.id] }),
 }));
 
 /** Drizzle relations for `postLike` — the `post` and `user` a like references. */

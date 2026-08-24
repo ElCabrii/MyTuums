@@ -20,8 +20,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { KeyRound, Loader2, Mail, ShieldCheck } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
+import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/two-factor")({
+  head: () => pageHead(m.twofa_challenge_title()),
   component: TwoFactorPage,
   /**
    * The `redirect` param lands here from `/login` when the person was in the

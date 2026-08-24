@@ -9,7 +9,13 @@ import {
   resetHandleClaimAtom,
   welcomeValidationAtom,
 } from "@/atoms/handle-claim";
-import { isSignedInAtom, needsDobAtom, needsHandleAtom, sessionPendingAtom } from "@/atoms/session";
+import {
+  isSignedInAtom,
+  needsDobAtom,
+  needsHandleAtom,
+  sessionPendingAtom,
+  viewerAtom,
+} from "@/atoms/session";
 import { offerTwoFactorAtom } from "@/atoms/onboarding";
 import {
   openTwoFactorPanelAtom,
@@ -24,13 +30,16 @@ import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";
 import { localizeAuthError } from "@/lib/auth-error-message";
 import { ErrorBanner } from "@/components/error-banner";
 import { PageCard } from "@/components/page-card";
+import { TotpSecretFallback } from "@/components/settings/totp-secret-fallback";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AtSign, Calendar, Check, Loader2, ShieldCheck } from "lucide-react";
 import QRCode from "react-qr-code";
 import { m } from "@/paraglide/messages.js";
+import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/welcome")({
+  head: () => pageHead(m.welcome_title()),
   component: WelcomePage,
 });
 
@@ -268,6 +277,7 @@ export function WelcomePage() {
  */
 function TwoFactorOffer() {
   const dismiss = useSetAtom(offerTwoFactorAtom);
+  const viewer = useAtomValue(viewerAtom);
   const panel = useAtomValue(twoFactorPanelAtom);
   const openPanel = useSetAtom(openTwoFactorPanelAtom);
   const [password, setPassword] = useAtom(twoFactorPasswordAtom);
@@ -335,8 +345,21 @@ function TwoFactorOffer() {
             >
               {m.auth_field_password()}
             </label>
+            {/* Same autofill pairing as the settings card — see the comment
+                in components/settings/two-factor-section.tsx (issue #169). */}
+            <input
+              type="text"
+              name="username"
+              value={viewer?.username ?? viewer?.email ?? ""}
+              autoComplete="username"
+              readOnly
+              hidden
+              aria-hidden="true"
+              tabIndex={-1}
+            />
             <Input
               id="welcome-twofa-password"
+              name="current-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -369,6 +392,7 @@ function TwoFactorOffer() {
           <div className="mx-auto w-fit rounded-2xl bg-white p-4">
             <QRCode value={setup.totpURI} size={160} />
           </div>
+          <TotpSecretFallback totpURI={setup.totpURI} />
 
           <div className="space-y-2">
             <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">

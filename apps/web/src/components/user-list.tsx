@@ -1,7 +1,7 @@
-import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { Users } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
+import { ProfileLink } from "@/components/profile-link";
 import { FollowButton } from "@/components/follow-button";
 import { PaginatedState } from "@/components/paginated-state";
 import { userListAtom, type FollowDirection } from "@/atoms/user-list";
@@ -20,23 +20,30 @@ export function UserRow({ user }: { user: UserSummary | SearchUser }) {
 
   return (
     <div className="border-border bg-card hover:border-primary/30 flex items-center gap-3 rounded-xl border p-4 shadow-sm transition-colors">
-      <UserAvatar
-        user={user}
-        alt={displayName}
-        className="bg-background h-11 w-11 shrink-0"
-        fallbackClassName="bg-primary text-primary-foreground font-bold text-xs"
-      />
+      {handle ? (
+        <ProfileLink username={handle} className="shrink-0 rounded-full">
+          <UserAvatar
+            user={user}
+            alt={displayName}
+            className="bg-background h-11 w-11"
+            fallbackClassName="bg-primary text-primary-foreground font-bold text-xs"
+          />
+        </ProfileLink>
+      ) : (
+        <UserAvatar
+          user={user}
+          alt={displayName}
+          className="bg-background h-11 w-11 shrink-0"
+          fallbackClassName="bg-primary text-primary-foreground font-bold text-xs"
+        />
+      )}
 
       <div className="min-w-0 flex-1">
         {handle ? (
-          <Link
-            to="/@{$username}"
-            params={{ username: handle }}
-            className="block min-w-0 hover:underline"
-          >
+          <ProfileLink username={handle} className="block min-w-0 hover:underline">
             <span className="text-foreground block truncate text-sm font-bold">{displayName}</span>
             <span className="text-muted-foreground block truncate text-xs">@{handle}</span>
-          </Link>
+          </ProfileLink>
         ) : (
           <span className="text-foreground block truncate text-sm font-bold">{displayName}</span>
         )}

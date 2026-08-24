@@ -1,5 +1,5 @@
-import { createRootRoute, Outlet } from "@tanstack/react-router";
-import { lazy, Suspense } from "react";
+import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
+import { lazy, Suspense, useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
@@ -10,23 +10,28 @@ import { localeDocumentEffect, localePreferenceEffect } from "@/atoms/locale";
 import { isSignedInAtom, sessionSettledAtom, sessionSettledEffect } from "@/atoms/session";
 import { useRequireHandle } from "@/hooks/use-require-handle";
 import { useRequireSignedIn } from "@/hooks/use-require-signed-in";
+import { fallbackHead } from "@/lib/document-head";
 
-// The moderation dialogs open from a kebab anywhere (post cards, profile
+// The kebab dialogs open from a card anywhere (feeds, threads, profile
 // pages) yet must exist in exactly one place: they are bound to shared
 // identity atoms, so a second mounted instance would stack a second dialog
 // on top of the first. Lazy, like the ModeToggle in the header — the dialogs
-// are only ever useful to someone who clicks Report or Block, so their chunk
-// (the Select, the mutations, the reason-code labels) stays out of first
-// paint. The named exports are mapped to `default` so the dynamic modules can
-// render as lazy components.
+// are only ever useful to someone who clicks Report, Block or Delete, so
+// their chunk (the Select, the mutations, the reason-code labels) stays out
+// of first paint. The named exports are mapped to `default` so the dynamic
+// modules can render as lazy components.
 const ReportDialog = lazy(() =>
   import("@/components/moderation/report-dialog").then((mod) => ({ default: mod.ReportDialog })),
 );
 const BlockDialog = lazy(() =>
   import("@/components/moderation/block-dialog").then((mod) => ({ default: mod.BlockDialog })),
 );
+const DeletePostDialog = lazy(() =>
+  import("@/components/delete-post-dialog").then((mod) => ({ default: mod.DeletePostDialog })),
+);
 
 export const Route = createRootRoute({
+  head: fallbackHead,
   component: RootLayout,
   // Rendered through this layout's own <Outlet/>, so an unmatched URL gets
   // the normal header/footer chrome instead of the router's bare default.
@@ -34,6 +39,15 @@ export const Route = createRootRoute({
 });
 
 function RootLayout() {
+  useEffect(() => {
+    // index.html supplies metadata before the SPA can execute, so a cold load
+    // is never an untitled document. HeadContent has committed the localized
+    // route metadata by the time this effect runs; remove only those tagged
+    // fallbacks to leave a single title and description owner afterward.
+    document.querySelector("#app-title-fallback")?.remove();
+    document.querySelector("#app-description-fallback")?.remove();
+  }, []);
+
   // Mounts the theme side effect for the lifetime of the app — see
   // src/atoms/theme.ts. `atomEffect` atoms resolve to `void`; the value is
   // never used, only the subscription its `useAtomValue` establishes.
@@ -71,33 +85,37 @@ function RootLayout() {
   // the session lands. `<Outlet/>` not rendering means no route fires its
   // queries against a session that is about to change under it — this is the
   // fix for the signed-out flash on cold load, see sessionSettledAtom.
-  if (!settled) return null;
+  if (!settled) return <HeadContent />;
 
   // The header renders only for a real session — never the Log in / Register
   // chrome. Signed-out visitors (on /login and friends) get a bare page; see
   // header.tsx, which narrows `viewerAtom` rather than branching on it.
 
   return (
-    <div className="bg-background text-foreground flex min-h-screen flex-col antialiased">
-      {signedIn && <Header />}
-      <main className="flex-1">
-        <Outlet />
-      </main>
-      <Footer />
-      {/* Mounted here, not per-call-site: the dialogs own the shared
-          `reportDialogAtom`/`blockDialogAtom` identities, and every kebab and
-          profile menu only sets the target. The Suspense fallback is null —
-          the dialogs are closed until a target lands, so there is nothing to
-          flash. */}
-      <Suspense fallback={null}>
-        <ReportDialog />
-        <BlockDialog />
-      </Suspense>
-      {/* Mounted unconditionally: the dialog owns the whole decision — signed
-          in, consent missing or stale, and not currently on one of the legal
-          documents itself. Duplicating half of that here would let the two
-          drift. */}
-      <LegalConsentDialog />
-    </div>
+    <>
+      <HeadContent />
+      <div className="bg-background text-foreground flex min-h-screen flex-col antialiased">
+        {signedIn && <Header />}
+        <main className="flex-1">
+          <Outlet />
+        </main>
+        <Footer />
+        {/* Mounted here, not per-call-site: the dialogs own the shared
+            `reportDialogAtom`/`blockDialogAtom`/`deletePostDialogAtom`
+            identities, and every kebab and profile menu only sets the target.
+            The Suspense fallback is null — the dialogs are closed until a target
+            lands, so there is nothing to flash. */}
+        <Suspense fallback={null}>
+          <ReportDialog />
+          <BlockDialog />
+          <DeletePostDialog />
+        </Suspense>
+        {/* Mounted unconditionally: the dialog owns the whole decision — signed
+            in, consent missing or stale, and not currently on one of the legal
+            documents itself. Duplicating half of that here would let the two
+            drift. */}
+        <LegalConsentDialog />
+      </div>
+    </>
   );
 }

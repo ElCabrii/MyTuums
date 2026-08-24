@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
 import { useEffect, type FormEvent } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
@@ -23,8 +23,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserPlus, Loader2, User, Mail, Lock, AtSign, Calendar } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
+import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/register")({
+  head: () => pageHead(m.auth_register()),
   component: RegisterPage,
   /**
    * The `redirect` param is the one the signed-in gate set on `/login`
@@ -38,6 +40,13 @@ export const Route = createFileRoute("/register")({
 
 const redirectSearchSchema = z.object({ redirect: z.string().optional() });
 
+/** Where `/register` navigates once the account exists but has no session yet. */
+interface VerifyEmailDestination {
+  to: "/verify-email";
+  replace: boolean;
+  search?: { redirect: string };
+}
+
 /**
  * The sign-up page: username, display name, email, password and date of birth,
  * plus the same OAuth/passkey options as `/login`. Success flows through the
@@ -47,6 +56,7 @@ const redirectSearchSchema = z.object({ redirect: z.string().optional() });
 export function RegisterPage() {
   const { redirect: redirectFromSearch } = Route.useSearch();
   useRedirectWhenSignedIn(redirectFromSearch);
+  const navigate = useNavigate();
 
   const [username, setUsername] = useAtom(registerUsernameAtom);
   const [name, setName] = useAtom(registerNameAtom);
@@ -74,10 +84,30 @@ export function RegisterPage() {
       return;
     }
 
-    // No navigate here — success flows through the session updating, which
-    // useRedirectWhenSignedIn picks up. Calling it here too was the old
-    // double-navigation bug.
-    await signUp({ username, name, email, password, dateOfBirth, legalAccepted });
+    // A successful password sign-up no longer creates a session (issue #172:
+    // `requireEmailVerification`), so `useRedirectWhenSignedIn` will not fire
+    // — the account exists but is held back until the email is verified. Move
+    // the person to the check-your-email screen here; `signUpAtom` has stashed
+    // the address in `verifyEmailAtom` so that screen can offer a resend.
+    // The pre-login destination rides along twice: into the verification
+    // link's `callbackURL` (so a link opened in another browser still lands
+    // there) and into this navigation (so the pending screen's own resend and
+    // its `useRedirectWhenSignedIn` know it too) — the same handoff `/login`
+    // makes to `/two-factor`.
+    const ok = await signUp({
+      username,
+      name,
+      email,
+      password,
+      dateOfBirth,
+      legalAccepted,
+      redirect: redirectFromSearch,
+    });
+    if (ok) {
+      const destination: VerifyEmailDestination = { to: "/verify-email", replace: true };
+      if (redirectFromSearch) destination.search = { redirect: redirectFromSearch };
+      void navigate(destination);
+    }
   };
 
   return (

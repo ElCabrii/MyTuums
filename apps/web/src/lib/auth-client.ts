@@ -192,6 +192,7 @@ export interface AuthClientSurface {
   };
   signUp?: { email?: AuthClientAction };
   signOut?: AuthClientAction;
+  sendVerificationEmail?: AuthClientAction;
   requestPasswordReset?: AuthClientAction;
   resetPassword?: AuthClientAction;
   updateUser?: AuthClientAction;

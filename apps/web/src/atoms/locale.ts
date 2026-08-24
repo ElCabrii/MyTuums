@@ -1,17 +1,11 @@
 import { atomEffect } from "jotai-effect";
 import { isLocalePreference } from "@my-tuums/auth/rules";
 import { getLocale, setLocale } from "@/paraglide/runtime.js";
-import { m } from "@/paraglide/messages.js";
 import { sessionPendingAtom, viewerAtom } from "@/atoms/session";
 
-/** Keeps document metadata aligned with the locale selected in the footer. */
+/** Keeps the document language aligned with the locale selected in the footer. */
 export const localeDocumentEffect = atomEffect(() => {
-  const root = document.documentElement;
-  root.lang = getLocale();
-  document.title = m.app_document_title();
-  document
-    .querySelector('meta[name="description"]')
-    ?.setAttribute("content", m.app_document_description());
+  document.documentElement.lang = getLocale();
 });
 
 /** The cookie Paraglide resolves the locale from, and the BetterAuth i18n plugin reads. */

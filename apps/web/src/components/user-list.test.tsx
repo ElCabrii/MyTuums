@@ -67,10 +67,9 @@ describe("UserList", () => {
       username: "jamierivera",
       displayUsername: "JamieRivera",
     });
-    // `displayUsername` differs in casing from the normalised `username` —
-    // the link must use the normalised one (see `handleOf` in
-    // lib/user.ts), or it would fragment the `byUsername` cache across
-    // casings.
+    // A stale pre-backfill shape whose display field differs in casing must
+    // still link through the canonical username, or it would fragment the
+    // `byUsername` cache across casings.
     const casey = makeUserSummary({
       name: "Casey Nolan",
       username: "caseynolan",

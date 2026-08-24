@@ -39,12 +39,16 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, or } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import type { Database } from "@my-tuums/db";
 import { appeal, moderationAction, post } from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
 import { APPEALABLE_ACTIONS } from "./constants.js";
 import type { Context } from "./context.js";
-import { isActionCurrent, isActionLatest, type ActionRow } from "./moderation-actions.js";
+import {
+  isActionCurrent,
+  isActionLatest,
+  type ActionRow,
+  type DbLike,
+} from "./moderation-actions.js";
 import { rateLimitCapability } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 
@@ -116,7 +120,7 @@ function isUniqueViolation<Value>(error: Value, depth = 0): boolean {
 }
 
 /** The user an action happened to — its target user, or the author for post actions. */
-async function actionTargetUser(db: Database, action: ActionRow): Promise<string | null> {
+async function actionTargetUser(db: DbLike, action: ActionRow): Promise<string | null> {
   if (action.targetType === "user") return action.targetUserId;
   if (!action.targetPostId) return null;
   const [target] = await db
@@ -232,10 +236,16 @@ async function resolveTarget(
 /**
  * Proves the action a target names is one this appellant may still contest.
  *
- * Four gates, source-blind by construction: the action exists, it is one of
- * the appealable kinds, it happened to *this* appellant, and it is both still
- * in force (`isActionCurrent` reads live state) and still the latest of its
- * kind (`isActionLatest` reads the log). The last two answer different
+ * The action row is locked before the gates run and stays locked through the
+ * appeal insert. Manual reversal takes the same lock before closing appeals,
+ * so either intake inserts first and reversal closes it, or reversal commits
+ * first and intake's current/latest checks observe that there is nothing left
+ * to appeal.
+ *
+ * Four gates then apply, source-blind by construction: the action exists, it
+ * is one of the appealable kinds, it happened to *this* appellant, and it is
+ * both still in force (`isActionCurrent` reads live state) and still the latest
+ * of its kind (`isActionLatest` reads the log). The last two answer different
  * questions — remove → restore → remove leaves the first removal's live-state
  * check reading the *second* tombstone as current — so both are required.
  *
@@ -243,7 +253,7 @@ async function resolveTarget(
  * for one belonging to someone else: a link handed onward must not reveal
  * whether the action it names exists.
  */
-async function assertContestable(db: Database, target: AppealTarget): Promise<void> {
+async function assertContestable(db: DbLike, target: AppealTarget): Promise<void> {
   const [actionRow] = await db
     .select({
       id: moderationAction.id,
@@ -256,6 +266,7 @@ async function assertContestable(db: Database, target: AppealTarget): Promise<vo
     })
     .from(moderationAction)
     .where(eq(moderationAction.id, target.actionId))
+    .for("update")
     .limit(1);
   if (!actionRow) {
     throw new ORPCError("BAD_REQUEST", { message: "This appeal link is no longer valid." });
@@ -294,10 +305,11 @@ async function assertContestable(db: Database, target: AppealTarget): Promise<vo
  * schema comment and the resolution email both promise that), so a prior row
  * in any status closes this path too.
  *
- * This is the readable half of the rule. The database holds the other half —
- * see {@link insertAppeal} — because two attempts can pass this check at once.
+ * The action-row lock serializes application callers before this read. The
+ * database constraints remain the final authority for collisions caused by a
+ * writer outside this path; see {@link insertAppeal}.
  */
-async function refuseReplay(db: Database, target: AppealTarget): Promise<void> {
+async function refuseReplay(db: DbLike, target: AppealTarget): Promise<void> {
   const [existing] = await db
     .select({ id: appeal.id, status: appeal.status, tokenNonce: appeal.tokenNonce })
     .from(appeal)
@@ -318,17 +330,15 @@ async function refuseReplay(db: Database, target: AppealTarget): Promise<void> {
 }
 
 /**
- * Writes the row, letting the database settle the races {@link refuseReplay}
- * cannot.
+ * Writes the row after the action-row lock and replay check.
  *
  * The unique `token_nonce` column and the partial unique open-per-action index
- * are the authority: two concurrent attempts can both read "no existing
- * appeal" and only one can commit. The loser is translated to the used-link
- * refusal rather than surfacing a 500, which is the same answer it would have
- * got a moment later from the read.
+ * remain the authority even though application callers serialize on the
+ * action row. A constraint rejection is translated to the used-link refusal
+ * rather than surfacing a 500.
  */
 async function insertAppeal(
-  db: Database,
+  db: DbLike,
   target: AppealTarget,
   reason: string,
 ): Promise<OpenedAppeal> {
@@ -369,8 +379,9 @@ async function insertAppeal(
  * 2. **Spend the capability's budget**, inside the adapter, at the point its
  *    key comes into existence — the link's nonce, or the removal's id. Every
  *    query after this point is paid for.
- * 3. **Prove the action contestable** — appealable, this appellant's, current,
- *    latest.
+ * 3. **Lock the contested action and prove it contestable** — appealable, this
+ *    appellant's, current, latest. The lock is held through the insert so a
+ *    manual reversal cannot pass between validation and persistence.
  * 4. **Refuse a replay**, then insert and let the unique constraints settle
  *    what the read could not.
  *
@@ -382,7 +393,9 @@ export async function openAppeal(
   request: AppealRequest,
 ): Promise<OpenedAppeal> {
   const target = await resolveTarget(context, request);
-  await assertContestable(context.db, target);
-  await refuseReplay(context.db, target);
-  return insertAppeal(context.db, target, request.reason);
+  return context.db.transaction(async (tx) => {
+    await assertContestable(tx, target);
+    await refuseReplay(tx, target);
+    return insertAppeal(tx, target, request.reason);
+  });
 }

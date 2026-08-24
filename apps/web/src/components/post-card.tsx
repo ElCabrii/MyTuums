@@ -3,8 +3,12 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Heart, MessageCircle, MoreHorizontal } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
+import { ProfileLink } from "@/components/profile-link";
+import { LinkedText } from "@/components/linked-text";
+import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
+import { deletePostDialogAtom } from "@/atoms/post-delete";
 import { isSignedInAtom, viewerIdAtom } from "@/atoms/session";
 import {
   DropdownMenu,
@@ -13,7 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatRelativeTime } from "@/lib/format";
+import { formatDateTime, formatRelativeTime } from "@/lib/format";
 import type { Post } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
@@ -29,8 +33,10 @@ import { getLocale } from "@/paraglide/runtime.js";
  * - `ancestor` — context above the focused post. Borderless and tighter, so
  *   the chain reads as one conversation rather than a stack of separate
  *   cards.
- * - `focused` — the post the URL points at. Larger body text, and its own
- *   timestamp is not a link, because it would link to the page you are on.
+ * - `focused` — the post the URL points at. Larger body text, the exact
+ *   creation date and time rather than the compact relative label, and
+ *   neither its timestamp nor its reply count links anywhere, because both
+ *   would point at the page you are already on.
  */
 type PostCardVariant = "feed" | "ancestor" | "focused";
 
@@ -39,7 +45,16 @@ type PostCardVariant = "feed" | "ancestor" | "focused";
  * like/reply actions — in the `feed`, `ancestor` or `focused` variants (see
  * `PostCardVariant`).
  */
-export function PostCard({ post, variant = "feed" }: { post: Post; variant?: PostCardVariant }) {
+export function PostCard({
+  post,
+  variant = "feed",
+  showParentContext = true,
+}: {
+  post: Post;
+  variant?: PostCardVariant;
+  /** Whether to render the immediate-parent preview; feed lists choose their surface explicitly. */
+  showParentContext?: boolean;
+}) {
   const navigate = useNavigate();
   const isSignedIn = useAtomValue(isSignedInAtom);
   // `viewerIdAtom`, not `viewerAtom`: the card only needs "is this my post?",
@@ -49,10 +64,22 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
   const toggleLike = useSetAtom(toggleLikeAtomFamily(post.id));
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
+  const setDeleteDialog = useSetAtom(deletePostDialogAtom);
   const authorHandle = handleOf(post.author);
   const authorName = post.author.name || authorHandle || m.user_unknown();
+  const parentAuthorName = post.parent
+    ? post.parent.author.name || handleOf(post.parent.author) || m.user_unknown()
+    : null;
   const isOwnPost = viewerId === post.author.id;
   const isFocused = variant === "focused";
+  // Both tombstones hide the content and take the actions away with it — the
+  // server nulls `content` for either (see `postSelection`), so there is
+  // nothing left to like or reply to. Which stub renders still depends on
+  // which one it is; only "is it gone" is shared.
+  const isGone = post.removed || post.deleted;
+  // A post already gone has nothing left to delete, so the item is dropped
+  // rather than offered as a no-op the server would refuse anyway.
+  const canDelete = isOwnPost && !isGone;
 
   const handleCardClick = (e: MouseEvent<HTMLDivElement>) => {
     if (isFocused) return;
@@ -86,7 +113,14 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
           isFocused ? "" : "hover:border-primary/30 cursor-pointer"
         }`;
 
-  const timestamp = formatRelativeTime(post.createdAt, getLocale(), m.post_just_now());
+  const locale = getLocale();
+  // The permalink is the durable surface for a post: a relative label is
+  // enough while scrolling a feed, but the page a link points at is where the
+  // exact date and time belong. `Intl` resolves both in the reader's own
+  // timezone.
+  const timestamp = isFocused
+    ? formatDateTime(post.createdAt, locale)
+    : formatRelativeTime(post.createdAt, locale, m.post_just_now());
   const authorAvatar = (
     <UserAvatar
       user={post.author}
@@ -98,42 +132,78 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
 
   return (
     <div className={containerClass} onClick={handleCardClick}>
+      {variant === "feed" && showParentContext && post.parentId && (
+        // A quiet one-line "Replying to …" above the whole card header —
+        // avatar, name and timestamp included — so a profile feed of replies
+        // reads as one conversation rather than a stack of boxed quotes. The
+        // name stays a link to the parent thread, and a removed/deleted
+        // parent keeps its inline why.
+        <p className="text-muted-foreground mb-2 text-xs">
+          {post.parent ? (
+            <>
+              <Link
+                to="/post/$postId"
+                params={{ postId: post.parentId }}
+                className="hover:text-foreground transition-colors hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {m.reply_parent_label({ name: parentAuthorName ?? m.user_unknown() })}
+              </Link>
+              {(post.parent.removed || post.parent.deleted) && (
+                <span>
+                  {" · "}
+                  {post.parent.removed ? m.moderation_post_removed_stub() : m.post_deleted_stub()}
+                </span>
+              )}
+            </>
+          ) : (
+            m.reply_parent_unavailable()
+          )}
+        </p>
+      )}
       <div className="flex gap-3">
         {authorHandle ? (
-          <Link
-            to="/@{$username}"
-            params={{ username: authorHandle }}
+          <ProfileLink
+            username={authorHandle}
             className="shrink-0 rounded-full transition-opacity hover:opacity-90"
             onClick={(e) => e.stopPropagation()}
           >
             {authorAvatar}
-          </Link>
+          </ProfileLink>
         ) : (
           authorAvatar
         )}
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex flex-wrap items-center gap-1.5">
             {authorHandle ? (
-              <Link
-                to="/@{$username}"
-                params={{ username: authorHandle }}
+              <ProfileLink
+                username={authorHandle}
                 className="flex items-center gap-1.5 hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
                 <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
                 <span className="text-muted-foreground text-xs">@{authorHandle}</span>
-              </Link>
+              </ProfileLink>
             ) : (
               <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
             )}
-            <span className="text-muted-foreground text-xs">• {timestamp}</span>
+            {/* `<time>` regardless of variant: the rendered label differs, but
+                the machine-readable value assistive technology and tooling
+                read is `post.createdAt` either way. */}
+            <span className="text-muted-foreground text-xs">
+              • <time dateTime={post.createdAt.toISOString()}>{timestamp}</time>
+            </span>
 
-            {/* Report / Block live in the shared dialogs mounted at the root
-                (identity atoms — see `atoms/moderation.ts`), so this menu only
-                has to set the target. Hidden on the viewer's own posts, and
-                shown even on removed ones: reporting the *author* of a removed
-                post is still a valid action. */}
-            {isSignedIn && !isOwnPost && (
+            {/* Every item here lives in a shared dialog mounted at the root
+                (identity atoms — see `atoms/moderation.ts` and
+                `atoms/post-delete.ts`), so this menu only has to set the
+                target. Which items it holds is decided by whose post it is:
+                Delete on the viewer's own, Report/Block on everyone else's —
+                you cannot report yourself, and a moderator takes other
+                people's posts down through the case queue, not from here.
+                Other people's posts keep the menu even when removed:
+                reporting the *author* of a removed post is still valid. */}
+            {isSignedIn && (canDelete || !isOwnPost) && (
               <DropdownMenu>
                 <DropdownMenuTrigger
                   aria-label={m.moderation_kebab()}
@@ -158,42 +228,54 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
                   // its own click, see above).
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <DropdownMenuItem
-                    className="cursor-pointer"
-                    onClick={() => setReportDialog({ targetType: "post", targetId: post.id })}
-                  >
-                    {m.moderation_kebab_report_post()}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="cursor-pointer"
-                    onClick={() =>
-                      setReportDialog({ targetType: "user", targetId: post.author.id })
-                    }
-                  >
-                    {m.moderation_kebab_report_author()}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="cursor-pointer"
-                    variant="destructive"
-                    onClick={() =>
-                      setBlockDialog({
-                        userId: post.author.id,
-                        handle: authorHandle ?? m.user_unknown(),
-                      })
-                    }
-                  >
-                    {m.moderation_kebab_block()}
-                  </DropdownMenuItem>
+                  {isOwnPost ? (
+                    <DropdownMenuItem
+                      className="cursor-pointer"
+                      variant="destructive"
+                      onClick={() => setDeleteDialog(post.id)}
+                    >
+                      {m.post_delete()}
+                    </DropdownMenuItem>
+                  ) : (
+                    <>
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        onClick={() => setReportDialog({ targetType: "post", targetId: post.id })}
+                      >
+                        {m.moderation_kebab_report_post()}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        onClick={() =>
+                          setReportDialog({ targetType: "user", targetId: post.author.id })
+                        }
+                      >
+                        {m.moderation_kebab_report_author()}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        variant="destructive"
+                        onClick={() =>
+                          setBlockDialog({
+                            userId: post.author.id,
+                            handle: authorHandle ?? m.user_unknown(),
+                          })
+                        }
+                      >
+                        {m.moderation_kebab_block()}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
           </div>
 
           {post.removed ? (
-            /* The stub. `removedReason` is author-only (the server nulls it
-                for everyone else), so its presence is also what gates the
-                appeal link — only the author can appeal from here. */
+            /* The removal stub. `removedReason` is author-only (the server
+                nulls it for everyone else), so its presence is also what gates
+                the appeal link — only the author can appeal from here. */
             <div className="border-border/60 bg-muted/30 mb-3 space-y-1.5 rounded-lg border p-3">
               <p className="text-muted-foreground text-sm">{m.moderation_post_removed_stub()}</p>
               {post.removedReason && (
@@ -212,19 +294,29 @@ export function PostCard({ post, variant = "feed" }: { post: Post; variant?: Pos
                 </Link>
               )}
             </div>
+          ) : post.deleted ? (
+            /* The author's own delete. Its own stub, not the removal one: no
+                reason to state, nothing to appeal, and calling it a removal
+                would tell every reader a moderator acted when none did. */
+            <div className="border-border/60 bg-muted/30 mb-3 rounded-lg border p-3">
+              <p className="text-muted-foreground text-sm">{m.post_deleted_stub()}</p>
+            </div>
           ) : (
-            <p
-              className={`text-foreground/90 mb-3 leading-relaxed break-words whitespace-pre-line ${
-                isFocused ? "text-base" : "text-sm"
-              }`}
-            >
-              {/* Null only for removed posts, which the stub branch above
-                  owns; here the server guarantees content. */}
-              {post.content ?? ""}
-            </p>
+            <>
+              <p
+                className={`text-foreground/90 mb-3 leading-relaxed break-words whitespace-pre-line ${
+                  isFocused ? "text-base" : "text-sm"
+                }`}
+              >
+                {/* Null only for the two tombstones, which the stub branches
+                    above own; here the server guarantees content. */}
+                <LinkedText text={post.content ?? ""} />
+              </p>
+              <PostAttachmentGrid attachments={post.attachments} />
+            </>
           )}
 
-          {!post.removed && (
+          {!isGone && (
             <div className="text-muted-foreground flex max-w-md items-center gap-6 text-xs">
               {/* Replying is a navigation, not a mutation — the composer lives
                 on the thread page — so this is a link, and the focused post

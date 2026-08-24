@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import { preloadInjectionPlugin } from "./build-inject-plugin";
+import { pwaPlugin } from "./pwa-plugin";
 import path from "node:path";
 import pkg from "./package.json";
 
@@ -50,6 +51,9 @@ export default defineConfig({
     // preload, non-blocking stylesheet. `enforce: "post"` inside the plugin
     // is what lets it see the final index.html — see build-inject-plugin.ts.
     preloadInjectionPlugin(),
+    // Emits a versioned, hashed-asset precache without adding a Workbox-sized
+    // dependency for the app's intentionally small offline-shell policy.
+    pwaPlugin(),
   ],
   resolve: {
     alias: {

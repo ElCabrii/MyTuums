@@ -98,6 +98,44 @@ describe("WelcomePage two-factor offer", () => {
     expect(store.get(offerTwoFactorAtom)).toBe(false);
   });
 
+  // Issue #169: the onboarding surface must offer the same two fallbacks as
+  // the settings card. Both render `TotpSecretFallback` and share the
+  // enrolment atoms, so this covers the wiring rather than re-testing the
+  // component's own behaviour (security-sections.test.tsx does that).
+  it("offers the autofill semantics and the manual-entry key here too", async () => {
+    vi.mocked(authClient.twoFactor.enable).mockResolvedValueOnce({
+      data: {
+        totpURI: "otpauth://totp/MyTuums:alex@example.com?secret=JBSWY3DPEHPK3PXP&issuer=MyTuums",
+        backupCodes: ["backup-one"],
+      },
+      error: null,
+    });
+    const store = offerStore();
+    await renderWithProviders(<WelcomePage />, {
+      store,
+      initialPath: "/welcome",
+      signedInAs: true,
+    });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: m.welcome_2fa_setup() }));
+
+    const field = screen.getByLabelText(m.auth_field_password());
+    expect(field).toHaveAttribute("type", "password");
+    expect(field).toHaveAttribute("name", "current-password");
+    expect(field).toHaveAttribute("autocomplete", "current-password");
+    expect(document.querySelector('input[autocomplete="username"]')).not.toBeNull();
+
+    await user.type(field, "account-password");
+    await user.click(screen.getByRole("button", { name: m.welcome_2fa_setup() }));
+    expect(await screen.findByText("backup-one")).toBeInTheDocument();
+
+    // Collapsed until asked for, here as in settings.
+    expect(screen.queryByText(/JBSW/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: m.twofa_cannot_scan() }));
+    expect(screen.getByText("JBSW Y3DP EHPK 3PXP")).toBeInTheDocument();
+  });
+
   it("keeps the panel and shows the error when enabling fails", async () => {
     vi.mocked(authClient.twoFactor.enable).mockResolvedValueOnce({
       data: null,

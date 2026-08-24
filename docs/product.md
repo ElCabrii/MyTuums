@@ -12,8 +12,8 @@ both by the server's page gate and by the client.
 
 ## Accounts and authentication
 
-- Email and password sign-up, with a handle (username), a date of birth,
-  and an explicit acceptance of the Terms of Service and Privacy Policy.
+- Email and password sign-up, with a lowercase handle (username), a date of
+  birth, and an explicit acceptance of the Terms of Service and Privacy Policy.
   Accounts must be at least 15 years old; the rule is enforced identically on
   the client and in a database hook. Consent is recorded on the account as a
   timestamp plus the accepted legal version; accounts created before this
@@ -41,9 +41,24 @@ both by the server's page gate and by the client.
 
 ## Posts, replies, likes, follows
 
-- Posts are plain text, up to 500 characters, trimmed.
+- Posts are plain text, up to 500 characters, trimmed. Rendering recognizes
+  two link shapes in that text and nothing else. Syntactically valid `@handles`
+  become links to lowercase canonical profile routes; malformed handles stay as
+  plain text, and an unknown handle lands on the profile route's existing
+  not-found state. Absolute `http` and `https` URLs become external links that
+  open in a new tab, keeping the address as it was typed and leaving the
+  sentence punctuation around it outside the link. Every other scheme —
+  `javascript:`, `data:`, `ftp:` — stays inert text, and a recognized URL never
+  gets a preview, unfurl or link card.
 - A reply is a post with a parent. Threads show the focused post, its replies,
   and up to 20 ancestors of context.
+- An author can delete their own post. Deletion is a tombstone, not a row
+  delete: the post reads as a stub saying its author deleted it, and its
+  replies, its likes and the conversation above it are untouched. It is not a
+  moderation action — no audit row, no email, nothing to appeal — and a post a
+  moderator already removed cannot be deleted on top, so the author keeps the
+  stated reason and the appeal link. Deleted posts are not search results, for
+  the same reason removed ones aren't.
 - Likes are two idempotent operations, `like` and `unlike`, never a toggle —
   so a retry is safe and ordering cannot invert the result. Like and reply
   counts are derived on read, not denormalised.
@@ -54,12 +69,14 @@ both by the server's page gate and by the client.
 
 ## Profiles and search
 
-- A profile carries a display name, handle, bio (160 characters), avatar,
-  banner, join date, and follower/following counts.
+- A profile carries a display name, lowercase handle, bio (160 characters),
+  avatar, banner, join date, and follower/following counts. Bios use the same
+  safe linkification as posts and replies.
 - Profiles are addressed by handle. A profile hidden by a block reads as "no
-  such user"; a banned profile resolves to a suspended stub instead.
-- Search has three surfaces: a header typeahead (up to five users and five
-  posts), a full user search, and a full post search. User results rank
+  such user"; a banned profile resolves to a suspended stub instead, without
+  its authored profile fields or relationship counts.
+- Search has three surfaces: a profile-only header typeahead (up to five
+  users), a full user search, and a full post search. User results rank
   handle-prefix matches ahead of substring matches.
 
 ## Media
@@ -133,7 +150,9 @@ author's removed-post stub. The appeal lands in the moderation queue labelled
 as such, and is reviewed by any moderator **except the one who took the
 original action**. Overturning an appeal applies the inverse action, which —
 like any action — emails the user. An appeal's own text is between 10 and 2000
-characters.
+characters. If a moderator reverses the contested action directly, the appeal
+closes as `reversed` and leaves the queue; the inverse action still emails the
+affected user, but the appeal is not recorded as having been reviewed.
 
 ## Glossary
 
@@ -167,7 +186,13 @@ different thing), shadowban.
 **Removed post** — a post whose content is hidden by a moderation action while
 the row remains. It renders as a stub, its replies stay visible, and restoring
 it brings the content back. Removal is never a hard delete. _Avoid:_ deleted
-post, purged post.
+post (that is the author's own act — see below), purged post.
+
+**Deleted post** — a post whose author took it down themselves. Like a removal
+it is a tombstone rather than a row delete, and it renders as its own stub —
+but it is not a moderation action: nothing is audited, nobody is emailed, there
+is nothing to appeal, and it cannot be restored. _Avoid:_ removed post,
+withdrawn post.
 
 **Moderation action** — any act by a moderator, staff member or admin that the
 audit log records. Every one of them emails the affected user, including

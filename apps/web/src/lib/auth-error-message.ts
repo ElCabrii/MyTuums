@@ -5,6 +5,8 @@ const validationMessages = {
   "Username must be between 3 and 20 characters long.": () => m.validation_username_length(),
   "Username can only contain letters, numbers, underscores, and hyphens.": () =>
     m.validation_username_characters(),
+  "Change a handle through the username field, not the display username field.": () =>
+    m.validation_username_canonical_write(),
   "Display Name is required.": () => m.validation_display_name_required(),
   "Please enter a valid email address.": () => m.validation_email_invalid(),
   "Password must be at least 8 characters long.": () => m.validation_password_length(),

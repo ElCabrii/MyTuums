@@ -1,6 +1,8 @@
 import { base32 } from "@better-auth/utils/base32";
 import { createOTP } from "@better-auth/utils/otp";
 import { expect, test } from "../../support/fixtures";
+import { emailVerificationLinkFor } from "../../support/db";
+import { E2E } from "../../playwright.config";
 import { uniqueUser } from "../../support/users";
 
 /**
@@ -29,11 +31,18 @@ async function signUpFresh(page: import("@playwright/test").Page, prefix: string
   await page.getByRole("checkbox", { name: /I have read and agree/ }).check();
   await page.getByRole("main").getByRole("button", { name: "Register" }).click();
 
-  // A fresh sign-up is offered two-factor at /welcome before its profile —
-  // see the `signUpAtom` / `useRedirectWhenSignedIn` pairing. Declining is
-  // what gets us to the account we came to configure.
-  await expect(page).toHaveURL(/\/welcome$/);
-  await page.getByRole("button", { name: "Skip for now" }).click();
+  // requireEmailVerification (packages/auth): sign-up creates the account and
+  // sends the verification link but issues NO session, so the person lands on
+  // /verify-email rather than /welcome (issue #172). The post-signup two-factor
+  // offer is gone on the password path — a documented tradeoff; 2FA is enrolled
+  // from settings in these specs, which is the path that remains.
+  await expect(page).toHaveURL(/\/verify-email$/);
+
+  // Complete verification by visiting the link a real email would carry:
+  // `autoSignInAfterVerification` mints the session and `useRedirectWhenSignedIn`
+  // lands the now-complete account on its profile — the state every test below
+  // starts from.
+  await page.goto(emailVerificationLinkFor(account.email, `${E2E.webUrl}/verify-email`));
   await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));
 
   return account;

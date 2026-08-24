@@ -181,6 +181,20 @@ export const USERNAME_LENGTH_MESSAGE = "Username must be between 3 and 20 charac
 /** Rejection for a handle carrying anything outside the allowed charset. */
 export const USERNAME_CHARACTERS_MESSAGE =
   "Username can only contain letters, numbers, underscores, and hyphens.";
+/** Rejection for trying to mutate Better Auth's derived display handle on its own. */
+export const USERNAME_CANONICAL_WRITE_MESSAGE =
+  "Change a handle through the username field, not the display username field.";
+
+/**
+ * The canonical stored and displayed handle form.
+ *
+ * Handles are ASCII-only, so locale-independent lowercasing is sufficient.
+ * Callers still validate the raw value: uppercase input is accepted and
+ * normalised rather than forcing someone to retype an otherwise valid handle.
+ */
+export function normalizeUsername(username: string): string {
+  return username.toLowerCase();
+}
 
 /**
  * The handle charset. Anchored and without the `g` flag on purpose — `test` on

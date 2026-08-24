@@ -2,6 +2,7 @@ import { atom, type PrimitiveAtom } from "jotai";
 import { atomFamily } from "jotai-family";
 import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import { viewerIdAtom } from "@/atoms/session";
+import { postListQueryOptions } from "@/lib/query-definitions";
 import { store } from "@/lib/store";
 import {
   beginFollowPatch,
@@ -37,7 +38,7 @@ interface FollowVariables {
  * person's follow state is cached in three shapes at once: their profile (a
  * flat object) and any follower/following list they appear in (paginated).
  * All three are patched locally. The Following *feed* is the fourth and the
- * one that can't be patched, so it is reset in `onSettled`.
+ * one that can't be patched, so it is invalidated in `onSettled`.
  */
 function toggleMutationAtom(userId: string, direction: "follow" | "unfollow") {
   // Explicit type parameters: inference does not flow the variables/context
@@ -86,14 +87,20 @@ function toggleMutationAtom(userId: string, direction: "follow" | "unfollow") {
 
       // Following someone changes *which posts belong in the Following feed*,
       // and there is no way to synthesise their posts client-side — so unlike
-      // every other cache here, this one has to be refetched. `resetQueries`
-      // rather than `invalidateQueries`: the feed's membership just changed,
-      // so dropping back to page one is both the correct reading and cheaper
-      // than refetching every page someone has scrolled through. A failed
-      // follow never changed the membership, so the error path skips the reset.
+      // every other cache here, this one has to be refetched. Invalidation
+      // keeps its rendered rows in place while an active feed refreshes in the
+      // background; resetting would recreate the skeleton flash this path is
+      // meant to avoid. A failed follow never changed the membership, so the
+      // error path skips the invalidation.
       onSettled: (_data, error) => {
         if (error) return;
-        void queryClient.resetQueries({ queryKey: orpc.post.list.key() });
+        // Only the Following feed derives membership from this relationship.
+        // The global timeline, profile feeds and reply lists remain valid and
+        // should keep their rendered rows rather than flashing to skeletons.
+        void queryClient.invalidateQueries({
+          queryKey: postListQueryOptions({ feed: "following" }).queryKey,
+          exact: true,
+        });
       },
     };
   });

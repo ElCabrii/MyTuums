@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { legalConsentBody } from "../../support/users";
+import { signUpVerifiedSession } from "../../support/auth";
 
 // This project's baseURL is the server (E2E.serverUrl) — see the `api`
 // project in playwright.config.ts.
@@ -37,17 +37,7 @@ test.describe("oRPC contract", () => {
     // -up user, under its own identity for the same reason the rate-limit
     // test below uses one, gets this past the auth guard so the malformed
     // body actually reaches input parsing.
-    const username = `mb${Date.now().toString(36)}`;
-    const signUp = await request.post("/api/auth/sign-up/email", {
-      data: {
-        email: `${username}@example.test`,
-        password: "malformed-body-probe-password",
-        name: "Malformed Body Probe",
-        username,
-        ...legalConsentBody(),
-      },
-    });
-    expect(signUp.ok(), await signUp.text()).toBe(true);
+    await signUpVerifiedSession(request, "mb");
 
     // The body has to go over the wire as raw bytes, not Playwright's `data`
     // string handling: passing a plain string still gets JSON-encoded when a
@@ -76,17 +66,7 @@ test.describe("oRPC contract", () => {
   test("hammering a write-tier procedure past its budget returns 429 with a retry hint", async ({
     request,
   }) => {
-    const username = `rl${Date.now().toString(36)}`;
-    const signUp = await request.post("/api/auth/sign-up/email", {
-      data: {
-        email: `${username}@example.test`,
-        password: "rate-limit-probe-password",
-        name: "Rate Limit Probe",
-        username,
-        ...legalConsentBody(),
-      },
-    });
-    expect(signUp.ok(), await signUp.text()).toBe(true);
+    await signUpVerifiedSession(request, "rl");
 
     // RATE_LIMITS.write is 15/minute. 20 attempts is enough headroom to
     // guarantee a 429 without hammering much past the budget.

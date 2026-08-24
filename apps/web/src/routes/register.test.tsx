@@ -93,3 +93,39 @@ describe("RegisterPage — Legal acceptance (issue #153)", () => {
     expect(body.legalAcceptedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 });
+
+/**
+ * The `?redirect=` handoff through email verification (issue #172 review).
+ * A visitor bounced to `/login` from a protected page, who then registers,
+ * must still reach that page once verified.
+ */
+describe("RegisterPage — the pre-login destination", () => {
+  it("carries ?redirect= into the verification link and the pending screen", async () => {
+    const { router } = await renderWithProviders(<RegisterPage />, {
+      initialPath: "/register?redirect=%2Fsettings%2Faccount",
+    });
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(m.auth_field_username()), "alexmercer");
+    await user.type(screen.getByLabelText(m.auth_field_display_name()), "Alex Mercer");
+    await user.type(screen.getByLabelText(m.auth_field_email()), "alex@example.com");
+    await user.type(screen.getByLabelText(m.auth_field_password()), "password1");
+    await user.type(screen.getByLabelText(m.auth_field_confirm_password()), "password1");
+    await user.type(screen.getByLabelText(m.auth_field_date_of_birth()), "1995-01-01");
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: m.auth_register() }));
+
+    // Inside the emailed link, so a link opened in another browser still lands
+    // there — no atom or history entry survives that hop.
+    await waitFor(() =>
+      expect(authClient.signUp.email).toHaveBeenCalledWith(
+        expect.objectContaining({
+          callbackURL: `${window.location.origin}/verify-email?redirect=%2Fsettings%2Faccount`,
+        }),
+      ),
+    );
+    // And on the navigation, so the pending screen's own resend keeps it too.
+    await waitFor(() => expect(router.state.location.pathname).toBe("/verify-email"));
+    expect(router.state.location.search).toEqual({ redirect: "/settings/account" });
+  });
+});

@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test as setup, type APIRequestContext } from "@playwright/test";
 import { E2E } from "../playwright.config";
-import { getUserId, setUserRole } from "../support/db";
+import { getUserId, markEmailVerified, setUserRole } from "../support/db";
 import { ALICE, FIXTURE_USERS, legalConsentBody, type FixtureUser } from "../support/users";
 
 // Lives under `tests/` rather than at the package root: playwright.config.ts
@@ -29,6 +29,15 @@ mkdirSync(path.join(import.meta.dirname, "..", ".auth"), { recursive: true });
  * guarantees a clean slate every run; this fallback only matters for
  * re-running the `setup` project on its own (e.g. `--project setup`) without
  * a fresh truncation ahead of it.
+ *
+ * With `requireEmailVerification` (packages/auth), a successful sign-up
+ * creates the account and sends the verification email but issues NO session —
+ * so a sign-up that returns ok no longer leaves this context carrying a
+ * session cookie. The fixture is grandfathered the same way the
+ * `0014_grandfather_email_verified` migration grandfathered every real
+ * account: flip `email_verified` directly, then sign in to mint the cookie.
+ * The sign-in path also covers the re-run case where the account already
+ * exists (sign-up then returns non-ok) and was verified by a previous run.
  */
 async function ensureFixtureSession(request: APIRequestContext, user: FixtureUser): Promise<void> {
   const signUpResponse = await request.post(`${E2E.webUrl}/api/auth/sign-up/email`, {
@@ -44,7 +53,24 @@ async function ensureFixtureSession(request: APIRequestContext, user: FixtureUse
     },
   });
 
-  if (signUpResponse.ok()) return;
+  // A fresh sign-up: the account exists but is unverified, so grandfather it
+  // before the sign-in below — otherwise sign-in is rejected with
+  // EMAIL_NOT_VERIFIED and no session cookie is set. A non-ok sign-up means
+  // the account already exists (a re-run without truncation); it was verified
+  // by a previous run, so there is nothing to flip here.
+  if (signUpResponse.ok()) {
+    // SAFETY: A successful Better Auth sign-up response owns this `user`
+    // contract; the ok check above guards the consumption.
+    const body = (await signUpResponse.json()) as { user?: { id?: string } };
+    const userId = body?.user?.id;
+    if (!userId) {
+      throw new Error(
+        `Sign-up for fixture "${user.username}" returned ok but no user.id — ` +
+          `the Better Auth sign-up response shape has changed.`,
+      );
+    }
+    await markEmailVerified(userId);
+  }
 
   const signInResponse = await request.post(`${E2E.webUrl}/api/auth/sign-in/email`, {
     data: { email: user.email, password: user.password },

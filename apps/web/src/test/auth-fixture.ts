@@ -128,6 +128,11 @@ const fakeAuthClient = {
   },
   signUp: { email: vi.fn(() => Promise.resolve({ data: {}, error: null })) },
   signOut: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+  // The `/verify-email` resend (issue #172). Answers `{ status: true }` for an
+  // unknown address too, exactly as the server does — the endpoint must not
+  // become an account-existence oracle, and the fixture should not tempt a
+  // test into asserting otherwise.
+  sendVerificationEmail: vi.fn(() => Promise.resolve({ data: { status: true }, error: null })),
   requestPasswordReset: vi.fn(() => Promise.resolve({ data: { status: true }, error: null })),
   resetPassword: vi.fn(() => Promise.resolve({ data: { status: true }, error: null })),
   updateUser: vi.fn(() => Promise.resolve({ data: {}, error: null })),

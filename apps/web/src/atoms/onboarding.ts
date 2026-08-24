@@ -11,15 +11,21 @@ import { atom } from "jotai";
  * same outcome as declining it; the cost of persisting it wrongly is a modal
  * gate on an established account.
  *
- * Only `signUpAtom` sets it, and that is what implements "OAuth accounts don't
- * see this step" without a single conditional: the email/password path is the
- * one that runs `signUpAtom`, and it is also the only path that produces an
- * account with a password — which `authClient.twoFactor.enable` requires. A
- * social sign-up never sets the flag, claims its handle at `/welcome`, and
- * redirects to its profile exactly as before.
- *
  * `useRedirectWhenSignedIn` reads it to decide where a *complete* session goes,
  * so it stays the single owner of navigation (see the long comment in that
  * hook) — this flag changes what the app knows, not where it sends anyone.
+ *
+ * NOTE (issue #172): nothing raises this flag any more (`signOutAtom` still
+ * clears it, so a stale offer cannot outlive a session). A password sign-up no
+ * longer creates a session — `requireEmailVerification` holds it back until
+ * the email is verified, and verification happens in a separate browser
+ * session (the email link), so an in-memory flag set at sign-up cannot survive
+ * to the session that follows. The automatic post-signup 2FA offer is
+ * therefore dormant on the password path; 2FA remains reachable from settings.
+ * The flag and its readers are left in place rather than ripped out here,
+ * because re-offering 2FA after verification is a separate product decision
+ * (persist the intent, or prompt on first verified sign-in), not part of the
+ * email-verification gate. A social sign-up never set the flag and still
+ * claims its handle at `/welcome` exactly as before.
  */
 export const offerTwoFactorAtom = atom(false);

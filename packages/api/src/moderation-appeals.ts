@@ -94,7 +94,7 @@ export const appealsRouter = {
         .limit(1);
       if (!row) throw new ORPCError("NOT_FOUND", { message: "This appeal doesn't exist." });
       if (row.status !== "open") {
-        throw new ORPCError("BAD_REQUEST", { message: "This appeal has already been reviewed." });
+        throw new ORPCError("BAD_REQUEST", { message: "This appeal has already been resolved." });
       }
       // SAFETY: The query selects every ActionRow field, and the schema's action
       // check constraint restricts the stored code to ModerationActionCode.
@@ -125,7 +125,7 @@ export const appealsRouter = {
           .for("update")
           .limit(1);
         if (!openAppeal) {
-          throw new ORPCError("BAD_REQUEST", { message: "This appeal has already been reviewed." });
+          throw new ORPCError("BAD_REQUEST", { message: "This appeal has already been resolved." });
         }
 
         if (input.outcome === "overturned") {

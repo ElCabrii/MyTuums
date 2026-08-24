@@ -3,6 +3,7 @@ import { IMAGE_LIMITS } from "@my-tuums/api/constants";
 import {
   IMAGE_ACCEPT,
   ImageError,
+  calculateCropFrame,
   calculateCropRect,
   calculateDisplayLayout,
   clampCrop,
@@ -76,7 +77,7 @@ function stubEncodePath({
   width = 100,
   height = 100,
 }: {
-  toBlob: Blob;
+  toBlob: Blob | Blob[];
   width?: number;
   height?: number;
 }) {
@@ -93,9 +94,13 @@ function stubEncodePath({
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
     () => contextDouble as never,
   );
-  vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback: BlobCallback) =>
-    callback(toBlob),
-  );
+  const blobs = Array.isArray(toBlob) ? toBlob : [toBlob];
+  let encodeIndex = 0;
+  vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback: BlobCallback) => {
+    callback(blobs[Math.min(encodeIndex, blobs.length - 1)] ?? null);
+    encodeIndex += 1;
+  });
+  return contextDouble;
 }
 
 describe("IMAGE_ACCEPT", () => {
@@ -108,6 +113,19 @@ describe("IMAGE_ACCEPT", () => {
   });
 });
 
+describe("calculateCropFrame", () => {
+  it("uses a square avatar composition for portrait and landscape sources", () => {
+    expect(calculateCropFrame({ width: 400, height: 800 }, "avatar")).toEqual({
+      width: 400,
+      height: 400,
+    });
+    expect(calculateCropFrame({ width: 800, height: 400 }, "avatar")).toEqual({
+      width: 400,
+      height: 400,
+    });
+  });
+});
+
 describe("calculateCropRect", () => {
   // The crop editor's core: given source dims, a slot and a crop descriptor, it
   // picks the source rectangle the display variant is drawn from. Pinned here
@@ -117,9 +135,7 @@ describe("calculateCropRect", () => {
   it("frames exactly what the no-crop path would keep, at zoom 1", () => {
     // THE load-bearing property: the default crop must select the same
     // rectangle `calculateDisplayLayout` picks with no crop at all. If these
-    // ever diverge, merely opening the editor changes the stored image — which
-    // is how a fixed 7.5:1 editor frame silently re-introduced the softness
-    // this module's width-priority policy exists to remove.
+    // ever diverge, merely opening the editor changes the stored image.
     const sources = [
       { width: 1200, height: 400 },
       { width: 1500, height: 500 },
@@ -145,10 +161,17 @@ describe("calculateCropRect", () => {
   });
 
   it("zooms in by shrinking the rect around the center", () => {
-    // An avatar keeps the whole square at zoom 1, so zoom 2 is the middle half.
+    // A portrait avatar starts from its centered square; zoom 2 keeps the
+    // middle half of that composition rather than reverting to source aspect.
     expect(
-      calculateCropRect({ width: 400, height: 400 }, "avatar", { x: 0.5, y: 0.5, scale: 2 }),
-    ).toEqual({ x: 100, y: 100, width: 200, height: 200 });
+      calculateCropRect({ width: 400, height: 800 }, "avatar", { x: 0.5, y: 0.5, scale: 2 }),
+    ).toEqual({ x: 100, y: 300, width: 200, height: 200 });
+  });
+
+  it("pans a square avatar composition within a portrait source", () => {
+    expect(
+      calculateCropRect({ width: 400, height: 800 }, "avatar", { x: 0.5, y: 0.25, scale: 1 }),
+    ).toEqual({ x: 0, y: 0, width: 400, height: 400 });
   });
 
   it("clamps the rect to the source when the center is near an edge", () => {
@@ -216,7 +239,7 @@ describe("calculateDisplayLayout", () => {
   // jsdom (see the file header) and covered end to end elsewhere, but the
   // arithmetic that decides sharpness is all here.
 
-  it("avatar: contains the whole image and never upscales", () => {
+  it("avatar: center-crops to a square and never upscales", () => {
     // A 4000x4000 source is scaled down to the 512x512 cap, keeping every row.
     expect(calculateDisplayLayout({ width: 4000, height: 4000 }, "avatar")).toEqual({
       sourceX: 0,
@@ -235,75 +258,28 @@ describe("calculateDisplayLayout", () => {
       width: 100,
       height: 100,
     });
-    // Portrait is height-limited but still whole-image: 200x400 -> 200x400.
+    // A portrait keeps its full width and crops the same-sized square from the center.
     expect(calculateDisplayLayout({ width: 200, height: 400 }, "avatar")).toEqual({
       sourceX: 0,
-      sourceY: 0,
-      sourceWidth: 200,
-      sourceHeight: 400,
-      width: 200,
-      height: 400,
-    });
-  });
-
-  it("banner: fills width, center-cropping height only when the source is tall", () => {
-    // The reported case: a 3840x2160 photo. Contain used to be height-limited
-    // to 1778x1000, starving the full-bleed banner of width. Width-priority
-    // keeps the full 3840 width and center-crops to the 512 cap.
-    expect(calculateDisplayLayout({ width: 3840, height: 2160 }, "banner")).toEqual({
-      sourceX: 0,
-      sourceY: 824,
-      sourceWidth: 3840,
-      sourceHeight: 512,
-      width: 3840,
-      height: 512,
-    });
-    // A source already at the banner shape is kept whole — no crop, no upscale.
-    expect(calculateDisplayLayout({ width: 1920, height: 256 }, "banner")).toEqual({
-      sourceX: 0,
-      sourceY: 0,
-      sourceWidth: 1920,
-      sourceHeight: 256,
-      width: 1920,
-      height: 256,
-    });
-    // A wide-short source is width-downscaled, never width-cropped: 4000x256
-    // -> 3840x246, keeping every row. Cropping width here would throw away
-    // pixels a wider viewport could have used.
-    expect(calculateDisplayLayout({ width: 4000, height: 256 }, "banner")).toEqual({
-      sourceX: 0,
-      sourceY: 0,
-      sourceWidth: 4000,
-      sourceHeight: 256,
-      width: 3840,
-      height: 246,
-    });
-    // A huge source is center-cropped to the cap after the width fill.
-    expect(calculateDisplayLayout({ width: 5000, height: 3000 }, "banner")).toEqual({
-      sourceX: 0,
-      sourceY: 1166,
-      sourceWidth: 5000,
-      sourceHeight: 667,
-      width: 3840,
-      height: 512,
-    });
-  });
-
-  it("banner: never shrinks a source that fits the cap to a sliver", () => {
-    // The regression the symmetric cover-crop would have introduced: a small
-    // or moderately-tall source must NOT be cropped to the banner aspect,
-    // because that would upscale what `object-cover` could have sampled whole.
-    // 200x200 stays 200x200, not 200x27.
-    expect(calculateDisplayLayout({ width: 200, height: 200 }, "banner")).toEqual({
-      sourceX: 0,
-      sourceY: 0,
+      sourceY: 100,
       sourceWidth: 200,
       sourceHeight: 200,
       width: 200,
       height: 200,
     });
-    // 1500x500 (3:1) stays whole — the frame is 7.5:1, but cropping a 3:1
-    // source to 7.5:1 would undershoot the frame's height and force upscaling.
+  });
+
+  it("banner: center-crops every source to 3:1 without upscaling", () => {
+    // A common landscape photo keeps its full width and crops height.
+    expect(calculateDisplayLayout({ width: 3840, height: 2160 }, "banner")).toEqual({
+      sourceX: 0,
+      sourceY: 440,
+      sourceWidth: 3840,
+      sourceHeight: 1280,
+      width: 3840,
+      height: 1280,
+    });
+    // A source already at 3:1 is kept whole.
     expect(calculateDisplayLayout({ width: 1500, height: 500 }, "banner")).toEqual({
       sourceX: 0,
       sourceY: 0,
@@ -312,34 +288,41 @@ describe("calculateDisplayLayout", () => {
       width: 1500,
       height: 500,
     });
-    // 600x600 just clears the cap height, so only the 88 rows the frame hides
-    // are dropped — not the 520 a full aspect-crop would have taken.
-    expect(calculateDisplayLayout({ width: 600, height: 600 }, "banner")).toEqual({
+    // A panorama keeps its full height and crops width to the same ratio.
+    expect(calculateDisplayLayout({ width: 3840, height: 400 }, "banner")).toEqual({
+      sourceX: 1320,
+      sourceY: 0,
+      sourceWidth: 1200,
+      sourceHeight: 400,
+      width: 1200,
+      height: 400,
+    });
+    // A small square is cropped, but never enlarged.
+    expect(calculateDisplayLayout({ width: 200, height: 200 }, "banner")).toEqual({
       sourceX: 0,
-      sourceY: 44,
-      sourceWidth: 600,
-      sourceHeight: 512,
-      width: 600,
-      height: 512,
+      sourceY: 66,
+      sourceWidth: 200,
+      sourceHeight: 67,
+      width: 200,
+      height: 67,
     });
   });
 
-  it("banner: never crops width, even for sources wider than the cap aspect", () => {
-    // A 9:1 panorama (3840x400) is wider than the 7.5:1 frame. Width-priority
-    // keeps the full width (downscaled to the cap) and leaves the spare height
-    // alone — it does NOT crop width to force the banner aspect.
-    const layout = calculateDisplayLayout({ width: 3840, height: 400 }, "banner");
-    expect(layout.sourceX).toBe(0);
-    expect(layout.sourceWidth).toBe(3840);
-    expect(layout.width).toBe(3840);
-    expect(layout.height).toBe(400);
+  it("banner: scales a large 3:1 crop within both display caps", () => {
+    expect(calculateDisplayLayout({ width: 6000, height: 3000 }, "banner")).toEqual({
+      sourceX: 0,
+      sourceY: 500,
+      sourceWidth: 6000,
+      sourceHeight: 2000,
+      width: 3840,
+      height: 1280,
+    });
   });
 
   it("crop: the default crop encodes exactly what no crop would have", () => {
     // Applying the editor without touching it must not change the image. The
-    // earlier version of this branch framed the storage cap's aspect instead,
-    // which cropped a portrait avatar to a square and squeezed every banner to
-    // 7.5:1 — re-introducing the softness the width-priority policy removes.
+    // Banner and avatar defaults have different policies, but both must agree
+    // with what their editor shows at scale 1.
     for (const source of [
       { width: 200, height: 400 },
       { width: 1200, height: 400 },
@@ -356,17 +339,17 @@ describe("calculateDisplayLayout", () => {
   });
 
   it("crop: zooming keeps the rect at native size rather than upscaling a sliver", () => {
-    // A 3840x2160 banner frames 3840x512 at zoom 1; zoom 2 halves that rect and
+    // A 3840x2160 banner frames 3840x1280 at zoom 1; zoom 2 halves that rect and
     // encodes it 1:1 — the output is the crop, never an upscale of it.
     expect(
       calculateDisplayLayout({ width: 3840, height: 2160 }, "banner", { x: 0.5, y: 0.5, scale: 2 }),
     ).toEqual({
       sourceX: 960,
-      sourceY: 952,
+      sourceY: 760,
       sourceWidth: 1920,
-      sourceHeight: 256,
+      sourceHeight: 640,
       width: 1920,
-      height: 256,
+      height: 640,
     });
   });
 
@@ -492,7 +475,7 @@ describe("createDisplayVariant", () => {
     stubEncodePath({
       toBlob: new Blob([new Uint8Array(size)], { type: "image/png" }),
       width: 3840,
-      height: 512,
+      height: 1280,
     });
 
     const encoded = await createDisplayVariant(file("image/jpeg"), "banner");
@@ -500,6 +483,23 @@ describe("createDisplayVariant", () => {
     expect(encoded.size).toBe(size);
     expect(encoded.type).toBe("image/png");
     expect(encoded.name).toBe("banner-display.png");
+  });
+
+  it("downscales an oversized PNG fallback until it fits the display byte cap", async () => {
+    const context = stubEncodePath({
+      toBlob: [
+        new Blob([new Uint8Array(9 * 1024 * 1024)], { type: "image/png" }),
+        new Blob([new Uint8Array(4 * 1024 * 1024)], { type: "image/png" }),
+      ],
+      width: 3840,
+      height: 1280,
+    });
+
+    const encoded = await createDisplayVariant(file("image/jpeg"), "banner");
+
+    expect(encoded.size).toBe(4 * 1024 * 1024);
+    expect(context.drawImage).toHaveBeenCalledTimes(2);
+    expect(context.drawImage.mock.calls[1]?.slice(-2)).toEqual([1920, 640]);
   });
 
   it("keeps webp when the canvas produced webp", async () => {

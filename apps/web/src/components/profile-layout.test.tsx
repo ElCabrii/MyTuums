@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { ORPCError } from "@orpc/client";
@@ -31,6 +31,14 @@ installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  document.head.querySelector('meta[name="description"]')?.remove();
+  const description = document.createElement("meta");
+  description.setAttribute("name", "description");
+  document.head.appendChild(description);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("ProfileLayout query states", () => {
@@ -106,6 +114,7 @@ describe("ProfileLayout role and ownership gates", () => {
     });
 
     expect(screen.getByText(m.profile_suspended_body())).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "@suspended" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: m.moderation_unban() })).not.toBeInTheDocument();
   });
 
@@ -177,7 +186,7 @@ describe("ProfileLayout role and ownership gates", () => {
 
     await user.click(screen.getByLabelText(m.moderation_kebab()));
     await user.click(await screen.findByRole("menuitem", { name: m.moderation_kebab_block() }));
-    expect(store.get(blockDialogAtom)).toEqual({ userId: other.id, handle: "Other" });
+    expect(store.get(blockDialogAtom)).toEqual({ userId: other.id, handle: "other" });
   });
 
   it("signs out from the viewer's own profile and lands on /login", async () => {
@@ -236,5 +245,152 @@ describe("ProfileLayout role and ownership gates", () => {
     expect(router.state.location.pathname).toBe("/@alex");
     expect(store.get(authErrorAtom)).toBe(m.common_something_went_wrong());
     consoleError.mockRestore();
+  });
+});
+
+describe("ProfileLayout bio", () => {
+  it("uses the canonical returned handle in the document title", async () => {
+    const bio = "A profile bio for search previews.";
+    const profile = makeProfile({
+      username: "canonical",
+      displayUsername: "Canonical",
+      bio,
+    });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("CANONICAL", profile);
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@CANONICAL",
+      signedInAs: true,
+    });
+
+    await waitFor(() => {
+      expect(document.title).toBe(`@canonical - ${m.app_title_suffix()}`);
+      expect(document.head.querySelector('meta[name="description"]')).toHaveAttribute(
+        "content",
+        bio,
+      );
+    });
+  });
+
+  it("does not publish a suspended profile bio in document metadata", async () => {
+    const privateBio = "This suspended bio must not reach page metadata.";
+    const profile = makeProfile({
+      username: "suspended",
+      displayUsername: "Suspended",
+      bio: privateBio,
+      suspended: true,
+    });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("suspended", profile);
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@suspended",
+      signedInAs: true,
+    });
+
+    await waitFor(() => {
+      expect(document.head.querySelector('meta[name="description"]')).toHaveAttribute(
+        "content",
+        m.app_document_description(),
+      );
+    });
+    expect(document.head.querySelector('meta[name="description"]')).not.toHaveAttribute(
+      "content",
+      privateBio,
+    );
+  });
+
+  it("links mentions to canonical profiles and preserves the surrounding text", async () => {
+    const bio = "Building with @Alice,\none day at a time.";
+    const profile = makeProfile({ username: "author", displayUsername: "Author", bio });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("author", profile);
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@author",
+      signedInAs: true,
+    });
+
+    const mention = screen.getByRole("link", { name: "@Alice" });
+    expect(mention).toHaveAttribute("href", "/@alice");
+    expect(mention.closest("p")?.textContent).toBe(bio);
+  });
+});
+
+describe("ProfileLayout avatar viewer", () => {
+  it("opens the profile picture and closes it with the dialog action", async () => {
+    const profile = makeProfile({
+      name: "Picture Owner",
+      username: "picture-owner",
+      image: "/media/picture-owner.webp",
+    });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("picture-owner", profile);
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@picture-owner",
+      signedInAs: true,
+    });
+
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: m.profile_avatar_view({ name: profile.name }) }),
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveAccessibleName(m.profile_avatar_title({ name: profile.name }));
+    expect(
+      within(dialog).getByRole("img", { name: m.profile_avatar_alt({ name: profile.name }) }),
+    ).toHaveAttribute("src", profile.image);
+
+    await user.click(within(dialog).getByRole("button", { name: m.common_close() }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("replaces a broken profile picture with a noninteractive initials fallback", async () => {
+    let failImage: (() => void) | undefined;
+
+    class FailingImage {
+      complete = false;
+      naturalWidth = 0;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      set src(_value: string) {
+        failImage = () => this.onerror?.();
+      }
+    }
+
+    vi.stubGlobal("Image", FailingImage);
+    const profile = makeProfile({
+      name: "Picture Owner",
+      username: "picture-owner",
+      image: "/media/missing.webp",
+    });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("picture-owner", profile);
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@picture-owner",
+      signedInAs: true,
+    });
+
+    expect(
+      screen.getByRole("button", { name: m.profile_avatar_view({ name: profile.name }) }),
+    ).toBeInTheDocument();
+    act(() => failImage?.());
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: m.profile_avatar_view({ name: profile.name }) }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("PO")).toBeInTheDocument();
   });
 });

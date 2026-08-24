@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { and, desc, eq, not, or, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import { follow, user, userBlock } from "@my-tuums/db/schema";
-import { USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "@my-tuums/auth/rules";
+import { normalizeUsername, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "@my-tuums/auth/rules";
 import { z } from "zod";
 import { FOLLOW_PAGE_SIZE, FOLLOW_PAGE_SIZE_MAX, IMAGE_KINDS } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
@@ -102,18 +102,17 @@ async function countFollowers(db: Database, userId: string): Promise<number> {
 /**
  * Resolves a handle to a user id, or throws `NOT_FOUND`.
  *
- * The username plugin stores a normalised (lower-cased) `username` alongside
- * the `displayUsername` the person actually typed, so `/@AlexMercer` and
- * `/@alexmercer` have to resolve to the same profile. Matching on the
- * normalised column is what makes that work — and it keeps the lookup on the
- * unique index rather than forcing a sequential scan the way
- * `lower(username) = ...` would.
+ * The username plugin stores both handle columns in canonical lowercase, so
+ * `/@AlexMercer` and `/@alexmercer` have to resolve to the same profile.
+ * Matching a normalised input against the stored column keeps the lookup on
+ * the unique index rather than forcing a sequential scan with
+ * `lower(username) = ...`.
  */
 async function requireUserIdByUsername(db: Database, username: string): Promise<string> {
   const [found] = await db
     .select({ id: user.id })
     .from(user)
-    .where(eq(user.username, username.toLowerCase()))
+    .where(eq(user.username, normalizeUsername(username)))
     .limit(1);
 
   if (!found) {
@@ -157,9 +156,9 @@ export const userRouter = {
     .handler(async ({ input, context }) => {
       // A profile blocked in either direction reads as nonexistent — the
       // same "no such user" as a missing handle, so the block doesn't leak
-      // that the profile exists. A banned profile DOES resolve, carrying
-      // `suspended: true` (additive — `publicUserColumns` is untouched): the
-      // profile page renders a stub instead of an existence leak.
+      // that the profile exists. A banned profile still resolves so the page
+      // can render a stub, but authored fields and relationship state are
+      // redacted before they cross the procedure boundary.
       const [found] = await context.db
         .select({
           ...publicUserColumns,
@@ -170,7 +169,10 @@ export const userRouter = {
         })
         .from(user)
         .where(
-          and(eq(user.username, input.username.toLowerCase()), not(invisibleUser(context.user.id))),
+          and(
+            eq(user.username, normalizeUsername(input.username)),
+            not(invisibleUser(context.user.id)),
+          ),
         )
         .limit(1);
 
@@ -178,7 +180,18 @@ export const userRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
-      return found;
+      return found.suspended
+        ? {
+            ...found,
+            name: found.username ?? "",
+            image: null,
+            bio: null,
+            bannerImage: null,
+            followerCount: 0,
+            followingCount: 0,
+            viewerIsFollowing: false,
+          }
+        : found;
     }),
 
   /**

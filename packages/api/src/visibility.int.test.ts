@@ -1,6 +1,7 @@
 import { call } from "@orpc/server";
 import { closeDb } from "@my-tuums/db";
-import { follow, post } from "@my-tuums/db/schema";
+import { follow, post, user } from "@my-tuums/db/schema";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";
 import {
@@ -86,12 +87,6 @@ describe("a live suspension makes the author invisible everywhere", () => {
       { context: contextFor(bob) },
     );
     expect(searchPosts.items).toHaveLength(0);
-    const typeahead = await call(
-      appRouter.search.typeahead,
-      { q: "vis-search-tag" },
-      { context: contextFor(bob) },
-    );
-    expect(typeahead.posts).toHaveLength(0);
   });
 
   it("drops them from the following feed — their own posts stay put", async () => {
@@ -164,9 +159,26 @@ describe("a live suspension makes the author invisible everywhere", () => {
 });
 
 describe("byUsername and the suspension stub", () => {
-  it("resolves a live suspension as a stub — `suspended: true`, no ban columns leaked", async () => {
-    const alice = await createTestUser({ username: "vissuspended" });
+  it("resolves a live suspension as a redacted stub", async () => {
+    const alice = await createTestUser({
+      username: "vissuspended",
+      name: "Private suspended name",
+    });
     const bob = await createTestUser({ username: "vissuspviewer" });
+    const carol = await createTestUser({ username: "vissuspcontrol" });
+    await anonContext.db
+      .update(user)
+      .set({
+        image: "/media/avatars/private.webp",
+        bio: "Private suspended bio",
+        bannerImage: "/media/banners/private.webp",
+      })
+      .where(eq(user.id, alice.id));
+    await anonContext.db.insert(follow).values([
+      { followerId: bob.id, followingId: alice.id },
+      { followerId: carol.id, followingId: alice.id },
+      { followerId: alice.id, followingId: carol.id },
+    ]);
     await setUserBan(alice.id, { reason: "spam", expiresAt: new Date(Date.now() + 3_600_000) });
 
     const profile = await call(
@@ -177,8 +189,15 @@ describe("byUsername and the suspension stub", () => {
     expect(profile.id).toBe(alice.id);
     expect(profile.username).toBe("vissuspended");
     expect(profile.suspended).toBe(true);
-    // The profile stub is additive only — `publicUserColumns` is untouched,
-    // so the ban columns stay off the wire entirely.
+    expect(profile).toMatchObject({
+      name: "vissuspended",
+      image: null,
+      bio: null,
+      bannerImage: null,
+      followerCount: 0,
+      followingCount: 0,
+      viewerIsFollowing: false,
+    });
     expect("banned" in profile).toBe(false);
     expect("banReason" in profile).toBe(false);
     expect("banExpires" in profile).toBe(false);

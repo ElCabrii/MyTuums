@@ -23,7 +23,12 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { testUtils, username } from "better-auth/plugins";
 import { db } from "@my-tuums/db";
 import { webOrigin } from "./env.js";
-import { isAllowedUsernameCharset, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "./rules.js";
+import {
+  isAllowedUsernameCharset,
+  normalizeUsername,
+  USERNAME_MAX_LENGTH,
+  USERNAME_MIN_LENGTH,
+} from "./rules.js";
 
 /** The test-only Better Auth instance, carrying the privileged testUtils helpers (file header explains why). */
 export const authTest = betterAuth({
@@ -68,6 +73,8 @@ export const authTest = betterAuth({
       minUsernameLength: USERNAME_MIN_LENGTH,
       maxUsernameLength: USERNAME_MAX_LENGTH,
       usernameValidator: isAllowedUsernameCharset,
+      usernameNormalization: normalizeUsername,
+      displayUsernameNormalization: normalizeUsername,
     }),
     testUtils({ captureOTP: true }),
   ],

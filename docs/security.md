@@ -27,7 +27,7 @@ There are four, and only the first two carry untrusted input:
 | ----------------------------- | -------------------------------------------------------------- |
 | `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`              |
 | `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`         |
-| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/appeal`                       |
+| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`   |
 | Static assets                 | anything with a file extension — the SPA cannot boot otherwise |
 | `moderation.appealOpen` (RPC) | the one anonymous RPC — see below                              |
 
@@ -81,6 +81,20 @@ Anything else building on `baseProcedure` is a bug.
 - **No session cookie cache.** A revoked session must stop authenticating
   immediately; `revokeSessionsOnPasswordReset: true` is the other half of
   that. Every session check is a real lookup, including the `/media` gate.
+- **Password accounts must prove their email before they can do anything.**
+  `emailAndPassword.requireEmailVerification` is `true`, so a password sign-up
+  creates the account but issues **no session** — and a sign-in with the
+  correct password is refused until the address is verified. That single
+  control is what gates every access path: with no session, the server page
+  gate and `protectedProcedure` already refuse the account, so no separate
+  `emailVerified` check exists (and must not be added to `protectedProcedure`
+  — it would lock out OAuth accounts whose provider reports an unverified
+  address, a flow this app deliberately keeps). `sendOnSignIn: true` makes the
+  refused sign-in re-send the link, which is the whole recovery path; the
+  resend and the failure states are worded generically so neither becomes an
+  account-existence oracle. Every account predating this rule was
+  grandfathered by the `0014_grandfather_email_verified` migration rather than
+  locked out.
 - **OAuth credentials are all-or-nothing per provider.** A half-configured
   pair must not render a button that fails at the token exchange; the server
   refuses to boot on one.
@@ -198,9 +212,43 @@ used to 429 every request from a fresh session.
 
 **Response headers** are set at one choke point,
 `apps/server/src/response-decorators.ts`: a Content-Security-Policy with
-`frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`,
+`img-src 'self' https: blob:` (the `blob:` source is only for the transient
+local image preview in the crop editor), `frame-ancestors 'none'`,
+`X-Content-Type-Options: nosniff`,
 `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`
 and HSTS. Inner handlers win, so a handler setting its own header keeps it.
+
+**The CSP is hash-based, which constrains the edge in front of the app.**
+Cloudflare's JavaScript Detections injects its own inline `<script>` into every
+HTML response at their edge, after our headers are written. Its source embeds
+the per-request ray ID, so no static hash can allow it; Cloudflare only
+nonce-matches when the policy itself uses nonces, which this policy does not.
+With JS Detections on, every page load logs an inline-script CSP violation and
+the injected script does not run.
+
+This is enforced **in code**, not by a dashboard setting: HTML responses carry
+`Cache-Control: no-transform` (`cacheHeaderFor` in
+`apps/server/src/static-files.ts`), which is the standard way to declare a body
+byte-exact, and which Cloudflare documents as suppressing that injection. The
+guarantee therefore ships with the policy it protects. It is deliberately not a
+statement about one vendor feature: any intermediary that rewrites the document
+invalidates a hash-based policy, and `no-transform` denies all of them at once.
+
+The dashboard toggle (Security → Bots → Configure Bot Management) is no longer
+load-bearing, which matters because it has regressed before — enabling **Bot
+Fight Mode force-enables JavaScript Detections and gives no way to turn it off
+independently**, so the zone drifted the moment someone turned Bot Fight Mode
+on. Bot Fight Mode may stay on; `no-transform` keeps the document intact
+regardless.
+
+If bot fingerprinting is ever genuinely needed, switch the policy to
+per-response nonces rather than adding `'unsafe-inline'`. Note that this would
+be cheaper than it sounds and than earlier revisions of this document claimed:
+the app has **no inline `<script>` of its own**, so the nonce would only need to
+appear in the CSP header — Cloudflare stamps its injected script with a nonce it
+parses from that header — and `index.html` would stay prebuilt and untemplated.
+The inline stylesheet-swap `onload` is an event handler, which nonces do not
+cover in any case; it stays on `'unsafe-hashes'` plus its hash.
 
 ## Privacy projection
 
@@ -216,7 +264,9 @@ it fails a test rather than shipping.
 Visibility filtering is centralised in `packages/api/src/visibility.ts` so
 banned or blocked content cannot leak through a surface that forgot to filter.
 A blocked profile reads as "no such user" — the same response as a handle that
-never existed, so the block itself does not leak.
+never existed, so the block itself does not leak. A banned profile resolves so
+the UI can show a suspension stub, but `user.byUsername` redacts its authored
+profile fields, relationship counts and viewer relationship state first.
 
 ## Moderation authority
 
@@ -233,6 +283,12 @@ never existed, so the block itself does not leak.
   `setRoleEffect` can never be clobbered by an appeal that already passed its
   currency check. Moving any of these reads out of the transaction re-opens
   the race.
+- Appeal intake and manual reversal lock the contested `moderation_action` row
+  before touching appeals. Holding that stable row through intake's validation
+  and insert prevents a reversal from observing no appeal and then committing
+  before a concurrent intake creates one. Manual reversal continues with the
+  appeal row and then the target row, matching review's appeal-before-target
+  order.
 - Appeal review excludes the moderator who took the original action.
 - The bootstrap promotion (`pnpm db:promote` / `node apps/server/dist/promote.js`)
   is the one deliberate exception to "role changes go through `/rpc`": it

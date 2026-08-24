@@ -72,20 +72,20 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   `base-uri` stops an injected `<base>` tag from rewriting every relative
  *   URL on the page (script `src`, form actions, links) to an attacker's
  *   origin.
- * - `img-src 'self' https:`: images come from two places, and neither is a
- *   single origin that can be pinned. Own uploads are served from this
- *   origin as `/media/<key>`, which 302s the BROWSER to a presigned URL on
- *   the storage bucket's endpoint (`S3_ENDPOINT`) — a value that is
- *   per-environment, has already changed once (see `packages/api/src/
- *   storage.ts`'s `StorageConfig.endpoint` doc), and is not threaded into
- *   this module. Separately, `user.image`/`bannerImage` (packages/auth) hold
- *   an OAuth provider's own avatar URL verbatim until someone uploads a
- *   replacement (`apps/web/src/components/user-avatar.tsx` renders
- *   `user.image` unmodified) — Google, Discord and Twitch avatar CDNs, none
- *   of which this app controls or should enumerate. `https:` is the honest
- *   statement of that: no bare-HTTP or non-network scheme, everything else is
- *   already scoped by same-origin session checks before it ever reaches an
- *   `<img>` tag.
+ * - `img-src 'self' https: blob:`: images come from three places. Own uploads
+ *   are served from this origin as `/media/<key>`, which 302s the BROWSER to a
+ *   presigned URL on the storage bucket's endpoint (`S3_ENDPOINT`) — a value
+ *   that is per-environment, has already changed once (see
+ *   `packages/api/src/storage.ts`'s `StorageConfig.endpoint` doc), and is not
+ *   threaded into this module. Separately, `user.image`/`bannerImage`
+ *   (packages/auth) hold an OAuth provider's own avatar URL verbatim until
+ *   someone uploads a replacement (`apps/web/src/components/user-avatar.tsx`
+ *   renders `user.image` unmodified) — Google, Discord and Twitch avatar CDNs,
+ *   none of which this app controls or should enumerate. Finally, the settings
+ *   crop editor renders the selected local file through a short-lived `blob:`
+ *   object URL (`apps/web/src/components/settings/image-crop-dialog.tsx`).
+ *   `blob:` is limited to image loads; no bare-HTTP or `data:` source is
+ *   allowed, and stored media remains behind the same-origin session gate.
  * - `font-src 'self'`: `@fontsource-variable/inter` ships the font files
  *   through the build; nothing is fetched from a font CDN.
  * - `script-src 'self' https://accounts.google.com 'unsafe-hashes'
@@ -128,6 +128,9 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   loaded script makes its own requests (credential fetch, FedCM
  *   `.well-known` discovery) back to Google from the page's origin context,
  *   so it needs the same host as `script-src`.
+ * - `worker-src 'self'`: the production web build emits one same-origin
+ *   service worker for the offline app shell. Keeping this explicit prevents
+ *   a future widening of `default-src` from silently widening worker code.
  * - `frame-src https://accounts.google.com`: One Tap's prompt UI itself
  *   renders in a Google-hosted iframe the loaded script creates. Nothing
  *   else in this app frames anything.
@@ -149,16 +152,28 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  * which is why this policy already uses the bare host) — and whether a
  * future `S3_ENDPOINT` migration needs `img-src` narrowed again once a stable
  * per-environment origin is worth threading into this module.
+ *
+ * One edge constraint, learned the hard way (observed as an inline-script
+ * violation on every production page, twice): a hash-based policy is only ever
+ * correct for the exact bytes this server sent, so any intermediary that
+ * rewrites the document breaks it. Cloudflare's JavaScript Detections is the
+ * concrete instance — it injects an inline `<script>` whose source embeds the
+ * per-request ray ID, which no static hash can allow, and their nonce matching
+ * only works for policies that use nonces. This is denied at the origin rather
+ * than in a dashboard: HTML responses carry `Cache-Control: no-transform` (see
+ * `cacheHeaderFor` in ./static-files.ts). Do not treat that directive as a
+ * cache tuning knob — it is what keeps this policy true. See docs/security.md.
  */
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
-  "img-src 'self' https:",
+  "img-src 'self' https: blob:",
   "font-src 'self'",
   `script-src 'self' https://accounts.google.com 'unsafe-hashes' '${STYLESHEET_SWAP_HANDLER_HASH}'`,
   "style-src 'self' 'unsafe-inline' https://accounts.google.com",
   "connect-src 'self' https://accounts.google.com",
+  "worker-src 'self'",
   "frame-src https://accounts.google.com",
   "form-action 'self'",
   "frame-ancestors 'none'",
@@ -170,6 +185,14 @@ const CONTENT_SECURITY_POLICY = [
  */
 const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
+  // Not a free knob to tighten. `same-origin` would send no referrer at all
+  // cross-origin, and Google's GSI setup guide asks for exactly this value
+  // because loading `gsi/client` from accounts.google.com is a cross-origin
+  // request that their origin check reads the referrer of — tightening this
+  // breaks One Tap (`apps/web/src/lib/one-tap.ts`). Outbound links in user
+  // content do not depend on it either way: `components/linked-text.tsx`
+  // already marks them `rel="noopener noreferrer nofollow ugc"`.
+  // https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "X-Frame-Options": "DENY",
   // Browsers ignore HSTS received over plain HTTP, so this is inert on

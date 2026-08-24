@@ -35,16 +35,16 @@ and `@my-tuums/auth/rules`. All four must stay free of `@my-tuums/db`, which rea
 The `packages/auth` edge is the one that looks surprising, so it is worth
 stating why it does not weaken the direction above. `@my-tuums/auth/rules`
 (`packages/auth/src/rules.ts`) is the single statement of the account rules —
-handle bounds and charset, the date-of-birth parse and age comparison, the bio
-limit, the preference lists, and the English rejection strings — and it is the
-only file in that package with **no imports at all**. Reaching it does not
-construct the better-auth instance, read any env, or touch `@my-tuums/db`; the
-production bundle contains exactly those four workspace modules and nothing
-else from the packages. It lives in `packages/auth` because that is where the
-rules are _enforced_ (the database hooks are the only place a user-field rule
-actually holds) and because `packages/api` already depends on `packages/auth` —
-putting the shared statement in `packages/api` instead would force
-`packages/auth` to import it, closing a cycle.
+handle bounds, charset and lowercase normalization, the date-of-birth parse and
+age comparison, the bio limit, the preference lists, and the English rejection
+strings — and it is the only file in that package with **no imports at all**.
+Reaching it does not construct the better-auth instance, read any env, or touch
+`@my-tuums/db`; the production bundle contains exactly those four workspace
+modules and nothing else from the packages. It lives in `packages/auth` because
+that is where the rules are _enforced_ (the database hooks are the only place a
+user-field rule actually holds) and because `packages/api` already depends on
+`packages/auth` — putting the shared statement in `packages/api` instead would
+force `packages/auth` to import it, closing a cycle.
 
 ## Development topology
 
@@ -75,6 +75,12 @@ run beside a live dev stack.
 In production there is no proxy and no second origin. The Docker image sets
 `WEB_DIST=/app/apps/web/dist` and the same Node process serves the SPA, the
 auth endpoints, the RPC API and media redirects.
+
+The Vite build also emits `/service-worker.js`, whose generated precache list
+contains the hashed app-shell assets. The worker never caches RPC, auth, or
+media responses; it only supplies the cached SPA shell when a document
+navigation is offline. The worker and manifest are root files with `no-cache`
+headers so browser update checks cannot be pinned to an old release.
 
 This is a requirement, not a packaging preference: `apps/web/src/lib/orpc.ts`
 resolves `/rpc` against `window.location.origin`, and uploaded images are
@@ -137,7 +143,7 @@ The router's top-level groups:
 <!-- docs:check=router-groups -->
 
 - `me` — the caller's own session user
-- `post` — `create`, `list`, `thread`, `like`, `unlike`
+- `post` — `create`, `delete`, `list`, `thread`, `like`, `unlike`
 - `user` — `byUsername`, `uploadImage`, `removeImage`, `follow`, `unfollow`, `followers`, `following`
 - `search` — `typeahead`, `users`, `posts`
 - `moderation` — reports, blocks, the queue, the staff actions, the audit log, appeals
@@ -239,16 +245,22 @@ sides by CI. See [operations.md](operations.md).
   post cards and settings preview for free. Re-cropping means re-uploading;
   the retained original is what makes that lossless. The server is unaffected:
   it validates the display object on its own bounds, exactly as before.
-- **The editor frames what the encoder would keep anyway** — at zoom 1 its
-  rectangle is exactly the one the no-crop policy picks (`calculateCropFrame`),
-  so opening the editor and applying without adjusting anything is a no-op,
-  and the preview is honest about what will be stored. It must NOT frame the
-  storage cap's aspect: the banner is `w-full` behind a fixed `h-48 sm:h-64`
-  frame, so its on-screen ratio is viewport-dependent (≈2:1 on a phone, 7.5:1
-  only at 1920px). Forcing every banner to the cap's 7.5:1 made a 1200x400
-  upload need 3.2x upscaling where keeping it whole needs 1.28x — the very
-  softness the width-priority policy exists to remove. `media.test.ts` pins the
-  zero-regression property directly.
+- **Avatars have a canonical 1:1 composition.** The crop editor and encoder
+  share `calculateCropFrame`, which selects the same centered square at zoom 1
+  for portrait and landscape sources. Applying an untouched crop therefore
+  matches the no-crop encode, while pan and zoom change the square that every
+  avatar surface renders without a second hidden `object-cover` crop. Only the
+  display variant is square-cropped; the original remains untouched for a
+  future refit.
+- **Banners have a canonical 3:1 source and a responsive display crop.** At
+  zoom 1 the editor rectangle is exactly the region the encoder stores
+  (`calculateCropFrame`), so applying without adjusting anything is a no-op.
+  The profile remains `w-full` behind a fixed `h-48 sm:h-64` frame and uses
+  `object-cover`; consequently narrow layouts may hide the source's sides and
+  wide layouts may hide its top and bottom. The editor outlines the center
+  safe area shared by common 320px-phone through 1920px-desktop frames, making
+  that responsive tradeoff visible before upload. The stored variant can reach
+  3840x1280 for a sharp 2x sample on a 1920px display.
 - **The pre-decode guards run at file pick, not just at encode.**
   `validateImageFile` owns the type, byte-cap and header megapixel checks, and
   the editor calls it before it decodes anything. The megapixel ceiling is the
@@ -332,15 +344,23 @@ sides by CI. See [operations.md](operations.md).
    adapters: each authenticates its own claim and spends its own
    capability-keyed budget, and both normalise to one internal target — the
    contested action, its appellant, and the nonce that makes the attempt
-   replayable exactly once. Everything after that is source-blind: appealable,
-   still current, still latest, not already appealed, then an insert whose
-   unique constraints settle the races the pre-read cannot. Intake sends no
-   email and changes no moderation state.
+   replayable exactly once. Everything after that is source-blind and one
+   transaction: lock the contested action row, prove it appealable, still
+   current and still latest, refuse a replay, then insert. The action lock is
+   shared with manual reversal; database uniqueness remains the final backstop.
+   Intake sends no email and changes no moderation state.
 6. **Appeal review.** `moderation.appealReview` upholds or overturns, in one
    transaction with the inverse effect and the `appeal_resolved` audit row,
    and excludes the moderator who took the original action. It runs that
    transaction through `applyModerationEffect`, so the overturn's notices go
    out after the REVIEW's commit — never an inner savepoint.
+7. **Manual reversal.** Restoring a post, unbanning or unsuspending an account,
+   or changing a role that an open appeal contests stamps that appeal
+   `reversed` in the same transaction. The wrapper first locks the contested
+   action rows — the same synchronization point appeal intake holds through
+   insert — then the appeal and target. It leaves the review fields empty and
+   does not add an `appeal_resolved` row because no appeal review occurred;
+   the inverse action's audit row and post-commit email record what happened.
 
 ## Schemas and migrations
 
@@ -364,6 +384,12 @@ catches a schema edit that never had a migration generated.
 Migrations run as a pre-deploy step, never at server boot: N replicas would
 race the same DDL. The image ships `apps/server/dist/migrate.js` and the SQL
 so Railway and `docker-compose.yml` run the identical runner.
+
+Handle canonicalisation is also enforced by the database trigger installed in
+`0015_lowercase_usernames`: `username` is lowercased and `display_username` is
+derived from it on every handle write. This closes the pre-deploy interval in
+which Railway still routes traffic to the previous application version, and
+keeps direct database writers from splitting the two representations.
 
 ## Test topology
 

@@ -3,6 +3,7 @@ import { atomFamily } from "jotai-family";
 import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import { orpc } from "@/lib/orpc";
 import { store } from "@/lib/store";
+import type { ComposerAttachment } from "./composer.js";
 
 /**
  * A half-typed reply, per parent post.
@@ -17,6 +18,11 @@ import { store } from "@/lib/store";
  * them by the session instead.
  */
 export const replyDraftAtomFamily = atomFamily<string, PrimitiveAtom<string>>(() => atom(""));
+
+/** Selected reply images are session-local and keyed by their parent post. */
+export const replyAttachmentsAtomFamily = atomFamily<string, PrimitiveAtom<ComposerAttachment[]>>(
+  () => atom<ComposerAttachment[]>([]),
+);
 
 /**
  * `post.create` scoped to one parent. Like `createPostAtom` this has no
@@ -37,6 +43,7 @@ export const createReplyAtomFamily = atomFamily((parentId: string) =>
     return orpc.post.create.mutationOptions({
       onSuccess: async () => {
         store.set(replyDraftAtomFamily(parentId), "");
+        store.set(replyAttachmentsAtomFamily(parentId), []);
 
         // Two prefixes, because a reply lands in two different caches:
         //
@@ -60,5 +67,6 @@ export const createReplyAtomFamily = atomFamily((parentId: string) =>
 /** Drops every entry these families have created. See `clearPostFeedFamily`. */
 export function clearReplyFamilies(): void {
   for (const key of replyDraftAtomFamily.getParams()) replyDraftAtomFamily.remove(key);
+  for (const key of replyAttachmentsAtomFamily.getParams()) replyAttachmentsAtomFamily.remove(key);
   for (const key of createReplyAtomFamily.getParams()) createReplyAtomFamily.remove(key);
 }

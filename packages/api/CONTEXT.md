@@ -25,21 +25,24 @@ over HTTP and imports only its browser-safe subpaths.
 
 ## Change map
 
-| Intent                                | Primary                                                                                  | Also touch                                                                              |
-| ------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`) | `src/router.ts` if it is a new group; an `.int.test.ts`                                 |
-| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                      | a matching index in `packages/db/src/schema/app.ts`                                     |
-| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                      | `src/rate-limit.test.ts`                                                                |
-| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                     | `src/users.int.test.ts` pins it — read the invariant first                              |
-| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)         | `src/constants.ts` (action code), `docs/product.md` glossary                            |
-| Change the queue or a case view       | `src/moderation-queue.ts`                                                                | `src/moderation-inputs.ts` if the input shape moves                                     |
-| Change how an appeal is opened        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                             | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface |
-| Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                             | `src/moderation-actions.ts` if the inverse effect changes                               |
-| Change upload rules                   | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                               |
-| Change the upload/remove lifecycle    | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes     |
-| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                    |
-| Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                        |
-| Change an account rule                | `../auth/src/rules.ts`                                                                   | not `src/constants.ts` — see the invariant below                                        |
+| Intent                                | Primary                                                                                  | Also touch                                                                                               |
+| ------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`) | `src/router.ts` if it is a new group; an `.int.test.ts`                                                  |
+| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                      | a matching index in `packages/db/src/schema/app.ts`                                                      |
+| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                      | `src/rate-limit.test.ts`                                                                                 |
+| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                     | `src/users.int.test.ts` pins it — read the invariant first                                               |
+| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)         | `src/constants.ts` (action code), `docs/product.md` glossary                                             |
+| Change the queue or a case view       | `src/moderation-queue.ts`                                                                | `src/moderation-inputs.ts` if the input shape moves                                                      |
+| Change how a user is matched by text  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                    | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking |
+| Change how an appeal is opened        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                             | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface                  |
+| Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                             | `src/moderation-actions.ts` if the inverse effect changes                                                |
+| Change profile-image upload rules     | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                                                |
+| Change post-attachment upload rules   | `src/post-image.ts`, `src/constants.ts` (`POST_ATTACHMENT_*`)                            | `src/image.test.ts`; `src/posts.int.test.ts`                                                             |
+| Change the profile upload lifecycle   | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                      |
+| Change the post attachment lifecycle  | `src/post-media.ts`, `src/post-media-lock.ts`                                            | `src/posts.int.test.ts`; `src/reconcile-media.ts`; `scripts/reconcile-media.ts`                          |
+| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                                     |
+| Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                                         |
+| Change an account rule                | `../auth/src/rules.ts`                                                                   | not `src/constants.ts` — see the invariant below                                                         |
 
 ## Invariants
 
@@ -72,31 +75,69 @@ over HTTP and imports only its browser-safe subpaths.
   its own capability budget (`appeal:<nonce>`, `appeal:<actionId>`) — and
   normalises both to one target, after which the appealable/current/latest
   gates, the replay policy and the insert are source-blind. The ordering is
-  load-bearing: the HMAC comparison happens before any database work, and each
-  budget is consumed at the exact point its key comes into existence, so
-  everything after it is paid for. Intake never sends a notice and never
-  reverses an action — that is `appealReview`'s half, in
-  `src/moderation-appeals.ts`.
-- **A unique-constraint race must read back as a caller-facing refusal.**
-  `appeal` has a unique `token_nonce` and a partial unique open-per-action
-  index, and they — not intake's pre-read — are what make an appeal
-  exactly-once. Drizzle wraps driver failures in a `DrizzleQueryError` whose
-  `cause` carries postgres' SQLSTATE, so `isUniqueViolation` walks the cause
-  chain; matching only the top level let a real race escape as a 500.
-  `src/appeal-intake.int.test.ts` races real concurrent opens against real
-  Postgres to pin it.
+  load-bearing: the HMAC comparison happens before any database work, each
+  budget is consumed at the exact point its key comes into existence, and the
+  common tail locks the contested `moderation_action` through validation and
+  insert. Intake never sends a notice and never reverses an action — that is
+  `appealReview`'s half, in `src/moderation-appeals.ts`.
+- **Appeal intake is exactly-once at two layers.** The action-row lock
+  serializes concurrent application opens before their replay read. The
+  unique `token_nonce` and partial unique open-per-action indexes remain the
+  database authority for outside writers and collisions; `isUniqueViolation`
+  walks Drizzle's wrapped `cause` chain so a constraint rejection still reads
+  as a caller-facing refusal.
+- **User matching has one definition.** `matchesUserQuery` in `src/search.ts`
+  is what "this account matches what you typed" means — a left-anchored match
+  on the normalised `username`, or a substring of either display field.
+  `search.typeahead`, `search.users` and `moderation.searchUsers` all filter
+  through it, so widening a match lands on all three instead of drifting.
+  The two bounded lookup surfaces (`search.typeahead` and
+  `moderation.searchUsers`) also share `userQueryRank`: exact handle, other
+  handle prefixes, then display-only matches. `search.users` deliberately
+  keeps its `(createdAt, id)` keyset order instead of relevance ranking. What
+  the moderation lookup does not share is the visibility filter: it is a
+  staff surface that has to reach a banned or blocked account, and it returns
+  `role` for the same reason `team` does — the caller cannot tell whether it
+  may manage a target without it.
 - **`publicUserColumns` is a privacy boundary.** Never add `email`,
   `twoFactorEnabled`, `lastLoginMethod`, `role` or a preference column; sign-in
   method is reconnaissance, not profile data. `src/users.int.test.ts` pins the
   exact shape.
 - **Every surface filters through `src/visibility.ts`.** `invisibleUser` is the
   stricter of the two per-user filters — it is what lets a banned-but-not-blocked
-  profile resolve to its suspended stub instead of 404ing.
+  profile resolve to its suspended stub instead of 404ing. `user.byUsername`
+  redacts authored profile fields, relationship counts and viewer state from
+  that stub before it crosses the API boundary.
 - **`like`/`unlike` and `follow`/`unfollow` are separate idempotent
   procedures, never a toggle** — ordering and retry safety.
-- **Replies are a mode of `post.list` (`parentId`), not their own procedure.**
-  The web app's optimistic like sweep covers every cached `post.list` by key
-  prefix; a separate procedure would miss reply likes.
+- **A post has two independent tombstones, and neither is a row delete.**
+  `moderation.removePost` stamps `removed_at`; `post.delete` (the author's own,
+  issue #148) stamps `deleted_at`. `postSelection` nulls the content for
+  either, and `search.posts` excludes both rows outright — it matches the raw
+  `content` column, which no projection touches, so a tombstoned post's text
+  would otherwise stay probeable. Keeping the row is what lets replies, likes
+  and the thread above survive, and it is why `post.parent_id` can still
+  cascade. `post.delete` is deliberately NOT a moderation effect: no
+  transaction, no `FOR UPDATE`, no `moderation_action` row, no email, nothing
+  appealable — it is author-owned and idempotent, and it refuses a post a
+  moderator already removed so the author keeps the stub's reason and appeal
+  link. Its unlocked read/write pair is safe because the update compares both
+  tombstones; after losing to a concurrent delete or removal, it re-reads the
+  winner and preserves that outcome.
+- **Replies are a mode of `post.list` (`parentId` or the profile `kind`), not
+  their own procedure.** The web app's optimistic like sweep covers every
+  cached `post.list` by key prefix; a separate procedure would miss reply
+  likes. `kind` selects top-level posts, replies, or both, while the legacy
+  `includeReplies` input remains the compatibility spelling for both.
+- **Posts and replies share one attachment policy.** Either may carry up to
+  four ordered PNG, JPEG, or WebP files. Each file is capped at 5 MiB, the
+  batch at 12 MiB, and decoded dimensions at 4096 px per side / 50 MP. The
+  server validates actual bytes and persists only server-minted `/media/posts/`
+  paths in `post_attachment`; `postSelection` is the authoritative projection
+  for every reader. Ordinary media reads follow post tombstones, author bans,
+  and blocks, while moderators retain access to removed evidence. Author
+  deletion removes the non-restorable relation and objects; failed writes and
+  hard account cascades are reaped by `reconcile-media`.
 - **The profile-media lifecycle lives in `src/profile-media.ts`, and only
   there.** `user.uploadImage` and `user.removeImage` call
   `replaceProfileMedia`/`removeProfileMedia` and own nothing else: the
@@ -110,9 +151,12 @@ over HTTP and imports only its browser-safe subpaths.
   commit wrote. The lifecycle interface accepts the bare `Database` handle,
   not a transaction handle, so its swap commits before object cleanup begins.
 - **`scripts/reconcile-media.ts` must list the bucket BEFORE reading the
-  `user` rows.** The reverse order treats an upload landing between the two
-  steps as an orphan and deletes an object whose row points at it (issue #52;
-  pinned by `src/reconcile-media.test.ts`).
+  `user` rows, and it holds the shared post-media advisory transaction lock
+  through list/read/delete. Post attachment writers acquire that same lock
+  across storage upload and attachment-row commit, closing the
+  upload-before-row window without a pending schema state. The reverse order
+  still treats a profile upload landing between the two steps as an orphan
+  (issue #52; pinned by `src/reconcile-media.test.ts`).
 - **Every moderation effect reads its guard `FOR UPDATE`, inside its own
   transaction** (`removePostEffect`, `suspendUserEffect`, `banUserEffect`,
   `setRoleEffect`, `restorePostEffect`, `unbanEffect`, `restoreRoleEffect`).
@@ -130,6 +174,14 @@ over HTTP and imports only its browser-safe subpaths.
   goes through the wrappers. The raw effects remain exported for the appeal
   intake and the tests, which compose them directly; a new procedure must go
   through the wrappers, not call an effect and hand-thread the send.
+- **A manual inverse action closes appeals under a shared action lock.** The
+  `restorePost`, `unbanUser` and `setRole` wrappers lock the contested action
+  rows, then stamp linked open appeals `reversed`, then lock/change the target,
+  all in one transaction. Intake takes the same action lock through its insert,
+  so reversal cannot miss an appeal being created. The wrappers do not fill
+  review fields or log `appeal_resolved`; the inverse action's audit row and
+  notice are the source of truth. The remaining appeal-before-target order
+  matches `appealReview`, avoiding a review/reversal deadlock.
 - **Cursor bounds go through `sql.param(value, column)`.** Interpolating a JS
   `Date` hands postgres.js something it cannot serialise.
 - **`keysetPage`'s `createdAtField` is type-tied to the `createdAt` column**, so
@@ -155,9 +207,9 @@ over HTTP and imports only its browser-safe subpaths.
   right for bounding one client, wrong for billing. `maxKeys` is a leak alarm,
   not an admission gate: at capacity a brand-new key is let through, never
   refused (issue #60).
-- **`src/constants.ts`, `src/dimensions.ts` and `src/roles.ts` must stay
-  dependency-free.** The browser imports them; an `@my-tuums/db` import throws
-  at module load.
+- **`src/constants.ts`, `src/dimensions.ts`, `src/post-image.ts` and
+  `src/roles.ts` must stay dependency-free.** The browser imports them; an
+  `@my-tuums/db` import throws at module load.
 - **Account rules are not this package's to state.** The handle bounds, the bio
   limit, the date-of-birth rules and the preference lists live in
   `packages/auth/src/rules.ts` (`@my-tuums/auth/rules`), because `packages/auth`

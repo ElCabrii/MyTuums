@@ -20,8 +20,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CheckCircle2, Loader2, Mail } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
+import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/forgot-password")({
+  head: () => pageHead(m.auth_forgot_title()),
   component: ForgotPasswordPage,
 });
 

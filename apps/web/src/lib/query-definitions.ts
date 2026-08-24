@@ -12,6 +12,7 @@ interface PostListInput {
   authorId?: string;
   parentId?: string;
   includeReplies?: boolean;
+  kind?: "posts" | "replies" | "all";
   feed?: FeedScope;
   cursor?: string;
 }
@@ -34,6 +35,9 @@ export type CaseRef = { targetType: "post" | "user"; targetId: string };
 
 export type FollowDirection = "followers" | "following";
 
+/** The profile activity views; `both` preserves the legacy includeReplies input. */
+export type PostFeedKind = "posts" | "replies" | "both";
+
 export type PostFeedParams = {
   /** Omit for the global timeline; set to scope the feed to one author. */
   authorId?: string;
@@ -43,6 +47,8 @@ export type PostFeedParams = {
   parentId?: string;
   /** Replies are excluded unless this is set; a profile feed opts in. */
   includeReplies?: boolean;
+  /** Profile-only three-way filter; `both` is encoded as legacy includeReplies. */
+  kind?: PostFeedKind;
 };
 
 /** Authoritative query definitions shared by production atoms and test fixtures. */
@@ -51,13 +57,15 @@ export function postListQueryOptions({
   feed: scope,
   parentId,
   includeReplies,
+  kind,
 }: PostFeedParams) {
   return orpc.post.list.infiniteOptions({
     input: (cursor: string | undefined) => {
       const input: PostListInput = { limit: POST_PAGE_SIZE };
       if (authorId) input.authorId = authorId;
       if (parentId) input.parentId = parentId;
-      if (includeReplies) input.includeReplies = true;
+      if (kind === "replies") input.kind = "replies";
+      else if (kind === "both" || includeReplies) input.includeReplies = true;
       if (scope === "following") input.feed = scope;
       if (cursor) input.cursor = cursor;
       return input;
@@ -73,6 +81,9 @@ export function profileQueryOptions(username: string) {
   return {
     ...orpc.user.byUsername.queryOptions({ input: { username } }),
     retry: retryUnlessClientError,
+    // Hover cards unmount when they close. Keep recently viewed profiles fresh
+    // long enough that moving between links does not refetch the same person.
+    staleTime: 60_000,
   };
 }
 
@@ -178,4 +189,20 @@ export function moderationCaseQueryOptions(ref: CaseRef) {
 
 export function teamQueryOptions() {
   return orpc.moderation.team.queryOptions();
+}
+
+/**
+ * The Team tab's account lookup — how staff reach someone the roster does not
+ * list, so they can be granted a role.
+ *
+ * `enabled` gates the empty query the same way `searchUsersQueryOptions` does:
+ * the field starts empty and the procedure rejects an empty `q`.
+ */
+export function teamSearchQueryOptions(q: string) {
+  const normalized = q.trim();
+  return {
+    ...orpc.moderation.searchUsers.queryOptions({ input: { q: normalized } }),
+    enabled: normalized.length > 0,
+    retry: retryUnlessClientError,
+  };
 }

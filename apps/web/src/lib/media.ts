@@ -1,5 +1,6 @@
 import {
   ALLOWED_IMAGE_TYPES,
+  BANNER_ASPECT_RATIO,
   IMAGE_LIMITS,
   MAX_IMAGE_MEGAPIXELS,
   type ImageKind,
@@ -99,10 +100,9 @@ function readFirstBytes(file: File, max: number): Promise<Uint8Array | null> {
  *
  * WebP because it is in `ALLOWED_IMAGE_TYPES`, is markedly smaller than PNG for
  * photographs, and is supported by every browser this app targets. Banners are
- * width-priority (see `calculateDisplayLayout`): fitting the whole source into
- * the cap was height-limited for tall photos and left the full-bleed banner
- * starved of width, so the banner fills width first and center-crops only the
- * height the fixed frame hides.
+ * encoded at a canonical 3:1 (see `calculateDisplayLayout`), giving the crop
+ * editor one stable source composition even though the profile frame remains
+ * responsive and may hide edges with `object-cover`.
  *
  * With a `crop` — what the editor in
  * `components/settings/image-crop-dialog.tsx` produces — the chosen region
@@ -134,20 +134,34 @@ export async function createDisplayVariantImpl(
 
     const context = canvas.getContext("2d");
     if (!context) throw new ImageError("decode");
-    context.drawImage(
-      bitmap,
-      layout.sourceX,
-      layout.sourceY,
-      layout.sourceWidth,
-      layout.sourceHeight,
-      0,
-      0,
-      layout.width,
-      layout.height,
-    );
+    let blob: Blob;
+    while (true) {
+      context.drawImage(
+        bitmap,
+        layout.sourceX,
+        layout.sourceY,
+        layout.sourceWidth,
+        layout.sourceHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
 
-    const blob = await toBlob(canvas);
-    if (blob.size > IMAGE_LIMITS[kind].maxDisplayBytes) throw new ImageError("size");
+      blob = await toBlob(canvas);
+      if (blob.size <= IMAGE_LIMITS[kind].maxDisplayBytes) break;
+
+      // Browsers without WebP encoding silently return lossless PNG. A noisy
+      // 3840x1280 PNG can exceed the display byte cap even though its dimensions
+      // are valid, so retry at half resolution. This preserves a 1920px-wide
+      // sample on the first retry and guarantees progress for unusually large
+      // fallbacks without raising the RPC/storage budget.
+      if (blob.type !== "image/png" || (canvas.width === 1 && canvas.height === 1)) {
+        throw new ImageError("size");
+      }
+      canvas.width = Math.max(1, Math.floor(canvas.width / 2));
+      canvas.height = Math.max(1, Math.floor(canvas.height / 2));
+    }
 
     // `canvas.toBlob` falls back to `image/png` when WebP encode is
     // unsupported — silently, with no error — so the type must be read off the
@@ -170,30 +184,25 @@ export async function createDisplayVariantImpl(
 /**
  * Chooses the source rectangle and output size for one display variant.
  *
- * With a `crop` (the editor's output) the layout is a cover-crop of the chosen
- * rect to the slot's aspect, never upscaled — see the branch at the top. The
- * two branches below are the no-crop defaults.
+ * With a `crop` (the editor's output) the layout uses the chosen region, never
+ * upscaled — see the branch at the top. Without one it uses the slot's
+ * canonical centered composition.
  *
- * Avatars preserve the whole image (contain): the round frame's `object-cover`
- * already hides nothing worth keeping, so cropping at encode would only
- * permanently discard pixels a future refit wants.
+ * Avatars are always 1:1. Every avatar surface is square before applying its
+ * round mask, so baking the chosen square into the display variant keeps the
+ * editor and the rendered result on the same composition. The untouched
+ * original remains available for a future refit.
  *
- * Banners are width-priority. The profile banner is a full-bleed `w-full` box
- * behind a fixed `h-48 sm:h-64` frame that `object-cover` fills, so width is
- * the dimension the display is starved of and height is the one the frame
- * throws away. The layout fills width up to the cap (never upscaling) and crops
- * height to the cap, centered, only when the source is tall enough to exceed
- * it — the top/bottom dropped are exactly what `object-cover` hides. Width is
- * never cropped: a wider viewport can always use more width, and a source that
- * already fits the cap is kept whole so `object-cover` samples every pixel
- * rather than an upscaled sliver. This is a strict improvement over the old
- * contain fit, which was height-limited for tall sources and left width short.
+ * Banners are always 3:1. The profile banner remains a full-bleed responsive
+ * box, so its `object-cover` display may crop the 3:1 source differently at
+ * different viewports. The editor makes that tradeoff visible with a safe-area
+ * overlay instead of pretending a source-dependent crop can be authoritative.
  */
 
 /**
  * The crop a user chose in the editor: the visible region's center as a
- * fraction of the source (0..1), and a zoom where **1 shows exactly what the
- * no-crop policy would have kept**. Client-only — the crop is baked into the
+ * fraction of the source (0..1), and a zoom where **1 shows the slot's default
+ * crop**. Client-only — the crop is baked into the
  * display variant before upload, never sent to the server.
  */
 export type Crop = { x: number; y: number; scale: number };
@@ -209,26 +218,30 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * The region the editor frames at zoom 1 — deliberately the *same* rectangle
- * the no-crop path would have encoded, so opening the editor and applying
- * without touching anything is a no-op.
- *
- * This is what stops the editor from re-introducing the softness this module's
- * width-priority policy exists to remove. Framing the storage cap's aspect
- * (7.5:1) instead would cover-crop every banner to that ratio, and the banner
- * is NOT 7.5:1 on screen: it is `w-full` behind a fixed `h-48 sm:h-64` frame,
- * so its aspect is viewport-dependent (≈2:1 on a phone, 4.7:1 at 1200px, 7.5:1
- * only at 1920px). A 1200x400 upload forced to 1200x160 needs 3.2x upscaling in
- * a 1200x256 frame, against 1.28x when kept whole — worse than the bug this
- * PR fixed. Framing what the encoder would keep anyway has no such failure
- * mode, and it makes the preview honest about what will be stored.
+ * The region the editor frames at zoom 1 — deliberately the same rectangle the
+ * no-crop path encodes, so applying without touching anything is a no-op.
+ * Avatars cover-crop to 1:1. Banners cover-crop to the canonical 3:1.
  */
 export function calculateCropFrame(
   source: { width: number; height: number },
   kind: ImageKind,
 ): ImageSize {
-  const layout = calculateDisplayLayout(source, kind);
-  return { width: layout.sourceWidth, height: layout.sourceHeight };
+  if (kind === "avatar") {
+    const edge = Math.min(source.width, source.height);
+    return { width: edge, height: edge };
+  }
+
+  const sourceAspect = source.width / source.height;
+  if (sourceAspect > BANNER_ASPECT_RATIO) {
+    return {
+      width: Math.max(1, Math.round(source.height * BANNER_ASPECT_RATIO)),
+      height: source.height,
+    };
+  }
+  return {
+    width: source.width,
+    height: Math.max(1, Math.round(source.width / BANNER_ASPECT_RATIO)),
+  };
 }
 
 /**
@@ -303,11 +316,9 @@ export function calculateDisplayLayout(
     // WITHOUT a crop to find the frame, so this branch must never be reached
     // from there — it isn't, because that call omits `crop`.
     //
-    // Both caps are honoured independently rather than assuming the rect has
-    // the cap's aspect: at zoom 1 the rect is whatever the no-crop policy
-    // picked (any aspect at all), so scaling on width alone could leave a tall
-    // rect over the height cap and the server would reject the browser's own
-    // variant. Never upscales.
+    // Both caps are honoured independently, so changing a slot's dimensions
+    // cannot make the browser produce a variant the server rejects. Never
+    // upscales.
     const rect = calculateCropRect(source, kind, crop);
     const scale = Math.min(maxWidth / rect.width, maxHeight / rect.height, 1);
     return {
@@ -320,51 +331,17 @@ export function calculateDisplayLayout(
     };
   }
 
-  if (kind === "avatar") {
-    // `min(..., 1)` stops a small image being blown up to the bounds, which
-    // would add bytes and lose sharpness to gain nothing.
-    const scale = Math.min(maxWidth / source.width, maxHeight / source.height, 1);
-    const width = Math.max(1, Math.round(source.width * scale));
-    const height = Math.max(1, Math.round(source.height * scale));
-
-    return {
-      sourceX: 0,
-      sourceY: 0,
-      sourceWidth: source.width,
-      sourceHeight: source.height,
-      width,
-      height,
-    };
-  }
-
-  // Fill width up to the cap; never upscale, never crop width.
-  const scale = Math.min(maxWidth / source.width, 1);
-  const width = Math.max(1, Math.round(source.width * scale));
-  const drawnHeight = source.height * scale;
-
-  if (drawnHeight <= maxHeight) {
-    // The source fits the cap's height at this width — contain, no crop.
-    return {
-      sourceX: 0,
-      sourceY: 0,
-      sourceWidth: source.width,
-      sourceHeight: source.height,
-      width,
-      height: Math.max(1, Math.round(drawnHeight)),
-    };
-  }
-
-  // Too tall: keep the full (scaled) width and crop height to the cap,
-  // centered. `maxHeight / scale` is the source rows that map to `maxHeight`
-  // after the width fill — everything outside them is what the frame hides.
-  const sourceHeight = Math.round(maxHeight / scale);
+  const frame = calculateCropFrame(source, kind);
+  const sourceX = Math.floor((source.width - frame.width) / 2);
+  const sourceY = Math.floor((source.height - frame.height) / 2);
+  const scale = Math.min(maxWidth / frame.width, maxHeight / frame.height, 1);
   return {
-    sourceX: 0,
-    sourceY: Math.floor((source.height - sourceHeight) / 2),
-    sourceWidth: source.width,
-    sourceHeight,
-    width,
-    height: maxHeight,
+    sourceX,
+    sourceY,
+    sourceWidth: frame.width,
+    sourceHeight: frame.height,
+    width: Math.max(1, Math.round(frame.width * scale)),
+    height: Math.max(1, Math.round(frame.height * scale)),
   };
 }
 

@@ -3,13 +3,16 @@ import { useAtomValue } from "jotai";
 import { MessageSquare } from "lucide-react";
 import { viewerIdAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
-import { postFeedAtom } from "@/atoms/post-feed";
+import { postFeedAtom, type PostFeedParams } from "@/atoms/post-feed";
 import { handleOf } from "@/lib/user";
 import { PostComposer } from "@/components/post-composer";
 import { PostFeed } from "@/components/post-feed";
+import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import { m } from "@/paraglide/messages.js";
 
 const routeApi = getRouteApi("/@{$username}/");
+
+type ProfilePostsFilter = "all" | "posts" | "reply";
 
 /**
  * The default profile tab. The surrounding header lives in the layout route
@@ -17,6 +20,8 @@ const routeApi = getRouteApi("/@{$username}/");
  */
 export function ProfilePosts() {
   const { username } = routeApi.useParams();
+  const { filter = "all" } = routeApi.useSearch();
+  const navigate = routeApi.useNavigate();
   const viewerId = useAtomValue(viewerIdAtom);
 
   // The layout route reads `profileAtomFamily(username)` too. Dedup is no
@@ -32,6 +37,27 @@ export function ProfilePosts() {
 
   const isOwnProfile = viewerId === profile.id;
   const handle = handleOf(profile) ?? username;
+  const feedParams: PostFeedParams =
+    filter === "posts"
+      ? { authorId: profile.id, feed: "global", kind: "posts" }
+      : filter === "reply"
+        ? { authorId: profile.id, feed: "global", kind: "replies" }
+        : { authorId: profile.id, feed: "global", includeReplies: true };
+  const emptyMessage =
+    filter === "reply"
+      ? isOwnProfile
+        ? m.profile_own_replies_empty()
+        : m.profile_replies_empty({ handle })
+      : isOwnProfile
+        ? m.profile_own_empty()
+        : m.profile_empty({ handle });
+
+  const selectFilter = (next: ProfilePostsFilter) => {
+    void navigate({
+      search: { filter: next },
+      replace: true,
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -40,18 +66,26 @@ export function ProfilePosts() {
         <h2 className="text-foreground text-sm font-bold">{m.profile_posts_heading()}</h2>
       </div>
 
-      {isOwnProfile && <PostComposer />}
+      <SegmentedControl label={m.profile_posts_filter_label()}>
+        <SegmentedControlItem active={filter === "all"} onClick={() => selectFilter("all")}>
+          {m.profile_posts_filter_all()}
+        </SegmentedControlItem>
+        <SegmentedControlItem active={filter === "posts"} onClick={() => selectFilter("posts")}>
+          {m.profile_posts_filter_posts()}
+        </SegmentedControlItem>
+        <SegmentedControlItem active={filter === "reply"} onClick={() => selectFilter("reply")}>
+          {m.profile_posts_filter_reply()}
+        </SegmentedControlItem>
+      </SegmentedControl>
+
+      {isOwnProfile && filter !== "reply" && <PostComposer />}
 
       {/*
-        `includeReplies` is what makes a profile the person's whole activity
-        rather than only their top-level posts — the home timelines stay
-        top-level, this doesn't. See the input's doc comment in
-        packages/api/src/posts.ts.
+        The selected profile view maps to the corresponding `post.list` mode;
+        the home timelines remain top-level-only. See the input's doc comment
+        in packages/api/src/posts.ts.
       */}
-      <PostFeed
-        feedAtom={postFeedAtom({ authorId: profile.id, feed: "global", includeReplies: true })}
-        emptyMessage={isOwnProfile ? m.profile_own_empty() : m.profile_empty({ handle })}
-      />
+      <PostFeed feedAtom={postFeedAtom(feedParams)} emptyMessage={emptyMessage} showParentContext />
     </div>
   );
 }

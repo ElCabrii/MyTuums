@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { atomWithReset, RESET } from "jotai/utils";
 import { queryClientAtom } from "jotai-tanstack-query";
-import type { LocalePreference } from "@my-tuums/auth/rules";
+import { normalizeUsername, type LocalePreference } from "@my-tuums/auth/rules";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/lib/orpc";
 import { waitForSession } from "@/lib/session-sync";
@@ -66,9 +66,9 @@ export const changeHandleAtom = atom(null, async (get, set): Promise<string | nu
     return null;
   }
 
-  const next = get(handleChangeDraftAtom).trim();
+  const next = normalizeUsername(get(handleChangeDraftAtom).trim());
   const previous = get(viewerHandleAtom);
-  if (next.toLowerCase() === previous) {
+  if (next === previous) {
     // Nothing to do, and saying so beats a round trip that reports success for
     // a change that did not happen.
     set(handleChangeDraftAtom, RESET);
@@ -88,7 +88,7 @@ export const changeHandleAtom = atom(null, async (get, set): Promise<string | nu
     // client has refetched, so reading the handle back immediately would still
     // give the old one — and navigating with it would land on the URL that has
     // just stopped existing.
-    await waitForSession((value) => value.data?.user.username === next.toLowerCase());
+    await waitForSession((value) => value.data?.user.username === next);
 
     // The old handle's cached profile is now a 404 and the new one has never
     // been fetched. Removing the family entry rather than invalidating it

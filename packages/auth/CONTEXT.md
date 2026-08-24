@@ -38,12 +38,28 @@ Each of these is a deliberate, non-default setting. The inline comment in
 
 - **No `session.cookieCache`.** A revoked session must stop authenticating
   immediately. `revokeSessionsOnPasswordReset: true` is the other half.
-- **`requireEmailVerification: false`.** Every existing account predates
-  verification; turning it on locks them all out.
+- **`requireEmailVerification: true`.** A password sign-up creates the account
+  and sends the verification email but issues no session, and a password sign-in
+  is rejected (and re-sends the verification email via `sendOnSignIn`) until the
+  email is verified. An unverified password account never holds a session, so
+  the existing session gates cover every access path; no blanket `emailVerified`
+  check is added to `protectedProcedure` because that would lock out OAuth
+  accounts whose provider returned an unverified email. Existing accounts were
+  grandfathered by the `email_verified = true` backfill migration
+  (`packages/db/drizzle`) so flipping this did not lock them out.
 - **`additionalFields` are optional and nullable.** OAuth sign-ups arrive with
   none of them. `imageOriginal` and `bannerImageOriginal` are `input: false` —
   only the upload procedure in `packages/api` writes them, via Drizzle,
   bypassing hooks.
+- **Handles have one lowercase representation.** `normalizeUsername` in
+  `src/rules.ts` is shared by the Better Auth username plugin, the browser's
+  three handle-claiming writes and API lookups. The plugin normalises both
+  `username` and `displayUsername`; the user update hook also mirrors a changed
+  username into the display column because Better Auth otherwise leaves the
+  previous display value in place, and rejects an independent display-only
+  update. Migration `0015_lowercase_usernames` audits case-folded collisions,
+  installs the database form of the invariant for direct and rolling-deploy
+  writes, then backfills existing rows.
 - **Legal acceptance is required only on `/sign-up/email`, and only on
   create.** The consent timestamp and version are nullable so existing
   accounts and OAuth/passkey sign-ups remain `NULL` until the web app's global

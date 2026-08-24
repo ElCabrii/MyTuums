@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { atomWithReset, RESET } from "jotai/utils";
+import { normalizeUsername } from "@my-tuums/auth/rules";
 import { authClient } from "@/lib/auth-client";
 import { waitForCompletion } from "@/lib/session-sync";
 import { dateOfBirthToIso, validateDateOfBirth, validateUsername } from "@/lib/auth-validation";
@@ -111,7 +112,7 @@ export const claimWelcomeFieldsAtom = atom(null, async (get, set): Promise<boole
     // Same client-type boundary as the sign-up body in atoms/auth.ts —
     // the server accepts the field, 1.6.25's client types don't surface it.
     const body: ClaimBody = {};
-    if (wantsHandle) body.username = get(handleDraftAtom).trim();
+    if (wantsHandle) body.username = normalizeUsername(get(handleDraftAtom).trim());
     if (wantsDob) body.dateOfBirth = dateOfBirthToIso(get(dateOfBirthDraftAtom).trim());
     const res = await authClient.updateUser(body);
     if (res.error) {

@@ -40,7 +40,7 @@ describe("HandleSection", () => {
 
   it("navigates to the normalized handle returned by the refreshed session", async () => {
     vi.mocked(authClient.updateUser).mockImplementationOnce(() => {
-      patchTestSessionUser({ username: "newhandle", displayUsername: "NewHandle" });
+      patchTestSessionUser({ username: "newhandle", displayUsername: "newhandle" });
       return Promise.resolve({ data: {}, error: null });
     });
     const { router } = await renderWithProviders(<HandleSection />, { signedInAs: true });
@@ -50,7 +50,7 @@ describe("HandleSection", () => {
     await user.click(screen.getByRole("button", { name: m.settings_handle_submit() }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/@newhandle"));
-    expect(authClient.updateUser).toHaveBeenCalledWith({ username: "NewHandle" });
+    expect(authClient.updateUser).toHaveBeenCalledWith({ username: "newhandle" });
   });
 
   it("disables while pending and clears its draft on unmount", async () => {

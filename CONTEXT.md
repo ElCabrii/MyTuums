@@ -49,14 +49,18 @@ to the owning context.
   read it. Duplicating it lets the two gates disagree and bounce a visitor
   between them forever.
 - **The browser-safe subpaths stay dependency-free.**
-  `@my-tuums/api/constants`, `@my-tuums/api/dimensions`, `@my-tuums/api/roles`
+  `@my-tuums/api/constants`, `@my-tuums/api/dimensions`,
+  `@my-tuums/api/post-image`, `@my-tuums/api/roles`
   and `@my-tuums/auth/rules` must never import `@my-tuums/db`; the web app
   imports them, and a database import throws at module load in a browser.
-  Those four are the _only_ workspace modules in the SPA bundle, and they are
+  Those five are the _only_ workspace modules in the SPA bundle, and they are
   the only ones `apps/web` may import from either package.
 - **Auth-owned user fields are written through the auth client only.**
-  `packages/auth`'s database hooks are the single enforcement point for
-  user-field rules; an oRPC procedure writing them bypasses validation.
+  `packages/auth`'s database hooks enforce their user-field rules; an oRPC
+  procedure writing them bypasses validation. The duplicated handle columns
+  have one additional database invariant: migration `0015_lowercase_usernames`
+  derives both lowercase values from `username`, including during a rolling
+  deploy while the previous server version can still write.
 - **The client's provider list and the server's credentials must agree.**
   `VITE_SOCIAL_PROVIDERS` is baked into the bundle at build time and the
   browser cannot see server env. CI asserts both halves.
@@ -67,13 +71,13 @@ to the owning context.
 - **Migrations run as a pre-deploy step, never at server boot.** N replicas
   would race the same DDL.
 - **The account rules have exactly one definition.**
-  `packages/auth/src/rules.ts` (`@my-tuums/auth/rules`) owns the handle bounds
-  and charset, the date-of-birth parse and age comparison, the bio limit, the
-  preference lists, and every English rejection string. The browser forms, the
-  better-auth hooks and plugin config, and `usernameInput` in
-  `packages/api/src/users.ts` all read it. Those strings are also the keys of
-  `apps/web/src/lib/auth-error-message.ts`; restate one anywhere and server
-  rejections render untranslated.
+  `packages/auth/src/rules.ts` (`@my-tuums/auth/rules`) owns the handle bounds,
+  charset and lowercase normalization, the date-of-birth parse and age
+  comparison, the bio limit, the preference lists, and every English rejection
+  string. The browser forms, the better-auth hooks and plugin config, and
+  `usernameInput` in `packages/api/src/users.ts` all read it. Those strings are
+  also the keys of `apps/web/src/lib/auth-error-message.ts`; restate one
+  anywhere and server rejections render untranslated.
 
 ## Generated files
 

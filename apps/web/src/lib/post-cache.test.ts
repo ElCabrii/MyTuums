@@ -13,6 +13,7 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     content: "hello",
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     parentId: null,
+    parent: null,
     author: {
       id: "author-1",
       name: "Author",
@@ -23,9 +24,12 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     likeCount: 0,
     replyCount: 0,
     viewerHasLiked: false,
-    // The tombstone fields (issue #38): never removed by default.
+    // The tombstone fields (issue #38, plus #148): never removed or deleted
+    // by default.
     removed: false,
+    deleted: false,
     removedReason: null,
+    attachments: [],
     ...overrides,
   };
 }
