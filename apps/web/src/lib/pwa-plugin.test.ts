@@ -4,9 +4,9 @@ import { serviceWorkerSource } from "../../pwa-plugin";
 
 const ORIGIN = "https://mytuums.example";
 
-type NavigationRequest = { method: "GET"; mode: "navigate"; url: string };
+type WorkerRequest = { method: string; mode: string; url: string };
 type FetchEvent = {
-  request: NavigationRequest;
+  request: WorkerRequest;
   respondWith(response: Promise<Response>): void;
   waitUntil(work: Promise<unknown>): void;
 };
@@ -19,7 +19,7 @@ function responseAt(path: string, body: string, contentType: string): Response {
   return response;
 }
 
-function serviceWorkerHarness(initialShell: Response) {
+function serviceWorkerHarness(initialShell: Response, shell: string[] = ["/"]) {
   const entries = new Map<string, Response>([["/", initialShell]]);
   const put = vi.fn((key: string, response: Response): Promise<void> => {
     entries.set(key, response);
@@ -30,7 +30,11 @@ function serviceWorkerHarness(initialShell: Response) {
     put,
   };
   const caches = {
-    open: vi.fn().mockResolvedValue(cache),
+    // The real Cache API is disk-backed, so `open` never settles within the
+    // caller's microtask checkpoint. Modelling that is what makes the shell
+    // refresh below a real test: it is the gap in which the browser consumes
+    // the navigation body, so a clone taken after the await comes too late.
+    open: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve(cache), 0))),
     keys: vi.fn().mockResolvedValue(["mytuums-shell-test"]),
     delete: vi.fn().mockResolvedValue(true),
     match: vi.fn((key: string) => Promise.resolve(entries.get(key)?.clone())),
@@ -45,7 +49,7 @@ function serviceWorkerHarness(initialShell: Response) {
     },
   };
 
-  runInNewContext(serviceWorkerSource("mytuums-shell-test", ["/"]), {
+  runInNewContext(serviceWorkerSource("mytuums-shell-test", shell), {
     Response,
     URL,
     caches,
@@ -56,25 +60,44 @@ function serviceWorkerHarness(initialShell: Response) {
     self,
   });
 
+  function dispatch(request: WorkerRequest) {
+    const pending: Promise<unknown>[] = [];
+    let result: Promise<Response> | undefined;
+    fetchHandler?.({
+      request,
+      respondWith(responsePromise) {
+        result = responsePromise;
+      },
+      waitUntil(work) {
+        pending.push(work);
+      },
+    });
+    return { pending, result };
+  }
+
   return {
     put,
-    async navigate(path: string, response: Response | Error): Promise<Response> {
+    /** Whether the worker answered the request itself instead of leaving it to the browser. */
+    intercepts(path: string, mode = "no-cors"): boolean {
+      const { result } = dispatch({ method: "GET", mode, url: new URL(path, ORIGIN).href });
+      // The harness is offline by default; the caller only asks whether the
+      // worker took the request, so swallow the network failure it would hit.
+      result?.catch(() => undefined);
+      return result !== undefined;
+    },
+    async navigate(path: string, response: Response | Error): Promise<string> {
       fetchResponse = response;
-      const pending: Promise<unknown>[] = [];
-      let result: Promise<Response> | undefined;
-      fetchHandler?.({
-        request: { method: "GET", mode: "navigate", url: new URL(path, ORIGIN).href },
-        respondWith(responsePromise) {
-          result = responsePromise;
-        },
-        waitUntil(work) {
-          pending.push(work);
-        },
+      const { pending, result } = dispatch({
+        method: "GET",
+        mode: "navigate",
+        url: new URL(path, ORIGIN).href,
       });
       if (!result) throw new Error("Service worker did not handle the navigation.");
-      const resolved = await result;
+      // The browser starts consuming a navigation body the moment respondWith
+      // settles; the worker only gets to keep what it cloned before returning.
+      const body = await (await result).text();
       await Promise.all(pending);
-      return resolved;
+      return body;
     },
   };
 }
@@ -93,8 +116,7 @@ describe("generated service worker navigation caching", () => {
     );
 
     expect(harness.put).not.toHaveBeenCalled();
-    const offline = await harness.navigate("/@alice", new Error("offline"));
-    expect(await offline.text()).toBe("cached shell");
+    expect(await harness.navigate("/@alice", new Error("offline"))).toBe("cached shell");
   });
 
   it("still refreshes the offline shell from a successful same-origin HTML navigation", async () => {
@@ -106,7 +128,23 @@ describe("generated service worker navigation caching", () => {
     );
 
     expect(harness.put).toHaveBeenCalledOnce();
-    const offline = await harness.navigate("/@bob", new Error("offline"));
-    expect(await offline.text()).toBe("fresh shell");
+    expect(await harness.navigate("/@bob", new Error("offline"))).toBe("fresh shell");
+  });
+});
+
+describe("generated service worker subresource handling", () => {
+  const shell = ["/", "/mytuums.svg", "/assets/index-B5y7ISu1.js"];
+
+  it("serves the precached shell but leaves everything else to the browser", () => {
+    const harness = serviceWorkerHarness(responseAt("/", "cached shell", "text/html"), shell);
+
+    expect(harness.intercepts("/assets/index-B5y7ISu1.js")).toBe(true);
+    expect(harness.intercepts("/mytuums.svg")).toBe(true);
+
+    // /media 302s to a presigned URL on the storage bucket; re-fetching it from
+    // the worker turns an img-src load into a connect-src one the CSP blocks.
+    expect(harness.intercepts("/media/posts/42/photo.webp")).toBe(false);
+    expect(harness.intercepts("/rpc/posts.feed")).toBe(false);
+    expect(harness.intercepts("/assets/index-DifferentBuild.js")).toBe(false);
   });
 });

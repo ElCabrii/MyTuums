@@ -154,11 +154,15 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  * per-environment origin is worth threading into this module.
  *
  * One edge constraint, learned the hard way (observed as an inline-script
- * violation on every production page): Cloudflare's JavaScript Detections
- * injects its own inline `<script>` into HTML responses, and its source embeds
- * the per-request ray ID — no static hash can allow it, and their nonce
- * matching only works for policies that use nonces. The mytuums.com zone must
- * keep JS Detections off; see docs/security.md.
+ * violation on every production page, twice): a hash-based policy is only ever
+ * correct for the exact bytes this server sent, so any intermediary that
+ * rewrites the document breaks it. Cloudflare's JavaScript Detections is the
+ * concrete instance — it injects an inline `<script>` whose source embeds the
+ * per-request ray ID, which no static hash can allow, and their nonce matching
+ * only works for policies that use nonces. This is denied at the origin rather
+ * than in a dashboard: HTML responses carry `Cache-Control: no-transform` (see
+ * `cacheHeaderFor` in ./static-files.ts). Do not treat that directive as a
+ * cache tuning knob — it is what keeps this policy true. See docs/security.md.
  */
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -181,6 +185,14 @@ const CONTENT_SECURITY_POLICY = [
  */
 const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
+  // Not a free knob to tighten. `same-origin` would send no referrer at all
+  // cross-origin, and Google's GSI setup guide asks for exactly this value
+  // because loading `gsi/client` from accounts.google.com is a cross-origin
+  // request that their origin check reads the referrer of — tightening this
+  // breaks One Tap (`apps/web/src/lib/one-tap.ts`). Outbound links in user
+  // content do not depend on it either way: `components/linked-text.tsx`
+  // already marks them `rel="noopener noreferrer nofollow ugc"`.
+  // https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "X-Frame-Options": "DENY",
   // Browsers ignore HSTS received over plain HTTP, so this is inert on
