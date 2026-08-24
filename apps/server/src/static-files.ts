@@ -150,7 +150,10 @@ export function createStaticFileHandler(rootDir: string): StaticFileHandler {
     await send(req, res, {
       headOnly: req.method === "HEAD",
       file: indexPath,
-      cacheControl: "no-cache",
+      // Through the same helper as a direct `/index.html` hit: the SPA fallback
+      // serves the identical bytes, so it must carry the identical no-transform
+      // guarantee.
+      cacheControl: cacheHeaderFor(root, indexPath),
     });
     return { served: true };
   };
@@ -203,12 +206,27 @@ async function isFile(candidate: string): Promise<boolean> {
  * files are immutable and can be cached forever. Anything else — `index.html`
  * above all — must be revalidated, or a deploy leaves browsers holding an
  * index that references assets that no longer exist.
+ *
+ * HTML additionally carries `no-transform`, which is a **security control, not
+ * a cache hint**. The Content-Security-Policy in `./response-decorators.ts`
+ * allows inline scripts only by hash, so it can only ever be correct for the
+ * exact bytes this server sent. An intermediary that rewrites the document —
+ * concretely, Cloudflare's JavaScript Detections, which injects an inline
+ * `<script>` carrying the per-request ray ID that no static hash can cover —
+ * produces a document its own policy forbids, and every page load logs a CSP
+ * violation. `no-transform` is the standard way to say the body is byte-exact
+ * and must be delivered unmodified, and Cloudflare documents it as suppressing
+ * that injection. Asserting it here keeps the guarantee in code that ships with
+ * the policy it protects, instead of in a dashboard toggle that has silently
+ * regressed before (see docs/security.md).
+ *
+ * The cost is edge compression on HTML, which this server already does itself
+ * (`COMPRESSIBLE_EXTENSIONS` above includes `.html`), so nothing is lost.
  */
 function cacheHeaderFor(root: string, file: string): string {
   const relative = path.relative(root, file);
-  return relative.startsWith(`assets${path.sep}`)
-    ? "public, max-age=31536000, immutable"
-    : "no-cache";
+  if (relative.startsWith(`assets${path.sep}`)) return "public, max-age=31536000, immutable";
+  return path.extname(file).toLowerCase() === ".html" ? "no-cache, no-transform" : "no-cache";
 }
 
 function send(

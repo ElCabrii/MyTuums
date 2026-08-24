@@ -222,14 +222,33 @@ and HSTS. Inner handlers win, so a handler setting its own header keeps it.
 Cloudflare's JavaScript Detections injects its own inline `<script>` into every
 HTML response at their edge, after our headers are written. Its source embeds
 the per-request ray ID, so no static hash can allow it; Cloudflare only
-nonce-matches when the policy itself uses nonces, which this policy does not
-(nonces would mean templating `index.html` on every request instead of serving
-the prebuilt file). With JS Detections on, every page load logs an inline-script
-CSP violation. The mytuums.com zone must therefore keep **JavaScript Detections
-off** (Security → Bots → Configure Bot Management); note that enabling Bot Fight
-Mode force-enables it on some plans. If bot fingerprinting is ever genuinely
-needed, revisit the policy's design (per-response nonces) rather than adding
-`'unsafe-inline'`.
+nonce-matches when the policy itself uses nonces, which this policy does not.
+With JS Detections on, every page load logs an inline-script CSP violation and
+the injected script does not run.
+
+This is enforced **in code**, not by a dashboard setting: HTML responses carry
+`Cache-Control: no-transform` (`cacheHeaderFor` in
+`apps/server/src/static-files.ts`), which is the standard way to declare a body
+byte-exact, and which Cloudflare documents as suppressing that injection. The
+guarantee therefore ships with the policy it protects. It is deliberately not a
+statement about one vendor feature: any intermediary that rewrites the document
+invalidates a hash-based policy, and `no-transform` denies all of them at once.
+
+The dashboard toggle (Security → Bots → Configure Bot Management) is no longer
+load-bearing, which matters because it has regressed before — enabling **Bot
+Fight Mode force-enables JavaScript Detections and gives no way to turn it off
+independently**, so the zone drifted the moment someone turned Bot Fight Mode
+on. Bot Fight Mode may stay on; `no-transform` keeps the document intact
+regardless.
+
+If bot fingerprinting is ever genuinely needed, switch the policy to
+per-response nonces rather than adding `'unsafe-inline'`. Note that this would
+be cheaper than it sounds and than earlier revisions of this document claimed:
+the app has **no inline `<script>` of its own**, so the nonce would only need to
+appear in the CSP header — Cloudflare stamps its injected script with a nonce it
+parses from that header — and `index.html` would stay prebuilt and untemplated.
+The inline stylesheet-swap `onload` is an event handler, which nonces do not
+cover in any case; it stays on `'unsafe-hashes'` plus its hash.
 
 ## Privacy projection
 

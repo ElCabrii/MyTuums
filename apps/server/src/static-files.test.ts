@@ -101,7 +101,19 @@ describe("createStaticFileHandler", () => {
 
     const index = resStub();
     await createStaticFileHandler(root)(req("/index.html"), index.res);
-    expect(index.calls.headers["Cache-Control"]).toBe("no-cache");
+    expect(index.calls.headers["Cache-Control"]).toBe("no-cache, no-transform");
+  });
+
+  it("forbids intermediaries from rewriting HTML, on both paths that serve it", async () => {
+    // The hash-based CSP in ./response-decorators.ts is only correct for the
+    // exact bytes sent, so an edge that injects a script into the document
+    // breaks it. Both the direct hit and the SPA fallback serve index.html and
+    // must say so — see cacheHeaderFor.
+    for (const path of ["/index.html", "/settings/account"]) {
+      const stub = resStub();
+      await createStaticFileHandler(root)(req(path), stub.res);
+      expect(stub.calls.headers["Cache-Control"]).toContain("no-transform");
+    }
   });
 
   it("serves the manifest and service worker with revalidation-safe headers", async () => {

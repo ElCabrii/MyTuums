@@ -46,9 +46,31 @@ export function pwaPlugin(): Plugin {
   };
 }
 
+/**
+ * The worker source, as a string because it ships as its own top-level script
+ * rather than through Vite's module graph. Two constraints are easy to break
+ * here and invisible until production:
+ *
+ * - **The worker only answers for paths it precached.** Every other
+ *   same-origin GET is left to the browser, which matters beyond avoiding a
+ *   pointless cache miss: a `fetch()` issued *from* a worker is a `connect-src`
+ *   request whatever the original destination was, and its redirect target has
+ *   to pass the same directive. `/media/<key>` 302s to a presigned URL on the
+ *   storage bucket, an origin the policy in
+ *   `apps/server/src/response-decorators.ts` allows under `img-src 'self'
+ *   https:` and deliberately does not enumerate under `connect-src`. Re-fetch
+ *   it here and the browser blocks the redirect, the `respondWith` promise
+ *   rejects, and every avatar and post image breaks for anyone with the worker
+ *   installed.
+ * - **The shell clone is taken synchronously.** `caches.open()` is disk-backed
+ *   and settles well after the navigation response is handed back, by which
+ *   point the browser has consumed its body and `clone()` throws. Cloning
+ *   before returning costs nothing and is the only ordering that works.
+ */
 export function serviceWorkerSource(cacheName: string, resources: string[]): string {
   return `const CACHE_NAME = ${JSON.stringify(cacheName)};
 const APP_SHELL = ${JSON.stringify(resources)};
+const SHELL_PATHS = new Set(APP_SHELL);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
@@ -65,7 +87,9 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
-  if (request.method !== "GET" || new URL(request.url).origin !== self.location.origin) return;
+  if (request.method !== "GET") return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
 
   if (request.mode === "navigate") {
     event.respondWith(
@@ -73,7 +97,8 @@ self.addEventListener("fetch", (event) => {
         .then((response) => {
           const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
           if (response.ok && new URL(response.url).origin === self.location.origin && contentType === "text/html") {
-            event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put("/", response.clone())));
+            const shell = response.clone();
+            event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put("/", shell)));
           }
           return response;
         })
@@ -82,6 +107,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  if (!SHELL_PATHS.has(url.pathname)) return;
   event.respondWith(caches.match(request).then((response) => response ?? fetch(request)));
 });
 `;
