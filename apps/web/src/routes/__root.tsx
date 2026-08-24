@@ -1,5 +1,5 @@
 import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
@@ -39,6 +39,15 @@ export const Route = createRootRoute({
 });
 
 function RootLayout() {
+  useEffect(() => {
+    // index.html supplies metadata before the SPA can execute, so a cold load
+    // is never an untitled document. HeadContent has committed the localized
+    // route metadata by the time this effect runs; remove only those tagged
+    // fallbacks to leave a single title and description owner afterward.
+    document.querySelector("#app-title-fallback")?.remove();
+    document.querySelector("#app-description-fallback")?.remove();
+  }, []);
+
   // Mounts the theme side effect for the lifetime of the app — see
   // src/atoms/theme.ts. `atomEffect` atoms resolve to `void`; the value is
   // never used, only the subscription its `useAtomValue` establishes.

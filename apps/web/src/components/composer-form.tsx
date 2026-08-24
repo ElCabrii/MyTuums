@@ -220,7 +220,21 @@ export function ComposerForm({
   const updateMentionState = (nextValue: string, start: number | null, end: number | null) => {
     if (suppressSelectionRef.current) return;
     const token = mentionAtCaret(nextValue, start, end);
-    setMentionState({ token, highlight: -1, open: token !== null });
+    setMentionState((previous) => {
+      const tokenIsUnchanged =
+        token !== null &&
+        previous.token !== null &&
+        token.start === previous.token.start &&
+        token.end === previous.token.end &&
+        token.query === previous.token.query;
+
+      // Chromium fires `select` after an ArrowDown/ArrowUp keydown even when
+      // its default caret movement was prevented. Preserve the keyboard
+      // highlight for that unchanged token; a real caret/token change still
+      // starts navigation from no selection.
+      if (tokenIsUnchanged) return { ...previous, open: true };
+      return { token, highlight: -1, open: token !== null };
+    });
   };
 
   const acceptMention = (index: number) => {
@@ -365,6 +379,7 @@ export function ComposerForm({
         <div className="relative min-w-0 flex-1">
           <textarea
             ref={textareaRef}
+            role="combobox"
             rows={rows}
             placeholder={placeholder}
             value={value}

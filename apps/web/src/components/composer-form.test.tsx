@@ -117,7 +117,7 @@ describe("ComposerForm", () => {
   it("disables the textarea and swaps the send icon for a spinner while pending", async () => {
     const { container } = await renderComposer({ value: "hello", isPending: true });
 
-    expect(screen.getByRole("textbox")).toBeDisabled();
+    expect(screen.getByRole("combobox")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Post" })).toBeDisabled();
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     // The spinner and the send icon are both unlabelled lucide svgs; the
@@ -128,7 +128,7 @@ describe("ComposerForm", () => {
 
   it("keeps short drafts compact and caps a near-limit multiline draft with scrolling", async () => {
     await renderWithProviders(<StatefulComposer initialValue="Short" mentionScope="auto-grow" />);
-    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
     let scrollHeight = 56;
     Object.defineProperty(textarea, "scrollHeight", {
       configurable: true,
@@ -169,7 +169,7 @@ describe("ComposerForm", () => {
     await renderComposer({ header: <p>Replying to @alexmercer</p> });
 
     const header = screen.getByText("Replying to @alexmercer");
-    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
 
     expect(
       header.compareDocumentPosition(textarea) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -210,7 +210,7 @@ describe("ComposerForm", () => {
     ).queryClient;
     queryClient.setQueryData(orpc.search.typeahead.queryKey({ input: { q: "al" } }), payload);
 
-    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
     fireEvent.change(textarea, {
       target: { value: "@al", selectionStart: 3, selectionEnd: 3 },
     });
@@ -221,6 +221,11 @@ describe("ComposerForm", () => {
     expect(suggestion).toBeInTheDocument();
 
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    // Chromium dispatches `select` after the arrow event even though the
+    // composer prevented its default caret movement. That unchanged token
+    // must not clear the highlight before the acceptance key arrives.
+    fireEvent.select(textarea);
+    expect(suggestion).toHaveAttribute("aria-selected", "true");
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onValueChange).toHaveBeenCalledWith("@alice");
@@ -256,7 +261,7 @@ describe("ComposerForm", () => {
       payload,
     );
 
-    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
     fireEvent.change(textarea, {
       target: { value: "before @alworld after", selectionStart: 10, selectionEnd: 10 },
     });
@@ -294,7 +299,7 @@ describe("ComposerForm", () => {
       payload,
     );
 
-    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
     fireEvent.change(textarea, { target: { value: "@al", selectionStart: 3, selectionEnd: 3 } });
     textarea.setSelectionRange(3, 3);
     fireEvent.select(textarea);
@@ -317,7 +322,7 @@ describe("ComposerForm", () => {
       posts: [],
     });
 
-    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
     fireEvent.change(textarea, {
       target: { value: "@zz", selectionStart: 3, selectionEnd: 3 },
     });

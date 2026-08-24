@@ -90,6 +90,7 @@ test.describe("composing a post", () => {
     const suggestion = page.getByRole("option", { name: /Alice Anderson.*@alice/i });
     await expect(suggestion).toBeVisible();
     await textarea.press("ArrowDown");
+    await expect(suggestion).toHaveAttribute("aria-selected", "true");
     await textarea.press("Tab");
 
     const accepted = `${prefix} @alice`;
