@@ -125,19 +125,58 @@ test.describe("security headers", () => {
 });
 
 test.describe("request body cap", () => {
-  test("a chunked /rpc body over the cap is refused with 413", async () => {
-    // rawRequest sends no Content-Length, so node encodes the body chunked —
-    // the framing the router's Content-Length check cannot see (and that Node
-    // http clients legitimately use). The cap for that framing lives in
-    // oRPC's BodyLimitPlugin (apps/server/src/index.ts), which counts body
-    // bytes as they stream and refuses at the same ceiling.
+  test("an anonymous chunked /rpc body is refused with 401 before it is buffered", async () => {
+    // The pre-auth gate treats a lengthless body as over the small-body line
+    // by definition — there is no Content-Length to prove otherwise — so an
+    // anonymous caller cannot trade a missing header for a buffered request.
+    // rawRequest sends no Content-Length, so node encodes the body chunked:
+    // exactly the framing the declared-length checks cannot see.
+    const wire = await rawRequest("/rpc/user/uploadImage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...RPC_HEADERS },
+      body: JSON.stringify({ json: { padding: "pad" } }),
+    });
+
+    expect(wire.status).toBe(401);
+  });
+
+  test("a chunked appeal body is refused with 411 — the public surface has no session to demand and no length to compare", async () => {
+    // moderation.appealOpen is exempt from the session demand (the appellant
+    // cannot sign in), so a chunked body there would otherwise be admitted to
+    // buffer against nothing. Every client that legitimately follows the
+    // email link sends plain JSON with a Content-Length, so refusing the
+    // encoding costs nothing real.
+    const wire = await rawRequest("/rpc/moderation/appealOpen", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...RPC_HEADERS },
+      body: JSON.stringify({ json: { reason: "x".repeat(RPC_SMALL_BODY_BYTES) } }),
+    });
+
+    expect(wire.status).toBe(411);
+    expect(wire.body.toString()).toContain("Length required");
+  });
+
+  test("a signed-in chunked /rpc body over the cap is refused with 413", async ({ request }) => {
+    // After the pre-auth gate, only an authenticated caller can put a chunked
+    // body in flight at all; its byte-counting cap remains oRPC's
+    // BodyLimitPlugin (apps/server/src/index.ts), which refuses at the same
+    // ceiling as the declared-length check. This test signs in precisely so it
+    // can reach that plugin past the gate.
     //
     // RPC_MAX_BODY_BYTES is imported rather than mirrored: it derives from
     // IMAGE_LIMITS, and this test only needs "over the cap", so importing
     // keeps it correct when the image caps change.
+    await signUpVerifiedSession(request, "bc");
+    const { cookies } = await request.storageState();
+    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+
     const wire = await rawRequest("/rpc/user/uploadImage", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...RPC_HEADERS },
+      headers: {
+        "Content-Type": "application/json",
+        ...RPC_HEADERS,
+        cookie: cookieHeader,
+      },
       body: "x".repeat(RPC_MAX_BODY_BYTES + 1024),
     });
 

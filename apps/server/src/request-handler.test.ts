@@ -483,30 +483,6 @@ describe("createRequestHandler", () => {
     expect(calls.body).toBe("Payload too large");
   });
 
-  it("forwards a chunked RPC body to handleRpc — its cap lives in oRPC's BodyLimitPlugin", async () => {
-    // A Transfer-Encoding request carries no Content-Length for the router
-    // cap to read, and Node http clients legitimately send chunked when they
-    // omit the header — so the router must not reject it. The byte-counting
-    // cap for chunked bodies is oRPC's BodyLimitPlugin, wired in index.ts.
-    const { res, calls } = resStub();
-    const handleRpc = vi.fn().mockImplementation((_req: IncomingMessage, r: RequestResponse) => {
-      r.writeHead(200, { "Content-Type": "application/json" });
-      r.end("{}");
-      return Promise.resolve({ matched: true });
-    });
-    const handle = createRequestHandler(deps({ handleRpc }));
-
-    await handle(
-      reqStub("/rpc/user.uploadImage", "POST", {
-        "transfer-encoding": "chunked",
-      }),
-      res,
-    );
-
-    expect(handleRpc).toHaveBeenCalledOnce();
-    expect(calls.statusCode).toBe(200);
-  });
-
   it("accepts an upload-sized RPC body at exactly the ceiling once signed in", async () => {
     // Above RPC_SMALL_BODY_BYTES the router demands a valid session before a
     // non-appeal body is buffered — a body this large is an upload by
@@ -708,11 +684,75 @@ describe("createRequestHandler", () => {
     expect(calls.body).toBe("Not found");
   });
 
+  it("refuses an anonymous chunked body with 401 before handleRpc, without touching the session store", async () => {
+    // A chunked body carries no Content-Length for either size check to read,
+    // so it is treated as over the small-body line by definition: same demand,
+    // same refusal, and the same cookie pre-check keeping the session store
+    // out of it. Without this, a missing header would buy what a big declared
+    // body cannot — an unbounded-looking buffered request from an anonymous
+    // caller.
+    const { res, calls } = resStub();
+    const handleRpc = vi.fn();
+    const resolveSession = vi.fn();
+    const handle = createRequestHandler(deps({ handleRpc, resolveSession }));
+
+    await handle(streamReqStub("/rpc/user.uploadImage", Buffer.alloc(16)), res);
+
+    expect(resolveSession).not.toHaveBeenCalled();
+    expect(handleRpc).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(401);
+    expect(calls.body).toBe("Unauthorized");
+  });
+
+  it("refuses an anonymous chunked appeal body with 411 rather than admitting it to buffer", async () => {
+    // The one public surface cannot be asked for a session, and a chunked
+    // body gives the gate no length to compare either — there is no version
+    // of that request it can admit. Every legitimate appeal client (a browser
+    // following the email link) sends plain JSON with a Content-Length, so
+    // refusing the encoding costs nothing real and closes the last anonymous
+    // path to a router-sized buffer.
+    const { res, calls } = resStub();
+    const handleRpc = vi.fn();
+    const handle = createRequestHandler(deps({ handleRpc }));
+
+    await handle(streamReqStub("/rpc/moderation/appealOpen", Buffer.alloc(16)), res);
+
+    expect(handleRpc).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(411);
+    expect(calls.body).toBe("Length required");
+  });
+
+  it("lets a signed-in chunked body through to handleRpc", async () => {
+    // Node http clients legitimately omit Content-Length; the gate demands a
+    // session for exactly those bodies and then admits them like any other.
+    const { res, calls } = resStub();
+    const handleRpc = vi.fn().mockImplementation((_req: IncomingMessage, r: RequestResponse) => {
+      r.writeHead(200, { "Content-Type": "application/json" });
+      r.end("{}");
+      return Promise.resolve({ matched: true });
+    });
+    const session = signedIn();
+    const handle = createRequestHandler(
+      deps({ handleRpc, resolveSession: session.resolveSession }),
+    );
+
+    await handle(
+      streamReqStub("/rpc/user.uploadImage", Buffer.alloc(16), "POST", session.headers),
+      res,
+    );
+
+    expect(session.resolveSession).toHaveBeenCalledOnce();
+    expect(handleRpc).toHaveBeenCalledOnce();
+    expect(calls.statusCode).toBe(200);
+  });
+
   it("refuses /rpc with 503 once MAX_RPC_IN_FLIGHT dispatches are already buffering, and admits again as they finish", async () => {
-    // The backpressure the chunked path rests on: a Transfer-Encoding body
-    // carries no declared length for either size gate to read, so the only
-    // bound on how many 17 MiB buffers can exist at once is this cap. The
-    // release proves it is a live counter, not a one-way latch.
+    // The backpressure that bounds how many router-sized buffers can exist at
+    // once. After the pre-auth gate, only a SIGNED-IN caller can put a
+    // lengthless or upload-sized body in flight at all, so these requests
+    // carry the session the gate demands; an anonymous flood is turned away at
+    // 401 long before this counter matters. The release proves it is a live
+    // counter, not a one-way latch.
     const release: (() => void)[] = [];
     const handleRpc = vi.fn().mockImplementation(
       () =>
@@ -722,24 +762,26 @@ describe("createRequestHandler", () => {
           });
         }),
     );
-    const handle = createRequestHandler(deps({ handleRpc }));
+    const session = signedIn("uploader-1");
+    const handle = createRequestHandler(
+      deps({ handleRpc, resolveSession: session.resolveSession }),
+    );
+    const request = () =>
+      reqStub("/rpc/user.uploadImage", "POST", {
+        "transfer-encoding": "chunked",
+        ...session.headers,
+      });
 
     const inFlight = Array.from({ length: MAX_RPC_IN_FLIGHT }, () => {
       const { res } = resStub();
-      return handle(
-        reqStub("/rpc/user.uploadImage", "POST", { "transfer-encoding": "chunked" }),
-        res,
-      );
+      return handle(request(), res);
     });
     // Let each admitted dispatch reach its pending handleRpc call.
     await Promise.resolve();
     expect(handleRpc).toHaveBeenCalledTimes(MAX_RPC_IN_FLIGHT);
 
     const { res: refused, calls: refusedCalls } = resStub();
-    await handle(
-      reqStub("/rpc/user.uploadImage", "POST", { "transfer-encoding": "chunked" }),
-      refused,
-    );
+    await handle(request(), refused);
     expect(handleRpc).toHaveBeenCalledTimes(MAX_RPC_IN_FLIGHT);
     expect(refusedCalls.statusCode).toBe(503);
     expect(refusedCalls.body).toBe("Server busy");
@@ -748,10 +790,7 @@ describe("createRequestHandler", () => {
     await Promise.all(inFlight);
 
     const { res: after, calls: afterCalls } = resStub();
-    const admitted = handle(
-      reqStub("/rpc/user.uploadImage", "POST", { "transfer-encoding": "chunked" }),
-      after,
-    );
+    const admitted = handle(request(), after);
     await Promise.resolve();
     expect(handleRpc).toHaveBeenCalledTimes(MAX_RPC_IN_FLIGHT + 1);
     release[release.length - 1]?.();

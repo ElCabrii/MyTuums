@@ -252,10 +252,14 @@ export const RPC_MAX_BODY_BYTES =
  *   buffered, so an anonymous upload-sized body is refused before oRPC parses
  *   it instead of being buffered and then rejected as UNAUTHORIZED.
  *
- * Chunked (`Transfer-Encoding`) bodies carry no Content-Length, so they skip
- * the declared-length check; they stay bounded at `RPC_MAX_BODY_BYTES` by
- * oRPC's BodyLimitPlugin, and the RPC concurrency admission cap in
- * `request-handler.ts` bounds how many can be buffering at once.
+ * Chunked (`Transfer-Encoding`) bodies carry no Content-Length to compare, so
+ * they are treated as over this bound by definition: the session demand
+ * applies to them exactly as to an oversized upload, and a chunked body on the
+ * appeal path itself is refused with 411 — every client that legitimately
+ * reaches that link sends plain JSON with a declared length. What an
+ * AUTHENTICATED chunked body can still do (buffer up to `RPC_MAX_BODY_BYTES`
+ * under oRPC's BodyLimitPlugin) is bounded in number by the RPC concurrency
+ * admission cap in `request-handler.ts`.
  */
 export const RPC_SMALL_BODY_BYTES = 16 * 1024;
 

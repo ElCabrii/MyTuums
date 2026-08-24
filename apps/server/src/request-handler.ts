@@ -156,6 +156,20 @@ function declaredContentLength(req: IncomingMessage): number | null {
 }
 
 /**
+ * Whether the body arrives in chunks (`Transfer-Encoding`), and therefore with
+ * no Content-Length any gate could compare. The header is hop-by-hop and
+ * repeatable per RFC 9112, so Node may hand it over as an array — normalize
+ * before matching. A request with neither this header nor a usable declared
+ * length carries no body at all (a bare GET), which is why the pre-auth gate
+ * keys on this rather than on "Content-Length absent".
+ */
+function isChunkedRequestBody(req: IncomingMessage): boolean {
+  const value = req.headers["transfer-encoding"];
+  const encoding = Array.isArray(value) ? value.join(",") : (value ?? "");
+  return encoding.toLowerCase().includes("chunked");
+}
+
+/**
  * The wire path of the app's ONE anonymous RPC procedure — `appealOpen` in
  * `moderationRouter` (packages/api). oRPC addresses a procedure by its router
  * path joined with `/`, NOT the dotted name the client code reads, so this is
@@ -176,12 +190,12 @@ const RPC_APPEAL_OPEN_PATH = "/rpc/moderation/appealOpen";
 
 /**
  * The most `/rpc` requests this process will dispatch concurrently. This is
- * the backpressure the buffering story rests on for the one body shape no
- * declared-length gate can see — `Transfer-Encoding: chunked` carries no
- * Content-Length, so it skips both size checks above and is bounded only by
- * oRPC's BodyLimitPlugin at `RPC_MAX_BODY_BYTES` while it is being buffered.
- * A bounded number of in-flight buffering requests makes the worst case a
- * fixed number of 17 MiB buffers instead of unbounded concurrent ones.
+ * the backpressure that bounds how many bodies can be buffering at once —
+ * after the pre-auth gate above has narrowed who can have one in flight at
+ * all: anonymous callers top out at `RPC_SMALL_BODY_BYTES` each (a chunked or
+ * upload-sized body from them is refused before buffering), so the worst case
+ * this cap alone has to hold is a set of authenticated sessions streaming
+ * `RPC_MAX_BODY_BYTES`-sized bodies simultaneously.
  *
  * A request refused here is a 503 — the standard answer a busy server gives
  * an overload condition — and the web client treats 5xx as retryable.
@@ -478,11 +492,11 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // arbitrary gigabytes, and the upload budget would never see the
         // request at all.
         //
-        // Content-Length is present on every browser multipart upload, which is
-        // the traffic this protects; a `Transfer-Encoding: chunked` client has no
-        // Content-Length to check, and is legitimately used by Node http clients
-        // that omit the header — so chunked bodies are bounded downstream by
-        // oRPC's BodyLimitPlugin at the same ceiling (see index.ts).
+        // Content-Length is present on every browser multipart upload, which
+        // is the traffic this protects. A `Transfer-Encoding: chunked` client
+        // has no Content-Length to compare here, so it skips THIS check and is
+        // instead sized by the pre-auth gate below, which refuses it on the
+        // same terms as an over-the-line declared body.
         const declared = declaredContentLength(req);
         if (declared !== null && declared > RPC_MAX_BODY_BYTES) {
           drainRejectedRequest(req);
@@ -503,11 +517,23 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // is small by construction: an oversized appeal body is refused on its
         // own low limit rather than being handed to the session demand.
         //
-        // Chunked bodies carry no declared length, so they skip this gate
-        // entirely; they stay bounded by `RPC_MAX_BODY_BYTES` through
-        // BodyLimitPlugin and by the admission cap below, which is what bounds
-        // how many of them can be buffering at once.
-        if (declared !== null && declared > RPC_SMALL_BODY_BYTES) {
+        // Chunked (`Transfer-Encoding`) bodies carry no Content-Length, so no
+        // declared-length check can see them at all — which is why they get
+        // the same treatment as a body already known to be over the line,
+        // rather than skipping the gate entirely: the session demand applies
+        // to them exactly as it does to an oversized upload, so an anonymous
+        // caller cannot trade a missing header for a buffer. The appeal path
+        // cannot demand a session (it is the one public surface), and every
+        // client that legitimately reaches it — a browser following the email
+        // link — sends a plain JSON body with a Content-Length, so a chunked
+        // appeal request is refused with 411 rather than admitted to buffer
+        // against nothing. What remains after both refusals is bounded twice
+        // over: per body by oRPC's BodyLimitPlugin at `RPC_MAX_BODY_BYTES`,
+        // and in number by the admission cap below.
+        const isChunked = isChunkedRequestBody(req);
+        const exceedsSmallBodyBound =
+          isChunked || (declared !== null && declared > RPC_SMALL_BODY_BYTES);
+        if (exceedsSmallBodyBound) {
           if (canonicalPath !== RPC_APPEAL_OPEN_PATH) {
             const session = hasSessionCookie(req.headers.cookie)
               ? await deps.resolveSession(req)
@@ -522,6 +548,15 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
               res.end("Unauthorized");
               return;
             }
+          } else if (isChunked) {
+            // No session to demand and no length to compare, so there is no
+            // version of this request the gate can admit: refuse the encoding,
+            // not a size. `drainRejectedRequest` first — a chunked stream kept
+            // readable lets the refusal finish cleanly on keep-alive too.
+            drainRejectedRequest(req);
+            res.writeHead(411, { "Content-Type": "text/plain" });
+            res.end("Length required");
+            return;
           } else {
             drainRejectedRequest(req);
             res.writeHead(413, { "Content-Type": "text/plain" });
