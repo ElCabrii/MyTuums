@@ -11,6 +11,7 @@ import { moderatorProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { publicUserColumns } from "./users.js";
 import { effectivelyBanned } from "./visibility.js";
+import { postAttachmentsSelection } from "./posts.js";
 
 /**
  * The moderator triage procedures: the merged queue, the case view, and
@@ -284,6 +285,7 @@ export const queueRouter = {
                   removedAt: post.removedAt,
                   removedBy: post.removedBy,
                   removedReason: post.removedReason,
+                  attachments: postAttachmentsSelection(true),
                   author: {
                     id: user.id,
                     name: user.name,

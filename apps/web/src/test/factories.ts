@@ -87,6 +87,8 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     deleted: false,
     removedReason: null,
     ...overrides,
+    parent: overrides.parent ?? null,
+    attachments: overrides.attachments ?? [],
   };
 }
 
@@ -236,6 +238,7 @@ export function makeModerationCaseDetail(
       removedAt: null,
       removedBy: null,
       removedReason: null,
+      attachments: [],
       author: makeAuthor(),
       ...overrides,
     },

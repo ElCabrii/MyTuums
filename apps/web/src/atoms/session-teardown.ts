@@ -114,6 +114,13 @@ export function clearViewerState(queryClient: QueryClient): void {
     },
   );
   sweepFamily(
+    "post composer",
+    () => import("@/atoms/composer"),
+    ({ clearComposerAttachments }) => {
+      clearComposerAttachments();
+    },
+  );
+  sweepFamily(
     "like",
     () => import("@/atoms/like"),
     ({ clearLikeFamilies }) => {
@@ -142,6 +149,13 @@ export function clearViewerState(queryClient: QueryClient): void {
     () => import("@/atoms/search"),
     ({ clearSearchFamilies }) => {
       clearSearchFamilies();
+    },
+  );
+  sweepFamily(
+    "composer mention",
+    () => import("@/atoms/composer-mentions"),
+    ({ clearComposerMentionFamilies }) => {
+      clearComposerMentionFamilies();
     },
   );
 }

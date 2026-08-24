@@ -20,6 +20,10 @@
       "types": "./src/dimensions.ts",
       "default": "./src/dimensions.ts"
     },
+    "./post-image": {
+      "types": "./src/post-image.ts",
+      "default": "./src/post-image.ts"
+    },
     "./roles": {
       "types": "./src/roles.ts",
       "default": "./src/roles.ts"

@@ -36,8 +36,10 @@ over HTTP and imports only its browser-safe subpaths.
 | Change how a user is matched by text  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                    | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking |
 | Change how an appeal is opened        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                             | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface                  |
 | Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                             | `src/moderation-actions.ts` if the inverse effect changes                                                |
-| Change upload rules                   | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                                                |
-| Change the upload/remove lifecycle    | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                      |
+| Change profile-image upload rules     | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                                                |
+| Change post-attachment upload rules   | `src/post-image.ts`, `src/constants.ts` (`POST_ATTACHMENT_*`)                            | `src/image.test.ts`; `src/posts.int.test.ts`                                                             |
+| Change the profile upload lifecycle   | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                      |
+| Change the post attachment lifecycle  | `src/post-media.ts`, `src/post-media-lock.ts`                                            | `src/posts.int.test.ts`; `src/reconcile-media.ts`; `scripts/reconcile-media.ts`                          |
 | Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                                     |
 | Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                                         |
 | Change an account rule                | `../auth/src/rules.ts`                                                                   | not `src/constants.ts` — see the invariant below                                                         |
@@ -103,7 +105,9 @@ over HTTP and imports only its browser-safe subpaths.
   exact shape.
 - **Every surface filters through `src/visibility.ts`.** `invisibleUser` is the
   stricter of the two per-user filters — it is what lets a banned-but-not-blocked
-  profile resolve to its suspended stub instead of 404ing.
+  profile resolve to its suspended stub instead of 404ing. `user.byUsername`
+  redacts authored profile fields, relationship counts and viewer state from
+  that stub before it crosses the API boundary.
 - **`like`/`unlike` and `follow`/`unfollow` are separate idempotent
   procedures, never a toggle** — ordering and retry safety.
 - **A post has two independent tombstones, and neither is a row delete.**
@@ -120,9 +124,20 @@ over HTTP and imports only its browser-safe subpaths.
   link. Its unlocked read/write pair is safe because the update compares both
   tombstones; after losing to a concurrent delete or removal, it re-reads the
   winner and preserves that outcome.
-- **Replies are a mode of `post.list` (`parentId`), not their own procedure.**
-  The web app's optimistic like sweep covers every cached `post.list` by key
-  prefix; a separate procedure would miss reply likes.
+- **Replies are a mode of `post.list` (`parentId` or the profile `kind`), not
+  their own procedure.** The web app's optimistic like sweep covers every
+  cached `post.list` by key prefix; a separate procedure would miss reply
+  likes. `kind` selects top-level posts, replies, or both, while the legacy
+  `includeReplies` input remains the compatibility spelling for both.
+- **Posts and replies share one attachment policy.** Either may carry up to
+  four ordered PNG, JPEG, or WebP files. Each file is capped at 5 MiB, the
+  batch at 12 MiB, and decoded dimensions at 4096 px per side / 50 MP. The
+  server validates actual bytes and persists only server-minted `/media/posts/`
+  paths in `post_attachment`; `postSelection` is the authoritative projection
+  for every reader. Ordinary media reads follow post tombstones, author bans,
+  and blocks, while moderators retain access to removed evidence. Author
+  deletion removes the non-restorable relation and objects; failed writes and
+  hard account cascades are reaped by `reconcile-media`.
 - **The profile-media lifecycle lives in `src/profile-media.ts`, and only
   there.** `user.uploadImage` and `user.removeImage` call
   `replaceProfileMedia`/`removeProfileMedia` and own nothing else: the
@@ -136,9 +151,12 @@ over HTTP and imports only its browser-safe subpaths.
   commit wrote. The lifecycle interface accepts the bare `Database` handle,
   not a transaction handle, so its swap commits before object cleanup begins.
 - **`scripts/reconcile-media.ts` must list the bucket BEFORE reading the
-  `user` rows.** The reverse order treats an upload landing between the two
-  steps as an orphan and deletes an object whose row points at it (issue #52;
-  pinned by `src/reconcile-media.test.ts`).
+  `user` rows, and it holds the shared post-media advisory transaction lock
+  through list/read/delete. Post attachment writers acquire that same lock
+  across storage upload and attachment-row commit, closing the
+  upload-before-row window without a pending schema state. The reverse order
+  still treats a profile upload landing between the two steps as an orphan
+  (issue #52; pinned by `src/reconcile-media.test.ts`).
 - **Every moderation effect reads its guard `FOR UPDATE`, inside its own
   transaction** (`removePostEffect`, `suspendUserEffect`, `banUserEffect`,
   `setRoleEffect`, `restorePostEffect`, `unbanEffect`, `restoreRoleEffect`).
@@ -189,9 +207,9 @@ over HTTP and imports only its browser-safe subpaths.
   right for bounding one client, wrong for billing. `maxKeys` is a leak alarm,
   not an admission gate: at capacity a brand-new key is let through, never
   refused (issue #60).
-- **`src/constants.ts`, `src/dimensions.ts` and `src/roles.ts` must stay
-  dependency-free.** The browser imports them; an `@my-tuums/db` import throws
-  at module load.
+- **`src/constants.ts`, `src/dimensions.ts`, `src/post-image.ts` and
+  `src/roles.ts` must stay dependency-free.** The browser imports them; an
+  `@my-tuums/db` import throws at module load.
 - **Account rules are not this package's to state.** The handle bounds, the bio
   limit, the date-of-birth rules and the preference lists live in
   `packages/auth/src/rules.ts` (`@my-tuums/auth/rules`), because `packages/auth`

@@ -17,8 +17,10 @@ import { Button } from "@/components/ui/button";
 import { AlertCircle, MailCheck, Loader2, Mail } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
 import { z } from "zod";
+import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/verify-email")({
+  head: () => pageHead(m.auth_verify_title()),
   component: VerifyEmailPage,
   /**
    * `error` arrives from *outside*: Better Auth's `/verify-email` endpoint

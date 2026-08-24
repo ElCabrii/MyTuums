@@ -37,12 +37,16 @@ export function FooterLocaleMenu() {
             size="sm"
             aria-label={`${m.locale_label()}: ${labelForLocale(currentLocale)}`}
             title={m.locale_label()}
-            className="gap-1.5"
+            className="min-w-32 justify-center"
           />
         }
       >
-        <Languages className="size-4" />
-        <span>{labelForLocale(currentLocale)}</span>
+        {/* Icon and label centred as one pair, nudged a touch left of true
+            centre so the pair reads balanced inside the wide trigger. */}
+        <span className="inline-flex -translate-x-1 items-center gap-1.5">
+          <Languages className="size-4" />
+          <span>{labelForLocale(currentLocale)}</span>
+        </span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-36">
         {locales.map((locale) => (

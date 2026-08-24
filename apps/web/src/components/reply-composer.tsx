@@ -1,7 +1,11 @@
 import { Link } from "@tanstack/react-router";
 import { useAtom, useAtomValue } from "jotai";
 import { ComposerForm } from "@/components/composer-form";
-import { createReplyAtomFamily, replyDraftAtomFamily } from "@/atoms/reply-composer";
+import {
+  createReplyAtomFamily,
+  replyAttachmentsAtomFamily,
+  replyDraftAtomFamily,
+} from "@/atoms/reply-composer";
 import { viewerAtom } from "@/atoms/session";
 import { m } from "@/paraglide/messages.js";
 
@@ -19,6 +23,7 @@ export function ReplyComposer({
 }) {
   const user = useAtomValue(viewerAtom);
   const [content, setContent] = useAtom(replyDraftAtomFamily(parentId));
+  const [attachments, setAttachments] = useAtom(replyAttachmentsAtomFamily(parentId));
   const createReply = useAtomValue(createReplyAtomFamily(parentId));
 
   if (!user) return null;
@@ -28,8 +33,12 @@ export function ReplyComposer({
       author={user}
       value={content}
       onValueChange={setContent}
-      onSubmit={(body) => {
-        createReply.mutate({ content: body, parentId });
+      onSubmit={(body, selectedAttachments) => {
+        createReply.mutate({
+          content: body,
+          parentId,
+          attachments: selectedAttachments?.map(({ file }) => file) ?? [],
+        });
       }}
       isPending={createReply.isPending}
       errorMessage={
@@ -37,6 +46,9 @@ export function ReplyComposer({
       }
       placeholder={m.reply_placeholder()}
       submitLabel={m.reply_action()}
+      mentionScope={`reply:${parentId}`}
+      attachments={attachments}
+      onAttachmentsChange={setAttachments}
       header={
         replyingTo ? (
           <p className="text-muted-foreground text-xs">

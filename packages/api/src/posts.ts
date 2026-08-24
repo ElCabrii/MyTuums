@@ -1,19 +1,35 @@
 import { ORPCError } from "@orpc/server";
+import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, isNull, not, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { Database } from "@my-tuums/db";
-import { follow, post, postLike, user } from "@my-tuums/db/schema";
+import { follow, post, postAttachment, postLike, user, userBlock } from "@my-tuums/db/schema";
 import { z } from "zod";
 import {
   POST_MAX_LENGTH,
+  POST_ATTACHMENT_MAX_BYTES,
+  POST_ATTACHMENT_MAX_COUNT,
+  POST_ATTACHMENT_MAX_TOTAL_BYTES,
   POST_PAGE_SIZE,
   POST_PAGE_SIZE_MAX,
   THREAD_ANCESTOR_MAX,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { keysetPage } from "./pagination.js";
+import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { invisibleAuthor } from "./visibility.js";
+import { acceptPostImage, type ImageRejection } from "./post-image.js";
+import {
+  discardPostAttachments,
+  cleanupDeletedPostAttachments,
+  postAttachmentRows,
+  preparePostAttachments,
+  writePostAttachments,
+  type PostAttachmentInput,
+} from "./post-media.js";
+import { requireStorage } from "./profile-media.js";
 
 /**
  * Feeds are keyset-paginated on `(post.created_at, post.id) DESC`; see
@@ -44,6 +60,171 @@ const likeCount = sql<number>`(
 const replyCount = sql<number>`(
   select count(*)::int from ${post} as reply where reply.parent_id = ${post.id}
 )`;
+
+/**
+ * The compact context shown above a reply in a feed. This deliberately keeps
+ * the parent as an additive field on the shared post projection: every feed
+ * and thread reader gets the same visibility and tombstone semantics without
+ * a second request per reply.
+ */
+type ParentPreview = {
+  id: string;
+  excerpt: string | null;
+  truncated: boolean;
+  removed: boolean;
+  deleted: boolean;
+  author: {
+    id: string;
+    name: string | null;
+    username: string | null;
+    displayUsername: string | null;
+    image: string | null;
+  };
+};
+
+/** Keep the profile-feed context compact even when the parent is a full post. */
+const PARENT_EXCERPT_LENGTH = 140;
+
+/** The parent tables are aliased because `postSelection` already reads `post`/`user`. */
+const parentPost = alias(post, "parent_post");
+const parentAuthor = alias(user, "parent_author");
+
+type PostAttachment = {
+  id: string;
+  url: string;
+  position: number;
+  contentType: string;
+  byteSize: number;
+  width: number;
+  height: number;
+};
+
+/** Attachments are ordered in one correlated aggregate so every post surface shares the same shape. */
+export function postAttachmentsSelection(includeTombstones = false) {
+  return sql<PostAttachment[]>`coalesce((
+    select jsonb_agg(
+      jsonb_build_object(
+        'id', ${postAttachment.id},
+        'url', ${postAttachment.mediaPath},
+        'position', ${postAttachment.position},
+        'contentType', ${postAttachment.contentType},
+        'byteSize', ${postAttachment.byteSize},
+        'width', ${postAttachment.width},
+        'height', ${postAttachment.height}
+      ) order by ${postAttachment.position}
+    )
+    from ${postAttachment}
+    where ${postAttachment.postId} = ${post.id}
+      ${includeTombstones ? sql`` : sql`and ${post.removedAt} is null and ${post.deletedAt} is null`}
+  ), '[]'::jsonb)`;
+}
+
+export const postAttachments = postAttachmentsSelection();
+
+const POST_IMAGE_REJECTIONS = {
+  type: "That image format isn't supported. Use a PNG, JPEG or WebP.",
+  size: "That image is too large.",
+  content: "That file doesn't look like an image.",
+} satisfies Record<ImageRejection, string>;
+
+function rejectPostImage(reason: ImageRejection): never {
+  throw new ORPCError("BAD_REQUEST", { message: POST_IMAGE_REJECTIONS[reason] });
+}
+
+/** Reads and validates the files before any object is written. */
+async function readPostAttachments(files: readonly File[]): Promise<PostAttachmentInput[]> {
+  let declaredTotal = 0;
+  for (const file of files) {
+    if (
+      !Number.isSafeInteger(file.size) ||
+      file.size <= 0 ||
+      file.size > POST_ATTACHMENT_MAX_BYTES
+    ) {
+      rejectPostImage("size");
+    }
+    declaredTotal += file.size;
+    if (declaredTotal > POST_ATTACHMENT_MAX_TOTAL_BYTES) rejectPostImage("size");
+  }
+
+  const attachments: PostAttachmentInput[] = [];
+  let actualTotal = 0;
+  for (const file of files) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // File.size is a declared multipart value at the procedure boundary; the
+    // bytes read from the stream are the authority for storage accounting.
+    if (bytes.byteLength !== file.size) rejectPostImage("size");
+    actualTotal += bytes.byteLength;
+    if (actualTotal > POST_ATTACHMENT_MAX_TOTAL_BYTES) rejectPostImage("size");
+
+    const verdict = acceptPostImage(bytes, file.type);
+    if (
+      !verdict.ok ||
+      !verdict.type ||
+      verdict.width === undefined ||
+      verdict.height === undefined
+    ) {
+      rejectPostImage(verdict.reason ?? "content");
+    }
+    attachments.push({
+      bytes,
+      type: verdict.type,
+      width: verdict.width,
+      height: verdict.height,
+    });
+  }
+  return attachments;
+}
+
+/**
+ * Immediate-parent preview for a reply. A correlated JSON projection keeps
+ * this in one round trip while allowing the outer query to keep its existing
+ * joins and keyset shape. Hidden parents produce null (rather than leaking
+ * their identity/content); removed/deleted parents remain present as stubs.
+ */
+function parentPreview(viewerId: string) {
+  return sql<ParentPreview | null>`(
+    select jsonb_build_object(
+      'id', ${parentPost.id},
+      'excerpt', case
+        when ${parentPost.removedAt} is not null or ${parentPost.deletedAt} is not null then null
+        else left(${parentPost.content}, ${PARENT_EXCERPT_LENGTH})
+      end,
+      'truncated', case
+        when ${parentPost.removedAt} is not null or ${parentPost.deletedAt} is not null then false
+        else char_length(${parentPost.content}) > ${PARENT_EXCERPT_LENGTH}
+      end,
+      'removed', ${parentPost.removedAt} is not null,
+      'deleted', ${parentPost.deletedAt} is not null,
+      'author', jsonb_build_object(
+        'id', ${parentAuthor.id},
+        'name', ${parentAuthor.name},
+        'username', ${parentAuthor.username},
+        'displayUsername', ${parentAuthor.displayUsername},
+        'image', ${parentAuthor.image}
+      )
+    )
+    from ${post} as "parent_post"
+    inner join ${user} as "parent_author" on ${parentAuthor.id} = ${parentPost.authorId}
+    where ${parentPost.id} = ${post.parentId}
+      and not (
+        (
+          ${parentAuthor.banned}
+          and (${parentAuthor.banExpires} is null or ${parentAuthor.banExpires} > now())
+        )
+        or exists (
+          select 1 from ${userBlock}
+          where ${userBlock.blockerId} = ${parentPost.authorId}
+            and ${userBlock.blockedId} = ${viewerId}
+        )
+        or exists (
+          select 1 from ${userBlock}
+          where ${userBlock.blockerId} = ${viewerId}
+            and ${userBlock.blockedId} = ${parentPost.authorId}
+        )
+      )
+    limit 1
+  )`;
+}
 
 /** Whether the viewer has liked this post — an EXISTS subquery. */
 function viewerHasLiked(viewerId: string) {
@@ -83,6 +264,8 @@ export const postSelection = (viewerId: string) => ({
   // needs a "Replying to" line, so it belongs in the shared selection rather
   // than only in the thread payload.
   parentId: post.parentId,
+  parent: parentPreview(viewerId),
+  attachments: postAttachments,
   author: {
     id: user.id,
     name: user.name,
@@ -104,6 +287,45 @@ async function countLikes(db: Database, postId: string): Promise<number> {
   return row?.count ?? 0;
 }
 
+type CreatedPost = {
+  id: string;
+  content: string;
+  createdAt: Date;
+  parentId: string | null;
+};
+
+/** Inserts the post and its already-prepared attachment rows atomically. */
+async function insertPost(
+  tx: Pick<Database, "insert">,
+  args: {
+    postId: string;
+    authorId: string;
+    content: string;
+    parentId: string | undefined;
+    prepared: ReturnType<typeof preparePostAttachments>;
+  },
+): Promise<CreatedPost | undefined> {
+  const [inserted] = await tx
+    .insert(post)
+    .values({
+      id: args.postId,
+      authorId: args.authorId,
+      content: args.content,
+      parentId: args.parentId ?? null,
+    })
+    .returning({
+      id: post.id,
+      content: post.content,
+      createdAt: post.createdAt,
+      parentId: post.parentId,
+    });
+
+  if (!inserted) return undefined;
+  if (args.prepared.length > 0)
+    await tx.insert(postAttachment).values(postAttachmentRows(args.prepared));
+  return inserted;
+}
+
 /**
  * The `post` procedure group: create, delete, list, thread, like, unlike.
  */
@@ -120,6 +342,8 @@ export const postRouter = {
         content: z.string().trim().min(1, "Post cannot be empty.").max(POST_MAX_LENGTH),
         /** Omit for a top-level post; set to reply to an existing one. */
         parentId: z.uuid().optional(),
+        /** The same ordered image capability is available to posts and replies. */
+        attachments: z.array(z.file()).max(POST_ATTACHMENT_MAX_COUNT).default([]),
       }),
     )
     .handler(async ({ input, context }) => {
@@ -148,21 +372,47 @@ export const postRouter = {
         }
       }
 
-      const [created] = await context.db
-        .insert(post)
-        .values({
-          authorId: context.user.id,
-          content: input.content,
-          parentId: input.parentId ?? null,
-        })
-        .returning({
-          id: post.id,
-          content: post.content,
-          createdAt: post.createdAt,
-          parentId: post.parentId,
+      const mediaInputs = await readPostAttachments(input.attachments);
+      const postId = randomUUID();
+      const prepared = preparePostAttachments(context.user.id, postId, mediaInputs);
+      const storage = prepared.length > 0 ? requireStorage(context) : null;
+
+      let created: CreatedPost | undefined;
+      try {
+        created = await context.db.transaction(async (tx) => {
+          if (storage) {
+            // The reconciler takes this same lock around its list/read/delete
+            // pass. Holding it until this transaction commits closes the
+            // upload-before-row window without adding lifecycle state to the
+            // attachment schema. Text-only posts skip the lock and storage
+            // work entirely.
+            await acquirePostMediaLifecycleLock(tx);
+            try {
+              await writePostAttachments(storage, prepared);
+            } catch {
+              // writePostAttachments already removes every attempted key,
+              // including a provider PUT that failed after committing.
+              throw new ORPCError("INTERNAL_SERVER_ERROR", {
+                message: "Failed to store post images.",
+              });
+            }
+          }
+
+          return insertPost(tx, {
+            postId,
+            authorId: context.user.id,
+            content: input.content,
+            parentId: input.parentId,
+            prepared,
+          });
         });
+      } catch (error) {
+        if (storage) await discardPostAttachments(storage, prepared);
+        throw error;
+      }
 
       if (!created) {
+        if (storage) await discardPostAttachments(storage, prepared);
         throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Failed to create post." });
       }
 
@@ -184,18 +434,29 @@ export const postRouter = {
         likeCount: 0,
         replyCount: 0,
         viewerHasLiked: false,
+        attachments: prepared.map(
+          ({ id, mediaPath, position, contentType, byteSize, width, height }) => ({
+            id,
+            url: mediaPath,
+            position,
+            contentType,
+            byteSize,
+            width,
+            height,
+          }),
+        ),
       };
     }),
 
   /**
    * Deletes the caller's own post (issue #148). Requires a session.
    *
-   * A tombstone, not a row delete: `deleted_at` is stamped and the row stays,
-   * so the post's replies, its likes and the conversation above it keep their
-   * shape — exactly what a moderator's `removePost` does, and for the same
-   * reason. `post.parent_id` still cascades on delete (see the schema
-   * comment), so a real DELETE here would silently take the whole reply
-   * subtree with it.
+   * A tombstone, not a post-row delete: `deleted_at` is stamped and the post
+   * row stays, so replies, likes and the conversation above it keep their
+   * shape. Its non-restorable attachment rows/objects are cleaned after the
+   * tombstone commits; moderation removal keeps its attachments for restore.
+   * `post.parent_id` still cascades on a real delete (see the schema comment),
+   * so that would silently take the whole reply subtree with it.
    *
    * It is deliberately NOT a moderation action: no `moderation_action` row,
    * no email, nothing to appeal. `postSelection` renders the stub, and
@@ -246,6 +507,7 @@ export const postRouter = {
       // so a double-click or a retry is a no-op that keeps the original
       // tombstone rather than restamping it.
       if (target.deletedAt) {
+        await cleanupDeletedPostAttachments(context.db, context.storage, input.postId);
         return { postId: input.postId, deletedAt: target.deletedAt };
       }
 
@@ -256,6 +518,7 @@ export const postRouter = {
         .returning({ deletedAt: post.deletedAt });
 
       if (updated?.deletedAt) {
+        await cleanupDeletedPostAttachments(context.db, context.storage, input.postId);
         return { postId: input.postId, deletedAt: updated.deletedAt };
       }
 
@@ -275,6 +538,7 @@ export const postRouter = {
       }
 
       if (winner?.deletedAt) {
+        await cleanupDeletedPostAttachments(context.db, context.storage, input.postId);
         return { postId: input.postId, deletedAt: winner.deletedAt };
       }
 
@@ -324,27 +588,36 @@ export const postRouter = {
          * person's profile is their whole activity.
          *
          * An explicit flag rather than inferring it from `authorId` keeps the
-         * two axes independent — it is what a "Posts / Replies" tab on the
-         * profile would toggle without touching the author filter.
+         * two axes independent — it is what a profile's "Both" view uses.
          */
         includeReplies: z.boolean().default(false),
+        /**
+         * The profile feed's three-way activity filter. `includeReplies` is
+         * retained for existing clients and means `all` when true; `kind`
+         * takes precedence when both are supplied. Keeping the legacy field
+         * avoids changing existing query-key/input shapes during rollout.
+         */
+        kind: z.enum(["posts", "replies", "all"]).optional(),
       }),
     )
     .handler(async ({ input, context }) => {
       const viewerId = context.user.id;
+      const kind = input.kind ?? (input.includeReplies ? "all" : "posts");
 
       const filters = [
         input.authorId ? eq(post.authorId, input.authorId) : undefined,
         // Three-way, in priority order: an explicit `parentId` asks for one
-        // post's replies; `includeReplies` widens a feed to carry them; and
-        // the default excludes them. The `is null` branch is what
-        // `post_created_idx` is a partial index on, so the global and
-        // Following timelines match it exactly.
+        // post's replies; otherwise `kind` selects top-level posts, replies,
+        // or both. The `is null` branch is what `post_created_idx` is a
+        // partial index on, so the global and Following timelines match it
+        // exactly.
         input.parentId
           ? eq(post.parentId, input.parentId)
-          : input.includeReplies
-            ? undefined
-            : isNull(post.parentId),
+          : kind === "posts"
+            ? isNull(post.parentId)
+            : kind === "replies"
+              ? not(isNull(post.parentId))
+              : undefined,
         // A semi-join rather than an INNER JOIN on `follow`: EXISTS cannot
         // duplicate a post row, whereas a join relies on the follow primary
         // key to avoid fanning out — true today, but a weaker statement of

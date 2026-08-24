@@ -1,7 +1,7 @@
 import { test, expect } from "../../support/fixtures";
 
-const EN_TITLE = "MyTuums — Social Media for Gamers";
-const FR_TITLE = "MyTuums — Le réseau social des gamers";
+const EN_TITLE = "Home - MyTuums";
+const FR_TITLE = "Accueil - MyTuums";
 
 test.describe("locale", () => {
   test("the footer switcher flips EN <-> FR, persists via cookie across reload, and updates <html lang> and the document title", async ({
@@ -11,6 +11,7 @@ test.describe("locale", () => {
     await page.goto("/");
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page).toHaveTitle(EN_TITLE);
+    await expect(page.locator("head title")).toHaveCount(1);
 
     await page.getByRole("button", { name: "Language" }).click();
     await page.getByRole("menuitem", { name: "French" }).click();

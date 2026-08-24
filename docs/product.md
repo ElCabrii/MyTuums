@@ -73,7 +73,8 @@ both by the server's page gate and by the client.
   avatar, banner, join date, and follower/following counts. Bios use the same
   safe linkification as posts and replies.
 - Profiles are addressed by handle. A profile hidden by a block reads as "no
-  such user"; a banned profile resolves to a suspended stub instead.
+  such user"; a banned profile resolves to a suspended stub instead, without
+  its authored profile fields or relationship counts.
 - Search has three surfaces: a profile-only header typeahead (up to five
   users), a full user search, and a full post search. User results rank
   handle-prefix matches ahead of substring matches.

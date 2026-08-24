@@ -17,8 +17,10 @@ import { LinkedAccountsSection } from "@/components/settings/linked-accounts-sec
 import { BlockedUsersSection } from "@/components/settings/blocked-users-section";
 import { SignOutSection } from "@/components/settings/sign-out-section";
 import { m } from "@/paraglide/messages.js";
+import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/settings/account")({
+  head: () => pageHead(m.settings_title()),
   component: AccountSettingsPage,
 });
 

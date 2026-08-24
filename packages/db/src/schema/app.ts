@@ -5,6 +5,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   pgTable,
   text,
+  integer,
   uuid,
   timestamp,
   index,
@@ -103,6 +104,44 @@ export const post = pgTable(
     index("post_author_created_idx").on(t.authorId, t.createdAt.desc(), t.id.desc()),
     // The reply list under a single post.
     index("post_parent_created_idx").on(t.parentId, t.createdAt.desc(), t.id.desc()),
+  ],
+);
+
+/**
+ * A raster image attached to a post or reply. The object itself lives in the
+ * private media bucket; this relation is the authoritative projection used by
+ * every post reader and by the media authorization gate.
+ *
+ * Positions are explicit so the composer can preserve a user's ordering. A
+ * moderation-tombstoned post keeps its attachment rows so restore is lossless;
+ * the author's non-restorable deletion removes its rows after the post
+ * tombstone commits. The API projection and media gate hide moderation rows
+ * until the post is visible again, so neither tombstone exposes a copied URL.
+ */
+export const postAttachment = pgTable(
+  "post_attachment",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => post.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    mediaPath: text("media_path").notNull(),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("post_attachment_position_idx").on(t.postId, t.position),
+    check("post_attachment_position", sql`${t.position} >= 0`),
+    check("post_attachment_byte_size", sql`${t.byteSize} > 0`),
+    check("post_attachment_dimensions", sql`${t.width} > 0 and ${t.height} > 0`),
+    check(
+      "post_attachment_content_type",
+      sql`${t.contentType} in ('image/png', 'image/jpeg', 'image/webp')`,
+    ),
   ],
 );
 
@@ -432,6 +471,7 @@ export const appeal = pgTable(
 export const postRelations = relations(post, ({ one, many }) => ({
   author: one(user, { fields: [post.authorId], references: [user.id] }),
   likes: many(postLike),
+  attachments: many(postAttachment),
   // Named for the direction they point, like followRelations below: `parent`
   // is the post being replied to, `replies` the posts replying to this one.
   // Both sides need the same `relationName` for Drizzle to pair them up as
@@ -442,6 +482,11 @@ export const postRelations = relations(post, ({ one, many }) => ({
     relationName: "replies",
   }),
   replies: many(post, { relationName: "replies" }),
+}));
+
+/** Drizzle relations for post attachments — the owning post. */
+export const postAttachmentRelations = relations(postAttachment, ({ one }) => ({
+  post: one(post, { fields: [postAttachment.postId], references: [post.id] }),
 }));
 
 /** Drizzle relations for `postLike` — the `post` and `user` a like references. */

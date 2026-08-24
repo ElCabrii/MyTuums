@@ -30,6 +30,10 @@ export interface AuthRequestSurface extends NodeJS.ReadableStream {
   httpVersionMajor: number;
 }
 
+/** One session-store read, preserving the difference between signed out and unavailable. */
+export type SessionLookup =
+  { kind: "authenticated"; userId: string } | { kind: "anonymous" } | { kind: "unavailable" };
+
 /**
  * Authentication payloads are small JSON/form requests, never media uploads.
  * Keep this budget well below the RPC upload ceiling so an unauthenticated
@@ -66,7 +70,10 @@ export interface RequestHandlerDeps {
    * not need object storage, credentials or a network. The real implementation
    * is `createMediaResolver` in `@my-tuums/api`.
    */
-  resolveMediaUrl: (key: string) => Promise<{ url: string; cacheSeconds: number } | null>;
+  resolveMediaUrl: (
+    key: string,
+    viewerId?: string,
+  ) => Promise<{ url: string; cacheSeconds: number } | null>;
   /**
    * Serves the built web app, when this deployment bundles it.
    *
@@ -77,20 +84,17 @@ export interface RequestHandlerDeps {
    */
   serveStatic: (req: IncomingMessage, res: RequestResponse) => Promise<{ served: boolean }>;
   /**
-   * Whether `req` carries a live session — a real `auth.api.getSession` check,
-   * not just "a cookie is present" (see `hasSessionCookie` below, which both
-   * gates that use this — the page gate and the `/media` gate — check first
-   * to avoid paying for this on every anonymous request).
+   * Resolves both session validity and viewer identity through one
+   * `auth.api.getSession` call. The cookie pre-check used by the page and
+   * `/media` gates avoids paying for this on every anonymous request.
    *
    * Injected rather than imported for the same reason as the deps above: this
    * module stays free of `@my-tuums/auth`, so its unit tests need no database
-   * and no real session store. The real implementation must fail OPEN (return
-   * `true`) on an error — see its doc comment in `index.ts` — so a database
-   * blip degrades to "the client gate decides" for pages, and "images keep
-   * loading" for media, rather than either one turning a database hiccup into
-   * a mass sign-out or every avatar in the app breaking at once.
+   * and no real session store. `unavailable` deliberately differs from an
+   * anonymous session: pages and profile media fail open, while post media
+   * still fails closed because its resolver requires an authenticated viewer.
    */
-  hasValidSession: (req: IncomingMessage) => Promise<boolean>;
+  resolveSession: (req: IncomingMessage) => Promise<SessionLookup>;
   /**
    * Called when the top-level safety net catches an unhandled exception. The
    * routing tree still owns the 500 response; the shared error-observation
@@ -412,16 +416,31 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // gate above). What this does NOT do is revoke a presigned URL
         // already handed out — that is a bearer credential good for its own
         // TTL regardless, since this server never sees it again once issued.
-        const hasSession =
-          hasSessionCookie(req.headers.cookie) && (await deps.hasValidSession(req));
-        if (!hasSession) {
+        const session = hasSessionCookie(req.headers.cookie)
+          ? await deps.resolveSession(req)
+          : null;
+        if (!session || session.kind === "anonymous") {
           res.writeHead(401, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
           res.end("Unauthorized");
           return;
         }
 
         const key = mediaKeyOf(req.url);
-        const media = key ? await deps.resolveMediaUrl(key) : null;
+        const isPostMedia = key?.startsWith("posts/") ?? false;
+        if (isPostMedia && session.kind !== "authenticated") {
+          res.writeHead(503, {
+            "Content-Type": "text/plain",
+            "Cache-Control": "no-store",
+          });
+          res.end("Service unavailable");
+          return;
+        }
+
+        const media = key
+          ? isPostMedia && session.kind === "authenticated"
+            ? await deps.resolveMediaUrl(key, session.userId)
+            : await deps.resolveMediaUrl(key)
+          : null;
 
         if (!media) {
           res.writeHead(404, { "Content-Type": "text/plain" });
@@ -433,15 +452,15 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // bucket to the browser, which costs no service egress and never holds
         // an image in this process's memory.
         //
-        // The cache is private and bounded by the signing window. Private
-        // because the URL it points at is a bearer credential — a shared cache
-        // handing it to another viewer would be handing out access. Bounded
-        // because the URL is byte-identical only until the window rolls (see
-        // MEDIA_SIGNING_WINDOW_MS); the resolver reports the remaining budget
-        // so this never serves a stale signature.
+        // Profile-media redirects are private and bounded by the signing
+        // window. Post-media redirects are viewer-authorized, so even a
+        // browser's private HTTP cache must not reuse one after account
+        // switching; those responses are never stored.
         res.writeHead(302, {
           Location: media.url,
-          "Cache-Control": `private, max-age=${media.cacheSeconds}`,
+          "Cache-Control": isPostMedia
+            ? "private, no-store"
+            : `private, max-age=${media.cacheSeconds}`,
         });
         res.end();
         return;
@@ -484,7 +503,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           // reason this gate validates a session rather than only checking
           // for a cookie the way the old `/`-only version did.
           const hasCookie = hasSessionCookie(req.headers.cookie);
-          const hasSession = hasCookie && (await deps.hasValidSession(req));
+          const hasSession = hasCookie && (await deps.resolveSession(req)).kind !== "anonymous";
 
           if (!hasSession) {
             const search = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";

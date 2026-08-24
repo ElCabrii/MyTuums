@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageCard } from "@/components/page-card";
+import { useDocumentHead } from "@/hooks/use-document-head";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -14,6 +15,8 @@ import { m } from "@/paraglide/messages.js";
  * them to `/login?redirect=<path>` before this ever renders.
  */
 export function NotFoundPage() {
+  useDocumentHead(m.notfound_title());
+
   return (
     <div className="container mx-auto max-w-md px-4 py-16">
       <PageCard className="space-y-4 text-center">

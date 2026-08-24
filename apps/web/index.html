@@ -3,9 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/mytuums.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MyTuums — Social Media for Gamers</title>
-    <meta name="description" content="MyTuums is the social media platform built for gamers." />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#171719" media="(prefers-color-scheme: dark)" />
+    <!-- `mobile-web-app-capable` is the surviving spelling: Chromium deprecation-warns
+         on the `apple-` one, and standalone mode is driven by the manifest's
+         `display: standalone` everywhere that still matters. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title id="app-title-fallback">MyTuums — Social Media for Gamers</title>
+    <meta
+      id="app-description-fallback"
+      name="description"
+      content="MyTuums is the social media platform built for gamers."
+    />
     <style>
       /* The cold-load splash, static on purpose. It lives here rather than in
          React so it paints on the very first frame — before the bundle has

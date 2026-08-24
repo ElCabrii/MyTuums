@@ -23,8 +23,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserPlus, Loader2, User, Mail, Lock, AtSign, Calendar } from "lucide-react";
 import { m } from "@/paraglide/messages.js";
+import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/register")({
+  head: () => pageHead(m.auth_register()),
   component: RegisterPage,
   /**
    * The `redirect` param is the one the signed-in gate set on `/login`

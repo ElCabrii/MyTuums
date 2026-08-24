@@ -29,6 +29,10 @@ installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  document.head.querySelector('meta[name="description"]')?.remove();
+  const description = document.createElement("meta");
+  description.setAttribute("name", "description");
+  document.head.appendChild(description);
 });
 
 describe("ThreadPage query states", () => {
@@ -94,6 +98,31 @@ describe("ThreadPage query states", () => {
 });
 
 describe("ThreadPage successful rendering", () => {
+  it("uses the focused post for the document title and description", async () => {
+    const content = "A focused post with a useful preview.";
+    const focused = makePost({ id: "head-post", content });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).thread.data(focused.id, makeThread({ post: focused }));
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }], {
+      feed: "global",
+      parentId: focused.id,
+    });
+
+    await renderWithProviders(<ThreadPage />, {
+      queryClient,
+      initialPath: `/post/${focused.id}`,
+      signedInAs: true,
+    });
+
+    await waitFor(() => {
+      expect(document.title).toBe(`${content} - ${m.app_title_suffix()}`);
+      expect(document.head.querySelector('meta[name="description"]')).toHaveAttribute(
+        "content",
+        content,
+      );
+    });
+  });
+
   it("renders the ancestor chain, truncation notice, focused post, composer and reply feed", async () => {
     const ancestorA = makePost({ id: "ancestor-a", content: "Oldest ancestor" });
     const ancestorB = makePost({ id: "ancestor-b", content: "Nearest ancestor" });

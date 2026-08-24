@@ -17,12 +17,15 @@ export function PostFeed({
   feedAtom,
   emptyMessage,
   emptyAction,
+  showParentContext = false,
 }: {
   /** The feed atom to read — parameterisation (scope, author) lives entirely in atom-land; see `atoms/post-feed.ts`. */
   feedAtom: ReturnType<typeof postFeedAtom>;
   emptyMessage: string;
   /** Rendered under `emptyMessage` — e.g. a "find people to follow" CTA. */
   emptyAction?: ReactNode;
+  /** Render the immediate-parent preview used by profile activity cards. */
+  showParentContext?: boolean;
 }) {
   const feed = useAtomValue(feedAtom);
   const posts = feed.data?.pages.flatMap((page) => page.items) ?? [];
@@ -38,7 +41,7 @@ export function PostFeed({
       listClassName="space-y-4"
     >
       {posts.map((post) => (
-        <PostCard key={post.id} post={post} />
+        <PostCard key={post.id} post={post} showParentContext={showParentContext} />
       ))}
     </PaginatedState>
   );

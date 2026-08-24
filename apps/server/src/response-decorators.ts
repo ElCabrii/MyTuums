@@ -128,6 +128,9 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   loaded script makes its own requests (credential fetch, FedCM
  *   `.well-known` discovery) back to Google from the page's origin context,
  *   so it needs the same host as `script-src`.
+ * - `worker-src 'self'`: the production web build emits one same-origin
+ *   service worker for the offline app shell. Keeping this explicit prevents
+ *   a future widening of `default-src` from silently widening worker code.
  * - `frame-src https://accounts.google.com`: One Tap's prompt UI itself
  *   renders in a Google-hosted iframe the loaded script creates. Nothing
  *   else in this app frames anything.
@@ -149,6 +152,13 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  * which is why this policy already uses the bare host) — and whether a
  * future `S3_ENDPOINT` migration needs `img-src` narrowed again once a stable
  * per-environment origin is worth threading into this module.
+ *
+ * One edge constraint, learned the hard way (observed as an inline-script
+ * violation on every production page): Cloudflare's JavaScript Detections
+ * injects its own inline `<script>` into HTML responses, and its source embeds
+ * the per-request ray ID — no static hash can allow it, and their nonce
+ * matching only works for policies that use nonces. The mytuums.com zone must
+ * keep JS Detections off; see docs/security.md.
  */
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -159,6 +169,7 @@ const CONTENT_SECURITY_POLICY = [
   `script-src 'self' https://accounts.google.com 'unsafe-hashes' '${STYLESHEET_SWAP_HANDLER_HASH}'`,
   "style-src 'self' 'unsafe-inline' https://accounts.google.com",
   "connect-src 'self' https://accounts.google.com",
+  "worker-src 'self'",
   "frame-src https://accounts.google.com",
   "form-action 'self'",
   "frame-ancestors 'none'",

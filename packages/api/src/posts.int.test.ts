@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
 import { eq, sql } from "drizzle-orm";
 import { closeDb } from "@my-tuums/db";
-import { post } from "@my-tuums/db/schema";
+import { post, postAttachment } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   POST_MAX_LENGTH,
@@ -11,12 +11,15 @@ import {
   THREAD_ANCESTOR_MAX,
 } from "./constants.js";
 import type { Context } from "./context.js";
+import { withPostMediaLifecycleLock } from "./post-media-lock.js";
 import { appRouter } from "./router.js";
 import {
   anonContext,
   contextFor,
   createTestUser,
   seedPosts,
+  testStorage,
+  testStorageObjects,
   truncateAll,
 } from "./testing/harness.js";
 
@@ -33,10 +36,23 @@ afterAll(async () => {
   await closeDb();
 });
 
+/** A genuine 2x2 PNG; post uploads validate the complete container. */
+const POST_PNG = new Uint8Array(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAEElEQVR4nGP4y8AARAwQCgAfrgP19hgqWQAAAABJRU5ErkJggg==",
+    "base64",
+  ),
+);
+
+function postImage(name: string): File {
+  return new File([POST_PNG], name, { type: "image/png" });
+}
+
 interface ListArgs {
   authorId?: string;
   parentId?: string;
   includeReplies?: boolean;
+  kind?: "posts" | "replies" | "all";
   feed?: "global" | "following";
   limit?: number;
 }
@@ -113,6 +129,26 @@ async function waitForPostLockWait(): Promise<void> {
   throw new Error("Author deletion never reached the held post-row lock");
 }
 
+/** Waits until a post attachment writer is blocked by the shared media lock. */
+async function waitForPostMediaLifecycleLockWait(): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const rows = await anonContext.db.execute<{ blocked: boolean }>(sql`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND state = 'active'
+          AND wait_event_type = 'Lock'
+          AND query LIKE '%pg_advisory_xact_lock%'
+      ) AS blocked
+    `);
+    if (rows[0]?.blocked) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Post attachment creation never reached the held media lifecycle lock");
+}
+
 describe("post.create", () => {
   it("rejects an anonymous caller", async () => {
     await expect(
@@ -170,6 +206,111 @@ describe("post.create", () => {
     expect(created.viewerHasLiked).toBe(false);
   });
 
+  it("stores ordered post and reply attachments and returns the authoritative projection", async () => {
+    const author = await createTestUser();
+    const parent = await call(
+      appRouter.post.create,
+      { content: "with images", attachments: [postImage("first.png"), postImage("second.png")] },
+      { context: contextFor(author) },
+    );
+    const reply = await call(
+      appRouter.post.create,
+      { content: "reply image", parentId: parent.id, attachments: [postImage("reply.png")] },
+      { context: contextFor(author) },
+    );
+
+    expect(parent.attachments).toHaveLength(2);
+    expect(parent.attachments.map((attachment) => attachment.position)).toEqual([0, 1]);
+    expect(parent.attachments.every((attachment) => attachment.width === 2)).toBe(true);
+    expect(reply.attachments).toHaveLength(1);
+
+    const rows = await anonContext.db
+      .select({ postId: postAttachment.postId, position: postAttachment.position })
+      .from(postAttachment)
+      .where(eq(postAttachment.postId, parent.id));
+    expect(rows.map((row) => row.position).sort()).toEqual([0, 1]);
+    expect(
+      [...testStorageObjects.keys()].filter((key) =>
+        key.startsWith(`posts/${author.id}/${parent.id}/`),
+      ),
+    ).toHaveLength(2);
+
+    const listed = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(author) },
+    );
+    expect(listed.items.find((item) => item.id === parent.id)?.attachments).toEqual(
+      parent.attachments,
+    );
+  });
+
+  it("rejects a file whose declared type disagrees with its bytes before writing storage", async () => {
+    const author = await createTestUser();
+    const mislabeled = new File([POST_PNG], "not-jpeg.jpg", { type: "image/jpeg" });
+
+    await expect(
+      call(
+        appRouter.post.create,
+        { content: "bad image", attachments: [mislabeled] },
+        { context: contextFor(author) },
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(testStorageObjects.size).toBe(0);
+  });
+
+  it("cleans objects when storage fails after a PUT has committed", async () => {
+    const author = await createTestUser();
+    const failingStorage = {
+      ...testStorage,
+      put: async (key: string, bytes: Uint8Array, contentType: string) => {
+        await testStorage.put(key, bytes, contentType);
+        throw new Error("storage acknowledgement lost");
+      },
+    };
+
+    await expect(
+      call(
+        appRouter.post.create,
+        { content: "storage failure", attachments: [postImage("failed.png")] },
+        { context: contextFor(author, author.context.rateLimiter, failingStorage) },
+      ),
+    ).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" });
+    expect(testStorageObjects.size).toBe(0);
+  });
+
+  it("holds the media lifecycle lock through upload and attachment-row commit", async () => {
+    const author = await createTestUser();
+    const holderReady = deferred();
+    const releaseHolder = deferred();
+    const holder = withPostMediaLifecycleLock(anonContext.db, async () => {
+      holderReady.resolve();
+      await releaseHolder.promise;
+    });
+
+    await holderReady.promise;
+    const creation = call(
+      appRouter.post.create,
+      { content: "serialized image", attachments: [postImage("serialized.png")] },
+      { context: contextFor(author) },
+    );
+
+    try {
+      await waitForPostMediaLifecycleLockWait();
+      // The writer has not reached storage.put while the reconciler-equivalent
+      // lock holder is active. Once released, upload and row commit happen in
+      // the same transaction that acquired the lock.
+      expect(testStorageObjects.size).toBe(0);
+    } finally {
+      releaseHolder.resolve();
+    }
+
+    await holder;
+    const created = await creation;
+    expect(created.attachments).toHaveLength(1);
+    expect(testStorageObjects.size).toBe(1);
+  });
+
   it("replying to a parentId that doesn't exist is NOT_FOUND", async () => {
     const author = await createTestUser();
     await expect(
@@ -222,6 +363,17 @@ describe("post.delete", () => {
     const author = await createTestUser();
     const viewer = await createTestUser();
     const [target] = await seedPosts(author.id, 1);
+    const attachmentPath = `/media/posts/${author.id}/${target.id}/${randomUUID()}.png`;
+    await anonContext.db.insert(postAttachment).values({
+      postId: target.id,
+      position: 0,
+      mediaPath: attachmentPath,
+      contentType: "image/png",
+      byteSize: POST_PNG.byteLength,
+      width: 2,
+      height: 2,
+    });
+    await testStorage.put(attachmentPath.replace("/media/", ""), POST_PNG, "image/png");
 
     const result = await call(
       appRouter.post.delete,
@@ -249,7 +401,17 @@ describe("post.delete", () => {
       // there is no reason to show and nothing to appeal.
       expect(item?.removed).toBe(false);
       expect(item?.removedReason).toBeNull();
+      // Author tombstones are not restorable: their attachment relation is
+      // cleaned after the post row is tombstoned, so no media path survives.
+      expect(item?.attachments).toEqual([]);
     }
+
+    const deletedAttachments = await anonContext.db
+      .select({ mediaPath: postAttachment.mediaPath })
+      .from(postAttachment)
+      .where(eq(postAttachment.postId, target.id));
+    expect(deletedAttachments).toEqual([]);
+    expect(testStorageObjects.has(attachmentPath.replace("/media/", ""))).toBe(false);
 
     const thread = await call(
       appRouter.post.thread,
@@ -530,6 +692,85 @@ describe("post.list", () => {
       { context: contextFor(author) },
     );
     expect(directReplies.items.map((i) => i.id)).toEqual([reply.id]);
+  });
+
+  it("supports the explicit posts/replies/all activity modes", async () => {
+    const author = await createTestUser();
+    const [root] = await seedPosts(author.id, 1);
+    const [reply] = await seedPosts(author.id, 1, { parentId: root.id });
+
+    const posts = await call(
+      appRouter.post.list,
+      { authorId: author.id, kind: "posts" },
+      { context: contextFor(author) },
+    );
+    const replies = await call(
+      appRouter.post.list,
+      { authorId: author.id, kind: "replies" },
+      { context: contextFor(author) },
+    );
+    const all = await call(
+      appRouter.post.list,
+      { authorId: author.id, kind: "all" },
+      { context: contextFor(author) },
+    );
+
+    expect(posts.items.map((item) => item.id)).toEqual([root.id]);
+    expect(replies.items.map((item) => item.id)).toEqual([reply.id]);
+    expect(new Set(all.items.map((item) => item.id))).toEqual(new Set([root.id, reply.id]));
+  });
+
+  it("includes an immediate parent preview, keeps removed parents as stubs, and hides blocked parents", async () => {
+    const parentAuthor = await createTestUser({ name: "Parent Author" });
+    const replyAuthor = await createTestUser({ name: "Reply Author" });
+    const viewer = await createTestUser();
+    const [parent] = await seedPosts(parentAuthor.id, 1);
+    const [reply] = await seedPosts(replyAuthor.id, 1, { parentId: parent.id });
+
+    const visible = await call(
+      appRouter.post.list,
+      { authorId: replyAuthor.id, kind: "replies" },
+      { context: contextFor(viewer) },
+    );
+    const visibleReply = visible.items.find((item) => item.id === reply.id);
+    expect(visibleReply?.parent).toMatchObject({
+      id: parent.id,
+      truncated: false,
+      removed: false,
+      deleted: false,
+      author: { id: parentAuthor.id, name: "Parent Author" },
+    });
+    expect(visibleReply?.parent?.excerpt).toMatch(/^seed post 0 /);
+
+    await anonContext.db
+      .update(post)
+      .set({ removedAt: new Date(), removedReason: "policy" })
+      .where(eq(post.id, parent.id));
+
+    const removed = await call(
+      appRouter.post.list,
+      { authorId: replyAuthor.id, kind: "replies" },
+      { context: contextFor(viewer) },
+    );
+    expect(removed.items.find((item) => item.id === reply.id)?.parent).toMatchObject({
+      id: parent.id,
+      excerpt: null,
+      truncated: false,
+      removed: true,
+      author: { id: parentAuthor.id },
+    });
+
+    await call(
+      appRouter.moderation.block,
+      { userId: parentAuthor.id },
+      { context: contextFor(viewer) },
+    );
+    const hidden = await call(
+      appRouter.post.list,
+      { authorId: replyAuthor.id, kind: "replies" },
+      { context: contextFor(viewer) },
+    );
+    expect(hidden.items.find((item) => item.id === reply.id)?.parent).toBeNull();
   });
 
   it("authorId scopes the feed to one author and composes as AND with the other filters", async () => {

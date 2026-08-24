@@ -170,6 +170,67 @@ describe("PostCard", () => {
     });
   });
 
+  describe("reply parent context", () => {
+    it("labels the reply with its parent and links the label to the parent's thread", async () => {
+      const parentAuthor = makeAuthor({ name: "Parent Author", username: "parent" });
+      const post = makePost({
+        id: "reply-1",
+        parentId: "parent-1",
+        parent: {
+          id: "parent-1",
+          excerpt: "The original post",
+          truncated: false,
+          removed: false,
+          deleted: false,
+          author: parentAuthor,
+        },
+      });
+      const { router } = await renderWithProviders(<PostCard post={post} />);
+
+      // The quiet one-line label replaced the boxed excerpt: the parent's
+      // text is no longer quoted into every reply card.
+      const parentLink = screen.getByRole("link", {
+        name: m.reply_parent_label({ name: parentAuthor.name }),
+      });
+      expect(parentLink).toHaveAttribute("href", "/post/parent-1");
+      expect(screen.queryByText("The original post")).not.toBeInTheDocument();
+
+      const user = userEvent.setup();
+      await user.click(parentLink);
+      expect(router.state.location.pathname).toBe("/post/parent-1");
+      expect(router.state.location.pathname).not.toBe("/post/reply-1");
+    });
+
+    it("keeps an inline why next to the label when the parent was removed", async () => {
+      const parentAuthor = makeAuthor({ name: "Parent Author", username: "parent" });
+      const post = makePost({
+        parentId: "parent-1",
+        parent: {
+          id: "parent-1",
+          excerpt: null,
+          truncated: false,
+          removed: true,
+          deleted: false,
+          author: parentAuthor,
+        },
+      });
+      await renderWithProviders(<PostCard post={post} />);
+
+      const label = screen.getByRole("link", {
+        name: m.reply_parent_label({ name: parentAuthor.name }),
+      });
+      // The why rides the same line as the label, not a separate box.
+      expect(label.closest("p")).toHaveTextContent(m.moderation_post_removed_stub());
+    });
+
+    it("does not add parent context to a top-level post", async () => {
+      const post = makePost({ parentId: null, parent: null });
+      await renderWithProviders(<PostCard post={post} />);
+
+      expect(screen.queryByText(m.reply_parent_unavailable())).not.toBeInTheDocument();
+    });
+  });
+
   describe("author without a handle", () => {
     it("degrades to a non-link name and still renders", async () => {
       const author = makeAuthor({ username: null, displayUsername: null });
@@ -314,6 +375,39 @@ describe("PostCard", () => {
       await renderWithProviders(<PostCard post={post} />);
 
       expect(screen.getByText("a".repeat(2000))).toBeInTheDocument();
+    });
+
+    it("renders authoritative post attachments as accessible media links", async () => {
+      const post = makePost({
+        attachments: [
+          {
+            id: "attachment-1",
+            url: "/media/posts/author/post/attachment-1.png",
+            position: 0,
+            contentType: "image/png",
+            byteSize: 24,
+            width: 256,
+            height: 128,
+          },
+          {
+            id: "attachment-2",
+            url: "/media/posts/author/post/attachment-2.webp",
+            position: 1,
+            contentType: "image/webp",
+            byteSize: 32,
+            width: 128,
+            height: 256,
+          },
+        ],
+      });
+      await renderWithProviders(<PostCard post={post} />);
+
+      const first = screen.getByAltText(m.post_attachment_alt({ position: "1" }));
+      const second = screen.getByAltText(m.post_attachment_alt({ position: "2" }));
+      expect(first).toHaveAttribute("src", post.attachments[0]?.url);
+      expect(second).toHaveAttribute("src", post.attachments[1]?.url);
+      expect(first.closest("a")).toHaveAttribute("href", post.attachments[0]?.url);
+      expect(first.closest("a")).toHaveAttribute("target", "_blank");
     });
   });
 });

@@ -26,6 +26,9 @@ describe("post-feed key encode/decode", () => {
     { feed: "global", authorId: "author-1" },
     { feed: "global", parentId: "parent-1" },
     { feed: "global", includeReplies: true },
+    { feed: "global", kind: "posts" },
+    { feed: "global", kind: "replies" },
+    { feed: "global", kind: "both" },
     { feed: "following", authorId: "author-1", parentId: "parent-1", includeReplies: true },
   ];
 
@@ -46,6 +49,10 @@ describe("post-feed key encode/decode", () => {
   it("decoding a minimal key produces no authorId/parentId/includeReplies keys at all", () => {
     const decoded = decode(encode({ feed: "global" }));
     expect(Object.keys(decoded)).toEqual(["feed"]);
+  });
+
+  it("keeps the legacy Both key stable for existing caches", () => {
+    expect(encode({ feed: "global", includeReplies: true })).toBe("global|r||");
   });
 });
 

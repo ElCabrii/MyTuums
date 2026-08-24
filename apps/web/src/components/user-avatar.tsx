@@ -24,6 +24,8 @@ interface UserAvatarProps {
    * everywhere the avatar is the only thing identifying the person.
    */
   alt?: string;
+  /** Reports whether the underlying image loaded so callers can change affordances. */
+  onImageLoadingStatusChange?: (status: "idle" | "loading" | "loaded" | "error") => void;
 }
 
 /**
@@ -40,12 +42,22 @@ interface UserAvatarProps {
  * The `|| undefined` is not incidental: `AvatarImage` treats an empty string as
  * a source and renders a broken image rather than falling back to the initials.
  */
-export function UserAvatar({ user, className, fallbackClassName, alt }: UserAvatarProps) {
+export function UserAvatar({
+  user,
+  className,
+  fallbackClassName,
+  alt,
+  onImageLoadingStatusChange,
+}: UserAvatarProps) {
   const displayName = user?.name ?? null;
 
   return (
     <Avatar className={className}>
-      <AvatarImage src={user?.image || undefined} alt={alt ?? displayName ?? ""} />
+      <AvatarImage
+        src={user?.image || undefined}
+        alt={alt ?? displayName ?? ""}
+        onLoadingStatusChange={onImageLoadingStatusChange}
+      />
       {/* `text-foreground`, not the primitive's `text-muted-foreground`: that
           default measures 4.39:1 on its own `bg-muted` disc, which fails WCAG
           AA for the initials at every size this app draws an avatar. Sites
