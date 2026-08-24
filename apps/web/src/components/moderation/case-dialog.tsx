@@ -15,13 +15,13 @@ import {
 } from "lucide-react";
 import { MODERATION_NOTE_MAX_LENGTH } from "@my-tuums/api/constants";
 import {
-  appealReviewAtom,
+  appealReviewFamily,
   banUserAtom,
   caseAtom,
   caseBanReasonAtom,
   caseDismissNoteAtom,
   caseRemoveReasonAtom,
-  caseReviewNoteAtom,
+  caseReviewNoteFamily,
   caseSuspendDurationAtom,
   caseSuspendReasonAtom,
   removePostAtom,
@@ -441,10 +441,15 @@ function ReportsSection({ reports }: { reports: ModerationCaseDetail["reports"] 
  * this dialog with a person on the other end of it.
  */
 function AppealSection({ appeal }: { appeal: ModerationCaseDetail["appeals"][number] }) {
-  const appealReview = useAtomValue(appealReviewAtom);
-  const [reviewNote, setReviewNote] = useAtom(caseReviewNoteAtom);
+  // Per-appeal state, not per dialog: a case can carry two open appeals (one
+  // per control family), and a shared note draft or shared mutation slot
+  // would leak one section's text and status into the other.
+  const appealReview = useAtomValue(appealReviewFamily(appeal.id));
+  const [reviewNote, setReviewNote] = useAtom(caseReviewNoteFamily(appeal.id));
   const isOpen = appeal.status === "open";
   const locale = getLocale();
+  // Unique per appeal: two open sections render two note fields at once.
+  const noteFieldId = `case-review-note-${appeal.id}`;
 
   return (
     <Card size="sm" className={isOpen ? "ring-primary/30" : undefined}>
@@ -475,11 +480,9 @@ function AppealSection({ appeal }: { appeal: ModerationCaseDetail["appeals"][num
           <>
             <Separator />
             <Field>
-              <FieldLabel htmlFor="case-review-note">
-                {m.moderation_case_appeal_note_label()}
-              </FieldLabel>
+              <FieldLabel htmlFor={noteFieldId}>{m.moderation_case_appeal_note_label()}</FieldLabel>
               <Textarea
-                id="case-review-note"
+                id={noteFieldId}
                 value={reviewNote}
                 onChange={(event) => setReviewNote(event.target.value)}
                 placeholder={m.moderation_case_appeal_note_placeholder()}
