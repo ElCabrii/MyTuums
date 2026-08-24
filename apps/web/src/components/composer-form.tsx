@@ -213,7 +213,12 @@ export function ComposerForm({
       textarea.focus();
       textarea.setSelectionRange(pendingCaret, pendingCaret);
       pendingCaretRef.current = null;
-      suppressSelectionRef.current = false;
+      // `suppressSelectionRef` stays armed on purpose: Chromium queues an
+      // async `select` event for this programmatic caret move, and it fires
+      // AFTER this effect returns — clearing the guard here let that echo
+      // re-open the suggestion list over the just-accepted mention. A real
+      // gesture (typing or clicking the textarea) disarms it instead; see
+      // the onChange/onClick handlers.
     }
   }, [value]);
 
@@ -244,12 +249,14 @@ export function ComposerForm({
     if (!token || !handle) return;
 
     const insertion = insertMention(value, token, handle);
+    // Both branches arm the selection guard and leave it armed: restoring the
+    // caret queues a synthetic `select` that must not re-open the list. See
+    // the layout effect above and the onChange/onClick handlers.
     if (insertion.value === value) {
       suppressSelectionRef.current = true;
       onValueChange(insertion.value);
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(insertion.caret, insertion.caret);
-      suppressSelectionRef.current = false;
     } else {
       pendingCaretRef.current = insertion.caret;
       suppressSelectionRef.current = true;
@@ -384,6 +391,10 @@ export function ComposerForm({
             placeholder={placeholder}
             value={value}
             onChange={(event) => {
+              // A real edit disarms the caret-restore guard before any
+              // selection bookkeeping runs — the synthetic `select` echo the
+              // guard exists for never follows a user keystroke.
+              suppressSelectionRef.current = false;
               onValueChange(event.target.value);
               updateMentionState(
                 event.target.value,
@@ -391,13 +402,14 @@ export function ComposerForm({
                 event.target.selectionEnd,
               );
             }}
-            onClick={(event) =>
+            onClick={(event) => {
+              suppressSelectionRef.current = false;
               updateMentionState(
                 event.currentTarget.value,
                 event.currentTarget.selectionStart,
                 event.currentTarget.selectionEnd,
-              )
-            }
+              );
+            }}
             onSelect={(event) =>
               updateMentionState(
                 event.currentTarget.value,
