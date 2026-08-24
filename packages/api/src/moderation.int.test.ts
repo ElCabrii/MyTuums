@@ -1559,6 +1559,124 @@ describe("removePost and restorePost", () => {
     expect(actions).toEqual([]);
   });
 
+  it("an author-deleted post withdraws its open appeal instead of stranding it open", async () => {
+    // The appellant IS the author, so deleting the contested post ends the
+    // grievance: every path that would touch such a post must close its open
+    // appeals `withdrawn` rather than leave them upholdable-but-never-
+    // overturnable in the queue. The row is driven straight to both
+    // tombstones because `post.delete` refuses a moderated post by design —
+    // this is the legacy-row shape the guards exist for.
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "deleted after removal");
+
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "first offense" },
+      { context: contextFor(mod) },
+    );
+    const removal = await latestAction("post_removed", "post", postRow.id);
+    const opened = await call(
+      appRouter.moderation.appealOpen,
+      { token: appealLink(removal!.id, author.id), reason: "The removal was unfair" },
+      { context: anonContext },
+    );
+
+    await anonContext.db
+      .update(post)
+      .set({ deletedAt: new Date("2026-08-24T17:00:00.000Z") })
+      .where(eq(post.id, postRow.id));
+
+    // A further moderation attempt refuses — and the refusal is what commits
+    // the withdrawal (it runs outside the effect transaction precisely so a
+    // throw cannot roll it back).
+    await expect(
+      call(
+        appRouter.moderation.removePost,
+        { postId: postRow.id, reason: "again" },
+        { context: contextFor(mod) },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This post was deleted by its author and can no longer be moderated.",
+    });
+    const [appealRow] = await anonContext.db
+      .select({ status: appeal.status, reviewedBy: appeal.reviewedBy })
+      .from(appeal)
+      .where(eq(appeal.id, opened.appealId));
+    expect(appealRow).toMatchObject({ status: "withdrawn", reviewedBy: null });
+
+    // Restore takes the same guard: idempotent on an already-withdrawn appeal.
+    await expect(
+      call(appRouter.moderation.restorePost, { postId: postRow.id }, { context: contextFor(mod) }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This post was deleted by its author and can no longer be moderated.",
+    });
+
+    // And the withdrawn appeal is off the queue's case view.
+    const caseDetail = await call(
+      appRouter.moderation.case,
+      { targetType: "post", targetId: postRow.id },
+      { context: contextFor(mod) },
+    );
+    expect(caseDetail.appeals).toEqual([]);
+  });
+
+  it("an overturned appeal against an author-deleted post is refused after withdrawing", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const mod2 = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "deleted before review");
+
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "first offense" },
+      { context: contextFor(mod) },
+    );
+    const removal = await latestAction("post_removed", "post", postRow.id);
+    const opened = await call(
+      appRouter.moderation.appealOpen,
+      { token: appealLink(removal!.id, author.id), reason: "Please reconsider" },
+      { context: anonContext },
+    );
+
+    await anonContext.db
+      .update(post)
+      .set({ deletedAt: new Date("2026-08-24T17:30:00.000Z") })
+      .where(eq(post.id, postRow.id));
+
+    // The reviewer cannot overturn (nothing can be restored), and reaching
+    // that conclusion is what withdraws the appeal. Upholding stays available,
+    // but there is no open appeal left for it to resolve.
+    await expect(
+      call(
+        appRouter.moderation.appealReview,
+        { appealId: opened.appealId, outcome: "overturned" },
+        { context: contextFor(mod2) },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This post was deleted by its author and can no longer be moderated.",
+    });
+    const [appealRow] = await anonContext.db
+      .select({ status: appeal.status })
+      .from(appeal)
+      .where(eq(appeal.id, opened.appealId));
+    expect(appealRow?.status).toBe("withdrawn");
+
+    await expect(
+      call(
+        appRouter.moderation.appealReview,
+        { appealId: opened.appealId, outcome: "upheld" },
+        { context: contextFor(mod2) },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This appeal has already been resolved.",
+    });
+  });
+
   it("an author deletion that wins the row-lock race prevents moderation audit state", async () => {
     const author = await createTestUser();
     const mod = await moderatorUser();

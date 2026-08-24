@@ -143,7 +143,14 @@ over HTTP and imports only its browser-safe subpaths.
   moderator already removed so the author keeps the stub's reason and appeal
   link. The moderation effects make the inverse check too: a deleted post is
   refused before `post_removed` or `post_restored` can be logged, including a
-  legacy row that happens to carry both tombstones. Its unlocked read/write
+  legacy row that happens to carry both tombstones. The refusal goes through
+  `refuseIfAuthorDeleted`, which first stamps the post's open appeals
+  `withdrawn` in its own committed transaction — the appellant is the author,
+  so their deletion ends the grievance, and an appeal that could be upheld but
+  never overturned must not sit open in the queue. That pre-check runs outside
+  the effect transaction (a thrown refusal would roll it back); it is idempotent
+  and re-run on every attempt, while the effects' locked guards remain the
+  authority on whether the operation itself proceeds. Its unlocked read/write
   pair is safe because the update compares both tombstones; after losing to a
   concurrent delete or removal, it re-reads the winner and preserves that
   outcome.

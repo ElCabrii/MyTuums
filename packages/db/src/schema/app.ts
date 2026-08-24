@@ -445,14 +445,15 @@ export const appeal = pgTable(
     tokenNonce: text("token_nonce").notNull().unique(),
     // The appellant's own words; 10..2000 characters enforced at input.
     reason: text("reason").notNull(),
-    // `'open'`, `'upheld'`, `'overturned'`, `'reversed'` or `'superseded'`
-    // (checked below). The last two are the terminal states reached without a
-    // review, so their nullable review fields deliberately remain empty:
-    // `reversed` means the contested action was undone outside appeal review,
-    // and `superseded` means a newer action of the same kind replaced it, so
-    // the appeal no longer contests anything that governs the target. The
-    // difference matters to the appellant: reversed is the remedy they asked
-    // for, superseded is not.
+    // `'open'`, `'upheld'`, `'overturned'`, `'reversed'`, `'superseded'` or
+    // `'withdrawn'` (checked below). The last three are the terminal states
+    // reached without a review, so their nullable review fields deliberately
+    // remain empty: `reversed` means the contested action was undone outside
+    // appeal review, `superseded` means a newer action of the same kind
+    // replaced it, and `withdrawn` means the appellant ended the grievance by
+    // deleting the contested post — the author of a removed post is its only
+    // possible appellant. The difference matters to the record: reversed is
+    // the remedy the appellant asked for, superseded and withdrawn are not.
     status: text("status").default("open").notNull(),
     reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
     reviewNote: text("review_note"),
@@ -464,7 +465,7 @@ export const appeal = pgTable(
   (t) => [
     check(
       "appeal_status",
-      sql`${t.status} in ('open', 'upheld', 'overturned', 'reversed', 'superseded')`,
+      sql`${t.status} in ('open', 'upheld', 'overturned', 'reversed', 'superseded', 'withdrawn')`,
     ),
     // The queue scans open appeals, newest first — the sort column is in
     // the index so the partial scan never needs a heap sort.

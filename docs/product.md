@@ -157,7 +157,10 @@ affected user, but the appeal is not recorded as having been reviewed. If a
 newer moderation action replaces the contested action, the appeal closes as
 `superseded` without review fields; the newer action is the one that remains
 available for appeal. A suspension and a permanent ban are one sanction family
-for this purpose, while a role-change appeal remains independent.
+for this purpose, while a role-change appeal remains independent. A post
+appeal whose author then deletes the post closes as `withdrawn` — the author
+is the appellant, so deleting the contested post ends the grievance; no review
+fields are filled and nothing was undone.
 
 ## Glossary
 

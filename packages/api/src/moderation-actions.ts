@@ -344,9 +344,7 @@ export async function removePostEffect(
       .limit(1);
     if (!target) throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
     if (target.deletedAt) {
-      throw new ORPCError("BAD_REQUEST", {
-        message: "This post was deleted by its author and can no longer be moderated.",
-      });
+      throw new ORPCError("BAD_REQUEST", { message: POST_AUTHOR_DELETED_MESSAGE });
     }
     if (target.removedAt) {
       throw new ORPCError("BAD_REQUEST", { message: "This post is already removed." });
@@ -834,9 +832,7 @@ export async function restorePostEffect(
     if (!target) throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
 
     if (target.deletedAt) {
-      throw new ORPCError("BAD_REQUEST", {
-        message: "This post was deleted by its author and can no longer be moderated.",
-      });
+      throw new ORPCError("BAD_REQUEST", { message: POST_AUTHOR_DELETED_MESSAGE });
     }
 
     // Already restored (a race with the appeal overturn or a manual restore):
@@ -1047,6 +1043,88 @@ export async function undoAction(
  */
 
 /**
+ * The refusal every path hits when it would moderate an author-deleted post.
+ * Shared verbatim by the two effects' locked guards (the authoritative check,
+ * inside their transactions) and the wrapper-level pre-check below, so a test
+ * or caller cannot tell which one fired.
+ */
+export const POST_AUTHOR_DELETED_MESSAGE =
+  "This post was deleted by its author and can no longer be moderated.";
+
+/**
+ * Stamps every open appeal against `postId`'s removal actions `withdrawn`.
+ *
+ * An author-deleted post can no longer be moderated — both effects refuse it —
+ * so an appeal left open against its removal could be upheld but never
+ * overturned: permanently open in the queue, unreviewable either way. The
+ * appellant IS the author (intake accepts only the author's claim), so
+ * deleting the contested post is the appellant ending their own grievance,
+ * which is exactly what `withdrawn` records — distinct from `reversed`, where
+ * a moderator undid something, and from `superseded`, where a newer action
+ * replaced it. Nothing was reviewed and nothing was undone; there is simply
+ * nothing left to appeal for.
+ *
+ * The removal action rows are locked first, ordered like every other action
+ * lock here, so this cannot miss an appeal being inserted concurrently by
+ * intake and cannot deadlock with a manual reversal. It runs as its own short
+ * transaction on the CALLER'S handle — never inside an effect's transaction —
+ * because each caller follows it by REFUSING the operation, and a refusal
+ * thrown inside the effect transaction would roll the withdrawal back with it.
+ */
+async function withdrawOpenAppeals(db: Database, postId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const removals = await tx
+      .select({ id: moderationAction.id })
+      .from(moderationAction)
+      .where(
+        and(
+          eq(moderationAction.targetType, "post"),
+          eq(moderationAction.targetPostId, postId),
+          eq(moderationAction.action, "post_removed"),
+        ),
+      )
+      .orderBy(moderationAction.createdAt, moderationAction.id)
+      .for("update");
+    if (removals.length === 0) return;
+
+    await tx
+      .update(appeal)
+      .set({ status: "withdrawn" })
+      .where(
+        and(
+          eq(appeal.status, "open"),
+          inArray(
+            appeal.actionId,
+            removals.map(({ id }) => id),
+          ),
+        ),
+      );
+  });
+}
+
+/**
+ * The guard of every path that would touch an author-deleted post: withdraw
+ * its open appeals first, then refuse with {@link POST_AUTHOR_DELETED_MESSAGE}.
+ *
+ * The pre-read is deliberately NOT `FOR UPDATE` — the effects' own locked
+ * guards remain the authority, and this check only decides whether to run the
+ * withdrawal before refusing. A deletion landing between this read and the
+ * effect's guard leaves the stamp to the next attempt; stamping is idempotent
+ * (`status = 'open'`), and the refusal is identical either way.
+ */
+export async function refuseIfAuthorDeleted(db: Database, postId: string): Promise<void> {
+  const [row] = await db
+    .select({ deletedAt: post.deletedAt })
+    .from(post)
+    .where(eq(post.id, postId))
+    .limit(1);
+  if (!row?.deletedAt) return;
+
+  await withdrawOpenAppeals(db, postId);
+  throw new ORPCError("BAD_REQUEST", { message: POST_AUTHOR_DELETED_MESSAGE });
+}
+
+/**
  * Closes open appeals whose contested action a newer action of the same kind
  * has replaced.
  *
@@ -1235,10 +1313,13 @@ async function runManualReversal(
  * commits, and any open appeal against an earlier removal of the same post is
  * closed as superseded in the same transaction.
  */
-export function removePost(
+export async function removePost(
   context: EffectContext,
   args: { postId: string; actorId: string; reason: string },
 ): Promise<void> {
+  // Outside the effect transaction on purpose: when it fires, the withdrawal
+  // has already committed, and the refusal must not roll it back.
+  await refuseIfAuthorDeleted(context.db, args.postId);
   return runSupersedingEffect(
     context,
     { targetType: "post", targetId: args.postId, action: "post_removed" },
@@ -1247,10 +1328,13 @@ export function removePost(
 }
 
 /** Restores a removed post and emails the author when something was actually restored. */
-export function restorePost(
+export async function restorePost(
   context: EffectContext,
   args: { postId: string; actorId: string; note?: string },
 ): Promise<void> {
+  // Same placement as `removePost`'s guard: the author-deleted withdrawal
+  // must commit before the refusal, not roll back with it.
+  await refuseIfAuthorDeleted(context.db, args.postId);
   return runManualReversal(
     context,
     { targetType: "post", targetId: args.postId, actionCodes: ["post_removed"] },

@@ -10,6 +10,7 @@ import {
   applyModerationEffect,
   isActionLatest,
   logAction,
+  refuseIfAuthorDeleted,
   sendModerationEmail,
   undoAction,
   type ActionRow,
@@ -101,6 +102,19 @@ export const appealsRouter = {
       const action = row.action as ActionRow;
       if (action.actorId === context.user.id) {
         throw new ORPCError("FORBIDDEN", { message: "You can't review your own action." });
+      }
+
+      // An overturn of a post removal runs the restore effect, and a
+      // deleted-by-its-author post cannot be restored — so an open appeal on
+      // such a post would be unoverturnable, stuck in the queue forever. The
+      // appellant is the author: their deletion ended the grievance. Withdraw
+      // its open appeals (committed in their own short transaction) and refuse
+      // with the same message the effects' guards use; upholding remains
+      // available and needs none of this.
+      if (input.outcome === "overturned" && action.targetType === "post") {
+        // SAFETY: the target_match check constraint guarantees target_post_id
+        // is set for a post-targeted action.
+        await refuseIfAuthorDeleted(context.db, action.targetPostId!);
       }
 
       // The overturn, the appeal stamp and the `appeal_resolved` audit row
