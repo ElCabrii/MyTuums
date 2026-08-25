@@ -53,8 +53,13 @@ both by the server's page gate and by the client.
   sentence punctuation around it outside the link. Every other scheme —
   `javascript:`, `data:`, `ftp:` — stays inert text, and a recognized URL never
   gets a preview, unfurl or link card.
-- A reply is a post with a parent. Threads show the focused post, its replies,
-  and up to 20 ancestors of context.
+- A reply is a post with a parent. Threads show the focused post, up to 20
+  ancestors of context, and keyset-paginated direct replies. Beneath each
+  direct reply, the thread groups the deterministic descendant branch first
+  joined by the focused post's author: the path to that author's earliest
+  reply is shown, then the oldest child at each later fork. Unrelated branches
+  remain collapsed. Long grouped branches start with a bounded slice and
+  expand in place through **Show more replies**.
 - An author can delete their own post. Deletion is a tombstone, not a row
   delete: fresh feeds and profiles omit it, while its own URL and thread
   context render a stub saying its author deleted it. Its replies, its likes

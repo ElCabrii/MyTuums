@@ -87,6 +87,11 @@ app's build from the same origin.
   structurally or by role.
 - **Feed and list parameterisation lives in atoms.** `PostFeed` takes a
   `feedAtom` prop and never knows its own scope or author.
+- **Permalink reply grouping reads the continuation embedded in each direct
+  `post.list({ parentId })` page.** `ThreadReplyFeed` renders the flat direct
+  page and its connected branch without recursive indentation;
+  `replyContinuationAtom` resumes capped branches through the
+  `continuationRootId` mode of the same procedure/cache prefix.
 
 ## Dependencies and boundaries
 

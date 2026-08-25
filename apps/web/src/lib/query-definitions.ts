@@ -11,6 +11,7 @@ interface PostListInput {
   limit: number;
   authorId?: string;
   parentId?: string;
+  continuationRootId?: string;
   includeReplies?: boolean;
   kind?: "posts" | "replies" | "all";
   feed?: FeedScope;
@@ -73,6 +74,22 @@ export function postListQueryOptions({
     initialPageParam:
       // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
       undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  });
+}
+
+/** Loads continuation pages after the branch slice embedded in a direct-reply page. */
+export function replyContinuationQueryOptions(rootPostId: string, initialCursor: string) {
+  return orpc.post.list.infiniteOptions({
+    input: (cursor: string | undefined) => {
+      const input: PostListInput = {
+        limit: POST_PAGE_SIZE,
+        continuationRootId: rootPostId,
+      };
+      if (cursor) input.cursor = cursor;
+      return input;
+    },
+    initialPageParam: initialCursor,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 }

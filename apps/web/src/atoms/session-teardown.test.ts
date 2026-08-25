@@ -4,6 +4,7 @@ import { clearViewerState } from "@/atoms/session-teardown";
 import { profileAtomFamily } from "@/atoms/profile";
 import { postFeedAtom } from "@/atoms/post-feed";
 import { threadAtomFamily } from "@/atoms/thread";
+import { replyContinuationAtom } from "@/atoms/reply-continuation";
 import { userListAtom } from "@/atoms/user-list";
 import { searchPostsAtom, searchUsersAtom } from "@/atoms/search";
 import { toggleLikeAtomFamily } from "@/atoms/like";
@@ -67,6 +68,10 @@ describe("clearViewerState", () => {
     { family: "profile", read: (): object => profileAtomFamily("alexmercer") },
     { family: "post feed", read: (): object => postFeedAtom({ feed: "global" }) },
     { family: "thread", read: (): object => threadAtomFamily("post-1") },
+    {
+      family: "reply continuation",
+      read: (): object => replyContinuationAtom("post-1", "cursor-1"),
+    },
     { family: "user list", read: (): object => userListAtom("alexmercer", "followers") },
     { family: "search users", read: (): object => searchUsersAtom("alex") },
     { family: "search posts", read: (): object => searchPostsAtom("alex") },

@@ -5,7 +5,7 @@ import { AlertCircle, ArrowLeft, FileQuestion, Loader2, MoreHorizontal } from "l
 import { THREAD_ANCESTOR_MAX } from "@my-tuums/api/constants";
 import { Button } from "@/components/ui/button";
 import { PostCard } from "@/components/post-card";
-import { PostFeed } from "@/components/post-feed";
+import { ThreadReplyFeed } from "@/components/thread-reply-feed";
 import { ProfileMessage } from "@/components/profile-message";
 import { ReplyComposer } from "@/components/reply-composer";
 import { postFeedAtom } from "@/atoms/post-feed";
@@ -118,7 +118,7 @@ export function ThreadPage() {
 
         {/* Reply feed container */}
         <div className="divide-border/50 divide-y pt-2">
-          <PostFeed
+          <ThreadReplyFeed
             feedAtom={postFeedAtom({ feed: "global", parentId: post.id })}
             emptyMessage={m.reply_empty()}
           />

@@ -104,6 +104,13 @@ export function clearViewerState(queryClient: QueryClient): void {
       clearThreadFamily();
     },
   );
+  sweepFamily(
+    "reply continuation",
+    () => import("@/atoms/reply-continuation"),
+    ({ clearReplyContinuationFamily }) => {
+      clearReplyContinuationFamily();
+    },
+  );
   // Reply drafts are per-post and in-memory; they belong to the person who
   // typed them, not to the browser.
   sweepFamily(
