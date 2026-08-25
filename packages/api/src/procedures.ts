@@ -1,5 +1,10 @@
 import { ORPCError, os } from "@orpc/server";
-import { hasCurrentLegalConsent, LEGAL_CONSENT_REQUIRED_MESSAGE } from "@my-tuums/auth/rules";
+import {
+  hasCompletedOnboarding,
+  hasCurrentLegalConsent,
+  LEGAL_CONSENT_REQUIRED_MESSAGE,
+  ONBOARDING_REQUIRED_MESSAGE,
+} from "@my-tuums/auth/rules";
 import type { Context } from "./context.js";
 import type { RateLimitPolicy } from "./rate-limit.js";
 import { roleAtLeast, type UserRole } from "./roles.js";
@@ -148,6 +153,34 @@ export const protectedProcedure = base
   .use(({ context, next }) => {
     if (!hasCurrentLegalConsent(context.user)) {
       throw new ORPCError("FORBIDDEN", { message: LEGAL_CONSENT_REQUIRED_MESSAGE });
+    }
+    return next();
+  })
+  /**
+   * The onboarding gate (security audit finding 3).
+   *
+   * OAuth and passkey sign-ups have nowhere to put a handle or a date of
+   * birth, so those accounts exist incomplete; the /welcome flow is where the
+   * two get declared. The client redirect that sends people there is a
+   * courtesy anyone can skip, so the record is enforced again here, at use
+   * rather than at creation — the same shape and the same reason as the legal
+   * consent gate above, and it is why the gate lives on `protectedProcedure`
+   * rather than on the procedures someone remembered to mark.
+   *
+   * What stays reachable is deliberate, and all of it is outside oRPC:
+   * claiming the handle and declaring the date of birth run through
+   * `authClient.updateUser`, the /welcome page's own route never touches a
+   * procedure, and `moderation.appealOpen` builds from `baseProcedure`, so a
+   * banned account can still be heard without first finishing onboarding.
+   *
+   * FORBIDDEN, not UNAUTHORIZED, for the same reason as the legal gate: the
+   * session is valid and the caller is who they say they are — there is
+   * simply something they owe first. Signing them out would lose the session
+   * they need in order to finish.
+   */
+  .use(({ context, next }) => {
+    if (!hasCompletedOnboarding(context.user)) {
+      throw new ORPCError("FORBIDDEN", { message: ONBOARDING_REQUIRED_MESSAGE });
     }
     return next();
   });

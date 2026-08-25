@@ -422,7 +422,11 @@ export const moderationAction = pgTable(
  *
  * One open appeal per action is enforced by the partial unique index below
  * — re-appealing an upheld action must go through a moderator, not the
- * form.
+ * form. A newer action of the same kind against the same target closes the
+ * older appeal as `superseded` (see `supersedeOpenAppeals` in
+ * packages/api/src/moderation-actions.ts), so at most one appeal per target
+ * per control family is ever open: an appeal against a sanction that no
+ * longer governs anything cannot be reviewed as if it did.
  */
 export const appeal = pgTable(
   "appeal",
@@ -441,9 +445,15 @@ export const appeal = pgTable(
     tokenNonce: text("token_nonce").notNull().unique(),
     // The appellant's own words; 10..2000 characters enforced at input.
     reason: text("reason").notNull(),
-    // `'open'`, `'upheld'`, `'overturned'` or `'reversed'` (checked below).
-    // `reversed` means the action was undone outside appeal review, so the
-    // nullable review fields deliberately remain empty.
+    // `'open'`, `'upheld'`, `'overturned'`, `'reversed'`, `'superseded'` or
+    // `'withdrawn'` (checked below). The last three are the terminal states
+    // reached without a review, so their nullable review fields deliberately
+    // remain empty: `reversed` means the contested action was undone outside
+    // appeal review, `superseded` means a newer action of the same kind
+    // replaced it, and `withdrawn` means the appellant ended the grievance by
+    // deleting the contested post — the author of a removed post is its only
+    // possible appellant. The difference matters to the record: reversed is
+    // the remedy the appellant asked for, superseded and withdrawn are not.
     status: text("status").default("open").notNull(),
     reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
     reviewNote: text("review_note"),
@@ -453,7 +463,10 @@ export const appeal = pgTable(
     reviewedAt: timestamp("reviewed_at", { withTimezone: true, precision: 3 }),
   },
   (t) => [
-    check("appeal_status", sql`${t.status} in ('open', 'upheld', 'overturned', 'reversed')`),
+    check(
+      "appeal_status",
+      sql`${t.status} in ('open', 'upheld', 'overturned', 'reversed', 'superseded', 'withdrawn')`,
+    ),
     // The queue scans open appeals, newest first — the sort column is in
     // the index so the partial scan never needs a heap sort.
     index("appeal_open_idx")

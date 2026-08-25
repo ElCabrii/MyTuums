@@ -52,7 +52,7 @@ describe("QueueView", () => {
             targetId: "post-1",
             reportCount: 3,
             reasons: ["spam"],
-            appeal: { id: "appeal-1", reason: "wasn't spam", createdAt: new Date() },
+            appeals: [{ id: "appeal-1", reason: "wasn't spam", createdAt: new Date() }],
           }),
         ],
         nextCursor: null,
@@ -77,7 +77,7 @@ describe("QueueView", () => {
             targetId: "user-1",
             reportCount: 1,
             reasons: ["harassment"],
-            appeal: null,
+            appeals: [],
           }),
         ],
         nextCursor: null,
@@ -96,12 +96,12 @@ describe("QueueView", () => {
     queryFixtures(queryClient).moderation.queue([
       {
         items: [
-          makeModerationCase({ targetId: "post-1", appeal: null }),
+          makeModerationCase({ targetId: "post-1", appeals: [] }),
           makeModerationCase({
             targetId: "post-2",
-            appeal: { id: "appeal-1", reason: "not spam", createdAt: new Date() },
+            appeals: [{ id: "appeal-1", reason: "not spam", createdAt: new Date() }],
           }),
-          makeModerationCase({ targetId: "post-3", appeal: null }),
+          makeModerationCase({ targetId: "post-3", appeals: [] }),
         ],
         nextCursor: null,
       },

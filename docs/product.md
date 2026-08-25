@@ -128,7 +128,8 @@ A role can only be granted or revoked by someone strictly above it.
   self-harm, illegal content, NSFW. User reasons: spam, harassment,
   impersonation, underage. Self-reports are refused.
 - **Queue.** Moderators see unresolved reports grouped by target, merged with
-  open appeals, newest first. Resolving a case marks it actioned or dismissed.
+  every independently open appeal, newest first. Resolving a case marks it
+  actioned or dismissed.
 - **Moderator powers.** Remove and restore posts; suspend and unsuspend users
   for a fixed term between one hour and one year.
 - **Staff powers.** Everything a moderator can do, plus permanent bans and
@@ -152,7 +153,14 @@ original action**. Overturning an appeal applies the inverse action, which —
 like any action — emails the user. An appeal's own text is between 10 and 2000
 characters. If a moderator reverses the contested action directly, the appeal
 closes as `reversed` and leaves the queue; the inverse action still emails the
-affected user, but the appeal is not recorded as having been reviewed.
+affected user, but the appeal is not recorded as having been reviewed. If a
+newer moderation action replaces the contested action, the appeal closes as
+`superseded` without review fields; the newer action is the one that remains
+available for appeal. A suspension and a permanent ban are one sanction family
+for this purpose, while a role-change appeal remains independent. A post
+appeal whose author then deletes the post closes as `withdrawn` — the author
+is the appellant, so deleting the contested post ends the grievance; no review
+fields are filled and nothing was undone.
 
 ## Glossary
 

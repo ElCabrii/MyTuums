@@ -188,6 +188,13 @@ export async function createTestUser(overrides?: {
       password,
       name,
       username,
+      // Fixtures are meant to be usable, so they are onboarding-complete:
+      // `protectedProcedure` refuses a session with no handle or no date of
+      // birth (see hasCompletedOnboarding in packages/auth/src/rules.ts), and
+      // almost every test in this package calls a protected procedure. A test
+      // that wants an incomplete account clears the column on the row and
+      // re-fetches the session itself (see onboarding-gate.int.test.ts).
+      dateOfBirth: new Date("1995-01-01"),
       legalAcceptedAt: new Date(),
       legalVersion: LEGAL_VERSION,
     },

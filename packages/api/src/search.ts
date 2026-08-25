@@ -1,7 +1,12 @@
 import { and, desc, eq, ilike, isNull, like, not, or, type SQL, sql } from "drizzle-orm";
 import { post, user } from "@my-tuums/db/schema";
 import { z } from "zod";
-import { SEARCH_PAGE_SIZE, SEARCH_PAGE_SIZE_MAX, SEARCH_QUERY_MAX_LENGTH } from "./constants.js";
+import {
+  CURSOR_MAX_ENCODED_LENGTH,
+  SEARCH_PAGE_SIZE,
+  SEARCH_PAGE_SIZE_MAX,
+  SEARCH_QUERY_MAX_LENGTH,
+} from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { keysetPage } from "./pagination.js";
 import { postSelection } from "./posts.js";
@@ -167,7 +172,7 @@ export const searchRouter = {
     .input(
       z.object({
         q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH),
-        cursor: z.string().optional(),
+        cursor: z.string().max(CURSOR_MAX_ENCODED_LENGTH).optional(),
         limit: z.number().int().min(1).max(SEARCH_PAGE_SIZE_MAX).default(SEARCH_PAGE_SIZE),
       }),
     )
@@ -211,7 +216,7 @@ export const searchRouter = {
     .input(
       z.object({
         q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH),
-        cursor: z.string().optional(),
+        cursor: z.string().max(CURSOR_MAX_ENCODED_LENGTH).optional(),
         limit: z.number().int().min(1).max(SEARCH_PAGE_SIZE_MAX).default(SEARCH_PAGE_SIZE),
       }),
     )

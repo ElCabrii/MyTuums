@@ -155,7 +155,7 @@ export function makeModerationCase(overrides: Partial<ModerationCase> = {}): Mod
     newestAt: new Date(),
     reportCount: 1,
     reasons: ["spam"],
-    appeal: null,
+    appeals: [],
     preview: null,
     ...overrides,
   };
@@ -216,18 +216,11 @@ export function makeModerationCaseDetail(
     targetType: "post",
     targetId: crypto.randomUUID(),
     reports: [],
-    // `ModerationCaseDetail["appeal"]`'s inferred type omits `null` even
-    // though the value genuinely can be one at runtime: `moderation.ts`'s
-    // handler destructures `[openAppeal] = await ....limit(1)` — with
-    // `noUncheckedIndexedAccess` off, TS treats that as always-present, so
-    // `openAppeal ?? null` elides the unreachable-per-types `null` branch
-    // from the inferred return type. The double cast keeps this fixture
-    // truthful about what the API can actually send.
-    appeal:
-      // SAFETY: the handler destructures [openAppeal] = await ....limit(1) and
-      // types it always-present (see the module note above); the wire can send
-      // null, so the fixture keeps it truthful.
-      null as never,
+    // A plain empty list: `moderation.case` returns every open appeal against
+    // the target, so the field is an array whose emptiness is the "no open
+    // appeal" case. (It used to be a single appeal typed as always-present,
+    // which needed a cast here to stay truthful about the wire's null.)
+    appeals: [],
     ...common,
     target: {
       kind: "post",
@@ -260,16 +253,7 @@ export function makeUserModerationCaseDetail(
     targetType: "user",
     targetId: crypto.randomUUID(),
     reports: [],
-    // `ModerationCaseDetail["appeal"]`'s inferred type omits `null` even
-    // though the value genuinely can be one at runtime: `moderation.ts`'s
-    // handler destructures `[openAppeal] = await ....limit(1)` — with
-    // `noUncheckedIndexedAccess` off, TS treats that as always-present, so
-    // `openAppeal ?? null` elides the unreachable-per-types `null` branch
-    // from the inferred return type. The double cast keeps this fixture
-    // truthful about what the API can actually send.
-    appeal:
-      // SAFETY: same nullable-on-the-wire truth as makeModerationCaseDetail.
-      null as never,
+    appeals: [],
     ...common,
     target: {
       kind: "user",

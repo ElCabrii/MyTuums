@@ -204,9 +204,14 @@ used to 429 every request from a fresh session.
   well-formed, let alone which objects exist, by watching the response differ.
   The rejection carries `Cache-Control: no-store`, so a cached 401 cannot keep
   an image broken after the visitor signs in.
-- The response is a 302 to a presigned URL, cached `private` and bounded by
-  `secondsUntilWindowEnd()`. Private because the URL is a **bearer
-  credential**; a shared cache handing it on would be handing on access.
+- The response is a 302 to a presigned URL, `private, no-store` by default:
+  every redirect is a **viewer-authorized decision**, and reusing one after an
+  account switch, block, ban or profile change would serve the old decision.
+  The one exemption is profile display objects, cached `private` and bounded
+  by `secondsUntilWindowEnd()` — content any viewer who can see the owner may
+  already render, so the staleness budget buys real per-render savings without
+  widening who can see what. `.orig` originals and post attachments are never
+  stored.
 - Gating `/media` does **not** revoke a presigned URL already issued. That URL
   stays valid for its own TTL, because this server never sees it again.
 

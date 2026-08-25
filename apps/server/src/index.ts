@@ -9,9 +9,11 @@ import { ORPCError, onError } from "@orpc/server";
 import {
   appRouter,
   canViewPostMedia,
+  canViewProfileMedia,
   createContext,
   createMediaResolver,
   defaultStorage,
+  profileDisplayRedirectCacheControl,
 } from "@my-tuums/api";
 import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
@@ -121,8 +123,18 @@ const handleRequest = createRequestHandler({
 
     return handler.handle(req, nodeResponse(res), { prefix: "/rpc", context });
   },
-  resolveMediaUrl: createMediaResolver(defaultStorage, (key, viewerId) =>
-    canViewPostMedia(db, key, viewerId),
+  // One resolver, two authorizers: post attachments follow the post's
+  // visibility (moderation tombstones, author blocks), profile images follow
+  // the owner's visibility and the owner-only rule for `.orig` originals.
+  // Display-object redirects are the one class whose caching is worth its
+  // staleness budget — window-bounded, private, per-viewer on every miss.
+  resolveMediaUrl: createMediaResolver(
+    defaultStorage,
+    (key, viewerId) =>
+      key.startsWith("posts/")
+        ? canViewPostMedia(db, key, viewerId)
+        : canViewProfileMedia(db, key, viewerId),
+    profileDisplayRedirectCacheControl,
   ),
   // Only when this deployment bundles the built web app. Unset in dev, where
   // Vite serves it and proxies /rpc, /api/auth and /media back here — see
@@ -133,17 +145,15 @@ const handleRequest = createRequestHandler({
     return staticHandler(req, nodeResponse(res));
   },
   // Preserve an unavailable lookup as its own state. The routing boundary can
-  // then fail open for the shell and profile media without mistaking a stale
-  // cookie for a session or admitting post media without a viewer identity.
+  // then fail open for the shell without mistaking a stale cookie for a
+  // session or admitting any media — post or profile — without a viewer
+  // identity to authorize against.
   resolveSession: async (req) => {
     try {
       const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
       return session ? { kind: "authenticated", userId: session.user.id } : { kind: "anonymous" };
     } catch (error) {
-      console.error(
-        "Session check failed; serving only the shell and profile media until it recovers:",
-        error,
-      );
+      console.error("Session check failed; serving only the shell until it recovers:", error);
       return { kind: "unavailable" };
     }
   },

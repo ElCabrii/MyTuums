@@ -1,5 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
+import { CURSOR_ID_MAX_LENGTH, CURSOR_MAX_ENCODED_LENGTH } from "./constants.js";
 
 /**
  * Opaque keyset pagination cursors.
@@ -27,10 +28,24 @@ interface DecodedCursor {
   id: string;
 }
 
+/**
+ * Whether `raw` is a canonical base64url encoding of its own bytes.
+ *
+ * `Buffer.from(raw, "base64url")` is lenient — it silently drops characters
+ * outside the alphabet, which means almost any string decodes to *some*
+ * bytes, and a caller could pad or interleave junk that the encoder would
+ * never produce. Re-encoding the decoded bytes must reproduce the input
+ * exactly, or the cursor is malformed. This also rejects `=` padding,
+ * whitespace and the `+`/`/` of ordinary base64 in one comparison.
+ */
+function isCanonicalBase64Url(raw: string): boolean {
+  return Buffer.from(raw, "base64url").toString("base64url") === raw;
+}
+
 export function createCursorCodec(idSchema: z.ZodType<string>) {
   const payloadSchema = z.object({
     createdAt: z.iso.datetime(),
-    id: idSchema,
+    id: z.intersection(idSchema, z.string().max(CURSOR_ID_MAX_LENGTH)),
   });
 
   return {
@@ -41,6 +56,10 @@ export function createCursorCodec(idSchema: z.ZodType<string>) {
     },
 
     decode(raw: string): DecodedCursor {
+      if (raw.length > CURSOR_MAX_ENCODED_LENGTH || !isCanonicalBase64Url(raw)) {
+        throw new ORPCError("BAD_REQUEST", { message: "Malformed pagination cursor." });
+      }
+
       let parsed: unknown;
       try {
         parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));

@@ -19,6 +19,7 @@ import type { Database } from "@my-tuums/db";
 import { appeal, moderationAction, post, report, session, user } from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
 import type { Context } from "./context.js";
+import { lockModerationTarget } from "./moderation-target-lock.js";
 import { canManageRole, type UserRole } from "./roles.js";
 
 /**
@@ -315,9 +316,11 @@ export function makeAppealUrl(actionId: string, userId: string): string {
  * The tombstone, the report stamps and the `post_removed` audit row commit
  * in ONE transaction: a failure between any of them would otherwise leave
  * the post removed with no trail of who removed it, or the reports stamped
- * with no removal. The guard read (does the post exist, is it still up?)
- * happens inside that transaction under a row lock, so two concurrent
- * removals serialize instead of both passing the check and each logging.
+ * with no removal. The guard read (does the post exist, and does neither
+ * tombstone already claim it?) happens inside that transaction under a row
+ * lock, so two concurrent removals serialize instead of both passing the
+ * check and each logging. Author-deleted posts are refused before any
+ * moderation state or audit row is created.
  *
  * The author's notice is returned, not sent — the caller sends it after the
  * transaction commits, so a failed send cannot roll the removal back and a
@@ -334,12 +337,16 @@ export async function removePostEffect(
         content: post.content,
         authorId: post.authorId,
         removedAt: post.removedAt,
+        deletedAt: post.deletedAt,
       })
       .from(post)
       .where(eq(post.id, args.postId))
       .for("update")
       .limit(1);
     if (!target) throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
+    if (target.deletedAt) {
+      throw new ORPCError("BAD_REQUEST", { message: POST_AUTHOR_DELETED_MESSAGE });
+    }
     if (target.removedAt) {
       throw new ORPCError("BAD_REQUEST", { message: "This post is already removed." });
     }
@@ -782,9 +789,10 @@ export async function isActionLatest(
  * The tombstone clear and its audit row commit in ONE transaction: a restore
  * that fails midway must not leave the post visible with no `post_restored`
  * row, or leave a row describing a restore that never happened. The guard
- * read (is the tombstone still set?) happens inside that same transaction
- * under a row lock, so two concurrent restores serialize instead of both
- * passing the check and each logging (issue #51). The author's email is
+ * read (is the moderation tombstone still set, and is the post not
+ * author-deleted?) happens inside that same transaction under a row lock, so
+ * two concurrent restores serialize instead of both passing the check and
+ * each logging (issue #51). The author's email is
  * deliberately NOT sent here — the caller sends it after its own transaction
  * commits. The appeal overturn runs inside the review transaction
  * (moderation.appealReview), and an email sent from inside a transaction that
@@ -811,13 +819,22 @@ export async function restorePostEffect(
   // call.
   return db.transaction(async (tx) => {
     const [target] = await tx
-      .select({ id: post.id, authorId: post.authorId, removedAt: post.removedAt })
+      .select({
+        id: post.id,
+        authorId: post.authorId,
+        removedAt: post.removedAt,
+        deletedAt: post.deletedAt,
+      })
       .from(post)
       .where(eq(post.id, args.postId))
       .for("update")
       .limit(1);
 
     if (!target) throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
+
+    if (target.deletedAt) {
+      throw new ORPCError("BAD_REQUEST", { message: POST_AUTHOR_DELETED_MESSAGE });
+    }
 
     // Already restored (a race with the appeal overturn or a manual restore):
     // nothing to log — the first restore's audit row exists, and a second one
@@ -1027,15 +1044,205 @@ export async function undoAction(
  */
 
 /**
- * Runs a "void" effect and sends the notices it owed — the shared shape of
- * every wrapper below that does not return a value. Every effect now returns
- * `{ pending }`, so the wrapper just forwards it.
+ * The refusal every path hits when it would moderate an author-deleted post.
+ * Shared verbatim by the two effects' locked guards (the authoritative check,
+ * inside their transactions) and the wrapper-level pre-check below, so a test
+ * or caller cannot tell which one fired.
  */
-async function runEffect(
+export const POST_AUTHOR_DELETED_MESSAGE =
+  "This post was deleted by its author and can no longer be moderated.";
+
+/**
+ * Stamps every open appeal against `postId`'s removal actions `withdrawn`.
+ *
+ * An author-deleted post can no longer be moderated — both effects refuse it —
+ * so an appeal left open against its removal could be upheld but never
+ * overturned: permanently open in the queue, unreviewable either way. The
+ * appellant IS the author (intake accepts only the author's claim), so
+ * deleting the contested post is the appellant ending their own grievance,
+ * which is exactly what `withdrawn` records — distinct from `reversed`, where
+ * a moderator undid something, and from `superseded`, where a newer action
+ * replaced it. Nothing was reviewed and nothing was undone; there is simply
+ * nothing left to appeal for.
+ *
+ * The removal action rows are locked first, ordered like every other action
+ * lock here, so this cannot miss an appeal being inserted concurrently by
+ * intake and cannot deadlock with a manual reversal. It runs as its own short
+ * transaction on the CALLER'S handle — never inside an effect's transaction —
+ * because each caller follows it by REFUSING the operation, and a refusal
+ * thrown inside the effect transaction would roll the withdrawal back with it.
+ */
+async function withdrawOpenAppeals(db: Database, postId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const removals = await tx
+      .select({ id: moderationAction.id })
+      .from(moderationAction)
+      .where(
+        and(
+          eq(moderationAction.targetType, "post"),
+          eq(moderationAction.targetPostId, postId),
+          eq(moderationAction.action, "post_removed"),
+        ),
+      )
+      .orderBy(moderationAction.createdAt, moderationAction.id)
+      .for("update");
+    if (removals.length === 0) return;
+
+    await tx
+      .update(appeal)
+      .set({ status: "withdrawn" })
+      .where(
+        and(
+          eq(appeal.status, "open"),
+          inArray(
+            appeal.actionId,
+            removals.map(({ id }) => id),
+          ),
+        ),
+      );
+  });
+}
+
+/**
+ * The guard of every path that would touch an author-deleted post: withdraw
+ * its open appeals first, then refuse with {@link POST_AUTHOR_DELETED_MESSAGE}.
+ *
+ * The pre-read is deliberately NOT `FOR UPDATE` — the effects' own locked
+ * guards remain the authority, and this check only decides whether to run the
+ * withdrawal before refusing. A deletion landing between this read and the
+ * effect's guard leaves the stamp to the next attempt; stamping is idempotent
+ * (`status = 'open'`), and the refusal is identical either way.
+ */
+export async function refuseIfAuthorDeleted(db: Database, postId: string): Promise<void> {
+  const [row] = await db
+    .select({ deletedAt: post.deletedAt })
+    .from(post)
+    .where(eq(post.id, postId))
+    .limit(1);
+  if (!row?.deletedAt) return;
+
+  await withdrawOpenAppeals(db, postId);
+  throw new ORPCError("BAD_REQUEST", { message: POST_AUTHOR_DELETED_MESSAGE });
+}
+
+/**
+ * Closes open appeals whose contested action a newer action of the same kind
+ * has replaced.
+ *
+ * The problem it solves: appeal uniqueness is per *action*, but the state an
+ * appeal contests belongs to the *target*. A user suspended, then suspended
+ * again while the first appeal is open, ends up with an appeal against a
+ * sentence that no longer governs anything — `isActionLatest` refuses to
+ * overturn it (correctly: the reversal would lift the newer sentence), which
+ * leaves the appeal permanently open and unreviewable, and lets a second
+ * appeal against the newer action exist alongside it. `moderation.queue`
+ * keeps one appeal per target, so one of the two silently disappears from the
+ * queue.
+ *
+ * `superseded` is its own terminal state rather than `reversed` on purpose:
+ * nothing was undone for the appellant, so calling it reversed would tell
+ * them — and the audit trail — that they got the remedy they asked for. It
+ * carries no review fields for the same reason `reversed` does not: no
+ * moderator reviewed it.
+ *
+ * `actionCodes` is the *control family*, not just the code being written: a
+ * ban and a suspension are one sanction on the account, so either supersedes
+ * an open appeal against the other. The target row is locked before the action
+ * scan. Appeal intake and manual reversal use the same target-first order, so
+ * a new action cannot be inserted between this read and the new action landing.
+ */
+async function supersedeOpenAppeals(
+  db: DbLike,
+  args: {
+    targetType: "post" | "user";
+    targetId: string;
+    actionCodes: ModerationActionCode[];
+  },
+): Promise<void> {
+  const targetMatch =
+    args.targetType === "post"
+      ? eq(moderationAction.targetPostId, args.targetId)
+      : eq(moderationAction.targetUserId, args.targetId);
+
+  const supersededActions = await db
+    .select({ id: moderationAction.id })
+    .from(moderationAction)
+    .where(
+      and(
+        eq(moderationAction.targetType, args.targetType),
+        targetMatch,
+        inArray(moderationAction.action, args.actionCodes),
+      ),
+    )
+    .orderBy(moderationAction.createdAt, moderationAction.id)
+    .for("update");
+
+  if (supersededActions.length === 0) return;
+
+  await db
+    .update(appeal)
+    .set({ status: "superseded" })
+    .where(
+      and(
+        eq(appeal.status, "open"),
+        inArray(
+          appeal.actionId,
+          supersededActions.map(({ id }) => id),
+        ),
+      ),
+    );
+}
+
+/**
+ * The appealable actions whose wrapper routes through
+ * {@link runSupersedingEffect}, grouped by what they govern. A newer action in
+ * a family supersedes an open appeal against any older member:
+ * `user_suspended` and `user_banned` are one sanction on an account
+ * (re-banning a suspended user replaces the sentence, it does not add a second
+ * one), while a removal governs one post.
+ *
+ * Deliberately partial over the action codes: `role_changed` has no entry
+ * because `setRole` does not supersede. A fresh role grant replaces the single
+ * role column wholesale, so there is no stacked sanction for a newer grant to
+ * replace — and `setRole` is also the staff remedy for a bad earlier grant,
+ * which must read as `reversed` (the manual-inverse path,
+ * {@link runManualReversal}), never as `superseded`. A ban and a role change
+ * share a target type but govern entirely different things; keeping them in
+ * separate maps is what stops a role appeal from closing because someone got
+ * banned.
+ */
+const SUPERSEDING_FAMILY = {
+  post_removed: ["post_removed"],
+  user_suspended: ["user_suspended", "user_banned"],
+  user_banned: ["user_suspended", "user_banned"],
+} as const satisfies Partial<Record<ModerationActionCode, readonly ModerationActionCode[]>>;
+
+type SupersedingAction = keyof typeof SUPERSEDING_FAMILY;
+
+/**
+ * Runs a forward sanction that replaces whatever earlier sanction of its
+ * family stood, closing the open appeals that earlier sanction left behind.
+ *
+ * The supersession and the new action commit together: an appeal left open
+ * against a superseded sanction is exactly the stranded state this exists to
+ * prevent, so it must not survive a partial failure.
+ */
+async function runSupersedingEffect(
   context: EffectContext,
+  args: {
+    targetType: "post" | "user";
+    targetId: string;
+    action: SupersedingAction;
+  },
   run: (db: DbLike) => Promise<{ pending: PendingEmail[] }>,
 ): Promise<void> {
   await applyModerationEffect(context, async (db) => {
+    await lockModerationTarget(db, { targetType: args.targetType, targetId: args.targetId });
+    await supersedeOpenAppeals(db, {
+      targetType: args.targetType,
+      targetId: args.targetId,
+      actionCodes: [...SUPERSEDING_FAMILY[args.action]],
+    });
     const { pending } = await run(db);
     return { result: undefined, pending };
   });
@@ -1049,11 +1256,11 @@ async function runEffect(
  * stay empty and the inverse action's audit row remains the honest record of
  * who acted and why. The stamp and inverse action share one transaction.
  *
- * The contested action rows are locked first, matching appeal intake's
- * synchronization point and preventing a not-yet-inserted appeal from racing
- * past the reversal. Appeal rows are then updated before the effect locks its
- * post/user target. Appeal review takes the latter two locks in the same order,
- * preventing a concurrent manual reversal and review from deadlocking.
+ * The target row is locked first, matching appeal intake and forward sanctions.
+ * The action rows are then locked and the appeals are updated before the effect
+ * runs, so a concurrent writer cannot insert a new action into the scan gap.
+ * Keeping this target-first order across moderation workflows also prevents
+ * deadlocks between reversal, appeal intake, and review.
  */
 async function runManualReversal(
   context: EffectContext,
@@ -1065,6 +1272,7 @@ async function runManualReversal(
   run: (db: DbLike) => Promise<{ pending: PendingEmail[] }>,
 ): Promise<void> {
   await applyModerationEffect(context, async (db) => {
+    await lockModerationTarget(db, { targetType: args.targetType, targetId: args.targetId });
     const targetMatch =
       args.targetType === "post"
         ? eq(moderationAction.targetPostId, args.targetId)
@@ -1102,19 +1310,33 @@ async function runManualReversal(
   });
 }
 
-/** Removes a post and emails the author — the notice goes out after the removal commits. */
-export function removePost(
+/**
+ * Removes a post and emails the author — the notice goes out after the removal
+ * commits, and any open appeal against an earlier removal of the same post is
+ * closed as superseded in the same transaction.
+ */
+export async function removePost(
   context: EffectContext,
   args: { postId: string; actorId: string; reason: string },
 ): Promise<void> {
-  return runEffect(context, (db) => removePostEffect(db, args));
+  // Outside the effect transaction on purpose: when it fires, the withdrawal
+  // has already committed, and the refusal must not roll it back.
+  await refuseIfAuthorDeleted(context.db, args.postId);
+  return runSupersedingEffect(
+    context,
+    { targetType: "post", targetId: args.postId, action: "post_removed" },
+    (db) => removePostEffect(db, args),
+  );
 }
 
 /** Restores a removed post and emails the author when something was actually restored. */
-export function restorePost(
+export async function restorePost(
   context: EffectContext,
   args: { postId: string; actorId: string; note?: string },
 ): Promise<void> {
+  // Same placement as `removePost`'s guard: the author-deleted withdrawal
+  // must commit before the refusal, not roll back with it.
+  await refuseIfAuthorDeleted(context.db, args.postId);
   return runManualReversal(
     context,
     { targetType: "post", targetId: args.postId, actionCodes: ["post_removed"] },
@@ -1122,7 +1344,12 @@ export function restorePost(
   );
 }
 
-/** Suspends a user for a bounded time and emails them, returning the stored expiry. */
+/**
+ * Suspends a user for a bounded time and emails them, returning the stored
+ * expiry. Open appeals against the sanction this one replaces — an earlier
+ * suspension or ban — are closed as superseded in the same transaction, so a
+ * new sentence never leaves an unreviewable appeal against the old one.
+ */
 export function suspendUser(
   context: EffectContext,
   args: {
@@ -1133,20 +1360,31 @@ export function suspendUser(
     durationSeconds: number;
   },
 ): Promise<Date> {
-  return applyModerationEffect(context, (db) =>
-    suspendUserEffect(db, args).then(({ banExpires, pending }) => ({
-      result: banExpires,
-      pending,
-    })),
-  );
+  return applyModerationEffect(context, async (db) => {
+    await lockModerationTarget(db, { targetType: "user", targetId: args.userId });
+    await supersedeOpenAppeals(db, {
+      targetType: "user",
+      targetId: args.userId,
+      actionCodes: [...SUPERSEDING_FAMILY.user_suspended],
+    });
+    const { banExpires, pending } = await suspendUserEffect(db, args);
+    return { result: banExpires, pending };
+  });
 }
 
-/** Bans a user permanently and emails them. */
+/**
+ * Bans a user permanently and emails them, closing open appeals against the
+ * suspension or ban this one replaces (see `supersedeOpenAppeals`).
+ */
 export function banUser(
   context: EffectContext,
   args: { userId: string; actorId: string; actorRole: string; reason: string },
 ): Promise<void> {
-  return runEffect(context, (db) => banUserEffect(db, args));
+  return runSupersedingEffect(
+    context,
+    { targetType: "user", targetId: args.userId, action: "user_banned" },
+    (db) => banUserEffect(db, args),
+  );
 }
 
 /** Unbans or unsuspends a user and emails them with the copy matching the lifted sentence. */

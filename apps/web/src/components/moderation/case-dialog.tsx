@@ -15,13 +15,13 @@ import {
 } from "lucide-react";
 import { MODERATION_NOTE_MAX_LENGTH } from "@my-tuums/api/constants";
 import {
-  appealReviewAtom,
+  appealReviewFamily,
   banUserAtom,
   caseAtom,
   caseBanReasonAtom,
   caseDismissNoteAtom,
   caseRemoveReasonAtom,
-  caseReviewNoteAtom,
+  caseReviewNoteFamily,
   caseSuspendDurationAtom,
   caseSuspendReasonAtom,
   removePostAtom,
@@ -200,7 +200,13 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
 
       <ReportsSection reports={detail.reports} />
 
-      {detail.appeal && <AppealSection appeal={detail.appeal} />}
+      {/* One section per open appeal. Two control families can be appealed
+          against the same target at once (a ban and a role change), and each
+          is reviewed on its own — rendering only one left the other
+          unreachable from the case it belongs to. */}
+      {detail.appeals.map((appeal) => (
+        <AppealSection key={appeal.id} appeal={appeal} />
+      ))}
 
       <ActionsSection detail={detail} />
     </div>
@@ -434,11 +440,16 @@ function ReportsSection({ reports }: { reports: ModerationCaseDetail["reports"] 
  * an open appeal is someone waiting on a reply, and it is the one thing on
  * this dialog with a person on the other end of it.
  */
-function AppealSection({ appeal }: { appeal: NonNullable<ModerationCaseDetail["appeal"]> }) {
-  const appealReview = useAtomValue(appealReviewAtom);
-  const [reviewNote, setReviewNote] = useAtom(caseReviewNoteAtom);
+function AppealSection({ appeal }: { appeal: ModerationCaseDetail["appeals"][number] }) {
+  // Per-appeal state, not per dialog: a case can carry two open appeals (one
+  // per control family), and a shared note draft or shared mutation slot
+  // would leak one section's text and status into the other.
+  const appealReview = useAtomValue(appealReviewFamily(appeal.id));
+  const [reviewNote, setReviewNote] = useAtom(caseReviewNoteFamily(appeal.id));
   const isOpen = appeal.status === "open";
   const locale = getLocale();
+  // Unique per appeal: two open sections render two note fields at once.
+  const noteFieldId = `case-review-note-${appeal.id}`;
 
   return (
     <Card size="sm" className={isOpen ? "ring-primary/30" : undefined}>
@@ -469,11 +480,9 @@ function AppealSection({ appeal }: { appeal: NonNullable<ModerationCaseDetail["a
           <>
             <Separator />
             <Field>
-              <FieldLabel htmlFor="case-review-note">
-                {m.moderation_case_appeal_note_label()}
-              </FieldLabel>
+              <FieldLabel htmlFor={noteFieldId}>{m.moderation_case_appeal_note_label()}</FieldLabel>
               <Textarea
-                id="case-review-note"
+                id={noteFieldId}
                 value={reviewNote}
                 onChange={(event) => setReviewNote(event.target.value)}
                 placeholder={m.moderation_case_appeal_note_placeholder()}

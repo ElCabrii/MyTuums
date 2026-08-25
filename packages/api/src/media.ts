@@ -14,56 +14,63 @@
  * itself.
  */
 import { isSafeObjectKey } from "./image.js";
-import { DEFAULT_SIGNED_URL_TTL, secondsUntilWindowEnd, type Storage } from "./storage.js";
+import { DEFAULT_SIGNED_URL_TTL, type Storage } from "./storage.js";
+
+/** `url` is where the browser should go. */
+export type MediaAuthorizer = (key: string, viewerId: string) => Promise<boolean>;
 
 /**
- * `url` is where the browser should go; `cacheSeconds` is how long the redirect
- * may be cached, bounded by the signing window so a cached redirect never
- * outlives the signature it points at.
+ * Decides the Cache-Control a `/media/` redirect may carry for a key, or
+ * `null` when its redirect must not be stored at all. Injected rather than
+ * imported so this module stays generic over key conventions; see
+ * `profileDisplayRedirectCacheControl` for the production policy.
  */
-export type MediaAuthorizer = (key: string, viewerId: string) => Promise<boolean>;
+export type RedirectCachePolicy = (key: string) => string | null;
+
 export type MediaResolver = (
   key: string,
-  viewerId?: string,
-) => Promise<{ url: string; cacheSeconds: number } | null>;
+  viewerId: string,
+) => Promise<{ url: string; cacheControl?: string } | null>;
 
 /**
  * `null` means "404 this" and is deliberately the answer to every failure
  * mode this function itself can produce — an unconfigured bucket, a malformed
- * key, a traversal attempt — rather than distinguishing them in the response.
- * A signed-in caller probing `/media/` learns only whether an object exists,
- * never why one doesn't.
+ * key, a traversal attempt, a missing viewer, a denied authorization —
+ * rather than distinguishing them in the response. A signed-in caller probing
+ * `/media/` learns only whether an object exists, never why one doesn't.
  *
- * "Signed-in" is load-bearing: this resolver is never reached by an
- * unauthenticated request at all. `apps/server/src/request-handler.ts` checks
- * for a live session before the key is even parsed, so an anonymous caller
- * gets a flat 401 and never learns anything about which keys are well-formed,
- * let alone which objects exist. This function itself stays a pure key→URL
- * mapping with no opinion on who is asking — the session lives entirely at
- * the routing layer, which is where it already had to check for `/rpc`.
+ * The viewer is load-bearing for EVERY key, profile media included: post
+ * attachments need it for moderation/visibility, and profile keys need it so
+ * a `.orig` original is only ever signed for its owner and a display object
+ * only for a viewer who can see the owner (see
+ * `./profile-media-authorization.ts`). `apps/server/src/request-handler.ts`
+ * checks for a live session before the key is even parsed — an anonymous
+ * caller gets a flat 401 and never learns anything about which keys are
+ * well-formed — and only ever calls this with an authenticated viewer id.
+ * This function itself stays a pure key→URL mapping with no opinion on who is
+ * asking beyond what `authorize` decides; the session lives at the routing
+ * layer, which is where it already had to check for `/rpc`.
  *
  * Note this does NOT check the object exists: presigning is a local signature
  * operation, so verifying would add a HEAD round trip to every image request
- * to convert a 403-from-the-bucket into a 404-from-us. The bucket answers that
+ * to turn a 403-from-the-bucket into a 404-from-us. The bucket answers that
  * question for free when the browser follows the redirect.
  */
 export function createMediaResolver(
   storage: Storage | null,
   authorize?: MediaAuthorizer,
+  redirectCachePolicy?: RedirectCachePolicy,
 ): MediaResolver {
-  return async (key: string, viewerId?: string) => {
+  return async (key: string, viewerId: string) => {
     if (!storage) return null;
     if (!isSafeObjectKey(key)) return null;
-    if (key.startsWith("posts/")) {
-      if (!viewerId || !authorize || !(await authorize(key, viewerId))) return null;
-    }
-    return {
-      url: await storage.signedGetUrl(key, DEFAULT_SIGNED_URL_TTL),
-      // The URL stays byte-identical only until the signing window rolls (see
-      // MEDIA_SIGNING_WINDOW_MS in ./storage.ts); past that the next request
-      // signs a different one. Caching the redirect for the remainder of the
-      // window is the longest cache that never serves a stale signature.
-      cacheSeconds: secondsUntilWindowEnd(),
-    };
+    if (!viewerId || !authorize || !(await authorize(key, viewerId))) return null;
+    // The directive is set only when the policy grants it, so the returned
+    // shape has no `cacheControl` key at all when it declines — the caller
+    // answers its no-store default and nothing can mistake an undefined for
+    // a decision.
+    const url = await storage.signedGetUrl(key, DEFAULT_SIGNED_URL_TTL);
+    const cacheControl = redirectCachePolicy?.(key);
+    return cacheControl ? { url, cacheControl } : { url };
   };
 }

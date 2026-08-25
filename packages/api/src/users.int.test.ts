@@ -1,8 +1,15 @@
 import { call } from "@orpc/server";
 import { closeDb } from "@my-tuums/db";
+import { userBlock } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";
-import { anonContext, contextFor, createTestUser, truncateAll } from "./testing/harness.js";
+import {
+  anonContext,
+  contextFor,
+  createTestUser,
+  setUserBan,
+  truncateAll,
+} from "./testing/harness.js";
 
 beforeAll(async () => {
   await truncateAll();
@@ -185,5 +192,90 @@ describe("user.byUsername", () => {
       { context: contextFor(stranger) },
     );
     expect(followerProfile.followingCount).toBe(1);
+  });
+});
+
+/**
+ * The graph-owner half of visibility (finding 4).
+ *
+ * `followers`/`following` resolve their target through the same visibility
+ * policy as `byUsername`: a block in either direction reads as "no such
+ * user", so a blocking account's graph cannot be traversed by the person it
+ * hides from; a banned target resolves to an empty page, matching the
+ * zeroed counts the profile stub already reports. Without either half, the
+ * lookup confirmed the account exists and enumerated its visible members.
+ */
+describe("user.followers / user.following target visibility", () => {
+  /** A hub with one follower, plus a fresh viewer — the shape every test starts from. */
+  async function seededGraph(): Promise<{
+    hub: Awaited<ReturnType<typeof createTestUser>>;
+    follower: Awaited<ReturnType<typeof createTestUser>>;
+    viewer: Awaited<ReturnType<typeof createTestUser>>;
+    hubUsername: string;
+  }> {
+    const hub = await createTestUser();
+    const follower = await createTestUser();
+    const viewer = await createTestUser();
+    await call(appRouter.user.follow, { userId: hub.id }, { context: contextFor(follower) });
+    return { hub, follower, viewer, hubUsername: hub.session.user.username! };
+  }
+
+  it("refuses a target that blocks the viewer — both lists read as no such user", async () => {
+    const { hub, follower, viewer, hubUsername } = await seededGraph();
+    await anonContext.db.insert(userBlock).values({ blockerId: hub.id, blockedId: viewer.id });
+
+    await expect(
+      call(appRouter.user.followers, { username: hubUsername }, { context: contextFor(viewer) }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      call(appRouter.user.following, { username: hubUsername }, { context: contextFor(viewer) }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    // The block is what made it vanish: an unrelated viewer still sees the graph.
+    const visible = await call(
+      appRouter.user.followers,
+      { username: hubUsername },
+      { context: contextFor(follower) },
+    );
+    expect(visible.items.map((item) => item.id)).toEqual([follower.id]);
+  });
+
+  it("reads a target the viewer blocked as no such user — the other block direction", async () => {
+    const { hub, viewer, hubUsername } = await seededGraph();
+    await anonContext.db.insert(userBlock).values({ blockerId: viewer.id, blockedId: hub.id });
+
+    await expect(
+      call(appRouter.user.followers, { username: hubUsername }, { context: contextFor(viewer) }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      call(appRouter.user.following, { username: hubUsername }, { context: contextFor(viewer) }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("redacts a banned target's graph to an empty page, matching the stub's zeroed counts", async () => {
+    const { hub, viewer, hubUsername } = await seededGraph();
+    await setUserBan(hub.id, { reason: "test", expiresAt: null });
+
+    // The profile stub agrees: zeroed relationship state.
+    const profile = await call(
+      appRouter.user.byUsername,
+      { username: hubUsername },
+      { context: contextFor(viewer) },
+    );
+    expect(profile.suspended).toBe(true);
+    expect(profile.followerCount).toBe(0);
+
+    const followers = await call(
+      appRouter.user.followers,
+      { username: hubUsername },
+      { context: contextFor(viewer) },
+    );
+    expect(followers).toEqual({ items: [], nextCursor: null });
+    const following = await call(
+      appRouter.user.following,
+      { username: hubUsername },
+      { context: contextFor(viewer) },
+    );
+    expect(following).toEqual({ items: [], nextCursor: null });
   });
 });

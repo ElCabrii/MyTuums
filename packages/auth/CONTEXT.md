@@ -51,6 +51,15 @@ Each of these is a deliberate, non-default setting. The inline comment in
   none of them. `imageOriginal` and `bannerImageOriginal` are `input: false` —
   only the upload procedure in `packages/api` writes them, via Drizzle,
   bypassing hooks.
+- **`image`/`bannerImage` provider URLs are bounded to
+  `PROVIDER_IMAGE_MAX_URL_LENGTH` (4 KiB).** The two columns are repeated on
+  every feed row that joins their owner (the avatar join), so an unbounded URL
+  — a bare `text` column a client could fill with a near-body-limit string via
+  `updateUser` — would amplify a single write into a per-row payload on reads.
+  The bound lives in `src/profile.ts` (server authority; there is no browser
+  counter for it) and applies to both columns and both create and update paths,
+  throwing the same `MANAGED_IMAGE_MESSAGE` the other image protections use so
+  the client lookup keeps one entry.
 - **Handles have one lowercase representation.** `normalizeUsername` in
   `src/rules.ts` is shared by the Better Auth username plugin, the browser's
   three handle-claiming writes and API lookups. The plugin normalises both

@@ -10,12 +10,14 @@ import {
   applyModerationEffect,
   isActionLatest,
   logAction,
+  refuseIfAuthorDeleted,
   sendModerationEmail,
   undoAction,
   type ActionRow,
   type PendingEmail,
 } from "./moderation-actions.js";
 import { noteInput } from "./moderation-inputs.js";
+import { lockModerationTarget } from "./moderation-target-lock.js";
 import { baseProcedure, moderatorProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 
@@ -103,6 +105,19 @@ export const appealsRouter = {
         throw new ORPCError("FORBIDDEN", { message: "You can't review your own action." });
       }
 
+      // An overturn of a post removal runs the restore effect, and a
+      // deleted-by-its-author post cannot be restored — so an open appeal on
+      // such a post would be unoverturnable, stuck in the queue forever. The
+      // appellant is the author: their deletion ended the grievance. Withdraw
+      // its open appeals (committed in their own short transaction) and refuse
+      // with the same message the effects' guards use; upholding remains
+      // available and needs none of this.
+      if (input.outcome === "overturned" && action.targetType === "post") {
+        // SAFETY: the target_match check constraint guarantees target_post_id
+        // is set for a post-targeted action.
+        await refuseIfAuthorDeleted(context.db, action.targetPostId!);
+      }
+
       // The overturn, the appeal stamp and the `appeal_resolved` audit row
       // commit in ONE transaction — a failure between any of them would
       // otherwise leave the action reversed with the appeal still open, or
@@ -114,6 +129,16 @@ export const appealsRouter = {
       // happened.
       await applyModerationEffect(context, async (db) => {
         let pending: PendingEmail[] = [];
+        const targetId = action.targetType === "post" ? action.targetPostId : action.targetUserId;
+        if (!targetId) {
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: "Moderation action has no target.",
+          });
+        }
+        // Review takes the same target-first order as intake and forward
+        // sanctions. This prevents a review holding an appeal row while a
+        // sanction holds the target and waits to supersede that appeal.
+        await lockModerationTarget(db, { targetType: action.targetType, targetId });
         // Serialize on the appeal row: two reviewers who both passed the
         // "still open" check above would otherwise stamp the same appeal
         // twice — the second transaction must observe the first's commit and
@@ -128,17 +153,24 @@ export const appealsRouter = {
           throw new ORPCError("BAD_REQUEST", { message: "This appeal has already been resolved." });
         }
 
+        // The appeal contests a specific logged action. If a newer action of
+        // the same kind has since replaced it (remove → restore → remove,
+        // ban → unban → re-ban), it no longer governs anything — the same
+        // hazard `isActionCurrent`'s live-state read cannot see. Checked for
+        // BOTH outcomes, not just the overturn: upholding a superseded action
+        // stamps a final decision on a grievance the reviewer did not
+        // actually adjudicate, and tells the appellant their appeal was
+        // considered on its merits when the sanction they are serving came
+        // from a different decision. Forward sanctions now close such appeals
+        // as `superseded` (see `supersedeOpenAppeals`), so this is the
+        // narrowed race window rather than the ordinary path.
+        if (!(await isActionLatest(db, action))) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "A newer moderation action has superseded this one.",
+          });
+        }
+
         if (input.outcome === "overturned") {
-          // The appeal contests a specific logged action. If a newer action of
-          // the same kind has since replaced it (remove → restore → remove,
-          // ban → unban → re-ban), overturning would reverse the NEWER state,
-          // not the contested one — the same hazard `isActionCurrent`'s
-          // live-state read cannot see.
-          if (!(await isActionLatest(db, action))) {
-            throw new ORPCError("BAD_REQUEST", {
-              message: "A newer moderation action has superseded this one.",
-            });
-          }
           // `undoAction` runs on the runner's transaction, so its inverse
           // effects open savepoints, not real transactions — the send follows
           // the review's commit above, never an inner savepoint.
@@ -149,6 +181,22 @@ export const appealsRouter = {
             context.user.role ?? "user",
             input.note,
           );
+
+          // An overturn that changed nothing must not be recorded as one. The
+          // inverse effects are deliberately race-tolerant — each returns an
+          // empty notice list when the state it would have reversed was
+          // already cleared — so an empty result here means the reversal was
+          // a no-op. Stamping the appeal `overturned` anyway would email the
+          // appellant that their sanction was lifted while they are still
+          // serving it (a ban re-imposed as a suspension is the same account
+          // state from their side, and a different action row from ours), and
+          // would leave a final decision with no inverse action behind it.
+          // Refusing lets the reviewer act on the state that actually stands.
+          if (pending.length === 0) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: "There's nothing left to overturn — this action was already undone.",
+            });
+          }
         }
 
         await db
