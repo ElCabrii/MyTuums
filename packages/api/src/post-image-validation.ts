@@ -458,8 +458,9 @@ export function gifFrameSummary(bytes: Uint8Array): GifFrameSummary | null {
         // Graphic Control Extension: blockSize (4), 4 data bytes, terminator.
         // The delay is the LE16 at data bytes 1-2, in centiseconds.
         if (offset + 6 > bytes.length || bytes[offset] !== 4) return null;
-        // The low two bits of the GCE packed field are reserved and must be 0.
-        if (bytes[offset + 1] & 0x03) return null;
+        // The high three bits are reserved. Bits 0 and 1 are the transparency
+        // and user-input flags, so valid animations may set either one.
+        if (bytes[offset + 1] & 0xe0) return null;
         pendingDelayCs = le16(bytes, offset + 2);
       }
       const afterExt = skipGifSubBlocks(bytes, offset);

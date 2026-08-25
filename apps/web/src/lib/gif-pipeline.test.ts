@@ -33,7 +33,7 @@ function copyBuffer(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
-function sourceGif(): ArrayBuffer {
+function sourceGif(repeat = 3): ArrayBuffer {
   const encoder = GIFEncoder();
   for (const [frame, delay] of [
     [solidFrame(255, 0, 0), 40],
@@ -44,7 +44,7 @@ function sourceGif(): ArrayBuffer {
     encoder.writeFrame(index, GIF_WIDTH, GIF_HEIGHT, {
       palette,
       delay,
-      repeat: 0,
+      repeat,
     });
   }
   encoder.finish();
@@ -58,7 +58,9 @@ describe("processAnimatedGif", () => {
       maxHeight: GIF_HEIGHT,
       maxBytes: 64 * 1024,
     });
-    const frames = decompressFrames(parseGIF(copyBuffer(result.bytes)), true);
+    const parsed = parseGIF(copyBuffer(result.bytes));
+    const frames = decompressFrames(parsed, true);
+    const loopExtension = parsed.frames.find((frame) => "application" in frame);
 
     expect(result.frameCount).toBe(2);
     expect(frames).toHaveLength(2);
@@ -66,6 +68,14 @@ describe("processAnimatedGif", () => {
       [GIF_WIDTH, GIF_HEIGHT, 40],
       [GIF_WIDTH, GIF_HEIGHT, 60],
     ]);
+    expect(
+      loopExtension && "application" in loopExtension
+        ? {
+            id: loopExtension.application.id,
+            blocks: Array.from(loopExtension.application.blocks),
+          }
+        : null,
+    ).toEqual({ id: "NETSCAPE2.0", blocks: [1, 3, 0] });
   });
 
   it("rejects a re-encoded result that exceeds the target byte cap", () => {

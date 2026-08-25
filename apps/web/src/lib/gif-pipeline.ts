@@ -59,9 +59,16 @@ function isImageFrame(frame: GifFrameEntry): frame is GifImageFrameEntry {
  */
 function loopCount(parsed: ParsedGif): number {
   for (const frame of parsed.frames) {
+    if (!("application" in frame)) continue;
+
+    // gifuct-js exposes the application identifier and authentication code as
+    // one blockSize-character string. NETSCAPE's standard values occupy the
+    // first eight and final three characters respectively.
+    const applicationId = frame.application.id.slice(0, 8);
+    const authenticationCode = frame.application.id.slice(8);
     if (
-      "application" in frame &&
-      frame.application.id === "NETSCAPE2.0" &&
+      applicationId === "NETSCAPE" &&
+      authenticationCode === "2.0" &&
       frame.application.blocks.length >= 3
     ) {
       return frame.application.blocks[1] | (frame.application.blocks[2] << 8);

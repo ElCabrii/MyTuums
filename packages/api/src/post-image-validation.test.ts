@@ -29,7 +29,12 @@ function le16(value: number): [number, number] {
  */
 function buildGif(
   logicalScreen: { width: number; height: number },
-  frames: ReadonlyArray<{ width: number; height: number; delayCs?: number }>,
+  frames: ReadonlyArray<{
+    width: number;
+    height: number;
+    delayCs?: number;
+    gcePacked?: number;
+  }>,
 ): Uint8Array {
   const bytes: number[] = [
     0x47,
@@ -45,10 +50,10 @@ function buildGif(
     0x00, // packed (no GCT), bg colour, pixel aspect ratio
   ];
   for (const frame of frames) {
-    if (frame.delayCs !== undefined) {
+    if (frame.delayCs !== undefined || frame.gcePacked !== undefined) {
       // Graphic Control Extension: introducer, label, blockSize(4), packed,
       // delay (LE16, centiseconds), transparent index, terminator.
-      bytes.push(0x21, 0xf9, 0x04, 0x00, ...le16(frame.delayCs), 0x00, 0x00);
+      bytes.push(0x21, 0xf9, 0x04, frame.gcePacked ?? 0, ...le16(frame.delayCs ?? 0), 0x00, 0x00);
     }
     // Image Descriptor: introducer, left, top, width, height (all LE16), packed.
     bytes.push(0x2c, ...le16(0), ...le16(0), ...le16(frame.width), ...le16(frame.height), 0x00);
@@ -164,6 +169,27 @@ describe("gifFrameSummary", () => {
     // The extension starts immediately after the 13-byte header; byte 15 is
     // its fixed data block size and must be exactly 4.
     gif[15] = 3;
+    expect(gifFrameSummary(gif)).toBeNull();
+  });
+
+  it.each([
+    ["transparency", 0x01],
+    ["user input", 0x02],
+  ] as const)("accepts the GCE %s flag", (_name, gcePacked) => {
+    const gif = buildGif({ width: 2, height: 2 }, [
+      { width: 2, height: 2, delayCs: 10, gcePacked },
+    ]);
+    expect(gifFrameSummary(gif)).toEqual({
+      frames: 1,
+      totalDurationMs: 100,
+      cumulativePixels: 4,
+    });
+  });
+
+  it("returns null when a reserved GCE flag is set", () => {
+    const gif = buildGif({ width: 2, height: 2 }, [
+      { width: 2, height: 2, delayCs: 10, gcePacked: 0x20 },
+    ]);
     expect(gifFrameSummary(gif)).toBeNull();
   });
 
