@@ -4,6 +4,7 @@ import { useAtomValue } from "jotai";
 import { ORPCError } from "@orpc/client";
 import { profileAtomFamily } from "@/atoms/profile";
 import { FollowButton } from "@/components/follow-button";
+import { LinkedText } from "@/components/linked-text";
 import { UserAvatar } from "@/components/user-avatar";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { handleOf } from "@/lib/user";
@@ -13,7 +14,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 const PROFILE_HOVER_DELAY = 600;
 const PROFILE_HOVER_CLOSE_DELAY = 300;
-const BIO_SNIPPET_LENGTH = 120;
 
 interface ProfileLinkProps {
   username: string;
@@ -113,8 +113,6 @@ function ProfileHoverCardContent({ username }: { username: string }) {
       ? m.profile_hover_follower_one({ count: followerCount })
       : m.profile_hover_follower_many({ count: followerCount });
   const bio = profile.bio?.trim() || m.profile_hover_no_bio();
-  const bioSnippet =
-    bio.length > BIO_SNIPPET_LENGTH ? `${bio.slice(0, BIO_SNIPPET_LENGTH).trimEnd()}…` : bio;
 
   return (
     <div className="space-y-3">
@@ -144,8 +142,13 @@ function ProfileHoverCardContent({ username }: { username: string }) {
         </div>
       </div>
 
-      <p className="text-foreground/90 text-sm leading-relaxed break-words whitespace-pre-line">
-        {bioSnippet}
+      {/* The bio gets the same LinkedText rendering as every other bio
+          surface, clamped visually instead of string-sliced so truncation can
+          never cut a URL or mention mid-token into a dead partial link. A
+          mention here intentionally opens its own hover preview inside this
+          card, as it already does inside the moderation case dialog. */}
+      <p className="text-foreground/90 line-clamp-3 text-sm leading-relaxed break-words whitespace-pre-line">
+        <LinkedText text={bio} />
       </p>
 
       <div className="flex items-center justify-between gap-3">
