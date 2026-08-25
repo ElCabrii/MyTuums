@@ -172,6 +172,33 @@ describe("PostAttachmentGrid", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
+  it("does not leak in-dialog clicks into surrounding clickable surfaces", async () => {
+    // Opening the viewer only claims the trigger's own click. Once open, the
+    // dialog is portaled to <body>, but React events still bubble through the
+    // React tree — past this grid and into the post card's click-to-navigate
+    // shell. Clicks on the full-size image, a loading/error state, or the
+    // backdrop must be claimed too, or interacting with the viewer also
+    // navigates to the thread.
+    const surfaceClick = vi.fn();
+    await renderWithProviders(
+      <div onClick={surfaceClick}>
+        <PostAttachmentGrid attachments={[makeAttachment()]} />
+      </div>,
+    );
+
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: m.post_attachment_view({ position: "1" }) }),
+    );
+    const dialog = await screen.findByRole("dialog");
+
+    // Clicking the full-size image must not bubble out of the viewer.
+    fireEvent.click(
+      within(dialog).getByRole("img", { name: m.post_attachment_alt({ position: "1" }) }),
+    );
+    expect(surfaceClick).not.toHaveBeenCalled();
+  });
+
   it("replaces a broken full-size image with an alert instead of an empty modal", async () => {
     await renderWithProviders(<PostAttachmentGrid attachments={[makeAttachment()]} />);
 

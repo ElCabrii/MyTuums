@@ -70,7 +70,18 @@ export function ImageViewer({
       </DialogTrigger>
       {/* Transparent over the darkened backdrop, matching the avatar viewer:
           nothing frames the image but its own rounded corners. */}
-      <DialogContent className="max-w-4xl overflow-hidden border-none bg-transparent p-2 shadow-none sm:p-4">
+      <DialogContent
+        className="max-w-4xl overflow-hidden border-none bg-transparent p-2 shadow-none sm:p-4"
+        // The dialog is portaled to <body>, but React events still bubble
+        // through the React tree — which, from a feed, passes through the
+        // post card's click-to-navigate shell. Without this, clicking the
+        // image, a loading/error state, or the backdrop would also fire
+        // `handleCardClick` and navigate to the thread (the trigger already
+        // stops propagation on its own click, but that only covers opening).
+        // The portaled `DropdownMenuContent` in `post-card.tsx` sets the same
+        // precedent.
+        onClick={(event) => event.stopPropagation()}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description ?? title}</DialogDescription>
