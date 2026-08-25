@@ -16,9 +16,10 @@ const initialMentionState: ComposerMentionState = {
 };
 
 /**
- * Mention state is keyed by composer identity rather than held in the
- * stateless form chrome. A post composer and a reply composer can therefore
- * keep independent caret/highlight state while sharing the same UI.
+ * Mention state is keyed by editor identity rather than held in the
+ * stateless form chrome. A post composer, a reply composer, and the bio
+ * editor can therefore keep independent caret/highlight state while sharing
+ * the same UI — each passes its own `mentionScope`.
  */
 export const composerMentionAtomFamily = atomFamily((scope: string) => {
   // The family map owns the scope key; keeping the callback parameter named

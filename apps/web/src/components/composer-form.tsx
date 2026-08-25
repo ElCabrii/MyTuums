@@ -1,13 +1,4 @@
-import { useAtom, useAtomValue } from "jotai";
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, ChevronLeft, ChevronRight, ImagePlus, Loader2, Send, X } from "lucide-react";
 import {
   ALLOWED_IMAGE_TYPES,
@@ -18,24 +9,11 @@ import {
 } from "@my-tuums/api/constants";
 import { acceptPostImage } from "@my-tuums/api/post-image";
 import type { ComposerAttachment } from "@/atoms/composer";
-import { composerMentionAtomFamily } from "@/atoms/composer-mentions";
-import { typeaheadQueryAtomFamily } from "@/atoms/search";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
-import { insertMention, mentionAtCaret } from "@/lib/composer-mentions";
+import { MentionTextarea } from "@/components/mention-textarea";
 import { createPostAttachment } from "@/lib/media";
-import { nextHighlight, suggestionRows, type SuggestionRow } from "@/lib/search-suggestions";
-import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
-
-const MAX_COMPOSER_HEIGHT = 256;
-
-function mentionUsers(rows: SuggestionRow[]): Extract<SuggestionRow, { kind: "user" }>[] {
-  return rows.filter(
-    (row): row is Extract<SuggestionRow, { kind: "user" }> =>
-      row.kind === "user" && handleOf(row.user) !== null,
-  );
-}
 
 /** Reads selected bytes through the browser's FileReader contract. */
 function readFileBytes(file: File): Promise<Uint8Array> {
@@ -59,62 +37,6 @@ function previewUrlFor(file: File): string {
   }
 }
 
-function MentionSuggestions({
-  rows,
-  highlight,
-  onHighlight,
-  onAccept,
-}: {
-  rows: Extract<SuggestionRow, { kind: "user" }>[];
-  highlight: number;
-  onHighlight: (index: number) => void;
-  onAccept: (index: number) => void;
-}) {
-  return (
-    <div
-      id="composer-mention-suggestions"
-      role="listbox"
-      aria-label={m.composer_mention_suggestions_aria()}
-      className="border-border bg-popover text-popover-foreground absolute top-[calc(100%+0.5rem)] right-0 left-0 z-50 max-h-60 overflow-y-auto rounded-xl border p-1.5 shadow-lg"
-    >
-      {rows.map((row, index) => {
-        const handle = handleOf(row.user);
-        const displayName = row.user.name || handle || m.user_unknown();
-        if (!handle) return null;
-
-        return (
-          <button
-            key={row.user.id}
-            type="button"
-            role="option"
-            aria-selected={index === highlight}
-            id={`composer-mention-${index}`}
-            onMouseDown={(event) => event.preventDefault()}
-            onMouseEnter={() => onHighlight(index)}
-            onClick={() => onAccept(index)}
-            className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left ${
-              index === highlight ? "bg-muted/60" : ""
-            }`}
-          >
-            <UserAvatar
-              user={row.user}
-              alt={displayName}
-              className="h-8 w-8 shrink-0"
-              fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
-            />
-            <span className="min-w-0">
-              <span className="text-foreground block truncate text-sm font-medium">
-                {displayName}
-              </span>
-              <span className="text-muted-foreground block truncate text-xs">@{handle}</span>
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 /**
  * The composer chrome — avatar, textarea, remaining-character counter, error
  * and submit — shared by the home composer and the thread page's reply box.
@@ -124,6 +46,10 @@ function MentionSuggestions({
  * replies are an in-memory family keyed by parent). Passing them in keeps the
  * one thing that genuinely differs — where the text goes — at the call site,
  * and the length rule, which must not differ, here.
+ *
+ * `@handle` completion is delegated to `MentionTextarea`, the shared seam the
+ * bio editor also mounts; `mentionScope` keeps each editor's transient
+ * highlight state apart.
  */
 export function ComposerForm({
   author,
@@ -159,15 +85,9 @@ export function ComposerForm({
   attachments?: ComposerAttachment[];
   onAttachmentsChange?: (next: ComposerAttachment[]) => void;
 }) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const pendingCaretRef = useRef<number | null>(null);
-  const suppressSelectionRef = useRef(false);
   const attachmentSelectionRef = useRef(0);
-  const [mentionState, setMentionState] = useAtom(composerMentionAtomFamily(mentionScope));
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentsAreValidating, setAttachmentsAreValidating] = useState(false);
-  const mentionQuery = mentionState.token?.query ?? "";
-  const typeahead = useAtomValue(typeaheadQueryAtomFamily(mentionQuery));
   const trimmed = value.trim();
   const remaining = POST_MAX_LENGTH - value.length;
   const isTooLong = remaining < 0;
@@ -179,9 +99,6 @@ export function ComposerForm({
     !isTooLong &&
     !isPending &&
     !attachmentsAreValidating;
-  const rowsForQuery = mentionUsers(suggestionRows(typeahead.data));
-  const showMentionSuggestions =
-    !isPending && mentionState.open && (typeahead.isPending || rowsForQuery.length > 0);
   const previewUrls = useMemo(
     () =>
       attachments.map(({ id, file }) => ({
@@ -199,116 +116,6 @@ export function ComposerForm({
     },
     [previewUrls],
   );
-
-  useEffect(
-    () => () => {
-      setMentionState({ token: null, highlight: -1, open: false });
-    },
-    [setMentionState],
-  );
-
-  useLayoutEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    textarea.style.height = "auto";
-    const height = Math.min(textarea.scrollHeight, MAX_COMPOSER_HEIGHT);
-    if (height > 0) textarea.style.height = `${height}px`;
-    textarea.style.overflowY = textarea.scrollHeight > MAX_COMPOSER_HEIGHT ? "auto" : "hidden";
-
-    const pendingCaret = pendingCaretRef.current;
-    if (pendingCaret !== null) {
-      textarea.focus();
-      textarea.setSelectionRange(pendingCaret, pendingCaret);
-      pendingCaretRef.current = null;
-      // `suppressSelectionRef` stays armed on purpose: Chromium queues an
-      // async `select` event for this programmatic caret move, and it fires
-      // AFTER this effect returns — clearing the guard here let that echo
-      // re-open the suggestion list over the just-accepted mention. A real
-      // gesture (typing or clicking the textarea) disarms it instead; see
-      // the onChange/onClick handlers.
-    }
-  }, [value]);
-
-  const updateMentionState = (nextValue: string, start: number | null, end: number | null) => {
-    if (suppressSelectionRef.current) return;
-    const token = mentionAtCaret(nextValue, start, end);
-    setMentionState((previous) => {
-      const tokenIsUnchanged =
-        token !== null &&
-        previous.token !== null &&
-        token.start === previous.token.start &&
-        token.end === previous.token.end &&
-        token.query === previous.token.query;
-
-      // Chromium fires `select` after an ArrowDown/ArrowUp keydown even when
-      // its default caret movement was prevented. Preserve the keyboard
-      // highlight for that unchanged token; a real caret/token change still
-      // starts navigation from no selection.
-      if (tokenIsUnchanged) return { ...previous, open: true };
-      return { token, highlight: -1, open: token !== null };
-    });
-  };
-
-  const acceptMention = (index: number) => {
-    const row = rowsForQuery[index];
-    const token = mentionState.token;
-    const handle = row ? handleOf(row.user) : null;
-    if (!token || !handle) return;
-
-    const insertion = insertMention(value, token, handle);
-    // Both branches arm the selection guard and leave it armed: restoring the
-    // caret queues a synthetic `select` that must not re-open the list. See
-    // the layout effect above and the onChange/onClick handlers.
-    if (insertion.value === value) {
-      suppressSelectionRef.current = true;
-      onValueChange(insertion.value);
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(insertion.caret, insertion.caret);
-    } else {
-      pendingCaretRef.current = insertion.caret;
-      suppressSelectionRef.current = true;
-      onValueChange(insertion.value);
-    }
-    setMentionState({ token: null, highlight: -1, open: false });
-  };
-
-  const handleMentionKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!showMentionSuggestions) {
-      if (event.key === "Escape" && mentionState.open) {
-        setMentionState((previous) => ({ ...previous, open: false, highlight: -1 }));
-      }
-      return;
-    }
-
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        setMentionState((previous) => ({
-          ...previous,
-          highlight: nextHighlight(previous.highlight, 1, rowsForQuery.length),
-        }));
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        setMentionState((previous) => ({
-          ...previous,
-          highlight: nextHighlight(previous.highlight, -1, rowsForQuery.length),
-        }));
-        break;
-      case "Enter":
-      case "Tab":
-        if (mentionState.highlight >= 0) {
-          event.preventDefault();
-          acceptMention(mentionState.highlight);
-        }
-        break;
-      case "Escape":
-        event.preventDefault();
-        setMentionState((previous) => ({ ...previous, open: false, highlight: -1 }));
-        break;
-    }
-  };
 
   const updateAttachments = (next: ComposerAttachment[]) => {
     onAttachmentsChange?.(next);
@@ -411,73 +218,16 @@ export function ComposerForm({
           className="bg-background h-10 w-10"
           fallbackClassName="bg-primary text-primary-foreground font-bold text-xs"
         />
-        <div className="relative min-w-0 flex-1">
-          <textarea
-            ref={textareaRef}
-            role="combobox"
-            rows={rows}
-            placeholder={placeholder}
-            value={value}
-            onChange={(event) => {
-              // A real edit disarms the caret-restore guard before any
-              // selection bookkeeping runs — the synthetic `select` echo the
-              // guard exists for never follows a user keystroke.
-              suppressSelectionRef.current = false;
-              onValueChange(event.target.value);
-              updateMentionState(
-                event.target.value,
-                event.target.selectionStart,
-                event.target.selectionEnd,
-              );
-            }}
-            onClick={(event) => {
-              suppressSelectionRef.current = false;
-              updateMentionState(
-                event.currentTarget.value,
-                event.currentTarget.selectionStart,
-                event.currentTarget.selectionEnd,
-              );
-            }}
-            onSelect={(event) =>
-              updateMentionState(
-                event.currentTarget.value,
-                event.currentTarget.selectionStart,
-                event.currentTarget.selectionEnd,
-              )
-            }
-            onKeyDown={handleMentionKeyDown}
-            aria-autocomplete="list"
-            aria-expanded={showMentionSuggestions}
-            aria-controls={showMentionSuggestions ? "composer-mention-suggestions" : undefined}
-            aria-activedescendant={
-              showMentionSuggestions && mentionState.highlight >= 0
-                ? `composer-mention-${mentionState.highlight}`
-                : undefined
-            }
-            disabled={isPending}
-            className="placeholder:text-muted-foreground max-h-64 min-h-[3.5rem] w-full resize-none overflow-y-hidden border-none bg-transparent p-0 text-sm focus:ring-0 focus:outline-none disabled:opacity-60"
-          />
-          {showMentionSuggestions &&
-            (typeahead.isPending ? (
-              <div
-                id="composer-mention-suggestions"
-                role="listbox"
-                aria-label={m.composer_mention_suggestions_aria()}
-                className="border-border bg-popover text-popover-foreground absolute top-[calc(100%+0.5rem)] right-0 left-0 z-50 flex items-center justify-center rounded-xl border p-4 shadow-lg"
-              >
-                <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
-              </div>
-            ) : (
-              <MentionSuggestions
-                rows={rowsForQuery}
-                highlight={mentionState.highlight}
-                onHighlight={(index) =>
-                  setMentionState((previous) => ({ ...previous, highlight: index }))
-                }
-                onAccept={acceptMention}
-              />
-            ))}
-        </div>
+        <MentionTextarea
+          value={value}
+          onValueChange={onValueChange}
+          mentionScope={mentionScope}
+          placeholder={placeholder}
+          rows={rows}
+          disabled={isPending}
+          wrapperClassName="min-w-0 flex-1"
+          className="placeholder:text-muted-foreground max-h-64 min-h-[3.5rem] w-full resize-none border-none bg-transparent p-0 text-sm focus-visible:ring-0 disabled:opacity-60"
+        />
       </div>
 
       {/*

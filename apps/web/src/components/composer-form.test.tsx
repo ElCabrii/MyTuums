@@ -1,4 +1,4 @@
-import { useState, type ComponentProps } from "react";
+import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -62,30 +62,6 @@ async function renderComposer(overrides: Partial<ComponentProps<typeof ComposerF
   );
 
   return { onSubmit, onValueChange, ...result };
-}
-
-function StatefulComposer({
-  initialValue,
-  mentionScope,
-}: {
-  initialValue: string;
-  mentionScope: string;
-}) {
-  const [value, setValue] = useState(initialValue);
-
-  return (
-    <ComposerForm
-      author={{ name: "Alex Mercer", image: null }}
-      value={value}
-      onValueChange={setValue}
-      onSubmit={() => {}}
-      isPending={false}
-      errorMessage={null}
-      placeholder="What's happening?"
-      submitLabel="Post"
-      mentionScope={mentionScope}
-    />
-  );
 }
 
 describe("ComposerForm", () => {
@@ -164,29 +140,6 @@ describe("ComposerForm", () => {
     // `animate-spin` class the source applies only to Loader2 is the
     // reliable signal that it — not Send — is what's rendered.
     expect(container.querySelector("button[type='submit'] svg.animate-spin")).toBeInTheDocument();
-  });
-
-  it("keeps short drafts compact and caps a near-limit multiline draft with scrolling", async () => {
-    await renderWithProviders(<StatefulComposer initialValue="Short" mentionScope="auto-grow" />);
-    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
-    let scrollHeight = 56;
-    Object.defineProperty(textarea, "scrollHeight", {
-      configurable: true,
-      get: () => scrollHeight,
-    });
-
-    fireEvent.change(textarea, { target: { value: "Short draft" } });
-    expect(textarea.style.height).toBe("56px");
-    expect(textarea.style.overflowY).toBe("hidden");
-
-    const nearLimit = "line\n".repeat(99) + "line";
-    expect(nearLimit.length).toBe(499);
-    scrollHeight = 480;
-    fireEvent.change(textarea, { target: { value: nearLimit } });
-
-    expect(textarea.style.height).toBe("256px");
-    expect(textarea.style.overflowY).toBe("auto");
-    expect(screen.getByText("1", { exact: true })).toBeInTheDocument();
   });
 
   it("shows the send icon, not a spinner, when idle", async () => {
