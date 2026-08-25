@@ -84,6 +84,52 @@ describe("ProfileLink", () => {
     expect(screen.queryByText("@keyboarduser")).not.toBeInTheDocument();
   });
 
+  it("renders bio URLs and mentions as links without slicing long tokens", async () => {
+    const queryClient = renderQueryClient();
+    const filler = "x".repeat(130);
+    queryFixtures(queryClient).profile.data(
+      "linker",
+      makeProfile({
+        id: "person-3",
+        username: "linker",
+        name: "Link User",
+        bio: `Find me at https://example.com or @jamierivera ${filler} https://example.com/very/long/path`,
+      }),
+    );
+
+    await renderWithProviders(<ProfileLink username="linker">Link User</ProfileLink>, {
+      queryClient,
+      signedInAs: true,
+    });
+    vi.useFakeTimers();
+
+    fireEvent.mouseEnter(screen.getByRole("link", { name: "Link User" }));
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    const external = screen.getByRole("link", { name: "https://example.com" });
+    expect(external).toHaveAttribute("href", "https://example.com/");
+    expect(external).toHaveAttribute("target", "_blank");
+    expect(external).toHaveAttribute("rel", "noopener noreferrer nofollow ugc");
+    expect(screen.getByRole("link", { name: "@jamierivera" })).toHaveAttribute(
+      "href",
+      "/@jamierivera",
+    );
+
+    const bioParagraph = screen.getByText("Find me at", { exact: false });
+    expect(bioParagraph).toHaveClass("line-clamp-3");
+    // Nothing is string-sliced, so a URL beyond the old snippet budget
+    // survives whole instead of ending as a dead partial link.
+    expect(bioParagraph).toHaveTextContent("https://example.com/very/long/path");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.queryByText("Find me at", { exact: false })).not.toBeInTheDocument();
+  });
+
   it("renders only the suspension stub for a suspended profile", async () => {
     const queryClient = renderQueryClient();
     queryFixtures(queryClient).profile.data(
