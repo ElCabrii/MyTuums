@@ -4,12 +4,18 @@ import type { Database } from "@my-tuums/db";
 import { follow, user, userBlock } from "@my-tuums/db/schema";
 import { normalizeUsername, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "@my-tuums/auth/rules";
 import { z } from "zod";
-import { FOLLOW_PAGE_SIZE, FOLLOW_PAGE_SIZE_MAX, IMAGE_KINDS } from "./constants.js";
+import {
+  CURSOR_MAX_ENCODED_LENGTH,
+  FOLLOW_PAGE_SIZE,
+  FOLLOW_PAGE_SIZE_MAX,
+  IMAGE_KINDS,
+} from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { keysetPage } from "./pagination.js";
 import { acceptImage, type ImageRejection } from "./image.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
+import { acquireRelationshipLock } from "./relationship-lock.js";
 import { replaceProfileMedia, removeProfileMedia, requireStorage } from "./profile-media.js";
 import { effectivelyBanned, invisibleUser, visibleUser } from "./visibility.js";
 
@@ -100,26 +106,41 @@ async function countFollowers(db: Database, userId: string): Promise<number> {
 }
 
 /**
- * Resolves a handle to a user id, or throws `NOT_FOUND`.
+ * Resolves a handle to the owner of a follower/following graph, or throws
+ * `NOT_FOUND`.
  *
  * The username plugin stores both handle columns in canonical lowercase, so
  * `/@AlexMercer` and `/@alexmercer` have to resolve to the same profile.
  * Matching a normalised input against the stored column keeps the lookup on
  * the unique index rather than forcing a sequential scan with
  * `lower(username) = ...`.
+ *
+ * The visibility half is the point (finding 4): a block in either direction
+ * reads as a missing handle — the same NOT_FOUND `byUsername` gives — so a
+ * blocking account's graph cannot be traversed by the very person it hides
+ * from. Without this filter the lookup returned the id and the caller's query
+ * confirmed the account exists and enumerated its visible members, leaking
+ * exactly what the block is supposed to hide. A banned target is returned
+ * rather than hidden, flagged by the same `effectivelyBanned` predicate the
+ * profile stub reads, so the caller can redact the graph to match the stub's
+ * zeroed counts instead of the 404 a blocked target gets.
  */
-async function requireUserIdByUsername(db: Database, username: string): Promise<string> {
+async function resolveGraphTarget(
+  db: Database,
+  username: string,
+  viewerId: string,
+): Promise<{ id: string; suspended: boolean }> {
   const [found] = await db
-    .select({ id: user.id })
+    .select({ id: user.id, suspended: effectivelyBanned })
     .from(user)
-    .where(eq(user.username, normalizeUsername(username)))
+    .where(and(eq(user.username, normalizeUsername(username)), not(invisibleUser(viewerId))))
     .limit(1);
 
   if (!found) {
     throw new ORPCError("NOT_FOUND", { message: "No such user." });
   }
 
-  return found.id;
+  return found;
 }
 
 /**
@@ -296,32 +317,44 @@ export const userRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
-      // A block in either direction makes the follow a bad request, not a
-      // silent no-op: the block severing follows is the P4 `block` procedure,
-      // and a follow that quietly did nothing would read as broken UI. A
-      // blocked account's profile is already invisible, so this guard is
-      // what stops a direct follow attempt after the block.
-      const [block] = await context.db
-        .select({ id: userBlock.blockerId })
-        .from(userBlock)
-        .where(
-          or(
-            and(eq(userBlock.blockerId, context.user.id), eq(userBlock.blockedId, input.userId)),
-            and(eq(userBlock.blockerId, input.userId), eq(userBlock.blockedId, context.user.id)),
-          ),
-        )
-        .limit(1);
+      // The block check and the insert run under the pair's relationship lock,
+      // in one transaction. Unlocked, they are a TOCTOU: a `block` committing
+      // between them severs the existing follows and then this insert puts a
+      // new edge back, leaving a prohibited follow standing behind the block
+      // that reappears the moment the block is lifted. `block` and `unblock`
+      // take the same lock, so the two operations are serialized per pair
+      // rather than per table — which is the only place the invariant can be
+      // enforced, since the edges live in two tables no constraint spans.
+      await context.db.transaction(async (tx) => {
+        await acquireRelationshipLock(tx, context.user.id, input.userId);
 
-      if (block) {
-        throw new ORPCError("BAD_REQUEST", { message: "You can't follow this user." });
-      }
+        // A block in either direction makes the follow a bad request, not a
+        // silent no-op: the block severing follows is the P4 `block`
+        // procedure, and a follow that quietly did nothing would read as
+        // broken UI. A blocked account's profile is already invisible, so this
+        // guard is what stops a direct follow attempt after the block.
+        const [block] = await tx
+          .select({ id: userBlock.blockerId })
+          .from(userBlock)
+          .where(
+            or(
+              and(eq(userBlock.blockerId, context.user.id), eq(userBlock.blockedId, input.userId)),
+              and(eq(userBlock.blockerId, input.userId), eq(userBlock.blockedId, context.user.id)),
+            ),
+          )
+          .limit(1);
 
-      // The (follower_id, following_id) primary key makes the duplicate
-      // impossible; this just declines to error on it.
-      await context.db
-        .insert(follow)
-        .values({ followerId: context.user.id, followingId: input.userId })
-        .onConflictDoNothing();
+        if (block) {
+          throw new ORPCError("BAD_REQUEST", { message: "You can't follow this user." });
+        }
+
+        // The (follower_id, following_id) primary key makes the duplicate
+        // impossible; this just declines to error on it.
+        await tx
+          .insert(follow)
+          .values({ followerId: context.user.id, followingId: input.userId })
+          .onConflictDoNothing();
+      });
 
       return {
         userId: input.userId,
@@ -375,17 +408,28 @@ export const userRouter = {
     .input(
       z.object({
         username: usernameInput,
-        cursor: z.string().optional(),
+        cursor: z.string().max(CURSOR_MAX_ENCODED_LENGTH).optional(),
         limit: z.number().int().min(1).max(FOLLOW_PAGE_SIZE_MAX).default(FOLLOW_PAGE_SIZE),
       }),
     )
     .handler(async ({ input, context }) => {
-      const targetId = await requireUserIdByUsername(context.db, input.username);
+      const target = await resolveGraphTarget(context.db, input.username, context.user.id);
+
+      // A banned target's graph is redacted to an empty page — the same
+      // answer `byUsername`'s stub gives when it zeros the counts, so the
+      // list cannot disagree with the profile that opened it about how many
+      // members exist. The `visibleUser` filter below then has no target
+      // rows to run over, which is the point: nothing about a suspended
+      // account's graph crosses the boundary.
+      if (target.suspended) {
+        return { items: [], nextCursor: null };
+      }
 
       const filters = [
-        eq(follow.followingId, targetId),
-        // Banned and blocked accounts drop out of the list — a follower you
-        // can't see (or who can't see you) is not a follower to list.
+        eq(follow.followingId, target.id),
+        // A user you can't see (or who can't see you) is not a follower to
+        // list — the member-side half of visibility; the target-side half is
+        // `resolveGraphTarget` above.
         visibleUser(context.user.id),
       ];
 
@@ -423,17 +467,23 @@ export const userRouter = {
     .input(
       z.object({
         username: usernameInput,
-        cursor: z.string().optional(),
+        cursor: z.string().max(CURSOR_MAX_ENCODED_LENGTH).optional(),
         limit: z.number().int().min(1).max(FOLLOW_PAGE_SIZE_MAX).default(FOLLOW_PAGE_SIZE),
       }),
     )
     .handler(async ({ input, context }) => {
-      const targetId = await requireUserIdByUsername(context.db, input.username);
+      const target = await resolveGraphTarget(context.db, input.username, context.user.id);
+
+      // Same redaction as `followers`: a banned target's graph is an empty
+      // page, matching the stub its profile renders.
+      if (target.suspended) {
+        return { items: [], nextCursor: null };
+      }
 
       const filters = [
-        eq(follow.followerId, targetId),
-        // Banned and blocked accounts drop out of the list — same filter as
-        // `followers`, which is what keeps the two lists symmetric.
+        eq(follow.followerId, target.id),
+        // Same member-side filter as `followers`, which is what keeps the
+        // two lists symmetric.
         visibleUser(context.user.id),
       ];
 

@@ -49,6 +49,7 @@ import {
   type ActionRow,
   type DbLike,
 } from "./moderation-actions.js";
+import { lockModerationTarget } from "./moderation-target-lock.js";
 import { rateLimitCapability } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 
@@ -294,6 +295,34 @@ async function assertContestable(db: DbLike, target: AppealTarget): Promise<void
 }
 
 /**
+ * Locks the target before `assertContestable` locks the action row.
+ *
+ * Forward sanctions use the same target-first order before scanning action
+ * history. Reading the action without a lock is only to discover which target
+ * row to lock; the authoritative action read remains the locked query in
+ * `assertContestable`.
+ */
+async function lockAppealTarget(db: DbLike, target: AppealTarget): Promise<void> {
+  const [action] = await db
+    .select({
+      targetType: moderationAction.targetType,
+      targetPostId: moderationAction.targetPostId,
+      targetUserId: moderationAction.targetUserId,
+    })
+    .from(moderationAction)
+    .where(eq(moderationAction.id, target.actionId))
+    .limit(1);
+  if (!action) return;
+
+  // SAFETY: the moderation_action target-match check constraint restricts this
+  // column to the two moderation target kinds.
+  const targetType = action.targetType as "post" | "user";
+  const targetId = targetType === "post" ? action.targetPostId : action.targetUserId;
+  if (!targetId) return;
+  await lockModerationTarget(db, { targetType, targetId });
+}
+
+/**
  * Refuses an attempt an earlier appeal already answered.
  *
  * One query covers both refusals: a REUSED link (same nonce — a double click
@@ -379,9 +408,10 @@ async function insertAppeal(
  * 2. **Spend the capability's budget**, inside the adapter, at the point its
  *    key comes into existence — the link's nonce, or the removal's id. Every
  *    query after this point is paid for.
- * 3. **Lock the contested action and prove it contestable** — appealable, this
- *    appellant's, current, latest. The lock is held through the insert so a
- *    manual reversal cannot pass between validation and persistence.
+ * 3. **Lock the target, then the contested action and prove it contestable** —
+ *    appealable, this appellant's, current, latest. The locks are held through
+ *    the insert so a forward sanction or manual reversal cannot pass between
+ *    validation and persistence.
  * 4. **Refuse a replay**, then insert and let the unique constraints settle
  *    what the read could not.
  *
@@ -394,6 +424,7 @@ export async function openAppeal(
 ): Promise<OpenedAppeal> {
   const target = await resolveTarget(context, request);
   return context.db.transaction(async (tx) => {
+    await lockAppealTarget(tx, target);
     await assertContestable(tx, target);
     await refuseReplay(tx, target);
     return insertAppeal(tx, target, request.reason);

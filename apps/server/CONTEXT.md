@@ -62,10 +62,28 @@ by the Playwright `api` project.
   plugin gates on its own `adminRoles` option, which cannot express this app's
   hierarchy. Blocking it keeps `/rpc` the only path to a moderation action, so
   the rank guard and the audit log stay the only enforcement surface.
-- **The `/rpc` body cap runs before oRPC buffers.** oRPC buffers a multipart
-  body while routing — before auth, rate limiting or any payload check.
-  Content-Length is checked here; chunked bodies are bounded at the same
-  ceiling by oRPC's `BodyLimitPlugin`, wired in `src/index.ts`.
+- **The `/rpc` admission gates run before oRPC buffers.** oRPC buffers a
+  multipart body while routing — before auth, rate limiting or any payload
+  check — so three checks hold ahead of it:
+  1. the hard ceiling, `RPC_MAX_BODY_BYTES`, on the declared Content-Length,
+     which 413s;
+  2. the pre-auth gate at `RPC_SMALL_BODY_BYTES`. Every procedure takes either
+     a small JSON object or a file upload, and every upload is session-gated,
+     so a body over that line — declared above it, OR chunked, which has no
+     length to compare — must present a valid session or get 401 on a
+     non-appeal path. An anonymous upload-sized body is refused instead of
+     buffered and then rejected. The one public procedure,
+     `moderation.appealOpen`, is exempt from the session demand: an oversized
+     declared appeal body gets that bound as its own 413 limit, and a chunked
+     appeal body gets 411 — every client that legitimately reaches the appeal
+     link sends plain JSON with a Content-Length. The gate reads the
+     **canonical** path, so an encoded spelling is recognised and an
+     uncanonicalisable one falls to the session demand;
+  3. `MAX_RPC_IN_FLIGHT` concurrent dispatches, over which `/rpc` answers 503.
+     After (2), only an AUTHENTICATED caller can have a body buffered at the
+     `RPC_MAX_BODY_BYTES` ceiling (oRPC's `BodyLimitPlugin`, wired in
+     `src/index.ts`, enforces it per body); (3) bounds how many of those can
+     buffer at once.
 - **The `/api/auth` body cap runs before Better Auth converts the request.**
   Declared bodies above `AUTH_MAX_BODY_BYTES` are rejected immediately;
   lengthless and chunked bodies use the bounded replay path so the adapter

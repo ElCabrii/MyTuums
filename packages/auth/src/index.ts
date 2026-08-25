@@ -396,3 +396,4 @@ export {
   type OutgoingEmail,
 } from "./email.js";
 export { webOrigin } from "./env.js";
+export { PROVIDER_IMAGE_MAX_URL_LENGTH } from "./profile.js";

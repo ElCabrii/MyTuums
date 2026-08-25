@@ -1,4 +1,5 @@
 import { ORPCError } from "@orpc/server";
+import { CURSOR_ID_MAX_LENGTH, CURSOR_MAX_ENCODED_LENGTH } from "./constants.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createCursorCodec } from "./cursor.js";
@@ -95,6 +96,47 @@ describe("createCursorCodec", () => {
       expectMalformedCursor(() =>
         codec.decode(encodeRaw({ createdAt: "2026-08-02T12:00:00+02:00", id: VALID_UUID })),
       );
+    });
+
+    it("throws BAD_REQUEST for an oversized cursor — the decode cost is bounded", () => {
+      // The cap is generous (a real cursor is a couple of hundred characters);
+      // this proves the bound exists at all, so a multi-megabyte cursor query
+      // cannot cost a repeated multi-MB decode per request.
+      const blob = "a".repeat(CURSOR_MAX_ENCODED_LENGTH + 1);
+      expectMalformedCursor(() => codec.decode(blob));
+    });
+
+    it("throws BAD_REQUEST for non-canonical base64url, before JSON.parse runs", () => {
+      // The encoder emits no `=` padding and no `+`/`/`; base64 with padding
+      // and a valid payload inside is still a malformed CURSOR, not a payload
+      // detail — re-encoding its bytes must reproduce the input exactly.
+      const padded = encodeRaw({ createdAt: new Date().toISOString(), id: VALID_UUID });
+      const unpadded = padded.replace(/=+$/, "");
+      expect(unpadded.length).toBeGreaterThan(0);
+      expectMalformedCursor(() => codec.decode(`${unpadded}=`));
+    });
+
+    it("throws BAD_REQUEST for base64 that smuggles non-alphabet characters", () => {
+      // `Buffer.from` drops out-of-alphabet characters when decoding; the
+      // canonical re-encode catches the interleaved junk that would otherwise
+      // silently vanish.
+      const payload = encodeRaw({ createdAt: new Date().toISOString(), id: VALID_UUID });
+      expectMalformedCursor(() => codec.decode(payload.slice(0, 4) + "!!" + payload.slice(4)));
+    });
+
+    it("still accepts an exactly-canonical cursor with no padding", () => {
+      // The canonical check must not reject what encode() produces.
+      const cursor = codec.encode(new Date(), VALID_UUID);
+      expect(codec.decode(cursor).id).toBe(VALID_UUID);
+    });
+
+    it("bounds textual ids inside an otherwise small decoded payload", () => {
+      const payload = encodeRaw({
+        createdAt: new Date().toISOString(),
+        id: "x".repeat(CURSOR_ID_MAX_LENGTH + 1),
+      });
+      expect(payload.length).toBeLessThanOrEqual(CURSOR_MAX_ENCODED_LENGTH);
+      expectMalformedCursor(() => codec.decode(payload));
     });
   });
 });

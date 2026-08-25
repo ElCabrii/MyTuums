@@ -134,6 +134,20 @@
       "when": 1787493604383,
       "tag": "0018_amazing_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787585556749,
+      "tag": "0019_daffy_magus",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787595696307,
+      "tag": "0020_natural_magdalene",
+      "breakpoints": true
     }
   ]
 }

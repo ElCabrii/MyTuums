@@ -44,6 +44,12 @@ export const SEARCH_PAGE_SIZE_MAX = 50;
 export const MODERATION_PAGE_SIZE = 20;
 export const MODERATION_PAGE_SIZE_MAX = 50;
 
+/** Maximum encoded length accepted for every opaque keyset cursor. */
+export const CURSOR_MAX_ENCODED_LENGTH = 512;
+
+/** Maximum length of a textual id carried inside a decoded cursor payload. */
+export const CURSOR_ID_MAX_LENGTH = 128;
+
 /** Maximum length of a moderator's stated reason or note, in characters, after trimming. */
 export const MODERATION_NOTE_MAX_LENGTH = 1000;
 
@@ -228,6 +234,34 @@ export const RPC_MAX_BODY_BYTES =
     ...Object.values(IMAGE_LIMITS).map((slot) => slot.maxOriginalBytes + slot.maxDisplayBytes),
   ) +
   1024 * 1024;
+
+/**
+ * The largest body any non-upload RPC call legitimately carries — the line
+ * the pre-auth gate draws (finding `resource-exhaustion.rpc-preauth-buffering`).
+ *
+ * Every `/rpc` procedure takes either a small JSON object (a post is 500
+ * characters, an appeal reason 2000, the appeal token 4 KiB — nothing above a
+ * few kilobytes) or a file upload, which is the one thing that crosses this
+ * line. So a declared body above this bound is an upload by definition — and
+ * every upload procedure is session-gated, so an anonymous caller has no
+ * legitimate use for it. `apps/server/src/request-handler.ts` therefore:
+ *
+ * - refuses an appeal body above this bound — the public appeal surface's low
+ *   limit, where the biggest legitimate body is the token plus the reason;
+ * - demands a valid session before letting any OTHER `/rpc` body above it be
+ *   buffered, so an anonymous upload-sized body is refused before oRPC parses
+ *   it instead of being buffered and then rejected as UNAUTHORIZED.
+ *
+ * Chunked (`Transfer-Encoding`) bodies carry no Content-Length to compare, so
+ * they are treated as over this bound by definition: the session demand
+ * applies to them exactly as to an oversized upload, and a chunked body on the
+ * appeal path itself is refused with 411 — every client that legitimately
+ * reaches that link sends plain JSON with a declared length. What an
+ * AUTHENTICATED chunked body can still do (buffer up to `RPC_MAX_BODY_BYTES`
+ * under oRPC's BodyLimitPlugin) is bounded in number by the RPC concurrency
+ * admission cap in `request-handler.ts`.
+ */
+export const RPC_SMALL_BODY_BYTES = 16 * 1024;
 
 /**
  * The URL prefix under which uploaded images are served, and the marker that

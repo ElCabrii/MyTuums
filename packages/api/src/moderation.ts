@@ -27,6 +27,7 @@ import { queueRouter } from "./moderation-queue.js";
 import { keysetPage } from "./pagination.js";
 import { moderatorProcedure, protectedProcedure, rateLimit, staffProcedure } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
+import { acquireRelationshipLock } from "./relationship-lock.js";
 import { roleAtLeast, roleRank, USER_ROLES } from "./roles.js";
 import { matchesUserQuery, userQueryRank } from "./search.js";
 import { publicUserColumns } from "./users.js";
@@ -200,7 +201,16 @@ export const moderationRouter = {
       // statements would let a mid-failure leave the follows deleted with no
       // block in place — the severs are the block's side effect, not a
       // standalone action.
+      //
+      // The pair's relationship lock is what makes the sever stick. `follow`
+      // checks for a block and then inserts its edge; without a lock spanning
+      // both operations, a follow that passed its check before this
+      // transaction can commit its insert after the delete above, leaving a
+      // prohibited edge behind the block. `follow` and `unblock` take the same
+      // lock, so relationship writes for a pair are serialized — the only
+      // place to enforce an invariant that spans two tables.
       await context.db.transaction(async (tx) => {
+        await acquireRelationshipLock(tx, context.user.id, input.userId);
         await tx.delete(follow).where(
           sql`(${follow.followerId} = ${context.user.id} and ${follow.followingId} = ${input.userId})
                  or (${follow.followerId} = ${input.userId} and ${follow.followingId} = ${context.user.id})`,
@@ -226,11 +236,20 @@ export const moderationRouter = {
         .limit(1);
       if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
 
-      await context.db
-        .delete(userBlock)
-        .where(
-          sql`${userBlock.blockerId} = ${context.user.id} and ${userBlock.blockedId} = ${input.userId}`,
-        );
+      // Under the same pair lock as `block` and `follow`, so a follow that is
+      // mid-flight cannot straddle the removal: it either finds the block and
+      // is refused, or runs entirely after the unblock and is allowed. Without
+      // the lock, a follow whose check ran while the block stood could still
+      // insert afterwards — the same edge the block was supposed to forbid,
+      // now committed with no block left to explain it.
+      await context.db.transaction(async (tx) => {
+        await acquireRelationshipLock(tx, context.user.id, input.userId);
+        await tx
+          .delete(userBlock)
+          .where(
+            sql`${userBlock.blockerId} = ${context.user.id} and ${userBlock.blockedId} = ${input.userId}`,
+          );
+      });
 
       return { userId: input.userId, blocked: false };
     }),

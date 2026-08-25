@@ -4,6 +4,7 @@ import {
   BIO_TOO_LONG_MESSAGE,
   DOB_INVALID_MESSAGE,
   DOB_UNDER_AGE_MESSAGE,
+  hasCompletedOnboarding,
   isAllowedUsernameCharset,
   isAtLeastYearsOld,
   isBioWithinLimit,
@@ -163,6 +164,62 @@ describe("username rules", () => {
     // handle forms and the plugin all share this one predicate.
     expect(isAllowedUsernameCharset("alice")).toBe(true);
     expect(isAllowedUsernameCharset("alice")).toBe(true);
+  });
+});
+
+describe("onboarding completeness", () => {
+  const complete = { username: "alice", dateOfBirth: "1995-01-01" };
+
+  it("passes a claimed handle with a date of birth at or above the minimum age", () => {
+    // The age boundary is the same `isAtLeastYearsOld` cutoff, checked against
+    // the same fixed "today" the other age tests use.
+    expect(hasCompletedOnboarding(complete, TODAY)).toBe(true);
+    expect(hasCompletedOnboarding({ username: "alice", dateOfBirth: "2011-08-14" }, TODAY)).toBe(
+      true,
+    );
+  });
+
+  it("refuses a session that never claimed a handle — the OAuth-incomplete shape", () => {
+    expect(hasCompletedOnboarding({ username: null, dateOfBirth: "1995-01-01" }, TODAY)).toBe(
+      false,
+    );
+    expect(hasCompletedOnboarding({ username: undefined, dateOfBirth: "1995-01-01" }, TODAY)).toBe(
+      false,
+    );
+    // An empty handle is a missing field, not a claimed one.
+    expect(hasCompletedOnboarding({ username: "", dateOfBirth: "1995-01-01" }, TODAY)).toBe(false);
+  });
+
+  it("fails a session with no date of birth, whatever the handle", () => {
+    for (const absent of [null, undefined, ""]) {
+      expect(hasCompletedOnboarding({ username: "alice", dateOfBirth: absent }, TODAY)).toBe(false);
+    }
+  });
+
+  it("fails a date of birth one day below the minimum age", () => {
+    expect(hasCompletedOnboarding({ username: "alice", dateOfBirth: "2011-08-15" }, TODAY)).toBe(
+      false,
+    );
+  });
+
+  it("fails a malformed date of birth rather than trusting it", () => {
+    expect(hasCompletedOnboarding({ username: "alice", dateOfBirth: "not-a-date" }, TODAY)).toBe(
+      false,
+    );
+    expect(hasCompletedOnboarding({ username: "alice", dateOfBirth: "1995-02-30" }, TODAY)).toBe(
+      false,
+    );
+  });
+
+  it("reads the session shapes the adapter actually hands back", () => {
+    // A `Date` (the timestamp column) and an ISO string must both count as a
+    // declared date of birth — the gate reads the session, not the form.
+    expect(
+      hasCompletedOnboarding({ username: "alice", dateOfBirth: new Date("1995-01-01") }, TODAY),
+    ).toBe(true);
+    expect(
+      hasCompletedOnboarding({ username: "alice", dateOfBirth: "1995-01-01T00:00:00.000Z" }, TODAY),
+    ).toBe(true);
   });
 });
 

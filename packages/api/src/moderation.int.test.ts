@@ -17,9 +17,16 @@ import {
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { APPEAL_TOKEN_MAX_LENGTH, appealToken } from "./appeal-token.js";
-import { isActionLatest, restorePostEffect, unbanEffect } from "./moderation-actions.js";
+import {
+  isActionLatest,
+  removePostEffect,
+  restorePostEffect,
+  suspendUserEffect,
+  unbanEffect,
+} from "./moderation-actions.js";
 import type { Context } from "./context.js";
 import { RATE_LIMITS } from "./rate-limit.js";
+import { acquireRelationshipLock } from "./relationship-lock.js";
 import { appRouter } from "./router.js";
 import {
   anonContext,
@@ -49,6 +56,50 @@ async function moderatorUser(): Promise<TestUser> {
   const user = await createTestUser();
   await setUserRole(user.id, "moderator");
   return freshSessionFor(user);
+}
+
+/**
+ * Waits until some session is parked on an ungranted advisory lock — the
+ * signal that a concurrent call has reached `acquireRelationshipLock` and is
+ * blocked there. Polling `pg_locks` beats an arbitrary sleep: it is the
+ * actual condition, so the test neither races the scheduler nor pays for a
+ * fixed delay. This file runs serially (`fileParallelism: false`), so an
+ * ungranted advisory lock belongs to the test that is running.
+ *
+ * Deliberately best-effort rather than throwing on timeout: if the lock were
+ * ever removed from the racing procedure, nothing would park here, and the
+ * test must then fail on the invariant it is about — a prohibited edge — not
+ * on a helper's timeout, which says nothing about what broke.
+ */
+async function waitForAdvisoryLockWaiter(): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const rows = await anonContext.db.execute<{ waiting: number }>(
+      sql`select count(*)::int as waiting from pg_locks where locktype = 'advisory' and not granted`,
+    );
+    if (Number(rows[0]?.waiting ?? 0) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** Waits until a moderation effect is blocked on the held post row. */
+async function waitForPostRowLockWaiter(): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const rows = await anonContext.db.execute<{ blocked: boolean }>(sql`
+      select exists (
+        select 1
+        from pg_stat_activity
+        where datname = current_database()
+          and pid <> pg_backend_pid()
+          and state = 'active'
+          and wait_event_type = 'Lock'
+          and query ilike '%for update%'
+          and query ilike '%post%'
+      ) as blocked
+    `);
+    if (rows[0]?.blocked) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Moderation removal never reached the held post-row lock");
 }
 
 /** Same idea as `moderatorUser`, one rank up. */
@@ -486,6 +537,49 @@ describe("block and unblock", () => {
     expect(blockRow).toBeDefined();
   });
 
+  it("a follow racing a block cannot slip an edge in behind it", async () => {
+    // The exact interleaving the pair lock exists to make impossible: `follow`
+    // reads no block, a `block` commits (severing the existing edges), and
+    // then `follow`'s insert lands anyway — a prohibited edge standing behind
+    // the block, invisible while it holds and back in view the moment it is
+    // lifted.
+    //
+    // Made deterministic rather than left to chance: an outer transaction
+    // takes the pair's lock first, so the concurrent `follow` blocks on it
+    // before it can read anything. The block's own rows are written inside
+    // that transaction and committed, which puts `follow` in exactly the
+    // window the race needs. Without the lock in `follow`, it would read
+    // through the uncommitted block, see nothing, and insert.
+    const a = await createTestUser();
+    const b = await createTestUser();
+
+    let followCall: Promise<unknown> | undefined;
+    await anonContext.db.transaction(async (tx) => {
+      await acquireRelationshipLock(tx, a.id, b.id);
+
+      followCall = call(appRouter.user.follow, { userId: b.id }, { context: contextFor(a) }).catch(
+        (error) => z.instanceof(Error).parse(error),
+      );
+
+      // Wait until that call is actually parked on the advisory lock, so the
+      // commit below lands inside its window rather than before it starts.
+      await waitForAdvisoryLockWaiter();
+
+      await tx.insert(userBlock).values({ blockerId: a.id, blockedId: b.id });
+    });
+
+    await expect(followCall).resolves.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "You can't follow this user.",
+    });
+    expect(
+      await anonContext.db
+        .select()
+        .from(follow)
+        .where(and(eq(follow.followerId, a.id), eq(follow.followingId, b.id))),
+    ).toHaveLength(0);
+  });
+
   it("blocking yourself or a missing account is refused", async () => {
     const a = await createTestUser();
     await expect(
@@ -598,7 +692,7 @@ describe("queue", () => {
     expect(only.targetId).toBe(postRow.id);
     expect(only.reportCount).toBe(3);
     expect([...only.reasons].sort()).toEqual(["harassment", "spam"]);
-    expect(only.appeal).toBeNull();
+    expect(only.appeals).toEqual([]);
     expect(page.nextCursor).toBeNull();
 
     await clearQueueFixtures();
@@ -919,16 +1013,79 @@ describe("queue", () => {
     expect([...case1!.reasons]).toEqual(["harassment"]);
     // Shape pin: exactly id + reason + createdAt — the appeal half of a
     // merged case carries nothing else.
-    expect(Object.keys(case1!.appeal!).sort()).toEqual(["createdAt", "id", "reason"]);
-    expect(case1!.appeal!.id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(case1!.appeal!.reason).toBe("This removal is unfair");
-    expect(case1!.appeal!.createdAt).toBeInstanceOf(Date);
+    expect(case1!.appeals).toHaveLength(1);
+    expect(Object.keys(case1!.appeals[0]).sort()).toEqual(["createdAt", "id", "reason"]);
+    expect(case1!.appeals[0].id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(case1!.appeals[0].reason).toBe("This removal is unfair");
+    expect(case1!.appeals[0].createdAt).toBeInstanceOf(Date);
     expect(case2).toBeDefined();
     expect(case2!.reportCount).toBe(0);
     expect([...case2!.reasons]).toEqual([]);
-    expect(case2!.appeal?.reason).toBe("This removal too");
+    expect(case2!.appeals[0]?.reason).toBe("This removal too");
 
     await clearQueueFixtures();
+  });
+
+  it("paginates distinct cases when one target has multiple open appeals", async () => {
+    const author = await createTestUser();
+    const olderMod = await moderatorUser();
+    const admin = await adminUser();
+    const victim = await createTestUser();
+
+    try {
+      // This appeal is older than the two appeals that will share one target.
+      const olderPost = await seedPostContent(author.id, "older appeal case");
+      await call(
+        appRouter.moderation.removePost,
+        { postId: olderPost.id, reason: "rule break" },
+        { context: contextFor(olderMod) },
+      );
+      const olderRemoval = await latestAction("post_removed", "post", olderPost.id);
+      await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(olderRemoval!.id, author.id), reason: "The removal was mistaken" },
+        { context: anonContext },
+      );
+
+      await call(
+        appRouter.moderation.setRole,
+        { userId: victim.id, role: "moderator" },
+        { context: contextFor(admin) },
+      );
+      const roleChange = await latestAction("role_changed", "user", victim.id);
+      await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(roleChange!.id, victim.id), reason: "The role change was mistaken" },
+        { context: anonContext },
+      );
+
+      await call(
+        appRouter.moderation.banUser,
+        { userId: victim.id, reason: "account violation" },
+        { context: contextFor(admin) },
+      );
+      const ban = await latestAction("user_banned", "user", victim.id);
+      await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(ban!.id, victim.id), reason: "The ban was mistaken" },
+        { context: anonContext },
+      );
+
+      const firstPage = await call(
+        appRouter.moderation.queue,
+        { limit: 1 },
+        { context: contextFor(olderMod) },
+      );
+      expect(firstPage.items.map(({ targetId }) => targetId)).toEqual([victim.id]);
+      expect(firstPage.items[0]?.appeals).toHaveLength(2);
+      expect(firstPage.nextCursor).not.toBeNull();
+
+      const walked = await walkAllQueuePages(contextFor(olderMod), 1);
+      expect(walked).toContainEqual({ targetType: "post", targetId: olderPost.id });
+      expect(walked).toContainEqual({ targetType: "user", targetId: victim.id });
+    } finally {
+      await clearQueueFixtures();
+    }
   });
 
   it("drops cases once their reports are resolved", async () => {
@@ -1052,7 +1209,7 @@ describe("case", () => {
     expect(result.reports[0].resolvedAt).toBeNull();
     expect(result.reports[1].reporterId).toBe(r2.id);
     expect(result.reports[1].resolvedOutcome).toBe("dismissed");
-    expect(result.appeal).toBeNull();
+    expect(result.appeals).toEqual([]);
 
     await clearQueueFixtures();
   });
@@ -1420,6 +1577,217 @@ describe("removePost and restorePost", () => {
       .mocked(testEmailSender.send)
       .mock.calls.filter(([mail]) => mail.subject === "Your post was restored");
     expect(restoreEmails).toHaveLength(1);
+  });
+
+  it("refuses removal and restoration for author-deleted posts without audit events", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "author deleted");
+
+    await call(appRouter.post.delete, { postId: postRow.id }, { context: contextFor(author) });
+
+    await expect(
+      call(
+        appRouter.moderation.removePost,
+        { postId: postRow.id, reason: "late moderation" },
+        { context: contextFor(mod) },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This post was deleted by its author and can no longer be moderated.",
+    });
+
+    // Defense in depth for a row that carries both tombstones (for example,
+    // one created by an older version or a race before the guard existed):
+    // restore must not manufacture a `post_restored` event either.
+    await anonContext.db
+      .update(post)
+      .set({ removedAt: new Date(), removedBy: mod.id, removedReason: "legacy removal" })
+      .where(eq(post.id, postRow.id));
+
+    await expect(
+      call(appRouter.moderation.restorePost, { postId: postRow.id }, { context: contextFor(mod) }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This post was deleted by its author and can no longer be moderated.",
+    });
+
+    const actions = await anonContext.db
+      .select({ action: moderationAction.action })
+      .from(moderationAction)
+      .where(
+        and(eq(moderationAction.targetType, "post"), eq(moderationAction.targetPostId, postRow.id)),
+      );
+    expect(actions).toEqual([]);
+  });
+
+  it("an author-deleted post withdraws its open appeal instead of stranding it open", async () => {
+    // The appellant IS the author, so deleting the contested post ends the
+    // grievance: every path that would touch such a post must close its open
+    // appeals `withdrawn` rather than leave them upholdable-but-never-
+    // overturnable in the queue. The row is driven straight to both
+    // tombstones because `post.delete` refuses a moderated post by design —
+    // this is the legacy-row shape the guards exist for.
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "deleted after removal");
+
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "first offense" },
+      { context: contextFor(mod) },
+    );
+    const removal = await latestAction("post_removed", "post", postRow.id);
+    const opened = await call(
+      appRouter.moderation.appealOpen,
+      { token: appealLink(removal!.id, author.id), reason: "The removal was unfair" },
+      { context: anonContext },
+    );
+
+    await anonContext.db
+      .update(post)
+      .set({ deletedAt: new Date("2026-08-24T17:00:00.000Z") })
+      .where(eq(post.id, postRow.id));
+
+    // A further moderation attempt refuses — and the refusal is what commits
+    // the withdrawal (it runs outside the effect transaction precisely so a
+    // throw cannot roll it back).
+    await expect(
+      call(
+        appRouter.moderation.removePost,
+        { postId: postRow.id, reason: "again" },
+        { context: contextFor(mod) },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This post was deleted by its author and can no longer be moderated.",
+    });
+    const [appealRow] = await anonContext.db
+      .select({ status: appeal.status, reviewedBy: appeal.reviewedBy })
+      .from(appeal)
+      .where(eq(appeal.id, opened.appealId));
+    expect(appealRow).toMatchObject({ status: "withdrawn", reviewedBy: null });
+
+    // Restore takes the same guard: idempotent on an already-withdrawn appeal.
+    await expect(
+      call(appRouter.moderation.restorePost, { postId: postRow.id }, { context: contextFor(mod) }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This post was deleted by its author and can no longer be moderated.",
+    });
+
+    // And the withdrawn appeal is off the queue's case view.
+    const caseDetail = await call(
+      appRouter.moderation.case,
+      { targetType: "post", targetId: postRow.id },
+      { context: contextFor(mod) },
+    );
+    expect(caseDetail.appeals).toEqual([]);
+  });
+
+  it("an overturned appeal against an author-deleted post is refused after withdrawing", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const mod2 = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "deleted before review");
+
+    await call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "first offense" },
+      { context: contextFor(mod) },
+    );
+    const removal = await latestAction("post_removed", "post", postRow.id);
+    const opened = await call(
+      appRouter.moderation.appealOpen,
+      { token: appealLink(removal!.id, author.id), reason: "Please reconsider" },
+      { context: anonContext },
+    );
+
+    await anonContext.db
+      .update(post)
+      .set({ deletedAt: new Date("2026-08-24T17:30:00.000Z") })
+      .where(eq(post.id, postRow.id));
+
+    // The reviewer cannot overturn (nothing can be restored), and reaching
+    // that conclusion is what withdraws the appeal. Upholding stays available,
+    // but there is no open appeal left for it to resolve.
+    await expect(
+      call(
+        appRouter.moderation.appealReview,
+        { appealId: opened.appealId, outcome: "overturned" },
+        { context: contextFor(mod2) },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This post was deleted by its author and can no longer be moderated.",
+    });
+    const [appealRow] = await anonContext.db
+      .select({ status: appeal.status })
+      .from(appeal)
+      .where(eq(appeal.id, opened.appealId));
+    expect(appealRow?.status).toBe("withdrawn");
+
+    await expect(
+      call(
+        appRouter.moderation.appealReview,
+        { appealId: opened.appealId, outcome: "upheld" },
+        { context: contextFor(mod2) },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This appeal has already been resolved.",
+    });
+  });
+
+  it("an author deletion that wins the row-lock race prevents moderation audit state", async () => {
+    const author = await createTestUser();
+    const mod = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "delete wins the race");
+    let resolveHolderReady: () => void = () => {
+      throw new Error("holderReady resolved before initialization");
+    };
+    const holderReady = new Promise<void>((resolve) => {
+      resolveHolderReady = resolve;
+    });
+    let releaseHolder: () => void = () => {
+      throw new Error("releaseHolder called before initialization");
+    };
+    const holder = anonContext.db.transaction(async (tx) => {
+      await tx
+        .update(post)
+        .set({ deletedAt: new Date("2026-08-24T16:00:00.000Z") })
+        .where(eq(post.id, postRow.id));
+      resolveHolderReady();
+      await new Promise<void>((resolve) => {
+        releaseHolder = resolve;
+      });
+    });
+
+    await holderReady;
+    const removal = call(
+      appRouter.moderation.removePost,
+      { postId: postRow.id, reason: "raced moderation" },
+      { context: contextFor(mod) },
+    );
+
+    try {
+      await waitForPostRowLockWaiter();
+    } finally {
+      releaseHolder();
+    }
+    await holder;
+
+    await expect(removal).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This post was deleted by its author and can no longer be moderated.",
+    });
+    const actions = await anonContext.db
+      .select({ action: moderationAction.action })
+      .from(moderationAction)
+      .where(
+        and(eq(moderationAction.targetType, "post"), eq(moderationAction.targetPostId, postRow.id)),
+      );
+    expect(actions).toEqual([]);
   });
 
   it("is NOT_FOUND for a missing post", async () => {
@@ -2490,6 +2858,231 @@ describe("appeal flow", () => {
     await clearQueueFixtures();
   });
 
+  it("a newer suspension supersedes the old appeal and leaves the new sentence appealable", async () => {
+    const victim = await createTestUser();
+    const actingMod = await moderatorUser();
+    const reviewingMod = await moderatorUser();
+
+    try {
+      await call(
+        appRouter.moderation.suspendUser,
+        { userId: victim.id, reason: "first suspension", durationSeconds: 3600 },
+        { context: contextFor(actingMod) },
+      );
+      const first = await latestAction("user_suspended", "user", victim.id);
+      const firstAppeal = await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(first!.id, victim.id), reason: "The first suspension was unfair" },
+        { context: anonContext },
+      );
+
+      await call(
+        appRouter.moderation.suspendUser,
+        { userId: victim.id, reason: "second suspension", durationSeconds: 7200 },
+        { context: contextFor(actingMod) },
+      );
+      const second = await latestAction("user_suspended", "user", victim.id);
+      expect(second?.id).not.toBe(first?.id);
+
+      const secondAppeal = await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(second!.id, victim.id), reason: "The second suspension was unfair" },
+        { context: anonContext },
+      );
+
+      const statuses = await anonContext.db
+        .select({ id: appeal.id, status: appeal.status, reviewedBy: appeal.reviewedBy })
+        .from(appeal)
+        .where(inArray(appeal.id, [firstAppeal.appealId, secondAppeal.appealId]));
+      expect(statuses).toEqual(
+        expect.arrayContaining([
+          { id: firstAppeal.appealId, status: "superseded", reviewedBy: null },
+          { id: secondAppeal.appealId, status: "open", reviewedBy: null },
+        ]),
+      );
+
+      const detail = await call(
+        appRouter.moderation.case,
+        { targetType: "user", targetId: victim.id },
+        { context: contextFor(reviewingMod) },
+      );
+      expect(detail.appeals.map(({ id }) => id)).toEqual([secondAppeal.appealId]);
+
+      await call(
+        appRouter.moderation.appealReview,
+        { appealId: secondAppeal.appealId, outcome: "overturned" },
+        { context: contextFor(reviewingMod) },
+      );
+      const [cleared] = await anonContext.db
+        .select({ banned: user.banned, banExpires: user.banExpires })
+        .from(user)
+        .where(eq(user.id, victim.id));
+      expect(cleared?.banned).toBe(false);
+      expect(cleared?.banExpires).toBeNull();
+    } finally {
+      await clearQueueFixtures();
+    }
+  });
+
+  it("a ban supersedes an open suspension appeal without hiding the ban appeal", async () => {
+    const victim = await createTestUser();
+    const actingMod = await staffUser();
+    const reviewingMod = await moderatorUser();
+
+    try {
+      await call(
+        appRouter.moderation.suspendUser,
+        { userId: victim.id, reason: "temporary suspension", durationSeconds: 3600 },
+        { context: contextFor(actingMod) },
+      );
+      const suspension = await latestAction("user_suspended", "user", victim.id);
+      const suspensionAppeal = await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(suspension!.id, victim.id), reason: "The suspension was mistaken" },
+        { context: anonContext },
+      );
+
+      await call(
+        appRouter.moderation.banUser,
+        { userId: victim.id, reason: "permanent violation" },
+        { context: contextFor(actingMod) },
+      );
+      const ban = await latestAction("user_banned", "user", victim.id);
+      const banAppeal = await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(ban!.id, victim.id), reason: "The permanent ban was mistaken" },
+        { context: anonContext },
+      );
+
+      const statuses = await anonContext.db
+        .select({ id: appeal.id, status: appeal.status })
+        .from(appeal)
+        .where(inArray(appeal.id, [suspensionAppeal.appealId, banAppeal.appealId]));
+      expect(statuses).toEqual(
+        expect.arrayContaining([
+          { id: suspensionAppeal.appealId, status: "superseded" },
+          { id: banAppeal.appealId, status: "open" },
+        ]),
+      );
+
+      const detail = await call(
+        appRouter.moderation.case,
+        { targetType: "user", targetId: victim.id },
+        { context: contextFor(reviewingMod) },
+      );
+      expect(detail.appeals).toHaveLength(1);
+      expect(detail.appeals[0]?.id).toBe(banAppeal.appealId);
+
+      await call(
+        appRouter.moderation.appealReview,
+        { appealId: banAppeal.appealId, outcome: "upheld" },
+        { context: contextFor(reviewingMod) },
+      );
+      const [stillBanned] = await anonContext.db
+        .select({ banned: user.banned, banExpires: user.banExpires })
+        .from(user)
+        .where(eq(user.id, victim.id));
+      expect(stillBanned?.banned).toBe(true);
+      expect(stillBanned?.banExpires).toBeNull();
+    } finally {
+      await clearQueueFixtures();
+    }
+  });
+
+  it("the case detail keeps open appeals from separate moderation families in newest-first order", async () => {
+    const victim = await staffUser();
+    const actingAdmin = await adminUser();
+
+    try {
+      await call(
+        appRouter.moderation.setRole,
+        { userId: victim.id, role: "moderator" },
+        { context: contextFor(actingAdmin) },
+      );
+      const roleChange = await latestAction("role_changed", "user", victim.id);
+      const roleAppeal = await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(roleChange!.id, victim.id), reason: "The role change was mistaken" },
+        { context: anonContext },
+      );
+
+      await call(
+        appRouter.moderation.banUser,
+        { userId: victim.id, reason: "account violation" },
+        { context: contextFor(actingAdmin) },
+      );
+      const ban = await latestAction("user_banned", "user", victim.id);
+      const banAppeal = await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(ban!.id, victim.id), reason: "The ban was mistaken" },
+        { context: anonContext },
+      );
+
+      const detail = await call(
+        appRouter.moderation.case,
+        { targetType: "user", targetId: victim.id },
+        { context: contextFor(actingAdmin) },
+      );
+      expect(detail.appeals.map(({ id }) => id)).toEqual([banAppeal.appealId, roleAppeal.appealId]);
+    } finally {
+      await clearQueueFixtures();
+    }
+  });
+
+  it("both outcomes refuse an open appeal whose action was superseded outside the wrapper", async () => {
+    const victim = await createTestUser();
+    const actingMod = await moderatorUser();
+    const reviewingMod = await moderatorUser();
+
+    try {
+      await suspendUserEffect(anonContext.db, {
+        userId: victim.id,
+        actorId: actingMod.id,
+        actorRole: actingMod.session.user.role ?? "moderator",
+        reason: "first suspension",
+        durationSeconds: 3600,
+      });
+      const first = await latestAction("user_suspended", "user", victim.id);
+      const opened = await call(
+        appRouter.moderation.appealOpen,
+        { token: appealLink(first!.id, victim.id), reason: "The first suspension was unfair" },
+        { context: anonContext },
+      );
+
+      // The raw effect models an older caller that bypasses the wrapper. The
+      // review guard must still refuse both outcomes rather than resolving an
+      // appeal for a sentence that no longer governs the account.
+      await suspendUserEffect(anonContext.db, {
+        userId: victim.id,
+        actorId: actingMod.id,
+        actorRole: actingMod.session.user.role ?? "moderator",
+        reason: "second suspension",
+        durationSeconds: 7200,
+      });
+
+      for (const outcome of ["upheld", "overturned"] as const) {
+        await expect(
+          call(
+            appRouter.moderation.appealReview,
+            { appealId: opened.appealId, outcome },
+            { context: contextFor(reviewingMod) },
+          ),
+        ).rejects.toMatchObject({
+          code: "BAD_REQUEST",
+          message: "A newer moderation action has superseded this one.",
+        });
+      }
+
+      const [unchanged] = await anonContext.db
+        .select({ status: appeal.status, reviewedBy: appeal.reviewedBy })
+        .from(appeal)
+        .where(eq(appeal.id, opened.appealId));
+      expect(unchanged).toEqual({ status: "open", reviewedBy: null });
+    } finally {
+      await clearQueueFixtures();
+    }
+  });
+
   it("upholding leaves the action in force", async () => {
     const author = await createTestUser();
     const mod1 = await moderatorUser();
@@ -2712,15 +3305,15 @@ describe("appeal flow", () => {
       { context: anonContext },
     );
 
-    // Use the raw effect as a fixture so this test can isolate the latest-
-    // action gate. The public manual-restore wrapper now closes the appeal,
-    // which is covered separately above.
+    // Use raw effects as fixtures so this test can isolate the latest-action
+    // gate. The public wrappers now close the old appeal as superseded, which
+    // is covered by the forward-action tests above.
     await restorePostEffect(anonContext.db, { postId: postRow.id, actorId: mod.id });
-    await call(
-      appRouter.moderation.removePost,
-      { postId: postRow.id, reason: "second offense" },
-      { context: contextFor(mod) },
-    );
+    await removePostEffect(anonContext.db, {
+      postId: postRow.id,
+      actorId: mod.id,
+      reason: "second offense",
+    });
 
     await expect(
       call(

@@ -7,7 +7,11 @@ import {
 import type { Socket } from "node:net";
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
-import { RPC_MAX_BODY_BYTES, SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
+import {
+  RPC_MAX_BODY_BYTES,
+  RPC_SMALL_BODY_BYTES,
+  SIGNED_OUT_PATHS,
+} from "@my-tuums/api/constants";
 import { normalizeObservedError, type ErrorObserver } from "./error-observation.js";
 import { createRequestId, pathnameOf } from "./observability.js";
 
@@ -62,8 +66,11 @@ export interface RequestHandlerDeps {
   /**
    * Turns a `/media/<key>` object key into a redirect target and the cache
    * budget for that redirect, or `null` when it should 404. Only ever called
-   * for a request that already passed the session gate below — this resolver
-   * itself has no opinion on who is asking, same as it always has.
+   * for a request that already passed the session gate below, and always with
+   * the authenticated viewer's id: every key — post and profile alike — is
+   * authorized per viewer by the resolver (see `createMediaResolver` in
+   * `@my-tuums/api`), so there is no path where this module names an object
+   * without saying who is asking.
    *
    * Injected rather than imported for the same reason the three above are:
    * this module's job is the routing decision, and a unit test of it should
@@ -72,7 +79,7 @@ export interface RequestHandlerDeps {
    */
   resolveMediaUrl: (
     key: string,
-    viewerId?: string,
+    viewerId: string,
   ) => Promise<{ url: string; cacheSeconds: number } | null>;
   /**
    * Serves the built web app, when this deployment bundles it.
@@ -91,8 +98,9 @@ export interface RequestHandlerDeps {
    * Injected rather than imported for the same reason as the deps above: this
    * module stays free of `@my-tuums/auth`, so its unit tests need no database
    * and no real session store. `unavailable` deliberately differs from an
-   * anonymous session: pages and profile media fail open, while post media
-   * still fails closed because its resolver requires an authenticated viewer.
+   * anonymous session: the page gate fails open, while every media request
+   * fails closed — without an authenticated viewer there is no one to
+   * authorize the object against.
    */
   resolveSession: (req: IncomingMessage) => Promise<SessionLookup>;
   /**
@@ -146,6 +154,53 @@ function declaredContentLength(req: IncomingMessage): number | null {
   const length = Number(value);
   return Number.isSafeInteger(length) && length >= 0 ? length : null;
 }
+
+/**
+ * Whether the body arrives in chunks (`Transfer-Encoding`), and therefore with
+ * no Content-Length any gate could compare. The header is hop-by-hop and
+ * repeatable per RFC 9112, so Node may hand it over as an array — normalize
+ * before matching. A request with neither this header nor a usable declared
+ * length carries no body at all (a bare GET), which is why the pre-auth gate
+ * keys on this rather than on "Content-Length absent".
+ */
+function isChunkedRequestBody(req: IncomingMessage): boolean {
+  const value = req.headers["transfer-encoding"];
+  const encoding = Array.isArray(value) ? value.join(",") : (value ?? "");
+  return encoding.toLowerCase().includes("chunked");
+}
+
+/**
+ * The wire path of the app's ONE anonymous RPC procedure — `appealOpen` in
+ * `moderationRouter` (packages/api). oRPC addresses a procedure by its router
+ * path joined with `/`, NOT the dotted name the client code reads, so this is
+ * `/rpc/moderation/appealOpen`. Every other `/rpc` procedure is session-gated,
+ * so an anonymous caller has no legitimate use for a body above
+ * `RPC_SMALL_BODY_BYTES` — except here, where the token is the capability and
+ * the person is not signed in by construction.
+ *
+ * The literal lives in this module for the same reason `/api/auth` and `/rpc`
+ * do: this file is deliberately free of `@my-tuums/api`'s router (its unit
+ * tests stand it in), so the path cannot be imported from the router that
+ * defines it. Judge the gate on the CANONICAL path, never the raw URL: dot
+ * segments and a trailing slash must not spell a way around the session
+ * demand, and anything that fails to canonicalise is not a legitimate appeal
+ * and falls to that demand, which is the closed direction.
+ */
+const RPC_APPEAL_OPEN_PATH = "/rpc/moderation/appealOpen";
+
+/**
+ * The most `/rpc` requests this process will dispatch concurrently. This is
+ * the backpressure that bounds how many bodies can be buffering at once —
+ * after the pre-auth gate above has narrowed who can have one in flight at
+ * all: anonymous callers top out at `RPC_SMALL_BODY_BYTES` each (a chunked or
+ * upload-sized body from them is refused before buffering), so the worst case
+ * this cap alone has to hold is a set of authenticated sessions streaming
+ * `RPC_MAX_BODY_BYTES`-sized bodies simultaneously.
+ *
+ * A request refused here is a 503 — the standard answer a busy server gives
+ * an overload condition — and the web client treats 5xx as retryable.
+ */
+export const MAX_RPC_IN_FLIGHT = 25;
 
 /**
  * Drain a rejected request without retaining its bytes. Keeping the socket
@@ -256,13 +311,13 @@ function mediaKeyOf(rawUrl: string): string | null {
 
 /**
  * The page gate's path check, deliberately NOT percent-decoded (unlike
- * `mediaKeyOf` above). `SIGNED_OUT_PATHS` is compared against the raw
- * pathname, so an encoded path like `/%6Cogin` — which decodes to `/login`
- * but is not the literal string `"/login"` — fails the allowlist match and
- * gets redirected rather than let through. Failing closed is the right
- * direction for a gate; the worst case is an odd path getting redirected to
- * `/login` unnecessarily, never a signed-out visitor reaching a page they
- * shouldn't.
+ * `mediaKeyOf` above and `canonicalizePathname` below). `SIGNED_OUT_PATHS` is
+ * compared against the raw pathname, so an encoded path like `/%6Cogin` —
+ * which decodes to `/login` but is not the literal string `"/login"` — fails
+ * the allowlist match and gets redirected rather than let through. Failing
+ * closed is the right direction for a gate; the worst case is an odd path
+ * getting redirected to `/login` unnecessarily, never a signed-out visitor
+ * reaching a page they shouldn't.
  *
  * Returns `null` for a malformed target, same as `mediaKeyOf` — a bad request
  * is not a page this gate has an opinion on either.
@@ -273,6 +328,44 @@ function pageGatePathname(rawUrl: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The fully-normalized path of a request: percent-decoded, dot segments
+ * resolved, repeated slashes collapsed.
+ *
+ * This is the form an HTTP router — better-auth included — effectively routes
+ * on, so a prefix check that runs on the RAW url (see the admin denylist
+ * below) can be danced around by encoding: `%2F` for a slash, `%2e%2e` for
+ * `..`, doubled slashes, or a missing trailing slash all change the literal
+ * string without changing the route. Comparing against this form instead
+ * means whatever the request decodes to is what is judged.
+ *
+ * Decoding is applied BEFORE dot-segment resolution, which is the order that
+ * catches an encoded `..`: `new URL` only recognizes literal `.`/`..` when it
+ * normalizes, so `%2e%2e` must be a character first.
+ *
+ * Returns `null` for a malformed target, same as `mediaKeyOf` — the caller
+ * decides whether a malformed URL is closed or passed through.
+ */
+function canonicalizePathname(rawUrl: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(new URL(rawUrl, "http://canonical.invalid").pathname);
+  } catch {
+    return null;
+  }
+
+  const segments: string[] = [];
+  for (const segment of decoded.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return `/${segments.join("/")}`;
 }
 
 /**
@@ -291,6 +384,14 @@ function pageGatePathname(rawUrl: string): string | null {
  * positioned to observe response headers over a real connection.
  */
 export function createRequestHandler(deps: RequestHandlerDeps) {
+  // How many `/rpc` dispatches are currently in flight, including every one
+  // whose body is still being buffered by oRPC. Owned by this closure so every
+  // handler instance shares one counter; a per-instance counter would admit
+  // `MAX_RPC_IN_FLIGHT` per instance and the cap would scale with the replica
+  // count instead of holding per process. See `MAX_RPC_IN_FLIGHT` above for
+  // what the cap is for.
+  let rpcInFlight = 0;
+
   return async function handleRequest(req: IncomingMessage, res: RequestResponse): Promise<void> {
     // Every request gets an identity before any routing branch runs, so
     // whatever the tree serves — health, auth, rpc, media, page, 404, or
@@ -334,7 +435,26 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       //
       // Checked before the `/api/auth` pass-through below, which is why this
       // prefix needs no other routing here.
-      if (req.url?.startsWith("/api/auth/admin/")) {
+      //
+      // The check runs on the CANONICALIZED path (`canonicalizePathname`), not
+      // the raw url: better-auth decodes and normalizes before it routes, so
+      // an encoded slash (`admin%2Fban-user`), an encoded dot segment
+      // (`admin%2f..%2f..%2f..` canceling back onto the prefix), a doubled
+      // slash, or the bare `/api/auth/admin` with no trailing slash would each
+      // fall past a raw string compare and reach the plugin's own gate.
+      // Comparing the decoded, normalized form closes every spelling of an
+      // admin route — and, because the canonical form is what is judged,
+      // `/api/auth/admin/../get-session` (canonical `/api/auth/get-session`)
+      // passes through to the auth handler exactly as it would to better-auth.
+      // The raw compare survives only as the fallback for the one input
+      // canonicalization refuses — a malformed percent-escape that still
+      // literally names an admin path — so that case fails closed too.
+      const canonicalPath = canonicalizePathname(req.url ?? "");
+      const isAdminRoute =
+        canonicalPath === null
+          ? req.url?.startsWith("/api/auth/admin/")
+          : canonicalPath === "/api/auth/admin" || canonicalPath.startsWith("/api/auth/admin/");
+      if (isAdminRoute) {
         res.writeHead(404, { "Content-Type": "text/plain" });
         res.end("Not found");
         return;
@@ -372,20 +492,95 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // arbitrary gigabytes, and the upload budget would never see the
         // request at all.
         //
-        // Content-Length is present on every browser multipart upload, which is
-        // the traffic this protects; a `Transfer-Encoding: chunked` client has no
-        // Content-Length to check, and is legitimately used by Node http clients
-        // that omit the header — so chunked bodies are bounded downstream by
-        // oRPC's BodyLimitPlugin at the same ceiling (see index.ts).
-        const declared = Number(req.headers["content-length"]);
-        if (Number.isFinite(declared) && declared > RPC_MAX_BODY_BYTES) {
+        // Content-Length is present on every browser multipart upload, which
+        // is the traffic this protects. A `Transfer-Encoding: chunked` client
+        // has no Content-Length to compare here, so it skips THIS check and is
+        // instead sized by the pre-auth gate below, which refuses it on the
+        // same terms as an over-the-line declared body.
+        const declared = declaredContentLength(req);
+        if (declared !== null && declared > RPC_MAX_BODY_BYTES) {
+          drainRejectedRequest(req);
           res.writeHead(413, { "Content-Type": "text/plain" });
           res.end("Payload too large");
           return;
         }
 
-        const { matched } = await deps.handleRpc(req, res);
-        if (matched) return;
+        // The pre-auth admission gate. Every `/rpc` procedure is either a small
+        // JSON object (a post is 500 characters, an appeal reason 2000, the
+        // appeal token 4 KiB — nothing above `RPC_SMALL_BODY_BYTES`) or a file
+        // upload — and every upload procedure is session-gated. So a declared
+        // body above that line is an upload by definition, and an anonymous
+        // caller has no legitimate use for one; refusing it before oRPC parses
+        // it is what stops an unauthenticated upload-sized body from ever being
+        // buffered, instead of buffering it and then rejecting it as
+        // UNAUTHORIZED. The one exception is the public appeal surface, which
+        // is small by construction: an oversized appeal body is refused on its
+        // own low limit rather than being handed to the session demand.
+        //
+        // Chunked (`Transfer-Encoding`) bodies carry no Content-Length, so no
+        // declared-length check can see them at all — which is why they get
+        // the same treatment as a body already known to be over the line,
+        // rather than skipping the gate entirely: the session demand applies
+        // to them exactly as it does to an oversized upload, so an anonymous
+        // caller cannot trade a missing header for a buffer. The appeal path
+        // cannot demand a session (it is the one public surface), and every
+        // client that legitimately reaches it — a browser following the email
+        // link — sends a plain JSON body with a Content-Length, so a chunked
+        // appeal request is refused with 411 rather than admitted to buffer
+        // against nothing. What remains after both refusals is bounded twice
+        // over: per body by oRPC's BodyLimitPlugin at `RPC_MAX_BODY_BYTES`,
+        // and in number by the admission cap below.
+        const isChunked = isChunkedRequestBody(req);
+        const exceedsSmallBodyBound =
+          isChunked || (declared !== null && declared > RPC_SMALL_BODY_BYTES);
+        if (exceedsSmallBodyBound) {
+          if (canonicalPath !== RPC_APPEAL_OPEN_PATH) {
+            const session = hasSessionCookie(req.headers.cookie)
+              ? await deps.resolveSession(req)
+              : null;
+            if (!session || session.kind !== "authenticated") {
+              // Same shape as the media gate: no-store so a cached 401 cannot
+              // linger after the caller signs in, and fail-closed on an
+              // unavailable session store — without a viewer there is no
+              // legitimate upload either.
+              drainRejectedRequest(req);
+              res.writeHead(401, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+              res.end("Unauthorized");
+              return;
+            }
+          } else if (isChunked) {
+            // No session to demand and no length to compare, so there is no
+            // version of this request the gate can admit: refuse the encoding,
+            // not a size. `drainRejectedRequest` first — a chunked stream kept
+            // readable lets the refusal finish cleanly on keep-alive too.
+            drainRejectedRequest(req);
+            res.writeHead(411, { "Content-Type": "text/plain" });
+            res.end("Length required");
+            return;
+          } else {
+            drainRejectedRequest(req);
+            res.writeHead(413, { "Content-Type": "text/plain" });
+            res.end("Payload too large");
+            return;
+          }
+        }
+
+        // The admission cap, checked after the size gates so it only ever
+        // measures requests that are about to be dispatched. A saturated
+        // handler answers 503 rather than joining the queue.
+        if (rpcInFlight >= MAX_RPC_IN_FLIGHT) {
+          drainRejectedRequest(req);
+          res.writeHead(503, { "Content-Type": "text/plain" });
+          res.end("Server busy");
+          return;
+        }
+        rpcInFlight += 1;
+        try {
+          const { matched } = await deps.handleRpc(req, res);
+          if (matched) return;
+        } finally {
+          rpcInFlight -= 1;
+        }
       }
 
       if (req.url?.startsWith(MEDIA_PREFIX)) {
@@ -426,8 +621,13 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         }
 
         const key = mediaKeyOf(req.url);
-        const isPostMedia = key?.startsWith("posts/") ?? false;
-        if (isPostMedia && session.kind !== "authenticated") {
+
+        // An unavailable session store leaves a cookie but no viewer identity,
+        // and every key — post and profile alike — is authorized per viewer by
+        // the resolver. There is no anonymous or viewer-less path to an
+        // object, so fail closed for all of them: without a viewer there is no
+        // one to authorize the request against.
+        if (session.kind !== "authenticated") {
           res.writeHead(503, {
             "Content-Type": "text/plain",
             "Cache-Control": "no-store",
@@ -436,11 +636,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           return;
         }
 
-        const media = key
-          ? isPostMedia && session.kind === "authenticated"
-            ? await deps.resolveMediaUrl(key, session.userId)
-            : await deps.resolveMediaUrl(key)
-          : null;
+        const media = key ? await deps.resolveMediaUrl(key, session.userId) : null;
 
         if (!media) {
           res.writeHead(404, { "Content-Type": "text/plain" });
@@ -452,15 +648,13 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // bucket to the browser, which costs no service egress and never holds
         // an image in this process's memory.
         //
-        // Profile-media redirects are private and bounded by the signing
-        // window. Post-media redirects are viewer-authorized, so even a
-        // browser's private HTTP cache must not reuse one after account
-        // switching; those responses are never stored.
+        // Every redirect is viewer-authorized, and the decision can change
+        // after account switching, blocking, banning, or profile updates. A
+        // browser must therefore never reuse a bearer redirect without asking
+        // this route to authorize the current viewer again.
         res.writeHead(302, {
           Location: media.url,
-          "Cache-Control": isPostMedia
-            ? "private, no-store"
-            : `private, max-age=${media.cacheSeconds}`,
+          "Cache-Control": "private, no-store",
         });
         res.end();
         return;

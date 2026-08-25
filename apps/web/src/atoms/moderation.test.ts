@@ -31,7 +31,7 @@ installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import { orpc, type BlockedUser } from "@/lib/orpc";
 import {
-  appealReviewAtom,
+  appealReviewFamily,
   banUserAtom,
   blockedUsersAtom,
   reportAtom,
@@ -179,8 +179,10 @@ describe("moderation action cache sweeps", () => {
     });
 
     const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
-    const mutationUnsub = singletonStore.sub(appealReviewAtom, () => {});
-    singletonStore.get(appealReviewAtom).mutate({ appealId: "appeal-1", outcome: "overturned" });
+    const mutationUnsub = singletonStore.sub(appealReviewFamily("appeal-1"), () => {});
+    singletonStore
+      .get(appealReviewFamily("appeal-1"))
+      .mutate({ appealId: "appeal-1", outcome: "overturned" });
 
     await waitFor(() =>
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.queue.key() }),

@@ -65,7 +65,11 @@ export const moderationQueueAtom = queueFamily("");
 export interface QueueSummary {
   /** Cases in the pages fetched so far. */
   loaded: number;
-  /** How many of those carry an open appeal. */
+  /**
+   * Open appeals across those cases — appeals, not cases carrying one: a
+   * single target can have two open at once (one per control family), and
+   * both are someone waiting on a reply.
+   */
   appeals: number;
   /** Whether the server has at least one more page. */
   hasMore: boolean;
@@ -77,7 +81,7 @@ export const moderationQueueSummaryAtom = atom<QueueSummary>((get) => {
   const cases = queue.data?.pages.flatMap((page) => page.items) ?? [];
   return {
     loaded: cases.length,
-    appeals: cases.filter((item) => item.appeal !== null).length,
+    appeals: cases.reduce((total, item) => total + item.appeals.length, 0),
     hasMore: queue.hasNextPage,
   };
 });
@@ -205,8 +209,16 @@ export const caseSuspendDurationAtom = atom(DEFAULT_SUSPENSION_SECONDS);
 /** The reason attached to a ban, shown to the user in their email. */
 export const caseBanReasonAtom = atom("");
 
-/** The moderator's optional note on an appeal review. */
-export const caseReviewNoteAtom = atom("");
+/**
+ * The moderator's optional note on an appeal review, one draft per appeal.
+ * Keyed by appeal id because a case can carry two open appeals at once (one
+ * per control family), and each is reviewed with its own note — a single
+ * shared draft would submit whichever text happened to be typed last with
+ * whichever decision was clicked first. The draft itself derives nothing from
+ * the id, so the initializer takes none: the family exists purely to give
+ * each appeal its own instance.
+ */
+export const caseReviewNoteFamily = atomFamily(() => atom(""));
 
 /** The role picked in the set-role dialog — "" until one is chosen. */
 export const roleSelectAtom = atom("");
@@ -227,7 +239,11 @@ export const resetCaseFormEffect = atomEffect((get, set) => {
   set(caseSuspendReasonAtom, "");
   set(caseSuspendDurationAtom, DEFAULT_SUSPENSION_SECONDS);
   set(caseBanReasonAtom, "");
-  set(caseReviewNoteAtom, "");
+  // The review-note drafts are keyed per appeal; a case change orphans all of
+  // them, so every existing entry is cleared rather than one named slot.
+  for (const appealId of caseReviewNoteFamily.getParams()) {
+    set(caseReviewNoteFamily(appealId), "");
+  }
 });
 
 /** Resets the report dialog's reason when a new target is picked. */
@@ -449,22 +465,32 @@ export const resetAppealReasonEffect = atomEffect((get, set) => {
   }
 });
 
-/** Reviews an appeal: upholds the action or overturns it, each with its own inverse + email. */
-export const appealReviewAtom = atomWithMutation((get) => {
-  const queryClient = get(queryClientAtom);
-  return orpc.moderation.appealReview.mutationOptions({
-    onSuccess: () => {
-      // An overturn reverses one of three actions, and the result only says
-      // "overturned" — not which — so sweep the union of the three inverses'
-      // surfaces: a post removal (content comes back → post surfaces), a
-      // suspension/ban (the user's content comes back app-wide → the full
-      // visibility sweep), or a role change (the roster changes → team).
-      invalidateVisibilityCaches(queryClient);
-      void queryClient.invalidateQueries({ queryKey: orpc.moderation.team.key() });
-      invalidateModerationQueries(queryClient);
-    },
-  });
-});
+/**
+ * Reviews one appeal: upholds the action or overturns it, each with its own
+ * inverse + email. One mutation instance per appeal id — a case can carry two
+ * open appeals at once, and a single shared slot would light every section's
+ * pending/success/error state the moment any one of them was reviewed. The id
+ * is also the mutation key, so each appeal's review is an identifiable entry
+ * to the QueryClient rather than one anonymous slot.
+ */
+export const appealReviewFamily = atomFamily((appealId: string) =>
+  atomWithMutation((get) => {
+    const queryClient = get(queryClientAtom);
+    return orpc.moderation.appealReview.mutationOptions({
+      mutationKey: ["moderation", "appealReview", appealId],
+      onSuccess: () => {
+        // An overturn reverses one of three actions, and the result only says
+        // "overturned" — not which — so sweep the union of the three inverses'
+        // surfaces: a post removal (content comes back → post surfaces), a
+        // suspension/ban (the user's content comes back app-wide → the full
+        // visibility sweep), or a role change (the roster changes → team).
+        invalidateVisibilityCaches(queryClient);
+        void queryClient.invalidateQueries({ queryKey: orpc.moderation.team.key() });
+        invalidateModerationQueries(queryClient);
+      },
+    });
+  }),
+);
 
 /**
  * Removes every entry the moderation families have created — part of the
@@ -475,4 +501,6 @@ export function clearModerationFamilies(): void {
   for (const key of queueFamily.getParams()) queueFamily.remove(key);
   for (const key of auditLogFamily.getParams()) auditLogFamily.remove(key);
   for (const key of caseFamily.getParams()) caseFamily.remove(key);
+  for (const key of caseReviewNoteFamily.getParams()) caseReviewNoteFamily.remove(key);
+  for (const key of appealReviewFamily.getParams()) appealReviewFamily.remove(key);
 }
