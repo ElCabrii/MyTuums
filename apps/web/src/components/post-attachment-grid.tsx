@@ -41,12 +41,16 @@ export function PostAttachmentGrid({
             `h-full … object-cover` treatment centre-cropped it whenever the
             surface was wider than ~683px — the width at which a square image
             crosses the 512px ceiling — so on the wide profile feed almost
-            every post cropped, and heavily (issue #209). Here the 32rem cap
-            survives only as a proportional ceiling: taller images scale down
-            and centre (`w-full h-auto max-h-…` triggers the replaced-element
-            constraint rules, which preserve the ratio) instead of cropping.
-            Grid cells keep the uniform cover-cropped look so mixed-ratio
-            rows stay aligned.
+            every post cropped, and heavily (issue #209).
+
+            The 32rem cap survives only as a proportional ceiling. With
+            `w-full` making width definite, `max-h-…` clamping height leaves
+            the box ratio-violating; the default `object-fit: fill` would then
+            *stretch* the content (squishing tall/square images vertically —
+            a worse defect than the original crop). `object-contain` keeps the
+            ratio and fits within the cap, letterboxing into the parent's
+            muted background instead of distorting. Grid cells keep the
+            uniform cover-cropped look so mixed-ratio rows stay aligned.
           */}
           <img
             src={attachment.url}
@@ -57,7 +61,7 @@ export function PostAttachmentGrid({
             decoding="async"
             className={`rounded-lg transition-opacity hover:opacity-90 ${
               isSingle
-                ? "mx-auto block h-auto max-h-[32rem] w-full"
+                ? "block h-auto max-h-[32rem] w-full object-contain"
                 : "h-full max-h-[32rem] w-full object-cover"
             }`}
           />

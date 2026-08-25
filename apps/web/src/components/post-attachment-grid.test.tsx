@@ -30,7 +30,11 @@ describe("PostAttachmentGrid", () => {
   // jsdom performs no layout, so the sizing behaviour can only be asserted
   // through the classes themselves — which is precisely where the fix for
   // issue #209 lives: singles must not carry `object-cover`, because under a
-  // height cap that class is what centre-crops them on wide surfaces.
+  // height cap that class is what centre-crops them on wide surfaces. They
+  // must instead carry `object-contain`: with `w-full` making width definite
+  // and `max-h-…` clamping height, the box becomes ratio-violating, so the
+  // default `object-fit: fill` would stretch (squish) the image — `contain`
+  // is what actually preserves the ratio and letterboxes into the cap.
   it("sizes a single image by its intrinsic aspect ratio under a proportional cap", async () => {
     await renderWithProviders(
       <PostAttachmentGrid attachments={[makeAttachment({ width: 1024, height: 1024 })]} />,
@@ -39,6 +43,7 @@ describe("PostAttachmentGrid", () => {
     const image = screen.getByAltText(m.post_attachment_alt({ position: "1" }));
     expect(image).toHaveClass("h-auto");
     expect(image).toHaveClass("max-h-[32rem]");
+    expect(image).toHaveClass("object-contain");
     expect(image).not.toHaveClass("object-cover");
   });
 
