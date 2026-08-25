@@ -56,8 +56,9 @@ both by the server's page gate and by the client.
 - A reply is a post with a parent. Threads show the focused post, its replies,
   and up to 20 ancestors of context.
 - An author can delete their own post. Deletion is a tombstone, not a row
-  delete: the post reads as a stub saying its author deleted it, and its
-  replies, its likes and the conversation above it are untouched. It is not a
+  delete: fresh feeds and profiles omit it, while its own URL and thread
+  context render a stub saying its author deleted it. Its replies, its likes
+  and the conversation above it are untouched. It is not a
   moderation action — no audit row, no email, nothing to appeal — and a post a
   moderator already removed cannot be deleted on top, so the author keeps the
   stated reason and the appeal link. Deleted posts are not search results, for
@@ -212,10 +213,10 @@ it brings the content back. Removal is never a hard delete. _Avoid:_ deleted
 post (that is the author's own act — see below), purged post.
 
 **Deleted post** — a post whose author took it down themselves. Like a removal
-it is a tombstone rather than a row delete, and it renders as its own stub —
-but it is not a moderation action: nothing is audited, nobody is emailed, there
-is nothing to appeal, and it cannot be restored. _Avoid:_ removed post,
-withdrawn post.
+it is a tombstone rather than a row delete, but fresh feeds and profiles omit
+it; its own URL and thread context render the stub. It is not a moderation
+action: nothing is audited, nobody is emailed, there is nothing to appeal, and
+it cannot be restored. _Avoid:_ removed post, withdrawn post.
 
 **Moderation action** — any act by a moderator, staff member or admin that the
 audit log records. Every one of them emails the affected user, including

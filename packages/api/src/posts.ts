@@ -201,7 +201,9 @@ async function readPostAttachments(files: readonly File[]): Promise<PostAttachme
  * Immediate-parent preview for a reply. A correlated JSON projection keeps
  * this in one round trip while allowing the outer query to keep its existing
  * joins and keyset shape. Hidden parents produce null (rather than leaking
- * their identity/content); removed/deleted parents remain present as stubs.
+ * their identity/content); removed parents remain present as appeal/context
+ * stubs, while author-deleted parents disappear like every other fresh feed
+ * rendering.
  */
 function parentPreview(viewerId: string) {
   return sql<ParentPreview | null>`(
@@ -228,6 +230,7 @@ function parentPreview(viewerId: string) {
     from ${post} as "parent_post"
     inner join ${user} as "parent_author" on ${parentAuthor.id} = ${parentPost.authorId}
     where ${parentPost.id} = ${post.parentId}
+      and ${parentPost.deletedAt} is null
       and not (
         (
           ${parentAuthor.banned}
@@ -637,6 +640,10 @@ export const postRouter = {
       const kind = input.kind ?? (input.includeReplies ? "all" : "posts");
 
       const filters = [
+        // Author-deleted posts survive for direct thread URLs and ancestor
+        // context, but a fresh feed/profile/reply-list read must not render a
+        // tombstone card. Moderator removals deliberately remain visible.
+        isNull(post.deletedAt),
         input.authorId ? eq(post.authorId, input.authorId) : undefined,
         // Three-way, in priority order: an explicit `parentId` asks for one
         // post's replies; otherwise `kind` selects top-level posts, replies,

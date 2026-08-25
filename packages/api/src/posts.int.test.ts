@@ -439,20 +439,19 @@ describe("post.delete", () => {
     expect(row?.deletedAt).not.toBeNull();
     expect(row?.content).not.toBeNull();
 
-    // ...and a stub through the one projection every surface reads.
+    // Fresh feeds no longer include the tombstone, regardless of viewer.
     for (const context of [contextFor(author), contextFor(viewer)]) {
       const feed = await call(appRouter.post.list, { feed: "global" }, { context });
-      const item = feed.items.find((p) => p.id === target.id);
-      expect(item?.deleted).toBe(true);
-      expect(item?.content).toBeNull();
-      // Nobody was moderated here, so nothing claims a moderator acted — and
-      // there is no reason to show and nothing to appeal.
-      expect(item?.removed).toBe(false);
-      expect(item?.removedReason).toBeNull();
-      // Author tombstones are not restorable: their attachment relation is
-      // cleaned after the post row is tombstoned, so no media path survives.
-      expect(item?.attachments).toEqual([]);
+      expect(feed.items.some((item) => item.id === target.id)).toBe(false);
     }
+
+    await call(appRouter.user.follow, { userId: author.id }, { context: contextFor(viewer) });
+    const following = await call(
+      appRouter.post.list,
+      { feed: "following" },
+      { context: contextFor(viewer) },
+    );
+    expect(following.items.some((item) => item.id === target.id)).toBe(false);
 
     const deletedAttachments = await anonContext.db
       .select({ mediaPath: postAttachment.mediaPath })
@@ -500,7 +499,7 @@ describe("post.delete", () => {
     expect(thread.ancestors[0]?.deleted).toBe(true);
   });
 
-  it("keeps the post's likes, and other posts by the same author", async () => {
+  it("hides the post from its author's profile while preserving its likes and other posts", async () => {
     const author = await createTestUser();
     const liker = await createTestUser();
     const [target, survivor] = await seedPosts(author.id, 2);
@@ -513,13 +512,19 @@ describe("post.delete", () => {
       { authorId: author.id },
       { context: contextFor(liker) },
     );
-    const deletedItem = feed.items.find((p) => p.id === target.id);
-    expect(deletedItem?.likeCount).toBe(1);
-    expect(deletedItem?.viewerHasLiked).toBe(true);
+    expect(feed.items.some((item) => item.id === target.id)).toBe(false);
 
     const survivorItem = feed.items.find((p) => p.id === survivor.id);
     expect(survivorItem?.deleted).toBe(false);
     expect(survivorItem?.content).not.toBeNull();
+
+    const thread = await call(
+      appRouter.post.thread,
+      { postId: target.id },
+      { context: contextFor(liker) },
+    );
+    expect(thread.post.likeCount).toBe(1);
+    expect(thread.post.viewerHasLiked).toBe(true);
   });
 
   it("deleting one author's post leaves another author's alone", async () => {
@@ -768,7 +773,7 @@ describe("post.list", () => {
     expect(new Set(all.items.map((item) => item.id))).toEqual(new Set([root.id, reply.id]));
   });
 
-  it("includes an immediate parent preview, keeps removed parents as stubs, and hides blocked parents", async () => {
+  it("includes an immediate parent preview, keeps removed parents as stubs, and hides deleted or blocked parents", async () => {
     const parentAuthor = await createTestUser({ name: "Parent Author" });
     const replyAuthor = await createTestUser({ name: "Reply Author" });
     const viewer = await createTestUser();
@@ -807,6 +812,20 @@ describe("post.list", () => {
       removed: true,
       author: { id: parentAuthor.id },
     });
+
+    await anonContext.db
+      .update(post)
+      .set({ removedAt: null, removedReason: null, deletedAt: new Date() })
+      .where(eq(post.id, parent.id));
+
+    const deleted = await call(
+      appRouter.post.list,
+      { authorId: replyAuthor.id, kind: "replies" },
+      { context: contextFor(viewer) },
+    );
+    expect(deleted.items.find((item) => item.id === reply.id)?.parent).toBeNull();
+
+    await anonContext.db.update(post).set({ deletedAt: null }).where(eq(post.id, parent.id));
 
     await call(
       appRouter.moderation.block,
