@@ -181,7 +181,6 @@ describe("PostCard", () => {
           excerpt: "The original post",
           truncated: false,
           removed: false,
-          deleted: false,
           author: parentAuthor,
         },
       });
@@ -210,7 +209,6 @@ describe("PostCard", () => {
           excerpt: null,
           truncated: false,
           removed: true,
-          deleted: false,
           author: parentAuthor,
         },
       });
