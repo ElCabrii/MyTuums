@@ -272,8 +272,10 @@ test.describe("password", () => {
 
     await expect(page.getByText("Your password has been changed.")).toBeVisible();
 
-    await page.goto("/settings/account");
-    await page.getByRole("button", { name: "Sign out" }).first().click();
+    // Sign-out is no longer a section on /settings/account (issue #217); sign
+    // out from the own-profile action row instead.
+    await page.goto(`/@${account.username}`);
+    await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/login/);
 
     await page.getByLabel("Username or Email").fill(account.email);

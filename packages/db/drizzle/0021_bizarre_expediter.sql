@@ -1,0 +1,2 @@
+ALTER TABLE "post_attachment" DROP CONSTRAINT "post_attachment_content_type";--> statement-breakpoint
+ALTER TABLE "post_attachment" ADD CONSTRAINT "post_attachment_content_type" CHECK ("post_attachment"."content_type" in ('image/png', 'image/jpeg', 'image/webp', 'image/gif'));

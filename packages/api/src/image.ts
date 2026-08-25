@@ -6,11 +6,12 @@
  * serve back from our own origin, and it is pure, so it is testable without a
  * bucket.
  *
- * The client re-encodes every selected file through a canvas before uploading
- * (`apps/web/src/lib/media.ts`), which means a well-behaved upload is already
- * a small raster image. None of that is trusted here: a caller can post
- * anything to the procedure directly, so the declared MIME type is checked
- * against an allowlist AND against the file's own leading bytes.
+ * The client re-encodes selected stills through a canvas and animated GIFs
+ * through its frame-aware worker before uploading (`apps/web/src/lib/media.ts`),
+ * which means a well-behaved upload is already a small raster image. None of
+ * that is trusted here: a caller can post anything to the procedure directly,
+ * so the declared MIME type is checked against an allowlist AND against the
+ * file's own leading bytes.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -22,6 +23,7 @@ import {
 } from "./constants.js";
 import { imageDimensions } from "./dimensions.js";
 import { isAllowedImageType, sniffImageType, type ImageRejection } from "./post-image.js";
+import { gifFrameSummary, gifWithinLimits } from "./post-image-validation.js";
 
 export {
   acceptPostImage,
@@ -49,6 +51,7 @@ const EXTENSION = {
   "image/webp": "webp",
   "image/png": "png",
   "image/jpeg": "jpg",
+  "image/gif": "gif",
 } satisfies Record<AllowedImageType, string>;
 
 /** The verdict of `acceptImage`: accepted with the sniffed type, or refused with a reason. */
@@ -101,7 +104,20 @@ export function acceptImage(
   const dimensions = imageDimensions(bytes, sniffed);
   // A type that sniffs right but has no parseable header is not an image we
   // can size — and an unsized image is one we will not serve.
-  if (!dimensions) return { ok: false, reason: "content" };
+  if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) {
+    return { ok: false, reason: "content" };
+  }
+
+  // A GIF is also an animation: the same dimension header says nothing about
+  // how many frames it carries or how much it decodes to. The block walk
+  // validates the structure (a truncated GIF is `content`) and the limits
+  // bound the work (an excessive-frame or decode-bomb GIF is `size`), the same
+  // two verdicts `acceptPostImage` returns for a post attachment.
+  if (sniffed === "image/gif") {
+    const summary = gifFrameSummary(bytes);
+    if (!summary) return { ok: false, reason: "content" };
+    if (!gifWithinLimits(summary)) return { ok: false, reason: "size" };
+  }
 
   if (variant === "original") {
     if (dimensions.width * dimensions.height > MAX_IMAGE_MEGAPIXELS * 1_000_000) {
@@ -178,10 +194,10 @@ export function objectKeyFromMediaPath(value: string | null | undefined): string
  */
 export function isSafeObjectKey(key: string): boolean {
   return (
-    /^(?:avatars|banners)\/[A-Za-z0-9_-]+\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?:\.orig)?\.(webp|png|jpg)$/.test(
+    /^(?:avatars|banners)\/[A-Za-z0-9_-]+\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?:\.orig)?\.(webp|png|jpg|gif)$/.test(
       key,
     ) ||
-    /^posts\/[A-Za-z0-9_-]+\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(webp|png|jpg)$/.test(
+    /^posts\/[A-Za-z0-9_-]+\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(webp|png|jpg|gif)$/.test(
       key,
     )
   );

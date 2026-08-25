@@ -41,6 +41,14 @@ describe("AccountSettingsPage", () => {
     });
 
     expect(screen.getByRole("heading", { level: 1, name: m.settings_title() })).toBeInTheDocument();
+    // Two group landmarks head the page; each card's own title nests below as
+    // an h3 (see components/settings/section.tsx).
+    expect(
+      screen.getByRole("heading", { level: 2, name: m.settings_group_profile() }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: m.settings_group_account() }),
+    ).toBeInTheDocument();
     for (const title of [
       m.settings_profile_title(),
       m.settings_handle_title(),
@@ -49,13 +57,15 @@ describe("AccountSettingsPage", () => {
       m.twofa_section_title(),
       m.passkey_section_title(),
       m.settings_blocked_title(),
-      m.auth_sign_out(),
     ]) {
-      expect(screen.getByRole("heading", { level: 2, name: title })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 3, name: title })).toBeInTheDocument();
     }
     expect(
       screen.queryByRole("heading", { name: m.settings_linked_title() }),
     ).not.toBeInTheDocument();
+    // Sign-out is no longer a section on this page — it lives in the navbar
+    // account menu (header.tsx). See issue #217.
+    expect(screen.queryByRole("heading", { name: m.auth_sign_out() })).not.toBeInTheDocument();
 
     act(() => store.set(authErrorAtom, "One shared failure"));
     expect(screen.getAllByRole("alert")).toHaveLength(1);

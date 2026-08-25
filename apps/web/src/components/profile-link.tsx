@@ -120,7 +120,10 @@ function ProfileHoverCardContent({ username }: { username: string }) {
     profile.followerCount === 1
       ? m.profile_hover_follower_one({ count: followerCount })
       : m.profile_hover_follower_many({ count: followerCount });
-  const bio = profile.bio?.trim() || m.profile_hover_no_bio();
+  // Omit the bio line entirely when there is none: the card already shows the
+  // name, handle, avatar, follower count and follow button, so a "no bio"
+  // placeholder adds no information (issue #216).
+  const bio = profile.bio?.trim();
 
   return (
     <div className="space-y-3">
@@ -155,9 +158,11 @@ function ProfileHoverCardContent({ username }: { username: string }) {
           never cut a URL or mention mid-token into a dead partial link. A
           mention here intentionally opens its own hover preview inside this
           card, as it already does inside the moderation case dialog. */}
-      <p className="text-foreground/90 line-clamp-3 text-sm leading-relaxed break-words whitespace-pre-line">
-        <LinkedText text={bio} />
-      </p>
+      {bio && (
+        <p className="text-foreground/90 line-clamp-3 text-sm leading-relaxed break-words whitespace-pre-line">
+          <LinkedText text={bio} />
+        </p>
+      )}
 
       <div className="flex items-center justify-between gap-3">
         <span className="text-muted-foreground text-xs">{followers}</span>

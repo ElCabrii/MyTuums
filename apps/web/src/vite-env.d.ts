@@ -42,3 +42,61 @@ interface ImportMeta {
  * the bundle was built from.
  */
 declare const __APP_VERSION__: string;
+
+/**
+ * `gifenc` (issue #201) ships no types of its own and has none published to
+ * DefinitelyTyped. This covers exactly the exports `lib/gif-pipeline.ts`
+ * calls — not the whole surface documented in its README (dithering options,
+ * `prequantize`, `nearestColor*`, manual-mode `first`/`bytesView`) — so an
+ * unused option silently typo'd would still be caught by nothing, but every
+ * option this app actually passes is checked.
+ */
+declare module "gifenc" {
+  // Variable-length rather than a strict RGB/RGBA tuple: `rgb565`/`rgb444`
+  // return 3-length colors and `rgba4444` returns 4-length colors, and the
+  // pipeline reads `color[3]` only after requesting the latter.
+  export type GifColor = readonly number[];
+  export type GifPalette = ReadonlyArray<GifColor>;
+
+  export function quantize(
+    rgba: Uint8Array | Uint8ClampedArray,
+    maxColors: number,
+    options?: {
+      format?: "rgb565" | "rgb444" | "rgba4444";
+      oneBitAlpha?: boolean | number;
+      clearAlpha?: boolean;
+      clearAlphaColor?: number;
+    },
+  ): GifPalette;
+
+  export function applyPalette(
+    rgba: Uint8Array | Uint8ClampedArray,
+    palette: GifPalette,
+    format?: "rgb565" | "rgb444" | "rgba4444",
+  ): Uint8Array;
+
+  export interface GifWriteFrameOptions {
+    palette?: GifPalette;
+    transparent?: boolean;
+    transparentIndex?: number;
+    delay?: number;
+    repeat?: number;
+    dispose?: number;
+  }
+
+  export interface GifEncoderInstance {
+    writeFrame(
+      index: Uint8Array,
+      width: number,
+      height: number,
+      options?: GifWriteFrameOptions,
+    ): void;
+    finish(): void;
+    bytes(): Uint8Array<ArrayBuffer>;
+  }
+
+  export function GIFEncoder(options?: {
+    initialCapacity?: number;
+    auto?: boolean;
+  }): GifEncoderInstance;
+}

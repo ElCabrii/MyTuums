@@ -150,12 +150,17 @@ export const THREAD_ANCESTOR_MAX = 20;
  * What the avatar and banner uploads accept.
  *
  * SVG is absent and must stay absent: it is a document format that can carry
- * script, and these bytes are served back from our own origin. The three
- * raster types below are what a browser canvas can produce, which is what
- * `apps/web/src/lib/media.ts` re-encodes every selected file into before it is
- * ever uploaded.
+ * script, and these bytes are served back from our own origin. The three raster
+ * types a browser canvas produces (WebP, PNG, JPEG) are what
+ * `apps/web/src/lib/media.ts` re-encodes every selected still image into before
+ * it is ever uploaded. GIF is the one exception to canvas re-encoding:
+ * `canvas.toBlob()` flattens an animation to its first frame, so the web app
+ * runs a frame-aware codec pipeline instead (issue #201) and uploads the
+ * re-encoded animated GIF as the display object. The server sniffs and
+ * structurally validates GIF the same way it does the canvas types — the
+ * declared MIME is never trusted.
  */
-export const ALLOWED_IMAGE_TYPES = ["image/webp", "image/png", "image/jpeg"] as const;
+export const ALLOWED_IMAGE_TYPES = ["image/webp", "image/png", "image/jpeg", "image/gif"] as const;
 
 export type AllowedImageType = (typeof ALLOWED_IMAGE_TYPES)[number];
 
@@ -214,6 +219,30 @@ export const IMAGE_LIMITS = {
  * profile. Checked against header bytes, so it costs nothing to enforce.
  */
 export const MAX_IMAGE_MEGAPIXELS = 50;
+
+/**
+ * Animation-specific limits for GIF, applied in addition to the byte and
+ * dimension caps above (issue #201).
+ *
+ * A GIF's byte size does not bound its decode cost the way a still image's
+ * does: LZW-compressed flat colour compresses many large frames into few bytes,
+ * so a tiny upload can explode into gigabytes of decoded pixels. These three
+ * centrally-defined limits bound that work, and are enforced server-side from
+ * the file's own block structure (never a declared field). The web app reads
+ * them too, for early client feedback before the upload.
+ *
+ * - `GIF_MAX_FRAMES` — the number of image descriptors. Bounds the encode pass
+ *   the web app runs and the storage/read cost of a multi-frame object.
+ * - `GIF_MAX_TOTAL_DURATION_MS` — the sum of every frame's delay. Bounds how
+ *   long one stored animation runs.
+ * - `GIF_MAX_CUMULATIVE_PIXELS` — the sum of every frame's `width × height`.
+ *   This is the decompression-bomb defence: it is what stops a small-byte upload
+ *   from decoding to an unbounded RGBA buffer, the way the megapixel ceiling
+ *   does for a single still frame.
+ */
+export const GIF_MAX_FRAMES = 500;
+export const GIF_MAX_TOTAL_DURATION_MS = 200_000;
+export const GIF_MAX_CUMULATIVE_PIXELS = 50_000_000;
 
 /**
  * The largest request body the RPC endpoint will accept.

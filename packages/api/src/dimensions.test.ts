@@ -266,6 +266,34 @@ describe("imageDimensions", () => {
     expect(imageDimensions(chromeBanner, "image/webp")).toEqual({ width: 667, height: 500 });
   });
 
+  it("parses GIF dimensions from the Logical Screen Descriptor", () => {
+    // "GIF89a", then the canvas width and height as 16-bit little-endian words
+    // at bytes 6-7 and 8-9. The logical screen is what the crop editor and the
+    // display-variant layout reason about — never an individual frame's sub-rect.
+    const gif = new Uint8Array([
+      0x47,
+      0x49,
+      0x46,
+      0x38,
+      0x39,
+      0x61, // "GIF89a"
+      0x00,
+      0x01, // width: 256
+      0x80,
+      0x00, // height: 128
+      0x00,
+      0x00,
+      0x00, // packed (no GCT), bg, aspect
+    ]);
+    expect(imageDimensions(gif, "image/gif")).toEqual({ width: 256, height: 128 });
+  });
+
+  it("returns null for a GIF with a bad version byte", () => {
+    // "GIF88a" — the version byte is neither 0x37 (87a) nor 0x39 (89a).
+    const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x38, 0x61, 0x00, 0x01, 0x80, 0x00]);
+    expect(imageDimensions(gif, "image/gif")).toBeNull();
+  });
+
   it("returns null for an unknown type, a short header, or a garbled chunk", () => {
     expect(imageDimensions(new Uint8Array(64), "image/svg+xml")).toBeNull();
     expect(imageDimensions(new Uint8Array(8), "image/png")).toBeNull();

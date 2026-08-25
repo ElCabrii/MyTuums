@@ -130,6 +130,36 @@ describe("ProfileLink", () => {
     expect(screen.queryByText("Find me at", { exact: false })).not.toBeInTheDocument();
   });
 
+  it("renders no bio line when the profile has no bio", async () => {
+    const queryClient = renderQueryClient();
+    queryFixtures(queryClient).profile.data(
+      "biolist",
+      makeProfile({ id: "person-4", username: "biolist", name: "No Bio", followerCount: 5 }),
+    );
+
+    await renderWithProviders(<ProfileLink username="biolist">No Bio</ProfileLink>, {
+      queryClient,
+      signedInAs: true,
+    });
+    vi.useFakeTimers();
+
+    fireEvent.mouseEnter(screen.getByRole("link", { name: "No Bio" }));
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    // The card still loads — follower count and follow button render — but the
+    // bio line is omitted entirely rather than showing a "no bio" placeholder.
+    expect(screen.getByText(m.profile_hover_follower_many({ count: "5" }))).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: m.follow_action() })).toBeInTheDocument();
+    expect(document.querySelector(".line-clamp-3")).toBeNull();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+  });
+
   it("renders only the suspension stub for a suspended profile", async () => {
     const queryClient = renderQueryClient();
     queryFixtures(queryClient).profile.data(

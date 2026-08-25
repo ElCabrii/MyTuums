@@ -115,6 +115,65 @@ const WEBP = new Uint8Array([
   0x01, // height: 256
 ]);
 
+// A GIF's 6-byte magic ("GIF89a") is what `sniffImageType` reads; the Logical
+// Screen Descriptor after it (256x128, no Global Color Table) is what the
+// dimension parser reads, so this one fixture serves both.
+const GIF = new Uint8Array([
+  0x47,
+  0x49,
+  0x46,
+  0x38,
+  0x39,
+  0x61, // "GIF89a"
+  0x00,
+  0x01,
+  0x80,
+  0x00, // logical screen 256x128
+  0x00,
+  0x00,
+  0x00, // packed (no GCT), bg, aspect
+]);
+
+/** Little-endian byte pair for a 16-bit value, the way GIF stores widths/heights/delays. */
+function le16(value: number): [number, number] {
+  return [value & 0xff, (value >>> 8) & 0xff];
+}
+
+/**
+ * Builds a minimal well-formed GIF for the accept-layer tests: a 13-byte header
+ * (no Global Color Table), then for each frame an optional Graphic Control
+ * Extension (its delay), an Image Descriptor, and an empty image-data sub-block
+ * sequence, then the 0x3B trailer. The server walks block structure only, so the
+ * image-data sub-blocks carry no real compressed pixels.
+ */
+function buildGif(
+  logicalScreen: { width: number; height: number },
+  frames: ReadonlyArray<{ width: number; height: number; delayCs?: number }>,
+): Uint8Array {
+  const bytes: number[] = [
+    0x47,
+    0x49,
+    0x46,
+    0x38,
+    0x39,
+    0x61,
+    ...le16(logicalScreen.width),
+    ...le16(logicalScreen.height),
+    0x00,
+    0x00,
+    0x00,
+  ];
+  for (const frame of frames) {
+    if (frame.delayCs !== undefined) {
+      bytes.push(0x21, 0xf9, 0x04, 0x00, ...le16(frame.delayCs), 0x00, 0x00);
+    }
+    bytes.push(0x2c, ...le16(0), ...le16(0), ...le16(frame.width), ...le16(frame.height), 0x00);
+    bytes.push(0x02, 0x00);
+  }
+  bytes.push(0x3b);
+  return new Uint8Array(bytes);
+}
+
 /** A PNG header with caller-selected dimensions and a caller-selected payload size. */
 function pngWithDimensions(width: number, height: number, size = 24): Uint8Array {
   const bytes = new Uint8Array(size);
@@ -199,6 +258,7 @@ describe("sniffImageType", () => {
       ["png", PNG, "image/png"],
       ["jpeg", JPEG, "image/jpeg"],
       ["webp", WEBP, "image/webp"],
+      ["gif", GIF, "image/gif"],
       // A document that can carry script is not an image, however it is labelled.
       ["svg", utf8('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>'), null],
       ["html", utf8("<!doctype html><script>"), null],
@@ -270,7 +330,9 @@ describe("acceptImage", () => {
 
   it("enforces the per-slot display byte cap, which differs between avatar and banner", () => {
     const overAvatar = new Uint8Array(IMAGE_LIMITS.avatar.maxDisplayBytes + 1);
-    overAvatar.set(PNG.slice(0, 8));
+    // Keep the payload a parseable PNG so the banner assertion tests only its
+    // larger byte cap, not whether a zero-dimension header is accepted.
+    overAvatar.set(PNG);
 
     expect(acceptImage(overAvatar, "image/png", "avatar", "display")).toMatchObject({
       ok: false,
@@ -388,6 +450,38 @@ describe("acceptImage", () => {
     expect(acceptImage(bomb, "image/png", "avatar", "original")).toMatchObject({
       ok: false,
       reason: "size",
+    });
+  });
+
+  it("accepts a well-formed GIF within the animation limits", () => {
+    const gif = buildGif({ width: 256, height: 128 }, [{ width: 256, height: 128 }]);
+    expect(acceptImage(gif, "image/gif", "avatar", "display")).toEqual({
+      ok: true,
+      type: "image/gif",
+    });
+  });
+
+  it("rejects a GIF with too many frames as size, not content", () => {
+    // 501 two-pixel frames: each frame is tiny, so the byte cap and the logical
+    // screen never see it — the frame-count limit is what bounds the stored and
+    // decoded work, and it lands as `size`.
+    const gif = buildGif(
+      { width: 2, height: 2 },
+      Array.from({ length: 501 }, () => ({ width: 2, height: 2 })),
+    );
+    expect(acceptImage(gif, "image/gif", "avatar", "display")).toMatchObject({
+      ok: false,
+      reason: "size",
+    });
+  });
+
+  it("rejects a truncated GIF as content", () => {
+    // The header is intact, so the dimensions parse; the missing trailer is what
+    // the block walk catches, and a structurally incomplete GIF is `content`.
+    const gif = buildGif({ width: 256, height: 128 }, [{ width: 256, height: 128 }]).slice(0, -1);
+    expect(acceptImage(gif, "image/gif", "avatar", "display")).toMatchObject({
+      ok: false,
+      reason: "content",
     });
   });
 });
@@ -519,6 +613,29 @@ describe("post attachment acceptance", () => {
 
     expect(acceptPostImage(oversized, "image/png")).toEqual({ ok: false, reason: "size" });
   });
+
+  it("accepts a well-formed GIF and reports the sniffed type and logical-screen size", () => {
+    const gif = buildGif({ width: 2, height: 2 }, [{ width: 2, height: 2 }]);
+    expect(acceptPostImage(gif, "image/gif")).toEqual({
+      ok: true,
+      type: "image/gif",
+      width: 2,
+      height: 2,
+    });
+  });
+
+  it("rejects a GIF with too many frames as size", () => {
+    const gif = buildGif(
+      { width: 2, height: 2 },
+      Array.from({ length: 501 }, () => ({ width: 2, height: 2 })),
+    );
+    expect(acceptPostImage(gif, "image/gif")).toEqual({ ok: false, reason: "size" });
+  });
+
+  it("rejects a truncated GIF as content", () => {
+    const gif = buildGif({ width: 2, height: 2 }, [{ width: 2, height: 2 }]).slice(0, -1);
+    expect(acceptPostImage(gif, "image/gif")).toEqual({ ok: false, reason: "content" });
+  });
 });
 
 /**
@@ -542,6 +659,8 @@ describe("isSafeObjectKey", () => {
       [`avatars/user-1/${UUID}.orig.jpg`, true],
       [`banners/user-1/${UUID}.orig.webp`, true],
       [`posts/user-1/${UUID}/${UUID}.png`, true],
+      [`avatars/user-1/${UUID}.gif`, true],
+      [`posts/user-1/${UUID}/${UUID}.gif`, true],
     ]);
   });
 

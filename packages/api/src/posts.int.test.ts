@@ -48,6 +48,55 @@ function postImage(name: string): File {
   return new File([POST_PNG], name, { type: "image/png" });
 }
 
+/** Little-endian byte pair for a 16-bit value, the way GIF stores widths/heights/delays. */
+function le16(value: number): [number, number] {
+  return [value & 0xff, (value >>> 8) & 0xff];
+}
+
+/**
+ * Builds a minimal well-formed GIF: a 13-byte header (no Global Color Table),
+ * then for each frame an optional Graphic Control Extension (its delay), an
+ * Image Descriptor, and an empty image-data sub-block sequence, then the 0x3B
+ * trailer. The server walks block structure only, so the image-data sub-blocks
+ * carry no real compressed pixels.
+ */
+function buildGif(
+  logicalScreen: { width: number; height: number },
+  frames: ReadonlyArray<{ width: number; height: number; delayCs?: number }>,
+): Uint8Array {
+  const bytes: number[] = [
+    0x47,
+    0x49,
+    0x46,
+    0x38,
+    0x39,
+    0x61,
+    ...le16(logicalScreen.width),
+    ...le16(logicalScreen.height),
+    0x00,
+    0x00,
+    0x00,
+  ];
+  for (const frame of frames) {
+    if (frame.delayCs !== undefined) {
+      bytes.push(0x21, 0xf9, 0x04, 0x00, ...le16(frame.delayCs), 0x00, 0x00);
+    }
+    bytes.push(0x2c, ...le16(0), ...le16(0), ...le16(frame.width), ...le16(frame.height), 0x00);
+    bytes.push(0x02, 0x00);
+  }
+  bytes.push(0x3b);
+  return new Uint8Array(bytes);
+}
+
+/** A file whose bytes really are a GIF, which is what the server sniffs for. */
+function postGif(
+  name: string,
+  logicalScreen: { width: number; height: number },
+  frames: ReadonlyArray<{ width: number; height: number; delayCs?: number }>,
+): File {
+  return new File([buildGif(logicalScreen, frames)], name, { type: "image/gif" });
+}
+
 interface ListArgs {
   authorId?: string;
   parentId?: string;
@@ -179,6 +228,35 @@ describe("post.create", () => {
     const row = listed.items.find((item) => item.id === created.id);
     expect(row?.content).toBe("");
     expect(row?.attachments).toHaveLength(1);
+  });
+
+  it("accepts an animated GIF attachment and stores it under the gif extension", async () => {
+    // The post_attachment content_type check constraint was extended to allow
+    // 'image/gif' (issue #201); this is the one test that exercises the DB
+    // constraint, since the profile path writes to a free-text column.
+    const author = await createTestUser();
+    const created = await call(
+      appRouter.post.create,
+      {
+        content: "",
+        attachments: [
+          postGif("solo.gif", { width: 256, height: 128 }, [
+            { width: 256, height: 128, delayCs: 20 },
+          ]),
+        ],
+      },
+      { context: contextFor(author) },
+    );
+
+    expect(created.attachments).toHaveLength(1);
+    const [attachment] = created.attachments;
+    expect(attachment.contentType).toBe("image/gif");
+    expect(attachment.url).toMatch(/\.gif$/);
+    expect(attachment.width).toBe(256);
+    expect(attachment.height).toBe(128);
+    expect(testStorageObjects.get(attachment.url.replace("/media/", ""))?.contentType).toBe(
+      "image/gif",
+    );
   });
 
   it("accepts an image-only reply and lists it under its parent and the author's replies", async () => {
