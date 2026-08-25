@@ -4,6 +4,14 @@ import { useAtomValue } from "jotai";
 import { ORPCError } from "@orpc/client";
 import { profileAtomFamily } from "@/atoms/profile";
 import { FollowButton } from "@/components/follow-button";
+// Mutual import: LinkedText renders @mentions as ProfileLink (with their own
+// hover preview), and ProfileLink's hover card renders LinkedText for the bio.
+// The cycle is inherent to the domain — profiles mention profiles — and
+// runtime-safe: Base UI renders hover-card content lazily on hover, so the
+// reference never unfolds eagerly (a self-referential bio yields one mention
+// link, not an infinite tree). Left static on purpose: mentions keep their
+// hover preview by design, and both modules export hoisted functions with no
+// top-level cross-references, so the cycle is initialization-safe.
 import { LinkedText } from "@/components/linked-text";
 import { UserAvatar } from "@/components/user-avatar";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";

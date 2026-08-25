@@ -6,6 +6,9 @@ import {
   USERNAME_MAX_LENGTH,
   USERNAME_MIN_LENGTH,
 } from "@my-tuums/auth/rules";
+// The other half of a mutual import: ProfileLink's hover card renders
+// LinkedText for the bio. See profile-link.tsx for why the cycle is
+// intentional and runtime-safe (hover-card content renders lazily on hover).
 import { ProfileLink } from "@/components/profile-link";
 
 type TextSegment = {
