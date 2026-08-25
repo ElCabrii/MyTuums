@@ -15,8 +15,10 @@ export const POST_MAX_LENGTH = 500;
 /**
  * Initial post-media scope. The same limits apply to top-level posts and
  * replies because both are rows in `post` and share one composer contract.
- * Attachments are stored as the validated raster bytes the user selected; no
- * client-supplied URL or data URI is ever persisted.
+ * Attachments are stored as the validated bytes the web app re-encoded for
+ * us — bounded by these caps, and carrying no container metadata because a
+ * canvas encode emits pixels only (issue #207); no client-supplied URL or
+ * data URI is ever persisted.
  */
 export const POST_ATTACHMENT_MAX_COUNT = 4;
 export const POST_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;

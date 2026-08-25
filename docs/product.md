@@ -87,11 +87,18 @@ both by the server's page gate and by the client.
 _Configuration-dependent_: uploads require the `S3_*` group. Without it the
 app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
 
-- Avatars and banners only. Accepted types are WebP, PNG and JPEG, decided by
-  sniffing the bytes — never by the declared content type — with per-slot size
-  limits and a 50-megapixel ceiling.
-- The browser uploads a display-sized WebP variant plus the untouched
-  original; both are stored and share one identifier.
+- Accepted types are WebP, PNG and JPEG everywhere, decided by sniffing the
+  bytes — never by the declared content type — with per-slot size limits and
+  a 50-megapixel ceiling.
+- Avatars and banners are stored as a pair: the browser uploads a
+  display-sized WebP variant plus the untouched original, sharing one
+  identifier. The original keeps whatever metadata it arrived with, so a
+  picture can be refitted or re-cropped later without lost pixels; only
+  signed-in viewers authorized for the profile can read it either way.
+- A post or reply can carry up to four images. Each is re-encoded in the
+  browser before upload and no original is kept: the stored image is bounded
+  in dimensions and bytes, and carries no camera/GPS (EXIF) metadata (issue
+  #207).
 - Replacing or removing a profile image is atomic: the new objects are
   written first, the profile's references swap in one locked database step,
   and only then is the superseded pair deleted. A failed upload or removal

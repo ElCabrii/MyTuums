@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { IMAGE_LIMITS } from "@my-tuums/api/constants";
+import { IMAGE_LIMITS, POST_ATTACHMENT_MAX_BYTES } from "@my-tuums/api/constants";
 import {
   IMAGE_ACCEPT,
   ImageError,
@@ -8,22 +8,25 @@ import {
   calculateDisplayLayout,
   clampCrop,
   createDisplayVariant,
+  createPostAttachment,
 } from "@/lib/media";
 
 /**
  * The guard paths only.
  *
- * The canvas half of `createDisplayVariant` is deliberately untested here:
- * jsdom implements neither `createImageBitmap` nor a real 2D context, so a test
- * of the resize arithmetic would be a test of whatever stub it installed rather
- * than of the browser behaviour it stands in for. That path is covered end to
- * end by `e2e/tests/specs/settings.spec.ts`, in a real browser, against a real
+ * The canvas half of `createDisplayVariant` and `createPostAttachment` is
+ * deliberately untested here: jsdom implements neither `createImageBitmap` nor
+ * a real 2D context, so a test of the resize arithmetic would be a test of
+ * whatever stub it installed rather than of the browser behaviour it stands in
+ * for. That path is covered end to end by `e2e/tests/specs/settings.spec.ts`
+ * and `e2e/tests/specs/compose.spec.ts`, in real browsers against a real
  * bucket.
  *
  * What IS worth pinning here is everything that decides whether the canvas is
  * reached at all — and, more importantly, that a rejection is an `ImageError`
- * carrying a `problem`, because `atoms/profile-edit.ts` branches on exactly that
- * to choose between its own copy and passing a server message straight through.
+ * carrying a `problem`, because `atoms/profile-edit.ts` branches on exactly
+ * that to choose between its own copy and passing a server message straight
+ * through.
  */
 
 const originalCreateImageBitmap = globalThis.createImageBitmap;
@@ -509,5 +512,119 @@ describe("createDisplayVariant", () => {
 
     expect(encoded.type).toBe("image/webp");
     expect(encoded.name).toBe("avatar-display.webp");
+  });
+});
+
+describe("createPostAttachment", () => {
+  // The post pipeline shares its guards with the display variant, so only the
+  // differences are re-pinned here: the attachment caps (not a slot's), and
+  // the property that makes issue #207 hold — what comes back is the
+  // encoder's output alone, never the picked bytes.
+
+  it("rejects a type outside the allowlist without touching the decoder", async () => {
+    const decode = vi.fn();
+    globalThis.createImageBitmap = decode;
+
+    await expect(createPostAttachment(file("image/svg+xml"))).rejects.toMatchObject({
+      problem: "type",
+    });
+    expect(decode).not.toHaveBeenCalled();
+  });
+
+  it("rejects a source over the attachment byte cap, before decoding it", async () => {
+    const decode = vi.fn();
+    globalThis.createImageBitmap = decode;
+
+    await expect(
+      createPostAttachment(file("image/png", POST_ATTACHMENT_MAX_BYTES + 1)),
+    ).rejects.toMatchObject({ problem: "size" });
+    expect(decode).not.toHaveBeenCalled();
+  });
+
+  it("rejects a megapixel bomb on header bytes alone, without decoding it", async () => {
+    const decode = vi.fn();
+    globalThis.createImageBitmap = decode;
+
+    await expect(createPostAttachment(pngFileWithHeader(20_000, 20_000))).rejects.toMatchObject({
+      problem: "size",
+    });
+    expect(decode).not.toHaveBeenCalled();
+  });
+
+  it("uploads only canvas-produced bytes — the picked bytes never survive", async () => {
+    // The mechanism behind metadata stripping: the stored File is assembled
+    // from `canvas.toBlob`'s output and nothing else. A JPEG's EXIF block —
+    // GPS included — lives in those input bytes, so if they do not reach the
+    // output, no metadata does. The stubbed encoder here returns bytes that
+    // share nothing with the source; jsdom cannot prove more, which is why
+    // compose.spec.ts proves the same property end to end with real EXIF.
+    const exifBytes = new Uint8Array(1024).fill(0xab);
+    exifBytes.set([0xff, 0xd8, 0xff, 0xe1], 0); // JPEG SOI + APP1 marker
+    exifBytes.set([...new TextEncoder().encode("Exif\0\0GPSProbe")], 6);
+    const encodedBytes = new Uint8Array(64).fill(0x42);
+    stubEncodePath({
+      toBlob: new Blob([encodedBytes], { type: "image/webp" }),
+      width: 800,
+      height: 600,
+    });
+
+    const stored = await createPostAttachment(
+      new File([exifBytes], "vacation.jpg", { type: "image/jpeg" }),
+    );
+
+    // jsdom's File has no arrayBuffer; FileReader is the one read path it
+    // implements (the same reason `readFirstBytes` uses it).
+    const storedBytes = await new Promise<Uint8Array>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (reader.result instanceof ArrayBuffer) resolve(new Uint8Array(reader.result));
+        else reject(new Error("unreadable"));
+      };
+      reader.onerror = () => reject(reader.error ?? new Error("unreadable"));
+      reader.readAsArrayBuffer(stored);
+    });
+
+    expect(storedBytes).toEqual(encodedBytes);
+    expect(stored.size).not.toBe(exifBytes.length);
+    // The picker's name survives as a label; the declared type is the
+    // encoder's truth.
+    expect(stored.name).toBe("vacation.jpg");
+    expect(stored.type).toBe("image/webp");
+  });
+
+  it("bounds past-cap dimensions and never upscales small sources", async () => {
+    const context = stubEncodePath({
+      toBlob: new Blob([new Uint8Array(64)], { type: "image/webp" }),
+      width: 5000,
+      height: 1000,
+    });
+    await createPostAttachment(file("image/png"));
+    // scale = min(4096/5000, 4096/1000, 1) = 0.8192 → 4096 x 819.
+    expect(context.drawImage.mock.calls[0]?.slice(-2)).toEqual([4096, 819]);
+
+    const small = stubEncodePath({
+      toBlob: new Blob([new Uint8Array(64)], { type: "image/webp" }),
+      width: 100,
+      height: 50,
+    });
+    await createPostAttachment(file("image/png"));
+    expect(small.drawImage.mock.calls[0]?.slice(-2)).toEqual([100, 50]);
+  });
+
+  it("downscales an oversized PNG fallback until it fits the attachment cap", async () => {
+    const context = stubEncodePath({
+      toBlob: [
+        new Blob([new Uint8Array(POST_ATTACHMENT_MAX_BYTES + 1)], { type: "image/png" }),
+        new Blob([new Uint8Array(POST_ATTACHMENT_MAX_BYTES - 1)], { type: "image/png" }),
+      ],
+      width: 2048,
+      height: 1024,
+    });
+
+    const stored = await createPostAttachment(file("image/png"));
+
+    expect(stored.size).toBe(POST_ATTACHMENT_MAX_BYTES - 1);
+    expect(context.drawImage).toHaveBeenCalledTimes(2);
+    expect(context.drawImage.mock.calls[1]?.slice(-2)).toEqual([1024, 512]);
   });
 });

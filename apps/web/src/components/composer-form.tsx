@@ -23,6 +23,7 @@ import { typeaheadQueryAtomFamily } from "@/atoms/search";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { insertMention, mentionAtCaret } from "@/lib/composer-mentions";
+import { createPostAttachment } from "@/lib/media";
 import { nextHighlight, suggestionRows, type SuggestionRow } from "@/lib/search-suggestions";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
@@ -352,8 +353,22 @@ export function ComposerForm({
         continue;
       }
 
-      next.push({ id: crypto.randomUUID(), file });
-      totalBytes += file.size;
+      // What joins the draft is the re-encoded object, never the picked
+      // bytes: processing strips EXIF/GPS metadata by construction and bounds
+      // what an upload can weigh (lib/media.ts). A processing failure is the
+      // same refusal as a byte-level one — the file simply never joins.
+      let processed: File;
+      try {
+        processed = await createPostAttachment(file);
+      } catch {
+        nextError ??= m.post_image_invalid();
+        continue;
+      }
+
+      next.push({ id: crypto.randomUUID(), file: processed });
+      // The batch budget counts what will actually be uploaded — the
+      // processed objects, not the picked originals.
+      totalBytes += processed.size;
     }
 
     if (selectionId !== attachmentSelectionRef.current) return;
