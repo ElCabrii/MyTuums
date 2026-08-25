@@ -102,7 +102,7 @@ const PARENT_EXCERPT_LENGTH = 140;
 const parentPost = alias(post, "parent_post");
 const parentAuthor = alias(user, "parent_author");
 
-type PostAttachment = {
+export type PostAttachment = {
   id: string;
   url: string;
   position: number;

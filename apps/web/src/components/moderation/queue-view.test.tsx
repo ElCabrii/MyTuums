@@ -189,6 +189,39 @@ describe("QueueView", () => {
     expect(container.textContent).not.toContain("—");
   });
 
+  it("renders a post preview's attachments as thumbnails, so an image report is visible without opening the case", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.queue([
+      {
+        items: [
+          makeModerationCase({
+            targetId: "post-1",
+            preview: makePostPreview({
+              attachments: [
+                {
+                  id: "attachment-1",
+                  url: "/media/posts/author/post/attachment-1.png",
+                  position: 0,
+                  contentType: "image/png",
+                  byteSize: 24,
+                  width: 256,
+                  height: 128,
+                },
+              ],
+            }),
+          }),
+        ],
+        nextCursor: null,
+      },
+    ]);
+    await renderWithProviders(<QueueView />, { queryClient, signedInAs: { role: "moderator" } });
+
+    expect(await screen.findByText("Alex Mercer")).toBeInTheDocument();
+    // The compact grid renders a thumbnail per attachment; the case dialog's
+    // full grid is what a click through the row opens.
+    expect(screen.getByAltText(m.post_attachment_alt({ position: "1" }))).toBeInTheDocument();
+  });
+
   it("badges what has already happened to the target: a removed reply, a suspension, a permanent ban", async () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).moderation.queue([

@@ -5,7 +5,7 @@ import {
   reportDialogAtom,
   reportReasonAtom,
   resetReportFormEffect,
-  type CaseRef,
+  type ReportDialogTarget,
 } from "@/atoms/moderation";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +23,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { reasonLabel } from "@/components/moderation/labels";
+import { PostAttachmentGrid } from "@/components/post-attachment-grid";
+import type { Post } from "@/lib/orpc";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -54,7 +56,7 @@ export function ReportDialog() {
 }
 
 /** The data-backed half of the report dialog — mounted only while a target is set. */
-function ReportDialogBody({ target }: { target: CaseRef }) {
+function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
   useAtomValue(resetReportFormEffect);
   const report = useAtomValue(reportAtom);
   const [reason, setReason] = useAtom(reportReasonAtom);
@@ -63,8 +65,8 @@ function ReportDialogBody({ target }: { target: CaseRef }) {
   const reasons = target.targetType === "user" ? USER_REPORT_REASONS : POST_REPORT_REASONS;
 
   return (
-    <DialogContent>
-      <DialogHeader>
+    <DialogContent className="max-h-[85dvh] gap-0 overflow-y-auto p-0">
+      <DialogHeader className="bg-popover border-border sticky top-0 z-10 border-b">
         <DialogTitle>
           {target.targetType === "user"
             ? m.moderation_report_title_user()
@@ -72,7 +74,10 @@ function ReportDialogBody({ target }: { target: CaseRef }) {
         </DialogTitle>
         <DialogDescription>{m.moderation_report_choose()}</DialogDescription>
       </DialogHeader>
-      <div className="space-y-4 px-6 pb-6">
+      <div className="space-y-4 px-6 pt-5 pb-6">
+        {/* The post being reported, so the reporter confirms what they are
+            flagging before picking a reason. A user target has no post. */}
+        {target.targetType === "post" && <ReportPreview post={target.post} />}
         {/* `items` is what makes the trigger read "Hate speech" once a reason
             is picked: Base UI renders the raw code otherwise. */}
         <Select
@@ -140,5 +145,38 @@ function ReportDialogBody({ target }: { target: CaseRef }) {
         )}
       </div>
     </DialogContent>
+  );
+}
+
+/**
+ * The post being reported, shown above the reason picker so the reporter
+ * confirms what they are flagging. Plain text rather than `LinkedText`: this
+ * is a confirmation preview, not a place to navigate away to a profile, and
+ * the appeal preview (`appeal-page.tsx`) renders the same way. The full
+ * `PostAttachmentGrid` — links and all — is fine here because the dialog body
+ * is not a button, unlike the queue row.
+ *
+ * The "no text" line is guarded on having attachments: a removed post reaches
+ * the kebab with null content and no attachments (the regular projection
+ * hides them), and telling the reporter "images only" with no images below
+ * would be a lie about what is gone.
+ */
+function ReportPreview({ post }: { post: Post }) {
+  return (
+    <div className="border-border/60 bg-muted/30 space-y-2 rounded-lg border p-3 text-left">
+      <p className="text-muted-foreground text-xs font-medium">
+        {m.moderation_report_preview_title()}
+      </p>
+      {post.content ? (
+        <p className="text-foreground/90 text-sm leading-relaxed break-words whitespace-pre-line">
+          {post.content}
+        </p>
+      ) : post.attachments.length > 0 ? (
+        <p className="text-muted-foreground text-sm italic">
+          {m.moderation_report_preview_no_text()}
+        </p>
+      ) : null}
+      <PostAttachmentGrid attachments={post.attachments} />
+    </div>
   );
 }

@@ -726,6 +726,7 @@ describe("queue", () => {
       truncated: true,
       isReply: true,
       removed: false,
+      attachments: [],
       author: await identityOf(author.id),
     });
 
@@ -735,6 +736,46 @@ describe("queue", () => {
       user: await identityOf(reported.id),
       banned: true,
       banExpires: null,
+    });
+
+    await clearQueueFixtures();
+  });
+
+  it("carries a post's attachments in its preview, so an image report is visible in the queue", async () => {
+    const author = await createTestUser();
+    const reporter = await createTestUser();
+    const mod = await moderatorUser();
+    const postRow = await seedPostContent(author.id, "look at this");
+    // The projection reads the row fields, not object storage, so the media
+    // object is never written here — matching how `moderation.case` is tested.
+    const attachmentPath = `/media/posts/${author.id}/${postRow.id}/${randomUUID()}.png`;
+    await anonContext.db.insert(postAttachment).values({
+      postId: postRow.id,
+      position: 0,
+      mediaPath: attachmentPath,
+      contentType: "image/png",
+      byteSize: 24,
+      width: 256,
+      height: 128,
+    });
+    await seedReport(reporter.id, "post", postRow.id, "spam");
+
+    const page = await call(
+      appRouter.moderation.queue,
+      { limit: 10 },
+      { context: contextFor(mod) },
+    );
+    const byId = new Map(page.items.map((item) => [item.targetId, item]));
+
+    expect(byId.get(postRow.id)?.preview).toMatchObject({
+      kind: "post",
+      attachments: [
+        expect.objectContaining({
+          url: attachmentPath,
+          position: 0,
+          contentType: "image/png",
+        }),
+      ],
     });
 
     await clearQueueFixtures();

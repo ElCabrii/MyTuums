@@ -214,4 +214,27 @@ describe("PostAttachmentGrid", () => {
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(m.image_viewer_error());
   });
+
+  it("renders compact thumbnails without link wrappers, so the grid can live inside a button", async () => {
+    const { container } = await renderWithProviders(
+      <PostAttachmentGrid
+        attachments={[makeAttachment(), makeAttachment({ id: "attachment-2", position: 1 })]}
+        compact
+      />,
+    );
+
+    // A flex row of thumbnails, not the feed's link-wrapped grid.
+    expect(container.firstElementChild).toHaveClass("flex");
+    expect(container.firstElementChild).not.toHaveClass("grid");
+    const images = screen.getAllByRole("img");
+    expect(images).toHaveLength(2);
+    for (const image of images) {
+      // Small cover-cropped squares, and bare <img>s — no <a> opens the image,
+      // so a click bubbles to the row button that mounts this grid (the
+      // moderation queue row), which is the point: the row opens the case.
+      expect(image).toHaveClass("size-14");
+      expect(image).toHaveClass("object-cover");
+      expect(image.closest("a")).toBeNull();
+    }
+  });
 });
