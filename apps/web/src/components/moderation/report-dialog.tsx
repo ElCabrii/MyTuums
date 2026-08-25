@@ -65,8 +65,8 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
   const reasons = target.targetType === "user" ? USER_REPORT_REASONS : POST_REPORT_REASONS;
 
   return (
-    <DialogContent>
-      <DialogHeader>
+    <DialogContent className="max-h-[85dvh] gap-0 overflow-y-auto p-0">
+      <DialogHeader className="bg-popover border-border sticky top-0 z-10 border-b">
         <DialogTitle>
           {target.targetType === "user"
             ? m.moderation_report_title_user()
@@ -74,7 +74,7 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
         </DialogTitle>
         <DialogDescription>{m.moderation_report_choose()}</DialogDescription>
       </DialogHeader>
-      <div className="space-y-4 px-6 pb-6">
+      <div className="space-y-4 px-6 pt-5 pb-6">
         {/* The post being reported, so the reporter confirms what they are
             flagging before picking a reason. A user target has no post. */}
         {target.targetType === "post" && <ReportPreview post={target.post} />}
