@@ -134,7 +134,11 @@ export function ProfileSection() {
           {/* The same `@handle` completion the composer offers, mounted here
               with its own `mentionScope` so a bio draft never shares transient
               highlight state with a composer. Acceptances write back through
-              `setBio`/`profileBioDraftAtom`, not a composer draft atom. */}
+              `setBio`/`profileBioDraftAtom`, not a composer draft atom. The bio
+              keeps a fixed height (`field-sizing: fixed`), opting out of the
+              shadcn primitive's `field-sizing-content` auto-grow. The override
+              is an inline style because a class-based one loses to the
+              primitive's `field-sizing-content` on CSS source order. */}
           <MentionTextarea
             id="profile-bio"
             value={bio}
@@ -143,6 +147,7 @@ export function ProfileSection() {
             placeholder={m.auth_field_bio_placeholder()}
             rows={3}
             className="border-input bg-background/50 focus-visible:ring-ring w-full resize-none rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+            style={{ fieldSizing: "fixed" }}
           />
           {/* Mirrors the composer's counter: only turns destructive once over,
               so it reads as information rather than a warning while typing. */}

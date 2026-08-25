@@ -1,47 +1,65 @@
 import { useAtom, useAtomValue } from "jotai";
-import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { composerMentionAtomFamily } from "@/atoms/composer-mentions";
 import { typeaheadQueryAtomFamily } from "@/atoms/search";
+import { Textarea } from "@/components/ui/textarea";
 import { UserAvatar } from "@/components/user-avatar";
 import { insertMention, mentionAtCaret } from "@/lib/composer-mentions";
 import { nextHighlight, suggestionRows, type SuggestionRow } from "@/lib/search-suggestions";
+import { type SearchUser } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
-/** Auto-resize ceiling for editors that grow with their text (the composer). */
-const MAX_HEIGHT = 256;
+/** A user the mention dropdown can accept: a profile with a resolvable handle. */
+type MentionableUser = { user: SearchUser; handle: string };
 
-/** The user rows a mention dropdown can accept: profiles with a resolvable handle. */
-function mentionUsers(rows: SuggestionRow[]): Extract<SuggestionRow, { kind: "user" }>[] {
-  return rows.filter(
-    (row): row is Extract<SuggestionRow, { kind: "user" }> =>
-      row.kind === "user" && handleOf(row.user) !== null,
-  );
+/**
+ * The user rows a mention dropdown can accept: profiles with a resolvable
+ * handle. The handle is resolved here and carried with the row, so the
+ * dropdown never re-derives it — and never guards a null it has already
+ * filtered out.
+ */
+function mentionUsers(rows: SuggestionRow[]): MentionableUser[] {
+  const users: MentionableUser[] = [];
+  for (const row of rows) {
+    if (row.kind !== "user") continue;
+    const handle = handleOf(row.user);
+    if (handle) users.push({ user: row.user, handle });
+  }
+  return users;
 }
+
+/** Frame classes shared by the populated list and the loading spinner. */
+const panelClass =
+  "border-border bg-popover text-popover-foreground absolute top-[calc(100%+0.5rem)] right-0 left-0 z-50 rounded-xl border shadow-lg";
 
 function MentionSuggestions({
   rows,
   highlight,
   onHighlight,
   onAccept,
+  listboxId,
+  optionId,
 }: {
-  rows: Extract<SuggestionRow, { kind: "user" }>[];
+  rows: MentionableUser[];
   highlight: number;
   onHighlight: (index: number) => void;
   onAccept: (index: number) => void;
+  /** Id of the listbox element; also the textarea's `aria-controls` target. */
+  listboxId: string;
+  /** Builds the option id for a given index; mirrors `aria-activedescendant`. */
+  optionId: (index: number) => string;
 }) {
   return (
     <div
-      id="composer-mention-suggestions"
+      id={listboxId}
       role="listbox"
       aria-label={m.composer_mention_suggestions_aria()}
-      className="border-border bg-popover text-popover-foreground absolute top-[calc(100%+0.5rem)] right-0 left-0 z-50 max-h-60 overflow-y-auto rounded-xl border p-1.5 shadow-lg"
+      className={`${panelClass} max-h-60 overflow-y-auto p-1.5`}
     >
       {rows.map((row, index) => {
-        const handle = handleOf(row.user);
-        const displayName = row.user.name || handle || m.user_unknown();
-        if (!handle) return null;
+        const displayName = row.user.name || row.handle;
 
         return (
           <button
@@ -49,7 +67,7 @@ function MentionSuggestions({
             type="button"
             role="option"
             aria-selected={index === highlight}
-            id={`composer-mention-${index}`}
+            id={optionId(index)}
             onMouseDown={(event) => event.preventDefault()}
             onMouseEnter={() => onHighlight(index)}
             onClick={() => onAccept(index)}
@@ -67,7 +85,7 @@ function MentionSuggestions({
               <span className="text-foreground block truncate text-sm font-medium">
                 {displayName}
               </span>
-              <span className="text-muted-foreground block truncate text-xs">@{handle}</span>
+              <span className="text-muted-foreground block truncate text-xs">@{row.handle}</span>
             </span>
           </button>
         );
@@ -85,12 +103,14 @@ function MentionSuggestions({
  * `mentionScope` so two mounted editors never share transient highlight state.
  * What stays caller-owned is the one thing that genuinely differs: where the
  * text lives. `value`/`onValueChange` route every keystroke and every accepted
- * mention back to the caller's draft atom — a composer draft or
- * `profileBioDraftAtom` — so the completion writes through the same atom the
- * field already binds, never a composer-specific one.
+ * mention back to the caller's draft atom — a composer draft or a bio draft
+ * atom — so the completion writes through the same atom the field already
+ * binds, never a composer-specific one.
  *
- * `autoResize` grows the field with its text up to a ceiling, the composer's
- * expanding box; the bio editor leaves it off and keeps its fixed `rows`.
+ * The field is the shadcn `Textarea` primitive, which auto-grows with its text
+ * via `field-sizing-content`; a caller's `max-h-*` caps the growth and scrolls
+ * past it — the composer's expanding box. The bio editor opts back out with
+ * `field-sizing: fixed` to keep a fixed `rows`.
  */
 export function MentionTextarea({
   value,
@@ -101,8 +121,8 @@ export function MentionTextarea({
   wrapperClassName,
   rows,
   id,
+  style,
   disabled = false,
-  autoResize = false,
 }: {
   value: string;
   onValueChange: (next: string) => void;
@@ -115,8 +135,15 @@ export function MentionTextarea({
   wrapperClassName?: string;
   rows?: number;
   id?: string;
+  /**
+   * Inline styles on the textarea. Higher specificity than the primitive's
+   * classes, so this is how a caller overrides a class-based property the
+   * primitive bakes in — the bio editor's `field-sizing: fixed`, which a
+   * class-based override loses to the primitive's `field-sizing-content` on
+   * source order.
+   */
+  style?: CSSProperties;
   disabled?: boolean;
-  autoResize?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingCaretRef = useRef<number | null>(null);
@@ -130,6 +157,11 @@ export function MentionTextarea({
   const showMentionSuggestions =
     !disabled && mentionState.open && (typeahead.isPending || rowsForQuery.length > 0);
 
+  // Namespaced once so the listbox/option ids and the ARIA wiring all agree,
+  // and so two editors on the same page never collide on a duplicate id.
+  const listboxId = `${mentionScope}-mention-suggestions`;
+  const optionId = (index: number) => `${mentionScope}-mention-${index}`;
+
   useEffect(
     () => () => {
       setMentionState({ token: null, highlight: -1, open: false });
@@ -140,13 +172,6 @@ export function MentionTextarea({
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-
-    if (autoResize) {
-      textarea.style.height = "auto";
-      const height = Math.min(textarea.scrollHeight, MAX_HEIGHT);
-      if (height > 0) textarea.style.height = `${height}px`;
-      textarea.style.overflowY = textarea.scrollHeight > MAX_HEIGHT ? "auto" : "hidden";
-    }
 
     const pendingCaret = pendingCaretRef.current;
     if (pendingCaret !== null) {
@@ -160,7 +185,7 @@ export function MentionTextarea({
       // gesture (typing or clicking the textarea) disarms it instead; see
       // the onChange/onClick handlers.
     }
-  }, [value, autoResize]);
+  }, [value]);
 
   const updateMentionState = (nextValue: string, start: number | null, end: number | null) => {
     if (suppressSelectionRef.current) return;
@@ -185,10 +210,9 @@ export function MentionTextarea({
   const acceptMention = (index: number) => {
     const row = rowsForQuery[index];
     const token = mentionState.token;
-    const handle = row ? handleOf(row.user) : null;
-    if (!token || !handle) return;
+    if (!token || !row) return;
 
-    const insertion = insertMention(value, token, handle);
+    const insertion = insertMention(value, token, row.handle);
     // Both branches arm the selection guard and leave it armed: restoring the
     // caret queues a synthetic `select` that must not re-open the list. See
     // the layout effect above and the onChange/onClick handlers.
@@ -242,11 +266,11 @@ export function MentionTextarea({
     }
   };
 
-  const wrapperClass = wrapperClassName ? `relative ${wrapperClassName}` : "relative";
+  const wrapperClass = ["relative", wrapperClassName].filter(Boolean).join(" ");
 
   return (
     <div className={wrapperClass}>
-      <textarea
+      <Textarea
         ref={textareaRef}
         id={id}
         role="combobox"
@@ -283,22 +307,23 @@ export function MentionTextarea({
         onKeyDown={handleMentionKeyDown}
         aria-autocomplete="list"
         aria-expanded={showMentionSuggestions}
-        aria-controls={showMentionSuggestions ? "composer-mention-suggestions" : undefined}
+        aria-controls={showMentionSuggestions ? listboxId : undefined}
         aria-activedescendant={
           showMentionSuggestions && mentionState.highlight >= 0
-            ? `composer-mention-${mentionState.highlight}`
+            ? optionId(mentionState.highlight)
             : undefined
         }
         disabled={disabled}
         className={className}
+        style={style}
       />
       {showMentionSuggestions &&
         (typeahead.isPending ? (
           <div
-            id="composer-mention-suggestions"
+            id={listboxId}
             role="listbox"
             aria-label={m.composer_mention_suggestions_aria()}
-            className="border-border bg-popover text-popover-foreground absolute top-[calc(100%+0.5rem)] right-0 left-0 z-50 flex items-center justify-center rounded-xl border p-4 shadow-lg"
+            className={`${panelClass} flex items-center justify-center p-4`}
           >
             <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
           </div>
@@ -310,6 +335,8 @@ export function MentionTextarea({
               setMentionState((previous) => ({ ...previous, highlight: index }))
             }
             onAccept={acceptMention}
+            listboxId={listboxId}
+            optionId={optionId}
           />
         ))}
     </div>
