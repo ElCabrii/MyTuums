@@ -3,6 +3,7 @@ import { MEDIA_SIGNING_WINDOW_MS, secondsUntilWindowEnd } from "./storage.js";
 import { profileDisplayRedirectCacheControl } from "./profile-media-authorization.js";
 
 const DISPLAY_KEY = "avatars/user-1/11111111-1111-4111-8111-111111111111.webp";
+const GIF_DISPLAY_KEY = "avatars/user-1/11111111-1111-4111-8111-111111111111.gif";
 const ORIGINAL_KEY = "avatars/user-1/11111111-1111-4111-8111-111111111111.orig.jpg";
 
 describe("profileDisplayRedirectCacheControl", () => {
@@ -21,6 +22,10 @@ describe("profileDisplayRedirectCacheControl", () => {
 
   it("never stores an original's redirect — the owner's file stays off shared browsers", () => {
     expect(profileDisplayRedirectCacheControl(ORIGINAL_KEY)).toBeNull();
+  });
+
+  it("recognizes a GIF display object as profile media", () => {
+    expect(profileDisplayRedirectCacheControl(GIF_DISPLAY_KEY)).toMatch(/^private, max-age=\d+$/);
   });
 
   it("declines every non-profile key, post attachments included", () => {

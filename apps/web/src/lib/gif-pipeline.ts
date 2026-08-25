@@ -43,6 +43,9 @@ export interface AnimatedGifResult {
 
 type GifFrameEntry = ParsedGif["frames"][number];
 type GifImageFrameEntry = Extract<GifFrameEntry, { image: unknown }>;
+type RgbaColor = readonly [red: number, green: number, blue: number, alpha: number];
+
+const TRANSPARENT_BACKGROUND: RgbaColor = [0, 0, 0, 0];
 
 function isImageFrame(frame: GifFrameEntry): frame is GifImageFrameEntry {
   return "image" in frame;
@@ -77,6 +80,12 @@ function loopCount(parsed: ParsedGif): number {
   return -1;
 }
 
+/** The logical screen's opaque global-palette background, when the GIF defines one. */
+function logicalScreenBackground(parsed: ParsedGif): RgbaColor {
+  const color = parsed.lsd.gct.exists ? parsed.gct[parsed.lsd.backgroundColorIndex] : undefined;
+  return color ? [color[0], color[1], color[2], 255] : TRANSPARENT_BACKGROUND;
+}
+
 /**
  * Composites every decoded frame onto the full logical screen, honouring GIF
  * disposal semantics, and returns one full-canvas RGBA buffer per frame.
@@ -91,8 +100,15 @@ function loopCount(parsed: ParsedGif): number {
 function compositeFrames(
   frames: ParsedFrame[],
   screen: { width: number; height: number },
+  background: RgbaColor,
 ): Array<{ data: Uint8ClampedArray; delay: number }> {
   const canvas = new Uint8ClampedArray(screen.width * screen.height * 4);
+  fillRect(
+    canvas,
+    screen.width,
+    { left: 0, top: 0, width: screen.width, height: screen.height },
+    background,
+  );
   const composited: Array<{ data: Uint8ClampedArray; delay: number }> = [];
   let previousState: Uint8ClampedArray | null = null;
 
@@ -107,7 +123,7 @@ function compositeFrames(
     composited.push({ data: canvas.slice(), delay: frame.delay || 0 });
 
     if (disposal === 2) {
-      clearRect(canvas, screen.width, frame.dims);
+      fillRect(canvas, screen.width, frame.dims, background);
     } else if (disposal === 3 && previousState) {
       canvas.set(previousState);
     }
@@ -133,18 +149,19 @@ function drawPatch(canvas: Uint8ClampedArray, canvasWidth: number, frame: Parsed
   }
 }
 
-function clearRect(
+function fillRect(
   canvas: Uint8ClampedArray,
   canvasWidth: number,
   dims: { left: number; top: number; width: number; height: number },
+  color: RgbaColor,
 ): void {
   for (let y = 0; y < dims.height; y += 1) {
     for (let x = 0; x < dims.width; x += 1) {
       const index = ((dims.top + y) * canvasWidth + (dims.left + x)) * 4;
-      canvas[index] = 0;
-      canvas[index + 1] = 0;
-      canvas[index + 2] = 0;
-      canvas[index + 3] = 0;
+      canvas[index] = color[0];
+      canvas[index + 1] = color[1];
+      canvas[index + 2] = color[2];
+      canvas[index + 3] = color[3];
     }
   }
 }
@@ -270,7 +287,7 @@ export function processAnimatedGif(source: ArrayBuffer, target: GifTarget): Anim
   if (cumulativePixels > GIF_MAX_CUMULATIVE_PIXELS) throw new ImageError("size");
   if (totalDurationMs > GIF_MAX_TOTAL_DURATION_MS) throw new ImageError("size");
 
-  const composited = compositeFrames(frames, screen);
+  const composited = compositeFrames(frames, screen, logicalScreenBackground(parsed));
   const layout =
     "kind" in target
       ? calculateDisplayLayout(screen, target.kind, target.crop)
