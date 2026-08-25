@@ -143,9 +143,11 @@ over HTTP and imports only its browser-safe subpaths.
   exists to hand the author back their own removed post — and `search.posts`
   excludes both rows outright — it matches the raw
   `content` column, which no projection touches, so a tombstoned post's text
-  would otherwise stay probeable. Keeping the row is what lets replies, likes
-  and the thread above survive, and it is why `post.parent_id` can still
-  cascade. `post.delete` is deliberately NOT a moderation effect: no
+  would otherwise stay probeable. `post.list` also excludes author-deleted
+  rows (including compact reply-parent previews), while `post.thread` keeps
+  their focused/ancestor stubs. Keeping the row is what lets replies, likes and
+  the thread above survive, and it is why `post.parent_id` can still cascade.
+  `post.delete` is deliberately NOT a moderation effect: no
   transaction, no `FOR UPDATE`, no `moderation_action` row, no email, nothing
   appealable — it is author-owned and idempotent, and it refuses a post a
   moderator already removed so the author keeps the stub's reason and appeal

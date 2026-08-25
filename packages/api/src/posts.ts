@@ -57,9 +57,16 @@ const likeCount = sql<number>`(
  * The subquery needs its own alias for the table it is already inside, hence
  * `as reply`: without it `parent_id = id` would compare the outer row to
  * itself and count every post whose parent is its own id, i.e. nothing.
+ *
+ * Author-deleted replies are excluded so the count matches the reply feed,
+ * which filters them out (see the `isNull(post.deletedAt)` filter below). A
+ * deleted reply would otherwise leave a permanent "1 reply" header above an
+ * empty list. Moderator-removed replies are still counted: removal is not
+ * invisibility, and their tombstone cards stay in the thread.
  */
 const replyCount = sql<number>`(
-  select count(*)::int from ${post} as reply where reply.parent_id = ${post.id}
+  select count(*)::int from ${post} as reply
+  where reply.parent_id = ${post.id} and reply.deleted_at is null
 )`;
 
 /**
@@ -201,7 +208,9 @@ async function readPostAttachments(files: readonly File[]): Promise<PostAttachme
  * Immediate-parent preview for a reply. A correlated JSON projection keeps
  * this in one round trip while allowing the outer query to keep its existing
  * joins and keyset shape. Hidden parents produce null (rather than leaking
- * their identity/content); removed/deleted parents remain present as stubs.
+ * their identity/content); removed parents remain present as appeal/context
+ * stubs, while author-deleted parents disappear like every other fresh feed
+ * rendering.
  */
 function parentPreview(viewerId: string) {
   return sql<ParentPreview | null>`(
@@ -228,6 +237,7 @@ function parentPreview(viewerId: string) {
     from ${post} as "parent_post"
     inner join ${user} as "parent_author" on ${parentAuthor.id} = ${parentPost.authorId}
     where ${parentPost.id} = ${post.parentId}
+      and ${parentPost.deletedAt} is null
       and not (
         (
           ${parentAuthor.banned}
@@ -637,6 +647,10 @@ export const postRouter = {
       const kind = input.kind ?? (input.includeReplies ? "all" : "posts");
 
       const filters = [
+        // Author-deleted posts survive for direct thread URLs and ancestor
+        // context, but a fresh feed/profile/reply-list read must not render a
+        // tombstone card. Moderator removals deliberately remain visible.
+        isNull(post.deletedAt),
         input.authorId ? eq(post.authorId, input.authorId) : undefined,
         // Three-way, in priority order: an explicit `parentId` asks for one
         // post's replies; otherwise `kind` selects top-level posts, replies,

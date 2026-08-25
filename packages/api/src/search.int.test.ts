@@ -590,7 +590,7 @@ describe("search.posts", () => {
     expect(stub?.content).toBeNull();
   });
 
-  it("an author-deleted post's content is not matchable either, while the feed still shows the stub", async () => {
+  it("an author-deleted post is absent from both search and fresh feeds", async () => {
     const author = await createTestUser();
     const stranger = await createTestUser();
     const tag = uniqueTag();
@@ -609,9 +609,7 @@ describe("search.posts", () => {
       { authorId: author.id },
       { context: contextFor(stranger) },
     );
-    const stub = feed.items.find((p) => p.id === deleted.id);
-    expect(stub?.deleted).toBe(true);
-    expect(stub?.content).toBeNull();
+    expect(feed.items.some((item) => item.id === deleted.id)).toBe(false);
   });
 });
 
