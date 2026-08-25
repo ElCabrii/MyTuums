@@ -79,11 +79,13 @@ by the Playwright `api` project.
      link sends plain JSON with a Content-Length. The gate reads the
      **canonical** path, so an encoded spelling is recognised and an
      uncanonicalisable one falls to the session demand;
-  3. `MAX_RPC_IN_FLIGHT` concurrent dispatches, over which `/rpc` answers 503.
-     After (2), only an AUTHENTICATED caller can have a body buffered at the
-     `RPC_MAX_BODY_BYTES` ceiling (oRPC's `BodyLimitPlugin`, wired in
-     `src/index.ts`, enforces it per body); (3) bounds how many of those can
-     buffer at once.
+  3. `MAX_RPC_IN_FLIGHT` dispatches whose body buffers past the small-body
+     line, over which `/rpc` answers 503 — the cap counts only requests that
+     can actually grow (`RPC_SMALL_BODY_BYTES` … `RPC_MAX_BODY_BYTES`), all of
+     which are AUTHENTICATED after (2); small JSON bodies stay outside it, so
+     ordinary reads never answer 503 on its account. oRPC's `BodyLimitPlugin`,
+     wired in `src/index.ts`, bounds each such body per request; (3) bounds
+     how many of those can buffer at once.
 - **The `/api/auth` body cap runs before Better Auth converts the request.**
   Declared bodies above `AUTH_MAX_BODY_BYTES` are rejected immediately;
   lengthless and chunked bodies use the bounded replay path so the adapter

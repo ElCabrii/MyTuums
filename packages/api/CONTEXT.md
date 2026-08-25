@@ -230,8 +230,11 @@ over HTTP and imports only its browser-safe subpaths.
   list bypasses the skeleton on purpose: `moderation.queue` merges two shapes
   in JS, which does not fit a single query.
 - **Presigned URLs are windowed** (`MEDIA_SIGNING_WINDOW_MS`): byte-identical
-  within a window, which is what makes object caching work. Redirects must not
-  be cached past `secondsUntilWindowEnd()`.
+  within a window, which is what keeps repeat views off the bucket. Every
+  `/media/` redirect is `private, no-store` — a viewer-authorized decision —
+  except profile display objects, whose redirect is the one stored class:
+  `private`, and bounded by `secondsUntilWindowEnd()` so it can never outlive
+  the signature it points at (`profileDisplayRedirectCacheControl`).
 - **Signed appeal tokens have a 4 KiB input ceiling and a canonical signature.**
   Reject oversized or malformed base64url input before decoding or hashing so
   the one anonymous procedure cannot turn attacker-controlled strings into

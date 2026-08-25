@@ -64,23 +64,22 @@ export interface RequestHandlerDeps {
    */
   handleRpc: (req: IncomingMessage, res: RequestResponse) => Promise<{ matched: boolean }>;
   /**
-   * Turns a `/media/<key>` object key into a redirect target and the cache
-   * budget for that redirect, or `null` when it should 404. Only ever called
-   * for a request that already passed the session gate below, and always with
-   * the authenticated viewer's id: every key — post and profile alike — is
-   * authorized per viewer by the resolver (see `createMediaResolver` in
-   * `@my-tuums/api`), so there is no path where this module names an object
-   * without saying who is asking.
+   * Turns a `/media/<key>` object key into a redirect target, plus — when a
+   * key's redirect may be stored — the Cache-Control to send it with, and
+   * `null` when it should 404. Only ever called for a request that already
+   * passed the session gate below, and always with the authenticated viewer's
+   * id: every key — post and profile alike — is authorized per viewer by the
+   * resolver (see `createMediaResolver` in `@my-tuums/api`), so there is no
+   * path where this module names an object without saying who is asking.
    *
    * Injected rather than imported for the same reason the three above are:
    * this module's job is the routing decision, and a unit test of it should
-   * not need object storage, credentials or a network. The real implementation
-   * is `createMediaResolver` in `@my-tuums/api`.
+   * not need a bucket or a database.
    */
   resolveMediaUrl: (
     key: string,
     viewerId: string,
-  ) => Promise<{ url: string; cacheSeconds: number } | null>;
+  ) => Promise<{ url: string; cacheControl?: string } | null>;
   /**
    * Serves the built web app, when this deployment bundles it.
    *
@@ -189,13 +188,15 @@ function isChunkedRequestBody(req: IncomingMessage): boolean {
 const RPC_APPEAL_OPEN_PATH = "/rpc/moderation/appealOpen";
 
 /**
- * The most `/rpc` requests this process will dispatch concurrently. This is
- * the backpressure that bounds how many bodies can be buffering at once —
- * after the pre-auth gate above has narrowed who can have one in flight at
- * all: anonymous callers top out at `RPC_SMALL_BODY_BYTES` each (a chunked or
- * upload-sized body from them is refused before buffering), so the worst case
- * this cap alone has to hold is a set of authenticated sessions streaming
- * `RPC_MAX_BODY_BYTES`-sized bodies simultaneously.
+ * The most `/rpc` dispatches whose body may buffer past `RPC_SMALL_BODY_BYTES`
+ * at one time. This is the backpressure that bounds how many large bodies can
+ * be buffering at once — and after the pre-auth gate only an AUTHENTICATED
+ * caller can have one in flight at all, so the worst case this cap holds is a
+ * set of authenticated sessions streaming `RPC_MAX_BODY_BYTES`-sized bodies
+ * simultaneously. Small JSON bodies are deliberately outside the cap: each is
+ * bounded by `RPC_SMALL_BODY_BYTES` itself, and counting them here would make
+ * ordinary read traffic answer 503 under modest concurrency while bounding
+ * nothing the per-body limit does not already bound.
  *
  * A request refused here is a 503 — the standard answer a busy server gives
  * an overload condition — and the web client treats 5xx as retryable.
@@ -384,12 +385,12 @@ function canonicalizePathname(rawUrl: string): string | null {
  * positioned to observe response headers over a real connection.
  */
 export function createRequestHandler(deps: RequestHandlerDeps) {
-  // How many `/rpc` dispatches are currently in flight, including every one
-  // whose body is still being buffered by oRPC. Owned by this closure so every
-  // handler instance shares one counter; a per-instance counter would admit
-  // `MAX_RPC_IN_FLIGHT` per instance and the cap would scale with the replica
-  // count instead of holding per process. See `MAX_RPC_IN_FLIGHT` above for
-  // what the cap is for.
+  // How many `/rpc` dispatches with a body over the small-body line are
+  // currently in flight — the ones the admission cap exists to bound. Owned
+  // by this closure so every handler instance shares one counter; a
+  // per-instance counter would admit `MAX_RPC_IN_FLIGHT` per instance and the
+  // cap would scale with the replica count instead of holding per process.
+  // See `MAX_RPC_IN_FLIGHT` above for what the cap is for.
   let rpcInFlight = 0;
 
   return async function handleRequest(req: IncomingMessage, res: RequestResponse): Promise<void> {
@@ -527,28 +528,15 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // client that legitimately reaches it — a browser following the email
         // link — sends a plain JSON body with a Content-Length, so a chunked
         // appeal request is refused with 411 rather than admitted to buffer
-        // against nothing. What remains after both refusals is bounded twice
-        // over: per body by oRPC's BodyLimitPlugin at `RPC_MAX_BODY_BYTES`,
-        // and in number by the admission cap below.
+        // against nothing. What survives both refusals — an AUTHENTICATED
+        // upload-sized or chunked body — is then bounded twice over: per body
+        // by oRPC's BodyLimitPlugin at `RPC_MAX_BODY_BYTES`, and in number by
+        // the admission cap below.
         const isChunked = isChunkedRequestBody(req);
         const exceedsSmallBodyBound =
           isChunked || (declared !== null && declared > RPC_SMALL_BODY_BYTES);
-        if (exceedsSmallBodyBound) {
-          if (canonicalPath !== RPC_APPEAL_OPEN_PATH) {
-            const session = hasSessionCookie(req.headers.cookie)
-              ? await deps.resolveSession(req)
-              : null;
-            if (!session || session.kind !== "authenticated") {
-              // Same shape as the media gate: no-store so a cached 401 cannot
-              // linger after the caller signs in, and fail-closed on an
-              // unavailable session store — without a viewer there is no
-              // legitimate upload either.
-              drainRejectedRequest(req);
-              res.writeHead(401, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
-              res.end("Unauthorized");
-              return;
-            }
-          } else if (isChunked) {
+        if (exceedsSmallBodyBound && canonicalPath === RPC_APPEAL_OPEN_PATH) {
+          if (isChunked) {
             // No session to demand and no length to compare, so there is no
             // version of this request the gate can admit: refuse the encoding,
             // not a size. `drainRejectedRequest` first — a chunked stream kept
@@ -556,30 +544,57 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
             drainRejectedRequest(req);
             res.writeHead(411, { "Content-Type": "text/plain" });
             res.end("Length required");
-            return;
           } else {
             drainRejectedRequest(req);
             res.writeHead(413, { "Content-Type": "text/plain" });
             res.end("Payload too large");
-            return;
           }
-        }
-
-        // The admission cap, checked after the size gates so it only ever
-        // measures requests that are about to be dispatched. A saturated
-        // handler answers 503 rather than joining the queue.
-        if (rpcInFlight >= MAX_RPC_IN_FLIGHT) {
-          drainRejectedRequest(req);
-          res.writeHead(503, { "Content-Type": "text/plain" });
-          res.end("Server busy");
           return;
         }
-        rpcInFlight += 1;
+
+        // Whether this dispatch may buffer past the small-body line at all —
+        // exactly what the admission cap below bounds in number. Only a
+        // non-appeal request over the line gets here, and the session demand
+        // above has already narrowed those to authenticated callers; small
+        // JSON bodies stay outside the cap entirely.
+        let buffersPastSmallLine = false;
+        if (exceedsSmallBodyBound) {
+          const session = hasSessionCookie(req.headers.cookie)
+            ? await deps.resolveSession(req)
+            : null;
+          if (!session || session.kind !== "authenticated") {
+            // Same shape as the media gate: no-store so a cached 401 cannot
+            // linger after the caller signs in, and fail-closed on an
+            // unavailable session store — without a viewer there is no
+            // legitimate upload either.
+            drainRejectedRequest(req);
+            res.writeHead(401, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+            res.end("Unauthorized");
+            return;
+          }
+          buffersPastSmallLine = true;
+        }
+
+        // The admission cap, scoped to the requests whose bodies can actually
+        // grow: small JSON dispatches are each bounded by
+        // `RPC_SMALL_BODY_BYTES` and by their procedure's rate limit, so
+        // counting them here would buy nothing against buffering while making
+        // ordinary read traffic answer 503 under modest concurrency. A
+        // saturated handler answers 503 rather than joining the queue.
+        if (buffersPastSmallLine) {
+          if (rpcInFlight >= MAX_RPC_IN_FLIGHT) {
+            drainRejectedRequest(req);
+            res.writeHead(503, { "Content-Type": "text/plain" });
+            res.end("Server busy");
+            return;
+          }
+          rpcInFlight += 1;
+        }
         try {
           const { matched } = await deps.handleRpc(req, res);
           if (matched) return;
         } finally {
-          rpcInFlight -= 1;
+          if (buffersPastSmallLine) rpcInFlight -= 1;
         }
       }
 
@@ -649,12 +664,15 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         // an image in this process's memory.
         //
         // Every redirect is viewer-authorized, and the decision can change
-        // after account switching, blocking, banning, or profile updates. A
-        // browser must therefore never reuse a bearer redirect without asking
-        // this route to authorize the current viewer again.
+        // after account switching, blocking, banning, or profile updates — so
+        // the DEFAULT is `private, no-store`: a browser must ask this route to
+        // authorize the current viewer again rather than reuse a bearer
+        // redirect. The resolver may exempt a key class from that (today, only
+        // profile display objects), and its directive is already window-bounded
+        // to outlive no signature.
         res.writeHead(302, {
           Location: media.url,
-          "Cache-Control": "private, no-store",
+          "Cache-Control": media.cacheControl ?? "private, no-store",
         });
         res.end();
         return;

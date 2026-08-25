@@ -36,6 +36,7 @@ import { and, eq } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import { user } from "@my-tuums/db/schema";
 import { mediaPathFor } from "./image.js";
+import { secondsUntilWindowEnd } from "./storage.js";
 import { visibleUser } from "./visibility.js";
 
 /**
@@ -45,6 +46,31 @@ import { visibleUser } from "./visibility.js";
  */
 const PROFILE_KEY_RE =
   /^(avatars|banners)\/([A-Za-z0-9_-]+)\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(\.orig)?\.(webp|png|jpg)$/;
+
+/**
+ * The Cache-Control a `/media/` redirect may carry for this key, or `null`
+ * when its redirect must never be stored.
+ *
+ * A **display** object is what feeds and profiles render for every viewer who
+ * can already see the owner, so its redirect is the one place caching is both
+ * safe and worth it: `private` (never a shared cache), and bounded by the
+ * signing window (`secondsUntilWindowEnd`) so a stored redirect cannot
+ * outlive the signature it points at. The per-view authorization still runs
+ * on every cache miss — a block, ban or profile swap takes effect at most one
+ * window later on a browser that had the image warm, which is the accepted
+ * posture display objects always had before the blanket no-store.
+ *
+ * An **original** is the owner's private file: its redirect is never stored,
+ * so a shared browser cannot hand it to whoever sits down next. Anything that
+ * does not parse as profile media (post attachments included) gets `null`
+ * too — post-media redirects have always been viewer-authorized decisions
+ * that must not be reused.
+ */
+export function profileDisplayRedirectCacheControl(key: string): string | null {
+  const match = PROFILE_KEY_RE.exec(key);
+  if (!match || match[4]) return null;
+  return `private, max-age=${secondsUntilWindowEnd()}`;
+}
 
 /** Whether the viewer may fetch this profile-media key. */
 export async function canViewProfileMedia(

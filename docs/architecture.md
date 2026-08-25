@@ -287,11 +287,14 @@ sides by CI. See [operations.md](operations.md).
   old object is deleted.
 - **Retrieval.** The stored value is a relative `/media/<key>` path. The
   server requires a session, then `createMediaResolver` returns a presigned
-  URL and a cache budget; the response is a 302 with
-  `Cache-Control: private, max-age=<secondsUntilWindowEnd()>`. Presigned URLs
-  are **windowed** (`MEDIA_SIGNING_WINDOW_MS`, 30 minutes): byte-identical
-  within a window, which is what makes browser caching work, and why the
-  redirect must not be cached past the window's end.
+  URL and — when a key's redirect may be stored — its Cache-Control; the
+  response is a 302 that is `private, no-store` by default, because every
+  redirect is a viewer-authorized decision. Profile **display** objects are
+  the one exemption: their redirect is cached
+  `private, max-age=<secondsUntilWindowEnd()>`, bounded so it can never
+  outlive the signature it points at. Presigned URLs remain **windowed**
+  (`MEDIA_SIGNING_WINDOW_MS`, 30 minutes) — byte-identical within a window,
+  which is what keeps repeat views off the bucket either way.
 - **Reconciliation.** `pnpm --filter @my-tuums/api reconcile:media` deletes
   objects no row points at. It lists the bucket **before** reading the `user`
   rows — the reverse order would treat an upload that landed between the two

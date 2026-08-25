@@ -147,6 +147,12 @@ export const queueRouter = {
         limit ${limit + 1}
       `);
 
+      // The appeal half's case key and its group-by, shared by the grouped
+      // CTE (both cursor branches) and the having clause's row comparison —
+      // restating the coalesce inline in each spot is how drift would start.
+      const appealCaseKey = sql`coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})`;
+      const appealCaseGroupBy = sql`group by ${moderationAction.targetType}, ${appealCaseKey}`;
+
       const openAppeals = await context.db.execute<OpenAppealRow>(sql`
         with appeal_cases as (
           select ${moderationAction.targetType} as target_type,
@@ -157,9 +163,9 @@ export const queueRouter = {
           where ${appeal.status} = 'open' ${appealSideExclusion}
           ${
             decoded
-              ? sql`group by ${moderationAction.targetType}, coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})
-                    having (max(${appeal.createdAt}), coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})) < (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, user.id)})`
-              : sql`group by ${moderationAction.targetType}, coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})`
+              ? sql`${appealCaseGroupBy}
+                    having (max(${appeal.createdAt}), ${appealCaseKey}) < (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, user.id)})`
+              : appealCaseGroupBy
           }
           order by newest_at desc, target_id desc
           limit ${limit + 1}

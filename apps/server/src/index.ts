@@ -13,6 +13,7 @@ import {
   createContext,
   createMediaResolver,
   defaultStorage,
+  profileDisplayRedirectCacheControl,
 } from "@my-tuums/api";
 import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
@@ -125,10 +126,15 @@ const handleRequest = createRequestHandler({
   // One resolver, two authorizers: post attachments follow the post's
   // visibility (moderation tombstones, author blocks), profile images follow
   // the owner's visibility and the owner-only rule for `.orig` originals.
-  resolveMediaUrl: createMediaResolver(defaultStorage, (key, viewerId) =>
-    key.startsWith("posts/")
-      ? canViewPostMedia(db, key, viewerId)
-      : canViewProfileMedia(db, key, viewerId),
+  // Display-object redirects are the one class whose caching is worth its
+  // staleness budget — window-bounded, private, per-viewer on every miss.
+  resolveMediaUrl: createMediaResolver(
+    defaultStorage,
+    (key, viewerId) =>
+      key.startsWith("posts/")
+        ? canViewPostMedia(db, key, viewerId)
+        : canViewProfileMedia(db, key, viewerId),
+    profileDisplayRedirectCacheControl,
   ),
   // Only when this deployment bundles the built web app. Unset in dev, where
   // Vite serves it and proxies /rpc, /api/auth and /media back here — see

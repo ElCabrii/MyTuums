@@ -29,16 +29,6 @@ interface DecodedCursor {
 }
 
 /**
- * The longest encoded cursor this package will decode. A real cursor is the
- * base64url of a small JSON payload — at most a couple of hundred characters
- * even for a long text tie-breaker — so 512 is an order of magnitude of slack
- * rather than a squeeze. The bound exists because `decode` is reached before
- * rate limiting has any say (it runs inside the page loop's handler, after
- * the rate limit, but a multi-megabyte `cursor` query parameter would still
- * cost the decode itself on every request); capping the length keeps the
- * cost of a hostile cursor constant.
- */
-/**
  * Whether `raw` is a canonical base64url encoding of its own bytes.
  *
  * `Buffer.from(raw, "base64url")` is lenient — it silently drops characters
