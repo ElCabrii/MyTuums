@@ -499,6 +499,52 @@ describe("post.delete", () => {
     expect(thread.ancestors[0]?.deleted).toBe(true);
   });
 
+  it("excludes author-deleted replies from replyCount but still counts moderator-removed ones", async () => {
+    const author = await createTestUser();
+    const replier = await createTestUser();
+    const [parent] = await seedPosts(author.id, 1);
+    const replies = await seedPosts(replier.id, 3, { parentId: parent.id });
+
+    const countFor = async () =>
+      call(appRouter.post.thread, { postId: parent.id }, { context: contextFor(author) }).then(
+        (r) => r.post.replyCount,
+      );
+
+    // Baseline: every reply is live, so the count matches the reply feed.
+    expect(await countFor()).toBe(3);
+
+    // An author-deleted reply drops out of both the feed and the count.
+    await call(appRouter.post.delete, { postId: replies[0].id }, { context: contextFor(replier) });
+
+    const afterDelete = await call(
+      appRouter.post.list,
+      { parentId: parent.id },
+      { context: contextFor(author) },
+    );
+    expect(afterDelete.items.map((item) => item.id).sort()).toEqual(
+      [replies[1].id, replies[2].id].sort(),
+    );
+    expect(await countFor()).toBe(2);
+
+    // A moderator-removed reply stays in the feed as a tombstone card and is
+    // still counted — removal is not invisibility.
+    await anonContext.db
+      .update(post)
+      .set({ removedAt: new Date(), removedReason: "policy" })
+      .where(eq(post.id, replies[1].id));
+
+    const afterRemove = await call(
+      appRouter.post.list,
+      { parentId: parent.id },
+      { context: contextFor(author) },
+    );
+    expect(afterRemove.items.map((item) => item.id).sort()).toEqual(
+      [replies[1].id, replies[2].id].sort(),
+    );
+    expect(afterRemove.items.find((item) => item.id === replies[1].id)?.removed).toBe(true);
+    expect(await countFor()).toBe(2);
+  });
+
   it("hides the post from its author's profile while preserving its likes and other posts", async () => {
     const author = await createTestUser();
     const liker = await createTestUser();

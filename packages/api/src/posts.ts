@@ -57,9 +57,16 @@ const likeCount = sql<number>`(
  * The subquery needs its own alias for the table it is already inside, hence
  * `as reply`: without it `parent_id = id` would compare the outer row to
  * itself and count every post whose parent is its own id, i.e. nothing.
+ *
+ * Author-deleted replies are excluded so the count matches the reply feed,
+ * which filters them out (see the `isNull(post.deletedAt)` filter below). A
+ * deleted reply would otherwise leave a permanent "1 reply" header above an
+ * empty list. Moderator-removed replies are still counted: removal is not
+ * invisibility, and their tombstone cards stay in the thread.
  */
 const replyCount = sql<number>`(
-  select count(*)::int from ${post} as reply where reply.parent_id = ${post.id}
+  select count(*)::int from ${post} as reply
+  where reply.parent_id = ${post.id} and reply.deleted_at is null
 )`;
 
 /**
