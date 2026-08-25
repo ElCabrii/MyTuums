@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderWithProviders } from "@/test/render";
-import { act, screen, waitFor } from "@testing-library/react";
+import { makeUserSummary, renderWithProviders } from "@/test/render";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { IMAGE_LIMITS } from "@my-tuums/api/constants";
@@ -11,13 +11,16 @@ import { createDisplayVariant } from "@/lib/media";
 import { ProfileSection } from "@/components/settings/profile-section";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
-import { installTestClient, installTestOrpc } from "@/lib/orpc";
+import { installTestClient, installTestOrpc, orpc, type SearchTypeahead } from "@/lib/orpc";
 import { installTestDisplayVariant } from "@/lib/media";
 
 const fakeClient = {
   user: {
     uploadImage: vi.fn(() => Promise.resolve()),
     removeImage: vi.fn(() => Promise.resolve()),
+  },
+  search: {
+    typeahead: vi.fn(),
   },
 };
 
@@ -136,6 +139,44 @@ describe("ProfileSection", () => {
     expect(authClient.updateUser).not.toHaveBeenCalled();
     expect(store.get(authErrorAtom)).toMatch(/bio/i);
   }, 20_000);
+
+  it("offers @handle completion in the bio editor and accepts it with the keyboard", async () => {
+    // Bios are the other free-text surface where a person writes @mentions,
+    // so the completion is the same machinery the composer mounts — just
+    // keyed to the bio's own scope and writing back to the bio draft atom
+    // rather than a composer draft (issue #218).
+    const payload: SearchTypeahead = {
+      users: [
+        makeUserSummary({
+          id: "alice-bio",
+          name: "Alice Example",
+          username: "alice",
+          displayUsername: "Alice",
+        }),
+      ],
+      posts: [],
+    };
+    fakeClient.search.typeahead.mockResolvedValue(payload);
+    const { queryClient } = await renderWithProviders(<ProfileSection />, { signedInAs: true });
+    queryClient.setQueryData(orpc.search.typeahead.queryKey({ input: { q: "al" } }), payload);
+
+    const bio = screen.getByLabelText(m.auth_field_bio());
+    fireEvent.change(bio, { target: { value: "@al", selectionStart: 3, selectionEnd: 3 } });
+    fireEvent.select(bio);
+
+    const suggestion = await screen.findByRole("option", { name: /Alice Example.*@alice/i });
+    fireEvent.keyDown(bio, { key: "ArrowDown" });
+    // Chromium dispatches `select` after the arrow event even though the
+    // editor prevented its default caret movement. That unchanged token must
+    // not clear the highlight before the acceptance key arrives.
+    fireEvent.select(bio);
+    expect(suggestion).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(bio, { key: "Enter" });
+
+    // The accepted handle lands in the bio draft atom the field binds — the
+    // same place a typed keystroke would — not a composer-specific atom.
+    await waitFor(() => expect(bio).toHaveValue("@alice"));
+  });
 
   it("uploads and removes both avatar and banner through the transport boundary", async () => {
     const display = new File(["display"], "display.webp", { type: "image/webp" });

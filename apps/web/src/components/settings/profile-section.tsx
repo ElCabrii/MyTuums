@@ -20,6 +20,7 @@ import { IMAGE_ACCEPT, validateImageFile } from "@/lib/media";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserAvatar } from "@/components/user-avatar";
+import { MentionTextarea } from "@/components/mention-textarea";
 import { Section } from "@/components/settings/section";
 import { ImageCropDialog } from "@/components/settings/image-crop-dialog";
 import { m } from "@/paraglide/messages.js";
@@ -130,15 +131,17 @@ export function ProfileSection() {
           >
             {m.auth_field_bio()}
           </label>
-          {/* A plain textarea rather than a `ui/` primitive — there is no
-              `ui/textarea.tsx`, and `composer-form.tsx` styles a bare one the
-              same way. */}
-          <textarea
+          {/* The same `@handle` completion the composer offers, mounted here
+              with its own `mentionScope` so a bio draft never shares transient
+              highlight state with a composer. Acceptances write back through
+              `setBio`/`profileBioDraftAtom`, not a composer draft atom. */}
+          <MentionTextarea
             id="profile-bio"
-            rows={3}
             value={bio}
-            onChange={(e) => setBio(e.target.value)}
+            onValueChange={setBio}
+            mentionScope="bio"
             placeholder={m.auth_field_bio_placeholder()}
+            rows={3}
             className="border-input bg-background/50 focus-visible:ring-ring w-full resize-none rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
           />
           {/* Mirrors the composer's counter: only turns destructive once over,
