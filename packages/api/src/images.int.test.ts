@@ -76,6 +76,55 @@ function pngFile(name = "avatar.png"): File {
   return new File([bytes], name, { type: "image/png" });
 }
 
+/** Little-endian byte pair for a 16-bit value, the way GIF stores widths/heights/delays. */
+function le16(value: number): [number, number] {
+  return [value & 0xff, (value >>> 8) & 0xff];
+}
+
+/**
+ * Builds a minimal well-formed GIF: a 13-byte header (no Global Color Table),
+ * then for each frame an optional Graphic Control Extension (its delay), an
+ * Image Descriptor, and an empty image-data sub-block sequence, then the 0x3B
+ * trailer. The server walks block structure only, so the image-data sub-blocks
+ * carry no real compressed pixels.
+ */
+function buildGif(
+  logicalScreen: { width: number; height: number },
+  frames: ReadonlyArray<{ width: number; height: number; delayCs?: number }>,
+): Uint8Array {
+  const bytes: number[] = [
+    0x47,
+    0x49,
+    0x46,
+    0x38,
+    0x39,
+    0x61,
+    ...le16(logicalScreen.width),
+    ...le16(logicalScreen.height),
+    0x00,
+    0x00,
+    0x00,
+  ];
+  for (const frame of frames) {
+    if (frame.delayCs !== undefined) {
+      bytes.push(0x21, 0xf9, 0x04, 0x00, ...le16(frame.delayCs), 0x00, 0x00);
+    }
+    bytes.push(0x2c, ...le16(0), ...le16(0), ...le16(frame.width), ...le16(frame.height), 0x00);
+    bytes.push(0x02, 0x00);
+  }
+  bytes.push(0x3b);
+  return new Uint8Array(bytes);
+}
+
+/** A file whose bytes really are a GIF, which is what the server sniffs for. */
+function gifFile(
+  logicalScreen: { width: number; height: number },
+  frames: ReadonlyArray<{ width: number; height: number; delayCs?: number }>,
+  name = "avatar.gif",
+): File {
+  return new File([buildGif(logicalScreen, frames)], name, { type: "image/gif" });
+}
+
 /** The two-object input every upload procedure call needs. */
 function uploadInput(
   kind: "avatar" | "banner",
@@ -277,6 +326,45 @@ describe("user.uploadImage", () => {
 
     await expect(
       call(appRouter.user.uploadImage, uploadInput("avatar", { original: bomb }), {
+        context: contextFor(alice),
+      }),
+    ).rejects.toThrow(/too large/);
+    expect(testStorageObjects.size).toBe(0);
+  });
+
+  it("stores a GIF under the gif extension with image/gif content type", async () => {
+    const alice = await createTestUser();
+    const gif = gifFile({ width: 256, height: 128 }, [{ width: 256, height: 128, delayCs: 20 }]);
+
+    const result = await call(
+      appRouter.user.uploadImage,
+      uploadInput("avatar", { original: gif, display: gif }),
+      { context: contextFor(alice) },
+    );
+
+    expect(result.url).toMatch(/^\/media\/avatars\/[^/]+\/[a-f0-9-]{36}\.gif$/);
+    // The original shares the display object's uuid, differing only in the
+    // `.orig` infix — the same pairing as the canvas-encoded types.
+    expect(result.originalUrl).toBe(result.url.replace(/\.gif$/, ".orig.gif"));
+    expect(testStorageObjects.get(result.url.replace("/media/", ""))?.contentType).toBe(
+      "image/gif",
+    );
+    expect(testStorageObjects.get(result.originalUrl.replace("/media/", ""))?.contentType).toBe(
+      "image/gif",
+    );
+  });
+
+  it("rejects a GIF with too many frames as too large", async () => {
+    const alice = await createTestUser();
+    // 501 two-pixel frames: the byte cap and the logical screen never see it —
+    // the frame-count limit is what the accept layer enforces, as `size`.
+    const gif = gifFile(
+      { width: 2, height: 2 },
+      Array.from({ length: 501 }, () => ({ width: 2, height: 2 })),
+    );
+
+    await expect(
+      call(appRouter.user.uploadImage, uploadInput("avatar", { display: gif }), {
         context: contextFor(alice),
       }),
     ).rejects.toThrow(/too large/);

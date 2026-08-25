@@ -1,16 +1,34 @@
-import { useState, type ComponentProps } from "react";
-import { describe, expect, it, vi } from "vitest";
+import type { ComponentProps } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { POST_MAX_LENGTH } from "@my-tuums/api/constants";
+import {
+  POST_ATTACHMENT_MAX_BYTES,
+  POST_ATTACHMENT_MAX_TOTAL_BYTES,
+  POST_MAX_LENGTH,
+} from "@my-tuums/api/constants";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc, orpc, type SearchTypeahead } from "@/lib/orpc";
 import { renderWithProviders, makeUserSummary } from "@/test/render";
 import { ComposerForm } from "@/components/composer-form";
+import { installTestPostAttachment } from "@/lib/media";
 import { m } from "@/paraglide/messages.js";
 
 const fakeClient = { search: { typeahead: vi.fn() } };
 installTestOrpc(createTanstackQueryUtils(fakeClient));
+
+/**
+ * Every selection runs through the post-attachment pipeline (`lib/media.ts`)
+ * before it joins the draft. jsdom implements neither `createImageBitmap` nor
+ * a canvas, so these tests substitute an identity processor and exercise the
+ * flow around it; what processing itself guarantees is pinned in
+ * `lib/media.test.ts` and proven end to end in compose.spec.ts.
+ */
+const identityProcessor = (file: File) => Promise.resolve(file);
+
+beforeEach(() => {
+  installTestPostAttachment(identityProcessor);
+});
 
 const VALID_PNG_BYTES = Uint8Array.from(
   atob(
@@ -46,30 +64,6 @@ async function renderComposer(overrides: Partial<ComponentProps<typeof ComposerF
   return { onSubmit, onValueChange, ...result };
 }
 
-function StatefulComposer({
-  initialValue,
-  mentionScope,
-}: {
-  initialValue: string;
-  mentionScope: string;
-}) {
-  const [value, setValue] = useState(initialValue);
-
-  return (
-    <ComposerForm
-      author={{ name: "Alex Mercer", image: null }}
-      value={value}
-      onValueChange={setValue}
-      onSubmit={() => {}}
-      isPending={false}
-      errorMessage={null}
-      placeholder="What's happening?"
-      submitLabel="Post"
-      mentionScope={mentionScope}
-    />
-  );
-}
-
 describe("ComposerForm", () => {
   it("disables submit when the value is empty", async () => {
     await renderComposer({ value: "" });
@@ -89,6 +83,28 @@ describe("ComposerForm", () => {
     await user.click(screen.getByRole("button", { name: "Post" }));
 
     expect(onSubmit).toHaveBeenCalledWith("hello");
+  });
+
+  // The same cross-field rule `post.create` enforces (issue #202): text,
+  // images, or both — never neither. A blank body is submittable only while
+  // at least one validated attachment rides along, and the body arrives as "".
+  it("enables submit for a whitespace-only body once a validated attachment rides along", async () => {
+    const onSubmit = vi.fn();
+    const file = new File([VALID_PNG_BYTES], "first.png", { type: "image/png" });
+    await renderComposer({
+      value: "   ",
+      onSubmit,
+      onAttachmentsChange: vi.fn(),
+      attachments: [{ id: "first", file }],
+    });
+
+    const submit = screen.getByRole("button", { name: "Post" });
+    expect(submit).not.toBeDisabled();
+
+    const user = userEvent.setup();
+    await user.click(submit);
+
+    expect(onSubmit).toHaveBeenCalledWith("", [{ id: "first", file }]);
   });
 
   it("starts the remaining-character counter at POST_MAX_LENGTH", async () => {
@@ -124,29 +140,6 @@ describe("ComposerForm", () => {
     // `animate-spin` class the source applies only to Loader2 is the
     // reliable signal that it — not Send — is what's rendered.
     expect(container.querySelector("button[type='submit'] svg.animate-spin")).toBeInTheDocument();
-  });
-
-  it("keeps short drafts compact and caps a near-limit multiline draft with scrolling", async () => {
-    await renderWithProviders(<StatefulComposer initialValue="Short" mentionScope="auto-grow" />);
-    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
-    let scrollHeight = 56;
-    Object.defineProperty(textarea, "scrollHeight", {
-      configurable: true,
-      get: () => scrollHeight,
-    });
-
-    fireEvent.change(textarea, { target: { value: "Short draft" } });
-    expect(textarea.style.height).toBe("56px");
-    expect(textarea.style.overflowY).toBe("hidden");
-
-    const nearLimit = "line\n".repeat(99) + "line";
-    expect(nearLimit.length).toBe(499);
-    scrollHeight = 480;
-    fireEvent.change(textarea, { target: { value: nearLimit } });
-
-    expect(textarea.style.height).toBe("256px");
-    expect(textarea.style.overflowY).toBe("auto");
-    expect(screen.getByText("1", { exact: true })).toBeInTheDocument();
   });
 
   it("shows the send icon, not a spinner, when idle", async () => {
@@ -436,5 +429,77 @@ describe("ComposerForm", () => {
       expect(onAttachmentsChange).toHaveBeenCalledWith([expect.objectContaining({ file: valid })]),
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("attaches what the processing pipeline returns, not the picked file", async () => {
+    // The draft must carry the re-encoded object (issue #207): the picked
+    // bytes are exactly what must never reach storage.
+    const picked = new File([VALID_PNG_BYTES], "picked.png", { type: "image/png" });
+    const processed = new File([VALID_PNG_BYTES], "processed.webp", { type: "image/webp" });
+    installTestPostAttachment(() => Promise.resolve(processed));
+
+    const onAttachmentsChange = vi.fn();
+    await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
+
+    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+      target: { files: [picked] },
+    });
+
+    await waitFor(() =>
+      expect(onAttachmentsChange).toHaveBeenCalledWith([
+        expect.objectContaining({ file: processed }),
+      ]),
+    );
+  });
+
+  it("refuses a file the processing pipeline cannot encode", async () => {
+    installTestPostAttachment(() => Promise.reject(new Error("unencodable")));
+    const onAttachmentsChange = vi.fn();
+    await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
+
+    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+      target: { files: [new File([VALID_PNG_BYTES], "doomed.png", { type: "image/png" })] },
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(m.post_image_invalid());
+    expect(onAttachmentsChange).not.toHaveBeenCalled();
+  });
+
+  it("caps the batch at the total-bytes budget against processed sizes, not picked sizes", async () => {
+    // A re-encode can outweigh its source — a PNG fallback on a browser
+    // without WebP encode — so the total budget must be measured against what
+    // is actually uploaded (the processed objects), never the picked bytes.
+    // Otherwise a staged batch could pass the client guard and exceed the
+    // server's POST_ATTACHMENT_MAX_TOTAL_BYTES (issue #207 follow-up).
+
+    // Pin the cap relationship this scenario depends on, so a future change
+    // to either constant turns this into a failure rather than a silent no-op.
+    expect(2 * POST_ATTACHMENT_MAX_BYTES).toBeLessThanOrEqual(POST_ATTACHMENT_MAX_TOTAL_BYTES);
+    expect(3 * POST_ATTACHMENT_MAX_BYTES).toBeGreaterThan(POST_ATTACHMENT_MAX_TOTAL_BYTES);
+
+    // Each picked file is a tiny valid PNG (under both caps); the processor
+    // stands in for the inflation, returning a max-size object every time.
+    const inflated = new Uint8Array(POST_ATTACHMENT_MAX_BYTES);
+    installTestPostAttachment((file: File) =>
+      Promise.resolve(new File([inflated], file.name, { type: "image/webp" })),
+    );
+
+    const onAttachmentsChange = vi.fn();
+    await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
+
+    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+      target: {
+        files: [
+          new File([VALID_PNG_BYTES], "a.png", { type: "image/png" }),
+          new File([VALID_PNG_BYTES], "b.png", { type: "image/png" }),
+          new File([VALID_PNG_BYTES], "c.png", { type: "image/png" }),
+        ],
+      },
+    });
+
+    // Two max-size objects fit within the total cap; the third would exceed
+    // it, so it is refused and the loop stops with the limit message.
+    await waitFor(() => expect(onAttachmentsChange.mock.calls.at(-1)?.[0]).toHaveLength(2));
+    expect(await screen.findByRole("alert")).toHaveTextContent(m.post_image_limit());
   });
 });

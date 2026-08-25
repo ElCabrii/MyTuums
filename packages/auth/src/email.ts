@@ -132,6 +132,40 @@ function formatDateTime(date: Date, locale: EmailLocale): string {
   });
 }
 
+/**
+ * The "your post" block of a removal notice.
+ *
+ * An image-only post (issue #202) stores `content` as `""`, and quoting that
+ * verbatim reads as an empty pair of quotes — the notice would then name
+ * nothing the author could recognise the post by. So the quote block is
+ * dropped entirely when there is no text and the attachments are counted
+ * instead; a post carrying both gets the count alongside its quote.
+ * "image"/"images" pluralizes identically in both locales, which is why the
+ * count itself is built once rather than per-locale.
+ */
+function removedPostSummary(
+  { postText, attachmentCount }: RemovalArgs,
+  locale: EmailLocale,
+): string {
+  const images = attachmentCount === 1 ? "1 image" : `${attachmentCount} images`;
+  const suffix = attachmentCount > 0 ? ` (${images})` : "";
+  if (locale === "fr") {
+    if (postText.length === 0) return `Votre publication : ${images}, sans texte.`;
+    return `Votre publication${suffix} :\n« ${postText} »`;
+  }
+  if (postText.length === 0) return `Your post: ${images}, no text.`;
+  return `Your post${suffix}:\n"${postText}"`;
+}
+
+/** What a removal notice is built from — the post it describes, plus the appeal link. */
+interface RemovalArgs {
+  postText: string;
+  /** How many images the removed post carried; 0 for a text-only post. */
+  attachmentCount: number;
+  reason: string;
+  appealUrl: string;
+}
+
 const copy = {
   otp: {
     en: (otp: string) => ({
@@ -177,37 +211,21 @@ const copy = {
    */
   moderation: {
     removal: {
-      en: ({
-        postText,
-        reason,
-        appealUrl,
-      }: {
-        postText: string;
-        reason: string;
-        appealUrl: string;
-      }) => ({
+      en: (args: RemovalArgs) => ({
         subject: "Your post was removed from MyTuums",
         text:
           `A moderator removed your post.\n\n` +
-          `Reason: ${reason}\n\n` +
-          `Your post:\n"${postText}"\n\n` +
-          `If you believe this was a mistake, you can appeal the decision:\n${appealUrl}`,
+          `Reason: ${args.reason}\n\n` +
+          `${removedPostSummary(args, "en")}\n\n` +
+          `If you believe this was a mistake, you can appeal the decision:\n${args.appealUrl}`,
       }),
-      fr: ({
-        postText,
-        reason,
-        appealUrl,
-      }: {
-        postText: string;
-        reason: string;
-        appealUrl: string;
-      }) => ({
+      fr: (args: RemovalArgs) => ({
         subject: "Votre publication a été retirée de MyTuums",
         text:
           `Un modérateur a retiré votre publication.\n\n` +
-          `Motif : ${reason}\n\n` +
-          `Votre publication :\n« ${postText} »\n\n` +
-          `Si vous pensez qu'il s'agit d'une erreur, vous pouvez faire appel de cette décision :\n${appealUrl}`,
+          `Motif : ${args.reason}\n\n` +
+          `${removedPostSummary(args, "fr")}\n\n` +
+          `Si vous pensez qu'il s'agit d'une erreur, vous pouvez faire appel de cette décision :\n${args.appealUrl}`,
       }),
     },
     restore: {
@@ -362,9 +380,9 @@ export function passwordResetEmail(url: string, locale: EmailLocale): Omit<Outgo
   return copy.reset[locale](url);
 }
 
-/** Builds the post-removal notice copy — quotes the post and links the appeal. */
+/** Builds the post-removal notice copy — describes the post and links the appeal. */
 export function moderationRemovalEmail(
-  args: { postText: string; reason: string; appealUrl: string },
+  args: RemovalArgs,
   locale: EmailLocale,
 ): Omit<OutgoingEmail, "to"> {
   return copy.moderation.removal[locale](args);

@@ -11,7 +11,7 @@ import { moderatorProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { publicUserColumns } from "./users.js";
 import { effectivelyBanned } from "./visibility.js";
-import { postAttachmentsSelection } from "./posts.js";
+import { postAttachmentsSelection, type PostAttachment } from "./posts.js";
 
 /**
  * The moderator triage procedures: the merged queue, the case view, and
@@ -486,6 +486,13 @@ type CasePreview =
       isReply: boolean;
       removed: boolean;
       author: PreviewPerson;
+      /**
+       * The post's attachments, moderator projection (tombstones included) —
+       * for an image-only report (#202) the image is the whole substance of the
+       * case, and an excerpt-only row hid it. Same selection `moderation.case`
+       * returns, so the row and the open dialog agree.
+       */
+      attachments: PostAttachment[];
     }
   | {
       kind: "user";
@@ -529,6 +536,10 @@ async function loadPreviews(
         content: post.content,
         parentId: post.parentId,
         removedAt: post.removedAt,
+        // `true` for the moderator projection: a removed post's evidence is
+        // exactly what a moderator is here to look at, and the row should agree
+        // with the case dialog the same click opens.
+        attachments: postAttachmentsSelection(true),
         author: {
           id: user.id,
           name: user.name,
@@ -546,6 +557,7 @@ async function loadPreviews(
         ...excerptOf(row.content),
         isReply: row.parentId !== null,
         removed: row.removedAt !== null,
+        attachments: row.attachments,
         author: row.author,
       });
     }

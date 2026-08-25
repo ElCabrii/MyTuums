@@ -99,10 +99,16 @@ async function enableTwoFactor(
   return { totpURI: body.totpURI, backupCodes: body.backupCodes ?? [] };
 }
 
-/** Signs out from the settings page and lands on /login. */
-async function signOut(page: import("@playwright/test").Page) {
-  await page.goto("/settings/account");
-  await page.getByRole("button", { name: "Sign out" }).first().click();
+/** Signs out from the account's own profile and lands on /login. */
+async function signOut(
+  page: import("@playwright/test").Page,
+  account: ReturnType<typeof uniqueUser>,
+) {
+  // Sign-out no longer has a section on /settings/account (issue #217); it
+  // lives in the navbar account menu and on the own-profile action row. The
+  // profile page's button is the one-click affordance, so sign out from there.
+  await page.goto(`/@${account.username}`);
+  await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/login/);
 }
 
@@ -132,7 +138,7 @@ test.describe("the sign-in challenge", () => {
   }) => {
     const account = await signUpFresh(page, "twofachal");
     const { totpURI } = await enableTwoFactor(page, account);
-    await signOut(page);
+    await signOut(page, account);
 
     // Signed out, a protected page bounces to /login with the destination in
     // the query string — the gate's redirect, which must survive the challenge.
@@ -150,7 +156,7 @@ test.describe("the sign-in challenge", () => {
   test("a wrong code shows the error and stays on the challenge", async ({ page }) => {
     const account = await signUpFresh(page, "twofawrong");
     await enableTwoFactor(page, account);
-    await signOut(page);
+    await signOut(page, account);
 
     await page.goto("/login");
     await signInWithPassword(page, account);
@@ -167,7 +173,7 @@ test.describe("the sign-in challenge", () => {
     const account = await signUpFresh(page, "twofabackup");
     const { backupCodes } = await enableTwoFactor(page, account);
     const [code] = backupCodes;
-    await signOut(page);
+    await signOut(page, account);
 
     await page.goto("/login");
     await signInWithPassword(page, account);
@@ -179,7 +185,7 @@ test.describe("the sign-in challenge", () => {
 
     // A backup code that can be replayed is just a password that never
     // expires — the second use of the same code must fail.
-    await signOut(page);
+    await signOut(page, account);
     await page.goto("/login");
     await signInWithPassword(page, account);
     await expect(page).toHaveURL(/\/two-factor/);
@@ -194,7 +200,7 @@ test.describe("the sign-in challenge", () => {
   test("an emailed code completes the sign-in", async ({ page, db }) => {
     const account = await signUpFresh(page, "twofaotp");
     await enableTwoFactor(page, account);
-    await signOut(page);
+    await signOut(page, account);
 
     await page.goto("/login");
     await signInWithPassword(page, account);
@@ -257,7 +263,7 @@ test.describe("passkeys", () => {
     await page.getByRole("button", { name: "Add" }).click();
     await expect(page.getByText("E2E key")).toBeVisible();
 
-    await signOut(page);
+    await signOut(page, account);
 
     await page.getByRole("button", { name: "Continue with a passkey" }).click();
     await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));

@@ -45,7 +45,7 @@ import { visibleUser } from "./visibility.js";
  * vetted the key at the route; this parse names the column to compare.
  */
 const PROFILE_KEY_RE =
-  /^(avatars|banners)\/([A-Za-z0-9_-]+)\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(\.orig)?\.(webp|png|jpg)$/;
+  /^(avatars|banners)\/([A-Za-z0-9_-]+)\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(\.orig)?\.(webp|png|jpg|gif)$/;
 
 /**
  * The Cache-Control a `/media/` redirect may carry for this key, or `null`

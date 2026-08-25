@@ -181,7 +181,6 @@ describe("PostCard", () => {
           excerpt: "The original post",
           truncated: false,
           removed: false,
-          deleted: false,
           author: parentAuthor,
         },
       });
@@ -210,7 +209,6 @@ describe("PostCard", () => {
           excerpt: null,
           truncated: false,
           removed: true,
-          deleted: false,
           author: parentAuthor,
         },
       });
@@ -377,7 +375,35 @@ describe("PostCard", () => {
       expect(screen.getByText("a".repeat(2000))).toBeInTheDocument();
     });
 
-    it("renders authoritative post attachments as accessible media links", async () => {
+    // An image-only post (issue #202) stores `content` as ""; rendering must
+    // omit the paragraph entirely rather than leave a blank block above the
+    // attachment grid.
+    it("omits the text paragraph for an image-only post and still renders its attachments", async () => {
+      const post = makePost({
+        content: "",
+        attachments: [
+          {
+            id: "attachment-1",
+            url: "/media/posts/author/post/attachment-1.png",
+            position: 0,
+            contentType: "image/png",
+            byteSize: 24,
+            width: 256,
+            height: 128,
+          },
+        ],
+      });
+      const { container } = await renderWithProviders(<PostCard post={post} />);
+
+      // The stub-route <p> the test harness renders also matches a bare tag
+      // query; the content paragraph is the one carrying `whitespace-pre-line`.
+      expect(container.querySelector("p.whitespace-pre-line")).toBeNull();
+      expect(screen.getByAltText(m.post_attachment_alt({ position: "1" }))).toBeInTheDocument();
+    });
+
+    // Issue #203: attachments are viewer triggers now, not raw media links —
+    // nothing inside a card should hand the reader a storage URL in a new tab.
+    it("renders authoritative post attachments as viewer triggers rather than media links", async () => {
       const post = makePost({
         attachments: [
           {
@@ -402,12 +428,44 @@ describe("PostCard", () => {
       });
       await renderWithProviders(<PostCard post={post} />);
 
-      const first = screen.getByAltText(m.post_attachment_alt({ position: "1" }));
-      const second = screen.getByAltText(m.post_attachment_alt({ position: "2" }));
-      expect(first).toHaveAttribute("src", post.attachments[0]?.url);
-      expect(second).toHaveAttribute("src", post.attachments[1]?.url);
-      expect(first.closest("a")).toHaveAttribute("href", post.attachments[0]?.url);
-      expect(first.closest("a")).toHaveAttribute("target", "_blank");
+      expect(
+        screen.getByRole("button", { name: m.post_attachment_view({ position: "1" }) }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: m.post_attachment_view({ position: "2" }) }),
+      ).toBeInTheDocument();
+      const thumbnail = screen.getByAltText(m.post_attachment_alt({ position: "1" }));
+      expect(thumbnail).toHaveAttribute("src", post.attachments[0]?.url);
+      expect(document.querySelector('a[href^="/media/"]')).toBeNull();
+    });
+
+    // Card navigation and image-viewer activation must not conflict: opening
+    // the viewer claims the click instead of also navigating to the thread.
+    it("opens an attachment in the viewer without navigating to the thread", async () => {
+      const post = makePost({
+        content: "",
+        attachments: [
+          {
+            id: "attachment-1",
+            url: "/media/posts/author/post/attachment-1.png",
+            position: 0,
+            contentType: "image/png",
+            byteSize: 24,
+            width: 256,
+            height: 128,
+          },
+        ],
+      });
+      const { router } = await renderWithProviders(<PostCard post={post} />);
+
+      const user = userEvent.setup();
+      await user.click(
+        screen.getByRole("button", { name: m.post_attachment_view({ position: "1" }) }),
+      );
+
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      expect(router.state.location.pathname).toBe("/");
+      expect(router.state.location.pathname).not.toBe(`/post/${post.id}`);
     });
   });
 });

@@ -48,7 +48,10 @@ export function installTestOrpc<TestOrpc>(testOrpc: TestOrpc): void {
   orpc = testOrpc as typeof orpc;
 }
 
-/** One page of `post.list` — a keyset-paginated slice of posts. */
+/**
+ * One page of `post.list` — normally a keyset-paginated slice of posts;
+ * direct-reply pages additionally carry their bounded inline continuations.
+ */
 export type PostListPage = Awaited<ReturnType<typeof client.post.list>>;
 /** A single post as served by the API, with viewer-relative like state. */
 export type Post = PostListPage["items"][number];

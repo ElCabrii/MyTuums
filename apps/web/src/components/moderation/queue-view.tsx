@@ -26,6 +26,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { CaseDialog } from "@/components/moderation/case-dialog";
 import { PaginatedState } from "@/components/paginated-state";
+import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { reasonBadgeVariant, reasonLabel } from "@/components/moderation/labels";
 import { UserAvatar } from "@/components/user-avatar";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
@@ -242,6 +243,15 @@ function QueueRow({ item }: { item: ModerationCase }) {
           ))}
         </ItemTitle>
         <TargetLine preview={preview} />
+        {/* The post's attachments, as compact thumbnails: for an image-only
+            report the image is the whole substance of the case, and the row
+            is the one place a moderator triages without opening it. The grid is
+            link-less in compact mode so a click still opens the case (the row
+            is a `<button>`); the case dialog renders the full, link-wrapped
+            set. */}
+        {preview?.kind === "post" && (
+          <PostAttachmentGrid attachments={preview.attachments} compact />
+        )}
         {/* One line per open appeal: a target can carry appeals from two
             control families at once (a ban and a role change), and showing
             only the newest hid the other from triage entirely. */}
@@ -313,7 +323,7 @@ function TargetLine({ preview }: { preview: CasePreview }) {
         {person.name || handle || m.user_unknown()}
       </span>
       {handle && <span> @{handle}</span>}
-      {preview.kind === "post" && (
+      {preview.kind === "post" && preview.excerpt && (
         <>
           {" — "}
           {preview.excerpt}

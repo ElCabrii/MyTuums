@@ -41,7 +41,10 @@ both by the server's page gate and by the client.
 
 ## Posts, replies, likes, follows
 
-- Posts are plain text, up to 500 characters, trimmed. Rendering recognizes
+- Posts are plain text, up to 500 characters, trimmed. A post or reply carries
+  text, up to four images, or both — a submission with neither is refused, and
+  an image-only post stores an empty body rather than placeholder whitespace.
+  Rendering recognizes
   two link shapes in that text and nothing else. Syntactically valid `@handles`
   become links to lowercase canonical profile routes; malformed handles stay as
   plain text, and an unknown handle lands on the profile route's existing
@@ -50,11 +53,17 @@ both by the server's page gate and by the client.
   sentence punctuation around it outside the link. Every other scheme —
   `javascript:`, `data:`, `ftp:` — stays inert text, and a recognized URL never
   gets a preview, unfurl or link card.
-- A reply is a post with a parent. Threads show the focused post, its replies,
-  and up to 20 ancestors of context.
+- A reply is a post with a parent. Threads show the focused post, up to 20
+  ancestors of context, and keyset-paginated direct replies. Beneath each
+  direct reply, the thread groups the deterministic descendant branch first
+  joined by the focused post's author: the path to that author's earliest
+  reply is shown, then the oldest child at each later fork. Unrelated branches
+  remain collapsed. Long grouped branches start with a bounded slice and
+  expand in place through **Show more replies**.
 - An author can delete their own post. Deletion is a tombstone, not a row
-  delete: the post reads as a stub saying its author deleted it, and its
-  replies, its likes and the conversation above it are untouched. It is not a
+  delete: fresh feeds and profiles omit it, while its own URL and thread
+  context render a stub saying its author deleted it. Its replies, its likes
+  and the conversation above it are untouched. It is not a
   moderation action — no audit row, no email, nothing to appeal — and a post a
   moderator already removed cannot be deleted on top, so the author keeps the
   stated reason and the appeal link. Deleted posts are not search results, for
@@ -84,11 +93,20 @@ both by the server's page gate and by the client.
 _Configuration-dependent_: uploads require the `S3_*` group. Without it the
 app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
 
-- Avatars and banners only. Accepted types are WebP, PNG and JPEG, decided by
-  sniffing the bytes — never by the declared content type — with per-slot size
-  limits and a 50-megapixel ceiling.
-- The browser uploads a display-sized WebP variant plus the untouched
-  original; both are stored and share one identifier.
+- Accepted types are WebP, PNG and JPEG everywhere, decided by sniffing the
+  bytes — never by the declared content type — with per-slot size limits and
+  a 50-megapixel ceiling.
+- Avatars and banners are stored as a pair: the browser uploads a
+  display-sized WebP variant plus the untouched original, sharing one
+  identifier. The original keeps whatever metadata it arrived with, so a
+  picture can be refitted or re-cropped later without lost pixels; only
+  signed-in viewers authorized for the profile can read it either way.
+- A post or reply can carry up to four images. Each is re-encoded in the
+  browser before upload and no original is kept: the stored image is bounded
+  in dimensions and bytes, and carries no camera/GPS (EXIF) metadata (issue
+  #207). Clicking an attachment opens it in an in-app full-size viewer — the
+  same accessible dialog profile pictures use — rather than navigating to its
+  storage URL.
 - Replacing or removing a profile image is atomic: the new objects are
   written first, the profile's references swap in one locked database step,
   and only then is the superseded pair deleted. A failed upload or removal
@@ -147,7 +165,12 @@ because each has a defined inverse.
 
 An appeal is opened one of two ways: from the link in the notification email,
 which works **signed out** (a banned user cannot sign in), or from a signed-in
-author's removed-post stub. The appeal lands in the moderation queue labelled
+author's removed-post stub. A signed-in appellant is shown the post being
+appealed — its original text, its images and the stated reason — above the
+form; signed out, the form stands alone, because a removal notice describes a
+post only its author may see. The removal email itself names the post the same
+way: it quotes the text, counts the images, and for an image-only post says so
+rather than quoting nothing. The appeal lands in the moderation queue labelled
 as such, and is reviewed by any moderator **except the one who took the
 original action**. Overturning an appeal applies the inverse action, which —
 like any action — emails the user. An appeal's own text is between 10 and 2000
@@ -197,10 +220,10 @@ it brings the content back. Removal is never a hard delete. _Avoid:_ deleted
 post (that is the author's own act — see below), purged post.
 
 **Deleted post** — a post whose author took it down themselves. Like a removal
-it is a tombstone rather than a row delete, and it renders as its own stub —
-but it is not a moderation action: nothing is audited, nobody is emailed, there
-is nothing to appeal, and it cannot be restored. _Avoid:_ removed post,
-withdrawn post.
+it is a tombstone rather than a row delete, but fresh feeds and profiles omit
+it; its own URL and thread context render the stub. It is not a moderation
+action: nothing is audited, nobody is emailed, there is nothing to appeal, and
+it cannot be restored. _Avoid:_ removed post, withdrawn post.
 
 **Moderation action** — any act by a moderator, staff member or admin that the
 audit log records. Every one of them emails the affected user, including

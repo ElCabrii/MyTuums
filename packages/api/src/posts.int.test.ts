@@ -2,13 +2,15 @@ import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
 import { eq, sql } from "drizzle-orm";
 import { closeDb } from "@my-tuums/db";
-import { post, postAttachment } from "@my-tuums/db/schema";
+import { post, postAttachment, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   POST_MAX_LENGTH,
   POST_PAGE_SIZE,
   POST_PAGE_SIZE_MAX,
   THREAD_ANCESTOR_MAX,
+  THREAD_REPLY_BRANCH_INITIAL_SIZE,
+  THREAD_REPLY_BRANCH_CHILD_FANOUT,
 } from "./constants.js";
 import type { Context } from "./context.js";
 import { withPostMediaLifecycleLock } from "./post-media-lock.js";
@@ -46,6 +48,55 @@ const POST_PNG = new Uint8Array(
 
 function postImage(name: string): File {
   return new File([POST_PNG], name, { type: "image/png" });
+}
+
+/** Little-endian byte pair for a 16-bit value, the way GIF stores widths/heights/delays. */
+function le16(value: number): [number, number] {
+  return [value & 0xff, (value >>> 8) & 0xff];
+}
+
+/**
+ * Builds a minimal well-formed GIF: a 13-byte header (no Global Color Table),
+ * then for each frame an optional Graphic Control Extension (its delay), an
+ * Image Descriptor, and an empty image-data sub-block sequence, then the 0x3B
+ * trailer. The server walks block structure only, so the image-data sub-blocks
+ * carry no real compressed pixels.
+ */
+function buildGif(
+  logicalScreen: { width: number; height: number },
+  frames: ReadonlyArray<{ width: number; height: number; delayCs?: number }>,
+): Uint8Array {
+  const bytes: number[] = [
+    0x47,
+    0x49,
+    0x46,
+    0x38,
+    0x39,
+    0x61,
+    ...le16(logicalScreen.width),
+    ...le16(logicalScreen.height),
+    0x00,
+    0x00,
+    0x00,
+  ];
+  for (const frame of frames) {
+    if (frame.delayCs !== undefined) {
+      bytes.push(0x21, 0xf9, 0x04, 0x00, ...le16(frame.delayCs), 0x00, 0x00);
+    }
+    bytes.push(0x2c, ...le16(0), ...le16(0), ...le16(frame.width), ...le16(frame.height), 0x00);
+    bytes.push(0x02, 0x00);
+  }
+  bytes.push(0x3b);
+  return new Uint8Array(bytes);
+}
+
+/** A file whose bytes really are a GIF, which is what the server sniffs for. */
+function postGif(
+  name: string,
+  logicalScreen: { width: number; height: number },
+  frames: ReadonlyArray<{ width: number; height: number; delayCs?: number }>,
+): File {
+  return new File([buildGif(logicalScreen, frames)], name, { type: "image/gif" });
 }
 
 interface ListArgs {
@@ -156,11 +207,88 @@ describe("post.create", () => {
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
-  it("rejects whitespace-only content — trimming first is what makes min(1) catch this instead of storing an empty-looking post", async () => {
+  it("rejects a submission carrying neither text nor attachments — trimming first is what keeps whitespace from persisting as fake content", async () => {
     const author = await createTestUser();
     await expect(
       call(appRouter.post.create, { content: "   \n\t  " }, { context: contextFor(author) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("accepts an image-only post: blank text plus a valid attachment stores content as ''", async () => {
+    const author = await createTestUser();
+    const created = await call(
+      appRouter.post.create,
+      { content: "   \n\t ", attachments: [postImage("solo.png")] },
+      { context: contextFor(author) },
+    );
+
+    // Whitespace is not persisted as fake content — the column reads "".
+    expect(created.content).toBe("");
+    expect(created.attachments).toHaveLength(1);
+
+    const listed = await call(appRouter.post.list, {}, { context: contextFor(author) });
+    const row = listed.items.find((item) => item.id === created.id);
+    expect(row?.content).toBe("");
+    expect(row?.attachments).toHaveLength(1);
+  });
+
+  it("accepts an animated GIF attachment and stores it under the gif extension", async () => {
+    // The post_attachment content_type check constraint was extended to allow
+    // 'image/gif' (issue #201); this is the one test that exercises the DB
+    // constraint, since the profile path writes to a free-text column.
+    const author = await createTestUser();
+    const created = await call(
+      appRouter.post.create,
+      {
+        content: "",
+        attachments: [
+          postGif("solo.gif", { width: 256, height: 128 }, [
+            { width: 256, height: 128, delayCs: 20 },
+          ]),
+        ],
+      },
+      { context: contextFor(author) },
+    );
+
+    expect(created.attachments).toHaveLength(1);
+    const [attachment] = created.attachments;
+    expect(attachment.contentType).toBe("image/gif");
+    expect(attachment.url).toMatch(/\.gif$/);
+    expect(attachment.width).toBe(256);
+    expect(attachment.height).toBe(128);
+    expect(testStorageObjects.get(attachment.url.replace("/media/", ""))?.contentType).toBe(
+      "image/gif",
+    );
+  });
+
+  it("accepts an image-only reply and lists it under its parent and the author's replies", async () => {
+    const author = await createTestUser();
+    const parent = await call(
+      appRouter.post.create,
+      { content: "parent" },
+      { context: contextFor(author) },
+    );
+    const reply = await call(
+      appRouter.post.create,
+      { content: "", parentId: parent.id, attachments: [postImage("reply.png")] },
+      { context: contextFor(author) },
+    );
+
+    expect(reply.content).toBe("");
+
+    const directReplies = await call(
+      appRouter.post.list,
+      { parentId: parent.id },
+      { context: contextFor(author) },
+    );
+    expect(directReplies.items.map((item) => item.id)).toEqual([reply.id]);
+
+    const activity = await call(
+      appRouter.post.list,
+      { authorId: author.id, kind: "replies" },
+      { context: contextFor(author) },
+    );
+    expect(activity.items.find((item) => item.id === reply.id)?.attachments).toHaveLength(1);
   });
 
   it("rejects content one character over POST_MAX_LENGTH", async () => {
@@ -391,20 +519,19 @@ describe("post.delete", () => {
     expect(row?.deletedAt).not.toBeNull();
     expect(row?.content).not.toBeNull();
 
-    // ...and a stub through the one projection every surface reads.
+    // Fresh feeds no longer include the tombstone, regardless of viewer.
     for (const context of [contextFor(author), contextFor(viewer)]) {
       const feed = await call(appRouter.post.list, { feed: "global" }, { context });
-      const item = feed.items.find((p) => p.id === target.id);
-      expect(item?.deleted).toBe(true);
-      expect(item?.content).toBeNull();
-      // Nobody was moderated here, so nothing claims a moderator acted — and
-      // there is no reason to show and nothing to appeal.
-      expect(item?.removed).toBe(false);
-      expect(item?.removedReason).toBeNull();
-      // Author tombstones are not restorable: their attachment relation is
-      // cleaned after the post row is tombstoned, so no media path survives.
-      expect(item?.attachments).toEqual([]);
+      expect(feed.items.some((item) => item.id === target.id)).toBe(false);
     }
+
+    await call(appRouter.user.follow, { userId: author.id }, { context: contextFor(viewer) });
+    const following = await call(
+      appRouter.post.list,
+      { feed: "following" },
+      { context: contextFor(viewer) },
+    );
+    expect(following.items.some((item) => item.id === target.id)).toBe(false);
 
     const deletedAttachments = await anonContext.db
       .select({ mediaPath: postAttachment.mediaPath })
@@ -452,7 +579,53 @@ describe("post.delete", () => {
     expect(thread.ancestors[0]?.deleted).toBe(true);
   });
 
-  it("keeps the post's likes, and other posts by the same author", async () => {
+  it("excludes author-deleted replies from replyCount but still counts moderator-removed ones", async () => {
+    const author = await createTestUser();
+    const replier = await createTestUser();
+    const [parent] = await seedPosts(author.id, 1);
+    const replies = await seedPosts(replier.id, 3, { parentId: parent.id });
+
+    const countFor = async () =>
+      call(appRouter.post.thread, { postId: parent.id }, { context: contextFor(author) }).then(
+        (r) => r.post.replyCount,
+      );
+
+    // Baseline: every reply is live, so the count matches the reply feed.
+    expect(await countFor()).toBe(3);
+
+    // An author-deleted reply drops out of both the feed and the count.
+    await call(appRouter.post.delete, { postId: replies[0].id }, { context: contextFor(replier) });
+
+    const afterDelete = await call(
+      appRouter.post.list,
+      { parentId: parent.id },
+      { context: contextFor(author) },
+    );
+    expect(afterDelete.items.map((item) => item.id).sort()).toEqual(
+      [replies[1].id, replies[2].id].sort(),
+    );
+    expect(await countFor()).toBe(2);
+
+    // A moderator-removed reply stays in the feed as a tombstone card and is
+    // still counted — removal is not invisibility.
+    await anonContext.db
+      .update(post)
+      .set({ removedAt: new Date(), removedReason: "policy" })
+      .where(eq(post.id, replies[1].id));
+
+    const afterRemove = await call(
+      appRouter.post.list,
+      { parentId: parent.id },
+      { context: contextFor(author) },
+    );
+    expect(afterRemove.items.map((item) => item.id).sort()).toEqual(
+      [replies[1].id, replies[2].id].sort(),
+    );
+    expect(afterRemove.items.find((item) => item.id === replies[1].id)?.removed).toBe(true);
+    expect(await countFor()).toBe(2);
+  });
+
+  it("hides the post from its author's profile while preserving its likes and other posts", async () => {
     const author = await createTestUser();
     const liker = await createTestUser();
     const [target, survivor] = await seedPosts(author.id, 2);
@@ -465,13 +638,19 @@ describe("post.delete", () => {
       { authorId: author.id },
       { context: contextFor(liker) },
     );
-    const deletedItem = feed.items.find((p) => p.id === target.id);
-    expect(deletedItem?.likeCount).toBe(1);
-    expect(deletedItem?.viewerHasLiked).toBe(true);
+    expect(feed.items.some((item) => item.id === target.id)).toBe(false);
 
     const survivorItem = feed.items.find((p) => p.id === survivor.id);
     expect(survivorItem?.deleted).toBe(false);
     expect(survivorItem?.content).not.toBeNull();
+
+    const thread = await call(
+      appRouter.post.thread,
+      { postId: target.id },
+      { context: contextFor(liker) },
+    );
+    expect(thread.post.likeCount).toBe(1);
+    expect(thread.post.viewerHasLiked).toBe(true);
   });
 
   it("deleting one author's post leaves another author's alone", async () => {
@@ -694,6 +873,211 @@ describe("post.list", () => {
     expect(directReplies.items.map((i) => i.id)).toEqual([reply.id]);
   });
 
+  it("groups the focused author's reply branch beneath each direct reply", async () => {
+    const focusedAuthor = await createTestUser();
+    const participant = await createTestUser();
+    const [focused] = await seedPosts(focusedAuthor.id, 1);
+    const [directReply] = await seedPosts(participant.id, 1, { parentId: focused.id });
+    const [authorReply] = await seedPosts(focusedAuthor.id, 1, { parentId: directReply.id });
+    const [continuation] = await seedPosts(participant.id, 1, { parentId: authorReply.id });
+
+    const page = await call(
+      appRouter.post.list,
+      { parentId: focused.id },
+      { context: contextFor(participant) },
+    );
+
+    expect(page).toMatchObject({
+      items: [{ id: directReply.id }],
+      continuations: [
+        {
+          rootPostId: directReply.id,
+          items: [{ id: authorReply.id }, { id: continuation.id }],
+          nextCursor: null,
+        },
+      ],
+    });
+  });
+
+  it("does not project a descendant branch the focused author never joins", async () => {
+    const focusedAuthor = await createTestUser();
+    const participant = await createTestUser();
+    const [focused] = await seedPosts(focusedAuthor.id, 1);
+    const [directReply] = await seedPosts(participant.id, 1, { parentId: focused.id });
+    const [participantReply] = await seedPosts(participant.id, 1, {
+      parentId: directReply.id,
+    });
+    await seedPosts(participant.id, 1, { parentId: participantReply.id });
+
+    const page = await call(
+      appRouter.post.list,
+      { parentId: focused.id },
+      { context: contextFor(participant) },
+    );
+
+    expect(page.items.map((item) => item.id)).toEqual([directReply.id]);
+    if (!("continuations" in page)) throw new Error("Direct reply page omitted continuations");
+    expect(page.continuations).toEqual([]);
+  });
+
+  it("caps an embedded branch and paginates the continuation without duplicating direct replies", async () => {
+    const focusedAuthor = await createTestUser();
+    const participant = await createTestUser();
+    const [focused] = await seedPosts(focusedAuthor.id, 1);
+    const [directReply] = await seedPosts(participant.id, 1, { parentId: focused.id });
+    const branchIds: string[] = [];
+    let parentId = directReply.id;
+
+    for (let index = 0; index < THREAD_REPLY_BRANCH_INITIAL_SIZE + 5; index += 1) {
+      const authorId = index === 0 ? focusedAuthor.id : participant.id;
+      const [branchPost] = await seedPosts(authorId, 1, { parentId });
+      branchIds.push(branchPost.id);
+      parentId = branchPost.id;
+    }
+
+    const directPage = await call(
+      appRouter.post.list,
+      { parentId: focused.id },
+      { context: contextFor(participant) },
+    );
+    if (!("continuations" in directPage)) {
+      throw new Error("Direct reply page omitted continuations");
+    }
+    const embedded = directPage.continuations[0];
+
+    expect(directPage.items.map((item) => item.id)).toEqual([directReply.id]);
+    expect(embedded?.items.map((item) => item.id)).toEqual(
+      branchIds.slice(0, THREAD_REPLY_BRANCH_INITIAL_SIZE),
+    );
+    expect(embedded?.nextCursor).toEqual(expect.any(String));
+
+    const loadedIds: string[] = [];
+    let cursor = embedded?.nextCursor ?? undefined;
+    while (cursor) {
+      const page = await call(
+        appRouter.post.list,
+        { continuationRootId: directReply.id, cursor, limit: 2 },
+        { context: contextFor(participant) },
+      );
+      loadedIds.push(...page.items.map((item) => item.id));
+      cursor = page.nextCursor ?? undefined;
+    }
+
+    expect([...embedded.items.map((item) => item.id), ...loadedIds]).toEqual(branchIds);
+    expect(new Set(loadedIds)).not.toContain(directReply.id);
+  });
+
+  it("keeps tombstones and skips blocked or banned authors without breaking the selected branch", async () => {
+    const focusedAuthor = await createTestUser();
+    const viewer = await createTestUser();
+    const blockedAuthor = await createTestUser();
+    const bannedAuthor = await createTestUser();
+    const [focused] = await seedPosts(focusedAuthor.id, 1);
+    const [directReply] = await seedPosts(viewer.id, 1, { parentId: focused.id });
+    const [removedAuthorReply] = await seedPosts(focusedAuthor.id, 1, {
+      parentId: directReply.id,
+    });
+    const [blockedReply] = await seedPosts(blockedAuthor.id, 1, {
+      parentId: removedAuthorReply.id,
+    });
+    const [bannedReply] = await seedPosts(bannedAuthor.id, 1, { parentId: blockedReply.id });
+    const [deletedContinuation] = await seedPosts(viewer.id, 1, { parentId: bannedReply.id });
+
+    await call(
+      appRouter.post.like,
+      { postId: removedAuthorReply.id },
+      { context: contextFor(viewer) },
+    );
+    await anonContext.db
+      .update(post)
+      .set({ removedAt: new Date(), removedReason: "policy" })
+      .where(eq(post.id, removedAuthorReply.id));
+    await anonContext.db
+      .update(post)
+      .set({ deletedAt: new Date() })
+      .where(eq(post.id, deletedContinuation.id));
+    await call(
+      appRouter.moderation.block,
+      { userId: blockedAuthor.id },
+      { context: contextFor(viewer) },
+    );
+    await anonContext.db.update(user).set({ banned: true }).where(eq(user.id, bannedAuthor.id));
+
+    const page = await call(
+      appRouter.post.list,
+      { parentId: focused.id },
+      { context: contextFor(viewer) },
+    );
+    if (!("continuations" in page)) throw new Error("Direct reply page omitted continuations");
+    const items = page.continuations[0]?.items ?? [];
+
+    expect(items.map((item) => item.id)).toEqual([removedAuthorReply.id, deletedContinuation.id]);
+    expect(items[0]).toMatchObject({
+      content: null,
+      removed: true,
+      viewerHasLiked: true,
+    });
+    expect(items[1]).toMatchObject({ content: null, deleted: true });
+    expect(items.map((item) => item.author.id)).not.toContain(blockedAuthor.id);
+    expect(items.map((item) => item.author.id)).not.toContain(bannedAuthor.id);
+  });
+
+  it("still selects the branch when the author's reply is the oldest child of a wide fork", async () => {
+    const focusedAuthor = await createTestUser();
+    const participant = await createTestUser();
+    const [focused] = await seedPosts(focusedAuthor.id, 1);
+    const [directReply] = await seedPosts(participant.id, 1, { parentId: focused.id });
+
+    // The author's reply is the oldest child, so it stays inside the fanout
+    // cap even when far more sibling replies exist beneath the same fork.
+    const [authorReply] = await seedPosts(focusedAuthor.id, 1, {
+      parentId: directReply.id,
+      createdAt: new Date(2024, 0, 1, 0, 0, 0),
+    });
+    await seedPosts(participant.id, THREAD_REPLY_BRANCH_CHILD_FANOUT + 10, {
+      parentId: directReply.id,
+      createdAt: (i) => new Date(2024, 0, 1, 0, 0, i + 1),
+    });
+
+    const page = await call(
+      appRouter.post.list,
+      { parentId: focused.id },
+      { context: contextFor(participant) },
+    );
+    if (!("continuations" in page)) throw new Error("Direct reply page omitted continuations");
+
+    expect(page.continuations[0]?.items.map((item) => item.id)).toEqual([authorReply.id]);
+  });
+
+  it("leaves a branch collapsed when the author's reply falls outside the fanout budget", async () => {
+    const focusedAuthor = await createTestUser();
+    const participant = await createTestUser();
+    const [focused] = await seedPosts(focusedAuthor.id, 1);
+    const [directReply] = await seedPosts(participant.id, 1, { parentId: focused.id });
+
+    // The first fork is filled with non-author replies older than the author's,
+    // so the author's reply is the (FANOUT + 1)th child and never enters the
+    // bounded scan. The branch stays gracefully collapsed instead of pulling
+    // every sibling into memory.
+    await seedPosts(participant.id, THREAD_REPLY_BRANCH_CHILD_FANOUT, {
+      parentId: directReply.id,
+      createdAt: (i) => new Date(2024, 0, 1, 0, 0, i),
+    });
+    await seedPosts(focusedAuthor.id, 1, {
+      parentId: directReply.id,
+      createdAt: new Date(2024, 0, 1, 0, 0, THREAD_REPLY_BRANCH_CHILD_FANOUT),
+    });
+
+    const page = await call(
+      appRouter.post.list,
+      { parentId: focused.id },
+      { context: contextFor(participant) },
+    );
+    if (!("continuations" in page)) throw new Error("Direct reply page omitted continuations");
+
+    expect(page.continuations).toEqual([]);
+  });
+
   it("supports the explicit posts/replies/all activity modes", async () => {
     const author = await createTestUser();
     const [root] = await seedPosts(author.id, 1);
@@ -720,7 +1104,7 @@ describe("post.list", () => {
     expect(new Set(all.items.map((item) => item.id))).toEqual(new Set([root.id, reply.id]));
   });
 
-  it("includes an immediate parent preview, keeps removed parents as stubs, and hides blocked parents", async () => {
+  it("includes an immediate parent preview, keeps removed parents as stubs, and hides deleted or blocked parents", async () => {
     const parentAuthor = await createTestUser({ name: "Parent Author" });
     const replyAuthor = await createTestUser({ name: "Reply Author" });
     const viewer = await createTestUser();
@@ -737,7 +1121,6 @@ describe("post.list", () => {
       id: parent.id,
       truncated: false,
       removed: false,
-      deleted: false,
       author: { id: parentAuthor.id, name: "Parent Author" },
     });
     expect(visibleReply?.parent?.excerpt).toMatch(/^seed post 0 /);
@@ -759,6 +1142,20 @@ describe("post.list", () => {
       removed: true,
       author: { id: parentAuthor.id },
     });
+
+    await anonContext.db
+      .update(post)
+      .set({ removedAt: null, removedReason: null, deletedAt: new Date() })
+      .where(eq(post.id, parent.id));
+
+    const deleted = await call(
+      appRouter.post.list,
+      { authorId: replyAuthor.id, kind: "replies" },
+      { context: contextFor(viewer) },
+    );
+    expect(deleted.items.find((item) => item.id === reply.id)?.parent).toBeNull();
+
+    await anonContext.db.update(post).set({ deletedAt: null }).where(eq(post.id, parent.id));
 
     await call(
       appRouter.moderation.block,

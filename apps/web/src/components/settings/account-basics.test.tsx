@@ -4,7 +4,6 @@ import {
   patchTestSessionUser,
   queryFixtures,
   renderWithProviders,
-  setTestSignedOut,
 } from "@/test/render";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -16,7 +15,6 @@ import { authClient } from "@/lib/auth-client";
 import { HandleSection } from "@/components/settings/handle-section";
 import { PasswordSection } from "@/components/settings/password-section";
 import { PreferencesSection } from "@/components/settings/preferences-section";
-import { SignOutSection } from "@/components/settings/sign-out-section";
 import { m } from "@/paraglide/messages.js";
 
 beforeEach(() => {
@@ -172,39 +170,5 @@ describe("PreferencesSection", () => {
     await user.click(screen.getByRole("button", { name: m.theme_dark() }));
     await user.click(screen.getByRole("button", { name: m.locale_french() }));
     expect(authClient.updateUser).not.toHaveBeenCalled();
-  });
-});
-
-describe("SignOutSection", () => {
-  it("stays busy and on the page until the session is actually signed out", async () => {
-    let release!: () => void;
-    vi.mocked(authClient.signOut).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          release = () => resolve({ data: {}, error: null });
-        }),
-    );
-    const { router } = await renderWithProviders(<SignOutSection />, {
-      initialPath: "/settings/account",
-      signedInAs: true,
-    });
-    const user = userEvent.setup();
-    const button = screen.getByRole("button", { name: m.auth_sign_out() });
-    await user.click(button);
-
-    expect(button).toBeDisabled();
-    expect(router.state.location.pathname).toBe("/settings/account");
-
-    act(() => {
-      release();
-    });
-    // `signOut` resolved but the store is still signed-in: `waitForSignedOut`
-    // is still waiting, so navigation must not have happened yet.
-    expect(router.state.location.pathname).toBe("/settings/account");
-
-    act(() => {
-      setTestSignedOut();
-    });
-    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
   });
 });

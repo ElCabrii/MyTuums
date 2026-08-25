@@ -22,6 +22,10 @@ function be16(bytes: Uint8Array, offset: number): number {
   return (bytes[offset] << 8) | bytes[offset + 1];
 }
 
+function le16(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8);
+}
+
 function be32(bytes: Uint8Array, offset: number): number {
   return (
     ((bytes[offset] << 24) |
@@ -146,10 +150,33 @@ function webpDimensions(bytes: Uint8Array): ImageDimensions | null {
   return null;
 }
 
+/**
+ * GIF: a 6-byte signature ("GIF87a" or "GIF89a"), then the Logical Screen
+ * Descriptor whose first two 16-bit little-endian words are the canvas width
+ * and height. Every frame's image descriptor is cropped to this logical screen,
+ * so these are the dimensions the crop editor and the display-variant layout
+ * reason about — never an individual frame's, which may be a partial sub-rect.
+ */
+function gifDimensions(bytes: Uint8Array): ImageDimensions | null {
+  if (bytes.length < 10) return null;
+  if (
+    bytes[0] !== 0x47 ||
+    bytes[1] !== 0x49 ||
+    bytes[2] !== 0x46 ||
+    bytes[3] !== 0x38 ||
+    (bytes[4] !== 0x37 && bytes[4] !== 0x39) ||
+    bytes[5] !== 0x61
+  ) {
+    return null;
+  }
+  return { width: le16(bytes, 6), height: le16(bytes, 8) };
+}
+
 const PARSERS = new Map([
   ["image/png", pngDimensions],
   ["image/jpeg", jpegDimensions],
   ["image/webp", webpDimensions],
+  ["image/gif", gifDimensions],
 ]);
 
 /**

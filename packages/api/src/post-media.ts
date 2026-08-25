@@ -6,7 +6,7 @@
  * moderation tombstones and blocks), not just the signed-in state.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull, not } from "drizzle-orm";
+import { and, eq, isNull, not, or } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import { post, postAttachment, user } from "@my-tuums/db/schema";
 import { roleAtLeast } from "./roles.js";
@@ -19,6 +19,7 @@ const EXTENSION = {
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/webp": "webp",
+  "image/gif": "gif",
 } satisfies Record<AllowedImageType, string>;
 
 export interface PostAttachmentInput {
@@ -180,7 +181,17 @@ export function postAttachmentRows(
 /**
  * Authorizes a `/media/` request for a post attachment. Moderators can inspect
  * reported/tombstoned posts; ordinary readers must pass the normal author
- * visibility predicate and both post tombstones must be clear.
+ * visibility predicate, and a post the author deleted is closed to everyone
+ * but a moderator.
+ *
+ * The one relaxation is for the author of a MODERATION-removed post: they may
+ * still fetch their own attachments, which is what lets the appeal page show
+ * someone the images they are contesting the removal of. It discloses nothing
+ * — the author uploaded these bytes — and the objects are still there, because
+ * a removal is reversible and deliberately does not reap them (see
+ * `discardPostAttachments`). An author-DELETED post stays closed for the
+ * opposite reason: `cleanupDeletedPostAttachments` reaps those objects, so
+ * there would be nothing behind the signature anyway.
  */
 export async function canViewPostMedia(
   db: Database,
@@ -198,7 +209,14 @@ export async function canViewPostMedia(
   const path = mediaPathFor(key);
   const visiblePost = isModerator
     ? undefined
-    : and(isNull(post.removedAt), isNull(post.deletedAt), not(invisibleAuthor(viewerId)));
+    : and(
+        isNull(post.deletedAt),
+        not(invisibleAuthor(viewerId)),
+        // The ONLY term the author is exempt from is the removal tombstone.
+        // Ban and block visibility still applies to them, so this cannot
+        // become a way to read anything back out of a hidden account.
+        or(isNull(post.removedAt), eq(post.authorId, viewerId)),
+      );
 
   const [found] = await db
     .select({ id: postAttachment.id })

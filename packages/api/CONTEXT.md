@@ -36,6 +36,7 @@ over HTTP and imports only its browser-safe subpaths.
 | Change how a user is matched by text  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                    | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking |
 | Change how an appeal is opened        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                             | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface                  |
 | Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                             | `src/moderation-actions.ts` if the inverse effect changes                                                |
+| Change what an appellant is shown     | `src/moderation-appeals.ts` (`appealPreview`), `src/post-media.ts` (`canViewPostMedia`)  | `src/appeal-preview.int.test.ts`, `src/post-media.int.test.ts`; `docs/security.md` — media retrieval     |
 | Change profile-image upload rules     | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                                                |
 | Change post-attachment upload rules   | `src/post-image.ts`, `src/constants.ts` (`POST_ATTACHMENT_*`)                            | `src/image.test.ts`; `src/posts.int.test.ts`                                                             |
 | Change the profile upload lifecycle   | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                      |
@@ -59,6 +60,11 @@ over HTTP and imports only its browser-safe subpaths.
 - **`baseProcedure` has exactly one consumer.** `moderation.appealOpen` is the
   app's one anonymous surface, and it is HMAC-capability-gated because a
   banned user cannot sign in to appeal. Anything else built on it is a bug.
+  `moderation.appealPreview` is the deliberate counter-example: it serves the
+  same page from `protectedProcedure`, because a post removal suspends nobody,
+  so its author can always sign in — and requiring that session is what lets
+  the attachments come back through the ordinary `/media/` route instead of
+  needing a second anonymous way to reach object storage.
 - **`protectedProcedure` carries the legal consent gate.** An account whose
   recorded acceptance is absent or names a superseded version is refused
   FORBIDDEN, because `packages/auth`'s create hook can only cover
@@ -133,11 +139,15 @@ over HTTP and imports only its browser-safe subpaths.
 - **A post has two independent tombstones, and neither is a row delete.**
   `moderation.removePost` stamps `removed_at`; `post.delete` (the author's own,
   issue #148) stamps `deleted_at`. `postSelection` nulls the content for
-  either, and `search.posts` excludes both rows outright — it matches the raw
+  either — including for the author, which is why `moderation.appealPreview`
+  exists to hand the author back their own removed post — and `search.posts`
+  excludes both rows outright — it matches the raw
   `content` column, which no projection touches, so a tombstoned post's text
-  would otherwise stay probeable. Keeping the row is what lets replies, likes
-  and the thread above survive, and it is why `post.parent_id` can still
-  cascade. `post.delete` is deliberately NOT a moderation effect: no
+  would otherwise stay probeable. `post.list` also excludes author-deleted
+  rows (including compact reply-parent previews), while `post.thread` keeps
+  their focused/ancestor stubs. Keeping the row is what lets replies, likes and
+  the thread above survive, and it is why `post.parent_id` can still cascade.
+  `post.delete` is deliberately NOT a moderation effect: no
   transaction, no `FOR UPDATE`, no `moderation_action` row, no email, nothing
   appealable — it is author-owned and idempotent, and it refuses a post a
   moderator already removed so the author keeps the stub's reason and appeal
@@ -154,11 +164,22 @@ over HTTP and imports only its browser-safe subpaths.
   pair is safe because the update compares both tombstones; after losing to a
   concurrent delete or removal, it re-reads the winner and preserves that
   outcome.
-- **Replies are a mode of `post.list` (`parentId` or the profile `kind`), not
-  their own procedure.** The web app's optimistic like sweep covers every
-  cached `post.list` by key prefix; a separate procedure would miss reply
-  likes. `kind` selects top-level posts, replies, or both, while the legacy
-  `includeReplies` input remains the compatibility spelling for both.
+- **Replies and their inline continuations are modes of `post.list`, not
+  separate procedures.** `parentId` remains the keyset-paginated owner of a
+  focused post's direct replies; those pages add the bounded original-author
+  continuation for each returned direct row. `continuationRootId` resumes one
+  capped branch in place. Keeping both under `post.list` means the web app's
+  optimistic like/deletion/moderation sweep reaches direct and continuation
+  rows through one query prefix. `src/reply-branch.ts` owns the deterministic
+  rule: choose the earliest descendant by the focused author, include its path,
+  then follow the oldest child at each fork. The descendant scan that feeds it
+  is bounded in `posts.ts`: each fork expands only its oldest
+  `THREAD_REPLY_BRANCH_CHILD_FANOUT` children, recursion stops at
+  `THREAD_REPLY_BRANCH_MAX_DEPTH`, and the total output is capped at
+  `THREAD_REPLY_BRANCH_DESCENDANT_BUDGET` rows — so a broad tree can never make
+  a permalink scan the whole forest or push the metadata lookup's parameter
+  list past PostgreSQL's limit. `kind` still selects top-level posts, replies,
+  or both, while `includeReplies` remains the compatibility spelling for both.
 - **Posts and replies share one attachment policy.** Either may carry up to
   four ordered PNG, JPEG, or WebP files. Each file is capped at 5 MiB, the
   batch at 12 MiB, and decoded dimensions at 4096 px per side / 50 MP. The

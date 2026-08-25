@@ -5,15 +5,17 @@ import { postCardWithText } from "../../support/post-card";
  * The moderation desk, walked end to end: bob posts, alice (the moderator
  * fixture — promoted in auth.setup.ts) reports the post from her feed, removes
  * it from the queue, bob's post becomes a stub in his own feed with the
- * author-only appeal link, bob appeals from the stub, and the open appeal
- * brings the case back into alice's queue.
+ * author-only appeal link, bob appeals from the stub — seeing the post he is
+ * contesting on the way — and the open appeal brings the case back into
+ * alice's queue.
  *
  * The review step is deliberately left out of the browser journey: `appealReview`
  * forbids the action's own actor from reviewing it, so overturning would need
  * a second moderator fixture — and the full reviewer-exclusion, uphold and
  * overturn behaviour is already covered by moderation.int.test.ts. This spec
  * proves the user-visible surface: report dialog, queue, case dialog removal,
- * stub + appeal link, appeal form, and the appeal badge in the queue.
+ * stub + appeal link, the appellant's preview of their own removed post,
+ * the appeal form, and the appeal badge in the queue.
  */
 test.describe("moderation", () => {
   test("report → queue → remove → appeal", async ({ page, bobPage, db }) => {
@@ -63,10 +65,14 @@ test.describe("moderation", () => {
     await stub.getByRole("link", { name: "Appeal this decision" }).click();
     await expect(bobPage).toHaveURL(/\/appeal\?postId=/);
 
-    // ── The appeal: signed-in stub path, form + success state. ──
+    // ── The appeal: signed-in stub path, preview + form + success state. ──
     await expect(
       bobPage.getByRole("heading", { name: "Appeal a moderation decision" }),
     ).toBeVisible();
+    // The preview hands bob back the post he is contesting — the same content
+    // the feed stub above takes away from him.
+    await expect(bobPage.getByText("The post you're appealing")).toBeVisible();
+    await expect(bobPage.getByText(marker, { exact: true })).toBeVisible();
     await bobPage
       .getByLabel("Your appeal")
       .fill("This removal was a mistake — my post followed the rules.");

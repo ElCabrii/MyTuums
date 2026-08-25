@@ -1,6 +1,6 @@
 import { test, expect } from "../../support/fixtures";
 import { postCardWithText } from "../../support/post-card";
-import { solidPng } from "../../support/image";
+import { solidPng, jpegWithExif, EXIF_PROBE_STRING } from "../../support/image";
 import { ALICE } from "../../support/users";
 
 const COMPOSER_PLACEHOLDER = "Share a gaming update, clip, or tournament result...";
@@ -197,5 +197,42 @@ test.describe("post image attachments", () => {
     const response = await page.request.get(src);
     expect(response.status()).toBe(200);
     expect(response.headers()["content-type"]).toContain("image");
+  });
+
+  test("stores a re-encoded attachment without the picked file's metadata", async ({ page }) => {
+    // Issue #207: what lands in storage must be the browser's re-encode, not
+    // the picked bytes. The fixture is a real JPEG whose EXIF names a camera
+    // and carries GPS coordinates; none of it may survive into the stored
+    // object, and the stored object must not even be a JPEG — the composer
+    // re-encodes to WebP (PNG on browsers without that encoder).
+    await page.goto("/");
+    const content = `Metadata strip ${Date.now().toString()}`;
+
+    await page.getByPlaceholder(COMPOSER_PLACEHOLDER).fill(content);
+    await page.getByLabel("Add images", { exact: true }).setInputFiles({
+      name: "gps-photo.jpg",
+      mimeType: "image/jpeg",
+      buffer: jpegWithExif(320, 240),
+    });
+    await expect(page.getByRole("img", { name: "gps-photo.jpg" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Post", exact: true }).click();
+
+    const card = postCardWithText(page, content);
+    const image = card.getByRole("img", { name: "Attached image 1" });
+    await expect(image).toHaveAttribute("src", /^\/media\/posts\//, { timeout: 20_000 });
+    const src = await image.getAttribute("src");
+    if (!src) throw new Error("expected the stored post image to have a source");
+    const response = await page.request.get(src);
+    expect(response.status()).toBe(200);
+
+    expect(response.headers()["content-type"]).toMatch(/^image\/(webp|png)$/);
+
+    // latin1 maps bytes to code points one-to-one, so ASCII metadata
+    // fragments remain greppable in the binary payload.
+    const body = (await response.body()).toString("latin1");
+    expect(body.includes(EXIF_PROBE_STRING)).toBe(false);
+    expect(body.includes("Exif")).toBe(false);
+    expect(body.includes("GPS Spy Unit")).toBe(false);
   });
 });

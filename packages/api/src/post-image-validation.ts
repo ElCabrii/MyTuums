@@ -1,4 +1,9 @@
-import type { AllowedImageType } from "./constants.js";
+import {
+  GIF_MAX_CUMULATIVE_PIXELS,
+  GIF_MAX_FRAMES,
+  GIF_MAX_TOTAL_DURATION_MS,
+  type AllowedImageType,
+} from "./constants.js";
 
 /**
  * Checks the container structure of a post attachment without decoding pixels.
@@ -9,6 +14,12 @@ import type { AllowedImageType } from "./constants.js";
  * are not enough to make an object a complete image. This pass checks the
  * format's chunk/marker boundaries and required terminators, but leaves costly
  * raster decoding to clients that render the image.
+ *
+ * For GIF this is structure only — a well-formed block walk with at least one
+ * image descriptor and a terminal trailer. The animation-wide magnitude limits
+ * (frame count, total duration, cumulative pixels) are enforced separately by
+ * `gifWithinLimits`, at the accept layer, so an excessive-frame GIF is rejected
+ * as `size` (a bound on stored/decoded work) rather than `content`.
  */
 export function isStructurallyValidPostImage(bytes: Uint8Array, type: AllowedImageType): boolean {
   switch (type) {
@@ -18,11 +29,17 @@ export function isStructurallyValidPostImage(bytes: Uint8Array, type: AllowedIma
       return validJpeg(bytes);
     case "image/webp":
       return validWebp(bytes);
+    case "image/gif":
+      return gifFrameSummary(bytes) !== null;
   }
 }
 
 function be16(bytes: Uint8Array, offset: number): number {
   return (bytes[offset] << 8) | bytes[offset + 1];
+}
+
+function le16(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8);
 }
 
 function be32(bytes: Uint8Array, offset: number): number {
@@ -311,4 +328,164 @@ function validWebp(bytes: Uint8Array): boolean {
   }
 
   return offset === bytes.length && hasFrame;
+}
+
+/**
+ * The animation-wide totals a GIF's block structure reports.
+ *
+ * `frames` is the number of image descriptors; `totalDurationMs` is the sum of
+ * every frame's Graphic Control Extension delay (the GCE preceding an image
+ * owns that image's delay); `cumulativePixels` is the sum of every frame's
+ * `width × height` — the measure of decode work, which a byte cap alone cannot
+ * bound because LZW-compressed flat colour compresses many large frames into
+ * few bytes.
+ */
+export interface GifFrameSummary {
+  frames: number;
+  totalDurationMs: number;
+  cumulativePixels: number;
+}
+
+/**
+ * Advances past one GIF sub-block sequence: length-prefixed chunks terminated by
+ * a zero byte. Returns the offset after the terminator, or `null` when the bytes
+ * overrun before terminating. Every GIF extension and image-data payload uses
+ * this framing, so one walker skips them all.
+ */
+function skipGifSubBlocks(bytes: Uint8Array, offset: number): number | null {
+  while (true) {
+    if (offset >= bytes.length) return null;
+    const length = bytes[offset];
+    offset += 1;
+    if (length === 0) return offset;
+    offset += length;
+    if (offset > bytes.length) return null;
+  }
+}
+
+/**
+ * Walks a GIF's block structure and totals its animation work, or returns
+ * `null` when the bytes are not a well-formed GIF.
+ *
+ * "Well-formed" means: a valid signature, a parseable Logical Screen Descriptor,
+ * every block consumed by its own length (no overrun), at least one image
+ * descriptor, and the `0x3B` trailer as the final byte. A truncated file — one
+ * that ends mid-sub-block or never reaches a trailer — is `null`, the same way
+ * a PNG missing IEND is. The LZW image data itself is NOT decoded here: the
+ * server never rasterises an upload, so the compressed sub-blocks are skipped
+ * by length, not decompressed.
+ */
+export function gifFrameSummary(bytes: Uint8Array): GifFrameSummary | null {
+  // 6-byte signature ("GIF87a" or "GIF89a") + 7-byte Logical Screen Descriptor.
+  if (bytes.length < 13) return null;
+  if (
+    bytes[0] !== 0x47 ||
+    bytes[1] !== 0x49 ||
+    bytes[2] !== 0x46 ||
+    bytes[3] !== 0x38 ||
+    (bytes[4] !== 0x37 && bytes[4] !== 0x39) ||
+    bytes[5] !== 0x61
+  ) {
+    return null;
+  }
+
+  const packed = bytes[10];
+  const logicalWidth = le16(bytes, 6);
+  const logicalHeight = le16(bytes, 8);
+  if (logicalWidth === 0 || logicalHeight === 0) return null;
+
+  let offset = 13;
+  // Global Color Table: present when the LSD's packed byte sets bit 7; its size
+  // is 3 × 2^(N+1) bytes where N is the low three bits.
+  if (packed & 0x80) offset += 3 * (1 << ((packed & 0x07) + 1));
+  if (offset > bytes.length) return null;
+
+  let frames = 0;
+  let totalDurationMs = 0;
+  let cumulativePixels = 0;
+  // The GCE preceding an image owns that image's delay, in centiseconds.
+  let pendingDelayCs = 0;
+
+  while (offset < bytes.length) {
+    const introducer = bytes[offset];
+    offset += 1;
+
+    if (introducer === 0x3b) {
+      // Trailer — must be the final byte, and only after at least one frame.
+      return frames > 0 && offset === bytes.length
+        ? { frames, totalDurationMs, cumulativePixels }
+        : null;
+    }
+
+    if (introducer === 0x2c) {
+      // Image Descriptor: left, top, width, height (all LE16), then a packed
+      // byte — 9 bytes after the introducer.
+      if (offset + 9 > bytes.length) return null;
+      const left = le16(bytes, offset);
+      const top = le16(bytes, offset + 2);
+      const width = le16(bytes, offset + 4);
+      const height = le16(bytes, offset + 6);
+      const imagePacked = bytes[offset + 8];
+      offset += 9;
+      if (width === 0 || height === 0) return null;
+      if (left + width > logicalWidth || top + height > logicalHeight) return null;
+      // Optional Local Color Table, sized the same way as the global one.
+      if (imagePacked & 0x80) {
+        offset += 3 * (1 << ((imagePacked & 0x07) + 1));
+        if (offset > bytes.length) return null;
+      }
+      // LZW minimum code size, then the image-data sub-blocks.
+      if (offset >= bytes.length) return null;
+      if (bytes[offset] < 2 || bytes[offset] > 8) return null;
+      offset += 1;
+      const afterData = skipGifSubBlocks(bytes, offset);
+      if (afterData === null) return null;
+      offset = afterData;
+
+      frames += 1;
+      cumulativePixels += width * height;
+      totalDurationMs += pendingDelayCs * 10;
+      pendingDelayCs = 0;
+      continue;
+    }
+
+    if (introducer === 0x21) {
+      // Extension: a label byte, then sub-blocks.
+      if (offset >= bytes.length) return null;
+      const label = bytes[offset];
+      offset += 1;
+      if (label === 0xf9) {
+        // Graphic Control Extension: blockSize (4), 4 data bytes, terminator.
+        // The delay is the LE16 at data bytes 1-2, in centiseconds.
+        if (offset + 6 > bytes.length || bytes[offset] !== 4) return null;
+        // The high three bits are reserved. Bits 0 and 1 are the transparency
+        // and user-input flags, so valid animations may set either one.
+        if (bytes[offset + 1] & 0xe0) return null;
+        pendingDelayCs = le16(bytes, offset + 2);
+      }
+      const afterExt = skipGifSubBlocks(bytes, offset);
+      if (afterExt === null) return null;
+      offset = afterExt;
+      continue;
+    }
+
+    // Any other introducer is not part of a GIF this app will accept.
+    return null;
+  }
+
+  // Ran out of bytes before the trailer.
+  return null;
+}
+
+/**
+ * Whether a GIF's animation totals fit the centrally-defined limits. Enforced
+ * at the accept layer (post and profile) so an excessive-frame, over-long, or
+ * decode-bomb GIF is rejected as `size` before storage.
+ */
+export function gifWithinLimits(summary: GifFrameSummary): boolean {
+  return (
+    summary.frames <= GIF_MAX_FRAMES &&
+    summary.totalDurationMs <= GIF_MAX_TOTAL_DURATION_MS &&
+    summary.cumulativePixels <= GIF_MAX_CUMULATIVE_PIXELS
+  );
 }

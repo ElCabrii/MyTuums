@@ -175,4 +175,120 @@ describe("ThreadPage successful rendering", () => {
 
     expect(screen.getByText(m.reply_count_one({ count: "1" }))).toBeInTheDocument();
   });
+
+  it("renders the focused author's continuation inline beneath its direct reply", async () => {
+    const focusedAuthor = { id: "author-a", name: "Author A" };
+    const focused = makePost({
+      id: "focused-conversation",
+      content: "A starts",
+      author: { ...makePost().author, ...focusedAuthor },
+      replyCount: 2,
+    });
+    const directReply = makePost({
+      id: "direct-b",
+      parentId: focused.id,
+      content: "B replies",
+    });
+    const authorReply = makePost({
+      id: "author-a-reply",
+      parentId: directReply.id,
+      content: "A answers",
+      author: focused.author,
+    });
+    const continuation = makePost({
+      id: "continuation-c",
+      parentId: authorReply.id,
+      content: "C continues",
+    });
+    const unrelatedDirectReply = makePost({
+      id: "unrelated-direct",
+      parentId: focused.id,
+      content: "Unrelated direct reply",
+    });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).thread.data(focused.id, makeThread({ post: focused }));
+    queryFixtures(queryClient).postList.data(
+      [
+        {
+          items: [directReply, unrelatedDirectReply],
+          nextCursor: null,
+          continuations: [
+            {
+              rootPostId: directReply.id,
+              items: [authorReply, continuation],
+              nextCursor: null,
+            },
+          ],
+        },
+      ],
+      { feed: "global", parentId: focused.id },
+    );
+
+    await renderWithProviders(<ThreadPage />, {
+      queryClient,
+      initialPath: `/post/${focused.id}`,
+      signedInAs: true,
+    });
+
+    expect(screen.getByText("B replies")).toBeInTheDocument();
+    expect(screen.getByText("A answers")).toBeInTheDocument();
+    expect(screen.getByText("C continues")).toBeInTheDocument();
+    expect(screen.getByText("Unrelated direct reply")).toBeInTheDocument();
+  });
+
+  it("loads a capped continuation in place from one accessible show-more action", async () => {
+    const focused = makePost({ id: "capped-focused", replyCount: 1 });
+    const directReply = makePost({ id: "capped-direct", parentId: focused.id });
+    const embedded = makePost({ id: "embedded-reply", parentId: directReply.id });
+    const loaded = makePost({
+      id: "loaded-reply",
+      parentId: embedded.id,
+      content: "Loaded in place",
+    });
+    fakeClient.post.list.mockResolvedValue({ items: [loaded], nextCursor: null });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).thread.data(focused.id, makeThread({ post: focused }));
+    queryFixtures(queryClient).postList.data(
+      [
+        {
+          items: [directReply],
+          nextCursor: null,
+          continuations: [
+            {
+              rootPostId: directReply.id,
+              items: [embedded],
+              nextCursor: "branch-cursor",
+            },
+          ],
+        },
+      ],
+      { feed: "global", parentId: focused.id },
+    );
+
+    await renderWithProviders(<ThreadPage />, {
+      queryClient,
+      initialPath: `/post/${focused.id}`,
+      signedInAs: true,
+    });
+
+    const user = userEvent.setup();
+    const showMore = screen.getByRole("button", { name: m.thread_show_more_replies() });
+    expect(screen.getAllByRole("button", { name: m.thread_show_more_replies() })).toHaveLength(1);
+    await user.click(showMore);
+
+    expect(await screen.findByText("Loaded in place")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(fakeClient.post.list).toHaveBeenCalledWith(
+        {
+          limit: 20,
+          continuationRootId: directReply.id,
+          cursor: "branch-cursor",
+        },
+        expect.anything(),
+      ),
+    );
+    expect(
+      screen.queryByRole("button", { name: m.thread_show_more_replies() }),
+    ).not.toBeInTheDocument();
+  });
 });
