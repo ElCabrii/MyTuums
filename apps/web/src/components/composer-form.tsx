@@ -333,10 +333,7 @@ export function ComposerForm({
         continue;
       }
 
-      if (
-        next.length >= POST_ATTACHMENT_MAX_COUNT ||
-        totalBytes + file.size > POST_ATTACHMENT_MAX_TOTAL_BYTES
-      ) {
+      if (next.length >= POST_ATTACHMENT_MAX_COUNT) {
         nextError = m.post_image_limit();
         break;
       }
@@ -365,9 +362,18 @@ export function ComposerForm({
         continue;
       }
 
+      // The batch budget counts what will actually be uploaded, so the cap
+      // is measured against the processed objects — never the picked
+      // originals. A re-encode can outweigh its source (a PNG fallback on a
+      // browser without WebP encode), and the per-file cap above only bounds
+      // the source; measuring here is what keeps a staged batch inside
+      // POST_ATTACHMENT_MAX_TOTAL_BYTES, matching the server's own total.
+      if (totalBytes + processed.size > POST_ATTACHMENT_MAX_TOTAL_BYTES) {
+        nextError = m.post_image_limit();
+        break;
+      }
+
       next.push({ id: crypto.randomUUID(), file: processed });
-      // The batch budget counts what will actually be uploaded — the
-      // processed objects, not the picked originals.
       totalBytes += processed.size;
     }
 

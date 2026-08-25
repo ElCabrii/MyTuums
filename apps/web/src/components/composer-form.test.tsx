@@ -2,7 +2,11 @@ import { useState, type ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { POST_MAX_LENGTH } from "@my-tuums/api/constants";
+import {
+  POST_ATTACHMENT_MAX_BYTES,
+  POST_ATTACHMENT_MAX_TOTAL_BYTES,
+  POST_MAX_LENGTH,
+} from "@my-tuums/api/constants";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc, orpc, type SearchTypeahead } from "@/lib/orpc";
 import { renderWithProviders, makeUserSummary } from "@/test/render";
@@ -506,5 +510,43 @@ describe("ComposerForm", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(m.post_image_invalid());
     expect(onAttachmentsChange).not.toHaveBeenCalled();
+  });
+
+  it("caps the batch at the total-bytes budget against processed sizes, not picked sizes", async () => {
+    // A re-encode can outweigh its source — a PNG fallback on a browser
+    // without WebP encode — so the total budget must be measured against what
+    // is actually uploaded (the processed objects), never the picked bytes.
+    // Otherwise a staged batch could pass the client guard and exceed the
+    // server's POST_ATTACHMENT_MAX_TOTAL_BYTES (issue #207 follow-up).
+
+    // Pin the cap relationship this scenario depends on, so a future change
+    // to either constant turns this into a failure rather than a silent no-op.
+    expect(2 * POST_ATTACHMENT_MAX_BYTES).toBeLessThanOrEqual(POST_ATTACHMENT_MAX_TOTAL_BYTES);
+    expect(3 * POST_ATTACHMENT_MAX_BYTES).toBeGreaterThan(POST_ATTACHMENT_MAX_TOTAL_BYTES);
+
+    // Each picked file is a tiny valid PNG (under both caps); the processor
+    // stands in for the inflation, returning a max-size object every time.
+    const inflated = new Uint8Array(POST_ATTACHMENT_MAX_BYTES);
+    installTestPostAttachment((file: File) =>
+      Promise.resolve(new File([inflated], file.name, { type: "image/webp" })),
+    );
+
+    const onAttachmentsChange = vi.fn();
+    await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
+
+    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+      target: {
+        files: [
+          new File([VALID_PNG_BYTES], "a.png", { type: "image/png" }),
+          new File([VALID_PNG_BYTES], "b.png", { type: "image/png" }),
+          new File([VALID_PNG_BYTES], "c.png", { type: "image/png" }),
+        ],
+      },
+    });
+
+    // Two max-size objects fit within the total cap; the third would exceed
+    // it, so it is refused and the loop stops with the limit message.
+    await waitFor(() => expect(onAttachmentsChange.mock.calls.at(-1)?.[0]).toHaveLength(2));
+    expect(await screen.findByRole("alert")).toHaveTextContent(m.post_image_limit());
   });
 });
