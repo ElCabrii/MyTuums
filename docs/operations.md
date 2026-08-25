@@ -70,12 +70,12 @@ Postgres and object storage in the same region.
 
 Four environments, and they do not do the same job:
 
-| Environment  | Runs the app | Postgres | Bucket              | Deploy source            |
-| ------------ | ------------ | -------- | ------------------- | ------------------------ |
-| `production` | yes          | yes      | the live bucket     | `main`                   |
-| `Preview`    | yes          | yes      | Preview bucket only | active release branch    |
-| `dev`        | no           | no       | dev bucket only     | none                     |
-| `ci`         | no           | no       | ci bucket only      | none                     |
+| Environment  | Runs the app | Postgres | Bucket              | Deploy source         |
+| ------------ | ------------ | -------- | ------------------- | --------------------- |
+| `production` | yes          | yes      | the live bucket     | `main`                |
+| `Preview`    | yes          | yes      | Preview bucket only | active release branch |
+| `dev`        | no           | no       | dev bucket only     | none                  |
+| `ci`         | no           | no       | ci bucket only      | none                  |
 
 `Preview` is the release-candidate environment. It uses fresh, isolated data
 and storage and auto-deploys the active release branch. When a new release
