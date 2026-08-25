@@ -120,8 +120,16 @@ function isUniqueViolation<Value>(error: Value, depth = 0): boolean {
   return parsed.data.cause === undefined ? false : isUniqueViolation(parsed.data.cause, depth + 1);
 }
 
-/** The user an action happened to — its target user, or the author for post actions. */
-async function actionTargetUser(db: DbLike, action: ActionRow): Promise<string | null> {
+/**
+ * The user an action happened to — its target user, or the author for post
+ * actions.
+ *
+ * Exported because it is the same question `moderation.appealPreview` has to
+ * answer before it will show anyone a removed post: "is this action yours?".
+ * One definition, so the read surface and the write surface cannot disagree
+ * about who an action belongs to.
+ */
+export async function actionTargetUser(db: DbLike, action: ActionRow): Promise<string | null> {
   if (action.targetType === "user") return action.targetUserId;
   if (!action.targetPostId) return null;
   const [target] = await db

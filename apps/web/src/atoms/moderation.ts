@@ -12,6 +12,7 @@ import { orpc } from "@/lib/orpc";
 import { FOLLOW_CACHE_KEYS } from "@/lib/follow-cache";
 import { POST_CACHE_KEYS } from "@/lib/post-cache";
 import {
+  appealPreviewQueryOptions,
   auditLogQueryOptions,
   type CaseRef,
   moderationCaseQueryOptions,
@@ -20,6 +21,7 @@ import {
   teamSearchQueryOptions,
 } from "@/lib/query-definitions";
 import { debounceMs } from "@/atoms/search";
+import { isSignedInAtom } from "@/atoms/session";
 
 /**
  * A reference to a moderation case target — what the queue rows hold, what the
@@ -433,6 +435,36 @@ export const setRoleAtom = atomWithMutation((get) => {
     },
   });
 });
+
+/**
+ * Encodes an appeal identifier into a family key — the kind FIRST and the
+ * value last, so a value containing the delimiter still round-trips (the same
+ * layout, for the same reason, as {@link encodeCaseKey}).
+ */
+export const encodeAppealKey = (identifier: { token?: string; postId?: string }): string =>
+  identifier.token ? `token|${identifier.token}` : `postId|${identifier.postId ?? ""}`;
+
+/**
+ * The removed post behind one appeal identifier — what the appeal page renders
+ * above its form.
+ *
+ * A family rather than a single atom for the same reason the queue is one:
+ * module-scope atoms take no parameters, and the page can be navigated from
+ * one identifier to another. Signed-in state is read inside the atom so the
+ * query starts itself the moment a session resolves, rather than staying
+ * disabled from whatever was true at mount.
+ */
+export const appealPreviewFamily = atomFamily((key: string) =>
+  atomWithQuery((get) => {
+    const separator = key.indexOf("|");
+    const kind = key.slice(0, separator);
+    const value = key.slice(separator + 1);
+    return appealPreviewQueryOptions(
+      kind === "token" ? { token: value } : { postId: value },
+      get(isSignedInAtom),
+    );
+  }),
+);
 
 /**
  * Opens an appeal — the app's one public surface, via capability token or a

@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, isNull, not, sql } from "drizzle-orm";
+import { and, desc, eq, getTableName, inArray, isNull, not, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Database } from "@my-tuums/db";
 import { follow, post, postAttachment, postLike, user, userBlock } from "@my-tuums/db/schema";
@@ -100,6 +100,23 @@ type PostAttachment = {
   height: number;
 };
 
+/**
+ * The outer post's columns, always table-qualified.
+ *
+ * Drizzle drops the table prefix from a column reference when the query it is
+ * building has no join — a harmless optimization at the top level, and a
+ * silent wrong answer inside the correlated subquery below: an unqualified
+ * `"id"` there resolves against `post_attachment`, the inner scope, so the
+ * correlation becomes `post_attachment.post_id = post_attachment.id` and the
+ * aggregate matches nothing. It fails as an empty attachment list rather than
+ * an error, which is exactly the kind of thing to spell out once here rather
+ * than leave every caller to discover. Qualifying explicitly makes the
+ * fragment correct whether or not the caller happens to join another table.
+ */
+function outerPost(column: "id" | "removed_at" | "deleted_at") {
+  return sql`${sql.identifier(getTableName(post))}.${sql.identifier(column)}`;
+}
+
 /** Attachments are ordered in one correlated aggregate so every post surface shares the same shape. */
 export function postAttachmentsSelection(includeTombstones = false) {
   return sql<PostAttachment[]>`coalesce((
@@ -115,8 +132,12 @@ export function postAttachmentsSelection(includeTombstones = false) {
       ) order by ${postAttachment.position}
     )
     from ${postAttachment}
-    where ${postAttachment.postId} = ${post.id}
-      ${includeTombstones ? sql`` : sql`and ${post.removedAt} is null and ${post.deletedAt} is null`}
+    where ${postAttachment.postId} = ${outerPost("id")}
+      ${
+        includeTombstones
+          ? sql``
+          : sql`and ${outerPost("removed_at")} is null and ${outerPost("deleted_at")} is null`
+      }
   ), '[]'::jsonb)`;
 }
 

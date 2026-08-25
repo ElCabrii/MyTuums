@@ -36,6 +36,7 @@ over HTTP and imports only its browser-safe subpaths.
 | Change how a user is matched by text  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                    | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking |
 | Change how an appeal is opened        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                             | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface                  |
 | Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                             | `src/moderation-actions.ts` if the inverse effect changes                                                |
+| Change what an appellant is shown     | `src/moderation-appeals.ts` (`appealPreview`), `src/post-media.ts` (`canViewPostMedia`)  | `src/appeal-preview.int.test.ts`, `src/post-media.int.test.ts`; `docs/security.md` — media retrieval     |
 | Change profile-image upload rules     | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                                                |
 | Change post-attachment upload rules   | `src/post-image.ts`, `src/constants.ts` (`POST_ATTACHMENT_*`)                            | `src/image.test.ts`; `src/posts.int.test.ts`                                                             |
 | Change the profile upload lifecycle   | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                      |
@@ -59,6 +60,11 @@ over HTTP and imports only its browser-safe subpaths.
 - **`baseProcedure` has exactly one consumer.** `moderation.appealOpen` is the
   app's one anonymous surface, and it is HMAC-capability-gated because a
   banned user cannot sign in to appeal. Anything else built on it is a bug.
+  `moderation.appealPreview` is the deliberate counter-example: it serves the
+  same page from `protectedProcedure`, because a post removal suspends nobody,
+  so its author can always sign in — and requiring that session is what lets
+  the attachments come back through the ordinary `/media/` route instead of
+  needing a second anonymous way to reach object storage.
 - **`protectedProcedure` carries the legal consent gate.** An account whose
   recorded acceptance is absent or names a superseded version is refused
   FORBIDDEN, because `packages/auth`'s create hook can only cover
@@ -133,7 +139,9 @@ over HTTP and imports only its browser-safe subpaths.
 - **A post has two independent tombstones, and neither is a row delete.**
   `moderation.removePost` stamps `removed_at`; `post.delete` (the author's own,
   issue #148) stamps `deleted_at`. `postSelection` nulls the content for
-  either, and `search.posts` excludes both rows outright — it matches the raw
+  either — including for the author, which is why `moderation.appealPreview`
+  exists to hand the author back their own removed post — and `search.posts`
+  excludes both rows outright — it matches the raw
   `content` column, which no projection touches, so a tombstoned post's text
   would otherwise stay probeable. Keeping the row is what lets replies, likes
   and the thread above survive, and it is why `post.parent_id` can still

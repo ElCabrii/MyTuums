@@ -9,12 +9,19 @@ import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
 
-const fakeClient = { moderation: { appealOpen: vi.fn(), queue: vi.fn() } };
+const fakeClient = {
+  moderation: { appealOpen: vi.fn(), appealPreview: vi.fn(), queue: vi.fn() },
+};
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The default for every card-state test below: the preview resolves to
+  // nothing, which is what a suspension or ban link returns and what a
+  // signed-out visitor never asks for. The preview must not participate in
+  // any of those states, so they assert against a page that has none.
+  fakeClient.moderation.appealPreview.mockResolvedValue({ post: null });
 });
 
 describe("AppealPage — the four card states", () => {
@@ -180,5 +187,88 @@ describe("AppealPage — the four card states", () => {
       screen.queryByRole("heading", { name: m.appeal_success_title() }),
     ).not.toBeInTheDocument();
     expect(store.get(appealReasonAtom)).toBe("");
+  });
+});
+
+/**
+ * The preview is context for the form, never a precondition for it — so what
+ * these pin is as much what it does NOT do (ask anything while signed out,
+ * stand between a banned appellant and the form) as what it renders.
+ */
+describe("AppealPage — the removed post preview", () => {
+  const attachment = {
+    id: "att-1",
+    url: "/media/posts/author-1/post-1/att-1.png",
+    position: 0,
+    contentType: "image/png",
+    byteSize: 24,
+    width: 64,
+    height: 64,
+  };
+
+  it("shows the removed post's text, images and reason above the form", async () => {
+    fakeClient.moderation.appealPreview.mockResolvedValue({
+      post: {
+        id: "post-1",
+        content: "the removed words",
+        createdAt: new Date().toISOString(),
+        removedReason: "spam",
+        attachments: [attachment],
+      },
+    });
+    await renderWithProviders(<AppealPage />, {
+      initialPath: "/appeal?postId=post-1",
+      signedInAs: true,
+    });
+
+    expect(await screen.findByText("the removed words")).toBeInTheDocument();
+    expect(screen.getByAltText(m.post_attachment_alt({ position: "1" }))).toHaveAttribute(
+      "src",
+      attachment.url,
+    );
+    expect(screen.getByText(m.appeal_preview_reason({ reason: "spam" }))).toBeInTheDocument();
+    // The form is still the point of the page.
+    expect(screen.getByLabelText(m.appeal_field_reason())).toBeInTheDocument();
+  });
+
+  it("names an image-only post as having no text instead of rendering an empty line", async () => {
+    fakeClient.moderation.appealPreview.mockResolvedValue({
+      post: {
+        id: "post-1",
+        content: "",
+        createdAt: new Date().toISOString(),
+        removedReason: "spam",
+        attachments: [attachment],
+      },
+    });
+    await renderWithProviders(<AppealPage />, {
+      initialPath: "/appeal?postId=post-1",
+      signedInAs: true,
+    });
+
+    expect(await screen.findByText(m.appeal_preview_no_text())).toBeInTheDocument();
+    expect(screen.getByAltText(m.post_attachment_alt({ position: "1" }))).toBeInTheDocument();
+  });
+
+  it("asks for nothing while signed out, and leaves the form working", async () => {
+    await renderWithProviders(<AppealPage />, { initialPath: "/appeal?token=some-token" });
+
+    expect(await screen.findByRole("heading", { name: m.appeal_title() })).toBeInTheDocument();
+    expect(screen.getByLabelText(m.appeal_field_reason())).toBeInTheDocument();
+    expect(screen.queryByText(m.appeal_preview_title())).not.toBeInTheDocument();
+    // The procedure is session-gated: a signed-out visitor holding a
+    // suspension or ban link would only ever get UNAUTHORIZED back.
+    expect(fakeClient.moderation.appealPreview).not.toHaveBeenCalled();
+  });
+
+  it("renders no preview for an action with no post behind it", async () => {
+    fakeClient.moderation.appealPreview.mockResolvedValue({ post: null });
+    await renderWithProviders(<AppealPage />, {
+      initialPath: "/appeal?token=some-token",
+      signedInAs: true,
+    });
+
+    expect(await screen.findByRole("heading", { name: m.appeal_title() })).toBeInTheDocument();
+    expect(screen.queryByText(m.appeal_preview_title())).not.toBeInTheDocument();
   });
 });
