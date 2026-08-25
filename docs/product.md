@@ -98,7 +98,9 @@ app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
 - A post or reply can carry up to four images. Each is re-encoded in the
   browser before upload and no original is kept: the stored image is bounded
   in dimensions and bytes, and carries no camera/GPS (EXIF) metadata (issue
-  #207).
+  #207). Clicking an attachment opens it in an in-app full-size viewer — the
+  same accessible dialog profile pictures use — rather than navigating to its
+  storage URL.
 - Replacing or removing a profile image is atomic: the new objects are
   written first, the profile's references swap in one locked database step,
   and only then is the superseded pair deleted. A failed upload or removal

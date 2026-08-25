@@ -1,13 +1,5 @@
 import { useState } from "react";
 import { getRouteApi, Link, Outlet } from "@tanstack/react-router";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { useAtomValue, useSetAtom } from "jotai";
 import { ORPCError } from "@orpc/client";
 import { authPendingAtom } from "@/atoms/auth";
@@ -25,6 +17,7 @@ import { formatJoinDate } from "@/lib/format";
 import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/user-avatar";
+import { ImageViewer } from "@/components/image-viewer";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
@@ -173,35 +166,24 @@ export function ProfileLayout() {
         {/* Avatar & Action buttons */}
         <div className="relative -mt-16 mb-4 flex items-end justify-between sm:-mt-20">
           {hasViewableAvatar && profile.image ? (
-            <Dialog>
-              <DialogTrigger
-                aria-label={m.profile_avatar_view({ name: displayName })}
-                className="focus-visible:ring-ring/60 h-auto w-auto cursor-zoom-in rounded-full border-0 bg-transparent p-0 outline-none focus-visible:ring-2"
-              >
-                <UserAvatar
-                  user={profile}
-                  alt={m.profile_avatar_alt({ name: displayName })}
-                  className="border-background ring-primary/20 bg-background h-28 w-28 border-4 shadow-xl ring-2 sm:h-36 sm:w-36"
-                  fallbackClassName="text-2xl sm:text-3xl font-bold bg-primary text-primary-foreground"
-                  onImageLoadingStatusChange={(status) => {
-                    if (status === "error") setFailedAvatarUrl(profile.image);
-                  }}
-                />
-              </DialogTrigger>
-              <DialogContent className="max-w-4xl overflow-hidden border-none bg-transparent p-2 shadow-none sm:p-4">
-                <DialogHeader className="sr-only">
-                  <DialogTitle>{m.profile_avatar_title({ name: displayName })}</DialogTitle>
-                  <DialogDescription>
-                    {m.profile_avatar_view({ name: displayName })}
-                  </DialogDescription>
-                </DialogHeader>
-                <img
-                  src={profile.image}
-                  alt={m.profile_avatar_alt({ name: displayName })}
-                  className="max-h-[80vh] w-full rounded-xl object-contain"
-                />
-              </DialogContent>
-            </Dialog>
+            <ImageViewer
+              src={profile.image}
+              alt={m.profile_avatar_alt({ name: displayName })}
+              title={m.profile_avatar_title({ name: displayName })}
+              description={m.profile_avatar_view({ name: displayName })}
+              triggerLabel={m.profile_avatar_view({ name: displayName })}
+              triggerClassName="focus-visible:ring-ring/60 rounded-full focus-visible:ring-2"
+            >
+              <UserAvatar
+                user={profile}
+                alt={m.profile_avatar_alt({ name: displayName })}
+                className="border-background ring-primary/20 bg-background h-28 w-28 border-4 shadow-xl ring-2 sm:h-36 sm:w-36"
+                fallbackClassName="text-2xl sm:text-3xl font-bold bg-primary text-primary-foreground"
+                onImageLoadingStatusChange={(status) => {
+                  if (status === "error") setFailedAvatarUrl(profile.image);
+                }}
+              />
+            </ImageViewer>
           ) : (
             <UserAvatar
               user={{ name: profile.name, image: null }}
