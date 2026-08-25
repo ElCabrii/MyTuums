@@ -144,7 +144,7 @@ export function postAttachmentsSelection(includeTombstones = false) {
 export const postAttachments = postAttachmentsSelection();
 
 const POST_IMAGE_REJECTIONS = {
-  type: "That image format isn't supported. Use a PNG, JPEG or WebP.",
+  type: "That image format isn't supported. Use a PNG, JPEG, WebP or GIF.",
   size: "That image is too large.",
   content: "That file doesn't look like an image.",
 } satisfies Record<ImageRejection, string>;

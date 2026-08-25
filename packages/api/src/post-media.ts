@@ -19,6 +19,7 @@ const EXTENSION = {
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/webp": "webp",
+  "image/gif": "gif",
 } satisfies Record<AllowedImageType, string>;
 
 export interface PostAttachmentInput {

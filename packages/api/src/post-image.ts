@@ -7,7 +7,11 @@ import {
   type AllowedImageType,
 } from "./constants.js";
 import { imageDimensions } from "./dimensions.js";
-import { isStructurallyValidPostImage } from "./post-image-validation.js";
+import {
+  gifFrameSummary,
+  gifWithinLimits,
+  isStructurallyValidPostImage,
+} from "./post-image-validation.js";
 
 /** The reason codes shared by profile and post-image upload validation. */
 export type ImageRejection = "type" | "size" | "content";
@@ -58,6 +62,20 @@ const SIGNATURES: { type: AllowedImageType; test: (bytes: Uint8Array) => boolean
       bytes[10] === 0x42 &&
       bytes[11] === 0x50,
   },
+  {
+    // "GIF87a" or "GIF89a" — the 6-byte magic every GIF carries. The version
+    // byte (0x37 or 0x39) is what distinguishes a GIF from any other file that
+    // happens to start with "GIF8".
+    type: "image/gif",
+    test: (bytes) =>
+      bytes.length >= 6 &&
+      bytes[0] === 0x47 &&
+      bytes[1] === 0x49 &&
+      bytes[2] === 0x46 &&
+      bytes[3] === 0x38 &&
+      (bytes[4] === 0x37 || bytes[4] === 0x39) &&
+      bytes[5] === 0x61,
+  },
 ];
 
 /** The format the bytes actually are, or `null` if they are none of the three. */
@@ -83,7 +101,16 @@ export function acceptPostImage(bytes: Uint8Array, declaredType: string): PostIm
 
   const sniffed = sniffImageType(bytes);
   if (!sniffed || sniffed !== declaredType) return { ok: false, reason: "content" };
-  if (!isStructurallyValidPostImage(bytes, sniffed)) {
+
+  // GIF's structure and its animation-wide limits come from one block walk
+  // (`gifFrameSummary`); the still formats share the cheaper structural pass.
+  // An excessive-frame or decode-bomb GIF is `size` — a bound on stored and
+  // decoded work — while a truncated or malformed one is `content`.
+  if (sniffed === "image/gif") {
+    const summary = gifFrameSummary(bytes);
+    if (!summary) return { ok: false, reason: "content" };
+    if (!gifWithinLimits(summary)) return { ok: false, reason: "size" };
+  } else if (!isStructurallyValidPostImage(bytes, sniffed)) {
     return { ok: false, reason: "content" };
   }
 

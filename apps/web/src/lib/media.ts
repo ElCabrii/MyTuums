@@ -1,6 +1,5 @@
 import {
   ALLOWED_IMAGE_TYPES,
-  BANNER_ASPECT_RATIO,
   IMAGE_LIMITS,
   MAX_IMAGE_MEGAPIXELS,
   POST_ATTACHMENT_MAX_BYTES,
@@ -10,6 +9,22 @@ import {
   type ImageKind,
 } from "@my-tuums/api/constants";
 import { imageDimensions } from "@my-tuums/api/dimensions";
+import { calculateDisplayLayout, ImageError, type Crop } from "@/lib/media-layout";
+import { createAnimatedGifVariant } from "@/lib/gif-variant-client";
+
+export {
+  calculateCropFrame,
+  calculateCropRect,
+  calculateDisplayLayout,
+  clampCrop,
+  DEFAULT_CROP,
+  ImageError,
+  type Crop,
+  type CropRect,
+  type DisplayLayout,
+  type ImageProblem,
+  type ImageSize,
+} from "@/lib/media-layout";
 
 /**
  * Turning picked files into the objects one upload carries.
@@ -44,17 +59,6 @@ import { imageDimensions } from "@my-tuums/api/dimensions";
 
 /** What the file picker should offer, as an `accept` attribute. */
 export const IMAGE_ACCEPT = ALLOWED_IMAGE_TYPES.join(",");
-
-/** The client-side reasons an upload can be refused before anything hits the wire. */
-export type ImageProblem = "type" | "size" | "decode";
-
-/** An upload refused by the client itself — carries a typed `problem` the UI can translate. */
-export class ImageError extends Error {
-  constructor(readonly problem: ImageProblem) {
-    super(problem);
-    this.name = "ImageError";
-  }
-}
 
 function isAllowedType(type: string): boolean {
   return ALLOWED_IMAGE_TYPES.some((allowed) => allowed === type);
@@ -147,6 +151,14 @@ export async function createDisplayVariantImpl(
 ): Promise<File> {
   await validateImageFile(file, kind);
 
+  if (file.type === "image/gif") {
+    return createAnimatedGifVariant(file, {
+      kind,
+      crop,
+      maxBytes: IMAGE_LIMITS[kind].maxDisplayBytes,
+    });
+  }
+
   const bitmap = await decode(file);
 
   try {
@@ -225,153 +237,12 @@ export async function createDisplayVariantImpl(
  * box, so its `object-cover` display may crop the 3:1 source differently at
  * different viewports. The editor makes that tradeoff visible with a safe-area
  * overlay instead of pretending a source-dependent crop can be authoritative.
- */
-
-/**
- * The crop a user chose in the editor: the visible region's center as a
- * fraction of the source (0..1), and a zoom where **1 shows the slot's default
- * crop**. Client-only — the crop is baked into the
- * display variant before upload, never sent to the server.
- */
-export type Crop = { x: number; y: number; scale: number };
-
-/** Pixel dimensions of an image or a region of one. */
-export type ImageSize = { width: number; height: number };
-
-/** The crop that changes nothing: what a slot encodes to when nobody adjusts it. */
-export const DEFAULT_CROP: Crop = { x: 0.5, y: 0.5, scale: 1 };
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
-/**
- * The region the editor frames at zoom 1 — deliberately the same rectangle the
- * no-crop path encodes, so applying without touching anything is a no-op.
- * Avatars cover-crop to 1:1. Banners cover-crop to the canonical 3:1.
- */
-export function calculateCropFrame(
-  source: { width: number; height: number },
-  kind: ImageKind,
-): ImageSize {
-  if (kind === "avatar") {
-    const edge = Math.min(source.width, source.height);
-    return { width: edge, height: edge };
-  }
-
-  const sourceAspect = source.width / source.height;
-  if (sourceAspect > BANNER_ASPECT_RATIO) {
-    return {
-      width: Math.max(1, Math.round(source.height * BANNER_ASPECT_RATIO)),
-      height: source.height,
-    };
-  }
-  return {
-    width: source.width,
-    height: Math.max(1, Math.round(source.width / BANNER_ASPECT_RATIO)),
-  };
-}
-
-/**
- * The source rectangle a crop selects.
  *
- * At `scale` 1 this is exactly `calculateCropFrame` — the whole of what would
- * have been encoded anyway. Zooming in shrinks the rect around
- * `crop.x`/`crop.y` (the center, as a fraction of the source), keeping the
- * frame's aspect so the preview and the encode agree. The rect is clamped
- * inside the source, so a center near an edge is pulled back rather than
- * producing a rectangle the canvas cannot draw.
+ * The math itself lives in `lib/media-layout.ts` — re-exported above — because
+ * `lib/gif-variant-worker.ts` needs the identical `calculateDisplayLayout` a
+ * GIF frame is cropped and scaled with, and a worker cannot import this
+ * module (its top-level scope reaches for `document`).
  */
-export type CropRect = { x: number; y: number; width: number; height: number };
-
-export function calculateCropRect(
-  source: { width: number; height: number },
-  kind: ImageKind,
-  crop: Crop,
-): CropRect {
-  const scale = Math.max(1, crop.scale);
-  const frame = calculateCropFrame(source, kind);
-  // Whole pixels throughout: `drawImage` samples a source rectangle, and the
-  // no-crop path this must agree with at zoom 1 already rounds. A fractional
-  // rect here would make the default crop differ from no crop at all by a
-  // half-pixel, which is exactly the drift the zoom-1 test forbids.
-  const width = Math.min(source.width, Math.round(frame.width / scale));
-  const height = Math.min(source.height, Math.round(frame.height / scale));
-  const x = Math.floor(clamp(crop.x * source.width - width / 2, 0, source.width - width));
-  const y = Math.floor(clamp(crop.y * source.height - height / 2, 0, source.height - height));
-  return { x, y, width, height };
-}
-
-/**
- * Clamps a crop descriptor so its rect stays inside the source: the center is
- * pulled back from the edges and the zoom is floored at 1. The editor calls
- * this after every pan/zoom so the descriptor it emits is always drawable.
- */
-export function clampCrop(
-  crop: Crop,
-  source: { width: number; height: number },
-  kind: ImageKind,
-): Crop {
-  const scale = Math.max(1, crop.scale);
-  const rect = calculateCropRect(source, kind, { ...crop, scale });
-  const halfX = rect.width / (2 * source.width);
-  const halfY = rect.height / (2 * source.height);
-  return {
-    x: clamp(crop.x, halfX, 1 - halfX),
-    y: clamp(crop.y, halfY, 1 - halfY),
-    scale,
-  };
-}
-
-export type DisplayLayout = {
-  sourceX: number;
-  sourceY: number;
-  sourceWidth: number;
-  sourceHeight: number;
-  width: number;
-  height: number;
-};
-
-export function calculateDisplayLayout(
-  source: { width: number; height: number },
-  kind: ImageKind,
-  crop?: Crop,
-): DisplayLayout {
-  const { maxWidth, maxHeight } = IMAGE_LIMITS[kind];
-
-  if (crop) {
-    // The crop editor's output. `calculateCropRect` recurses into this function
-    // WITHOUT a crop to find the frame, so this branch must never be reached
-    // from there — it isn't, because that call omits `crop`.
-    //
-    // Both caps are honoured independently, so changing a slot's dimensions
-    // cannot make the browser produce a variant the server rejects. Never
-    // upscales.
-    const rect = calculateCropRect(source, kind, crop);
-    const scale = Math.min(maxWidth / rect.width, maxHeight / rect.height, 1);
-    return {
-      sourceX: rect.x,
-      sourceY: rect.y,
-      sourceWidth: rect.width,
-      sourceHeight: rect.height,
-      width: Math.max(1, Math.round(rect.width * scale)),
-      height: Math.max(1, Math.round(rect.height * scale)),
-    };
-  }
-
-  const frame = calculateCropFrame(source, kind);
-  const sourceX = Math.floor((source.width - frame.width) / 2);
-  const sourceY = Math.floor((source.height - frame.height) / 2);
-  const scale = Math.min(maxWidth / frame.width, maxHeight / frame.height, 1);
-  return {
-    sourceX,
-    sourceY,
-    sourceWidth: frame.width,
-    sourceHeight: frame.height,
-    width: Math.max(1, Math.round(frame.width * scale)),
-    height: Math.max(1, Math.round(frame.height * scale)),
-  };
-}
 
 /**
  * Live binding so test harnesses can substitute a no-op variant creator and
@@ -411,6 +282,14 @@ export function installTestDisplayVariant<Creator>(creator: Creator): void {
  */
 export async function createPostAttachmentImpl(file: File): Promise<File> {
   await refuseBeforeDecode(file, POST_ATTACHMENT_MAX_BYTES, POST_ATTACHMENT_MAX_MEGAPIXELS);
+
+  if (file.type === "image/gif") {
+    return createAnimatedGifVariant(file, {
+      maxWidth: POST_ATTACHMENT_MAX_WIDTH,
+      maxHeight: POST_ATTACHMENT_MAX_HEIGHT,
+      maxBytes: POST_ATTACHMENT_MAX_BYTES,
+    });
+  }
 
   const bitmap = await decode(file);
 

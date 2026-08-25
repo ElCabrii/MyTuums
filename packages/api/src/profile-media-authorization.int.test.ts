@@ -29,10 +29,14 @@ afterAll(async () => {
 async function seedStoredPair(
   person: TestUser,
   kind: "avatar" | "banner",
+  extensions: { display: "webp" | "gif"; original: "jpg" | "gif" } = {
+    display: "webp",
+    original: "jpg",
+  },
 ): Promise<{ display: string; original: string }> {
   const id = randomUUID();
-  const display = `${kind}s/${person.id}/${id}.webp`;
-  const original = `${kind}s/${person.id}/${id}.orig.jpg`;
+  const display = `${kind}s/${person.id}/${id}.${extensions.display}`;
+  const original = `${kind}s/${person.id}/${id}.orig.${extensions.original}`;
   await anonContext.db
     .update(user)
     .set(
@@ -62,6 +66,19 @@ describe("canViewProfileMedia", () => {
     // The untouched file is the owner's alone, even though the display object
     // renders for everyone.
     expect(await canViewProfileMedia(anonContext.db, original, viewer.id)).toBe(false);
+  });
+
+  it("authorizes GIF display and original keys under the same visibility rules", async () => {
+    const owner = await createTestUser();
+    const viewer = await createTestUser();
+    const { display, original } = await seedStoredPair(owner, "avatar", {
+      display: "gif",
+      original: "gif",
+    });
+
+    expect(await canViewProfileMedia(anonContext.db, display, viewer.id)).toBe(true);
+    expect(await canViewProfileMedia(anonContext.db, original, viewer.id)).toBe(false);
+    expect(await canViewProfileMedia(anonContext.db, original, owner.id)).toBe(true);
   });
 
   it("applies the banner slot's columns rather than the avatar's", async () => {

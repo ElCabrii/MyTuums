@@ -140,7 +140,7 @@ export const postAttachment = pgTable(
     check("post_attachment_dimensions", sql`${t.width} > 0 and ${t.height} > 0`),
     check(
       "post_attachment_content_type",
-      sql`${t.contentType} in ('image/png', 'image/jpeg', 'image/webp')`,
+      sql`${t.contentType} in ('image/png', 'image/jpeg', 'image/webp', 'image/gif')`,
     ),
   ],
 );

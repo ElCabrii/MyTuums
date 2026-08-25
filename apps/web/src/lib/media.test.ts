@@ -111,7 +111,7 @@ describe("IMAGE_ACCEPT", () => {
     // The file picker's `accept` and the server's allowlist come from the same
     // constant, so a picker that offered SVG would be advertising an upload
     // that is rejected after the round trip.
-    expect(IMAGE_ACCEPT).toBe("image/webp,image/png,image/jpeg");
+    expect(IMAGE_ACCEPT).toBe("image/webp,image/png,image/jpeg,image/gif");
     expect(IMAGE_ACCEPT).not.toContain("svg");
   });
 });

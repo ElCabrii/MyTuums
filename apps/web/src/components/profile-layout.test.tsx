@@ -147,7 +147,7 @@ describe("ProfileLayout role and ownership gates", () => {
     );
   });
 
-  it("shows settings, sign-out and private email only on the viewer's own profile", async () => {
+  it("shows settings and sign-out only on the viewer's own profile", async () => {
     const own = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data("alex", own);
@@ -160,7 +160,10 @@ describe("ProfileLayout role and ownership gates", () => {
 
     expect(screen.getByRole("button", { name: m.profile_settings() })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: m.auth_sign_out() })).toBeInTheDocument();
-    expect(screen.getByText("owner@example.com")).toBeInTheDocument();
+    // The profile header renders no email — not even the owner's own. The
+    // address belongs to Settings, and showing it here read like leakage
+    // (issue #208).
+    expect(screen.queryByText("owner@example.com")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(m.moderation_kebab())).not.toBeInTheDocument();
   });
 

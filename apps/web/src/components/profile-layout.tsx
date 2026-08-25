@@ -33,7 +33,6 @@ import { useSignOut } from "@/hooks/use-sign-out";
 import { useDocumentHead } from "@/hooks/use-document-head";
 import {
   UserX,
-  Mail,
   Calendar,
   LogOut,
   Loader2,
@@ -317,14 +316,6 @@ export function ProfileLayout() {
                 {m.profile_joined({ date: formatJoinDate(profile.createdAt, getLocale()) })}
               </span>
             </div>
-            {/* Email is the caller's own, out of the session — `byUsername` is
-                a public endpoint and deliberately never returns it. */}
-            {isOwnProfile && viewer?.email && (
-              <div className="flex items-center gap-1.5">
-                <Mail className="h-3.5 w-3.5" />
-                <span>{viewer.email}</span>
-              </div>
-            )}
           </div>
         </div>
 
