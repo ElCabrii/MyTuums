@@ -267,6 +267,19 @@ sides by CI. See [operations.md](operations.md).
   load-bearing one: a ~200 KB PNG declaring 400 MP allocates about a gigabyte
   on decode, so an editor that measured the source first would freeze the tab
   merely on selection.
+- **Post attachments are re-encoded in the browser and keep no original**
+  (issue #207). The composer runs every picked file through
+  `createPostAttachment` (`apps/web/src/lib/media.ts`) before it joins a
+  draft: decode → canvas re-encode to WebP (PNG where a browser lacks that
+  encoder) bounded by the server's own attachment caps — never upscaled, at
+  most 4096 px per side, shrunk until within `POST_ATTACHMENT_MAX_BYTES`.
+  Unlike profile media there is deliberately no `.orig` twin: posts are
+  feed-wide content any signed-in viewer can fetch, so the only stored object
+  is the re-encoded one — and a canvas encode emits pixels only, which is
+  what strips EXIF/GPS metadata by construction. Profile originals keep their
+  metadata on purpose; post attachments cannot have any. The server still
+  validates whatever arrives (`packages/api/src/post-image.ts`); the client
+  pipeline is the cooperative path, not the boundary.
 - **Lifecycle.** `user.uploadImage` and `user.removeImage` are thin
   procedures over `packages/api/src/profile-media.ts`, which owns the whole
   avatar/banner lifecycle: minting the object pair, the locked database

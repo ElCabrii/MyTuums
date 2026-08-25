@@ -3,12 +3,16 @@ import {
   BANNER_ASPECT_RATIO,
   IMAGE_LIMITS,
   MAX_IMAGE_MEGAPIXELS,
+  POST_ATTACHMENT_MAX_BYTES,
+  POST_ATTACHMENT_MAX_HEIGHT,
+  POST_ATTACHMENT_MAX_MEGAPIXELS,
+  POST_ATTACHMENT_MAX_WIDTH,
   type ImageKind,
 } from "@my-tuums/api/constants";
 import { imageDimensions } from "@my-tuums/api/dimensions";
 
 /**
- * Turning a file someone picked into the two objects one upload carries.
+ * Turning picked files into the objects one upload carries.
  *
  * Everything here runs in the browser, on purpose. Re-encoding server-side
  * would mean `sharp` and its platform-specific native binary in the server
@@ -17,14 +21,25 @@ import { imageDimensions } from "@my-tuums/api/dimensions";
  * is genuinely raster bytes the browser itself produced. A renamed HTML file or
  * a script-bearing SVG cannot survive the round trip.
  *
- * The ORIGINAL is uploaded untouched — that is the product requirement: a user
- * should be able to refit their picture later without having lost pixels. It is
- * the display variant this module produces: a small WebP that feeds, headers
- * and profiles render, so megabytes of original never travel down a timeline.
+ * The two upload slots disagree about the ORIGINAL, and both are product
+ * requirements:
+ *
+ * - A profile's original is uploaded untouched so a user can refit their
+ *   picture later without having lost pixels; what feeds, headers and profiles
+ *   render is the display variant this module produces beside it — a small
+ *   WebP, so megabytes of original never travel down a timeline. That original
+ *   keeps whatever metadata it arrived with, deliberately, behind
+ *   profile-media authorization.
+ * - A post attachment keeps NO original. Posts are feed-wide content served to
+ *   any signed-in viewer, so the only object stored is the one this module
+ *   re-encodes — and a canvas encode carries no metadata by construction: no
+ *   EXIF block, no GPS coordinates, no camera info survive into the bytes we
+ *   hold (issue #207).
  *
  * None of this is trusted by the server, which sniffs the magic bytes of
- * whatever actually arrives (`packages/api/src/image.ts`). This is the
- * cooperative path, not the security boundary.
+ * whatever actually arrives (`packages/api/src/image.ts`,
+ * `packages/api/src/post-image.ts`). This is the cooperative path, not the
+ * security boundary.
  */
 
 /** What the file picker should offer, as an `accept` attribute. */
@@ -58,23 +73,36 @@ function isAllowedType(type: string): boolean {
  * on bytes later.
  */
 export async function validateImageFile(file: File, kind: ImageKind): Promise<void> {
+  await refuseBeforeDecode(file, IMAGE_LIMITS[kind].maxOriginalBytes, MAX_IMAGE_MEGAPIXELS);
+}
+
+/**
+ * The pre-decode refusals shared by every upload slot: an allowlisted type, a
+ * non-empty source within `maxBytes`, and — from header bytes alone, before
+ * any decode — a megapixel ceiling.
+ *
+ * The megapixel check exists because a 400 MP flat-colour PNG is ~200 KB and
+ * decodes to a gigabyte of pixels; the byte cap never sees it. It has to run
+ * before *any* caller decodes — including the crop editor, which decodes to
+ * measure the source, so a bomb would freeze the tab merely by being selected.
+ * The server enforces the same ceilings; rejecting here saves the browser the
+ * decode. A file whose header is unparseable (a JPEG with a huge EXIF block
+ * pushes the SOF past the first 64 bytes) simply skips the pre-check — the
+ * server still holds the line.
+ */
+async function refuseBeforeDecode(
+  file: File,
+  maxBytes: number,
+  maxMegapixels: number,
+): Promise<void> {
   if (!isAllowedType(file.type)) throw new ImageError("type");
-  if (file.size === 0 || file.size > IMAGE_LIMITS[kind].maxOriginalBytes) {
+  if (file.size === 0 || file.size > maxBytes) {
     throw new ImageError("size");
   }
 
-  // Megapixel pre-check on header bytes, before any decode: a 400 MP
-  // flat-colour PNG is ~200 KB and decodes to a gigabyte of pixels. The byte
-  // cap above never sees it. This has to run before *any* caller decodes —
-  // including the crop editor, which decodes to measure the source, so a bomb
-  // would freeze the tab merely by being selected. The server enforces the
-  // same ceiling on the original; rejecting here saves the browser the decode.
-  // A file whose header is unparseable (a JPEG with a huge EXIF block pushes
-  // the SOF past the first 64 bytes) simply skips the pre-check — the server
-  // still holds the line.
   const header = await readFirstBytes(file, 64);
   const headerDims = header ? imageDimensions(header, file.type) : null;
-  if (headerDims && headerDims.width * headerDims.height > MAX_IMAGE_MEGAPIXELS * 1_000_000) {
+  if (headerDims && headerDims.width * headerDims.height > maxMegapixels * 1_000_000) {
     throw new ImageError("size");
   }
 }
@@ -357,6 +385,98 @@ export function installTestDisplayVariant<Creator>(creator: Creator): void {
   // SAFETY: test creators implement the (file, kind) contract and resolve the
   // display upload object the atoms forward to the transport boundary.
   createDisplayVariant = creator as typeof createDisplayVariant;
+}
+
+/**
+ * Re-encodes a picked post attachment into the only object a post stores.
+ *
+ * Unlike the profile slots there is no original beside it: post attachments
+ * are feed-wide content any signed-in viewer can fetch, so the stored bytes
+ * are exactly what this returns — freshly encoded raster with no metadata by
+ * construction (issue #207). A phone photo's EXIF block — GPS coordinates,
+ * camera and device info, timestamps — never reaches storage, because a
+ * canvas encode cannot reproduce metadata: it emits pixels and nothing else.
+ *
+ * The output honours the same bounds the server enforces on an accepted
+ * attachment: never scaled up, at most 4096 px per side, and the byte loop
+ * keeps shrinking until the result fits `POST_ATTACHMENT_MAX_BYTES`. WebP at
+ * the display variant's quality; PNG where a browser lacks WebP encoding —
+ * both alpha-capable, so a transparent PNG survives as transparency instead
+ * of being flattened onto black by a JPEG step.
+ *
+ * The returned File keeps the picker's name: it is transient — the server
+ * mints its own object key and never persists a filename — and keeping it
+ * leaves the composer's preview labels stable across processing. The File's
+ * `type`, not its name, is what tells the truth about the bytes.
+ */
+export async function createPostAttachmentImpl(file: File): Promise<File> {
+  await refuseBeforeDecode(file, POST_ATTACHMENT_MAX_BYTES, POST_ATTACHMENT_MAX_MEGAPIXELS);
+
+  const bitmap = await decode(file);
+
+  try {
+    const scale = Math.min(
+      POST_ATTACHMENT_MAX_WIDTH / bitmap.width,
+      POST_ATTACHMENT_MAX_HEIGHT / bitmap.height,
+      1,
+    );
+    // Whole pixels throughout, floored at 1 and capped so rounding can never
+    // push a side past the bound the server measures from the same header.
+    let width = Math.max(1, Math.round(bitmap.width * scale));
+    let height = Math.max(1, Math.round(bitmap.height * scale));
+
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) throw new ImageError("decode");
+
+    let blob: Blob;
+    while (true) {
+      // Assigning the dimensions clears the canvas, so redraw precedes every
+      // encode attempt — including the retries below.
+      canvas.width = width;
+      canvas.height = height;
+      context.drawImage(bitmap, 0, 0, width, height);
+
+      blob = await toBlob(canvas);
+      if (blob.size <= POST_ATTACHMENT_MAX_BYTES) break;
+
+      // Browsers without WebP encoding silently return lossless PNG, whose
+      // photographic sizes can exceed the cap despite valid dimensions.
+      // Retry at half resolution — preserving progress toward the cap —
+      // instead of refusing; 1x1 is where giving up is the honest answer.
+      if (blob.type !== "image/png" || (width === 1 && height === 1)) {
+        throw new ImageError("size");
+      }
+      width = Math.max(1, Math.floor(width / 2));
+      height = Math.max(1, Math.floor(height / 2));
+    }
+
+    // Read the type off the result, never assert webp — `canvas.toBlob`
+    // falls back to PNG silently when WebP encode is unsupported, and
+    // labelling one as the other is exactly the declared-vs-actual mismatch
+    // the server's sniffer rejects. Both types are in the allowlist; anything
+    // else is not a File worth sending.
+    const type = blob.type;
+    if (type !== "image/webp" && type !== "image/png") throw new ImageError("decode");
+    return new File([blob], file.name, { type });
+  } finally {
+    // Bitmaps hold decoded pixel data outside the JS heap; release it even
+    // when an encode attempt fails mid-loop.
+    bitmap.close();
+  }
+}
+
+/**
+ * Live binding so test harnesses can substitute a no-op attachment processor
+ * and exercise composer flows without running the real image pipeline.
+ */
+export let createPostAttachment: (file: File) => Promise<File> = createPostAttachmentImpl;
+
+/** Test seam: swaps the attachment processor the composer calls through. */
+export function installTestPostAttachment<Processor>(processor: Processor): void {
+  // SAFETY: test processors implement the (file) => Promise<File> contract
+  // and resolve the upload object the composer forwards to the transport.
+  createPostAttachment = processor as typeof createPostAttachment;
 }
 
 async function decode(file: File): Promise<ImageBitmap> {

@@ -177,6 +177,26 @@ used to 429 every request from a fresh session.
   **before** oRPC buffers a multipart body — which happens before auth or rate
   limiting would otherwise see the request.
 
+**Upload processing** (`apps/web/src/lib/media.ts`) — the client pipeline,
+not the boundary:
+
+- Every upload path re-encodes in the browser before anything is sent. The
+  profile slots upload an untouched original beside the display variant on
+  purpose: a user must be able to refit their picture without having lost
+  pixels. Post attachments keep **no original** — the composer replaces each
+  picked file with its canvas re-encode before it joins the draft (issue
+  #207).
+- A canvas encode emits pixels only, so **post attachments carry no EXIF,
+  GPS or other container metadata** on the app's own upload path. Profile
+  originals keep their metadata by the same token — deliberately, behind
+  profile-media authorization rather than feed-wide reads.
+- The guarantee is cooperative, like the rest of the pipeline: post-image
+  validation sniffs and bounds whatever actually arrives but does not strip
+  it, so a caller bypassing the web app could still store verbatim bytes;
+  `canViewPostMedia` bounds who can fetch them. The re-encode also bounds
+  what ordinary uploads weigh: never upscaled, at most 4096 px per side,
+  shrunk until within `POST_ATTACHMENT_MAX_BYTES`.
+
 **Replacement and removal** (`packages/api/src/profile-media.ts`):
 
 - The lifecycle is one module: prepare/write the new objects, atomically swap
