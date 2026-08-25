@@ -16,6 +16,8 @@ import {
   THREAD_ANCESTOR_MAX,
   THREAD_REPLY_BRANCH_INITIAL_SIZE,
   THREAD_REPLY_BRANCH_MAX_DEPTH,
+  THREAD_REPLY_BRANCH_CHILD_FANOUT,
+  THREAD_REPLY_BRANCH_DESCENDANT_BUDGET,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { keysetPage } from "./pagination.js";
@@ -334,26 +336,49 @@ async function visiblePostAuthorId(
  * The recursive query collects only tree identity; every caller-visible row
  * is selected afterwards through `postSelection` and the ordinary visibility
  * filter, preserving attachments, tombstones and viewer-relative like state.
+ *
+ * The descendant scan is bounded three ways so a user-shaped tree can never
+ * turn a permalink into a forest scan: each fork expands only its oldest
+ * `THREAD_REPLY_BRANCH_CHILD_FANOUT` children (the candidates the branch rule
+ * walks), recursion stops at `THREAD_REPLY_BRANCH_MAX_DEPTH`, and the total
+ * output is capped at `THREAD_REPLY_BRANCH_DESCENDANT_BUDGET` rows — which
+ * also bounds the parameter list of the metadata lookup below.
  */
 async function replyContinuationPages(args: ReplyContinuationPageArgs) {
   if (args.rootPostIds.length === 0) return [];
 
-  const rootIds = sql.join(
-    args.rootPostIds.map((id) => sql.param(id, post.id)),
+  const rootsValues = sql.join(
+    args.rootPostIds.map((id) => sql`(${sql.param(id, post.id)}::uuid)`),
     sql`, `,
   );
   const descendantIds = await args.db.execute<{ id: string; root_id: string }>(sql`
-    with recursive descendants as (
-      select descendant.id, descendant.parent_id, descendant.parent_id as root_id, 1 as depth
-      from ${post} as descendant
-      where descendant.parent_id in (${rootIds})
+    with recursive roots(root_id) as (
+      values ${rootsValues}
+    ),
+    descendants as (
+      select child.id, child.parent_id, roots.root_id, 1 as depth
+      from roots
+      join lateral (
+        select id, parent_id
+        from ${post}
+        where parent_id = roots.root_id
+        order by created_at asc, id asc
+        limit ${THREAD_REPLY_BRANCH_CHILD_FANOUT}
+      ) as child on true
       union all
       select child.id, child.parent_id, descendants.root_id, descendants.depth + 1
-      from ${post} as child
-      join descendants on child.parent_id = descendants.id
+      from descendants
+      join lateral (
+        select id, parent_id
+        from ${post}
+        where parent_id = descendants.id
+        order by created_at asc, id asc
+        limit ${THREAD_REPLY_BRANCH_CHILD_FANOUT}
+      ) as child on true
       where descendants.depth < ${THREAD_REPLY_BRANCH_MAX_DEPTH}
     )
     select id, root_id from descendants
+    limit ${THREAD_REPLY_BRANCH_DESCENDANT_BUDGET}
   `);
 
   if (descendantIds.length === 0) return [];

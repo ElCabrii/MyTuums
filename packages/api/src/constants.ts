@@ -160,6 +160,28 @@ export const THREAD_REPLY_BRANCH_INITIAL_SIZE = 3;
 export const THREAD_REPLY_BRANCH_MAX_DEPTH = 100;
 
 /**
+ * Maximum number of children the descendant scan expands at any one post.
+ * The branch rule follows the oldest child and looks for the focused author's
+ * earliest reply, so the scan keeps the oldest children at each fork — the
+ * candidates the rule actually walks. Capping the fanout is what stops a broad
+ * tree (a reply with tens of thousands of direct replies) from turning every
+ * permalink request into a full-sibling scan; only the oldest children per
+ * fork are ever materialized.
+ */
+export const THREAD_REPLY_BRANCH_CHILD_FANOUT = 50;
+
+/**
+ * Hard ceiling on the total descendants the scan materializes for one page of
+ * direct replies, across every reply root. It bounds both the recursive CTE's
+ * output and the parameter list of the metadata lookup that follows, so a
+ * user-shaped tree can never exhaust database resources or push the bound
+ * parameter count past PostgreSQL's limit. The branch rule runs over this
+ * bounded set; a branch buried beneath more descendants than the budget
+ * simply stays collapsed rather than pulling the whole subtree into memory.
+ */
+export const THREAD_REPLY_BRANCH_DESCENDANT_BUDGET = 1000;
+
+/**
  * What the avatar and banner uploads accept.
  *
  * SVG is absent and must stay absent: it is a document format that can carry

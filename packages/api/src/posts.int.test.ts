@@ -10,6 +10,7 @@ import {
   POST_PAGE_SIZE_MAX,
   THREAD_ANCESTOR_MAX,
   THREAD_REPLY_BRANCH_INITIAL_SIZE,
+  THREAD_REPLY_BRANCH_CHILD_FANOUT,
 } from "./constants.js";
 import type { Context } from "./context.js";
 import { withPostMediaLifecycleLock } from "./post-media-lock.js";
@@ -890,6 +891,62 @@ describe("post.list", () => {
     expect(items[1]).toMatchObject({ content: null, deleted: true });
     expect(items.map((item) => item.author.id)).not.toContain(blockedAuthor.id);
     expect(items.map((item) => item.author.id)).not.toContain(bannedAuthor.id);
+  });
+
+  it("still selects the branch when the author's reply is the oldest child of a wide fork", async () => {
+    const focusedAuthor = await createTestUser();
+    const participant = await createTestUser();
+    const [focused] = await seedPosts(focusedAuthor.id, 1);
+    const [directReply] = await seedPosts(participant.id, 1, { parentId: focused.id });
+
+    // The author's reply is the oldest child, so it stays inside the fanout
+    // cap even when far more sibling replies exist beneath the same fork.
+    const [authorReply] = await seedPosts(focusedAuthor.id, 1, {
+      parentId: directReply.id,
+      createdAt: new Date(2024, 0, 1, 0, 0, 0),
+    });
+    await seedPosts(participant.id, THREAD_REPLY_BRANCH_CHILD_FANOUT + 10, {
+      parentId: directReply.id,
+      createdAt: (i) => new Date(2024, 0, 1, 0, 0, i + 1),
+    });
+
+    const page = await call(
+      appRouter.post.list,
+      { parentId: focused.id },
+      { context: contextFor(participant) },
+    );
+    if (!("continuations" in page)) throw new Error("Direct reply page omitted continuations");
+
+    expect(page.continuations[0]?.items.map((item) => item.id)).toEqual([authorReply.id]);
+  });
+
+  it("leaves a branch collapsed when the author's reply falls outside the fanout budget", async () => {
+    const focusedAuthor = await createTestUser();
+    const participant = await createTestUser();
+    const [focused] = await seedPosts(focusedAuthor.id, 1);
+    const [directReply] = await seedPosts(participant.id, 1, { parentId: focused.id });
+
+    // The first fork is filled with non-author replies older than the author's,
+    // so the author's reply is the (FANOUT + 1)th child and never enters the
+    // bounded scan. The branch stays gracefully collapsed instead of pulling
+    // every sibling into memory.
+    await seedPosts(participant.id, THREAD_REPLY_BRANCH_CHILD_FANOUT, {
+      parentId: directReply.id,
+      createdAt: (i) => new Date(2024, 0, 1, 0, 0, i),
+    });
+    await seedPosts(focusedAuthor.id, 1, {
+      parentId: directReply.id,
+      createdAt: new Date(2024, 0, 1, 0, 0, THREAD_REPLY_BRANCH_CHILD_FANOUT),
+    });
+
+    const page = await call(
+      appRouter.post.list,
+      { parentId: focused.id },
+      { context: contextFor(participant) },
+    );
+    if (!("continuations" in page)) throw new Error("Direct reply page omitted continuations");
+
+    expect(page.continuations).toEqual([]);
   });
 
   it("supports the explicit posts/replies/all activity modes", async () => {
