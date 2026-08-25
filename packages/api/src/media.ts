@@ -65,14 +65,12 @@ export function createMediaResolver(
     if (!storage) return null;
     if (!isSafeObjectKey(key)) return null;
     if (!viewerId || !authorize || !(await authorize(key, viewerId))) return null;
-    const media: { url: string; cacheControl?: string } = {
-      url: await storage.signedGetUrl(key, DEFAULT_SIGNED_URL_TTL),
-    };
-    // Set only when the policy grants it: an absent field reads as the
-    // caller's no-store default, and no caller can mistake an undefined for
+    // The directive is set only when the policy grants it, so the returned
+    // shape has no `cacheControl` key at all when it declines — the caller
+    // answers its no-store default and nothing can mistake an undefined for
     // a decision.
+    const url = await storage.signedGetUrl(key, DEFAULT_SIGNED_URL_TTL);
     const cacheControl = redirectCachePolicy?.(key);
-    if (cacheControl) media.cacheControl = cacheControl;
-    return media;
+    return cacheControl ? { url, cacheControl } : { url };
   };
 }
