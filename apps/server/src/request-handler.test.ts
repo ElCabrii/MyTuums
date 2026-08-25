@@ -108,7 +108,7 @@ function streamReqStub(
 }
 
 /** A representative media hit: a URL plus the signing-window cache budget. */
-const MEDIA_HIT = { url: "https://bucket.example/signed?sig=abc", cacheSeconds: 300 };
+const MEDIA_HIT = { url: "https://bucket.example/signed?sig=abc" };
 
 /**
  * The cookie header plus the `resolveSession` override a signed-in request
@@ -798,6 +798,60 @@ describe("createRequestHandler", () => {
     expect(afterCalls.statusCode).toBeUndefined();
   });
 
+  it("keeps small /rpc dispatches outside the in-flight cap — a saturated cap still serves them", async () => {
+    // The cap bounds how many LARGE bodies can buffer at once, not how many
+    // requests may dispatch: a small JSON body is bounded per-request by
+    // RPC_SMALL_BODY_BYTES, so counting it here would make ordinary reads
+    // answer 503 under modest concurrency without bounding anything the
+    // per-body limit does not already bound.
+    const release: (() => void)[] = [];
+    const handleRpc = vi.fn().mockImplementation(
+      (_req: IncomingMessage, r: RequestResponse) =>
+        new Promise<{ matched: boolean }>((resolve) => {
+          release.push(() => {
+            r.writeHead(200, { "Content-Type": "application/json" });
+            resolve({ matched: true });
+          });
+        }),
+    );
+    const session = signedIn("uploader-1");
+    const handle = createRequestHandler(
+      deps({ handleRpc, resolveSession: session.resolveSession }),
+    );
+    const chunked = () =>
+      reqStub("/rpc/user.uploadImage", "POST", {
+        "transfer-encoding": "chunked",
+        ...session.headers,
+      });
+
+    const inFlight = Array.from({ length: MAX_RPC_IN_FLIGHT }, () => {
+      const { res } = resStub();
+      return handle(chunked(), res);
+    });
+    await Promise.resolve();
+    expect(handleRpc).toHaveBeenCalledTimes(MAX_RPC_IN_FLIGHT);
+
+    // Anonymous small read: dispatched even though the cap is fully consumed.
+    const { res: smallRes, calls: smallCalls } = resStub();
+    const smallDispatch = handle(
+      reqStub("/rpc/post.list", "GET", { "content-length": "40" }),
+      smallRes,
+    );
+    await Promise.resolve();
+    expect(handleRpc).toHaveBeenCalledTimes(MAX_RPC_IN_FLIGHT + 1);
+
+    // A further upload-sized dispatch is what the cap still refuses.
+    const { res: refusedRes, calls: refusedCalls } = resStub();
+    await handle(chunked(), refusedRes);
+    expect(handleRpc).toHaveBeenCalledTimes(MAX_RPC_IN_FLIGHT + 1);
+    expect(refusedCalls.statusCode).toBe(503);
+    expect(refusedCalls.body).toBe("Server busy");
+
+    for (const resolve of release) resolve();
+    await Promise.all([...inFlight, smallDispatch]);
+    expect(smallCalls.statusCode).toBe(200);
+  });
+
   it("redirects a /media hit to the presigned URL without caching a viewer decision", async () => {
     const { res, calls } = resStub();
     const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
@@ -815,6 +869,28 @@ describe("createRequestHandler", () => {
       // The resolver authorizes against the current viewer, so a browser must
       // not reuse this bearer redirect after an account or visibility change.
       "Cache-Control": "private, no-store",
+    });
+  });
+
+  it("forwards the resolver's Cache-Control when a key's redirect may be stored", async () => {
+    // Only profile display objects earn this today (window-bounded, private);
+    // the handler neither invents nor widens the directive — it forwards it
+    // verbatim and keeps no-store for every resolver that declines.
+    const { res, calls } = resStub();
+    const resolveMediaUrl = vi
+      .fn()
+      .mockResolvedValue({ ...MEDIA_HIT, cacheControl: "private, max-age=1200" });
+    const session = signedIn();
+    const handle = createRequestHandler(
+      deps({ resolveMediaUrl, resolveSession: session.resolveSession }),
+    );
+
+    await handle(reqStub("/media/avatars/user-1/abc.webp", "GET", session.headers), res);
+
+    expect(calls.statusCode).toBe(302);
+    expect(calls.headers).toMatchObject({
+      Location: MEDIA_HIT.url,
+      "Cache-Control": "private, max-age=1200",
     });
   });
 

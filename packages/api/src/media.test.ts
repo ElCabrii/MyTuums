@@ -71,4 +71,32 @@ describe("createMediaResolver", () => {
     expect(await resolver(PROFILE_KEY, "")).toBeNull();
     expect(authorize).not.toHaveBeenCalled();
   });
+
+  it("carries no Cache-Control when no redirect policy is wired", async () => {
+    const authorize = vi.fn<MediaAuthorizer>().mockResolvedValue(true);
+    const resolver = createMediaResolver(storage(), authorize);
+
+    const media = await resolver(PROFILE_KEY, "viewer-1");
+    expect(media).toHaveProperty("url");
+    expect(media).not.toHaveProperty("cacheControl");
+  });
+
+  it("forwards the policy's verdict per key and lets a null mean no-store", async () => {
+    const authorize = vi.fn<MediaAuthorizer>().mockResolvedValue(true);
+    const cachePolicy = vi
+      .fn<(key: string) => string | null>()
+      .mockImplementation((key) => (key === PROFILE_KEY ? "private, max-age=1200" : null));
+    const resolver = createMediaResolver(storage(), authorize, cachePolicy);
+
+    // The display key's directive passes through verbatim...
+    const display = await resolver(PROFILE_KEY, "viewer-1");
+    expect(display?.url).toBeTruthy();
+    expect(display?.cacheControl).toBe("private, max-age=1200");
+    // ...the original's refusal comes back as NO field, which the caller
+    // answers with its no-store default.
+    const original = await resolver(PROFILE_ORIGINAL_KEY, "viewer-1");
+    expect(original).not.toHaveProperty("cacheControl");
+    expect(cachePolicy).toHaveBeenCalledWith(PROFILE_KEY);
+    expect(cachePolicy).toHaveBeenCalledWith(PROFILE_ORIGINAL_KEY);
+  });
 });

@@ -8,6 +8,9 @@ export { appRouter, type AppRouter } from "./router.js";
 export { createContext, defaultStorage } from "./context.js";
 export { createMediaResolver, type MediaAuthorizer, type MediaResolver } from "./media.js";
 export { canViewPostMedia } from "./post-media.js";
-export { canViewProfileMedia } from "./profile-media-authorization.js";
+export {
+  canViewProfileMedia,
+  profileDisplayRedirectCacheControl,
+} from "./profile-media-authorization.js";
 export { objectKeyFromMediaPath } from "./image.js";
 export type { Storage } from "./storage.js";

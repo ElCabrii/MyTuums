@@ -14,18 +14,23 @@
  * itself.
  */
 import { isSafeObjectKey } from "./image.js";
-import { DEFAULT_SIGNED_URL_TTL, secondsUntilWindowEnd, type Storage } from "./storage.js";
+import { DEFAULT_SIGNED_URL_TTL, type Storage } from "./storage.js";
+
+/** `url` is where the browser should go. */
+export type MediaAuthorizer = (key: string, viewerId: string) => Promise<boolean>;
 
 /**
- * `url` is where the browser should go; `cacheSeconds` is how long the redirect
- * may be cached, bounded by the signing window so a cached redirect never
- * outlives the signature it points at.
+ * Decides the Cache-Control a `/media/` redirect may carry for a key, or
+ * `null` when its redirect must not be stored at all. Injected rather than
+ * imported so this module stays generic over key conventions; see
+ * `profileDisplayRedirectCacheControl` for the production policy.
  */
-export type MediaAuthorizer = (key: string, viewerId: string) => Promise<boolean>;
+export type RedirectCachePolicy = (key: string) => string | null;
+
 export type MediaResolver = (
   key: string,
   viewerId: string,
-) => Promise<{ url: string; cacheSeconds: number } | null>;
+) => Promise<{ url: string; cacheControl?: string } | null>;
 
 /**
  * `null` means "404 this" and is deliberately the answer to every failure
@@ -54,18 +59,18 @@ export type MediaResolver = (
 export function createMediaResolver(
   storage: Storage | null,
   authorize?: MediaAuthorizer,
+  redirectCachePolicy?: RedirectCachePolicy,
 ): MediaResolver {
   return async (key: string, viewerId: string) => {
     if (!storage) return null;
     if (!isSafeObjectKey(key)) return null;
     if (!viewerId || !authorize || !(await authorize(key, viewerId))) return null;
-    return {
-      url: await storage.signedGetUrl(key, DEFAULT_SIGNED_URL_TTL),
-      // The URL stays byte-identical only until the signing window rolls (see
-      // MEDIA_SIGNING_WINDOW_MS in ./storage.ts); past that the next request
-      // signs a different one. Caching the redirect for the remainder of the
-      // window is the longest cache that never serves a stale signature.
-      cacheSeconds: secondsUntilWindowEnd(),
-    };
+    // The directive is set only when the policy grants it, so the returned
+    // shape has no `cacheControl` key at all when it declines — the caller
+    // answers its no-store default and nothing can mistake an undefined for
+    // a decision.
+    const url = await storage.signedGetUrl(key, DEFAULT_SIGNED_URL_TTL);
+    const cacheControl = redirectCachePolicy?.(key);
+    return cacheControl ? { url, cacheControl } : { url };
   };
 }
