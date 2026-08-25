@@ -337,15 +337,25 @@ export const postRouter = {
   create: protectedProcedure
     .use(rateLimit(RATE_LIMITS.write))
     .input(
-      z.object({
-        // Trim first so a body of only whitespace fails `min(1)` rather than
-        // being stored as an empty-looking post.
-        content: z.string().trim().min(1, "Post cannot be empty.").max(POST_MAX_LENGTH),
-        /** Omit for a top-level post; set to reply to an existing one. */
-        parentId: z.uuid().optional(),
-        /** The same ordered image capability is available to posts and replies. */
-        attachments: z.array(z.file()).max(POST_ATTACHMENT_MAX_COUNT).default([]),
-      }),
+      z
+        .object({
+          // Trim first so whitespace never persists as fake content. An empty
+          // body is legal only when at least one attachment rides along — the
+          // cross-field rule below is what keeps a fully empty submission out.
+          content: z.string().trim().max(POST_MAX_LENGTH),
+          /** Omit for a top-level post; set to reply to an existing one. */
+          parentId: z.uuid().optional(),
+          /** The same ordered image capability is available to posts and replies. */
+          attachments: z.array(z.file()).max(POST_ATTACHMENT_MAX_COUNT).default([]),
+        })
+        // The one invariant neither field can hold alone (issue #202): a post
+        // must carry text, images, or both. Keeping `content` string-shaped
+        // and non-null means every reader stays a plain string — no nullable
+        // column, no null handling spread across the projections.
+        .refine(({ content, attachments }) => content.length > 0 || attachments.length > 0, {
+          error: "Post cannot be empty.",
+          path: ["content"],
+        }),
     )
     .handler(async ({ input, context }) => {
       // The foreign key already rejects a parent that doesn't exist, but it

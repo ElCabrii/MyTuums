@@ -156,11 +156,59 @@ describe("post.create", () => {
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
-  it("rejects whitespace-only content — trimming first is what makes min(1) catch this instead of storing an empty-looking post", async () => {
+  it("rejects a submission carrying neither text nor attachments — trimming first is what keeps whitespace from persisting as fake content", async () => {
     const author = await createTestUser();
     await expect(
       call(appRouter.post.create, { content: "   \n\t  " }, { context: contextFor(author) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("accepts an image-only post: blank text plus a valid attachment stores content as ''", async () => {
+    const author = await createTestUser();
+    const created = await call(
+      appRouter.post.create,
+      { content: "   \n\t ", attachments: [postImage("solo.png")] },
+      { context: contextFor(author) },
+    );
+
+    // Whitespace is not persisted as fake content — the column reads "".
+    expect(created.content).toBe("");
+    expect(created.attachments).toHaveLength(1);
+
+    const listed = await call(appRouter.post.list, {}, { context: contextFor(author) });
+    const row = listed.items.find((item) => item.id === created.id);
+    expect(row?.content).toBe("");
+    expect(row?.attachments).toHaveLength(1);
+  });
+
+  it("accepts an image-only reply and lists it under its parent and the author's replies", async () => {
+    const author = await createTestUser();
+    const parent = await call(
+      appRouter.post.create,
+      { content: "parent" },
+      { context: contextFor(author) },
+    );
+    const reply = await call(
+      appRouter.post.create,
+      { content: "", parentId: parent.id, attachments: [postImage("reply.png")] },
+      { context: contextFor(author) },
+    );
+
+    expect(reply.content).toBe("");
+
+    const directReplies = await call(
+      appRouter.post.list,
+      { parentId: parent.id },
+      { context: contextFor(author) },
+    );
+    expect(directReplies.items.map((item) => item.id)).toEqual([reply.id]);
+
+    const activity = await call(
+      appRouter.post.list,
+      { authorId: author.id, kind: "replies" },
+      { context: contextFor(author) },
+    );
+    expect(activity.items.find((item) => item.id === reply.id)?.attachments).toHaveLength(1);
   });
 
   it("rejects content one character over POST_MAX_LENGTH", async () => {

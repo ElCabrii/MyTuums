@@ -41,7 +41,10 @@ both by the server's page gate and by the client.
 
 ## Posts, replies, likes, follows
 
-- Posts are plain text, up to 500 characters, trimmed. Rendering recognizes
+- Posts are plain text, up to 500 characters, trimmed. A post or reply carries
+  text, up to four images, or both — a submission with neither is refused, and
+  an image-only post stores an empty body rather than placeholder whitespace.
+  Rendering recognizes
   two link shapes in that text and nothing else. Syntactically valid `@handles`
   become links to lowercase canonical profile routes; malformed handles stay as
   plain text, and an unknown handle lands on the profile route's existing

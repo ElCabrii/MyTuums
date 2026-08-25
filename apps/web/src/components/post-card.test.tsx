@@ -377,6 +377,32 @@ describe("PostCard", () => {
       expect(screen.getByText("a".repeat(2000))).toBeInTheDocument();
     });
 
+    // An image-only post (issue #202) stores `content` as ""; rendering must
+    // omit the paragraph entirely rather than leave a blank block above the
+    // attachment grid.
+    it("omits the text paragraph for an image-only post and still renders its attachments", async () => {
+      const post = makePost({
+        content: "",
+        attachments: [
+          {
+            id: "attachment-1",
+            url: "/media/posts/author/post/attachment-1.png",
+            position: 0,
+            contentType: "image/png",
+            byteSize: 24,
+            width: 256,
+            height: 128,
+          },
+        ],
+      });
+      const { container } = await renderWithProviders(<PostCard post={post} />);
+
+      // The stub-route <p> the test harness renders also matches a bare tag
+      // query; the content paragraph is the one carrying `whitespace-pre-line`.
+      expect(container.querySelector("p.whitespace-pre-line")).toBeNull();
+      expect(screen.getByAltText(m.post_attachment_alt({ position: "1" }))).toBeInTheDocument();
+    });
+
     it("renders authoritative post attachments as accessible media links", async () => {
       const post = makePost({
         attachments: [

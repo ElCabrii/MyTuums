@@ -91,6 +91,28 @@ describe("ComposerForm", () => {
     expect(onSubmit).toHaveBeenCalledWith("hello");
   });
 
+  // The same cross-field rule `post.create` enforces (issue #202): text,
+  // images, or both — never neither. A blank body is submittable only while
+  // at least one validated attachment rides along, and the body arrives as "".
+  it("enables submit for a whitespace-only body once a validated attachment rides along", async () => {
+    const onSubmit = vi.fn();
+    const file = new File([VALID_PNG_BYTES], "first.png", { type: "image/png" });
+    await renderComposer({
+      value: "   ",
+      onSubmit,
+      onAttachmentsChange: vi.fn(),
+      attachments: [{ id: "first", file }],
+    });
+
+    const submit = screen.getByRole("button", { name: "Post" });
+    expect(submit).not.toBeDisabled();
+
+    const user = userEvent.setup();
+    await user.click(submit);
+
+    expect(onSubmit).toHaveBeenCalledWith("", [{ id: "first", file }]);
+  });
+
   it("starts the remaining-character counter at POST_MAX_LENGTH", async () => {
     await renderComposer({ value: "" });
     expect(screen.getByText(String(POST_MAX_LENGTH))).toBeInTheDocument();

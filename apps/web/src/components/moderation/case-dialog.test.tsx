@@ -80,6 +80,36 @@ describe("CaseDialog — mention rendering", () => {
     expect(mention.closest("p")?.textContent).toBe(content);
   });
 
+  // An image-only post (issue #202) stores `content` as ""; the case view
+  // must omit the blank paragraph rather than render empty space above the
+  // attachment grid.
+  it("omits the content paragraph for an image-only post target", async () => {
+    const target: CaseRef = { targetType: "post", targetId: "post-1" };
+    const { container } = await renderCase(
+      target,
+      makeModerationCaseDetail({
+        id: "post-1",
+        content: "",
+        attachments: [
+          {
+            id: "attachment-1",
+            url: "/media/posts/author/post/attachment-1.png",
+            position: 0,
+            contentType: "image/png",
+            byteSize: 24,
+            width: 256,
+            height: 128,
+          },
+        ],
+      }),
+    );
+
+    // The stub-route <p> the test harness renders also matches a bare tag
+    // query; the content paragraph is the one carrying `whitespace-pre-line`.
+    expect(container.querySelector("p.whitespace-pre-line")).toBeNull();
+    expect(screen.getByAltText(m.post_attachment_alt({ position: "1" }))).toBeInTheDocument();
+  });
+
   it("uses the same mention rendering for a target user's bio", async () => {
     const bio = "Working with @Alice.";
     const target: CaseRef = { targetType: "user", targetId: "user-1" };
