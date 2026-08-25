@@ -64,6 +64,30 @@ function searchPostsQueries(queryClient: QueryClient): CachedSearchPosts {
   });
 }
 
+function postsInListPage(page: PostListPage): Post[] {
+  const continuations =
+    "continuations" in page ? page.continuations.flatMap((continuation) => continuation.items) : [];
+  return [...page.items, ...continuations];
+}
+
+function updatePostListPage(
+  page: PostListPage,
+  postId: string,
+  update: (post: Post) => Post,
+): PostListPage {
+  const items = page.items.map((post) => (post.id === postId ? update(post) : post));
+  if (!("continuations" in page)) return { ...page, items };
+
+  return {
+    ...page,
+    items,
+    continuations: page.continuations.map((continuation) => ({
+      ...continuation,
+      items: continuation.items.map((post) => (post.id === postId ? update(post) : post)),
+    })),
+  };
+}
+
 /**
  * Current state, read from whichever cache happens to hold this post rather
  * than from a prop: a prop is a render-time snapshot, so a burst of clicks
@@ -76,7 +100,7 @@ function searchPostsQueries(queryClient: QueryClient): CachedSearchPosts {
 export function readCachedPost(queryClient: QueryClient, postId: string): Post | undefined {
   const fromFeed = feedQueries(queryClient)
     .flatMap(([, data]) => data?.pages ?? [])
-    .flatMap((page) => page.items)
+    .flatMap(postsInListPage)
     .find((item) => item.id === postId);
 
   if (fromFeed) return fromFeed;
@@ -129,10 +153,7 @@ export function updatePostEverywhere(
       cached
         ? {
             ...cached,
-            pages: cached.pages.map((page) => ({
-              ...page,
-              items: page.items.map((post) => (post.id === postId ? update(post) : post)),
-            })),
+            pages: cached.pages.map((page) => updatePostListPage(page, postId, update)),
           }
         : cached,
   );

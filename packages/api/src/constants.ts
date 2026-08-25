@@ -147,6 +147,19 @@ export const SUSPENSION_MAX_SECONDS = 365 * 24 * 60 * 60;
 export const THREAD_ANCESTOR_MAX = 20;
 
 /**
+ * How many posts from an original-author continuation are embedded beneath a
+ * direct reply before the permalink offers to expand that branch in place.
+ */
+export const THREAD_REPLY_BRANCH_INITIAL_SIZE = 3;
+
+/**
+ * Maximum descendant depth inspected while selecting an inline reply branch.
+ * The post schema prevents cycles by requiring a parent to exist before its
+ * child is inserted, but user-shaped trees still need a recursion bound.
+ */
+export const THREAD_REPLY_BRANCH_MAX_DEPTH = 100;
+
+/**
  * What the avatar and banner uploads accept.
  *
  * SVG is absent and must stay absent: it is a document format that can carry

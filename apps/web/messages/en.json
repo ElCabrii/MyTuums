@@ -287,6 +287,7 @@
   "reply_count_one": "{count} reply",
   "reply_count_many": "{count} replies",
   "reply_empty": "No replies yet. Be the first to reply.",
+  "thread_show_more_replies": "Show more replies",
   "thread_truncated": "This conversation continues above the {count} replies shown.",
   "follow_action": "Follow",
   "follow_unfollow": "Unfollow",

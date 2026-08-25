@@ -162,11 +162,17 @@ over HTTP and imports only its browser-safe subpaths.
   pair is safe because the update compares both tombstones; after losing to a
   concurrent delete or removal, it re-reads the winner and preserves that
   outcome.
-- **Replies are a mode of `post.list` (`parentId` or the profile `kind`), not
-  their own procedure.** The web app's optimistic like sweep covers every
-  cached `post.list` by key prefix; a separate procedure would miss reply
-  likes. `kind` selects top-level posts, replies, or both, while the legacy
-  `includeReplies` input remains the compatibility spelling for both.
+- **Replies and their inline continuations are modes of `post.list`, not
+  separate procedures.** `parentId` remains the keyset-paginated owner of a
+  focused post's direct replies; those pages add the bounded original-author
+  continuation for each returned direct row. `continuationRootId` resumes one
+  capped branch in place. Keeping both under `post.list` means the web app's
+  optimistic like/deletion/moderation sweep reaches direct and continuation
+  rows through one query prefix. `src/reply-branch.ts` owns the deterministic
+  rule: choose the earliest descendant by the focused author, include its path,
+  then follow the oldest child at each fork. `kind` still selects top-level
+  posts, replies, or both, while `includeReplies` remains the compatibility
+  spelling for both.
 - **Posts and replies share one attachment policy.** Either may carry up to
   four ordered PNG, JPEG, or WebP files. Each file is capped at 5 MiB, the
   batch at 12 MiB, and decoded dimensions at 4096 px per side / 50 MP. The

@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
 import { eq, sql } from "drizzle-orm";
 import { closeDb } from "@my-tuums/db";
-import { post, postAttachment } from "@my-tuums/db/schema";
+import { post, postAttachment, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   POST_MAX_LENGTH,
   POST_PAGE_SIZE,
   POST_PAGE_SIZE_MAX,
   THREAD_ANCESTOR_MAX,
+  THREAD_REPLY_BRANCH_INITIAL_SIZE,
 } from "./constants.js";
 import type { Context } from "./context.js";
 import { withPostMediaLifecycleLock } from "./post-media-lock.js";
@@ -740,6 +741,155 @@ describe("post.list", () => {
       { context: contextFor(author) },
     );
     expect(directReplies.items.map((i) => i.id)).toEqual([reply.id]);
+  });
+
+  it("groups the focused author's reply branch beneath each direct reply", async () => {
+    const focusedAuthor = await createTestUser();
+    const participant = await createTestUser();
+    const [focused] = await seedPosts(focusedAuthor.id, 1);
+    const [directReply] = await seedPosts(participant.id, 1, { parentId: focused.id });
+    const [authorReply] = await seedPosts(focusedAuthor.id, 1, { parentId: directReply.id });
+    const [continuation] = await seedPosts(participant.id, 1, { parentId: authorReply.id });
+
+    const page = await call(
+      appRouter.post.list,
+      { parentId: focused.id },
+      { context: contextFor(participant) },
+    );
+
+    expect(page).toMatchObject({
+      items: [{ id: directReply.id }],
+      continuations: [
+        {
+          rootPostId: directReply.id,
+          items: [{ id: authorReply.id }, { id: continuation.id }],
+          nextCursor: null,
+        },
+      ],
+    });
+  });
+
+  it("does not project a descendant branch the focused author never joins", async () => {
+    const focusedAuthor = await createTestUser();
+    const participant = await createTestUser();
+    const [focused] = await seedPosts(focusedAuthor.id, 1);
+    const [directReply] = await seedPosts(participant.id, 1, { parentId: focused.id });
+    const [participantReply] = await seedPosts(participant.id, 1, {
+      parentId: directReply.id,
+    });
+    await seedPosts(participant.id, 1, { parentId: participantReply.id });
+
+    const page = await call(
+      appRouter.post.list,
+      { parentId: focused.id },
+      { context: contextFor(participant) },
+    );
+
+    expect(page.items.map((item) => item.id)).toEqual([directReply.id]);
+    if (!("continuations" in page)) throw new Error("Direct reply page omitted continuations");
+    expect(page.continuations).toEqual([]);
+  });
+
+  it("caps an embedded branch and paginates the continuation without duplicating direct replies", async () => {
+    const focusedAuthor = await createTestUser();
+    const participant = await createTestUser();
+    const [focused] = await seedPosts(focusedAuthor.id, 1);
+    const [directReply] = await seedPosts(participant.id, 1, { parentId: focused.id });
+    const branchIds: string[] = [];
+    let parentId = directReply.id;
+
+    for (let index = 0; index < THREAD_REPLY_BRANCH_INITIAL_SIZE + 5; index += 1) {
+      const authorId = index === 0 ? focusedAuthor.id : participant.id;
+      const [branchPost] = await seedPosts(authorId, 1, { parentId });
+      branchIds.push(branchPost.id);
+      parentId = branchPost.id;
+    }
+
+    const directPage = await call(
+      appRouter.post.list,
+      { parentId: focused.id },
+      { context: contextFor(participant) },
+    );
+    if (!("continuations" in directPage)) {
+      throw new Error("Direct reply page omitted continuations");
+    }
+    const embedded = directPage.continuations[0];
+
+    expect(directPage.items.map((item) => item.id)).toEqual([directReply.id]);
+    expect(embedded?.items.map((item) => item.id)).toEqual(
+      branchIds.slice(0, THREAD_REPLY_BRANCH_INITIAL_SIZE),
+    );
+    expect(embedded?.nextCursor).toEqual(expect.any(String));
+
+    const loadedIds: string[] = [];
+    let cursor = embedded?.nextCursor ?? undefined;
+    while (cursor) {
+      const page = await call(
+        appRouter.post.list,
+        { continuationRootId: directReply.id, cursor, limit: 2 },
+        { context: contextFor(participant) },
+      );
+      loadedIds.push(...page.items.map((item) => item.id));
+      cursor = page.nextCursor ?? undefined;
+    }
+
+    expect([...embedded.items.map((item) => item.id), ...loadedIds]).toEqual(branchIds);
+    expect(new Set(loadedIds)).not.toContain(directReply.id);
+  });
+
+  it("keeps tombstones and skips blocked or banned authors without breaking the selected branch", async () => {
+    const focusedAuthor = await createTestUser();
+    const viewer = await createTestUser();
+    const blockedAuthor = await createTestUser();
+    const bannedAuthor = await createTestUser();
+    const [focused] = await seedPosts(focusedAuthor.id, 1);
+    const [directReply] = await seedPosts(viewer.id, 1, { parentId: focused.id });
+    const [removedAuthorReply] = await seedPosts(focusedAuthor.id, 1, {
+      parentId: directReply.id,
+    });
+    const [blockedReply] = await seedPosts(blockedAuthor.id, 1, {
+      parentId: removedAuthorReply.id,
+    });
+    const [bannedReply] = await seedPosts(bannedAuthor.id, 1, { parentId: blockedReply.id });
+    const [deletedContinuation] = await seedPosts(viewer.id, 1, { parentId: bannedReply.id });
+
+    await call(
+      appRouter.post.like,
+      { postId: removedAuthorReply.id },
+      { context: contextFor(viewer) },
+    );
+    await anonContext.db
+      .update(post)
+      .set({ removedAt: new Date(), removedReason: "policy" })
+      .where(eq(post.id, removedAuthorReply.id));
+    await anonContext.db
+      .update(post)
+      .set({ deletedAt: new Date() })
+      .where(eq(post.id, deletedContinuation.id));
+    await call(
+      appRouter.moderation.block,
+      { userId: blockedAuthor.id },
+      { context: contextFor(viewer) },
+    );
+    await anonContext.db.update(user).set({ banned: true }).where(eq(user.id, bannedAuthor.id));
+
+    const page = await call(
+      appRouter.post.list,
+      { parentId: focused.id },
+      { context: contextFor(viewer) },
+    );
+    if (!("continuations" in page)) throw new Error("Direct reply page omitted continuations");
+    const items = page.continuations[0]?.items ?? [];
+
+    expect(items.map((item) => item.id)).toEqual([removedAuthorReply.id, deletedContinuation.id]);
+    expect(items[0]).toMatchObject({
+      content: null,
+      removed: true,
+      viewerHasLiked: true,
+    });
+    expect(items[1]).toMatchObject({ content: null, deleted: true });
+    expect(items.map((item) => item.author.id)).not.toContain(blockedAuthor.id);
+    expect(items.map((item) => item.author.id)).not.toContain(bannedAuthor.id);
   });
 
   it("supports the explicit posts/replies/all activity modes", async () => {

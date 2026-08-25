@@ -14,6 +14,8 @@ import {
   POST_PAGE_SIZE_MAX,
   CURSOR_MAX_ENCODED_LENGTH,
   THREAD_ANCESTOR_MAX,
+  THREAD_REPLY_BRANCH_INITIAL_SIZE,
+  THREAD_REPLY_BRANCH_MAX_DEPTH,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { keysetPage } from "./pagination.js";
@@ -31,6 +33,7 @@ import {
   type PostAttachmentInput,
 } from "./post-media.js";
 import { requireStorage } from "./profile-media.js";
+import { selectReplyBranch, type ReplyBranchNode } from "./reply-branch.js";
 
 /**
  * Feeds are keyset-paginated on `(post.created_at, post.id) DESC`; see
@@ -299,6 +302,136 @@ export const postSelection = (viewerId: string) => ({
   replyCount,
   viewerHasLiked: viewerHasLiked(viewerId),
 });
+
+type ReplyDescendant = ReplyBranchNode & { rootPostId: string };
+
+interface ReplyContinuationPageArgs {
+  db: Database;
+  viewerId: string;
+  focusedAuthorId: string;
+  rootPostIds: readonly string[];
+  limit: number;
+  cursors?: ReadonlyMap<string, string>;
+}
+
+async function visiblePostAuthorId(
+  db: Database,
+  viewerId: string,
+  postId: string,
+): Promise<string | undefined> {
+  const [visiblePost] = await db
+    .select({ authorId: post.authorId })
+    .from(post)
+    .innerJoin(user, eq(user.id, post.authorId))
+    .where(and(eq(post.id, postId), not(invisibleAuthor(viewerId))))
+    .limit(1);
+
+  return visiblePost?.authorId;
+}
+
+/**
+ * Builds one bounded, deterministic continuation page for each direct reply.
+ * The recursive query collects only tree identity; every caller-visible row
+ * is selected afterwards through `postSelection` and the ordinary visibility
+ * filter, preserving attachments, tombstones and viewer-relative like state.
+ */
+async function replyContinuationPages(args: ReplyContinuationPageArgs) {
+  if (args.rootPostIds.length === 0) return [];
+
+  const rootIds = sql.join(
+    args.rootPostIds.map((id) => sql.param(id, post.id)),
+    sql`, `,
+  );
+  const descendantIds = await args.db.execute<{ id: string; root_id: string }>(sql`
+    with recursive descendants as (
+      select descendant.id, descendant.parent_id, descendant.parent_id as root_id, 1 as depth
+      from ${post} as descendant
+      where descendant.parent_id in (${rootIds})
+      union all
+      select child.id, child.parent_id, descendants.root_id, descendants.depth + 1
+      from ${post} as child
+      join descendants on child.parent_id = descendants.id
+      where descendants.depth < ${THREAD_REPLY_BRANCH_MAX_DEPTH}
+    )
+    select id, root_id from descendants
+  `);
+
+  if (descendantIds.length === 0) return [];
+
+  const metadataRows = await args.db
+    .select({
+      id: post.id,
+      parentId: post.parentId,
+      authorId: post.authorId,
+      createdAt: post.createdAt,
+    })
+    .from(post)
+    .where(
+      inArray(
+        post.id,
+        descendantIds.map((row) => row.id),
+      ),
+    );
+  const rootByPostId = new Map(descendantIds.map((row) => [row.id, row.root_id]));
+  const descendantsByRoot = new Map<string, ReplyDescendant[]>();
+
+  for (const row of metadataRows) {
+    const rootPostId = rootByPostId.get(row.id);
+    if (!rootPostId || !row.parentId) continue;
+    const descendants = descendantsByRoot.get(rootPostId) ?? [];
+    descendants.push({ ...row, parentId: row.parentId, rootPostId });
+    descendantsByRoot.set(rootPostId, descendants);
+  }
+
+  const branchByRoot = new Map(
+    args.rootPostIds.map((rootPostId) => [
+      rootPostId,
+      selectReplyBranch(rootPostId, args.focusedAuthorId, descendantsByRoot.get(rootPostId) ?? []),
+    ]),
+  );
+  const selectedIds = [...branchByRoot.values()].flatMap((branch) => branch.map((row) => row.id));
+  if (selectedIds.length === 0) return [];
+
+  const visibleRows = await args.db
+    .select(postSelection(args.viewerId))
+    .from(post)
+    .innerJoin(user, eq(user.id, post.authorId))
+    .where(and(inArray(post.id, selectedIds), not(invisibleAuthor(args.viewerId))));
+  const visibleById = new Map(visibleRows.map((row) => [row.id, row]));
+
+  return args.rootPostIds.flatMap((rootPostId) => {
+    const branch = branchByRoot.get(rootPostId) ?? [];
+    if (branch.length === 0) return [];
+
+    const rawCursor = args.cursors?.get(rootPostId);
+    let start = 0;
+    if (rawCursor) {
+      const cursor = postCursor.decode(rawCursor);
+      const cursorIndex = branch.findIndex((row) => row.id === cursor.id);
+      const cursorPost = branch[cursorIndex];
+      if (!cursorPost || cursorPost.createdAt.getTime() !== cursor.createdAt.getTime()) {
+        throw new ORPCError("BAD_REQUEST", { message: "Malformed pagination cursor." });
+      }
+      start = cursorIndex + 1;
+    }
+
+    const visibleBranch = branch
+      .slice(start)
+      .map((row) => visibleById.get(row.id))
+      .filter((row) => row !== undefined);
+    const hasMore = visibleBranch.length > args.limit;
+    const items = hasMore ? visibleBranch.slice(0, args.limit) : visibleBranch;
+    const last = items.at(-1);
+
+    return [
+      {
+        rootPostId,
+        items,
+        nextCursor: hasMore && last ? postCursor.encode(last.createdAt, last.id) : null,
+      },
+    ];
+  });
+}
 
 async function countLikes(db: Database, postId: string): Promise<number> {
   const [row] = await db
@@ -579,61 +712,118 @@ export const postRouter = {
 
   /**
    * Lists posts, keyset-paginated: the global feed, one author's posts, the
-   * following feed, or one post's direct replies. Requires a session, like
-   * every procedure in this app (issue #36).
+   * following feed, one post's direct replies, or a selected inline reply
+   * continuation. Requires a session, like every procedure in this app
+   * (issue #36).
    */
   list: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
     .input(
-      z.object({
-        cursor: z.string().max(CURSOR_MAX_ENCODED_LENGTH).optional(),
-        limit: z.number().int().min(1).max(POST_PAGE_SIZE_MAX).default(POST_PAGE_SIZE),
-        /**
-         * Omit for the global feed; set to scope the feed to one author.
-         * Composes with `feed` as AND — "posts by X, if I follow X" — which is
-         * coherent if degenerate. The UI never sends both.
-         */
-        authorId: z.string().optional(),
-        /**
-         * An enum rather than a boolean because this axis will grow (a ranked
-         * "for you", lists), and each new value should be a widening here
-         * rather than another orthogonal flag with undefined interactions.
-         */
-        feed: z.enum(["global", "following"]).default("global"),
-        /**
-         * Set to list one post's direct replies. This is deliberately a mode
-         * of `list` rather than its own `post.replies` procedure: the web
-         * app's optimistic like sweeps every cached `post.list` query by key
-         * prefix (see apps/web/src/lib/post-cache.ts), so a separate
-         * procedure would sit outside that sweep and likes on replies would
-         * silently stop updating. Sharing the procedure means the reply list
-         * inherits the cursor, the feed atom family, and the sweep.
-         *
-         * Composes with `authorId`/`feed` as AND — "replies to X, by someone
-         * I follow" — which is coherent if degenerate. The UI never sends
-         * both, same as `authorId` and `feed`.
-         */
-        parentId: z.uuid().optional(),
-        /**
-         * Replies are excluded by default, which is what keeps the home
-         * timelines top-level only. A profile feed opts in, because a
-         * person's profile is their whole activity.
-         *
-         * An explicit flag rather than inferring it from `authorId` keeps the
-         * two axes independent — it is what a profile's "Both" view uses.
-         */
-        includeReplies: z.boolean().default(false),
-        /**
-         * The profile feed's three-way activity filter. `includeReplies` is
-         * retained for existing clients and means `all` when true; `kind`
-         * takes precedence when both are supplied. Keeping the legacy field
-         * avoids changing existing query-key/input shapes during rollout.
-         */
-        kind: z.enum(["posts", "replies", "all"]).optional(),
-      }),
+      z
+        .object({
+          cursor: z.string().max(CURSOR_MAX_ENCODED_LENGTH).optional(),
+          limit: z.number().int().min(1).max(POST_PAGE_SIZE_MAX).default(POST_PAGE_SIZE),
+          /**
+           * Omit for the global feed; set to scope the feed to one author.
+           * Composes with `feed` as AND — "posts by X, if I follow X" — which is
+           * coherent if degenerate. The UI never sends both.
+           */
+          authorId: z.string().optional(),
+          /**
+           * An enum rather than a boolean because this axis will grow (a ranked
+           * "for you", lists), and each new value should be a widening here
+           * rather than another orthogonal flag with undefined interactions.
+           */
+          feed: z.enum(["global", "following"]).default("global"),
+          /**
+           * Set to list one post's direct replies. This is deliberately a mode
+           * of `list` rather than its own `post.replies` procedure: the web
+           * app's optimistic like sweeps every cached `post.list` query by key
+           * prefix (see apps/web/src/lib/post-cache.ts), so a separate
+           * procedure would sit outside that sweep and likes on replies would
+           * silently stop updating. Sharing the procedure means the reply list
+           * inherits the cursor, the feed atom family, and the sweep.
+           *
+           * Composes with `authorId`/`feed` as AND — "replies to X, by someone
+           * I follow" — which is coherent if degenerate. The UI never sends
+           * both, same as `authorId` and `feed`.
+           */
+          parentId: z.uuid().optional(),
+          /**
+           * Continues the original-author branch beneath one direct reply. It
+           * remains a `post.list` mode so continuation rows share the same query
+           * prefix as feeds and direct replies for optimistic cache sweeps.
+           */
+          continuationRootId: z.uuid().optional(),
+          /**
+           * Replies are excluded by default, which is what keeps the home
+           * timelines top-level only. A profile feed opts in, because a
+           * person's profile is their whole activity.
+           *
+           * An explicit flag rather than inferring it from `authorId` keeps the
+           * two axes independent — it is what a profile's "Both" view uses.
+           */
+          includeReplies: z.boolean().default(false),
+          /**
+           * The profile feed's three-way activity filter. `includeReplies` is
+           * retained for existing clients and means `all` when true; `kind`
+           * takes precedence when both are supplied. Keeping the legacy field
+           * avoids changing existing query-key/input shapes during rollout.
+           */
+          kind: z.enum(["posts", "replies", "all"]).optional(),
+        })
+        .superRefine((input, refinement) => {
+          if (
+            input.continuationRootId &&
+            (input.parentId ||
+              input.authorId ||
+              input.feed === "following" ||
+              input.includeReplies ||
+              input.kind)
+          ) {
+            refinement.addIssue({
+              code: "custom",
+              message: "A continuation cannot be combined with feed filters.",
+            });
+          }
+        }),
     )
     .handler(async ({ input, context }) => {
       const viewerId = context.user.id;
+
+      if (input.continuationRootId) {
+        const [rootReply] = await context.db
+          .select({ parentId: post.parentId })
+          .from(post)
+          .innerJoin(user, eq(user.id, post.authorId))
+          .where(and(eq(post.id, input.continuationRootId), not(invisibleAuthor(viewerId))))
+          .limit(1);
+        if (!rootReply?.parentId) {
+          throw new ORPCError("NOT_FOUND", { message: "Reply not found." });
+        }
+
+        const focusedAuthorId = await visiblePostAuthorId(context.db, viewerId, rootReply.parentId);
+        if (!focusedAuthorId) {
+          throw new ORPCError("NOT_FOUND", { message: "Post not found." });
+        }
+
+        const continuationArgs: ReplyContinuationPageArgs = {
+          db: context.db,
+          viewerId,
+          focusedAuthorId,
+          rootPostIds: [input.continuationRootId],
+          limit: input.limit,
+        };
+        if (input.cursor) {
+          continuationArgs.cursors = new Map([[input.continuationRootId, input.cursor]]);
+        }
+        const [continuation] = await replyContinuationPages(continuationArgs);
+
+        return continuation
+          ? { items: continuation.items, nextCursor: continuation.nextCursor }
+          : { items: [], nextCursor: null };
+      }
+
       const kind = input.kind ?? (input.includeReplies ? "all" : "posts");
 
       const filters = [
@@ -681,7 +871,7 @@ export const postRouter = {
       // shares. The ORDER BY and the +1 lookahead stay here, on the same
       // columns as the cursor comparison.
       const selection = postSelection(viewerId);
-      return keysetPage({
+      const page = await keysetPage({
         codec: postCursor,
         cursor: input.cursor,
         limit: input.limit,
@@ -699,6 +889,21 @@ export const postRouter = {
             .orderBy(desc(post.createdAt), desc(post.id))
             .limit(input.limit + 1),
       });
+
+      if (!input.parentId || page.items.length === 0) return page;
+
+      const focusedAuthorId = await visiblePostAuthorId(context.db, viewerId, input.parentId);
+      if (!focusedAuthorId) return { ...page, continuations: [] };
+
+      const continuations = await replyContinuationPages({
+        db: context.db,
+        viewerId,
+        focusedAuthorId,
+        rootPostIds: page.items.map((item) => item.id),
+        limit: THREAD_REPLY_BRANCH_INITIAL_SIZE,
+      });
+
+      return { ...page, continuations };
     }),
 
   /**

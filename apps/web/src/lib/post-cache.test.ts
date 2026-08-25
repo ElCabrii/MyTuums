@@ -41,6 +41,25 @@ function feedPage(posts: Post[]): InfiniteData<PostListPage> {
   };
 }
 
+function replyPage(directReply: Post, continuation: Post): InfiniteData<PostListPage> {
+  return {
+    pages: [
+      {
+        items: [directReply],
+        nextCursor: null,
+        continuations: [
+          {
+            rootPostId: directReply.id,
+            items: [continuation],
+            nextCursor: null,
+          },
+        ],
+      },
+    ],
+    pageParams: [undefined],
+  };
+}
+
 function searchPage(posts: Post[]): InfiniteData<SearchPostsPage> {
   return {
     pages: [{ items: posts, nextCursor: null }],
@@ -106,6 +125,31 @@ describe("post-cache", () => {
       const data = queryClient.getQueryData<InfiniteData<SearchPostsPage>>(searchKey);
       expect(data?.pages[0]?.items.find((p) => p.id === "search-1")?.likeCount).toBe(4);
       expect(data?.pages[0]?.items.find((p) => p.id === "search-1")?.viewerHasLiked).toBe(true);
+    });
+
+    it("patches a post embedded in a direct reply's continuation", () => {
+      const queryClient = new QueryClient();
+      const directReply = makePost({ id: "direct-1" });
+      const continuation = makePost({
+        id: "continuation-1",
+        parentId: directReply.id,
+        likeCount: 2,
+      });
+      const key = orpc.post.list.key({ input: { limit: 20, parentId: "focused-1" } });
+      queryClient.setQueryData(key, replyPage(directReply, continuation));
+
+      updatePostEverywhere(queryClient, continuation.id, (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+        viewerHasLiked: true,
+      }));
+
+      const page = queryClient.getQueryData<InfiniteData<PostListPage>>(key)?.pages[0];
+      if (!page || !("continuations" in page)) throw new Error("Missing continuation fixture");
+      expect(page.continuations[0]?.items[0]).toMatchObject({
+        likeCount: 3,
+        viewerHasLiked: true,
+      });
     });
 
     it("patches the same post inside a post.thread entry as both data.post and an ancestor", () => {
@@ -186,6 +230,18 @@ describe("post-cache", () => {
       );
 
       expect(readCachedPost(queryClient, "search-only-1")).toEqual(post);
+    });
+
+    it("finds a post that exists only inside an embedded reply continuation", () => {
+      const queryClient = new QueryClient();
+      const directReply = makePost({ id: "direct-only-1" });
+      const continuation = makePost({ id: "embedded-only-1", parentId: directReply.id });
+      queryClient.setQueryData(
+        orpc.post.list.key({ input: { limit: 20, parentId: "focused-1" } }),
+        replyPage(directReply, continuation),
+      );
+
+      expect(readCachedPost(queryClient, continuation.id)).toEqual(continuation);
     });
 
     it("tolerates a registered query whose data is still undefined", () => {
