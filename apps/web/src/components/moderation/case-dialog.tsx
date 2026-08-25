@@ -272,9 +272,13 @@ function TargetPostCard({
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm break-words whitespace-pre-line">
-          <LinkedText text={target.content} />
-        </p>
+        {/* An image-only post carries `content: ""` (issue #202); omitting the
+            paragraph keeps the card free of a blank block above the grid. */}
+        {target.content && (
+          <p className="text-sm break-words whitespace-pre-line">
+            <LinkedText text={target.content} />
+          </p>
+        )}
         <PostAttachmentGrid attachments={target.attachments} />
         {target.removedAt && (
           <Alert variant="destructive">

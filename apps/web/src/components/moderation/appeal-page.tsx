@@ -3,9 +3,16 @@ import type { ReactNode } from "react";
 import { Link, getRouteApi } from "@tanstack/react-router";
 import { ORPCError } from "@orpc/client";
 import { APPEAL_REASON_MAX_LENGTH, APPEAL_REASON_MIN_LENGTH } from "@my-tuums/api/constants";
-import { appealOpenAtom, appealReasonAtom, resetAppealReasonEffect } from "@/atoms/moderation";
+import {
+  appealOpenAtom,
+  appealPreviewFamily,
+  appealReasonAtom,
+  encodeAppealKey,
+  resetAppealReasonEffect,
+} from "@/atoms/moderation";
 import { isSignedInAtom } from "@/atoms/session";
 import { Button } from "@/components/ui/button";
+import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { Textarea } from "@/components/ui/textarea";
 import { m } from "@/paraglide/messages.js";
 
@@ -25,6 +32,45 @@ export function AppealPage() {
   const { token, postId } = routeApi.useSearch();
   const identifier = token ?? postId ?? "none";
   return <AppealCard key={identifier} token={token} postId={postId} />;
+}
+
+/**
+ * The post being appealed, when the server will show it.
+ *
+ * Renders nothing at all in every "no" case — signed out, still loading, a
+ * refusal, or a suspension or ban with no post behind it. That is deliberate:
+ * the preview is context for the form, never a precondition for it, and the
+ * page must keep working for a banned appellant who cannot sign in to see it.
+ *
+ * The images come back through the ordinary `/media/` route, which the author
+ * of a removed post is allowed to read (see `canViewPostMedia`); no capability
+ * travels in the markup.
+ */
+function AppealPreview({ token, postId }: { token?: string; postId?: string }) {
+  const preview = useAtomValue(appealPreviewFamily(encodeAppealKey({ token, postId })));
+  if (!preview.isSuccess) return null;
+
+  const { post } = preview.data;
+  if (!post) return null;
+
+  return (
+    <div className="border-border/60 bg-muted/30 space-y-2 rounded-lg border p-3 text-left">
+      <p className="text-muted-foreground text-xs font-medium">{m.appeal_preview_title()}</p>
+      {post.content ? (
+        <p className="text-foreground/90 text-sm leading-relaxed break-words whitespace-pre-line">
+          {post.content}
+        </p>
+      ) : (
+        <p className="text-muted-foreground text-sm italic">{m.appeal_preview_no_text()}</p>
+      )}
+      <PostAttachmentGrid attachments={post.attachments} />
+      {post.removedReason && (
+        <p className="text-muted-foreground text-xs">
+          {m.appeal_preview_reason({ reason: post.removedReason })}
+        </p>
+      )}
+    </div>
+  );
 }
 
 /** The data-backed half of the appeal page — keyed per identifier by its parent. */
@@ -91,6 +137,7 @@ function AppealCard({ token, postId }: { token?: string; postId?: string }) {
       <>
         <h1 className="text-xl font-bold tracking-tight">{m.appeal_title()}</h1>
         <p className="text-muted-foreground text-sm">{m.appeal_subtitle()}</p>
+        <AppealPreview token={token} postId={postId} />
         <div className="space-y-2 text-left">
           <label htmlFor="appeal-reason" className="text-sm font-medium">
             {m.appeal_field_reason()}

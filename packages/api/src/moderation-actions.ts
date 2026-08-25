@@ -16,7 +16,15 @@ import {
 } from "@my-tuums/auth";
 import { isLocalePreference } from "@my-tuums/auth/rules";
 import type { Database } from "@my-tuums/db";
-import { appeal, moderationAction, post, report, session, user } from "@my-tuums/db/schema";
+import {
+  appeal,
+  moderationAction,
+  post,
+  postAttachment,
+  report,
+  session,
+  user,
+} from "@my-tuums/db/schema";
 import { appealToken } from "./appeal-token.js";
 import type { Context } from "./context.js";
 import { lockModerationTarget } from "./moderation-target-lock.js";
@@ -369,6 +377,16 @@ export async function removePostEffect(
       targetPostId: args.postId,
       reason: args.reason,
     });
+    // An image-only post's `content` is "" (issue #202), so the count is what
+    // the notice names the post by. Read inside the transaction alongside the
+    // locked target row: the attachments of a post being removed cannot
+    // change, and a second read outside would describe a different post than
+    // the one the audit row records.
+    const [attachments] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(postAttachment)
+      .where(eq(postAttachment.postId, args.postId));
+    const attachmentCount = attachments?.count ?? 0;
     return {
       pending: [
         {
@@ -377,6 +395,7 @@ export async function removePostEffect(
             moderationRemovalEmail(
               {
                 postText: target.content,
+                attachmentCount,
                 reason: args.reason,
                 appealUrl: makeAppealUrl(action.id, target.authorId),
               },

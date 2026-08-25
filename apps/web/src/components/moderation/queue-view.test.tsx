@@ -165,6 +165,30 @@ describe("QueueView", () => {
     expect(screen.getByText(/a very long body the server cut…/)).toBeInTheDocument();
   });
 
+  it("drops the excerpt segment entirely for an image-only post whose content is ''", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.queue([
+      {
+        items: [
+          makeModerationCase({
+            targetId: "post-1",
+            preview: makePostPreview({ excerpt: "", truncated: false }),
+          }),
+        ],
+        nextCursor: null,
+      },
+    ]);
+    const { container } = await renderWithProviders(<QueueView />, {
+      queryClient,
+      signedInAs: { role: "moderator" },
+    });
+
+    expect(await screen.findByText("Alex Mercer")).toBeInTheDocument();
+    // The author line renders, but without a dangling " — " for the missing
+    // text (issue #202).
+    expect(container.textContent).not.toContain("—");
+  });
+
   it("badges what has already happened to the target: a removed reply, a suspension, a permanent ban", async () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).moderation.queue([

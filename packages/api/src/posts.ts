@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, isNull, not, sql } from "drizzle-orm";
+import { and, desc, eq, getTableName, inArray, isNull, not, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Database } from "@my-tuums/db";
 import { follow, post, postAttachment, postLike, user, userBlock } from "@my-tuums/db/schema";
@@ -100,6 +100,23 @@ type PostAttachment = {
   height: number;
 };
 
+/**
+ * The outer post's columns, always table-qualified.
+ *
+ * Drizzle drops the table prefix from a column reference when the query it is
+ * building has no join — a harmless optimization at the top level, and a
+ * silent wrong answer inside the correlated subquery below: an unqualified
+ * `"id"` there resolves against `post_attachment`, the inner scope, so the
+ * correlation becomes `post_attachment.post_id = post_attachment.id` and the
+ * aggregate matches nothing. It fails as an empty attachment list rather than
+ * an error, which is exactly the kind of thing to spell out once here rather
+ * than leave every caller to discover. Qualifying explicitly makes the
+ * fragment correct whether or not the caller happens to join another table.
+ */
+function outerPost(column: "id" | "removed_at" | "deleted_at") {
+  return sql`${sql.identifier(getTableName(post))}.${sql.identifier(column)}`;
+}
+
 /** Attachments are ordered in one correlated aggregate so every post surface shares the same shape. */
 export function postAttachmentsSelection(includeTombstones = false) {
   return sql<PostAttachment[]>`coalesce((
@@ -115,8 +132,12 @@ export function postAttachmentsSelection(includeTombstones = false) {
       ) order by ${postAttachment.position}
     )
     from ${postAttachment}
-    where ${postAttachment.postId} = ${post.id}
-      ${includeTombstones ? sql`` : sql`and ${post.removedAt} is null and ${post.deletedAt} is null`}
+    where ${postAttachment.postId} = ${outerPost("id")}
+      ${
+        includeTombstones
+          ? sql``
+          : sql`and ${outerPost("removed_at")} is null and ${outerPost("deleted_at")} is null`
+      }
   ), '[]'::jsonb)`;
 }
 
@@ -337,15 +358,25 @@ export const postRouter = {
   create: protectedProcedure
     .use(rateLimit(RATE_LIMITS.write))
     .input(
-      z.object({
-        // Trim first so a body of only whitespace fails `min(1)` rather than
-        // being stored as an empty-looking post.
-        content: z.string().trim().min(1, "Post cannot be empty.").max(POST_MAX_LENGTH),
-        /** Omit for a top-level post; set to reply to an existing one. */
-        parentId: z.uuid().optional(),
-        /** The same ordered image capability is available to posts and replies. */
-        attachments: z.array(z.file()).max(POST_ATTACHMENT_MAX_COUNT).default([]),
-      }),
+      z
+        .object({
+          // Trim first so whitespace never persists as fake content. An empty
+          // body is legal only when at least one attachment rides along — the
+          // cross-field rule below is what keeps a fully empty submission out.
+          content: z.string().trim().max(POST_MAX_LENGTH),
+          /** Omit for a top-level post; set to reply to an existing one. */
+          parentId: z.uuid().optional(),
+          /** The same ordered image capability is available to posts and replies. */
+          attachments: z.array(z.file()).max(POST_ATTACHMENT_MAX_COUNT).default([]),
+        })
+        // The one invariant neither field can hold alone (issue #202): a post
+        // must carry text, images, or both. Keeping `content` string-shaped
+        // and non-null means every reader stays a plain string — no nullable
+        // column, no null handling spread across the projections.
+        .refine(({ content, attachments }) => content.length > 0 || attachments.length > 0, {
+          error: "Post cannot be empty.",
+          path: ["content"],
+        }),
     )
     .handler(async ({ input, context }) => {
       // The foreign key already rejects a parent that doesn't exist, but it

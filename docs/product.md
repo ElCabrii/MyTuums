@@ -41,7 +41,10 @@ both by the server's page gate and by the client.
 
 ## Posts, replies, likes, follows
 
-- Posts are plain text, up to 500 characters, trimmed. Rendering recognizes
+- Posts are plain text, up to 500 characters, trimmed. A post or reply carries
+  text, up to four images, or both — a submission with neither is refused, and
+  an image-only post stores an empty body rather than placeholder whitespace.
+  Rendering recognizes
   two link shapes in that text and nothing else. Syntactically valid `@handles`
   become links to lowercase canonical profile routes; malformed handles stay as
   plain text, and an unknown handle lands on the profile route's existing
@@ -147,7 +150,12 @@ because each has a defined inverse.
 
 An appeal is opened one of two ways: from the link in the notification email,
 which works **signed out** (a banned user cannot sign in), or from a signed-in
-author's removed-post stub. The appeal lands in the moderation queue labelled
+author's removed-post stub. A signed-in appellant is shown the post being
+appealed — its original text, its images and the stated reason — above the
+form; signed out, the form stands alone, because a removal notice describes a
+post only its author may see. The removal email itself names the post the same
+way: it quotes the text, counts the images, and for an image-only post says so
+rather than quoting nothing. The appeal lands in the moderation queue labelled
 as such, and is reviewed by any moderator **except the one who took the
 original action**. Overturning an appeal applies the inverse action, which —
 like any action — emails the user. An appeal's own text is between 10 and 2000

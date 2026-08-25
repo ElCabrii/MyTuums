@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { closeDb } from "@my-tuums/db";
 import { and, eq } from "drizzle-orm";
-import { moderationAction, post, report, session, user } from "@my-tuums/db/schema";
+import { moderationAction, post, postAttachment, report, session, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   applyModerationEffect,
@@ -68,6 +69,49 @@ function dbThatRollsBack(): DbLike {
 }
 
 describe("forward moderation effects", () => {
+  it("removePostEffect describes the removed post's images, and drops the quote block when there is no text", async () => {
+    const author = await createTestUser();
+    const mod = await createTestUser();
+    await setUserRole(mod.id, "moderator");
+
+    async function noticeFor(content: string, images: number) {
+      const [row] = await anonContext.db
+        .insert(post)
+        .values({ authorId: author.id, content })
+        .returning({ id: post.id });
+      for (let position = 0; position < images; position += 1) {
+        await anonContext.db.insert(postAttachment).values({
+          postId: row.id,
+          position,
+          mediaPath: `/media/posts/${author.id}/${row.id}/${randomUUID()}.png`,
+          contentType: "image/png",
+          byteSize: 24,
+          width: 64,
+          height: 64,
+        });
+      }
+      const { pending } = await removePostEffect(anonContext.db, {
+        postId: row.id,
+        actorId: mod.id,
+        reason: "spam content",
+      });
+      return { en: pending[0].build("en").text, fr: pending[0].build("fr").text };
+    }
+
+    // Issue #202: an image-only post stores `content` as "", which quoted
+    // verbatim would read as an empty pair of quotes. The count is what the
+    // author can recognise the post by instead.
+    const imageOnly = await noticeFor("", 1);
+    expect(imageOnly.en).toContain("Your post: 1 image, no text.");
+    expect(imageOnly.en).not.toContain('""');
+    expect(imageOnly.fr).toContain("Votre publication : 1 image, sans texte.");
+    expect(imageOnly.fr).not.toContain("«  »");
+
+    const both = await noticeFor("look at these", 2);
+    expect(both.en).toContain('Your post (2 images):\n"look at these"');
+    expect(both.fr).toContain("Votre publication (2 images) :\n« look at these »");
+  });
+
   it("removePostEffect commits the tombstone, the report stamps and the audit row, and returns the notice unsent", async () => {
     const author = await createTestUser();
     const mod = await createTestUser();
@@ -93,6 +137,9 @@ describe("forward moderation effects", () => {
     expect(pending).toHaveLength(1);
     expect(pending[0].userId).toBe(author.id);
     expect(pending[0].build("en").subject).toBe("Your post was removed from MyTuums");
+    // A text-only post is quoted with no image count at all.
+    expect(pending[0].build("en").text).toContain('Your post:\n"remove me"');
+    expect(pending[0].build("fr").text).toContain("Votre publication :\n« remove me »");
 
     const [row] = await anonContext.db
       .select({

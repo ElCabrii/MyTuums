@@ -212,6 +212,16 @@ used to 429 every request from a fresh session.
   already render, so the staleness budget buys real per-render savings without
   widening who can see what. `.orig` originals and post attachments are never
   stored.
+- Every key is authorized **per viewer**, post attachments included
+  (`canViewPostMedia`): a moderator may inspect a reported or tombstoned post,
+  and an ordinary reader must clear both post tombstones and the author
+  visibility predicate. The one relaxation is that the **author of a
+  moderation-removed post may still read its attachments** — it discloses
+  nothing they did not upload, the objects deliberately survive a removal so a
+  restore is lossless, and it is what lets `moderation.appealPreview` show
+  someone the images they are contesting. Ban and block visibility still
+  applies to them, and an author-_deleted_ post stays closed to everyone but a
+  moderator because those objects are reaped.
 - Gating `/media` does **not** revoke a presigned URL already issued. That URL
   stays valid for its own TTL, because this server never sees it again.
 

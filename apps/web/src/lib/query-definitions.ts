@@ -192,6 +192,32 @@ export function teamQueryOptions() {
 }
 
 /**
+ * The removed post an appeal is about — what the appeal page shows above its
+ * form so nobody has to argue about a post they cannot see.
+ *
+ * `enabled` gates two things at once. There may be no identifier at all (the
+ * page's "nothing to appeal" state), and the procedure is session-gated while
+ * the page itself is not: a signed-out visitor holding a suspension or ban
+ * link would only ever get UNAUTHORIZED, so the query is never sent rather
+ * than fired to fail. The form does not depend on any of this.
+ */
+export function appealPreviewQueryOptions(
+  identifier: { token?: string; postId?: string },
+  isSignedIn: boolean,
+) {
+  const input: { token?: string; postId?: string } = identifier.token
+    ? { token: identifier.token }
+    : identifier.postId
+      ? { postId: identifier.postId }
+      : {};
+  return {
+    ...orpc.moderation.appealPreview.queryOptions({ input }),
+    enabled: isSignedIn && (Boolean(identifier.token) || Boolean(identifier.postId)),
+    retry: retryUnlessClientError,
+  };
+}
+
+/**
  * The Team tab's account lookup — how staff reach someone the roster does not
  * list, so they can be granted a role.
  *

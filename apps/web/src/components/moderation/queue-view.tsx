@@ -313,7 +313,7 @@ function TargetLine({ preview }: { preview: CasePreview }) {
         {person.name || handle || m.user_unknown()}
       </span>
       {handle && <span> @{handle}</span>}
-      {preview.kind === "post" && (
+      {preview.kind === "post" && preview.excerpt && (
         <>
           {" — "}
           {preview.excerpt}

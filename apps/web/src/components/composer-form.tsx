@@ -170,7 +170,14 @@ export function ComposerForm({
   const trimmed = value.trim();
   const remaining = POST_MAX_LENGTH - value.length;
   const isTooLong = remaining < 0;
-  const canSubmit = trimmed.length > 0 && !isTooLong && !isPending && !attachmentsAreValidating;
+  // The same cross-field rule `post.create` enforces (issue #202): text,
+  // images, or both — never neither. Attachment validation/pending state
+  // still blocks until the selected files are known-good.
+  const canSubmit =
+    (trimmed.length > 0 || attachments.length > 0) &&
+    !isTooLong &&
+    !isPending &&
+    !attachmentsAreValidating;
   const rowsForQuery = mentionUsers(suggestionRows(typeahead.data));
   const showMentionSuggestions =
     !isPending && mentionState.open && (typeahead.isPending || rowsForQuery.length > 0);

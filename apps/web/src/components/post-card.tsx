@@ -303,15 +303,18 @@ export function PostCard({
             </div>
           ) : (
             <>
-              <p
-                className={`text-foreground/90 mb-3 leading-relaxed break-words whitespace-pre-line ${
-                  isFocused ? "text-base" : "text-sm"
-                }`}
-              >
-                {/* Null only for the two tombstones, which the stub branches
-                    above own; here the server guarantees content. */}
-                <LinkedText text={post.content ?? ""} />
-              </p>
+              {/* An image-only post (issue #202) stores `content` as ""; the
+                  paragraph is omitted entirely rather than leaving a blank
+                  block above the attachment grid. */}
+              {post.content && (
+                <p
+                  className={`text-foreground/90 mb-3 leading-relaxed break-words whitespace-pre-line ${
+                    isFocused ? "text-base" : "text-sm"
+                  }`}
+                >
+                  <LinkedText text={post.content} />
+                </p>
+              )}
               <PostAttachmentGrid attachments={post.attachments} />
             </>
           )}
