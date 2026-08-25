@@ -413,6 +413,8 @@
   "moderation_report_error": "Couldn't submit the report.",
   "moderation_report_submit": "Report",
   "moderation_report_submitting": "Reporting…",
+  "moderation_report_preview_title": "The post you're reporting",
+  "moderation_report_preview_no_text": "No text — images only.",
   "moderation_block_title": "Block @{handle}?",
   "moderation_block_body": "They won't be able to follow you or see your posts, and you'll stop seeing theirs.",
   "moderation_block_error": "Couldn't block this user.",

@@ -185,6 +185,7 @@ export function makePostPreview(
     truncated: false,
     isReply: false,
     removed: false,
+    attachments: [],
     author: makePreviewPerson(),
     ...overrides,
   };

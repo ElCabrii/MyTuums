@@ -10,13 +10,43 @@ export interface PostAttachmentView {
   height: number;
 }
 
-/** The shared, responsive renderer for feed, thread, profile, and moderation posts. */
+/**
+ * The shared, responsive renderer for feed, thread, profile, and moderation
+ * posts.
+ *
+ * `compact` renders a row of small square thumbnails with no link wrappers —
+ * for list rows like the moderation queue, where the whole row is a `<button>`
+ * and an interactive `<a>` cannot nest inside it. A thumbnail click bubbles to
+ * that button rather than opening the image, which is the point: the queue row
+ * opens the case, and the case dialog renders the full, link-wrapped grid.
+ */
 export function PostAttachmentGrid({
   attachments,
+  compact = false,
 }: {
   attachments: readonly PostAttachmentView[];
+  compact?: boolean;
 }) {
   if (attachments.length === 0) return null;
+
+  if (compact) {
+    return (
+      <div className="flex flex-wrap gap-1.5" aria-label={m.post_images_hint()}>
+        {attachments.map((attachment, index) => (
+          <img
+            key={attachment.id}
+            src={attachment.url}
+            alt={m.post_attachment_alt({ position: String(index + 1) })}
+            width={attachment.width}
+            height={attachment.height}
+            loading="lazy"
+            decoding="async"
+            className="size-14 rounded-md object-cover"
+          />
+        ))}
+      </div>
+    );
+  }
 
   const isSingle = attachments.length === 1;
 

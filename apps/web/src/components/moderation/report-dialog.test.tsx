@@ -3,8 +3,8 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { POST_REPORT_REASONS, USER_REPORT_REASONS } from "@my-tuums/api/constants";
-import { reportDialogAtom, reportReasonAtom, type CaseRef } from "@/atoms/moderation";
-import { renderWithProviders } from "@/test/render";
+import { reportDialogAtom, reportReasonAtom, type ReportDialogTarget } from "@/atoms/moderation";
+import { makePost, renderWithProviders } from "@/test/render";
 import { ReportDialog } from "@/components/moderation/report-dialog";
 import { reasonLabel } from "@/components/moderation/labels";
 import { m } from "@/paraglide/messages.js";
@@ -38,7 +38,7 @@ beforeEach(() => {
  * identity atom before render, since `ReportDialog`'s `open` is driven
  * straight off it (no click-to-open step exists inside this component).
  */
-async function openReportDialog(target: CaseRef) {
+async function openReportDialog(target: ReportDialogTarget) {
   const store = createStore();
   store.set(reportDialogAtom, target);
   const result = await renderWithProviders(<ReportDialog />, { store });
@@ -48,7 +48,11 @@ async function openReportDialog(target: CaseRef) {
 describe("ReportDialog", () => {
   it("keeps Report disabled until a reason is picked, then submits the post target", async () => {
     fakeClient.moderation.report.mockResolvedValue({ reported: true });
-    const { store } = await openReportDialog({ targetType: "post", targetId: "post-1" });
+    const { store } = await openReportDialog({
+      targetType: "post",
+      targetId: "post-1",
+      post: makePost({ id: "post-1" }),
+    });
 
     const submit = await screen.findByRole("button", { name: m.moderation_report_submit() });
     expect(submit).toBeDisabled();
@@ -105,7 +109,11 @@ describe("ReportDialog", () => {
   });
 
   it("offers POST_REPORT_REASONS and the post-target title for a post target", async () => {
-    await openReportDialog({ targetType: "post", targetId: "post-1" });
+    await openReportDialog({
+      targetType: "post",
+      targetId: "post-1",
+      post: makePost({ id: "post-1" }),
+    });
 
     expect(
       await screen.findByRole("heading", { name: m.moderation_report_title_post() }),
@@ -120,7 +128,11 @@ describe("ReportDialog", () => {
 
   it("shows the thank-you copy and hides the submit button once the report succeeds", async () => {
     fakeClient.moderation.report.mockResolvedValue({ reported: true });
-    const { store } = await openReportDialog({ targetType: "post", targetId: "post-1" });
+    const { store } = await openReportDialog({
+      targetType: "post",
+      targetId: "post-1",
+      post: makePost({ id: "post-1" }),
+    });
 
     act(() => store.set(reportReasonAtom, "spam"));
     const user = userEvent.setup();
@@ -134,7 +146,11 @@ describe("ReportDialog", () => {
 
   it("shows an error and keeps the form open when the report fails", async () => {
     fakeClient.moderation.report.mockRejectedValue(new Error("network down"));
-    const { store } = await openReportDialog({ targetType: "post", targetId: "post-1" });
+    const { store } = await openReportDialog({
+      targetType: "post",
+      targetId: "post-1",
+      post: makePost({ id: "post-1" }),
+    });
 
     act(() => store.set(reportReasonAtom, "spam"));
     const user = userEvent.setup();
@@ -143,5 +159,62 @@ describe("ReportDialog", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(m.moderation_report_error());
     // Unlike success, failure keeps the submit control around for a retry.
     expect(screen.getByRole("button", { name: m.moderation_report_submit() })).toBeInTheDocument();
+  });
+
+  it("previews the post being reported — its text and images — above the reason picker", async () => {
+    await openReportDialog({
+      targetType: "post",
+      targetId: "post-1",
+      post: makePost({
+        id: "post-1",
+        content: "the flagged text",
+        attachments: [
+          {
+            id: "attachment-1",
+            url: "/media/posts/author/post/attachment-1.png",
+            position: 0,
+            contentType: "image/png",
+            byteSize: 24,
+            width: 256,
+            height: 128,
+          },
+        ],
+      }),
+    });
+
+    expect(await screen.findByText("the flagged text")).toBeInTheDocument();
+    expect(screen.getByText(m.moderation_report_preview_title())).toBeInTheDocument();
+    expect(screen.getByAltText(m.post_attachment_alt({ position: "1" }))).toBeInTheDocument();
+  });
+
+  it("shows the 'images only' note for an image-only post (issue #202)", async () => {
+    await openReportDialog({
+      targetType: "post",
+      targetId: "post-1",
+      post: makePost({
+        id: "post-1",
+        content: "",
+        attachments: [
+          {
+            id: "attachment-1",
+            url: "/media/posts/author/post/attachment-1.png",
+            position: 0,
+            contentType: "image/png",
+            byteSize: 24,
+            width: 256,
+            height: 128,
+          },
+        ],
+      }),
+    });
+
+    expect(await screen.findByText(m.moderation_report_preview_no_text())).toBeInTheDocument();
+  });
+
+  it("shows no post preview for a user target — there is no post to flag", async () => {
+    await openReportDialog({ targetType: "user", targetId: "user-1" });
+
+    await screen.findByRole("heading", { name: m.moderation_report_title_user() });
+    expect(screen.queryByText(m.moderation_report_preview_title())).not.toBeInTheDocument();
   });
 });

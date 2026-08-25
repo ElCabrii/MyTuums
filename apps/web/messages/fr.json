@@ -413,6 +413,8 @@
   "moderation_report_error": "Impossible d'envoyer le signalement.",
   "moderation_report_submit": "Signaler",
   "moderation_report_submitting": "Envoi…",
+  "moderation_report_preview_title": "La publication que vous signalez",
+  "moderation_report_preview_no_text": "Aucun texte — images uniquement.",
   "moderation_block_title": "Bloquer @{handle} ?",
   "moderation_block_body": "Cette personne ne pourra plus vous suivre ni voir vos posts, et vous ne verrez plus les siens.",
   "moderation_block_error": "Impossible de bloquer cet utilisateur.",

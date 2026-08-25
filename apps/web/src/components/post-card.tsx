@@ -240,7 +240,9 @@ export function PostCard({
                     <>
                       <DropdownMenuItem
                         className="cursor-pointer"
-                        onClick={() => setReportDialog({ targetType: "post", targetId: post.id })}
+                        onClick={() =>
+                          setReportDialog({ targetType: "post", targetId: post.id, post })
+                        }
                       >
                         {m.moderation_kebab_report_post()}
                       </DropdownMenuItem>
