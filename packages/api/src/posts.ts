@@ -85,7 +85,6 @@ type ParentPreview = {
   excerpt: string | null;
   truncated: boolean;
   removed: boolean;
-  deleted: boolean;
   author: {
     id: string;
     name: string | null;
@@ -222,15 +221,14 @@ function parentPreview(viewerId: string) {
     select jsonb_build_object(
       'id', ${parentPost.id},
       'excerpt', case
-        when ${parentPost.removedAt} is not null or ${parentPost.deletedAt} is not null then null
+        when ${parentPost.removedAt} is not null then null
         else left(${parentPost.content}, ${PARENT_EXCERPT_LENGTH})
       end,
       'truncated', case
-        when ${parentPost.removedAt} is not null or ${parentPost.deletedAt} is not null then false
+        when ${parentPost.removedAt} is not null then false
         else char_length(${parentPost.content}) > ${PARENT_EXCERPT_LENGTH}
       end,
       'removed', ${parentPost.removedAt} is not null,
-      'deleted', ${parentPost.deletedAt} is not null,
       'author', jsonb_build_object(
         'id', ${parentAuthor.id},
         'name', ${parentAuthor.name},

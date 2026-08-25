@@ -1121,7 +1121,6 @@ describe("post.list", () => {
       id: parent.id,
       truncated: false,
       removed: false,
-      deleted: false,
       author: { id: parentAuthor.id, name: "Parent Author" },
     });
     expect(visibleReply?.parent?.excerpt).toMatch(/^seed post 0 /);
