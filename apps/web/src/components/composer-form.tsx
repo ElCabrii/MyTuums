@@ -226,7 +226,7 @@ export function ComposerForm({
           rows={rows}
           disabled={isPending}
           wrapperClassName="min-w-0 flex-1"
-          className="placeholder:text-muted-foreground max-h-64 min-h-[3.5rem] w-full resize-none border-none bg-transparent p-0 text-sm focus-visible:ring-0 disabled:opacity-60"
+          className="placeholder:text-muted-foreground max-h-64 min-h-[3.5rem] w-full resize-none rounded-none border-none bg-transparent p-0 text-sm focus-visible:ring-0 disabled:opacity-60"
         />
       </div>
 
