@@ -22,7 +22,7 @@ import { z } from "zod";
 import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/login")({
-  head: () => pageHead(m.auth_log_in()),
+  head: () => pageHead(m.auth_log_in(), m.login_document_description(), "/login"),
   component: LoginPage,
   /**
    * Two search params, and together they prove the rule CONTEXT.md states:

@@ -5,7 +5,7 @@ import { pageHead } from "@/lib/document-head";
 import { m } from "@/paraglide/messages.js";
 
 export const Route = createFileRoute("/search")({
-  head: () => pageHead(m.search_input_aria()),
+  head: () => pageHead(m.search_input_aria(), m.search_document_description(), "/search"),
   component: SearchPage,
   /**
    * `q` arrives from *outside* — the header's search box navigates here with

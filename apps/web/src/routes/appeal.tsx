@@ -5,7 +5,7 @@ import { m } from "@/paraglide/messages.js";
 import { z } from "zod";
 
 export const Route = createFileRoute("/appeal")({
-  head: () => pageHead(m.appeal_title()),
+  head: () => pageHead(m.appeal_title(), m.appeal_document_description(), "/appeal"),
   component: AppealPage,
   /**
    * `token` and `postId` arrive from *outside* — the moderation email and the

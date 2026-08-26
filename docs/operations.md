@@ -66,7 +66,14 @@ beside a live dev stack rather than asking you to stop working first.
 ## Railway
 
 Production runs on Railway, **always in a European region** — the app,
-Postgres and object storage in the same region.
+Postgres and object storage in the same region. The public origin is
+**https://mytuums.com**; it is what `WEB_ORIGIN` is set to in production, and
+it is baked into `apps/web/index.html`'s canonical/Open Graph tags and
+Organization JSON-LD, mirrored by `SITE_ORIGIN` in
+`apps/web/src/lib/document-head.ts`. Those tags are crawler-facing statements
+about the real site, so every environment serves them unchanged — a Preview
+URL still unfurls with production canonicals by design. Change all three
+places together.
 
 Four environments, and they do not do the same job:
 

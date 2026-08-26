@@ -41,11 +41,11 @@ export const Route = createRootRoute({
 function RootLayout() {
   useEffect(() => {
     // index.html supplies metadata before the SPA can execute, so a cold load
-    // is never an untitled document. HeadContent has committed the localized
-    // route metadata by the time this effect runs; remove only those tagged
-    // fallbacks to leave a single title and description owner afterward.
-    document.querySelector("#app-title-fallback")?.remove();
-    document.querySelector("#app-description-fallback")?.remove();
+    // is never an untitled document — and so no-JS crawlers still see unfurl
+    // tags. HeadContent has committed the localized route metadata by the time
+    // this effect runs; remove only those tagged fallbacks to leave a single
+    // owner per tag afterward.
+    document.querySelectorAll("[data-app-fallback]").forEach((el) => el.remove());
   }, []);
 
   // Mounts the theme side effect for the lifetime of the app — see

@@ -13,12 +13,59 @@
          `display: standalone` everywhere that still matters. -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title id="app-title-fallback">MyTuums — Social Media for Gamers</title>
+    <title data-app-fallback>MyTuums — Social Media for Gamers</title>
     <meta
-      id="app-description-fallback"
+      data-app-fallback
       name="description"
       content="MyTuums is the social media platform built for gamers."
     />
+    <!-- Static unfurl metadata. This file is the only head a no-JS crawler ever
+         sees (the server serves it for every URL), so these tags are what
+         Slack/X/Discord previews render. They are fallbacks only: once React
+         mounts, __root.tsx removes every [data-app-fallback] tag and each
+         route's head() re-emits the same set with localized, per-page values
+         (src/lib/document-head.ts owns those shapes — keep origin and copy in
+         step with it). English-only is deliberate; Paraglide lives in the
+         bundle and cannot reach this markup, like the splash below. -->
+    <link data-app-fallback rel="canonical" href="https://mytuums.com/" />
+    <meta data-app-fallback property="og:title" content="MyTuums — Social Media for Gamers" />
+    <meta
+      data-app-fallback
+      property="og:description"
+      content="MyTuums is the social media platform built for gamers."
+    />
+    <meta data-app-fallback property="og:type" content="website" />
+    <meta data-app-fallback property="og:url" content="https://mytuums.com/" />
+    <meta data-app-fallback property="og:site_name" content="MyTuums" />
+    <meta data-app-fallback property="og:image" content="https://mytuums.com/mytuums-512.png" />
+    <meta data-app-fallback name="twitter:card" content="summary" />
+    <meta data-app-fallback name="twitter:title" content="MyTuums — Social Media for Gamers" />
+    <meta
+      data-app-fallback
+      name="twitter:description"
+      content="MyTuums is the social media platform built for gamers."
+    />
+    <meta data-app-fallback name="twitter:image" content="https://mytuums.com/mytuums-512.png" />
+    <!-- Organization entity stacking (schema.org): tells search engines that
+         this site and the profiles below are one brand entity. Only genuine,
+         crawlable profiles belong in `sameAs`. Sits outside [data-app-fallback]
+         because it is crawler-owned and never duplicated by the SPA. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "MyTuums",
+        "url": "https://mytuums.com",
+        "logo": "https://mytuums.com/mytuums-512.png",
+        "sameAs": [
+          "https://x.com/mytuums",
+          "https://www.instagram.com/mytuums/",
+          "https://www.tiktok.com/@mytuums",
+          "https://www.youtube.com/@MyTuums",
+          "https://github.com/MyTuums"
+        ]
+      }
+    </script>
     <style>
       /* The cold-load splash, static on purpose. It lives here rather than in
          React so it paints on the very first frame — before the bundle has

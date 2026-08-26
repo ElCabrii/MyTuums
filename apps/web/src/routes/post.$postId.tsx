@@ -5,6 +5,6 @@ import { pageHead } from "@/lib/document-head";
 
 /** The single-post thread route (`/post/$postId`) — renders `ThreadPage`. */
 export const Route = createFileRoute("/post/$postId")({
-  head: () => pageHead(m.post_title()),
+  head: ({ params }) => pageHead(m.post_title(), undefined, `/post/${params.postId}`),
   component: ThreadPage,
 });

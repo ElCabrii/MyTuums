@@ -26,7 +26,8 @@ import { z } from "zod";
 import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/reset-password")({
-  head: () => pageHead(m.auth_reset_title()),
+  head: () =>
+    pageHead(m.auth_reset_title(), m.reset_password_document_description(), "/reset-password"),
   component: ResetPasswordPage,
   /**
    * Two params, and both arrive from *outside*: BetterAuth's own server
