@@ -5,6 +5,7 @@ import { m } from "@/paraglide/messages.js";
 
 /** The LCEN legal-notice route — renders `MentionsLegales` in the current locale. */
 export const Route = createFileRoute("/mentions-legales")({
-  head: () => pageHead(m.legal_notice()),
+  head: () =>
+    pageHead(m.legal_notice(), m.legal_notice_document_description(), "/mentions-legales"),
   component: MentionsLegales,
 });

@@ -85,6 +85,15 @@ app's build from the same origin.
   add new ones with the CLI so regenerations stay clean.
 - **`data-testid` is banned** across the app — the E2E suite locates
   structurally or by role.
+- **`src/lib/document-head.ts` owns every SPA-rendered head tag; `index.html`
+  owns only pre-JS fallbacks.** The static `[data-app-fallback]` tags restate
+  `SITE_ORIGIN` and the brand copy by hand because that file cannot import
+  TypeScript; `__root.tsx` removes them on mount so nothing is left with two
+  owners. Canonical/Open Graph URLs always point at the production origin
+  (`SITE_ORIGIN`), never at the current host — change it together with
+  `index.html`. Data-dependent titles/descriptions go through
+  `setDocumentHead`/`useDocumentHead`, which also update the Open Graph and
+  Twitter mirrors.
 - **Feed and list parameterisation lives in atoms.** `PostFeed` takes a
   `feedAtom` prop and never knows its own scope or author.
 - **Permalink reply grouping reads the continuation embedded in each direct

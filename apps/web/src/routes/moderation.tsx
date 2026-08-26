@@ -4,6 +4,6 @@ import { pageHead } from "@/lib/document-head";
 import { m } from "@/paraglide/messages.js";
 
 export const Route = createFileRoute("/moderation")({
-  head: () => pageHead(m.moderation_title()),
+  head: () => pageHead(m.moderation_title(), m.moderation_document_description(), "/moderation"),
   component: ModerationPage,
 });

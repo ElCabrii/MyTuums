@@ -26,7 +26,7 @@ import { m } from "@/paraglide/messages.js";
 import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/register")({
-  head: () => pageHead(m.auth_register()),
+  head: () => pageHead(m.auth_register(), m.register_document_description(), "/register"),
   component: RegisterPage,
   /**
    * The `redirect` param is the one the signed-in gate set on `/login`

@@ -5,6 +5,6 @@ import { m } from "@/paraglide/messages.js";
 
 /** The privacy policy route — renders `PrivacyPolicy` in the current locale. */
 export const Route = createFileRoute("/privacy")({
-  head: () => pageHead(m.legal_privacy_policy()),
+  head: () => pageHead(m.legal_privacy_policy(), m.privacy_document_description(), "/privacy"),
   component: PrivacyPolicy,
 });

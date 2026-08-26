@@ -5,6 +5,6 @@ import { m } from "@/paraglide/messages.js";
 
 /** The home feed route (`/`) — renders `HomePage`. */
 export const Route = createFileRoute("/")({
-  head: () => pageHead(m.feed_title()),
+  head: () => pageHead(m.feed_title(), m.feed_document_description()),
   component: HomePage,
 });

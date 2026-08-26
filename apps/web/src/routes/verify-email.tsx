@@ -20,7 +20,8 @@ import { z } from "zod";
 import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/verify-email")({
-  head: () => pageHead(m.auth_verify_title()),
+  head: () =>
+    pageHead(m.auth_verify_title(), m.verify_email_document_description(), "/verify-email"),
   component: VerifyEmailPage,
   /**
    * `error` arrives from *outside*: Better Auth's `/verify-email` endpoint
