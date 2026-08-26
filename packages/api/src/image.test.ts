@@ -345,7 +345,7 @@ describe("acceptImage", () => {
 
   it("rejects a display object beyond the slot's pixel bounds", () => {
     // The display object is what lands in every feed; a hostile client can
-    // name a 600px-wide image "the avatar's display object" and expect it to
+    // name a 1200px-wide image "the avatar's display object" and expect it to
     // ride along. The bound is what stops it.
     const wide = new Uint8Array([
       0x52,
@@ -374,8 +374,8 @@ describe("acceptImage", () => {
       0x9d,
       0x01,
       0x2a, // start code
-      0x58,
-      0x02, // width: 600
+      0xb0,
+      0x04, // width: 1200
       0x2c,
       0x01, // height: 300
     ]);
@@ -387,6 +387,39 @@ describe("acceptImage", () => {
     // Same bytes are fine as the ORIGINAL, whose rule is megapixels, not
     // display bounds.
     expect(acceptImage(wide, "image/webp", "avatar", "original")).toMatchObject({ ok: true });
+  });
+
+  it("accepts the avatar's enlarged display bounds and byte budget", () => {
+    // The full-size viewer renders the display object at near-viewport scale
+    // (issue #229), so a 1.5 MB photographic PNG must fit under the raised
+    // 2 MiB cap — this catches the client/server display-byte limit falling
+    // behind the new resolution.
+    const fullResolution = pngWithDimensions(1024, 1024, Math.floor(1.5 * 1024 * 1024));
+    expect(acceptImage(fullResolution, "image/png", "avatar", "display")).toMatchObject({
+      ok: true,
+    });
+    // The old 512px ceiling would have rejected this; the new one accepts it.
+    expect(
+      acceptImage(pngWithDimensions(1024, 1024), "image/png", "avatar", "display"),
+    ).toMatchObject({ ok: true });
+
+    expect(IMAGE_LIMITS.avatar).toMatchObject({
+      maxDisplayBytes: 2 * 1024 * 1024,
+      maxWidth: 1024,
+      maxHeight: 1024,
+    });
+    expect(
+      acceptImage(pngWithDimensions(1025, 1024), "image/png", "avatar", "display"),
+    ).toMatchObject({
+      ok: false,
+      reason: "size",
+    });
+    expect(
+      acceptImage(pngWithDimensions(1024, 1025), "image/png", "avatar", "display"),
+    ).toMatchObject({
+      ok: false,
+      reason: "size",
+    });
   });
 
   it("accepts the banner's enlarged display bounds and byte budget", () => {

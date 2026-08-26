@@ -60,6 +60,23 @@ export {
 /** What the file picker should offer, as an `accept` attribute. */
 export const IMAGE_ACCEPT = ALLOWED_IMAGE_TYPES.join(",");
 
+/**
+ * WebP encode quality for the display variants whose only job is to render
+ * small: feeds, headers and the profile frame never draw a banner above its
+ * native pixels, so 0.85 — the usual knee, visually indistinguishable from 1.0
+ * at these sizes for roughly a third of the bytes — holds.
+ */
+const DISPLAY_VARIANT_WEBP_QUALITY = 0.85;
+
+/**
+ * Avatars encode a notch higher because one surface reads them differently:
+ * the profile page's full-size viewer (`ImageViewer`) scales this same object
+ * toward the viewport, where the knee's blocking starts to show. Feeds still
+ * downscale, so nothing else changes; the enlarged avatar ceiling
+ * (`IMAGE_LIMITS.avatar`) absorbs the extra bytes.
+ */
+const AVATAR_DISPLAY_VARIANT_WEBP_QUALITY = 0.9;
+
 function isAllowedType(type: string): boolean {
   return ALLOWED_IMAGE_TYPES.some((allowed) => allowed === type);
 }
@@ -188,7 +205,10 @@ export async function createDisplayVariantImpl(
         canvas.height,
       );
 
-      blob = await toBlob(canvas);
+      blob = await toBlob(
+        canvas,
+        kind === "avatar" ? AVATAR_DISPLAY_VARIANT_WEBP_QUALITY : DISPLAY_VARIANT_WEBP_QUALITY,
+      );
       if (blob.size <= IMAGE_LIMITS[kind].maxDisplayBytes) break;
 
       // Browsers without WebP encoding silently return lossless PNG. A noisy
@@ -316,7 +336,7 @@ export async function createPostAttachmentImpl(file: File): Promise<File> {
       canvas.height = height;
       context.drawImage(bitmap, 0, 0, width, height);
 
-      blob = await toBlob(canvas);
+      blob = await toBlob(canvas, DISPLAY_VARIANT_WEBP_QUALITY);
       if (blob.size <= POST_ATTACHMENT_MAX_BYTES) break;
 
       // Browsers without WebP encoding silently return lossless PNG, whose
@@ -374,7 +394,7 @@ async function decode(file: File): Promise<ImageBitmap> {
   }
 }
 
-function toBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+function toBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
@@ -382,9 +402,7 @@ function toBlob(canvas: HTMLCanvasElement): Promise<Blob> {
         else reject(new ImageError("decode"));
       },
       "image/webp",
-      // 0.85 is the usual knee for WebP: visually indistinguishable from 1.0 at
-      // these sizes, roughly a third of the bytes.
-      0.85,
+      quality,
     );
   });
 }
