@@ -251,7 +251,9 @@ sides by CI. See [operations.md](operations.md).
   matches the no-crop encode, while pan and zoom change the square that every
   avatar surface renders without a second hidden `object-cover` crop. Only the
   display variant is square-cropped; the original remains untouched for a
-  future refit.
+  future refit. The stored variant can reach 1024x1024 because the profile
+  page's full-size viewer renders this same object at near-viewport scale —
+  feeds still downscale it (issue #229).
 - **Banners have a canonical 3:1 source and a responsive display crop.** At
   zoom 1 the editor rectangle is exactly the region the encoder stores
   (`calculateCropFrame`), so applying without adjusting anything is a no-op.

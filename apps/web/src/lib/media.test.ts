@@ -243,14 +243,14 @@ describe("calculateDisplayLayout", () => {
   // arithmetic that decides sharpness is all here.
 
   it("avatar: center-crops to a square and never upscales", () => {
-    // A 4000x4000 source is scaled down to the 512x512 cap, keeping every row.
+    // A 4000x4000 source is scaled down to the 1024x1024 cap, keeping every row.
     expect(calculateDisplayLayout({ width: 4000, height: 4000 }, "avatar")).toEqual({
       sourceX: 0,
       sourceY: 0,
       sourceWidth: 4000,
       sourceHeight: 4000,
-      width: 512,
-      height: 512,
+      width: 1024,
+      height: 1024,
     });
     // A source under the cap stays at native size — no invented pixels.
     expect(calculateDisplayLayout({ width: 100, height: 100 }, "avatar")).toEqual({

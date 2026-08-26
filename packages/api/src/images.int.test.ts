@@ -307,9 +307,9 @@ describe("user.uploadImage", () => {
   // cost of another Postgres round trip.
   it("rejects a display object beyond the slot's pixel bounds", async () => {
     // The display object is what lands in every feed; a hostile client naming
-    // a 600px-wide image "the avatar's display object" must be refused.
+    // a 1200px-wide image "the avatar's display object" must be refused.
     const alice = await createTestUser();
-    const wide = new File([pngWithDimensions(600, 300)], "wide.png", { type: "image/png" });
+    const wide = new File([pngWithDimensions(1200, 300)], "wide.png", { type: "image/png" });
 
     await expect(
       call(appRouter.user.uploadImage, uploadInput("avatar", { display: wide }), {
