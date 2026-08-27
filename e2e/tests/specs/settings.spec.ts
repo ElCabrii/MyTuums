@@ -1,4 +1,5 @@
 import { expect, test } from "../../support/fixtures";
+import type { Locator } from "@playwright/test";
 import { emailVerificationLinkFor } from "../../support/db";
 import { solidPng } from "../../support/image";
 import { E2E } from "../../playwright.config";
@@ -27,6 +28,31 @@ function storageBucketConfigured(): boolean {
   return ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"].every((key) =>
     Boolean(process.env[key]),
   );
+}
+
+/**
+ * The uploaded object and its immediate display frame must share the canonical
+ * 3:1 aspect. Equal aspects make `object-cover` a no-op: every marker in an
+ * asymmetric source remains in the composition instead of being silently
+ * removed by a viewport-dependent second crop (issue #234).
+ */
+async function expectCanonicalBannerGeometry(banner: Locator) {
+  await expect(banner).toBeVisible();
+  await expect
+    .poll(() =>
+      banner.evaluate((image: HTMLImageElement) =>
+        image.naturalHeight === 0 ? 0 : image.naturalWidth / image.naturalHeight,
+      ),
+    )
+    .toBeCloseTo(3, 5);
+
+  const frameAspect = await banner.evaluate((image) => {
+    const frame = image.parentElement;
+    if (!frame) throw new Error("banner image has no display frame");
+    const bounds = frame.getBoundingClientRect();
+    return bounds.width / bounds.height;
+  });
+  expect(frameAspect).toBeCloseTo(3, 5);
 }
 
 /** Signs up a fresh account through the UI and lands on its profile. */
@@ -161,7 +187,7 @@ test.describe("images", () => {
     expect(response.headers()["content-type"]).toContain("image");
   });
 
-  test("uploads a banner into its own slot", async ({ page }) => {
+  test("keeps one banner composition in Settings and across profile widths", async ({ page }) => {
     const account = await signUpFresh(page, "banner");
 
     await page.goto("/settings/account");
@@ -182,11 +208,16 @@ test.describe("images", () => {
     // so a future regression reports the reason rather than a bare timeout.
     await expect(page.getByRole("alert")).toHaveCount(0);
 
+    await expectCanonicalBannerGeometry(page.getByRole("img", { name: "Banner" }));
+
     await page.goto(`/@${account.username}`);
-    await expect(page.getByRole("img", { name: /banner/i })).toHaveAttribute(
-      "src",
-      /^\/media\/banners\//,
-    );
+    const profileBanner = page.getByRole("img", { name: /banner/i });
+    await expect(profileBanner).toHaveAttribute("src", /^\/media\/banners\//);
+
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expectCanonicalBannerGeometry(profileBanner);
+    }
   });
 
   test("removing an image clears it from the profile", async ({ page }) => {
