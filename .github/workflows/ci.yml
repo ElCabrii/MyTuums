@@ -24,8 +24,8 @@ env:
   POSTGRES_PASSWORD: ci-postgres-password
   # Port 5433, not 5432: the self-hosted runner also runs the dev stack
   # (`pnpm docker:up` binds 5432), so the CI service container would collide
-  # with it. The `docker` job's `--network host` boot step reaches this port
-  # through the runner's loopback, same as 5432.
+  # with it. The `docker` job reaches this port through Docker's host-gateway
+  # alias, which works on Docker Desktop as well as native Linux.
   DATABASE_URL: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums
   DATABASE_URL_TEST: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums_test
   BETTER_AUTH_SECRET: ci-better-auth-secret-at-least-32-characters
@@ -286,10 +286,9 @@ jobs:
     runs-on: self-hosted
 
     services:
-      # Same ephemeral Postgres as the integration and e2e jobs. The image's
-      # ports are published to the runner's localhost, which the container
-      # reaches through `--network host` (the runner is a native Linux VM, so
-      # host networking shares the runner's namespace).
+      # Same ephemeral Postgres as the integration and e2e jobs. Docker Desktop
+      # runs containers inside its VM, so the container reaches the runner's
+      # published port through the `ci-host` host-gateway alias below.
       postgres:
         image: postgres:16-alpine
         env:
@@ -403,14 +402,14 @@ jobs:
       # and the boot below uses the image's real CMD with no overrides — the
       # same process a deployed container runs.
       #
-      # `--network host` is required here, not optional: the Postgres service
-      # port is published on the RUNNER's loopback, and a plain `docker run`
-      # puts the container on the default bridge where `localhost` is the
-      # container's own loopback — the migrate process could not reach the
-      # database at all.
+      # Docker Desktop's host network is inside its VM, not the runner's
+      # network namespace. Rewrite the runner URL to one host label and map it
+      # through Docker's host-gateway so migration reaches the service port.
       - name: Run the pre-deploy migration
         run: |
-          docker run --rm --network host -e "DATABASE_URL=${DATABASE_URL}" \
+          ci_database_url=${DATABASE_URL/localhost/ci-host}
+          docker run --rm --add-host ci-host=host-gateway \
+            -e "DATABASE_URL=${ci_database_url}" \
             mytuums-server:ci node apps/server/dist/migrate.js
 
       # The production smoke: boot the image (real CMD), then probe the same
@@ -446,8 +445,11 @@ jobs:
           # fails on the name conflict. Remove any stale one first.
           docker rm -f ci-smoke-server >/dev/null 2>&1 || true
 
-          docker run -d --name ci-smoke-server --network host \
-            -e "DATABASE_URL=${DATABASE_URL}" \
+          ci_database_url=${DATABASE_URL/localhost/ci-host}
+          docker run -d --name ci-smoke-server \
+            --add-host ci-host=host-gateway \
+            -p 127.0.0.1:3002:3002 \
+            -e "DATABASE_URL=${ci_database_url}" \
             -e "BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}" \
             -e "BETTER_AUTH_URL=${BETTER_AUTH_URL}" \
             -e "WEB_ORIGIN=${WEB_ORIGIN}" \
@@ -464,9 +466,6 @@ jobs:
             echo "::error::docker run failed - the image could not be started";
             exit 1; }
 
-          # The server binds IPv4 (`HOST=0.0.0.0`). Some self-hosted runners
-          # resolve localhost to IPv6 first and never reach that socket, so the
-          # transport probe uses the matching loopback address explicitly.
           smoke_origin=http://127.0.0.1:3002
 
           for _ in $(seq 1 30); do
