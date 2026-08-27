@@ -52,11 +52,13 @@ would produce a broken one.
   minutes are consumed. The runner must be a native Linux machine with Node
   22, pnpm, Docker, and the `postgres:16-alpine` image available, and it must
   be online when a run is triggered.
-- **The `docker` job's boot step needs `--network host` on a native Linux
-  runner.** The Postgres service port is published on the runner's loopback;
-  on the default bridge network `localhost` is the container's own loopback
-  and the migration cannot reach the database at all. Moving to a
-  container-based or macOS runner requires `host.docker.internal` instead.
+- **The `docker` job reaches runner services through a single-label
+  `ci-host` alias mapped to Docker's `host-gateway`.** The Postgres service
+  port is published on the runner, while a container's `localhost` is its own
+  loopback. Keep the alias single-label so the database package does not apply
+  its production TLS rule to this private CI connection. The smoke server
+  publishes `127.0.0.1:3002:3002` explicitly; Docker Desktop's host network is
+  the Docker VM's namespace and is not reachable from runner-side probes.
 - **CI's Postgres binds host port 5433, not 5432.** The self-hosted runner
   also runs the dev stack (`pnpm docker:up` binds 5432), so the CI service
   container would collide with it. `DATABASE_URL`/`DATABASE_URL_TEST` and the
