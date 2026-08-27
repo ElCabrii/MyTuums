@@ -52,11 +52,11 @@ would produce a broken one.
   minutes are consumed. The runner must be a native Linux machine with Node
   22, pnpm, Docker, and the `postgres:16-alpine` image available, and it must
   be online when a run is triggered.
-- **The `docker` job's boot step needs `--network host` on a native Linux
-  runner.** The Postgres service port is published on the runner's loopback;
-  on the default bridge network `localhost` is the container's own loopback
-  and the migration cannot reach the database at all. Moving to a
-  container-based or macOS runner requires `host.docker.internal` instead.
+- **The `docker` job uses a Docker Desktop-compatible host alias.** Docker
+  Desktop's `--network host` is inside its VM, so the runner cannot reach a
+  container port through `localhost`. The migration and smoke container map
+  `ci-host=host-gateway`, and rewrite the CI database URL's `localhost` label
+  to `ci-host`; the smoke port is published to the runner explicitly.
 - **CI's Postgres binds host port 5433, not 5432.** The self-hosted runner
   also runs the dev stack (`pnpm docker:up` binds 5432), so the CI service
   container would collide with it. `DATABASE_URL`/`DATABASE_URL_TEST` and the
@@ -65,8 +65,8 @@ would produce a broken one.
   self-hosted runner also runs the dev stack (`pnpm dev` holds 3001), so the
   container would fail to bind and the probes would silently hit the dev
   server. The boot step overrides `BETTER_AUTH_URL` to match. Its curls use
-  `127.0.0.1`, matching the server's IPv4 bind even when a runner resolves
-  `localhost` to IPv6 first.
+  `127.0.0.1`, matching the published host port while `BETTER_AUTH_URL`
+  remains `http://localhost:3002` for application URL generation.
 - **The OAuth provider mirror is asserted from both sides.** The bundle grep
   proves the client list shipped; the booted container's
   `/api/auth/sign-in/social` probes prove the server registers the same
