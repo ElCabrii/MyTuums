@@ -52,13 +52,13 @@ would produce a broken one.
   minutes are consumed. The runner must be a native Linux machine with Node
   22, pnpm, Docker, and the `postgres:16-alpine` image available, and it must
   be online when a run is triggered.
-- **The `docker` job reaches runner services through a single-label
-  `ci-host` alias mapped to Docker's `host-gateway`.** The Postgres service
-  port is published on the runner, while a container's `localhost` is its own
-  loopback. Keep the alias single-label so the database package does not apply
-  its production TLS rule to this private CI connection. The smoke server
-  publishes `127.0.0.1:3002:3002` explicitly; Docker Desktop's host network is
-  the Docker VM's namespace and is not reachable from runner-side probes.
+- **The `docker` job uses a Docker Desktop-compatible host alias.** Docker
+  Desktop's `--network host` is inside its VM, so the runner cannot reach a
+  container port through `localhost`. The migration and smoke container map
+  `ci-host=host-gateway`, and rewrite the CI database URL's `localhost` label
+  to `ci-host`; the smoke port is published to the runner explicitly. Keep the
+  alias single-label so the database package does not apply its production TLS
+  rule to this private CI connection.
 - **CI's Postgres binds host port 5433, not 5432.** The self-hosted runner
   also runs the dev stack (`pnpm docker:up` binds 5432), so the CI service
   container would collide with it. `DATABASE_URL`/`DATABASE_URL_TEST` and the
@@ -66,7 +66,9 @@ would produce a broken one.
 - **The `docker` job's smoke server binds port 3002, not 3001.** The
   self-hosted runner also runs the dev stack (`pnpm dev` holds 3001), so the
   container would fail to bind and the probes would silently hit the dev
-  server. The boot step overrides `BETTER_AUTH_URL` to match.
+  server. The boot step overrides `BETTER_AUTH_URL` to match. Its curls use
+  `127.0.0.1`, matching the published host port while `BETTER_AUTH_URL`
+  remains `http://localhost:3002` for application URL generation.
 - **The OAuth provider mirror is asserted from both sides.** The bundle grep
   proves the client list shipped; the booted container's
   `/api/auth/sign-in/social` probes prove the server registers the same

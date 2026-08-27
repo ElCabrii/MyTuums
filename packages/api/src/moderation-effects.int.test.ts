@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { moderationRemovalEmail } from "@my-tuums/auth";
 import { closeDb } from "@my-tuums/db";
 import { and, eq } from "drizzle-orm";
 import { moderationAction, post, postAttachment, report, session, user } from "@my-tuums/db/schema";
@@ -67,6 +68,21 @@ function dbThatRollsBack(): DbLike {
       }),
   };
 }
+
+describe("branded email rendering", () => {
+  it("keeps a capability URL unchanged in text and equivalent in its escaped HTML link", () => {
+    const appealUrl =
+      "https://mytuums.test/appeal?token=signed-capability&callbackURL=%2Fmoderation%3Ftab%3Dappeals";
+
+    const email = moderationRemovalEmail(
+      { postText: "remove me", attachmentCount: 0, reason: "spam", appealUrl },
+      "en",
+    );
+
+    expect(email.text).toContain(appealUrl);
+    expect(email.html).toContain(`href="${appealUrl.replaceAll("&", "&amp;")}"`);
+  });
+});
 
 describe("forward moderation effects", () => {
   it("removePostEffect describes the removed post's images, and drops the quote block when there is no text", async () => {
@@ -497,12 +513,41 @@ describe("the moderation entry points deliver their notices", () => {
     const author = await createTestUser();
     const mod = await createTestUser();
     await setUserRole(mod.id, "moderator");
-    const postId = await seedPost(author.id, "remove me");
+    const postId = await seedPost(author.id, "remove <script>alert('x')</script>");
 
-    await removePost(anonContext, { postId, actorId: mod.id, reason: "spam" });
+    await removePost(anonContext, { postId, actorId: mod.id, reason: "spam & scams" });
 
-    const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
-    expect(emails).toContain("Your post was removed from MyTuums");
+    const email = vi
+      .mocked(testEmailSender.send)
+      .mock.calls.map(([mail]) => mail)
+      .find((mail) => mail.subject === "Your post was removed from MyTuums");
+    if (!email) throw new Error("expected the removal email to be delivered");
+
+    const appealUrl = email.text.match(/https?:\/\/\S+/)?.[0];
+    if (!appealUrl) throw new Error("expected the text fallback to contain an appeal URL");
+
+    expect(email.html).toContain(appealUrl);
+    expect(email.html).toContain("http://localhost:5173/mytuums-192.png");
+    expect(email.html).toContain("remove &lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
+    expect(email.html).not.toContain("<script>alert('x')</script>");
+    expect(email.text).toContain("spam & scams");
+  });
+
+  it("removePost delivers branded French HTML from the recipient's stored locale", async () => {
+    const author = await createTestUser();
+    const mod = await createTestUser();
+    await setUserRole(mod.id, "moderator");
+    await anonContext.db.update(user).set({ localePreference: "fr" }).where(eq(user.id, author.id));
+    const postId = await seedPost(author.id, "publication en français");
+
+    await removePost(anonContext, { postId, actorId: mod.id, reason: "contenu indésirable" });
+
+    const email = vi.mocked(testEmailSender.send).mock.calls[0]?.[0];
+    if (!email) throw new Error("expected the French removal email to be delivered");
+    expect(email.subject).toBe("Votre publication a été retirée de MyTuums");
+    expect(email.text).toContain("Motif : contenu indésirable");
+    expect(email.html).toContain('<html lang="fr">');
+    expect(email.html).toContain("Un modérateur a retiré votre publication.");
   });
 
   it("restorePost delivers its restore notice", async () => {

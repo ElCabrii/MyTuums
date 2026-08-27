@@ -97,6 +97,11 @@ Each of these is a deliberate, non-default setting. The inline comment in
 - **`src/env.ts` never throws.** This is the quiet reader;
   `apps/server/src/env.ts` is the loud boot-time validator. The split is what
   lets the better-auth CLI import this package with no server around.
+- **Every outgoing email is multipart.** `src/email.ts` keeps the English and
+  French plain-text copy as the source of truth, then safely renders the same
+  content through one branded, inline-CSS HTML template. Capability URLs must
+  remain absolute and present in both parts; the no-provider development log
+  deliberately prints the clickable text fallback.
 - **The `i18n` plugin reads the `PARAGLIDE_LOCALE` cookie** — the same cookie
   the web app sets — so one locale governs both client copy and server error
   messages.

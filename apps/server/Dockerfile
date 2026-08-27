@@ -60,10 +60,13 @@ RUN pnpm --filter @my-tuums/server run build
 # render in production while working fine in dev.
 ARG VITE_SOCIAL_PROVIDERS
 ARG VITE_GOOGLE_CLIENT_ID
-# Node derives a ~512 MiB heap limit from small builder containers, but the
-# Rollup render step needs slightly more for the production bundle. Keep the
-# override scoped to this build command so it never reaches the runtime image.
-RUN NODE_OPTIONS=--max-old-space-size=768 pnpm --filter @my-tuums/web run build
+# The self-hosted CI Docker VM has about 956 MiB available. Node derives an
+# old-space ceiling near 475 MiB from that limit, but Vite's source-map render
+# exhausted even a 580 MiB ceiling after transforming every module.
+# Scope the measured 640 MiB old-space and 4 MiB semi-space ceilings to this
+# build only: production source maps stay intact without consuming the whole
+# VM, while the runtime server keeps Node's ordinary container-aware limits.
+RUN NODE_OPTIONS="--max-old-space-size=640 --max-semi-space-size=4" pnpm --filter @my-tuums/web run build
 
 # ---- Production image: prod-only deps + the pre-built bundle ----
 FROM base AS runner
