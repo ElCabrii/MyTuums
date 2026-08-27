@@ -464,12 +464,17 @@ jobs:
             echo "::error::docker run failed - the image could not be started";
             exit 1; }
 
+          # The server binds IPv4 (`HOST=0.0.0.0`). Some self-hosted runners
+          # resolve localhost to IPv6 first and never reach that socket, so the
+          # transport probe uses the matching loopback address explicitly.
+          smoke_origin=http://127.0.0.1:3002
+
           for _ in $(seq 1 30); do
-            curl -f --max-time 10 http://localhost:3002/health > /tmp/health.json 2>/dev/null && break
+            curl -f --max-time 10 "$smoke_origin/health" > /tmp/health.json 2>/dev/null && break
             sleep 2
           done
 
-          curl -fsS --max-time 10 http://localhost:3002/health > /tmp/health.json || {
+          curl -fsS --max-time 10 "$smoke_origin/health" > /tmp/health.json || {
             echo "::error::the image's CMD did not become healthy after 30 attempts - the production process does not boot";
             docker logs ci-smoke-server;
             exit 1; }
@@ -478,23 +483,23 @@ jobs:
             docker logs ci-smoke-server;
             exit 1; }
 
-          login_code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://localhost:3002/login)
+          login_code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "$smoke_origin/login")
           [ "$login_code" = "200" ] || {
             echo "::error::/login returned $login_code instead of 200 - the static SPA is not being served";
             docker logs ci-smoke-server;
             exit 1; }
-          login_type=$(curl -s --max-time 10 -o /dev/null -w '%{content_type}' http://localhost:3002/login)
+          login_type=$(curl -s --max-time 10 -o /dev/null -w '%{content_type}' "$smoke_origin/login")
           echo "$login_type" | grep -q 'text/html' || {
             echo "::error::/login served content-type $login_type instead of text/html";
             docker logs ci-smoke-server;
             exit 1; }
 
-          root_code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://localhost:3002/)
+          root_code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "$smoke_origin/")
           [ "$root_code" = "302" ] || {
             echo "::error::/ returned $root_code instead of 302 - the page gate is not live";
             docker logs ci-smoke-server;
             exit 1; }
-          root_target=$(curl -s --max-time 10 -o /dev/null -w '%{redirect_url}' http://localhost:3002/)
+          root_target=$(curl -s --max-time 10 -o /dev/null -w '%{redirect_url}' "$smoke_origin/")
           echo "$root_target" | grep -q '/login?redirect=' || {
             echo "::error::/ redirected to $root_target instead of /login?redirect=...";
             docker logs ci-smoke-server;
@@ -520,7 +525,7 @@ jobs:
             code=$(curl -s --max-time 10 -o "/tmp/social-$provider.json" -w '%{http_code}' \
               -X POST -H 'Content-Type: application/json' \
               -d "{\"provider\":\"$provider\"}" \
-              http://localhost:3002/api/auth/sign-in/social)
+              "$smoke_origin/api/auth/sign-in/social")
             [ "$code" = "200" ] || social_probe_failed "social sign-in for $provider returned $code - the server does not hold that provider's credentials"
             grep -q '"redirect":true' "/tmp/social-$provider.json" || social_probe_failed "social sign-in for $provider did not offer a redirect"
             grep -q "$host" "/tmp/social-$provider.json" || social_probe_failed "social sign-in for $provider did not target $host (authorize URL mismatch)"
@@ -529,7 +534,7 @@ jobs:
           github_code=$(curl -s --max-time 10 -o /tmp/social-github.json -w '%{http_code}' \
             -X POST -H 'Content-Type: application/json' \
             -d '{"provider":"github"}' \
-            http://localhost:3002/api/auth/sign-in/social)
+            "$smoke_origin/api/auth/sign-in/social")
           [ "$github_code" = "404" ] || social_probe_failed "unregistered provider github returned $github_code instead of 404 - the registration check is vacuous"
           grep -q 'PROVIDER_NOT_FOUND' /tmp/social-github.json || social_probe_failed "unregistered provider github did not report PROVIDER_NOT_FOUND"
           echo "Social providers agree: server registers google, discord, twitch; unregistered providers are refused."
