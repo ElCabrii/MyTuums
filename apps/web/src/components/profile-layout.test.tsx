@@ -344,7 +344,10 @@ describe("ProfileLayout banner", () => {
       name: m.profile_banner_alt({ name: profile.name }),
     });
     expect(banner.parentElement).toHaveStyle({ aspectRatio: "3" });
-    expect(banner.parentElement).not.toHaveClass("h-48", "sm:h-64");
+    // Each class needs its own negation: jest-dom's toHaveClass(a, b) requires
+    // BOTH, so the negated form would pass if only one of them reappeared.
+    expect(banner.parentElement).not.toHaveClass("h-48");
+    expect(banner.parentElement).not.toHaveClass("sm:h-64");
   });
 });
 
