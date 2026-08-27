@@ -18,7 +18,7 @@
  *   never receives anything.
  */
 import { Resend } from "resend";
-import { emailFrom, isProduction, resendApiKey } from "./env.js";
+import { emailFrom, isProduction, resendApiKey, webOrigin } from "./env.js";
 
 /**
  * Constructed lazily rather than at module scope so importing this package
@@ -32,11 +32,12 @@ function client(apiKey: string): Resend {
   return resend;
 }
 
-/** One email to send: recipient address plus plain-text subject and body. */
+/** One multipart email to send: recipient, subject, HTML body and its plain-text fallback. */
 export interface OutgoingEmail {
   to: string;
   subject: string;
   text: string;
+  html: string;
 }
 
 /**
@@ -46,7 +47,7 @@ export interface OutgoingEmail {
  * and runs reset/verification sends in the background, so the HTTP response
  * is success either way; the loud log is for operators.
  */
-export async function sendEmail({ to, subject, text }: OutgoingEmail): Promise<void> {
+export async function sendEmail({ to, subject, text, html }: OutgoingEmail): Promise<void> {
   if (!resendApiKey) {
     if (isProduction) {
       throw new Error(
@@ -73,6 +74,7 @@ export async function sendEmail({ to, subject, text }: OutgoingEmail): Promise<v
     to,
     subject,
     text,
+    html,
   });
 
   // The Resend SDK reports failures in the response body rather than by
@@ -96,6 +98,122 @@ export async function sendEmail({ to, subject, text }: OutgoingEmail): Promise<v
  * produces.
  */
 export type EmailLocale = "en" | "fr";
+
+type EmailCopy = Pick<OutgoingEmail, "subject" | "text">;
+
+const EMAIL_PRIMARY_COLOR = "#c6005c";
+
+/**
+ * The public logo asset, resolved against the same browser origin every
+ * security-relevant email link uses. The server rejects a malformed origin at
+ * boot; the fallback keeps this package's quiet env reader import-safe for CLI
+ * tooling that may load it without the server validator.
+ */
+function emailLogoUrl(): string {
+  try {
+    return new URL("/mytuums-192.png", webOrigin).href;
+  } catch {
+    return "http://localhost:5173/mytuums-192.png";
+  }
+}
+
+/** Escapes all copy before it enters the HTML part, including moderator-supplied reasons and notes. */
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+/** Turns the absolute URLs already present in plain-text copy into safe, clickable links. */
+function renderHtmlLine(line: string): string {
+  let rendered = "";
+  let previousEnd = 0;
+
+  for (const match of line.matchAll(/https?:\/\/[^\s<>"']+/g)) {
+    const url = match[0];
+    const start = match.index;
+    rendered += escapeHtml(line.slice(previousEnd, start));
+    rendered +=
+      `<a href="${escapeHtml(url)}" ` +
+      `style="color:${EMAIL_PRIMARY_COLOR};font-weight:600;text-decoration:underline;word-break:break-all;">` +
+      `${escapeHtml(url)}</a>`;
+    previousEnd = start + url.length;
+  }
+
+  return rendered + escapeHtml(line.slice(previousEnd));
+}
+
+/** Preserves the existing copy's paragraph and line-break structure in email-client-safe markup. */
+function renderHtmlCopy(text: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map(
+      (paragraph) =>
+        `<p style="margin:0 0 20px;color:#313035;font-family:Arial,Helvetica,sans-serif;` +
+        `font-size:16px;line-height:1.6;">${paragraph.split("\n").map(renderHtmlLine).join("<br>")}</p>`,
+    )
+    .join("");
+}
+
+/**
+ * Gives every auth and moderation message one branded HTML family while the
+ * locale-specific copy remains the source of truth for both multipart parts.
+ */
+function brandedEmail(copy: EmailCopy, locale: EmailLocale): Omit<OutgoingEmail, "to"> {
+  const subject = escapeHtml(copy.subject);
+  const logoUrl = escapeHtml(emailLogoUrl());
+
+  return {
+    ...copy,
+    html: `<!doctype html>
+<html lang="${locale}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
+    <title>${subject}</title>
+  </head>
+  <body style="margin:0;padding:0;background-color:#f5f2f4;color:#313035;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f5f2f4" style="width:100%;border-collapse:collapse;background-color:#f5f2f4;">
+      <tr>
+        <td align="center" style="padding:32px 16px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:600px;border-collapse:separate;background-color:#ffffff;border:1px solid #e7dfe3;border-radius:16px;overflow:hidden;">
+            <tr>
+              <td bgcolor="${EMAIL_PRIMARY_COLOR}" height="6" style="height:6px;background-color:${EMAIL_PRIMARY_COLOR};font-size:0;line-height:0;">&nbsp;</td>
+            </tr>
+            <tr>
+              <td style="padding:32px 36px 12px;">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td style="padding-right:12px;vertical-align:middle;">
+                      <img src="${logoUrl}" width="48" height="48" alt="MyTuums" style="display:block;width:48px;height:48px;border:0;border-radius:12px;outline:none;text-decoration:none;">
+                    </td>
+                    <td style="color:#313035;font-family:Arial,Helvetica,sans-serif;font-size:24px;font-weight:700;letter-spacing:-0.5px;vertical-align:middle;">MyTuums</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:12px 36px 20px;">
+                <h1 style="margin:0 0 24px;color:#313035;font-family:Arial,Helvetica,sans-serif;font-size:26px;line-height:1.25;">${subject}</h1>
+                ${renderHtmlCopy(copy.text)}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 36px;border-top:1px solid #e7dfe3;color:#6f6269;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;">MyTuums</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`,
+  };
+}
 
 /** The email locale for this request: the PARAGLIDE_LOCALE cookie when it is exactly "fr", else the base locale. */
 export function localeFromRequest(headers: Headers | undefined): EmailLocale {
@@ -367,17 +485,17 @@ const copy = {
 
 /** Builds the two-factor OTP email copy for the given locale. */
 export function otpEmail(otp: string, locale: EmailLocale): Omit<OutgoingEmail, "to"> {
-  return copy.otp[locale](otp);
+  return brandedEmail(copy.otp[locale](otp), locale);
 }
 
 /** Builds the email-verification email copy for the given locale. */
 export function verificationEmail(url: string, locale: EmailLocale): Omit<OutgoingEmail, "to"> {
-  return copy.verify[locale](url);
+  return brandedEmail(copy.verify[locale](url), locale);
 }
 
 /** Builds the password-reset email copy for the given locale. */
 export function passwordResetEmail(url: string, locale: EmailLocale): Omit<OutgoingEmail, "to"> {
-  return copy.reset[locale](url);
+  return brandedEmail(copy.reset[locale](url), locale);
 }
 
 /** Builds the post-removal notice copy — describes the post and links the appeal. */
@@ -385,12 +503,12 @@ export function moderationRemovalEmail(
   args: RemovalArgs,
   locale: EmailLocale,
 ): Omit<OutgoingEmail, "to"> {
-  return copy.moderation.removal[locale](args);
+  return brandedEmail(copy.moderation.removal[locale](args), locale);
 }
 
 /** Builds the post-restored notice copy. */
 export function moderationRestoreEmail(locale: EmailLocale): Omit<OutgoingEmail, "to"> {
-  return copy.moderation.restore[locale]();
+  return brandedEmail(copy.moderation.restore[locale](), locale);
 }
 
 /** Builds the suspension notice copy — names the expiry time and links the appeal. */
@@ -398,12 +516,12 @@ export function moderationSuspensionEmail(
   args: { reason: string; expiresAt: Date; appealUrl: string },
   locale: EmailLocale,
 ): Omit<OutgoingEmail, "to"> {
-  return copy.moderation.suspension[locale](args);
+  return brandedEmail(copy.moderation.suspension[locale](args), locale);
 }
 
 /** Builds the suspension-lifted notice copy. */
 export function moderationUnsuspensionEmail(locale: EmailLocale): Omit<OutgoingEmail, "to"> {
-  return copy.moderation.unsuspension[locale]();
+  return brandedEmail(copy.moderation.unsuspension[locale](), locale);
 }
 
 /** Builds the ban notice copy — states the reason and links the appeal. */
@@ -411,12 +529,12 @@ export function moderationBanEmail(
   args: { reason: string; appealUrl: string },
   locale: EmailLocale,
 ): Omit<OutgoingEmail, "to"> {
-  return copy.moderation.ban[locale](args);
+  return brandedEmail(copy.moderation.ban[locale](args), locale);
 }
 
 /** Builds the ban-lifted notice copy. */
 export function moderationUnbanEmail(locale: EmailLocale): Omit<OutgoingEmail, "to"> {
-  return copy.moderation.unban[locale]();
+  return brandedEmail(copy.moderation.unban[locale](), locale);
 }
 
 /** Builds the role-change notice copy — the reason is optional (a setRole without one). */
@@ -424,7 +542,7 @@ export function moderationRoleEmail(
   args: { role: string; reason?: string },
   locale: EmailLocale,
 ): Omit<OutgoingEmail, "to"> {
-  return copy.moderation.role[locale](args);
+  return brandedEmail(copy.moderation.role[locale](args), locale);
 }
 
 /** Builds the report-resolution notice for reporters — the case's outcome, not the appeal's. */
@@ -432,7 +550,7 @@ export function moderationCaseResolutionEmail(
   args: { outcome: "actioned" | "dismissed"; note?: string },
   locale: EmailLocale,
 ): Omit<OutgoingEmail, "to"> {
-  return copy.moderation.caseResolution[locale](args);
+  return brandedEmail(copy.moderation.caseResolution[locale](args), locale);
 }
 
 /** Builds the appeal-review notice copy for the given outcome. */
@@ -440,5 +558,5 @@ export function moderationResolutionEmail(
   args: { outcome: "upheld" | "overturned"; note?: string },
   locale: EmailLocale,
 ): Omit<OutgoingEmail, "to"> {
-  return copy.moderation.resolution[locale](args);
+  return brandedEmail(copy.moderation.resolution[locale](args), locale);
 }
