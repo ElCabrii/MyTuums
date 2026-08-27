@@ -60,7 +60,13 @@ RUN pnpm --filter @my-tuums/server run build
 # render in production while working fine in dev.
 ARG VITE_SOCIAL_PROVIDERS
 ARG VITE_GOOGLE_CLIENT_ID
-RUN pnpm --filter @my-tuums/web run build
+# The self-hosted CI Docker VM has about 956 MiB available. Node derives an
+# old-space ceiling near 475 MiB from that limit, but Vite's source-map render
+# needs slightly more and otherwise dies after transforming every module.
+# Scope the measured 580 MiB ceiling to this build only: production source maps
+# stay intact, while the runtime server keeps Node's ordinary container-aware
+# memory limit.
+RUN NODE_OPTIONS=--max-old-space-size=580 pnpm --filter @my-tuums/web run build
 
 # ---- Production image: prod-only deps + the pre-built bundle ----
 FROM base AS runner
