@@ -60,7 +60,10 @@ RUN pnpm --filter @my-tuums/server run build
 # render in production while working fine in dev.
 ARG VITE_SOCIAL_PROVIDERS
 ARG VITE_GOOGLE_CLIENT_ID
-RUN pnpm --filter @my-tuums/web run build
+# Node derives a ~512 MiB heap limit from small builder containers, but the
+# Rollup render step needs slightly more for the production bundle. Keep the
+# override scoped to this build command so it never reaches the runtime image.
+RUN NODE_OPTIONS=--max-old-space-size=768 pnpm --filter @my-tuums/web run build
 
 # ---- Production image: prod-only deps + the pre-built bundle ----
 FROM base AS runner
