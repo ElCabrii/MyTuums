@@ -52,7 +52,10 @@ async function expectCanonicalBannerGeometry(banner: Locator) {
     const bounds = frame.getBoundingClientRect();
     return bounds.width / bounds.height;
   });
-  expect(frameAspect).toBeCloseTo(3, 5);
+  // CSS layout quantizes dimensions to fractional device pixels. Two decimal
+  // places allow that subpixel noise while still rejecting the old responsive
+  // crop ratios (about 2.03 on mobile and 5.63 on desktop).
+  expect(frameAspect).toBeCloseTo(3, 2);
 }
 
 /** Signs up a fresh account through the UI and lands on its profile. */
