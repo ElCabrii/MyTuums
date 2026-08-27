@@ -2,6 +2,7 @@ import { useState } from "react";
 import { getRouteApi, Link, Outlet } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { ORPCError } from "@orpc/client";
+import { BANNER_ASPECT_RATIO } from "@my-tuums/api/constants";
 import { authPendingAtom } from "@/atoms/auth";
 import { viewerAtom, isStaffAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
@@ -151,7 +152,10 @@ export function ProfileLayout() {
       {/* The plain `bg-muted` plate is the fallback, not a placeholder: most
           profiles have no banner, and it is what the avatar's negative margin
           and the border below are laid out against either way. */}
-      <div className="bg-muted border-border relative h-48 w-full overflow-hidden border-b sm:h-64">
+      <div
+        className="bg-muted border-border relative w-full overflow-hidden border-b"
+        style={{ aspectRatio: BANNER_ASPECT_RATIO }}
+      >
         {profile.bannerImage && (
           <img
             src={profile.bannerImage}

@@ -405,6 +405,8 @@ jobs:
       # Docker Desktop's host network is inside its VM, not the runner's
       # network namespace. Rewrite the runner URL to one host label and map it
       # through Docker's host-gateway so migration reaches the service port.
+      # Keep the alias single-label because the private CI database does not
+      # terminate TLS.
       - name: Run the pre-deploy migration
         run: |
           ci_database_url=${DATABASE_URL/localhost/ci-host}

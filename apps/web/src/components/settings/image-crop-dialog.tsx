@@ -49,16 +49,6 @@ const MAX_CROP_SCALE = 8;
 /** Wheel zoom step: one notch in or out. */
 const ZOOM_STEP = 1.1;
 
-/**
- * The center guaranteed to survive common responsive profile frames.
- *
- * The narrow edge is a 320px phone over the 192px mobile banner (5:3); the
- * wide edge is a 1920px desktop over the 256px banner (7.5:1). Relative to the
- * canonical 3:1 source, those frames retain 5/9 of its width and 2/5 of its
- * height respectively. Wider or narrower exceptional viewports can crop more.
- */
-const BANNER_SAFE_AREA = { width: `${(5 / 9) * 100}%`, height: "40%" } as const;
-
 export function ImageCropDialog({
   kind,
   file,
@@ -214,7 +204,9 @@ export function ImageCropDialog({
       >
         <DialogHeader>
           <DialogTitle>{m.settings_image_crop_title({ label })}</DialogTitle>
-          <DialogDescription>{m.settings_image_crop_hint()}</DialogDescription>
+          <DialogDescription>
+            {kind === "banner" ? m.settings_banner_crop_hint() : m.settings_image_crop_hint()}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="px-6 pb-2">
@@ -239,26 +231,20 @@ export function ImageCropDialog({
                     className="absolute max-w-none"
                     style={imageStyle(source.dims, kind, crop)}
                   />
-                  <div
-                    aria-hidden="true"
-                    className={cn(
-                      "pointer-events-none absolute top-1/2 left-1/2 border border-white/90 shadow-[0_0_0_9999px_rgb(0_0_0/0.28)]",
-                      kind === "avatar" && "rounded-full",
-                    )}
-                    style={{
-                      width: kind === "avatar" ? "100%" : BANNER_SAFE_AREA.width,
-                      height: kind === "avatar" ? "100%" : BANNER_SAFE_AREA.height,
-                      transform: "translate(-50%, -50%)",
-                    }}
-                  />
+                  {kind === "avatar" && (
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute top-1/2 left-1/2 rounded-full border border-white/90 shadow-[0_0_0_9999px_rgb(0_0_0/0.28)]"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        transform: "translate(-50%, -50%)",
+                      }}
+                    />
+                  )}
                 </>
               )}
             </div>
-          )}
-          {kind === "banner" && !failed && (
-            <p className="text-muted-foreground mt-2 text-xs">
-              {m.settings_banner_crop_safe_area()}
-            </p>
           )}
         </div>
 

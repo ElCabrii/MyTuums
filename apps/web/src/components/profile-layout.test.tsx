@@ -324,6 +324,30 @@ describe("ProfileLayout bio", () => {
   });
 });
 
+describe("ProfileLayout banner", () => {
+  it("renders the encoded 3:1 composition without a second responsive crop", async () => {
+    const profile = makeProfile({
+      name: "Banner Owner",
+      username: "banner-owner",
+      bannerImage: "/media/banner-owner.webp",
+    });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("banner-owner", profile);
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@banner-owner",
+      signedInAs: true,
+    });
+
+    const banner = screen.getByRole("img", {
+      name: m.profile_banner_alt({ name: profile.name }),
+    });
+    expect(banner.parentElement).toHaveStyle({ aspectRatio: "3" });
+    expect(banner.parentElement).not.toHaveClass("h-48", "sm:h-64");
+  });
+});
+
 describe("ProfileLayout avatar viewer", () => {
   it("opens the profile picture and closes it with the dialog action", async () => {
     const profile = makeProfile({

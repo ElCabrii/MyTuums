@@ -253,10 +253,9 @@ export async function createDisplayVariantImpl(
  * editor and the rendered result on the same composition. The untouched
  * original remains available for a future refit.
  *
- * Banners are always 3:1. The profile banner remains a full-bleed responsive
- * box, so its `object-cover` display may crop the 3:1 source differently at
- * different viewports. The editor makes that tradeoff visible with a safe-area
- * overlay instead of pretending a source-dependent crop can be authoritative.
+ * Banners are always 3:1. The crop editor, Settings preview and profile banner
+ * all use that same aspect, so the encoded composition remains authoritative
+ * at every viewport without a second hidden crop.
  *
  * The math itself lives in `lib/media-layout.ts` — re-exported above — because
  * `lib/gif-variant-worker.ts` needs the identical `calculateDisplayLayout` a

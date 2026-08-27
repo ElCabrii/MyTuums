@@ -254,15 +254,13 @@ sides by CI. See [operations.md](operations.md).
   future refit. The stored variant can reach 1024x1024 because the profile
   page's full-size viewer renders this same object at near-viewport scale —
   feeds still downscale it (issue #229).
-- **Banners have a canonical 3:1 source and a responsive display crop.** At
-  zoom 1 the editor rectangle is exactly the region the encoder stores
-  (`calculateCropFrame`), so applying without adjusting anything is a no-op.
-  The profile remains `w-full` behind a fixed `h-48 sm:h-64` frame and uses
-  `object-cover`; consequently narrow layouts may hide the source's sides and
-  wide layouts may hide its top and bottom. The editor outlines the center
-  safe area shared by common 320px-phone through 1920px-desktop frames, making
-  that responsive tradeoff visible before upload. The stored variant can reach
-  3840x1280 for a sharp 2x sample on a 1920px display.
+- **Banners have one canonical 3:1 composition.** At zoom 1 the editor
+  rectangle is exactly the region the encoder stores (`calculateCropFrame`),
+  so applying without adjusting anything is a no-op. The editor, Settings
+  preview and full-width profile frame all use the same 3:1 aspect; responsive
+  layouts scale that composition instead of applying a second `object-cover`
+  crop. The stored variant can reach 3840x1280 for a sharp 2x sample on a
+  1920px display.
 - **The pre-decode guards run at file pick, not just at encode.**
   `validateImageFile` owns the type, byte-cap and header megapixel checks, and
   the editor calls it before it decodes anything. The megapixel ceiling is the

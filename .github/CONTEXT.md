@@ -56,7 +56,9 @@ would produce a broken one.
   Desktop's `--network host` is inside its VM, so the runner cannot reach a
   container port through `localhost`. The migration and smoke container map
   `ci-host=host-gateway`, and rewrite the CI database URL's `localhost` label
-  to `ci-host`; the smoke port is published to the runner explicitly.
+  to `ci-host`; the smoke port is published to the runner explicitly. Keep the
+  alias single-label so the database package does not apply its production TLS
+  rule to this private CI connection.
 - **CI's Postgres binds host port 5433, not 5432.** The self-hosted runner
   also runs the dev stack (`pnpm docker:up` binds 5432), so the CI service
   container would collide with it. `DATABASE_URL`/`DATABASE_URL_TEST` and the

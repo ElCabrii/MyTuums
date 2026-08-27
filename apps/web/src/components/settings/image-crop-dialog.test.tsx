@@ -111,7 +111,7 @@ describe("ImageCropDialog", () => {
 
   it("names the slot it is editing", async () => {
     stubDecode(2000, 1200);
-    await renderWithProviders(
+    const { container } = await renderWithProviders(
       <ImageCropDialog kind="banner" file={file()} onApply={vi.fn()} onCancel={vi.fn()} />,
     );
 
@@ -120,7 +120,13 @@ describe("ImageCropDialog", () => {
         name: m.settings_image_crop_title({ label: m.settings_banner_label() }),
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText(m.settings_banner_crop_safe_area())).toBeInTheDocument();
+    expect(screen.getByText(m.settings_banner_crop_hint())).toBeInTheDocument();
+    await waitFor(() =>
+      expect(container.ownerDocument.querySelector(".touch-none img")).toBeInTheDocument(),
+    );
+    expect(
+      container.ownerDocument.querySelector('.touch-none [aria-hidden="true"]'),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("dialog")).toHaveClass(
       "max-h-[calc(100dvh-2rem)]",
       "overflow-y-auto",
