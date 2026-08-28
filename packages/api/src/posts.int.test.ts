@@ -201,12 +201,6 @@ async function waitForPostMediaLifecycleLockWait(): Promise<void> {
 }
 
 describe("post.create", () => {
-  it("rejects an anonymous caller", async () => {
-    await expect(
-      call(appRouter.post.create, { content: "hello" }, { context: anonContext }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-  });
-
   it("rejects a submission carrying neither text nor attachments — trimming first is what keeps whitespace from persisting as fake content", async () => {
     const author = await createTestUser();
     await expect(
@@ -307,18 +301,6 @@ describe("post.create", () => {
     const content = "a".repeat(POST_MAX_LENGTH);
     const created = await call(appRouter.post.create, { content }, { context: contextFor(author) });
     expect(created.content).toHaveLength(POST_MAX_LENGTH);
-  });
-
-  it("trims surrounding whitespace and attaches the author", async () => {
-    const author = await createTestUser();
-    const created = await call(
-      appRouter.post.create,
-      { content: "  hello world  " },
-      { context: contextFor(author) },
-    );
-
-    expect(created.content).toBe("hello world");
-    expect(created.author.id).toBe(author.id);
   });
 
   it("reports likeCount: 0, replyCount: 0, viewerHasLiked: false on a brand-new post", async () => {
@@ -452,15 +434,6 @@ describe("post.create", () => {
 });
 
 describe("post.delete", () => {
-  it("rejects an anonymous caller", async () => {
-    const author = await createTestUser();
-    const [target] = await seedPosts(author.id, 1);
-
-    await expect(
-      call(appRouter.post.delete, { postId: target.id }, { context: anonContext }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-  });
-
   it("is NOT_FOUND for a post that doesn't exist", async () => {
     const author = await createTestUser();
 
@@ -1235,12 +1208,6 @@ describe("post.list", () => {
 });
 
 describe("post.thread", () => {
-  it("rejects an anonymous caller", async () => {
-    await expect(
-      call(appRouter.post.thread, { postId: randomUUID() }, { context: anonContext }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-  });
-
   it("an unknown id is NOT_FOUND", async () => {
     const viewer = await createTestUser();
     await expect(

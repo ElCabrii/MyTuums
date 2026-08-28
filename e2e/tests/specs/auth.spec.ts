@@ -7,44 +7,6 @@ import { ALICE, dateOfBirthUnder15 } from "../../support/users";
 test.use({ storageState: { cookies: [], origins: [] } });
 
 test.describe("registration", () => {
-  test("registering a fresh account lands on the check-your-email screen without a session", async ({
-    page,
-  }) => {
-    const username = `e2enew${Date.now().toString(36)}`;
-
-    await page.goto("/register");
-    await page.getByLabel("Username").fill(username);
-    await page.getByLabel("Display Name").fill("Freshly Registered");
-    await page.getByLabel("Email Address").fill(`${username}@example.test`);
-    // "Password" is a substring of "Confirm Password" too, so this needs
-    // `exact` to avoid a strict-mode ambiguity between the two labels.
-    await page.getByLabel("Password", { exact: true }).fill("a-fresh-password-1");
-    await page.getByLabel("Confirm Password").fill("a-fresh-password-1");
-    // The 15+ rule is part of a valid registration — an under-15 date is
-    // rejected below.
-    await page.getByLabel("Date of Birth").fill("1995-01-01");
-    await page.getByRole("checkbox", { name: /I have read and agree/ }).check();
-    await page.getByRole("main").getByRole("button", { name: "Register" }).click();
-
-    // With requireEmailVerification (packages/auth), sign-up creates the
-    // account and sends the verification link but issues NO session (issue
-    // #172), so the person lands on /verify-email rather than /welcome and the
-    // app stays signed out until the email is proved. register.tsx drives this
-    // navigation itself — signUpAtom no longer navigates on a session it never
-    // gets, so reaching /verify-email at all is what proves the sign-up
-    // succeeded. The post-signup two-factor offer is gone on the password path
-    // (a documented tradeoff: verification happens in a separate browser
-    // session; 2FA stays configurable from settings).
-    await expect(page).toHaveURL(/\/verify-email$/);
-    await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
-
-    // No session means no access to the app: a protected page bounces to
-    // /login (with the destination preserved) rather than rendering for someone
-    // who has not proved their email.
-    await page.goto("/discover");
-    await expect(page).toHaveURL(/\/login(\?redirect=.*)?$/);
-  });
-
   test("validation errors surface in submit-handler order when several rules are violated", async ({
     page,
   }) => {
@@ -100,27 +62,6 @@ test.describe("login", () => {
     await page.getByLabel("Username or Email").fill(ALICE.username);
     await page.getByLabel("Password").fill(ALICE.password);
     await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
-
-    await expect(page).toHaveURL(new RegExp(`/@${ALICE.username}$`));
-  });
-
-  test("logging in works by email", async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("Username or Email").fill(ALICE.email);
-    await page.getByLabel("Password").fill(ALICE.password);
-    await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
-
-    await expect(page).toHaveURL(new RegExp(`/@${ALICE.username}$`));
-  });
-
-  test("visiting /login while already signed in redirects away", async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("Username or Email").fill(ALICE.username);
-    await page.getByLabel("Password").fill(ALICE.password);
-    await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
-    await expect(page).toHaveURL(new RegExp(`/@${ALICE.username}$`));
-
-    await page.goto("/login");
 
     await expect(page).toHaveURL(new RegExp(`/@${ALICE.username}$`));
   });

@@ -15,7 +15,7 @@ import {
  * module installs nothing and reaches no network — it is safe from pure tests
  * (e.g. `src/lib/follow-cache.test.ts`) that must not drag the auth-client
  * install in. The auth fake and the session fixtures live in
- * `./auth-fixture.ts`; the router stand-in lives in `./route-tree.ts`.
+ * `./auth-fixture.ts`; the router stand-in lives in `./route-tree.tsx`.
  */
 
 /**

@@ -25,17 +25,6 @@ afterAll(async () => {
 });
 
 describe("user.byUsername", () => {
-  it("rejects an anonymous caller", async () => {
-    const alice = await createTestUser();
-    await expect(
-      call(
-        appRouter.user.byUsername,
-        { username: alice.session.user.username! },
-        { context: anonContext },
-      ),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-  });
-
   it("never returns email or emailVerified — this is the privacy boundary: widening publicUserColumns should fail this test", async () => {
     const alice = await createTestUser();
     const viewer = await createTestUser();

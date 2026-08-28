@@ -12,6 +12,7 @@ import { eq, sql } from "drizzle-orm";
 import { auth } from "@my-tuums/auth";
 import { db } from "@my-tuums/db";
 import { assertTestDatabase } from "@my-tuums/db/testing";
+import { testHelpers } from "@my-tuums/auth/testing";
 import { post, user } from "@my-tuums/db/schema";
 import { LEGAL_VERSION } from "@my-tuums/auth/rules";
 import type { Context, EmailSender } from "../context.js";
@@ -34,7 +35,7 @@ export type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSess
  * A signed-up test user: their session, and a `Context` already carrying it.
  *
  * `sessionCookie` is the signed value of the `better-auth.session_token`
- * cookie, captured from the sign-up `set-cookie` header. It is NOT the same as
+ * cookie, captured when the session was minted. It is NOT the same as
  * `session.session.token` — better-auth issues the cookie as
  * `<token>.<hmac-signature>` (URL-encoded), and `getSession` returns only the
  * token half, which cannot be re-signed client-side. Re-presenting the cookie
@@ -143,105 +144,84 @@ beforeEach(() => {
 });
 
 /**
- * Signs up a brand-new user through real BetterAuth rather than inserting a
- * fixture row by hand, so these tests exercise the same password hashing,
- * cookie issuance, and username normalisation the app relies on in
- * production — and so `context.session` looks exactly like what
- * `createContext` builds from a real request.
+ * Mints a usable, onboarding-complete fixture account and a real session for
+ * it, through `@my-tuums/auth/testing`'s privileged helpers.
  *
- * `randomUUID()` is the source of uniqueness for both the email and the
- * username, so concurrent tests (and repeated runs against a database that
- * wasn't truncated) never collide on BetterAuth's unique constraints.
+ * The session is created by `authTest`, then resolved through the PRODUCTION
+ * `auth.api.getSession` — the two instances share `BETTER_AUTH_SECRET` and
+ * the `session` table, so what lands in `context.session` is byte-for-byte
+ * what `createContext` builds from a real request. `auth.int.test.ts` pins
+ * that property directly ("mints a session that the production auth instance
+ * accepts").
  *
- * With `requireEmailVerification: true` (packages/auth/src/index.ts), sign-up
- * creates the account and sends the verification email but issues NO session —
- * so a fixture built only from `signUpEmail` could not sign in. Fixture
- * accounts are meant to be usable, so this grandfathers each one the same way
- * the `0014_grandfather_email_verified` migration grandfathered every real
- * account: flip `email_verified` directly, then sign in through the real
- * instance to mint a genuine session and its signed cookie. The sign-in goes
- * through `auth.api.signInEmail` rather than the test instance's
- * `getAuthHeaders` to keep exercising the production cookie-issuance path;
- * direct `auth.api.*` calls bypass the router's `onRequest` rate limiter (see
- * the password-reset block in auth.int.test.ts), so a suite that seeds many
- * users in a loop never spends a `/sign-in/email` budget.
+ * It deliberately does NOT go through `signUpEmail` + `signInEmail`. Those
+ * two calls cost one scrypt hash each — about 430ms per fixture, and this
+ * package creates several hundred of them, which was most of the integration
+ * suite's runtime. Nothing outside `auth.int.test.ts` is asserting anything
+ * about sign-up: that file exercises the production instance's rules
+ * (verification, handle bounds, date of birth, legal consent, password
+ * policy) on purpose and must keep doing so, and the browser suite registers
+ * real accounts through the real form. Here the account is a premise, not the
+ * thing under test.
+ *
+ * Two consequences worth knowing:
+ *
+ * - There is no `account` row, because there is no password. A test that
+ *   needs to sign in with credentials belongs in `auth.int.test.ts` with the
+ *   production instance.
+ * - `authTest` carries no `databaseHooks`, so the fixture bypasses the
+ *   user-field rules. The handle is still canonicalised — migration
+ *   `0015_lowercase_usernames` installs a database trigger that lowercases
+ *   `username` and derives `display_username` on every write, whoever the
+ *   writer is.
  */
 export async function createTestUser(overrides?: {
   username?: string;
   name?: string;
 }): Promise<TestUser> {
   const uuid = randomUUID();
-  const email = `vitest+${uuid}@example.com`;
-  const username = overrides?.username ?? `vitest${uuid.replace(/-/g, "").slice(0, 8)}`;
-  const name = overrides?.name ?? "Vitest User";
-  const password = "vitest-Sup3rSecret!";
+  const test = await testHelpers();
 
-  // Creates the user through the production instance (real password hashing,
-  // username normalisation, the legal/dob/profile hooks) and sends the
-  // verification email (captured by `testEmailSender`). With
-  // `requireEmailVerification` the response carries no session and no
-  // `set-cookie` — the account is unusable until the email is proved, which
-  // the two steps below short-circuit for fixtures.
-  await auth.api.signUpEmail({
-    body: {
-      email,
-      password,
-      name,
-      username,
-      // Fixtures are meant to be usable, so they are onboarding-complete:
-      // `protectedProcedure` refuses a session with no handle or no date of
-      // birth (see hasCompletedOnboarding in packages/auth/src/rules.ts), and
-      // almost every test in this package calls a protected procedure. A test
-      // that wants an incomplete account clears the column on the row and
-      // re-fetches the session itself (see onboarding-gate.int.test.ts).
-      dateOfBirth: new Date("1995-01-01"),
-      legalAcceptedAt: new Date(),
-      legalVersion: LEGAL_VERSION,
-    },
+  const created = test.createUser({
+    email: `vitest+${uuid}@example.com`,
+    name: overrides?.name ?? "Vitest User",
+    emailVerified: true,
+    username: overrides?.username ?? `vitest${uuid.replace(/-/g, "").slice(0, 8)}`,
+    // The admin plugin supplies this default on the production instance;
+    // `authTest` does not carry that plugin, and a null role is a shape no
+    // real account has.
+    role: "user",
+    // Fixtures are meant to be usable, so they are onboarding-complete:
+    // `protectedProcedure` refuses a session with no handle, no date of birth
+    // or no current legal consent (hasCompletedOnboarding /
+    // hasCurrentLegalConsent in packages/auth/src/rules.ts), and almost every
+    // test in this package calls a protected procedure. A test that wants an
+    // incomplete account clears the column on the row and re-fetches the
+    // session itself (see onboarding-gate.int.test.ts).
+    dateOfBirth: new Date("1995-01-01"),
+    legalAcceptedAt: new Date(),
+    legalVersion: LEGAL_VERSION,
   });
+  await test.saveUser(created);
 
-  const [created] = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
-  if (!created) {
-    throw new Error("createTestUser: signUpEmail did not create a user row.");
-  }
-  await db.update(user).set({ emailVerified: true }).where(eq(user.id, created.id));
-
-  const signInResult = await auth.api.signInEmail({
-    body: { email, password },
-    returnHeaders: true,
-  });
-
-  const setCookie = signInResult.headers.get("set-cookie");
-  if (!setCookie) {
-    throw new Error(
-      "auth.api.signInEmail() returned no set-cookie header after the " +
-        "fixture was marked verified — check requireEmailVerification / " +
-        "emailVerified in packages/auth/src/index.ts.",
-    );
-  }
-
-  // The session cookie's VALUE is what matters, and it is signed — the raw
-  // `set-cookie` string cannot be handed to `Headers` again for `getSession`,
-  // and `session.session.token` below only carries the token half. The whole
-  // cookie header round-trips fine (the "cookie" header below), so parse the
-  // value out once, here, and let `sessionHeaders` re-present it later.
-  const sessionCookie = setCookie
-    .split(/,(?=\s*[\w.]+=)/)
-    .map((part) => part.trim().split(";")[0])
-    .find((pair) => pair.startsWith("better-auth.session_token="))
-    ?.slice("better-auth.session_token=".length);
+  const { cookies } = await test.login({ userId: created.id });
+  const sessionCookie = cookies.find(
+    (cookie) => cookie.name === "better-auth.session_token",
+  )?.value;
   if (!sessionCookie) {
     throw new Error(
-      "auth.api.signInEmail() returned no better-auth.session_token cookie — " +
+      "authTest.login() returned no better-auth.session_token cookie — " +
         "the session cookie name has changed upstream.",
     );
   }
 
-  const session = await auth.api.getSession({ headers: new Headers({ cookie: setCookie }) });
+  const session = await auth.api.getSession({
+    headers: new Headers({ cookie: `better-auth.session_token=${sessionCookie}` }),
+  });
   if (!session) {
     throw new Error(
-      "auth.api.getSession() returned null after sign-in — the session " +
-        "cookie from signInEmail didn't round-trip.",
+      "auth.api.getSession() returned null for a session minted by authTest — " +
+        "the two instances no longer share a secret or a session table.",
     );
   }
 
@@ -253,6 +233,80 @@ export async function createTestUser(overrides?: {
     // tests (not for making rate-limited calls — those go through
     // `contextFor`), so the forwarding limiter is a formality here, not a
     // behaviour anything actually exercises.
+    context: {
+      db,
+      session,
+      requestId: "test-request-id",
+      rateLimiter: forwardingRateLimiter,
+      storage: testStorage,
+      emailSender: testEmailSender,
+    },
+  };
+}
+
+/**
+ * The expensive fixture: an account with a real credential, created and
+ * signed in through the PRODUCTION instance.
+ *
+ * `createTestUser` above deliberately mints no password, which makes
+ * `auth.api.signInEmail` throw for every fixture — vacuously satisfying any
+ * "sign-in is refused" assertion. Better Auth's admin plugin enforces a ban
+ * at sign-in, not at session resolution (a suspended account's *new* session
+ * still resolves), so proving a suspension actually locks an account needs a
+ * credential to be refused. That is the only reason to reach for this: two
+ * scrypt hashes, about 430ms, versus about 95ms for the ordinary fixture.
+ *
+ * Returns the account's email and password alongside the usual `TestUser`, so
+ * the caller can attempt the sign-in it is asserting about.
+ */
+export async function createPasswordTestUser(): Promise<
+  TestUser & { email: string; password: string }
+> {
+  const uuid = randomUUID();
+  const email = `vitest-pw+${uuid}@example.com`;
+  const password = "vitest-Sup3rSecret!";
+
+  await auth.api.signUpEmail({
+    body: {
+      email,
+      password,
+      name: "Vitest User",
+      username: `vitestpw${uuid.replace(/-/g, "").slice(0, 8)}`,
+      dateOfBirth: new Date("1995-01-01"),
+      legalAcceptedAt: new Date(),
+      legalVersion: LEGAL_VERSION,
+    },
+  });
+
+  const [created] = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
+  if (!created) throw new Error("createPasswordTestUser: signUpEmail created no user row.");
+  // requireEmailVerification means sign-up issues no session; fixtures are
+  // grandfathered the same way migration 0014 grandfathered real accounts.
+  await db.update(user).set({ emailVerified: true }).where(eq(user.id, created.id));
+
+  const signIn = await auth.api.signInEmail({ body: { email, password }, returnHeaders: true });
+  const setCookie = signIn.headers.get("set-cookie");
+  if (!setCookie) throw new Error("createPasswordTestUser: sign-in returned no set-cookie.");
+
+  // better-auth issues the cookie as `<token>.<hmac>`; the signature cannot be
+  // rebuilt from `session.session.token`, so the signed value is parsed out
+  // once here and re-presented by `sessionHeaders`.
+  const sessionCookie = setCookie
+    .split(/,(?=\s*[\w.]+=)/)
+    .map((part) => part.trim().split(";")[0])
+    .find((pair) => pair.startsWith("better-auth.session_token="))
+    ?.slice("better-auth.session_token=".length);
+  if (!sessionCookie) throw new Error("createPasswordTestUser: no session_token cookie.");
+
+  const session = await auth.api.getSession({ headers: new Headers({ cookie: setCookie }) });
+  if (!session) throw new Error("createPasswordTestUser: the sign-in cookie did not round-trip.");
+
+  return {
+    id: session.user.id,
+    session,
+    sessionCookie,
+    email,
+    password,
     context: {
       db,
       session,
@@ -352,8 +406,8 @@ export async function seedPosts(
  * The cookie header that re-presents a session to better-auth — the same
  * `better-auth.session_token` cookie a real browser would send.
  *
- * This MUST use the user's stored `sessionCookie` (the signed value from the
- * original `set-cookie` header), not `session.session.token`: better-auth
+ * This MUST use the user's stored `sessionCookie` (the signed value captured
+ * when the session was minted), not `session.session.token`: better-auth
  * issues the cookie as `<token>.<hmac-signature>`, and the signature cannot be
  * rebuilt from the token alone. A `TestUser` carries the signed value
  * precisely so a test can re-fetch a session (a role change, a fresh

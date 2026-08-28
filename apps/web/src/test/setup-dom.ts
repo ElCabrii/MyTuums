@@ -1,16 +1,12 @@
-import "@testing-library/jest-dom/vitest";
 import { afterEach } from "vitest";
-import { cleanup } from "@testing-library/react";
-import { installTestAuthFixture } from "@/test/auth-fixture";
+import { installTestAuthFixture } from "./auth-fixture";
+import { createInMemoryStorage } from "./memory-storage";
 
 /**
- * Install the BetterAuth fake before any test module is evaluated. Vitest runs
- * `setupFiles` in a separate module graph from the test files, and it does so
- * before collecting a test file's static imports — so `atoms/session.ts`'s
- * import-time `sessionStore.get()` always reads the fake store, no matter what
- * a test imports first. This is what removes the import-order convention that
- * used to require importing `@/test/render` (or `auth-fixture.ts`) before the
- * component under test.
+ * Setup for the `dom` Vitest project ("*.test.tsx" plus the "*.dom.test.ts"
+ * `*.dom.test.ts` exceptions): everything that renders React or asserts on
+ * the real document. Each shim below names the tests that fail without it —
+ * when the tests it serves go away, so does the shim.
  */
 installTestAuthFixture();
 
@@ -23,21 +19,11 @@ installTestAuthFixture();
  *
  * Jotai swallows it (its storage getter is null-safe), so the failure mode is
  * not a crash but a preference that never persists: exactly the behaviour
- * several tests here exist to assert on. An in-memory shim restores it.
+ * several tests here exist to assert on. An in-memory implementation from
+ * `./memory-storage` restores it.
  */
 if (!globalThis.localStorage) {
-  const entries = new Map<string, string>();
-
-  globalThis.localStorage = {
-    get length() {
-      return entries.size;
-    },
-    key: (index) => [...entries.keys()][index] ?? null,
-    getItem: (key) => entries.get(key) ?? null,
-    setItem: (key, value) => void entries.set(key, String(value)),
-    removeItem: (key) => void entries.delete(key),
-    clear: () => entries.clear(),
-  };
+  globalThis.localStorage = createInMemoryStorage();
 }
 
 /**
@@ -84,14 +70,12 @@ if (!globalThis.matchMedia) {
 }
 
 /**
- * `globals: false` means Testing Library's own auto-cleanup — which hooks a
- * global `afterEach` — never registers, so unmounting between tests has to be
- * wired up here. Without it every render stays in the document and `getByRole`
- * starts failing with "found multiple elements".
+ * Rendered components need jest-dom's matchers and RTL's `cleanup` between
+ * tests; nothing in this project runs without them.
  */
-afterEach(() => {
-  cleanup();
-});
+await import("@testing-library/jest-dom/vitest");
+const { cleanup } = await import("@testing-library/react");
+afterEach(() => cleanup());
 
 /**
  * The `localStorage` shim above has no per-test lifetime of its own, so a

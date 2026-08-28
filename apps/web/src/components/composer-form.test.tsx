@@ -9,7 +9,8 @@ import {
 } from "@my-tuums/api/constants";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc, orpc, type SearchTypeahead } from "@/lib/orpc";
-import { renderWithProviders, makeUserSummary } from "@/test/render";
+import { makeUserSummary } from "@/test/factories";
+import { renderWithProviders } from "@/test/render";
 import { ComposerForm } from "@/components/composer-form";
 import { installTestPostAttachment } from "@/lib/media";
 import { m } from "@/paraglide/messages.js";
@@ -22,7 +23,7 @@ installTestOrpc(createTanstackQueryUtils(fakeClient));
  * before it joins the draft. jsdom implements neither `createImageBitmap` nor
  * a canvas, so these tests substitute an identity processor and exercise the
  * flow around it; what processing itself guarantees is pinned in
- * `lib/media.test.ts` and proven end to end in compose.spec.ts.
+ * `lib/media.dom.test.ts` and proven end to end in compose.spec.ts.
  */
 const identityProcessor = (file: File) => Promise.resolve(file);
 
@@ -65,14 +66,12 @@ async function renderComposer(overrides: Partial<ComponentProps<typeof ComposerF
 }
 
 describe("ComposerForm", () => {
-  it("disables submit when the value is empty", async () => {
-    await renderComposer({ value: "" });
-    expect(screen.getByRole("button", { name: "Post" })).toBeDisabled();
-  });
-
-  it("disables submit when the value is whitespace-only", async () => {
-    await renderComposer({ value: "   " });
-    expect(screen.getByRole("button", { name: "Post" })).toBeDisabled();
+  it("refuses a body with nothing in it once trimmed", async () => {
+    for (const value of ["", "   ", "\n\t "]) {
+      const rendered = await renderComposer({ value });
+      expect(screen.getByRole("button", { name: "Post" }), value).toBeDisabled();
+      rendered.unmount();
+    }
   });
 
   it("calls onSubmit with the trimmed body, not the raw value", async () => {
@@ -107,27 +106,22 @@ describe("ComposerForm", () => {
     expect(onSubmit).toHaveBeenCalledWith("", [{ id: "first", file }]);
   });
 
-  it("starts the remaining-character counter at POST_MAX_LENGTH", async () => {
-    await renderComposer({ value: "" });
+  // One test, both sides of the only boundary there is: the counter counts
+  // down from POST_MAX_LENGTH, the last accepted length is exactly it, and
+  // the first refused length is one past.
+  it("counts down to POST_MAX_LENGTH and refuses the first character past it", async () => {
+    const empty = await renderComposer({ value: "" });
     expect(screen.getByText(String(POST_MAX_LENGTH))).toBeInTheDocument();
-  });
+    empty.unmount();
 
-  it("goes negative past the limit and disables submit", async () => {
-    const over = "a".repeat(POST_MAX_LENGTH + 5);
-    await renderComposer({ value: over });
-
-    expect(screen.getByText("-5")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Post" })).toBeDisabled();
-  });
-
-  it("is submittable at exactly POST_MAX_LENGTH characters", async () => {
-    await renderComposer({ value: "a".repeat(POST_MAX_LENGTH) });
+    const atLimit = await renderComposer({ value: "a".repeat(POST_MAX_LENGTH) });
     expect(screen.getByRole("button", { name: "Post" })).not.toBeDisabled();
-  });
+    atLimit.unmount();
 
-  it("is not submittable one character past POST_MAX_LENGTH", async () => {
-    await renderComposer({ value: "a".repeat(POST_MAX_LENGTH + 1) });
+    const over = await renderComposer({ value: "a".repeat(POST_MAX_LENGTH + 1) });
+    expect(screen.getByText("-1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Post" })).toBeDisabled();
+    over.unmount();
   });
 
   it("disables the textarea and swaps the send icon for a spinner while pending", async () => {
@@ -140,13 +134,6 @@ describe("ComposerForm", () => {
     // `animate-spin` class the source applies only to Loader2 is the
     // reliable signal that it — not Send — is what's rendered.
     expect(container.querySelector("button[type='submit'] svg.animate-spin")).toBeInTheDocument();
-  });
-
-  it("shows the send icon, not a spinner, when idle", async () => {
-    const { container } = await renderComposer({ value: "hello", isPending: false });
-    expect(
-      container.querySelector("button[type='submit'] svg.animate-spin"),
-    ).not.toBeInTheDocument();
   });
 
   it("renders errorMessage in an alert, and renders no alert when null", async () => {

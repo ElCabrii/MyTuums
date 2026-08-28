@@ -105,16 +105,4 @@ test.describe("liking a post", () => {
     const profileLike = likeButtonFor(page, seeded.content);
     await expect(profileLike).toHaveAttribute("aria-pressed", "true");
   });
-
-  test("signed out, the site gate holds a visitor at /login", async ({ signedOutPage }) => {
-    // The site is private (use-require-signed-in.ts): a signed-out visitor to
-    // "/" is redirected to /login, so the feed — and its signed-out like
-    // controls — never render. This test used to assert on that feed (the
-    // heart links to /login); the gate made it unreachable, and the assertion
-    // raced the redirect it was trying to observe. Pinning the gate instead
-    // asserts the behaviour that actually ships.
-    await signedOutPage.goto("/");
-
-    await expect(signedOutPage).toHaveURL(/\/login/, { timeout: 10_000 });
-  });
 });

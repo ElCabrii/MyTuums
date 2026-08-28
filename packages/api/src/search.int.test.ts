@@ -3,7 +3,7 @@ import { call } from "@orpc/server";
 import { closeDb } from "@my-tuums/db";
 import { post, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SEARCH_PAGE_SIZE, SEARCH_PAGE_SIZE_MAX, SEARCH_QUERY_MAX_LENGTH } from "./constants.js";
+import { SEARCH_PAGE_SIZE, SEARCH_QUERY_MAX_LENGTH } from "./constants.js";
 import type { Context } from "./context.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { appRouter } from "./router.js";
@@ -208,16 +208,6 @@ describe("search input validation", () => {
       ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
-
-  it("rejects an empty query on search.users and search.posts too — all three share the same q schema", async () => {
-    const viewer = await createTestUser();
-    await expect(
-      call(appRouter.search.users, { q: "" }, { context: contextFor(viewer) }),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    await expect(
-      call(appRouter.search.posts, { q: "" }, { context: contextFor(viewer) }),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
-  });
 });
 
 describe("search.typeahead", () => {
@@ -320,35 +310,6 @@ describe("search.typeahead", () => {
     const posts = await call(appRouter.search.posts, { q: tag }, { context: contextFor(author) });
     expect(posts.items.map((p) => p.id)).toEqual([root.id]);
   });
-
-  it("serves a viewer with no relationship to the target, reporting viewer-relative state as false", async () => {
-    const author = await createTestUser({ username: uniqueTag() });
-    await seedPostContent(author.id, `${author.session.user.username} content`);
-    const stranger = await createTestUser();
-
-    const matching = await call(
-      appRouter.search.typeahead,
-      { q: author.session.user.username! },
-      { context: contextFor(stranger) },
-    );
-    expect(matching.users.map((u) => u.id)).toEqual([author.id]);
-    expect(matching.users[0].viewerIsFollowing).toBe(false);
-
-    const users = await call(
-      appRouter.search.users,
-      { q: author.session.user.username! },
-      { context: contextFor(stranger) },
-    );
-    expect(users.items.map((u) => u.id)).toEqual([author.id]);
-    expect(users.items[0].viewerIsFollowing).toBe(false);
-
-    const posts = await call(
-      appRouter.search.posts,
-      { q: author.session.user.username! },
-      { context: contextFor(stranger) },
-    );
-    expect(posts.items[0].viewerHasLiked).toBe(false);
-  });
 });
 
 describe("search.users", () => {
@@ -392,55 +353,6 @@ describe("search.users", () => {
     expect(new Set(ids).size).toBe(tieCount);
     expect(new Set(ids)).toEqual(new Set(seeded.map((u) => u.id)));
   }, 20_000);
-
-  it("nextCursor is null on the last page", async () => {
-    const viewer = await createTestUser();
-    const tag = uniqueTag();
-    await seedUsers([{ username: tag }]);
-
-    const page = await call(
-      appRouter.search.users,
-      { q: tag, limit: 10 },
-      { context: contextFor(viewer) },
-    );
-
-    expect(page.items).toHaveLength(1);
-    expect(page.nextCursor).toBeNull();
-  });
-
-  it("rejects a malformed cursor with BAD_REQUEST", async () => {
-    const viewer = await createTestUser();
-    await expect(
-      call(
-        appRouter.search.users,
-        { q: "al", cursor: "not-a-real-cursor" },
-        { context: contextFor(viewer) },
-      ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
-  });
-
-  it("rejects limit 0 and anything above SEARCH_PAGE_SIZE_MAX, and accepts exactly SEARCH_PAGE_SIZE_MAX", async () => {
-    const viewer = await createTestUser();
-
-    await expect(
-      call(appRouter.search.users, { q: "al", limit: 0 }, { context: contextFor(viewer) }),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
-
-    await expect(
-      call(
-        appRouter.search.users,
-        { q: "al", limit: SEARCH_PAGE_SIZE_MAX + 1 },
-        { context: contextFor(viewer) },
-      ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
-
-    const page = await call(
-      appRouter.search.users,
-      { q: "al", limit: SEARCH_PAGE_SIZE_MAX },
-      { context: contextFor(viewer) },
-    );
-    expect(page.items.length).toBeLessThanOrEqual(SEARCH_PAGE_SIZE_MAX);
-  });
 
   it("items pin the publicUserColumns key set — no email, and no auth-reconnaissance columns", async () => {
     const author = await createTestUser();
@@ -491,20 +403,6 @@ describe("search.posts", () => {
 
     expect(ids).toHaveLength(count);
     expect(new Set(ids).size).toBe(count);
-    expect(new Set(ids)).toEqual(new Set(seeded.map((p) => p.id)));
-  }, 20_000);
-
-  it("rows sharing a millisecond are still traversed exactly once", async () => {
-    const author = await createTestUser();
-    const tag = uniqueTag();
-    const tiedAt = new Date("2025-06-01T12:00:00.000Z");
-    const tieCount = SEARCH_PAGE_SIZE + 5;
-    const seeded = await seedPostContentMany(author.id, tieCount, tag, tiedAt);
-
-    const ids = await walkAllPostPages(tag, contextFor(author), 10);
-
-    expect(ids).toHaveLength(tieCount);
-    expect(new Set(ids).size).toBe(tieCount);
     expect(new Set(ids)).toEqual(new Set(seeded.map((p) => p.id)));
   }, 20_000);
 

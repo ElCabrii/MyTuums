@@ -18,8 +18,8 @@ import {
   makeProfile,
   makeThread,
   makeUserSummary,
-  queryFixtures,
-} from "@/test/render";
+} from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
 
 /**
  * Everything here goes through `clearViewerState` and the *public* readers of

@@ -44,6 +44,12 @@ export const authTest = betterAuth({
   // what a test needs to hold.
   user: {
     additionalFields: {
+      // `role` comes from the admin() plugin on the production instance, which
+      // this one deliberately does not carry (see the plugin note below). It is
+      // declared here anyway because the column exists and every real account
+      // has a value in it — a fixture with a null role is a shape production
+      // never produces, and the moderation suites read it.
+      role: { type: "string", required: false },
       dateOfBirth: { type: "date", required: false },
       bio: { type: "string", required: false },
       bannerImage: { type: "string", required: false },

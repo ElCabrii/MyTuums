@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { makeUserSummary, renderWithProviders } from "@/test/render";
+import { makeUserSummary } from "@/test/factories";
+import { renderWithProviders } from "@/test/render";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";

@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
-import { waitFor } from "@testing-library/react";
 
 const fakeClient = {
   user: {
@@ -165,7 +164,7 @@ describe("toggleFollowAtomFamily", () => {
     store.set(toggleFollowAtomFamily("target-1"));
     expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(true);
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(
         false,
       );
@@ -204,10 +203,10 @@ describe("toggleFollowAtomFamily", () => {
 
     // The mutationFn call is deferred past a microtask boundary, so
     // `resolveFollow` only exists once the promise executor has actually run.
-    await waitFor(() => expect(fakeClient.user.follow).toHaveBeenCalled());
+    await vi.waitFor(() => expect(fakeClient.user.follow).toHaveBeenCalled());
     resolveFollow({ userId: "target-1", followerCount: 6, viewerIsFollowing: true });
 
-    await waitFor(() => expect(fakeClient.user.unfollow).toHaveBeenCalled());
+    await vi.waitFor(() => expect(fakeClient.user.unfollow).toHaveBeenCalled());
     expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(false);
   });
 
@@ -256,7 +255,7 @@ describe("toggleFollowAtomFamily", () => {
 
     store.set(toggleFollowAtomFamily("target-1"));
 
-    await waitFor(() => expect(fakeClient.user.unfollow).toHaveBeenCalled());
+    await vi.waitFor(() => expect(fakeClient.user.unfollow).toHaveBeenCalled());
     expect(fakeClient.user.follow).not.toHaveBeenCalled();
   });
 
@@ -380,7 +379,7 @@ describe("toggleFollowAtomFamily", () => {
 
     // The rejected mutation rolls the row back to the pre-click value the
     // (uncorrupted) snapshot recorded.
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(row()?.viewerIsFollowing).toBe(false);
     });
   });
@@ -454,7 +453,7 @@ describe("toggleFollowAtomFamily", () => {
 
     store.set(toggleFollowAtomFamily("target-1"));
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({
         queryKey: followingKey,
         exact: true,
@@ -475,7 +474,7 @@ describe("toggleFollowAtomFamily", () => {
     store.set(toggleFollowAtomFamily("target-1"));
 
     // The rollback runs, but the feed membership never changed, so no refresh.
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(
         false,
       );

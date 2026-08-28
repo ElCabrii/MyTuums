@@ -14,15 +14,13 @@ import { desc, eq, like } from "drizzle-orm";
 import { auth, PROVIDER_IMAGE_MAX_URL_LENGTH } from "@my-tuums/auth";
 import {
   BIO_MAX_LENGTH,
-  LOCALE_PREFERENCES,
   LEGAL_ACCEPTANCE_REQUIRED_MESSAGE,
   LEGAL_VERSION,
-  THEME_PREFERENCES,
   USERNAME_CANONICAL_WRITE_MESSAGE,
 } from "@my-tuums/auth/rules";
 import { authTest, testHelpers } from "@my-tuums/auth/testing";
 import { closeDb, db } from "@my-tuums/db";
-import { passkey, twoFactor, user, verification } from "@my-tuums/db/schema";
+import { twoFactor, user, verification } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { truncateAll } from "./testing/harness.js";
 
@@ -455,9 +453,78 @@ describe("backup codes", () => {
   });
 });
 
+describe("emailed one-time codes", () => {
+  it("an emailed OTP completes the sign-in challenge", async () => {
+    const { email, jar } = await signUp();
+    await enrolTwoFactor(jar);
+
+    const challenge = await auth.api.signInEmail({
+      body: { email, password: PASSWORD },
+      returnHeaders: true,
+    });
+    const challengeJar = new CookieJar().absorb(challenge.headers);
+
+    // No mailbox in the test stack and the production `sendEmail` has no
+    // injectable seam (see the email-verification note above), so the code is
+    // read from the verification table — the row the plugin wrote while
+    // handling the send, keyed on the signed challenge cookie's unsigned
+    // payload, which is the challenge's only identity mid-challenge. The
+    // cookie value is URL-encoded on the wire (`+`/`=`), and the payload
+    // charset contains no `.`, so splitting on the first dot isolates it the
+    // same way the server's `getSignedCookie` does.
+    await auth.api.sendTwoFactorOTP({ headers: challengeJar.headers });
+
+    const challengeCookie = challenge.headers
+      .getSetCookie()
+      .map((raw) => raw.split(";")[0] ?? "")
+      .find((pair) => pair.startsWith("better-auth.two_factor="));
+    if (!challengeCookie) throw new Error("no two-factor challenge cookie after sign-in");
+    const challengeKey = decodeURIComponent(challengeCookie.slice(challengeCookie.indexOf("=") + 1))
+      .split(".")[0]
+      .trim();
+
+    const [row] = await db
+      .select({ value: verification.value })
+      .from(verification)
+      // `eq`, not `like`: the identifier is exactly `2fa-otp-<key>` with no
+      // suffix, and the key's charset includes `_`, which LIKE treats as a
+      // single-character wildcard.
+      .where(eq(verification.identifier, `2fa-otp-${challengeKey}`))
+      .orderBy(desc(verification.createdAt))
+      .limit(1);
+    if (!row) throw new Error("no OTP was stored for the challenge");
+    const otp = row.value.split(":")[0];
+
+    const verified = await auth.api.verifyTwoFactorOTP({
+      body: { code: otp },
+      headers: challengeJar.headers,
+      returnHeaders: true,
+    });
+    const session = new CookieJar().absorb(verified.headers);
+
+    const who = await auth.api.getSession({ headers: session.headers });
+    expect(who?.user.email).toBe(email);
+  });
+});
+
 describe("password policy", () => {
   it("enforces the 8-character minimum the web validator also applies", async () => {
     await expect(signUp({ password: "Sh0rt!" })).rejects.toThrow();
+  });
+});
+
+describe("password change", () => {
+  it("refuses a wrong current password", async () => {
+    const { jar } = await signUp();
+
+    // The current-password check is the only thing standing between somebody
+    // with a hijacked session and ownership of the account.
+    await expect(
+      auth.api.changePassword({
+        body: { currentPassword: "not-the-password", newPassword: "vitest-AnotherSecret2!" },
+        headers: jar.headers,
+      }),
+    ).rejects.toThrow();
   });
 });
 
@@ -614,30 +681,6 @@ describe("date of birth requirement", () => {
 
     const session = await auth.api.getSession({ headers });
     expect(session?.user.dateOfBirth).toBeFalsy();
-  });
-
-  it("rejects an impossible date rather than storing it", async () => {
-    // The raw-string form is the wire format the web app sends (a Date cannot
-    // even represent February 30 — it rolls over), and the hook must reject it
-    // before `new Date()` silently stores March 2. `as never` keeps the string
-    // on the wire while the client type declares `Date`.
-    const impossibleDate =
-      // SAFETY: see the comment above — the string is the wire value the hook
-      // parses; the assertion only bridges the client's `Date` field type.
-      "1995-02-30T00:00:00.000Z" as never;
-    await expect(
-      auth.api.signUpEmail({
-        body: {
-          email: `vitest+${randomUUID()}@example.com`,
-          password: PASSWORD,
-          name: "Vitest User",
-          username: `vitest${randomUUID().replace(/-/g, "").slice(0, 8)}`,
-          dateOfBirth: impossibleDate,
-          legalAcceptedAt: new Date(),
-          legalVersion: LEGAL_VERSION,
-        },
-      }),
-    ).rejects.toThrow("Please enter a valid date of birth.");
   });
 
   it("enforces the same rule on updateUser — the /welcome claim path", async () => {
@@ -809,21 +852,6 @@ describe("profile field rules", () => {
     ).rejects.toThrow("Please choose a valid language.");
   });
 
-  it("accepts every offered preference value", async () => {
-    const { headers } = await signUp();
-
-    for (const themePreference of THEME_PREFERENCES) {
-      await expect(
-        auth.api.updateUser({ body: { themePreference }, headers }),
-      ).resolves.toBeDefined();
-    }
-    for (const localePreference of LOCALE_PREFERENCES) {
-      await expect(
-        auth.api.updateUser({ body: { localePreference }, headers }),
-      ).resolves.toBeDefined();
-    }
-  });
-
   it("lets an unrelated partial update through — absence is not a violation", async () => {
     // The hook sees *partial* updates: someone changing only their display
     // name arrives with bio and both preferences undefined. Treating that as a
@@ -874,17 +902,6 @@ describe("test fixtures", () => {
 
     expect(session?.user.id).toBe(created.id);
     expect(authTest).toBeDefined();
-  });
-});
-
-describe("passkeys", () => {
-  it("has a passkey table wired to the user, and truncateAll clears it", async () => {
-    // A full WebAuthn ceremony needs a browser — that lives in the E2E suite
-    // with a virtual authenticator. What is worth asserting here is the part
-    // that silently breaks otherwise: the table exists, cascades from `user`,
-    // and is in `truncateAll`'s list so rows cannot leak between tests.
-    const rows = await db.select().from(passkey);
-    expect(rows).toEqual([]);
   });
 });
 

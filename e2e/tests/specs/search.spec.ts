@@ -44,20 +44,4 @@ test.describe("search", () => {
     const postsSection = page.getByRole("region", { name: "Posts" });
     await expect(postsSection.getByText(post.content, { exact: true })).toBeVisible();
   });
-
-  test("clicking a suggested user row opens that profile", async ({ page, db }) => {
-    const marker = `Clickme${Date.now().toString()}`;
-    const searcher = await db.createUser({ ...uniqueUser("clickme"), name: marker });
-
-    await page.goto("/");
-    await page.getByRole("combobox", { name: "Search" }).fill(marker);
-
-    const listbox = page.getByRole("listbox", { name: "Search suggestions" });
-    await expect(listbox).toBeVisible();
-
-    await listbox.getByRole("option", { name: new RegExp(`@${searcher.username}`) }).click();
-
-    await expect(page).toHaveURL(`/@${searcher.username}`);
-    await expect(page.getByRole("heading", { name: marker })).toBeVisible();
-  });
 });

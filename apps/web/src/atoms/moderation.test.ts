@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { waitFor } from "@testing-library/react";
 
 // `unblockAtom`'s success sweep reads every cache prefix it invalidates
 // (`orpc.post.list.key()`, `orpc.search.*.key()`, …) — a fake that only stubs
@@ -80,7 +79,7 @@ describe("blockedUsersAtom", () => {
     const unsub = singletonStore.sub(blockedUsersAtom, () => {});
     // Wait for the data itself, not just the call: the fetch starts before
     // the resolved value lands in the atom.
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(singletonStore.get(blockedUsersAtom).data?.items).toHaveLength(1);
     });
     unsub();
@@ -93,7 +92,7 @@ describe("blockedUsersAtom", () => {
     fakeClient.moderation.unblock.mockResolvedValue({ userId: "blocked-1", blocked: false });
 
     const unsub = singletonStore.sub(blockedUsersAtom, () => {});
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(singletonStore.get(blockedUsersAtom).data?.items).toHaveLength(1);
     });
 
@@ -107,7 +106,7 @@ describe("blockedUsersAtom", () => {
     // reply-composer.test.ts's post.list/post.thread assertions. Unblocking
     // clears the row server-side, so the mounted list has to refetch rather
     // than be patched (the same reason every viewer-scoped cache is swept).
-    await waitFor(() =>
+    await vi.waitFor(() =>
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.listBlocked.key() }),
     );
     // The profile cache is swept too: blocking from the profile kebab severs
@@ -123,7 +122,7 @@ describe("blockedUsersAtom", () => {
 
     // And the invalidation actually refetches the mounted list — the row the
     // settings page renders is gone without any manual refresh.
-    await waitFor(() => expect(fakeClient.moderation.listBlocked).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(fakeClient.moderation.listBlocked).toHaveBeenCalledTimes(2));
 
     unsub();
     mutationUnsub();
@@ -140,7 +139,7 @@ describe("moderation action cache sweeps", () => {
 
     // The moderation sweep first — wait for any one of its keys, then the
     // rest of the calls are already synchronous.
-    await waitFor(() =>
+    await vi.waitFor(() =>
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.queue.key() }),
     );
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.case.key() });
@@ -184,7 +183,7 @@ describe("moderation action cache sweeps", () => {
       .get(appealReviewFamily("appeal-1"))
       .mutate({ appealId: "appeal-1", outcome: "overturned" });
 
-    await waitFor(() =>
+    await vi.waitFor(() =>
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.queue.key() }),
     );
 
@@ -226,7 +225,7 @@ describe("moderation action cache sweeps", () => {
       .get(resolveAtom)
       .mutate({ targetType: "post", targetId: "post-1", outcome: "dismissed" });
 
-    await waitFor(() =>
+    await vi.waitFor(() =>
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.auditLog.key() }),
     );
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.queue.key() });
@@ -244,7 +243,7 @@ describe("moderation action cache sweeps", () => {
       .get(reportAtom)
       .mutate({ targetType: "post", targetId: "post-1", reason: "spam" });
 
-    await waitFor(() =>
+    await vi.waitFor(() =>
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.moderation.queue.key() }),
     );
 

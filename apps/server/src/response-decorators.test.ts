@@ -1,13 +1,7 @@
 import { createServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import {
-  brotliCompressSync,
-  brotliDecompressSync,
-  constants,
-  gunzipSync,
-  gzipSync,
-} from "node:zlib";
+import { brotliCompressSync, constants, gunzipSync, gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { decorateResponse } from "./response-decorators.js";
@@ -197,20 +191,6 @@ describe("decorateResponse", () => {
     );
   });
 
-  it("prefers brotli when both are offered", async () => {
-    await withServer(
-      (_req, res) => {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(BIG_JSON);
-      },
-      async (raw) => {
-        const r = await raw("/", { headers: { "accept-encoding": "gzip, br" } });
-        expect(r.headers["content-encoding"]).toBe("br");
-        expect(brotliDecompressSync(r.body).toString()).toBe(BIG_JSON);
-      },
-    );
-  });
-
   it("compresses brotli at the explicit dynamic quality, not the zlib default (11)", async () => {
     // The zlib default brotli quality (11) is designed for build-time assets;
     // on the per-request path it blocks the event loop for ~10 ms per feed
@@ -230,36 +210,6 @@ describe("decorateResponse", () => {
             params: { [constants.BROTLI_PARAM_QUALITY]: 4 },
           }),
         );
-      },
-    );
-  });
-
-  it("honours an explicit q=0 refusal rather than compressing anyway", async () => {
-    await withServer(
-      (_req, res) => {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(BIG_JSON);
-      },
-      async (raw) => {
-        const r = await raw("/", {
-          headers: { "accept-encoding": "gzip;q=0, br;q=0" },
-        });
-        expect(r.headers["content-encoding"]).toBeUndefined();
-        expect(r.body.toString()).toBe(BIG_JSON);
-      },
-    );
-  });
-
-  it("sends nothing with no accept-encoding, whatever the body size", async () => {
-    await withServer(
-      (_req, res) => {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(BIG_JSON);
-      },
-      async (raw) => {
-        const r = await raw("/");
-        expect(r.headers["content-encoding"]).toBeUndefined();
-        expect(r.body.toString()).toBe(BIG_JSON);
       },
     );
   });

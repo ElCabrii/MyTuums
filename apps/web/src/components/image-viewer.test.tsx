@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import { renderWithProviders } from "@/test/render";
 import { ImageViewer } from "@/components/image-viewer";
 import { m } from "@/paraglide/messages.js";

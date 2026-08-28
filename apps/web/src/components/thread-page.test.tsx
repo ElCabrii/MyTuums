@@ -3,13 +3,9 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ORPCError } from "@orpc/client";
 import { THREAD_ANCESTOR_MAX } from "@my-tuums/api/constants";
-import {
-  createTestQueryClient,
-  makePost,
-  makeThread,
-  queryFixtures,
-  renderWithProviders,
-} from "@/test/render";
+import { createTestQueryClient, makePost, makeThread } from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
+import { renderWithProviders } from "@/test/render";
 import { ThreadPage } from "@/components/thread-page";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";

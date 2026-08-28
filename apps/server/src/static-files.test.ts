@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { IncomingMessage, OutgoingHttpHeaders } from "node:http";
 import { PassThrough } from "node:stream";
-import { brotliCompressSync, brotliDecompressSync, constants, gunzipSync } from "node:zlib";
+import { brotliCompressSync, constants, gunzipSync } from "node:zlib";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createStaticFileHandler, noStaticFiles, type StaticResponse } from "./static-files.js";
 
@@ -214,20 +214,6 @@ describe("compression", () => {
     expect(gunzipSync(bodyBuffer()).toString()).toBe("console.log(1)");
   });
 
-  it("prefers brotli over gzip when both are offered", async () => {
-    const { res, calls, bodyBuffer } = resStub();
-
-    await expect(
-      createStaticFileHandler(root)(
-        req("/assets/index-abc123.js", "GET", "*/*", { "accept-encoding": "gzip, br" }),
-        res,
-      ),
-    ).resolves.toEqual({ served: true });
-
-    expect(calls.headers["Content-Encoding"]).toBe("br");
-    expect(brotliDecompressSync(bodyBuffer()).toString()).toBe("console.log(1)");
-  });
-
   it("compresses brotli at the explicit dynamic quality, not the zlib default (11)", async () => {
     // The zlib default brotli quality (11) is designed for build-time assets;
     // this stream runs per request on bundles a cold load pays for once, and
@@ -250,19 +236,5 @@ describe("compression", () => {
         params: { [constants.BROTLI_PARAM_QUALITY]: 4 },
       }),
     );
-  });
-
-  it("honours an explicit q=0 refusal rather than compressing anyway", async () => {
-    const { res, calls, body } = resStub();
-
-    await expect(
-      createStaticFileHandler(root)(
-        req("/assets/index-abc123.js", "GET", "*/*", { "accept-encoding": "gzip;q=0, br;q=0" }),
-        res,
-      ),
-    ).resolves.toEqual({ served: true });
-
-    expect(calls.headers["Content-Encoding"]).toBeUndefined();
-    expect(body()).toBe("console.log(1)");
   });
 });

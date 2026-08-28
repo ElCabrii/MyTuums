@@ -12,7 +12,9 @@
     "paraglide": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide --emit-ts-declarations",
     "test": "pnpm paraglide && vitest run",
     "test:unit": "pnpm paraglide && vitest run",
-    "test:watch": "pnpm paraglide && vitest"
+    "test:watch": "pnpm paraglide && vitest",
+    "test:node": "pnpm paraglide && vitest run --project node",
+    "test:dom": "pnpm paraglide && vitest run --project dom"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

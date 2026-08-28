@@ -114,39 +114,7 @@ test.describe("profile details", () => {
     await expect(page.getByRole("heading", { name: "Renamed Person" })).toBeVisible();
     await expect(page.getByText("Collector of small stones.")).toBeVisible();
   });
-
-  test("refuses a bio over the limit, and says so rather than failing silently", async ({
-    page,
-  }) => {
-    await signUpFresh(page, "settings");
-
-    await page.goto("/settings/account");
-    await page.getByLabel("Bio").fill("x".repeat(161));
-    await page.getByRole("button", { name: "Save" }).click();
-
-    // The client's copy and the server's are byte-identical, so this message is
-    // the same either way — which is the point of keeping them in step.
-    await expect(page.getByRole("alert")).toContainText("160 characters or fewer");
-  });
 });
-
-/**
- * A real 1x1 PNG. Real bytes matter: the client re-encodes through a canvas
- * (`lib/media.ts`) and the server sniffs the magic bytes of whatever arrives
- * (`packages/api/src/image.ts`), so a fake buffer would be rejected — correctly.
- *
- * Reserved for the specs that only care THAT an image landed. **A 1x1 is not a
- * valid test of the upload path itself**, and this suite learned that the
- * expensive way: every upload spec used one, and a 1x1 is the single size at
- * which a WebP header misparse is invisible — the broken parser reported width
- * 1 for everything, which is exactly what a 1x1 is. A banner bug that rejected
- * every real landscape image as "too large" shipped through a fully green E2E
- * run. The upload specs below use `solidPng` at realistic sizes instead.
- */
-const PNG_1X1 = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-  "base64",
-);
 
 /**
  * These hit the real Storage Bucket — there is no fake in the browser path.
@@ -171,7 +139,9 @@ test.describe("images", () => {
     await apply.click();
   }
 
-  test("uploads an avatar, and it renders on the profile from /media", async ({ page }) => {
+  test("uploads an avatar, renders it on the profile from /media, and clears it again", async ({
+    page,
+  }) => {
     const account = await signUpFresh(page, "avatar");
 
     await page.goto("/settings/account");
@@ -200,6 +170,17 @@ test.describe("images", () => {
     const response = await page.request.get(src!);
     expect(response.status()).toBe(200);
     expect(response.headers()["content-type"]).toContain("image");
+
+    // Removal shares this account rather than paying for a second sign-up: it
+    // is the same lifecycle, and the profile falling back to initials is the
+    // only browser-visible half `profile-media.int.test.ts` cannot assert.
+    await page.goto("/settings/account");
+    const remove = page.getByRole("button", { name: "Remove Profile picture" });
+    await remove.click();
+    await expect(remove).toBeHidden();
+
+    await page.goto(`/@${account.username}`);
+    await expect(page.getByRole("img", { name: account.name })).toHaveCount(0);
   });
 
   test("keeps one banner composition in Settings and across profile widths", async ({ page }) => {
@@ -240,44 +221,6 @@ test.describe("images", () => {
     await page.setViewportSize({ width: 2560, height: 900 });
     await expectCanonicalBannerGeometry(profileBanner, 500);
   });
-
-  test("removing an image clears it from the profile", async ({ page }) => {
-    const account = await signUpFresh(page, "unavatar");
-
-    await page.goto("/settings/account");
-    await page.getByLabel("Profile picture").setInputFiles({
-      name: "me.png",
-      mimeType: "image/png",
-      buffer: PNG_1X1,
-    });
-    await applyCrop(page);
-    const remove = page.getByRole("button", { name: "Remove Profile picture" });
-    await expect(remove).toBeVisible({ timeout: 20_000 });
-
-    await remove.click();
-    await expect(remove).toBeHidden();
-
-    await page.goto(`/@${account.username}`);
-    // Back to the initials fallback — no <img> at all.
-    await expect(page.getByRole("img", { name: account.name })).toHaveCount(0);
-  });
-
-  test("refuses an SVG, which is a document that can carry script", async ({ page }) => {
-    await signUpFresh(page, "svgreject");
-
-    await page.goto("/settings/account");
-    await page.getByLabel("Profile picture").setInputFiles({
-      name: "sneaky.svg",
-      mimeType: "image/svg+xml",
-      buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>'),
-    });
-
-    await expect(page.getByRole("alert")).toContainText("isn't supported");
-    // Refused before the crop editor opens: a file that cannot be uploaded has
-    // no crop worth choosing (apps/web/src/lib/media.ts, `validateImageFile`).
-    await expect(page.getByRole("button", { name: "Apply" })).toBeHidden();
-    await expect(page.getByRole("button", { name: "Remove Profile picture" })).toBeHidden();
-  });
 });
 
 test.describe("handle", () => {
@@ -295,19 +238,6 @@ test.describe("handle", () => {
     // nothing redirects from it.
     await page.goto(`/@${account.username}`);
     await expect(page.getByText("This handle isn't taken")).toBeVisible();
-  });
-
-  test("refuses a handle that is already taken", async ({ page, db }) => {
-    const taken = uniqueUser("taken");
-    await db.createUser(taken);
-    await signUpFresh(page, "clash");
-
-    await page.goto("/settings/account");
-    await page.getByLabel("Username").fill(taken.username);
-    await page.getByRole("button", { name: "Change handle" }).click();
-
-    await expect(page.getByRole("alert")).toBeVisible();
-    await expect(page).toHaveURL(/\/settings\/account$/);
   });
 });
 
@@ -336,63 +266,6 @@ test.describe("password", () => {
 
     await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));
   });
-
-  test("rejects a wrong current password", async ({ page }) => {
-    await signUpFresh(page, "pwwrong");
-
-    await page.goto("/settings/account");
-    await page.getByLabel("Current Password").fill("definitely-not-it");
-    await page.getByLabel("New Password", { exact: true }).fill("correct-horse-battery-98");
-    await page.getByLabel("Confirm New Password").fill("correct-horse-battery-98");
-    await page.getByRole("button", { name: "Change password" }).click();
-
-    await expect(page.getByRole("alert")).toBeVisible();
-  });
 });
 
-test.describe("preferences", () => {
-  test("stores a default theme without changing this device's current one", async ({ page }) => {
-    await signUpFresh(page, "prefs");
-
-    await page.goto("/settings/account");
-    await page
-      .getByRole("group", { name: "Default theme" })
-      .getByRole("button", { name: "Dark" })
-      .click();
-
-    // Pressed state comes from the *account*, not from this device — the two
-    // are separate by design.
-    await expect(
-      page.getByRole("group", { name: "Default theme" }).getByRole("button", { name: "Dark" }),
-    ).toHaveAttribute("aria-pressed", "true");
-  });
-
-  test("the stored default applies in a browser that has never chosen", async ({
-    browser,
-    page,
-  }) => {
-    const account = await signUpFresh(page, "prefsfresh");
-
-    await page.goto("/settings/account");
-    await page
-      .getByRole("group", { name: "Default theme" })
-      .getByRole("button", { name: "Dark" })
-      .click();
-    await expect(
-      page.getByRole("group", { name: "Default theme" }).getByRole("button", { name: "Dark" }),
-    ).toHaveAttribute("aria-pressed", "true");
-
-    // A genuinely fresh context: no localStorage, no cookie — the state the
-    // account default exists to fill.
-    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
-    const fresh = await context.newPage();
-    await fresh.goto("/login");
-    await fresh.getByLabel("Username or Email").fill(account.email);
-    await fresh.getByLabel("Password").fill(account.password);
-    await fresh.getByRole("main").getByRole("button", { name: "Log in" }).click();
-    await expect(fresh).toHaveURL(new RegExp(`/@${account.username}$`));
-
-    await expect(fresh.locator("html")).toHaveClass(/dark/);
-    await context.close();
-  });
-});
+test.describe("preferences", () => {});

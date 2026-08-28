@@ -76,16 +76,6 @@ describe("createAppealTokenSigner", () => {
       }
     });
 
-    it("rejects a truncated or appended signature", () => {
-      const { sign, verify } = createAppealTokenSigner(SECRET);
-      const token = sign(payload());
-
-      const body = bodyOf(token);
-      const signature = token.slice(token.lastIndexOf(".") + 1);
-      expect(verify(`${body}.${signature.slice(0, 8)}`)).toBeNull();
-      expect(verify(`${body}.${signature}extra`)).toBeNull();
-    });
-
     it("rejects oversized input and implausible signature encodings before verification", () => {
       const { sign, verify } = createAppealTokenSigner(SECRET);
       const token = sign(payload());

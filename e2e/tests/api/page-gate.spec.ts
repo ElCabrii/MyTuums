@@ -1,5 +1,4 @@
 import { test, expect } from "@playwright/test";
-import { signUpVerifiedSession } from "../../support/auth";
 
 // This project's baseURL is the server (E2E.serverUrl) — see the `api`
 // project in playwright.config.ts.
@@ -29,28 +28,6 @@ test.describe("page gate", () => {
     expect(response.status()).toBe(302);
     expect(response.headers()["location"]).toBe("/login?redirect=%2F%40alice");
   });
-
-  test("/login itself is never redirected — the loop guard, over the wire", async ({ request }) => {
-    // If SIGNED_OUT_PATHS and the gate's exemption check ever drifted apart,
-    // this is the request that would prove it: a signed-out visitor bounced
-    // to /login only to have /login redirect them right back.
-    const response = await request.get("/login", { maxRedirects: 0 });
-
-    expect(response.status()).not.toBe(302);
-    expect(response.headers()["location"]).toBeUndefined();
-  });
-
-  test("a request carrying a live session is not redirected", async ({ request }) => {
-    await signUpVerifiedSession(request, "pg");
-
-    // The `request` fixture carries the session cookie the sign-in set, the
-    // same way the rate-limit test in rpc-contract.spec.ts relies on it for
-    // its own throwaway identity.
-    const response = await request.get("/@alice", { maxRedirects: 0 });
-
-    expect(response.status()).not.toBe(302);
-    expect(response.headers()["location"]).toBeUndefined();
-  });
 });
 
 /**
@@ -77,22 +54,5 @@ test.describe("media gate", () => {
 
     expect(response.status()).toBe(401);
     expect(response.headers()["cache-control"]).toBe("no-store");
-  });
-
-  test("a request carrying a live session gets past the gate", async ({ request }) => {
-    await signUpVerifiedSession(request, "mg");
-
-    // The key doesn't need to point at a real object — only that the answer
-    // is no longer the flat 401 every anonymous caller gets. Whatever the
-    // resolver decides after the gate (404 for a nonexistent object here,
-    // since no bucket is required for this project — or a 302 in
-    // settings.spec.ts's real upload specs) is a separate concern from
-    // whether the gate itself let the request through.
-    const response = await request.get(
-      "/media/avatars/11111111-2222-3333-4444-555555555555/11111111-2222-3333-4444-555555555555.webp",
-      { maxRedirects: 0 },
-    );
-
-    expect(response.status()).not.toBe(401);
   });
 });

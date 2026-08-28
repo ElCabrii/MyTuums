@@ -23,5 +23,12 @@ export default defineConfig({
     // the repo's integration naming convention can never land in this
     // database-less project.
     exclude: ["src/**/*.int.test.ts"],
+
+    // Same structural guard as `packages/api`'s unit project: this package's
+    // `index.ts` and `testing.ts` both construct a Better Auth instance over
+    // `@my-tuums/db`, which throws on a falsy DATABASE_URL at module scope. A
+    // test here that reaches for either fails by name instead of quietly
+    // connecting to whatever database the shell happened to point at.
+    env: { DATABASE_URL: "" },
   },
 });

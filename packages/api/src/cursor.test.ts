@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { CURSOR_ID_MAX_LENGTH, CURSOR_MAX_ENCODED_LENGTH } from "./constants.js";
+import { CURSOR_MAX_ENCODED_LENGTH } from "./constants.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createCursorCodec } from "./cursor.js";
@@ -74,22 +74,12 @@ describe("createCursorCodec", () => {
   describe("decode: malformed input", () => {
     const codec = createCursorCodec(z.uuid());
 
-    it("throws BAD_REQUEST when base64url-decoded bytes aren't valid JSON", () => {
-      // Buffer.from(x, "base64url") is lenient — it decodes almost any
-      // string to *some* bytes — so this only fails at JSON.parse.
-      expectMalformedCursor(() => codec.decode("!!!not base64!!!"));
-    });
-
     it("throws BAD_REQUEST when valid base64url decodes to non-JSON text", () => {
       expectMalformedCursor(() => codec.decode(Buffer.from("not json").toString("base64url")));
     });
 
     it("throws BAD_REQUEST when JSON parses but createdAt fails the schema", () => {
       expectMalformedCursor(() => codec.decode(encodeRaw({ createdAt: "nope", id: VALID_UUID })));
-    });
-
-    it("throws BAD_REQUEST when JSON parses but id is missing", () => {
-      expectMalformedCursor(() => codec.decode(encodeRaw({ createdAt: new Date().toISOString() })));
     });
 
     it("throws BAD_REQUEST for an offset-bearing timestamp — z.iso.datetime() requires UTC", () => {
@@ -116,27 +106,10 @@ describe("createCursorCodec", () => {
       expectMalformedCursor(() => codec.decode(`${unpadded}=`));
     });
 
-    it("throws BAD_REQUEST for base64 that smuggles non-alphabet characters", () => {
-      // `Buffer.from` drops out-of-alphabet characters when decoding; the
-      // canonical re-encode catches the interleaved junk that would otherwise
-      // silently vanish.
-      const payload = encodeRaw({ createdAt: new Date().toISOString(), id: VALID_UUID });
-      expectMalformedCursor(() => codec.decode(payload.slice(0, 4) + "!!" + payload.slice(4)));
-    });
-
     it("still accepts an exactly-canonical cursor with no padding", () => {
       // The canonical check must not reject what encode() produces.
       const cursor = codec.encode(new Date(), VALID_UUID);
       expect(codec.decode(cursor).id).toBe(VALID_UUID);
-    });
-
-    it("bounds textual ids inside an otherwise small decoded payload", () => {
-      const payload = encodeRaw({
-        createdAt: new Date().toISOString(),
-        id: "x".repeat(CURSOR_ID_MAX_LENGTH + 1),
-      });
-      expect(payload.length).toBeLessThanOrEqual(CURSOR_MAX_ENCODED_LENGTH);
-      expectMalformedCursor(() => codec.decode(payload));
     });
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import { LinkedText } from "@/components/linked-text";
 import { insertMention, mentionAtCaret } from "@/lib/composer-mentions";
+
 import { renderWithProviders } from "@/test/render";
 
 describe("LinkedText", () => {

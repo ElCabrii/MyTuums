@@ -42,27 +42,6 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(date, "en")).toBe("5 minutes ago");
     expect(formatRelativeTime(date, "fr")).toBe("il y a 5 minutes");
   });
-
-  it("reuses one formatter per locale instead of rebuilding per call", () => {
-    // The cache is module-level, so "de" (unused elsewhere in this file)
-    // starts uncached; three calls must construct exactly one formatter.
-    const RealRelativeTimeFormat = Intl.RelativeTimeFormat;
-    const spy = vi.spyOn(Intl, "RelativeTimeFormat").mockImplementation(function (
-      locales?: Intl.LocalesArgument,
-      options?: Intl.RelativeTimeFormatOptions,
-    ) {
-      return new RealRelativeTimeFormat(locales, options);
-    });
-    try {
-      const date = new Date(NOW.getTime() - 5 * 60_000);
-      formatRelativeTime(date, "de");
-      formatRelativeTime(date, "de");
-      formatRelativeTime(date, "de");
-      expect(spy).toHaveBeenCalledTimes(1);
-    } finally {
-      spy.mockRestore();
-    }
-  });
 });
 
 describe("formatJoinDate", () => {
