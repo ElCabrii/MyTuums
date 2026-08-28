@@ -151,9 +151,12 @@ export function ProfileLayout() {
     <div className="bg-background min-h-screen pb-12">
       {/* The plain `bg-muted` plate is the fallback, not a placeholder: most
           profiles have no banner, and it is what the avatar's negative margin
-          and the border below are laid out against either way. */}
+          and the border below are laid out against either way. The measure cap
+          is a width cap, not a height cap, because a `max-h` would reintroduce
+          the viewport-dependent `object-cover` crop the exact 3:1 aspect
+          removed; bounding the width bounds the height as a consequence. */}
       <div
-        className="bg-muted border-border relative w-full overflow-hidden border-b"
+        className="bg-muted border-border relative mx-auto w-full max-w-[1500px] overflow-hidden border-b"
         style={{ aspectRatio: BANNER_ASPECT_RATIO }}
       >
         {profile.bannerImage && (
