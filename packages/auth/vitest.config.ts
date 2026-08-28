@@ -18,5 +18,10 @@ export default defineConfig({
     name: "auth",
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // `*` spans dots, so the include also matches `*.int.test.ts`; exclude it
+    // explicitly like `packages/api`'s unit project does, so a file following
+    // the repo's integration naming convention can never land in this
+    // database-less project.
+    exclude: ["src/**/*.int.test.ts"],
   },
 });

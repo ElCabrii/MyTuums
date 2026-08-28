@@ -175,9 +175,12 @@ it is pure — so it belongs in `pnpm test:unit`, which runs with no database
 service. There is deliberately no integration project here: delivery behaviour
 already has one in `packages/api`, and giving this package a second would hand
 it a database dependency its modules do not have. Nothing in the unit project
-may read the root `.env` — `src/env.ts`'s defaults are what make that true, and
-`src/email.test.ts` re-imports the module under a stubbed `WEB_ORIGIN` when it
-needs to pin a value.
+may read the root `.env`: `vitest.config.ts`, unlike `packages/api`'s, never
+dotenv-loads it, and `src/env.ts` resolves every variable at module load with a
+usable default, which is what keeps the package import-safe with no environment
+at all. `src/email.test.ts` re-imports the module under a stubbed `WEB_ORIGIN`
+when it needs to pin a value; the malformed-origin fallback those tests pin
+lives in `src/email.ts`'s `emailLogoUrl`, not in `env.ts`.
 
 ## Further reading
 

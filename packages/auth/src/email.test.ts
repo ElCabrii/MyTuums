@@ -71,7 +71,7 @@ describe("moderationRemovalEmail", () => {
     );
 
     expect(email.text).toContain(appealUrl);
-    expect(email.html).toContain(`href="${appealUrl.replaceAll("&", "&amp;")}"`);
+    expect(hrefs(email.html)).toContain(appealUrl.replaceAll("&", "&amp;"));
   });
 
   it("linkifies each URL in the copy once, with the href escaped and the surrounding prose escaped too", () => {
@@ -174,5 +174,19 @@ describe("otpEmail", () => {
     // The fallback is the point: a bad origin must cost the email its logo
     // resolution, not the whole send.
     expect(email.html).toContain('src="http://localhost:5173/mytuums-192.png"');
+  });
+
+  // Positive control for the fallback test above: the fallback URL equals
+  // `env.ts`'s default `WEB_ORIGIN` (and the one CI exports), so only a
+  // distinct valid origin proves the stub actually reached the module and the
+  // logo is resolved against it — on the happy path, not just the catch.
+  it("resolves the logo against a valid WEB_ORIGIN", async () => {
+    vi.stubEnv("WEB_ORIGIN", "https://mail.example.test");
+    vi.resetModules();
+    const { otpEmail: freshOtpEmail } = await import("./email.js");
+
+    const email = freshOtpEmail("123456", "en");
+
+    expect(email.html).toContain('src="https://mail.example.test/mytuums-192.png"');
   });
 });
