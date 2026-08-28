@@ -89,9 +89,13 @@ app's build from the same origin.
   owns only pre-JS fallbacks.** The static `[data-app-fallback]` tags restate
   `SITE_ORIGIN` and the brand copy by hand because that file cannot import
   TypeScript; `__root.tsx` removes them on mount so nothing is left with two
-  owners. Canonical/Open Graph URLs always point at the production origin
+  owners. Open Graph URLs always point at the production origin
   (`SITE_ORIGIN`), never at the current host — change it together with
-  `index.html`. Data-dependent titles/descriptions go through
+  `index.html`. Canonicals are per-URL, so `index.html` ships none: the server
+  serves that file verbatim for every path and a static one would point every
+  crawlable URL at the homepage. Each route's `head()` emits its own canonical
+  via `pageHead`, and `fallbackHead()` deliberately emits no `links`.
+  Data-dependent titles/descriptions go through
   `setDocumentHead`/`useDocumentHead`, which also update the Open Graph and
   Twitter mirrors.
 - **Feed and list parameterisation lives in atoms.** `PostFeed` takes a

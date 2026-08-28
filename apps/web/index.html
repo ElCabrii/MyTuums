@@ -27,7 +27,11 @@
          (src/lib/document-head.ts owns those shapes — keep origin and copy in
          step with it). English-only is deliberate; Paraglide lives in the
          bundle and cannot reach this markup, like the splash below. -->
-    <link data-app-fallback rel="canonical" href="https://mytuums.com/" />
+    <!-- No canonical here, unlike the tags below: a canonical is inherently
+         per-URL, and the server serves this file verbatim for every path, so a
+         static one would claim every crawlable URL is a duplicate of the
+         homepage. Each route's head() emits its own canonical instead
+         (src/lib/document-head.ts). -->
     <meta data-app-fallback property="og:title" content="MyTuums — Social Media for Gamers" />
     <meta
       data-app-fallback
