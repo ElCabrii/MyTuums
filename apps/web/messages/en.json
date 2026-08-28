@@ -238,6 +238,12 @@
   "settings_image_crop_hint": "Drag to reposition, scroll to zoom.",
   "settings_banner_crop_hint": "Drag to reposition, scroll to zoom. This frame matches the banner shown on profiles.",
   "settings_image_crop_apply": "Apply",
+  "avatar_upgrade_title": "Sharpen your profile picture",
+  "avatar_upgrade_body": "This picture was uploaded at a lower resolution than MyTuums now supports. Re-crop it from the original to fix the blur.",
+  "avatar_upgrade_action": "Re-crop picture",
+  "avatar_upgrade_dismiss": "Dismiss",
+  "avatar_upgrade_failed": "Couldn't load the original picture. Try again, or upload a new one from settings.",
+
   "settings_handle_title": "Handle",
   "settings_handle_description": "The @name people find you by.",
   "settings_handle_warning": "Changing this breaks every existing link to your profile, and frees your old handle for someone else to take.",

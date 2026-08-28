@@ -28,6 +28,8 @@ export interface TestSessionUser {
   username?: string | null;
   displayUsername?: string | null;
   image?: string | null;
+  /** The untouched original's /media path (issue #246's re-crop offer reads it). */
+  imageOriginal?: string | null;
   /** A Date, as the session store reports it. Omit it to simulate a session that never declared one. */
   dateOfBirth?: Date | null;
   bio?: string | null;
@@ -237,6 +239,7 @@ export function signedInSession(user: Partial<TestSessionUser> = {}): TestSessio
         username: "alexmercer",
         displayUsername: "AlexMercer",
         image: null,
+        imageOriginal: null,
         // The editable profile and the stored preferences, all unset — the
         // state a fresh account is in, and the one the theme/locale fallbacks
         // in atoms/theme.ts and atoms/locale.ts are written against. A test

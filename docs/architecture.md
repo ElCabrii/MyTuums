@@ -254,6 +254,17 @@ sides by CI. See [operations.md](operations.md).
   future refit. The stored variant can reach 1024x1024 because the profile
   page's full-size viewer renders this same object at near-viewport scale —
   feeds still downscale it (issue #229).
+- **Avatars uploaded before #233 stay at 512 px until their owner re-crops
+  them.** The ceiling raise only changed the encode path, so every display
+  variant already in the bucket predates it, and profile media persist no
+  dimensions to notice that from — detection measures the display object in
+  the browser against the live `IMAGE_LIMITS.avatar` ceiling
+  (`apps/web/src/lib/avatar-upgrade.ts`). The owner is offered a one-click
+  re-crop on their own profile (`apps/web/src/components/avatar-upgrade-prompt.tsx`),
+  seeded from the retained original and running the ordinary upload pipeline —
+  never a server-side or silent re-encode, which would recompose the stored
+  crop. Dismissal persists per browser against the dismissed display path, so
+  a new upload re-evaluates from scratch (issue #246).
 - **Banners have one canonical 3:1 composition.** At zoom 1 the editor
   rectangle is exactly the region the encoder stores (`calculateCropFrame`),
   so applying without adjusting anything is a no-op. The editor, Settings
