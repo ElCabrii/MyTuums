@@ -149,9 +149,9 @@ function readFirstBytes(file: File, max: number): Promise<Uint8Array | null> {
  *
  * WebP because it is in `ALLOWED_IMAGE_TYPES`, is markedly smaller than PNG for
  * photographs, and is supported by every browser this app targets. Banners are
- * encoded at a canonical 3:1 (see `calculateDisplayLayout`), giving the crop
- * editor one stable source composition even though the profile frame remains
- * responsive and may hide edges with `object-cover`.
+ * always 3:1 (see `calculateDisplayLayout`), and the crop editor, Settings
+ * preview and profile banner all use that same aspect, so the encoded
+ * composition remains authoritative at every viewport.
  *
  * With a `crop` — what the editor in
  * `components/settings/image-crop-dialog.tsx` produces — the chosen region

@@ -35,8 +35,16 @@ function storageBucketConfigured(): boolean {
  * 3:1 aspect. Equal aspects make `object-cover` a no-op: every marker in an
  * asymmetric source remains in the composition instead of being silently
  * removed by a viewport-dependent second crop (issue #234).
+ *
+ * Aspect and bounded height are two different properties, and both are
+ * asserted: a 1440x480 frame and a 1500x500 frame are both exactly 3:1, and so
+ * was the unbounded full-bleed frame that rendered 853px tall at 2560px
+ * viewports (issue #240). `expectedHeight` catches that where the 1500px
+ * measure binds — on viewports wider than the cap, where the height has a
+ * single exact value; below the cap the height is viewportWidth / 3 and no
+ * number is worth pinning.
  */
-async function expectCanonicalBannerGeometry(banner: Locator) {
+async function expectCanonicalBannerGeometry(banner: Locator, expectedHeight?: number) {
   await expect(banner).toBeVisible();
   await expect
     .poll(() =>
@@ -46,16 +54,20 @@ async function expectCanonicalBannerGeometry(banner: Locator) {
     )
     .toBeCloseTo(3, 5);
 
-  const frameAspect = await banner.evaluate((image) => {
+  const frameBounds = await banner.evaluate((image) => {
     const frame = image.parentElement;
     if (!frame) throw new Error("banner image has no display frame");
-    const bounds = frame.getBoundingClientRect();
-    return bounds.width / bounds.height;
+    return frame.getBoundingClientRect();
   });
   // CSS layout quantizes dimensions to fractional device pixels. Two decimal
   // places allow that subpixel noise while still rejecting the old responsive
   // crop ratios (about 2.03 on mobile and 5.63 on desktop).
-  expect(frameAspect).toBeCloseTo(3, 2);
+  expect(frameBounds.width / frameBounds.height).toBeCloseTo(3, 2);
+
+  // A 3:1 frame says nothing about its size, hence the absolute height.
+  if (expectedHeight !== undefined) {
+    expect(frameBounds.height).toBeCloseTo(expectedHeight, 1);
+  }
 }
 
 /** Signs up a fresh account through the UI and lands on its profile. */
@@ -221,6 +233,12 @@ test.describe("images", () => {
       await page.setViewportSize({ width, height: 900 });
       await expectCanonicalBannerGeometry(profileBanner);
     }
+
+    // 2560 is wide enough that the 1500px measure binds, making the frame
+    // exactly 1500x500. Aspect alone cannot catch an unbounded frame — 2560x853
+    // is as 3:1 as 1500x500 — so the absolute height is what pins the cap here.
+    await page.setViewportSize({ width: 2560, height: 900 });
+    await expectCanonicalBannerGeometry(profileBanner, 500);
   });
 
   test("removing an image clears it from the profile", async ({ page }) => {
