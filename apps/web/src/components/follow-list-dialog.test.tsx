@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import {
-  createTestQueryClient,
-  makeUserSummary,
-  renderWithProviders,
-  queryFixtures,
-} from "@/test/render";
+import { createTestQueryClient, makeUserSummary } from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
+import { renderWithProviders } from "@/test/render";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { m } from "@/paraglide/messages.js";
 

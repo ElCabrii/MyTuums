@@ -10,7 +10,8 @@ import {
   searchInputAtom,
 } from "@/atoms/search";
 import { orpc, type SearchTypeahead } from "@/lib/orpc";
-import { createTestQueryClient, makeUserSummary, renderWithProviders } from "@/test/render";
+import { createTestQueryClient, makeUserSummary } from "@/test/factories";
+import { renderWithProviders } from "@/test/render";
 
 /**
  * Opens the typeahead dropdown the way a user does: a query already in the

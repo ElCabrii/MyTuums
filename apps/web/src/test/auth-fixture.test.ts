@@ -15,7 +15,7 @@ import { createStore } from "jotai";
 // `vi.hoisted` runs before the static import below, so the fetch spy is in
 // place before `@/atoms/session` evaluates — the same ordering a test author
 // would otherwise have to remember by hand. The fake is installed by
-// `src/test/setup.ts` during the Vitest setup phase, which runs before any
+// the Vitest setups (`setup-node.ts`/`setup-dom.ts`) during the setup phase, which runs before any
 // test module is evaluated, so this import order is safe without any
 // caller-side convention.
 const { fetchCalls } = vi.hoisted(() => {

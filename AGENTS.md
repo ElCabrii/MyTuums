@@ -16,8 +16,8 @@ routing live in [CONTEXT.md](CONTEXT.md).
 4. Test observable behavior at the lowest practical layer. Update the owning
    context or deeper documentation when a public interface, architecture,
    invariant, workflow, deployment requirement, or security assumption changes.
-5. Run the narrowest relevant checks from the owning `CONTEXT.md`. Fix failures
-   introduced by the change and report any check that could not run.
+5. Run the narrowest relevant checks while iterating, then `pnpm verify`. Fix
+   failures introduced by the change and report any check that could not run.
 
 ## Repository guardrails
 
@@ -41,6 +41,27 @@ routing live in [CONTEXT.md](CONTEXT.md).
   migrations in the pre-deploy step.
 - Keep credentials and `.env` contents out of source, logs, and reports.
 
+## Tests
+
+Full rules and the reasoning: [TESTING_STRATEGY.md](TESTING_STRATEGY.md).
+
+- Do not add a test for every new function, and never for coverage. A test
+  earns its place by protecting an invariant, a contract, a boundary, a
+  security or data-integrity property, or a regression that actually happened.
+- Test observable behavior. Not private helpers, call order, or mock
+  interactions.
+- Do not restate an assertion at a second layer. If a rule is pinned in
+  `packages/auth/src/rules.ts`'s tests, do not re-prove it through a browser.
+- Prefer the cheapest layer that can catch the failure:
+  unit → `packages/api` integration → `e2e/tests/api` → a browser spec. Add a
+  browser spec only for something that genuinely crosses the browser.
+- Fixing a bug: reproduce it at the cheapest reliable level first, and name the
+  issue in the test.
+- No snapshots for structured behavior, no new fixture or factory until
+  repeated setup justifies one, no retry to hide a flake.
+- In `packages/api`, use `createTestUser`; reach for `createPasswordTestUser`
+  only when a password being accepted or refused is the assertion.
+
 ## Completion
 
 A change is complete when:
@@ -48,9 +69,10 @@ A change is complete when:
 - the requested behavior works through its caller-visible interface;
 - affected tests pass at the lowest relevant layer;
 - relevant lint, typecheck, build, and documentation checks pass;
-- `pnpm format` has been run. Formatting is a **separate CI step**
-  (`pnpm format:check`) that `pnpm lint` does not cover, so a change that
-  passes lint locally can still fail CI on formatting alone;
+- `pnpm format` has been run. Formatting is checked by `pnpm format:check`,
+  which `pnpm lint` does not cover, so a change that passes lint locally can
+  still fail on formatting alone;
+- `pnpm verify` passes. It is exactly what CI's `Verify` job runs;
 - generated and documentation artifacts agree with their sources of truth;
 - the final report lists changed behavior, verification run, and remaining
   blockers or risks.

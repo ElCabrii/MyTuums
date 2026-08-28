@@ -115,7 +115,13 @@ export default defineConfig({
   outputDir: "./test-results",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // One retry in CI, not two. A required check has to be trustworthy, and two
+  // retries is enough to keep a genuinely unreliable spec green indefinitely —
+  // the failure mode is not a red build, it is a suite nobody believes. One
+  // absorbs a real infrastructure blip (a service container that answered
+  // slowly on its first request) while a spec that needs a third attempt
+  // shows up as a failure to fix or quarantine, not as noise to absorb.
+  retries: process.env.CI ? 1 : 0,
 
   // One worker. Every spec shares a single Postgres and a single in-process
   // rate limiter on the server, so parallel workers would both contend for

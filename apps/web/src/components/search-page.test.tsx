@@ -1,13 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { act, screen } from "@testing-library/react";
 import { SearchPage } from "@/components/search-page";
-import {
-  makeAuthor,
-  makePost,
-  makeUserSummary,
-  renderWithProviders,
-  queryFixtures,
-} from "@/test/render";
+import { makeAuthor, makePost, makeUserSummary } from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
+import { renderWithProviders } from "@/test/render";
 
 describe("SearchPage", () => {
   it("renders the type-something prompt when the URL carries no query", async () => {

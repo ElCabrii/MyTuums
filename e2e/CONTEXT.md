@@ -7,8 +7,16 @@ real Postgres, and — when the `S3_*` group is present — a real bucket. Its o
 workspace package so Playwright never enters the root manifest.
 
 The suite is slow (browser install, real sign-ups, two servers). Reach for
-`pnpm test:unit` or `pnpm test:integration` first; CI runs this on every push
-regardless. Add a spec here only for a journey no cheaper layer can prove.
+`pnpm test:unit`, `pnpm test:integration`, or a `tests/api` spec first — that
+last one hits the real server over real HTTP with no browser at all, and the
+whole project runs in about a second and a half.
+
+**Add a browser spec here only for something that genuinely crosses the
+browser**: a real WebAuthn or TOTP ceremony, a canvas re-encode reaching a
+bucket, an optimistic cache surviving a navigation, a CSS composition at a
+real viewport width, an axe scan. A rule that already has an owner in
+`packages/auth/src/rules.ts`, `packages/api` or a component test must not be
+re-proved here — see [../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
 
 ## Start here
 

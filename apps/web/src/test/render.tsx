@@ -20,38 +20,14 @@ import {
  * memory router standing in for `src/routeTree.gen.ts` (generated, git-ignored,
  * so tests can't depend on it).
  *
- * The auth fake and session fixtures live in `./auth-fixture.ts` (installed by
- * `src/test/setup.ts` during the Vitest setup phase, before any test module
- * evaluates); the domain factories and QueryClient tuning live in
- * `./factories.ts`; the router stand-in lives in `./route-tree.ts`. This module
- * re-exports what component tests need so their call sites stay stable.
+ * This module does one thing — compose providers and render. It is not a
+ * barrel: the auth fixtures live in `./auth-fixture.ts` (installed by the dom
+ * setup during the Vitest setup phase, before any test module evaluates), the
+ * domain factories in `./factories.ts`, the query-cache seeding in
+ * `./query-fixtures.ts`, and the router stand-in in `./route-tree.tsx`.
+ * Tests import those from their owning modules, so a grep can answer who
+ * actually depends on each of them.
  */
-
-export { queryFixtures } from "@/test/query-fixtures";
-export { createTestQueryClient } from "@/test/factories";
-export {
-  makeAuthor,
-  makeAuditEntry,
-  makeModerationCase,
-  makeModerationCaseDetail,
-  makeModerationReport,
-  makePost,
-  makePostPreview,
-  makeProfile,
-  makeTeamMember,
-  makeThread,
-  makeUserModerationCaseDetail,
-  makeUserPreview,
-  makeUserSummary,
-} from "@/test/factories";
-export {
-  patchTestSessionUser,
-  setTestSession,
-  setTestSignedOut,
-  setTestSocialProviders,
-  type TestSessionUser,
-  type TestSessionValue,
-} from "@/test/auth-fixture";
 
 /** jotai doesn't re-export a `Store` type from its package root at this version — derive it instead. */
 type JotaiStore = ReturnType<typeof createStore>;

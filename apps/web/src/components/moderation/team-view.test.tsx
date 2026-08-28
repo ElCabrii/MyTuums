@@ -4,12 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { debounceMs } from "@/atoms/search";
 import { debouncedTeamSearchAtom, roleSelectAtom, teamSearchInputAtom } from "@/atoms/moderation";
-import {
-  createTestQueryClient,
-  makeTeamMember,
-  queryFixtures,
-  renderWithProviders,
-} from "@/test/render";
+import { createTestQueryClient, makeTeamMember } from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
+import { renderWithProviders } from "@/test/render";
 import { TeamView } from "@/components/moderation/team-view";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";

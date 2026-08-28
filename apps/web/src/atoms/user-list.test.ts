@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient } from "@tanstack/react-query";
-import { waitFor } from "@testing-library/react";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
 
@@ -59,7 +58,7 @@ describe("userListAtom", () => {
     const atom = userListAtom("carol", "followers");
     const unsub = store.sub(atom, () => {});
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       const result = store.get(atom);
       expect(result.data?.pages[0]?.items[0]?.username).toBe("bob");
     });

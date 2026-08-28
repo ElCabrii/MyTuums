@@ -419,14 +419,21 @@ keeps direct database writers from splitting the two representations.
 
 | Layer       | What runs                                                         | Needs                                         |
 | ----------- | ----------------------------------------------------------------- | --------------------------------------------- |
-| Unit        | `*.test.ts(x)` — pure logic, atoms, components                    | nothing; must pass with no database reachable |
+| Unit        | `*.test.ts(x)` — pure logic, atoms, components, request handling  | nothing; must pass with no database reachable |
 | Integration | `*.int.test.ts` in `packages/api`                                 | real Postgres, `fileParallelism: false`       |
-| E2E         | Playwright `setup` / `api` / `chromium` projects                  | real server, real Postgres, optional bucket   |
-| Docker      | CI builds the image, asserts its contents, boots it and probes it | a Postgres service                            |
+| Contract    | Playwright's `api` project — headers, CORS, body caps, the gates  | the real server; no browser, no auth state    |
+| E2E         | Playwright's `setup` / `chromium` projects                        | real server, real Postgres, optional bucket   |
+| Image       | CI builds the image, asserts its contents, boots it and probes it | a Postgres service                            |
 
-The unit/integration split is enforced by CI giving the `unit` job no database
-service. The `docker` job is the only place the production artefact is ever
-started; the E2E suite runs the dev server.
+The unit/integration split is structural rather than circumstantial: the unit
+projects blank `DATABASE_URL` themselves (`packages/api/vitest.config.ts`,
+`packages/auth/vitest.config.ts`), so a unit test that grows a database
+dependency fails by name on a developer's machine as well as in CI. The
+`image` job is the only place the production artefact is ever started; the E2E
+suite runs the dev server.
+
+What belongs in which layer, and when a test deserves to exist at all:
+[../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
 
 ## Further reading
 

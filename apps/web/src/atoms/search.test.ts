@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient } from "@tanstack/react-query";
-import { waitFor } from "@testing-library/react";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
 
@@ -127,7 +126,7 @@ describe("typeaheadAtom", () => {
     store.set(setSearchQueryAtom, "alice");
     expect(fakeClient.search.typeahead).not.toHaveBeenCalled();
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(fakeClient.search.typeahead).toHaveBeenCalledWith({ q: "alice" }, expect.anything());
     });
 

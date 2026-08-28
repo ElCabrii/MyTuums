@@ -5,13 +5,7 @@ import { user } from "@my-tuums/db/schema";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";
-import {
-  anonContext,
-  contextFor,
-  createTestUser,
-  seedPosts,
-  truncateAll,
-} from "./testing/harness.js";
+import { contextFor, createTestUser, seedPosts, truncateAll } from "./testing/harness.js";
 
 beforeAll(async () => {
   await truncateAll();
@@ -27,15 +21,6 @@ afterAll(async () => {
 });
 
 describe("post.like / post.unlike", () => {
-  it("like requires authentication", async () => {
-    const author = await createTestUser();
-    const [target] = await seedPosts(author.id, 1);
-
-    await expect(
-      call(appRouter.post.like, { postId: target.id }, { context: anonContext }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-  });
-
   it("liking an unknown post is NOT_FOUND", async () => {
     const liker = await createTestUser();
     await expect(

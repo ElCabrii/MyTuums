@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
+import { jsonStorage } from "@/lib/json-storage";
 import { z } from "zod";
 import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import { orpc } from "@/lib/orpc";
@@ -18,7 +19,7 @@ const STORAGE_KEY = "my-tuums.composer-draft";
  * stored draft only afterwards, so a half-typed post would flash empty and
  * then reappear a frame later instead of just being there.
  */
-const storedComposerDraftAtom = atomWithStorage<unknown>(STORAGE_KEY, "", undefined, {
+const storedComposerDraftAtom = atomWithStorage<unknown>(STORAGE_KEY, "", jsonStorage(), {
   getOnInit: true,
 });
 

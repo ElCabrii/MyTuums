@@ -1,13 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import {
-  createTestQueryClient,
-  makeAuditEntry,
-  makeTeamMember,
-  queryFixtures,
-  renderWithProviders,
-} from "@/test/render";
+import { createTestQueryClient, makeAuditEntry, makeTeamMember } from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
+import { renderWithProviders } from "@/test/render";
 import { ModerationPage } from "@/components/moderation/moderation-page";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";

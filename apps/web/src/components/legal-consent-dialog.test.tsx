@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { LEGAL_VERSION } from "@my-tuums/auth/rules";
+
 import { renderWithProviders } from "@/test/render";
 import { patchTestSessionUser } from "@/test/auth-fixture";
 import { authClient } from "@/lib/auth-client";

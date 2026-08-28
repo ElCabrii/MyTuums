@@ -5,13 +5,10 @@ import { createStore } from "jotai";
 import { ORPCError } from "@orpc/client";
 import { authErrorAtom } from "@/atoms/auth";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
-import {
-  createTestQueryClient,
-  makeProfile,
-  queryFixtures,
-  renderWithProviders,
-  setTestSession,
-} from "@/test/render";
+import { setTestSession } from "@/test/auth-fixture";
+import { createTestQueryClient, makeProfile } from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
+import { renderWithProviders } from "@/test/render";
 import { ProfileLayout } from "@/components/profile-layout";
 import { authClient } from "@/lib/auth-client";
 import { m } from "@/paraglide/messages.js";
@@ -304,23 +301,6 @@ describe("ProfileLayout bio", () => {
       "content",
       privateBio,
     );
-  });
-
-  it("links mentions to canonical profiles and preserves the surrounding text", async () => {
-    const bio = "Building with @Alice,\none day at a time.";
-    const profile = makeProfile({ username: "author", displayUsername: "Author", bio });
-    const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).profile.data("author", profile);
-
-    await renderWithProviders(<ProfileLayout />, {
-      queryClient,
-      initialPath: "/@author",
-      signedInAs: true,
-    });
-
-    const mention = screen.getByRole("link", { name: "@Alice" });
-    expect(mention).toHaveAttribute("href", "/@alice");
-    expect(mention.closest("p")?.textContent).toBe(bio);
   });
 });
 

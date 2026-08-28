@@ -1,30 +1,15 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { screen } from "@testing-library/react";
+
 import { renderWithProviders } from "@/test/render";
 import { NotFoundPage } from "@/components/not-found-page";
-import { m } from "@/paraglide/messages.js";
 
-beforeEach(() => {
-  document.head.querySelector('meta[name="description"]')?.remove();
-  const description = document.createElement("meta");
-  description.setAttribute("name", "description");
-  document.head.appendChild(description);
-});
-
+// The 404 screen's copy and document metadata are static strings — the
+// document-head helper they go through is owned by lib/document-head.dom.test.ts
+// and its wiring by the pages whose titles actually vary. What only this page
+// can get wrong is its one behaviour: offering the way back.
 describe("NotFoundPage", () => {
-  it("renders the title and body", async () => {
-    await renderWithProviders(<NotFoundPage />);
-
-    expect(screen.getByRole("heading", { name: "Page not found" })).toBeInTheDocument();
-    expect(screen.getByText("This page doesn't exist or has moved.")).toBeInTheDocument();
-    expect(document.title).toBe(`${m.notfound_title()} - ${m.app_title_suffix()}`);
-    expect(document.head.querySelector('meta[name="description"]')).toHaveAttribute(
-      "content",
-      m.app_document_description(),
-    );
-  });
-
   it("back-home button navigates to /", async () => {
     const user = userEvent.setup();
     const { router } = await renderWithProviders(<NotFoundPage />);

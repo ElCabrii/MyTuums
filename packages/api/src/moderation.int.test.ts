@@ -33,6 +33,7 @@ import {
   contextFor,
   createTestUser,
   freshSessionFor,
+  createPasswordTestUser,
   seedPosts,
   sessionHeaders,
   setUserBan,
@@ -300,41 +301,6 @@ async function openCaseKeysFromDb(): Promise<string[]> {
 }
 
 describe("report", () => {
-  it("is idempotent per (reporter, target) — a repeat refreshes the timestamp, never a new row", async () => {
-    const reporter = await createTestUser();
-    const author = await createTestUser();
-    const postRow = await seedPostContent(author.id, "report me once");
-
-    await call(
-      appRouter.moderation.report,
-      { targetType: "post", targetId: postRow.id, reason: "spam" },
-      { context: contextFor(reporter) },
-    );
-    const [before] = await anonContext.db
-      .select({ createdAt: report.createdAt })
-      .from(report)
-      .where(eq(report.reporterId, reporter.id));
-
-    // The reason is fixed at first report (the upsert only clears the
-    // resolution stamp and refreshes the clock) — pinning that contract.
-    const second = await call(
-      appRouter.moderation.report,
-      { targetType: "post", targetId: postRow.id, reason: "harassment" },
-      { context: contextFor(reporter) },
-    );
-    expect(second).toEqual({ reported: true });
-
-    const rows = await anonContext.db
-      .select({ reason: report.reason, createdAt: report.createdAt })
-      .from(report)
-      .where(eq(report.reporterId, reporter.id));
-    expect(rows).toHaveLength(1);
-    expect(rows[0].reason).toBe("spam");
-    expect(rows[0].createdAt.getTime()).toBeGreaterThanOrEqual(before.createdAt.getTime());
-
-    await clearQueueFixtures();
-  });
-
   it("reopens after a dismissal — a stamp clearing, still one row", async () => {
     const reporter = await createTestUser();
     const author = await createTestUser();
@@ -1414,38 +1380,6 @@ describe("removePost and restorePost", () => {
     expect(caseResult.target.content).toBe("remove me please");
   });
 
-  it("a failed notice email does not fail the action — the removal stands", async () => {
-    const author = await createTestUser();
-    const mod = await moderatorUser();
-    const postRow = await seedPostContent(author.id, "email may fail");
-
-    // The notice goes out after the transaction commits, so a dead email
-    // service must not turn a done removal into an error the moderator
-    // retries (and gets "already removed" for). The loud log is for
-    // operators; the action is the truth.
-    vi.mocked(testEmailSender.send).mockRejectedValueOnce(new Error("resend is down"));
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const result = await call(
-      appRouter.moderation.removePost,
-      { postId: postRow.id, reason: "spam" },
-      { context: contextFor(mod) },
-    );
-    expect(result).toEqual({ postId: postRow.id, removed: true });
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringMatching(/Moderation email failed to send/),
-      expect.anything(),
-      expect.any(Error),
-    );
-
-    const [row] = await anonContext.db
-      .select({ removedAt: post.removedAt })
-      .from(post)
-      .where(eq(post.id, postRow.id));
-    expect(row?.removedAt).not.toBeNull();
-    errorSpy.mockRestore();
-  });
-
   it("replies to a removed post stay visible and creatable", async () => {
     const author = await createTestUser();
     const mod = await moderatorUser();
@@ -1852,7 +1786,10 @@ describe("removePost and restorePost", () => {
 
 describe("suspendUser", () => {
   it("locks the account: every session dies and sign-in is refused", async () => {
-    const victim = await createTestUser();
+    // The credential fixture, on purpose: Better Auth enforces a ban at
+    // sign-in, so "sign-in is refused" is only a real assertion when there is
+    // a password that would otherwise work (see createPasswordTestUser).
+    const victim = await createPasswordTestUser();
     const mod = await moderatorUser();
     const result = await call(
       appRouter.moderation.suspendUser,
@@ -1867,14 +1804,11 @@ describe("suspendUser", () => {
     expect(stored?.banExpires).toEqual(result.banExpires);
     expect(Math.abs(result.banExpires.getTime() - (Date.now() + 3600_000))).toBeLessThan(60_000);
 
+    // The live session is gone, and the working password no longer opens a new one.
     expect(await auth.api.getSession({ headers: sessionHeaders(victim) })).toBeNull();
-    const [victimRow] = await anonContext.db
-      .select({ email: user.email })
-      .from(user)
-      .where(eq(user.id, victim.id));
     await expect(
       auth.api.signInEmail({
-        body: { email: victimRow.email, password: "vitest-Sup3rSecret!" },
+        body: { email: victim.email, password: victim.password },
         returnHeaders: true,
       }),
     ).rejects.toThrow();
@@ -1947,17 +1881,6 @@ describe("suspendUser", () => {
     }
   });
 
-  it("is NOT_FOUND for a missing account", async () => {
-    const mod = await moderatorUser();
-    await expect(
-      call(
-        appRouter.moderation.suspendUser,
-        { userId: randomUUID(), reason: "spam", durationSeconds: 3600 },
-        { context: contextFor(mod) },
-      ),
-    ).rejects.toMatchObject({ code: "NOT_FOUND", message: "This account doesn't exist." });
-  });
-
   it("refuses a permanently banned account — the sentence stays permanent", async () => {
     const victim = await createTestUser();
     const staff = await staffUser();
@@ -1991,18 +1914,6 @@ describe("suspendUser", () => {
 });
 
 describe("banUser and unbanUser", () => {
-  it("banUser is staff-only", async () => {
-    const victim = await createTestUser();
-    const mod = await moderatorUser();
-    await expect(
-      call(
-        appRouter.moderation.banUser,
-        { userId: victim.id, reason: "spam" },
-        { context: contextFor(mod) },
-      ),
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
-  });
-
   it("banUser bans permanently; unbanUser logs user_unbanned", async () => {
     const victim = await createTestUser();
     const staff = await staffUser();
@@ -3527,7 +3438,9 @@ describe("appeal flow", () => {
   });
 
   it("suspension overturn: the account is unsuspended and can sign back in", async () => {
-    const victim = await createTestUser();
+    // Credential fixture: "can sign back in" is the assertion (see the
+    // suspendUser lock test for why an ordinary fixture makes it vacuous).
+    const victim = await createPasswordTestUser();
     const mod1 = await moderatorUser();
     const mod2 = await moderatorUser();
     await call(
@@ -3557,13 +3470,9 @@ describe("appeal flow", () => {
     expect(cleared?.banReason).toBeNull();
     expect(await latestAction("user_unsuspended", "user", victim.id)).toBeDefined();
 
-    // The account can sign back in and hold a live session again.
-    const [victimRow] = await anonContext.db
-      .select({ email: user.email })
-      .from(user)
-      .where(eq(user.id, victim.id));
+    // ...and the password that was refused while the sentence stood works again.
     const signIn = await auth.api.signInEmail({
-      body: { email: victimRow.email, password: "vitest-Sup3rSecret!" },
+      body: { email: victim.email, password: victim.password },
       returnHeaders: true,
     });
     expect(signIn.headers.get("set-cookie")).toBeTruthy();

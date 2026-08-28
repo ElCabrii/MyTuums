@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient } from "@tanstack/react-query";
-import { waitFor } from "@testing-library/react";
 import { ORPCError } from "@orpc/client";
 
 const fakeClient = { post: { thread: vi.fn() } };
@@ -38,7 +37,7 @@ describe("threadAtomFamily", () => {
     const atom = threadAtomFamily("post-1");
     const unsub = store.sub(atom, () => {});
 
-    await waitFor(() => expect(store.get(atom).data?.post.id).toBe("post-1"));
+    await vi.waitFor(() => expect(store.get(atom).data?.post.id).toBe("post-1"));
 
     unsub();
   });
@@ -53,7 +52,7 @@ describe("threadAtomFamily", () => {
     const atom = threadAtomFamily("missing-post");
     const unsub = store.sub(atom, () => {});
 
-    await waitFor(() => expect(store.get(atom).isError).toBe(true));
+    await vi.waitFor(() => expect(store.get(atom).isError).toBe(true));
     expect(fakeClient.post.thread).toHaveBeenCalledTimes(1);
 
     unsub();

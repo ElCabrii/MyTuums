@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import { renderWithProviders } from "@/test/render";
 import type { Crop } from "@/lib/media";
 import { ImageCropDialog } from "@/components/settings/image-crop-dialog";
@@ -11,10 +12,10 @@ import { m } from "@/paraglide/messages.js";
  *
  * jsdom implements neither `createImageBitmap` nor object URLs nor pointer
  * capture, so all three are stubbed here — the same trade the encoder's own
- * suite makes in `lib/media.test.ts`. What that leaves testable is the part
+ * suite makes in `lib/media.dom.test.ts`. What that leaves testable is the part
  * worth testing: the descriptor the dialog emits, which is what
  * `createDisplayVariant` bakes into the upload. The crop *arithmetic* itself is
- * pinned as pure functions in `lib/media.test.ts`; the pixel-accurate rendering
+ * pinned as pure functions in `lib/media.dom.test.ts`; the pixel-accurate rendering
  * is a browser concern covered by `e2e/tests/specs/settings.spec.ts`.
  */
 

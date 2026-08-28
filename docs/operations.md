@@ -103,7 +103,7 @@ CI at the ci bucket. Pointed at production, that cleanup deletes real users'
 avatars.
 
 CI never deploys. Railway builds its own image from `apps/server/Dockerfile`
-on push; the CI `docker` job exists to fail a commit that would produce a
+on push; the CI `image` job exists to fail a commit that would produce a
 broken one.
 
 ## Build-time and runtime configuration
@@ -206,16 +206,34 @@ Destructive helpers refuse to touch anything else.
 ## CI checks
 
 `.github/workflows/ci.yml` runs on every push to `main` and every pull
-request:
+request. Three jobs, split by what a failure means and by what each is
+trusted with — not by test taxonomy:
 
-| Job           | Does                                                                     |
-| ------------- | ------------------------------------------------------------------------ |
-| `check`       | build → lint → typecheck → `pnpm format:check` → `pnpm docs:check`       |
-| `unit`        | `pnpm test:unit` with **no** database service                            |
-| `integration` | Postgres service, schema-drift check, then `pnpm test:integration`       |
-| `e2e`         | Postgres + the ci bucket's secrets, capped at 60 minutes                 |
-| `docker`      | builds the image, asserts its contents, boots it and probes it over HTTP |
+| Job                   | Does                                                                     | Secrets |
+| --------------------- | ------------------------------------------------------------------------ | ------- |
+| `Verify`              | Postgres service, then one `pnpm verify`                                 | none    |
+| `E2E tests`           | Postgres + the `ci` bucket's secrets, then `pnpm test:e2e`               | `S3_*`  |
+| `Docker image builds` | builds the image, asserts its contents, boots it and probes it over HTTP | none    |
 
+`Verify` runs the **same** `pnpm verify` a contributor runs before pushing —
+one script, so local and CI cannot drift. It is, in order: `build`, `lint`,
+`typecheck`, `format:check`, `docs:check`, `test:unit`, `db:check`,
+`db:test:setup`, `test:integration`.
+
+The jobs run serially: this repository's runners are self-hosted and there is
+effectively one slot, so the pipeline's critical path is their sum. That is
+why there are three jobs and not more — each one costs about a minute of pure
+setup. `Docker image builds` stays separate from `E2E tests` despite both
+needing Postgres because the image job must keep taking no secrets.
+
+All three are required checks on `main`; GitHub matches them by job `name:`,
+so renaming a job silently breaks branch protection. To restore the
+protection (e.g. after experimenting), put each job's `name:` into
+`required_status_checks.checks` — `Verify`, `E2E tests`,
+`Docker image builds` — and `PUT` it to
+`repos/ElCabrii/MyTuums/branches/main/protection` with the existing
+`enforce_admins`, `strict`, `required_conversation_resolution`,
+`allow_force_pushes: false` and `allow_deletions: false` settings intact.
 Details and the invariants behind each job: [.github/CONTEXT.md](../.github/CONTEXT.md).
 
 ## Maintenance
@@ -241,7 +259,7 @@ carries no score weight.
 
 **Documentation.** `pnpm docs:check` validates the agent-facing docs against
 the code — links, cited paths, documented scripts, the router groups, and the
-Docker build arguments. It runs in CI's `check` job.
+Docker build arguments. It runs as part of `pnpm verify`.
 
 ## Further reading
 

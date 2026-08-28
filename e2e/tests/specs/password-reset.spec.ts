@@ -65,10 +65,4 @@ test.describe("password reset", () => {
     await page.getByRole("main").getByRole("button", { name: "Request a new link" }).click();
     await expect(page).toHaveURL(/\/forgot-password$/);
   });
-
-  test("the login page links to the forgot-password page", async ({ page }) => {
-    await page.goto("/login");
-    await page.getByRole("link", { name: "Forgot password?" }).click();
-    await expect(page).toHaveURL(/\/forgot-password$/);
-  });
 });

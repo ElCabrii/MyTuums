@@ -5,6 +5,7 @@ import {
   DOB_INVALID_MESSAGE,
   DOB_UNDER_AGE_MESSAGE,
   hasCompletedOnboarding,
+  hasCurrentLegalConsent,
   isAllowedUsernameCharset,
   isAtLeastYearsOld,
   isBioWithinLimit,
@@ -266,6 +267,36 @@ describe("stored preferences", () => {
  * and a server rejection would render untranslated with nothing failing. These
  * assertions are what turn that into a failing test instead.
  */
+/**
+ * Moved here from `procedures.int.test.ts`, where the two pure-condition cases
+ * were being proved through Postgres fixtures for a predicate with no database
+ * in it. The consent gate's *wiring* (that `protectedProcedure` actually calls
+ * this) stays over there.
+ */
+describe("legal consent predicate", () => {
+  it("accepts a current acceptance", () => {
+    expect(
+      hasCurrentLegalConsent({ legalAcceptedAt: new Date(), legalVersion: LEGAL_VERSION }),
+    ).toBe(true);
+  });
+
+  it("refuses an acceptance of a superseded version", () => {
+    expect(
+      hasCurrentLegalConsent({
+        legalAcceptedAt: new Date("2020-01-01T00:00:00.000Z"),
+        legalVersion: "2020-01-01",
+      }),
+    ).toBe(false);
+  });
+
+  it("refuses a timestamp with no version, and a version with no timestamp — neither half is consent on its own", () => {
+    expect(hasCurrentLegalConsent({ legalAcceptedAt: new Date(), legalVersion: null })).toBe(false);
+    expect(hasCurrentLegalConsent({ legalAcceptedAt: null, legalVersion: LEGAL_VERSION })).toBe(
+      false,
+    );
+  });
+});
+
 describe("rejection messages", () => {
   it("states the bound each one is about", () => {
     expect(BIO_TOO_LONG_MESSAGE).toContain(String(BIO_MAX_LENGTH));

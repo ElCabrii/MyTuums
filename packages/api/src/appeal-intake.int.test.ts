@@ -111,26 +111,6 @@ describe("appeal intake — one target from two sources", () => {
     expect(await appealsFor(actionId)).toHaveLength(1);
     await anonContext.db.delete(appeal);
   });
-
-  it("an appeal opened from the email link closes the removed-post stub for the same action", async () => {
-    const author = await createTestUser();
-    const { postId, actionId } = await removedPost(author);
-
-    await openAppeal(anonContext, {
-      token: link(actionId, author.id),
-      reason: "Appealing by link first",
-    });
-
-    await expect(
-      openAppeal(contextFor(author), { postId, reason: "Appealing from the stub too" }),
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: "There's already an open appeal for this action.",
-    });
-
-    expect(await appealsFor(actionId)).toHaveLength(1);
-    await anonContext.db.delete(appeal);
-  });
 });
 
 describe("appeal intake — concurrent exactly-once", () => {

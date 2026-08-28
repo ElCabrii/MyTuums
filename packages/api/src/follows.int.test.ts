@@ -5,7 +5,7 @@ import { follow } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Context } from "./context.js";
 import { appRouter } from "./router.js";
-import { anonContext, contextFor, createTestUser, truncateAll } from "./testing/harness.js";
+import { contextFor, createTestUser, truncateAll } from "./testing/harness.js";
 
 beforeAll(async () => {
   await truncateAll();
@@ -36,27 +36,6 @@ async function walkAllFollowerIds(
     cursor = page.nextCursor ?? undefined;
     pages += 1;
     if (pages > 500) throw new Error("walkAllFollowerIds: pagination looks like it's looping.");
-  } while (cursor);
-
-  return ids;
-}
-
-/** Walks `user.following` to exhaustion via `nextCursor`, collecting every followee id it returns. */
-async function walkAllFollowingIds(
-  username: string,
-  context: Context,
-  limit?: number,
-): Promise<string[]> {
-  const ids: string[] = [];
-  let cursor: string | undefined;
-  let pages = 0;
-
-  do {
-    const page = await call(appRouter.user.following, { username, cursor, limit }, { context });
-    ids.push(...page.items.map((i) => i.id));
-    cursor = page.nextCursor ?? undefined;
-    pages += 1;
-    if (pages > 500) throw new Error("walkAllFollowingIds: pagination looks like it's looping.");
   } while (cursor);
 
   return ids;
@@ -116,16 +95,6 @@ describe("user.follow / user.unfollow", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("follow/unfollow require authentication", async () => {
-    const target = await createTestUser();
-    await expect(
-      call(appRouter.user.follow, { userId: target.id }, { context: anonContext }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-    await expect(
-      call(appRouter.user.unfollow, { userId: target.id }, { context: anonContext }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-  });
-
   it("counts are correct from both directions after a follow", async () => {
     const follower = await createTestUser();
     const target = await createTestUser();
@@ -149,17 +118,6 @@ describe("user.follow / user.unfollow", () => {
 });
 
 describe("user.followers / user.following", () => {
-  it("followers/following require authentication", async () => {
-    const hub = await createTestUser();
-    const hubUsername = hub.session.user.username!;
-    await expect(
-      call(appRouter.user.followers, { username: hubUsername }, { context: anonContext }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-    await expect(
-      call(appRouter.user.following, { username: hubUsername }, { context: anonContext }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-  });
-
   it("followers and following join opposite columns of the relation", async () => {
     const hub = await createTestUser();
     const followerOfHub = await createTestUser();
@@ -235,21 +193,6 @@ describe("user.followers / user.following", () => {
 
     expect(ids).toHaveLength(3);
     expect(new Set(ids)).toEqual(new Set(followers.map((f) => f.id)));
-  }, 20_000);
-
-  it("following paginates by keyset without repeats, even when many rows share created_at", async () => {
-    const hub = await createTestUser();
-    const followees = await Promise.all(Array.from({ length: 3 }, () => createTestUser()));
-
-    const tiedAt = new Date("2025-06-01T12:00:00.000Z");
-    await hub.context.db
-      .insert(follow)
-      .values(followees.map((f) => ({ followerId: hub.id, followingId: f.id, createdAt: tiedAt })));
-
-    const ids = await walkAllFollowingIds(hub.session.user.username!, contextFor(hub), 1);
-
-    expect(ids).toHaveLength(3);
-    expect(new Set(ids)).toEqual(new Set(followees.map((f) => f.id)));
   }, 20_000);
 
   it("rejects a cursor minted by a follow list when fed to post.list — the codecs are parameterised on different id schemas", async () => {

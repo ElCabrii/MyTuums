@@ -97,17 +97,32 @@ function until one build has run.
 
 ## Verification matrix
 
-| Change touches                  | Run                                                    |
-| ------------------------------- | ------------------------------------------------------ |
-| anything                        | `pnpm lint`, `pnpm typecheck`                          |
-| pure logic, atoms, components   | `pnpm test:unit`                                       |
-| procedures, queries, schema     | `pnpm db:test:setup` then `pnpm test:integration`      |
-| a user journey                  | `pnpm test:e2e` (slow; use only for end-to-end proof)  |
-| the Dockerfile or the SPA build | `pnpm build`, and let CI's `docker` job boot the image |
-| documentation                   | `pnpm docs:check`                                      |
+Three levels, widening. Use the narrowest one that can see your change while
+you iterate, and `pnpm verify` before you call the work done.
 
-`.env` must exist first — copy `.env.example`. Integration tests need a
-reachable Postgres (`pnpm docker:up`).
+| Level    | Command            | Covers                                                         |
+| -------- | ------------------ | -------------------------------------------------------------- |
+| **fast** | `pnpm test:unit`   | pure logic, atoms, components, the server's request handling   |
+| **PR**   | `pnpm verify`      | build, lint, typecheck, format, docs, unit **and** integration |
+| **full** | `pnpm verify:full` | the above plus the browser journeys (`pnpm test:e2e`)          |
+
+`pnpm verify` is exactly what CI's `Verify` job runs — one script, so the two
+cannot drift. While iterating, go narrower still:
+
+| Change touches                  | Run                                                   |
+| ------------------------------- | ----------------------------------------------------- |
+| one file                        | `pnpm --filter <pkg> exec vitest run <path>`          |
+| pure logic, atoms, components   | `pnpm test:unit`                                      |
+| procedures, queries, schema     | `pnpm db:test:setup` then `pnpm test:integration`     |
+| a user journey                  | `pnpm test:e2e` (slow; use only for end-to-end proof) |
+| the Dockerfile or the SPA build | `pnpm build`, and let CI's `image` job boot the image |
+| documentation                   | `pnpm docs:check`                                     |
+
+`.env` must exist first — copy `.env.example`. Integration and E2E tests need
+a reachable Postgres (`pnpm docker:up`).
+
+What belongs in which suite, and when a test deserves to exist at all:
+[TESTING_STRATEGY.md](TESTING_STRATEGY.md).
 
 ## Further reading
 
@@ -116,3 +131,4 @@ reachable Postgres (`pnpm docker:up`).
 - [docs/product.md](docs/product.md) — implemented behaviour and vocabulary.
 - [docs/operations.md](docs/operations.md) — environments, deploys, CI.
 - [docs/security.md](docs/security.md) — trust boundaries and sensitive invariants.
+- [TESTING_STRATEGY.md](TESTING_STRATEGY.md) — the test portfolio and its rules.

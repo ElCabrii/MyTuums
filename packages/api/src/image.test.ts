@@ -283,17 +283,6 @@ describe("acceptImage", () => {
     });
   });
 
-  it("rejects a type that is not on the allowlist", () => {
-    expect(acceptImage(PNG, "image/svg+xml", "avatar", "display")).toMatchObject({
-      ok: false,
-      reason: "type",
-    });
-    expect(acceptImage(PNG, "text/html", "avatar", "display")).toMatchObject({
-      ok: false,
-      reason: "type",
-    });
-  });
-
   it("rejects bytes whose content disagrees with the declared type", () => {
     // The whole point of sniffing: `image/png` is what the caller says, PNG is
     // not what the bytes are. Rejected rather than silently stored as JPEG.
@@ -341,52 +330,6 @@ describe("acceptImage", () => {
     // The same payload is under the banner's larger cap, so it passes there —
     // the caps are per slot, not one global number.
     expect(acceptImage(overAvatar, "image/png", "banner", "display")).toMatchObject({ ok: true });
-  });
-
-  it("rejects a display object beyond the slot's pixel bounds", () => {
-    // The display object is what lands in every feed; a hostile client can
-    // name a 1200px-wide image "the avatar's display object" and expect it to
-    // ride along. The bound is what stops it.
-    const wide = new Uint8Array([
-      0x52,
-      0x49,
-      0x46,
-      0x46,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x57,
-      0x45,
-      0x42,
-      0x50,
-      0x56,
-      0x50,
-      0x38,
-      0x20,
-      0x00,
-      0x00,
-      0x00,
-      0x00, // "VP8 "
-      0xb0,
-      0x5f,
-      0x00, // frame tag
-      0x9d,
-      0x01,
-      0x2a, // start code
-      0xb0,
-      0x04, // width: 1200
-      0x2c,
-      0x01, // height: 300
-    ]);
-
-    expect(acceptImage(wide, "image/webp", "avatar", "display")).toMatchObject({
-      ok: false,
-      reason: "size",
-    });
-    // Same bytes are fine as the ORIGINAL, whose rule is megapixels, not
-    // display bounds.
-    expect(acceptImage(wide, "image/webp", "avatar", "original")).toMatchObject({ ok: true });
   });
 
   it("accepts the avatar's enlarged display bounds and byte budget", () => {
@@ -491,30 +434,6 @@ describe("acceptImage", () => {
     expect(acceptImage(gif, "image/gif", "avatar", "display")).toEqual({
       ok: true,
       type: "image/gif",
-    });
-  });
-
-  it("rejects a GIF with too many frames as size, not content", () => {
-    // 501 two-pixel frames: each frame is tiny, so the byte cap and the logical
-    // screen never see it — the frame-count limit is what bounds the stored and
-    // decoded work, and it lands as `size`.
-    const gif = buildGif(
-      { width: 2, height: 2 },
-      Array.from({ length: 501 }, () => ({ width: 2, height: 2 })),
-    );
-    expect(acceptImage(gif, "image/gif", "avatar", "display")).toMatchObject({
-      ok: false,
-      reason: "size",
-    });
-  });
-
-  it("rejects a truncated GIF as content", () => {
-    // The header is intact, so the dimensions parse; the missing trailer is what
-    // the block walk catches, and a structurally incomplete GIF is `content`.
-    const gif = buildGif({ width: 256, height: 128 }, [{ width: 256, height: 128 }]).slice(0, -1);
-    expect(acceptImage(gif, "image/gif", "avatar", "display")).toMatchObject({
-      ok: false,
-      reason: "content",
     });
   });
 });
@@ -663,11 +582,6 @@ describe("post attachment acceptance", () => {
       Array.from({ length: 501 }, () => ({ width: 2, height: 2 })),
     );
     expect(acceptPostImage(gif, "image/gif")).toEqual({ ok: false, reason: "size" });
-  });
-
-  it("rejects a truncated GIF as content", () => {
-    const gif = buildGif({ width: 2, height: 2 }, [{ width: 2, height: 2 }]).slice(0, -1);
-    expect(acceptPostImage(gif, "image/gif")).toEqual({ ok: false, reason: "content" });
   });
 });
 

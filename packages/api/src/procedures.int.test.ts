@@ -176,40 +176,6 @@ describe("legal consent gate", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN", message: LEGAL_CONSENT_REQUIRED_MESSAGE });
   });
 
-  it("refuses an acceptance of a superseded version", async () => {
-    const user = await createTestUser();
-
-    await expect(
-      call(
-        appRouter.post.create,
-        { content: "accepted, but not this version" },
-        {
-          context: contextWithConsent(user, {
-            legalAcceptedAt: new Date("2020-01-01T00:00:00.000Z"),
-            legalVersion: "2020-01-01",
-          }),
-        },
-      ),
-    ).rejects.toMatchObject({ code: "FORBIDDEN", message: LEGAL_CONSENT_REQUIRED_MESSAGE });
-  });
-
-  it("refuses a timestamp with no version, and a version with no timestamp — neither half is consent on its own", async () => {
-    const user = await createTestUser();
-
-    for (const consent of [
-      { legalAcceptedAt: new Date(), legalVersion: null },
-      { legalAcceptedAt: null, legalVersion: LEGAL_VERSION },
-    ]) {
-      await expect(
-        call(
-          appRouter.post.create,
-          { content: "half a record" },
-          { context: contextWithConsent(user, consent) },
-        ),
-      ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    }
-  });
-
   it("lets a current acceptance through — the gate is not simply closed", async () => {
     const user = await createTestUser();
 

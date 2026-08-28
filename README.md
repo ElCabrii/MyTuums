@@ -46,12 +46,23 @@ unset; the traps worth knowing are collected in
 
 ## Common commands
 
+Three levels of validation, widening. Use the narrowest one that can see your
+change while you work, and `pnpm verify` before you push.
+
+| Command            | What it does                                                     |
+| ------------------ | ---------------------------------------------------------------- |
+| `pnpm test:unit`   | **fast** — vitest unit suites, no database needed, ~30s          |
+| `pnpm verify`      | **PR** — build, lint, typecheck, format, docs, unit, integration |
+| `pnpm verify:full` | **full** — the above plus the Playwright suite                   |
+
+`pnpm verify` is exactly what CI's `Verify` job runs. It needs a reachable
+Postgres (`pnpm docker:up`).
+
 | Command                                                         | What it does                                                   |
 | --------------------------------------------------------------- | -------------------------------------------------------------- |
 | `pnpm build`                                                    | production builds across the workspace                         |
 | `pnpm lint` · `pnpm typecheck`                                  | Oxlint, ESLint, and TypeScript across the workspace            |
-| `pnpm format`                                                   | Prettier write; CI checks this separately from `pnpm lint`     |
-| `pnpm test:unit`                                                | vitest unit suites — pure logic, no database needed            |
+| `pnpm format`                                                   | Prettier write; checked separately from `pnpm lint`            |
 | `pnpm db:test:setup` then `pnpm test:integration`               | API integration suites against real Postgres                   |
 | `pnpm test:e2e`                                                 | Playwright; slow, own ports (`:3101` / `:5273`)                |
 | `pnpm db:generate` · `pnpm db:push` · `pnpm db:promote`         | new migration · apply it · appoint the first admin (bootstrap) |
@@ -104,4 +115,5 @@ reasons and owning source files are in [CONTEXT.md](CONTEXT.md).
 | [docs/product.md](docs/product.md)           | what does the app do, and what do we call it?      |
 | [docs/operations.md](docs/operations.md)     | how do I run, deploy and maintain it?              |
 | [docs/security.md](docs/security.md)         | what is exposed, and what must not break?          |
+| [TESTING_STRATEGY.md](TESTING_STRATEGY.md)   | does this change need a test, and at which layer?  |
 | [SECURITY.md](SECURITY.md)                   | how do I report a vulnerability?                   |

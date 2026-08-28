@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createTestQueryClient, renderWithProviders } from "@/test/render";
+import { createTestQueryClient } from "@/test/factories";
+import { renderWithProviders } from "@/test/render";
 import { act, screen } from "@testing-library/react";
 import { createStore } from "jotai";
 import { authErrorAtom } from "@/atoms/auth";

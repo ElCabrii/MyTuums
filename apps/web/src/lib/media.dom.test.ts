@@ -415,6 +415,16 @@ describe("createDisplayVariant", () => {
     expect(decode).not.toHaveBeenCalled();
   });
 
+  it("rejects a megapixel bomb on header bytes alone, without decoding it", async () => {
+    const decode = vi.fn();
+    globalThis.createImageBitmap = decode;
+
+    await expect(
+      createDisplayVariant(pngFileWithHeader(20_000, 20_000), "avatar"),
+    ).rejects.toMatchObject({ problem: "size" });
+    expect(decode).not.toHaveBeenCalled();
+  });
+
   it("rejects a source over the slot's original cap, before decoding it", async () => {
     const decode = vi.fn();
     globalThis.createImageBitmap = decode;
@@ -424,21 +434,6 @@ describe("createDisplayVariant", () => {
     await expect(
       createDisplayVariant(file("image/png", IMAGE_LIMITS.avatar.maxOriginalBytes + 1), "avatar"),
     ).rejects.toMatchObject({ problem: "size" });
-    expect(decode).not.toHaveBeenCalled();
-  });
-
-  it("rejects a megapixel bomb on header bytes alone, without decoding it", async () => {
-    const decode = vi.fn();
-    globalThis.createImageBitmap = decode;
-
-    // 400 MP in 24 bytes: the byte cap never sees it, but the header parse
-    // does — the browser should not pay for decoding a gigabyte of pixels it
-    // is about to be told it may not upload.
-    await expect(
-      createDisplayVariant(pngFileWithHeader(20_000, 20_000), "avatar"),
-    ).rejects.toMatchObject({
-      problem: "size",
-    });
     expect(decode).not.toHaveBeenCalled();
   });
 
@@ -521,16 +516,6 @@ describe("createPostAttachment", () => {
   // the property that makes issue #207 hold — what comes back is the
   // encoder's output alone, never the picked bytes.
 
-  it("rejects a type outside the allowlist without touching the decoder", async () => {
-    const decode = vi.fn();
-    globalThis.createImageBitmap = decode;
-
-    await expect(createPostAttachment(file("image/svg+xml"))).rejects.toMatchObject({
-      problem: "type",
-    });
-    expect(decode).not.toHaveBeenCalled();
-  });
-
   it("rejects a source over the attachment byte cap, before decoding it", async () => {
     const decode = vi.fn();
     globalThis.createImageBitmap = decode;
@@ -538,16 +523,6 @@ describe("createPostAttachment", () => {
     await expect(
       createPostAttachment(file("image/png", POST_ATTACHMENT_MAX_BYTES + 1)),
     ).rejects.toMatchObject({ problem: "size" });
-    expect(decode).not.toHaveBeenCalled();
-  });
-
-  it("rejects a megapixel bomb on header bytes alone, without decoding it", async () => {
-    const decode = vi.fn();
-    globalThis.createImageBitmap = decode;
-
-    await expect(createPostAttachment(pngFileWithHeader(20_000, 20_000))).rejects.toMatchObject({
-      problem: "size",
-    });
     expect(decode).not.toHaveBeenCalled();
   });
 

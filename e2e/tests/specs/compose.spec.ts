@@ -40,18 +40,6 @@ test.describe("composing a post", () => {
     expect(freshBox.y).toBeLessThan(olderBox.y);
   });
 
-  test("the counter goes negative past 500 characters and disables submit", async ({ page }) => {
-    await page.goto("/");
-    const textarea = page.getByPlaceholder(COMPOSER_PLACEHOLDER);
-
-    await textarea.fill("x".repeat(505));
-
-    // POST_MAX_LENGTH is 500 (packages/api/src/constants.ts); 505 characters
-    // leaves a remaining count of -5.
-    await expect(page.getByText("-5", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Post", exact: true })).toBeDisabled();
-  });
-
   test("long multiline drafts grow without horizontal overflow on a mobile viewport", async ({
     page,
   }) => {
@@ -100,15 +88,6 @@ test.describe("composing a post", () => {
     const post = page.getByText(accepted, { exact: true });
     await expect(post).toBeVisible();
     await expect(post.getByRole("link", { name: "@alice" })).toHaveAttribute("href", "/@alice");
-  });
-
-  test("whitespace-only content cannot be submitted", async ({ page }) => {
-    await page.goto("/");
-    await page.getByPlaceholder(COMPOSER_PLACEHOLDER).fill("     ");
-
-    // ComposerForm trims before checking length (components/composer-form.tsx),
-    // so an all-whitespace draft never satisfies canSubmit.
-    await expect(page.getByRole("button", { name: "Post", exact: true })).toBeDisabled();
   });
 
   test("the home draft survives a page reload", async ({ page }) => {

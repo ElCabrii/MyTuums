@@ -1,12 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import {
-  createTestQueryClient,
-  makeProfile,
-  renderWithProviders,
-  queryFixtures,
-} from "@/test/render";
+import { createTestQueryClient, makeProfile } from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
+import { renderWithProviders } from "@/test/render";
 import { ProfilePosts } from "@/components/profile-posts";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";

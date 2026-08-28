@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
+import { jsonStorage } from "@/lib/json-storage";
 
 /** The two home feeds: the global timeline, and the signed-in viewer's Following feed. */
 export type FeedScope = "following" | "global";
@@ -20,7 +21,7 @@ const feedScopeSchema = z.enum(["following", "global"]);
  * same double-fetch the session guard in `home-page.tsx` exists to avoid. The
  * app is a client-rendered SPA, so there is no hydration pass to mismatch.
  */
-const storedFeedScopeAtom = atomWithStorage<unknown>(STORAGE_KEY, "global", undefined, {
+const storedFeedScopeAtom = atomWithStorage<unknown>(STORAGE_KEY, "global", jsonStorage(), {
   getOnInit: true,
 });
 

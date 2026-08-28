@@ -305,7 +305,19 @@ over HTTP and imports only its browser-safe subpaths.
 
 Suites split by filename: `*.test.ts` is unit (no I/O), `*.int.test.ts` is
 integration. `fileParallelism: false` is deliberate — the harness in
-`src/testing/harness.ts` shares one pool and one truncate.
+`src/testing/harness.ts` shares one pool and one truncate. The unit project
+blanks `DATABASE_URL`, so a unit test that reaches for the database fails by
+name rather than quietly connecting to whatever the shell pointed at.
+
+**Fixtures.** `createTestUser` mints an account and a real session through
+`@my-tuums/auth/testing` — about 95ms, no password. `createPasswordTestUser`
+goes through production sign-up and sign-in and costs about 430ms, two scrypt
+hashes; reach for it **only** when a password being accepted or refused is the
+assertion, or a suspension test will pass for the wrong reason (sign-in throws
+because there is no credential, not because the account is banned). There are
+currently two such tests, both in `src/moderation.int.test.ts`. Sign-up itself
+is under test in `src/auth.int.test.ts`, which uses the production instance
+throughout on purpose.
 
 ## Further reading
 
