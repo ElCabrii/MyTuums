@@ -66,16 +66,21 @@ would produce a broken one.
   `env:` block still wins.
 - **Every job runs on a self-hosted runner.** The repo's CI jobs use
   `runs-on: self-hosted` — the owner's own device — so no GitHub-hosted
-  minutes are consumed. The runner must be a native Linux machine with Node
-  22, pnpm, Docker, and the `postgres:16-alpine` image available, and it must
-  be online when a run is triggered.
-- **The `image` job uses a Docker Desktop-compatible host alias.** Docker
-  Desktop's `--network host` is inside its VM, so the runner cannot reach a
-  container port through `localhost`. The migration and smoke container map
-  `ci-host=host-gateway`, and rewrite the CI database URL's `localhost` label
-  to `ci-host`; the smoke port is published to the runner explicitly. Keep the
-  alias single-label so the database package does not apply its production TLS
-  rule to this private CI connection.
+  minutes are consumed. The runner currently is a Docker Desktop host, and
+  the jobs must keep working on a native Linux host too: it needs Node 22,
+  pnpm, Docker, and the `postgres:16-alpine` image available, and it must be
+  online when a run is triggered. Containers must reach the runner's
+  published ports without assuming they share its network namespace.
+- **The `image` job reaches the runner through the `ci-host=host-gateway`
+  alias, not `--network host`.** `--network host` shares the host's network
+  namespace only on a native Linux Docker install; on Docker Desktop it is
+  the VM's namespace, so `localhost` inside a container never reaches a port
+  published on the runner. `host-gateway` resolves to the host on both
+  installs, so the migration and smoke containers work regardless of which
+  one the runner is: the migration rewrites the CI database URL's `localhost`
+  label to `ci-host`, and the smoke port is published to the runner
+  explicitly. Keep the alias single-label so the database package does not
+  apply its production TLS rule to this private CI connection.
 - **CI's Postgres binds host port 5433, not 5432.** The self-hosted runner
   also runs the dev stack (`pnpm docker:up` binds 5432), so the CI service
   container would collide with it. `DATABASE_URL`/`DATABASE_URL_TEST` and the
