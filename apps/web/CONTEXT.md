@@ -94,6 +94,16 @@ app's build from the same origin.
   `index.html`. Data-dependent titles/descriptions go through
   `setDocumentHead`/`useDocumentHead`, which also update the Open Graph and
   Twitter mirrors.
+- **`SIGNED_OUT_PATHS` decides whether any of this is externally visible.**
+  The route heads are client-rendered, so only a signed-in, JS-rendering
+  browser sees them; every main content route (`/`, `/discover`, `/search`,
+  `/@{username}`, `/post/$postId`, `/moderation`, `/settings/account`) is
+  absent from `SIGNED_OUT_PATHS`, so the server 302s every signed-out fetcher
+  — search engines and non-JS unfurlers included — to `/login` before any of
+  it could be served. The externally visible head today is the static
+  fallback in `index.html` plus its Organization JSON-LD; what the per-route
+  tags deliver is tab titles/descriptions (and mirrors) for signed-in users,
+  not public unfurls.
 - **Feed and list parameterisation lives in atoms.** `PostFeed` takes a
   `feedAtom` prop and never knows its own scope or author.
 - **Permalink reply grouping reads the continuation embedded in each direct
