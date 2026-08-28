@@ -23,7 +23,7 @@ nothing else — no routes, no UI, no queries beyond the adapter.
 | Intent                            | Primary                                        | Also touch                                                                                                       |
 | --------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Add or change an OAuth provider   | `src/social.ts`                                | `../../apps/server/src/env.ts`, `../../.env.example`, `VITE_SOCIAL_PROVIDERS`, `apps/web/src/lib/auth-client.ts` |
-| Change an auth email              | `src/email.ts`                                 | both locales in the same file                                                                                    |
+| Change an auth email              | `src/email.ts`                                 | both locales in the same file, and `src/email.test.ts` when the rendering changes                                |
 | Translate an auth error           | `src/i18n.ts`                                  | `apps/web/src/lib/auth-error-message.ts`                                                                         |
 | Change a user-field rule          | `src/rules.ts`                                 | nothing — the hooks, both handle forms and `packages/api` all read it. Keep the file import-free                 |
 | Change how a violation is refused | `src/dob.ts`, `src/profile.ts`, `src/legal.ts` | the `APIError` translation only; the rule itself belongs in `src/rules.ts`                                       |
@@ -154,17 +154,33 @@ migration.
 
 ## Verification
 
-| Command                                           | Covers                                |
-| ------------------------------------------------- | ------------------------------------- |
-| `pnpm --filter @my-tuums/auth lint` / `typecheck` | this package alone                    |
-| `pnpm test:integration`                           | the real behaviour of this instance   |
-| `pnpm --filter @my-tuums/api test:unit`           | `src/rules.ts`, through its interface |
+| Command                                           | Covers                                          |
+| ------------------------------------------------- | ----------------------------------------------- |
+| `pnpm --filter @my-tuums/auth lint` / `typecheck` | this package alone                              |
+| `pnpm --filter @my-tuums/auth test:unit`          | `src/email.ts`'s HTML rendering, pure and local |
+| `pnpm test:integration`                           | the real behaviour of this instance             |
+| `pnpm --filter @my-tuums/api test:unit`           | `src/rules.ts`, through its interface           |
 
-There is no test script here on purpose. The instance's behaviour is covered by
-`packages/api`'s integration suites, which exercise the _production_ instance;
-`src/rules.ts` is covered by `packages/api/src/account-rules.test.ts`, a **unit**
-test, which is itself the standing proof that the module needs no database, no
-environment and no better-auth instance to import.
+The instance's behaviour is covered by `packages/api`'s integration suites,
+which exercise the _production_ instance; `src/rules.ts` is covered by
+`packages/api/src/account-rules.test.ts`, a **unit** test, which is itself the
+standing proof that the module needs no database, no environment and no
+better-auth instance to import.
+
+The one test suite owned here is `src/email.test.ts`, run by `vitest.config.ts`'s
+single **unit** project. The email HTML rendering (`escapeHtml`,
+`renderHtmlLine`, `renderHtmlCopy`, `brandedEmail`) is the only thing standing
+between moderator- and user-supplied copy and an email client's HTML parser, and
+it is pure — so it belongs in `pnpm test:unit`, which runs with no database
+service. There is deliberately no integration project here: delivery behaviour
+already has one in `packages/api`, and giving this package a second would hand
+it a database dependency its modules do not have. Nothing in the unit project
+may read the root `.env`: `vitest.config.ts`, unlike `packages/api`'s, never
+dotenv-loads it, and `src/env.ts` resolves every variable at module load with a
+usable default, which is what keeps the package import-safe with no environment
+at all. `src/email.test.ts` re-imports the module under a stubbed `WEB_ORIGIN`
+when it needs to pin a value; the malformed-origin fallback those tests pin
+lives in `src/email.ts`'s `emailLogoUrl`, not in `env.ts`.
 
 ## Further reading
 

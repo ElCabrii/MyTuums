@@ -347,7 +347,10 @@ describe("ProfileLayout banner", () => {
     // Shares the content wrapper's measure, so the 3:1 aspect bounds the
     // height instead of letting it scale with the viewport.
     expect(banner.parentElement).toHaveClass("mx-auto", "max-w-[1500px]");
-    expect(banner.parentElement).not.toHaveClass("h-48", "sm:h-64");
+    // Each class needs its own negation: jest-dom's toHaveClass(a, b) requires
+    // BOTH, so the negated form would pass if only one of them reappeared.
+    expect(banner.parentElement).not.toHaveClass("h-48");
+    expect(banner.parentElement).not.toHaveClass("sm:h-64");
   });
 });
 

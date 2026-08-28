@@ -414,8 +414,8 @@ keeps direct database writers from splitting the two representations.
 
 ## Test topology
 
-**Source of truth:** `packages/api/vitest.config.ts`, `apps/web/vitest.config.ts`,
-`e2e/playwright.config.ts`, `.github/workflows/ci.yml`
+**Source of truth:** `packages/api/vitest.config.ts`, `packages/auth/vitest.config.ts`,
+`apps/web/vitest.config.ts`, `e2e/playwright.config.ts`, `.github/workflows/ci.yml`
 
 | Layer       | What runs                                                         | Needs                                         |
 | ----------- | ----------------------------------------------------------------- | --------------------------------------------- |
