@@ -19,6 +19,7 @@ import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/user-avatar";
 import { ImageViewer } from "@/components/image-viewer";
+import { AvatarUpgradePrompt } from "@/components/avatar-upgrade-prompt";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
@@ -264,6 +265,15 @@ export function ProfileLayout() {
             </div>
           )}
         </div>
+
+        {/* The pre-#233 avatar re-crop offer. Own profile only, and only when
+            an original exists to seed the editor from (see the component). */}
+        {isOwnProfile && profile.image && (
+          <AvatarUpgradePrompt
+            avatarUrl={profile.image}
+            originalUrl={viewer?.imageOriginal ?? null}
+          />
+        )}
 
         {/* Profile Info */}
         <div className="mb-6 space-y-3">

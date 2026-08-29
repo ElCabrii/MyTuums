@@ -102,6 +102,12 @@ type SessionWithDeclaredFields = ReturnType<typeof useSession> & {
       dateOfBirth: Date | string | null;
       bio: string | null;
       bannerImage: string | null;
+      // The untouched original beside each uploaded image, returned by the
+      // session (`input: false` server-side — only the upload procedure may
+      // write it). The profile page's re-crop offer seeds the editor from it;
+      // a provider-set picture has none, which is how the offer knows to stay
+      // quiet (issue #246).
+      imageOriginal: string | null;
       themePreference: string | null;
       localePreference: string | null;
       legalAcceptedAt: Date | string | null;
