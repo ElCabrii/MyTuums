@@ -80,7 +80,11 @@ would produce a broken one.
   one the runner is: the migration rewrites the CI database URL's `localhost`
   label to `ci-host`, and the smoke port is published to the runner
   explicitly. Keep the alias single-label so the database package does not
-  apply its production TLS rule to this private CI connection.
+  apply its production TLS rule to this private CI connection. This invariant
+  describes the reworked `ci.yml` — until that workflow change lands on
+  `main`, the `main` workflow still boots its migration and smoke containers
+  with `--network host`, and only becomes accurate the way described here once
+  it does.
 - **CI's Postgres binds host port 5433, not 5432.** The self-hosted runner
   also runs the dev stack (`pnpm docker:up` binds 5432), so the CI service
   container would collide with it. `DATABASE_URL`/`DATABASE_URL_TEST` and the
