@@ -95,6 +95,11 @@ would produce a broken one.
   server. The boot step overrides `BETTER_AUTH_URL` to match. Its curls use
   `127.0.0.1`, matching the published host port while `BETTER_AUTH_URL`
   remains `http://localhost:3002` for application URL generation.
+- **The web build inside the `image` job's Docker build caps Node's heap.**
+  The CI Docker VM is small, so `apps/server/Dockerfile` runs the Vite build
+  under a measured `NODE_OPTIONS` via the `WEB_BUILD_NODE_OPTIONS` ARG — if a
+  build OOMs or the VM's memory changes, tune it there with
+  `--build-arg`.
 - **The OAuth provider mirror is asserted from both sides.** The bundle grep
   proves the client list shipped; the booted container's
   `/api/auth/sign-in/social` probes prove the server registers the same
