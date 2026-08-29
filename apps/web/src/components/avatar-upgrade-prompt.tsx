@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { ImageUp, Loader2, X } from "lucide-react";
+import { authErrorAtom } from "@/atoms/auth";
 import { imageUploadingAtom, uploadImageAtom } from "@/atoms/profile-edit";
 import { avatarUpgradeDismissalAtom } from "@/atoms/avatar-upgrade";
 import { isBelowAvatarDisplayCeiling, measureImageWidth } from "@/lib/avatar-upgrade";
+import { localizeAuthError } from "@/lib/auth-error-message";
 import { Button } from "@/components/ui/button";
 import { ImageCropDialog } from "@/components/settings/image-crop-dialog";
 import { m } from "@/paraglide/messages.js";
@@ -35,6 +37,7 @@ export function AvatarUpgradePrompt({
   const [dismissedUrl, setDismissedUrl] = useAtom(avatarUpgradeDismissalAtom);
   const uploading = useAtomValue(imageUploadingAtom);
   const upload = useSetAtom(uploadImageAtom);
+  const authError = useAtomValue(authErrorAtom);
 
   /**
    * The measurement for one avatar URL, held with the URL it belongs to — a
@@ -50,6 +53,8 @@ export function AvatarUpgradePrompt({
   /** The original fetched as a File, waiting on the crop editor — or null when it is closed. */
   const [source, setSource] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Set when the last re-crop upload failed, gating the reason `uploadImageAtom` left on `authErrorAtom`. */
+  const [uploadFailed, setUploadFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +78,16 @@ export function AvatarUpgradePrompt({
 
   /** Both image controls lock while either slot uploads (see `profile-edit.ts`). */
   const isBusy = uploading !== null;
+
+  /**
+   * The upload's specific reason comes from `authErrorAtom` — `uploadImageAtom`
+   * localizes its own refusals there, exactly as the settings page's banner
+   * reads it — so this prompt only flags that a failure happened rather than
+   * flattening every failure to a generic message. Gated by the flag so unrelated
+   * auth errors left over from other surfaces never appear before any attempt.
+   */
+  const uploadError = uploadFailed && authError !== null ? localizeAuthError(authError) : null;
+  const displayedError = error ?? uploadError;
 
   /** Brings the untouched original into the editor as the File it decodes. */
   async function openRecrop() {
@@ -99,9 +114,9 @@ export function AvatarUpgradePrompt({
           <div className="min-w-0 space-y-1">
             <p className="text-sm font-medium">{m.avatar_upgrade_title()}</p>
             <p className="text-muted-foreground text-sm">{m.avatar_upgrade_body()}</p>
-            {error && (
+            {displayedError && (
               <p role="alert" className="text-destructive text-xs">
-                {error}
+                {displayedError}
               </p>
             )}
           </div>
@@ -139,7 +154,7 @@ export function AvatarUpgradePrompt({
           onApply={(crop) => {
             setSource(null);
             void upload({ kind: "avatar", file: source, crop }).then((ok) => {
-              if (!ok) setError(m.common_something_went_wrong());
+              setUploadFailed(!ok);
             });
           }}
           onCancel={() => setSource(null)}

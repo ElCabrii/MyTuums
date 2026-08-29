@@ -1,10 +1,26 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { avatarUpgradeDismissalAtom } from "@/atoms/avatar-upgrade";
 import { renderWithProviders } from "@/test/render";
 import { AvatarUpgradePrompt } from "@/components/avatar-upgrade-prompt";
 import { m } from "@/paraglide/messages.js";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { installTestClient, installTestOrpc } from "@/lib/orpc";
+import { installTestDisplayVariant } from "@/lib/media";
+
+const fakeClient = {
+  user: {
+    uploadImage: vi.fn(() => Promise.reject(new Error("That image is too large."))),
+  },
+  search: {
+    typeahead: vi.fn(),
+  },
+};
+
+installTestOrpc(createTanstackQueryUtils(fakeClient));
+installTestClient(fakeClient);
+installTestDisplayVariant(vi.fn((file: File) => Promise.resolve(file)));
 
 const AVATAR_URL = "/media/legacy-avatar.webp";
 const ORIGINAL_URL = "/media/legacy-avatar.orig.webp";
@@ -166,5 +182,47 @@ describe("AvatarUpgradePrompt", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(m.avatar_upgrade_failed());
     expect(screen.getByRole("button", { name: m.avatar_upgrade_action() })).toBeEnabled();
+  });
+
+  // Issue #255's review: a failed re-crop upload used to fall back to the
+  // generic message even though `uploadImageAtom` had already localized the
+  // specific reason on `authErrorAtom`, which the settings-page banner reads.
+  it("surfaces the upload's specific rejection over a generic message", async () => {
+    // Bound rather than captured bare (see `profile-section.test.tsx`):
+    // these are `URL` methods and lint refuses uncaptured references.
+    const originalCreateObjectURL = globalThis.URL.createObjectURL.bind(globalThis.URL);
+    const originalRevokeObjectURL = globalThis.URL.revokeObjectURL.bind(globalThis.URL);
+    globalThis.URL.createObjectURL = vi.fn(() => "blob:crop");
+    globalThis.URL.revokeObjectURL = vi.fn();
+
+    try {
+      await renderPromptWithWidth(512);
+      const user = userEvent.setup();
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() =>
+          Promise.resolve({
+            ok: true,
+            blob: () => Promise.resolve(new Blob([], { type: "image/png" })),
+          }),
+        ),
+      );
+      vi.stubGlobal(
+        "createImageBitmap",
+        vi.fn(() => Promise.resolve({ width: 800, height: 800, close: vi.fn() })),
+      );
+
+      await user.click(screen.getByRole("button", { name: m.avatar_upgrade_action() }));
+
+      const dialog = await screen.findByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: m.settings_image_crop_apply() }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(m.validation_image_too_large());
+      expect(screen.queryByText(m.common_something_went_wrong())).not.toBeInTheDocument();
+    } finally {
+      globalThis.URL.createObjectURL = originalCreateObjectURL;
+      globalThis.URL.revokeObjectURL = originalRevokeObjectURL;
+    }
   });
 });
