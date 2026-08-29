@@ -305,7 +305,7 @@ describe("ProfileLayout bio", () => {
 });
 
 describe("ProfileLayout banner", () => {
-  it("renders the encoded 3:1 composition without a second responsive crop", async () => {
+  it("preserves the encoded 3:1 image inside a shorter desktop frame", async () => {
     const profile = makeProfile({
       name: "Banner Owner",
       username: "banner-owner",
@@ -323,14 +323,18 @@ describe("ProfileLayout banner", () => {
     const banner = screen.getByRole("img", {
       name: m.profile_banner_alt({ name: profile.name }),
     });
-    expect(banner.parentElement).toHaveStyle({ aspectRatio: "3" });
-    // Shares the content wrapper's measure, so the 3:1 aspect bounds the
-    // height instead of letting it scale with the viewport.
-    expect(banner.parentElement).toHaveClass("mx-auto", "max-w-[1500px]");
-    // Each class needs its own negation: jest-dom's toHaveClass(a, b) requires
-    // BOTH, so the negated form would pass if only one of them reappeared.
-    expect(banner.parentElement).not.toHaveClass("h-48");
-    expect(banner.parentElement).not.toHaveClass("sm:h-64");
+    expect(banner.parentElement).toHaveClass(
+      "aspect-[3/1]",
+      "md:aspect-[4/1]",
+      "mx-auto",
+      "max-w-[1500px]",
+      "border-x",
+      "border-border/60",
+      "bg-muted/40",
+    );
+    expect(banner).toHaveClass("h-full", "w-full", "object-contain");
+    expect(banner).not.toHaveClass("object-cover");
+    expect(banner).toHaveAttribute("src", profile.bannerImage);
   });
 });
 

@@ -236,7 +236,7 @@
   "settings_image_remove_label": "Remove {label}",
   "settings_image_crop_title": "Adjust {label}",
   "settings_image_crop_hint": "Drag to reposition, scroll to zoom.",
-  "settings_banner_crop_hint": "Drag to reposition, scroll to zoom. This frame matches the banner shown on profiles.",
+  "settings_banner_crop_hint": "Drag to reposition, scroll to zoom. Profiles preserve this full 3:1 composition; desktop adds side gutters.",
   "settings_image_crop_apply": "Apply",
   "avatar_upgrade_title": "Sharpen your profile picture",
   "avatar_upgrade_body": "This picture was uploaded at a lower resolution than MyTuums now supports. Re-crop it from the original to fix the blur.",
