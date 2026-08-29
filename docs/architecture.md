@@ -265,13 +265,16 @@ sides by CI. See [operations.md](operations.md).
   never a server-side or silent re-encode, which would recompose the stored
   crop. Dismissal persists per browser against the dismissed display path, so
   a new upload re-evaluates from scratch (issue #246).
-- **Banners have one canonical 3:1 composition.** At zoom 1 the editor
+- **Banners have one canonical 3:1 stored composition.** At zoom 1 the editor
   rectangle is exactly the region the encoder stores (`calculateCropFrame`),
-  so applying without adjusting anything is a no-op. The editor, Settings
-  preview and full-width profile frame all use the same 3:1 aspect; responsive
-  layouts scale that composition instead of applying a second `object-cover`
-  crop. The stored variant can reach 3840x1280 for a sharp 2x sample on a
-  1920px display.
+  so applying without adjusting anything is a no-op. The editor and Settings
+  preview use that same 3:1 aspect. The profile frame stays 3:1 on compact
+  layouts, then widens to 4:1 on desktop to keep the header from dominating
+  the viewport; the image uses `object-contain`, so the additional width
+  becomes bordered side gutters instead of applying a second crop or stretch.
+  The frame still caps its width at 1500px, which bounds its desktop height at
+  375px on ultrawide viewports. The stored variant can reach 3840x1280 for a
+  sharp 2x sample on a 1920px display.
 - **The pre-decode guards run at file pick, not just at encode.**
   `validateImageFile` owns the type, byte-cap and header megapixel checks, and
   the editor calls it before it decodes anything. The megapixel ceiling is the

@@ -99,8 +99,11 @@ Each of these is a deliberate, non-default setting. The inline comment in
   lets the better-auth CLI import this package with no server around.
 - **Every outgoing email is multipart.** `src/email.ts` keeps the English and
   French plain-text copy as the source of truth, then safely renders the same
-  content through one branded, inline-CSS HTML template. Capability URLs must
-  remain absolute and present in both parts; the no-provider development log
+  content through one restrained, table-based, inline-CSS HTML template. The
+  verification, password-reset and moderation-appeal capability URLs must
+  remain absolute and present in both parts, but appear only as escaped anchor
+  `href` values behind localized HTML CTA labels; arbitrary URLs in quoted user
+  content remain ordinary escaped links. The no-provider development log
   deliberately prints the clickable text fallback.
 - **The `i18n` plugin reads the `PARAGLIDE_LOCALE` cookie** — the same cookie
   the web app sets — so one locale governs both client copy and server error
@@ -169,18 +172,22 @@ better-auth instance to import.
 
 The one test suite owned here is `src/email.test.ts`, run by `vitest.config.ts`'s
 single **unit** project. The email HTML rendering (`escapeHtml`,
-`renderHtmlLine`, `renderHtmlCopy`, `brandedEmail`) is the only thing standing
-between moderator- and user-supplied copy and an email client's HTML parser, and
-it is pure — so it belongs in `pnpm test:unit`, which runs with no database
-service. There is deliberately no integration project here: delivery behaviour
-already has one in `packages/api`, and giving this package a second would hand
-it a database dependency its modules do not have. Nothing in the unit project
-may read the root `.env`: `vitest.config.ts`, unlike `packages/api`'s, never
-dotenv-loads it, and `src/env.ts` resolves every variable at module load with a
-usable default, which is what keeps the package import-safe with no environment
-at all. `src/email.test.ts` re-imports the module under a stubbed `WEB_ORIGIN`
-when it needs to pin a value; the malformed-origin fallback those tests pin
-lives in `src/email.ts`'s `emailLogoUrl`, not in `env.ts`.
+`renderHtmlLine`, `renderHtmlCopy`, `renderActionButton`, `brandedEmail`) is the
+only thing standing between moderator- and user-supplied copy and an email
+client's HTML parser, and it is pure — so it belongs in `pnpm test:unit`, which
+runs with no database service. The tests pin the localized CTA labels, escaped
+action `href` values, the absence of visible action URLs in HTML, retention of
+URLs in the plain-text fallback, safe quoted-content rendering and OTP
+emphasis. There is deliberately no integration project here: delivery
+behaviour already has one in `packages/api`, and giving this package a second
+would hand it a database dependency its modules do not have. Nothing in the
+unit project may read the root `.env`: `vitest.config.ts`, unlike
+`packages/api`'s, never dotenv-loads it, and `src/env.ts` resolves every
+variable at module load with a usable default, which is what keeps the package
+import-safe with no environment at all. `src/email.test.ts` re-imports the
+module under a stubbed `WEB_ORIGIN` when it needs to pin a value; the
+malformed-origin fallback those tests pin lives in `src/email.ts`'s
+`emailLogoUrl`, not in `env.ts`.
 
 ## Further reading
 

@@ -1,15 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { moderationRemovalEmail } from "./email.js";
+import {
+  moderationRemovalEmail,
+  otpEmail,
+  passwordResetEmail,
+  verificationEmail,
+} from "./email.js";
 
 /**
  * The email HTML rendering, tested through the exported builders.
  *
- * `escapeHtml`, `renderHtmlLine`, `renderHtmlCopy` and `brandedEmail` are
- * private on purpose — they are the template's internals, not an interface.
- * What the rest of the repo calls is the builder per flow, so that is what the
- * assertions go through: the copy a moderator or an author supplied has to
- * come out of `moderationRemovalEmail`'s HTML part inert, because that string
- * is what an email client parses.
+ * `escapeHtml`, `renderHtmlLine`, `renderHtmlCopy`, `renderActionButton` and
+ * `brandedEmail` are private on purpose — they are the template's internals,
+ * not an interface. What the rest of the repo calls is the builder per flow,
+ * so that is what the assertions go through: action URLs become buttons,
+ * while moderator- and author-supplied copy stays inert in an email client.
  *
  * These are `*.test.ts` and not `*.int.test.ts` for the same reason
  * `src/email.ts` is import-safe with no environment: nothing here touches the
@@ -18,9 +22,17 @@ import { moderationRemovalEmail } from "./email.js";
  * suites, which run the production instance against a real database.
  */
 
-/** The URLs an email's HTML part links to, in document order. */
-function hrefs(html: string): string[] {
-  return [...html.matchAll(/href="([^"]+)"/g)].map((match) => match[1]);
+type Anchor = {
+  href: string;
+  text: string;
+};
+
+/** The anchors in an email's HTML part, in document order. */
+function anchors(html: string): Anchor[] {
+  return [...html.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)].map((match) => ({
+    href: match[1],
+    text: match[2],
+  }));
 }
 
 /** The rendered paragraphs of the HTML part, in document order. */
@@ -28,11 +40,25 @@ function paragraphs(html: string): string[] {
   return [...html.matchAll(/<p style="[^"]*">([\s\S]*?)<\/p>/g)].map((match) => match[1]);
 }
 
-describe("moderationRemovalEmail", () => {
-  it("escapes every markup-significant character in the moderator-supplied reason", () => {
+/** Removes tags so assertions inspect visible copy rather than attributes. */
+function visibleHtml(html: string): string {
+  return html.replaceAll(/<[^>]*>/g, "");
+}
+
+describe("branded email HTML", () => {
+  it("uses an accessible, table-based letter layout", () => {
+    const email = verificationEmail("https://mytuums.test/verify", "en");
+
+    expect(email.html).toContain('<table role="article" aria-labelledby="email-title"');
+    expect(email.html).toContain('<h1 id="email-title"');
+    expect(email.html).toContain('alt="MyTuums logo"');
+    expect(email.html).toContain("border-top:3px solid #c6005c");
+  });
+
+  it("keeps supplied moderator and author content escaped in the HTML part", () => {
     const email = moderationRemovalEmail(
       {
-        postText: "remove me",
+        postText: '<img src="x" onerror="alert(1)"> & "quoted"',
         attachmentCount: 0,
         reason: "&<>\"'",
         appealUrl: "https://mytuums.test/appeal",
@@ -41,6 +67,11 @@ describe("moderationRemovalEmail", () => {
     );
 
     expect(email.html).toContain("Reason: &amp;&lt;&gt;&quot;&#39;");
+    expect(email.html).toContain(
+      "&lt;img src=&quot;x&quot; onerror=&quot;alert(1)&quot;&gt; &amp; &quot;quoted&quot;",
+    );
+    expect(email.html).not.toContain('<img src="x"');
+    expect(email.html).not.toContain('onerror="alert(1)"');
   });
 
   it("escapes & first, so an & next to markup is not double-escaped", () => {
@@ -54,14 +85,48 @@ describe("moderationRemovalEmail", () => {
       "en",
     );
 
-    // Escaping `&` first is what keeps the `&lt;`/`&gt;` it produces intact;
-    // escaping it last would re-escape its own output and the reason would
-    // arrive showing the entity instead of the tag it defanged.
     expect(email.html).toContain("Reason: Tom &amp; &lt;b&gt;Jerry&lt;/b&gt;");
     expect(email.html).not.toContain("&amp;lt;");
   });
 
-  it("keeps a capability URL unchanged in text and equivalent in its escaped HTML link", () => {
+  it.each([
+    {
+      name: "English verification",
+      build: () => verificationEmail("https://mytuums.test/action?token=one&next=%2Fhome", "en"),
+      label: "Verify my email address",
+    },
+    {
+      name: "French verification",
+      build: () => verificationEmail("https://mytuums.test/action?token=one&next=%2Fhome", "fr"),
+      label: "Vérifier mon adresse e-mail",
+    },
+    {
+      name: "English password reset",
+      build: () => passwordResetEmail("https://mytuums.test/action?token=two&next=%2Fhome", "en"),
+      label: "Reset my password",
+    },
+    {
+      name: "French password reset",
+      build: () => passwordResetEmail("https://mytuums.test/action?token=two&next=%2Fhome", "fr"),
+      label: "Réinitialiser mon mot de passe",
+    },
+  ])("renders a localized $name CTA instead of visible URL text", ({ build, label }) => {
+    const email = build();
+    const actionUrl = email.text.match(/https?:\/\/\S+/)?.[0];
+
+    if (!actionUrl) throw new Error("expected the text fallback to contain an action URL");
+
+    const escapedActionUrl = actionUrl.replaceAll("&", "&amp;");
+    expect(email.text).toContain(actionUrl);
+    expect(anchors(email.html)).toContainEqual({
+      href: escapedActionUrl,
+      text: label,
+    });
+    expect(email.html).toContain(`href="${escapedActionUrl}"`);
+    expect(visibleHtml(email.html)).not.toContain(actionUrl);
+  });
+
+  it("keeps a moderation appeal URL in text and as an escaped CTA href", () => {
     const appealUrl =
       "https://mytuums.test/appeal?token=signed-capability&callbackURL=%2Fmoderation%3Ftab%3Dappeals";
 
@@ -71,50 +136,48 @@ describe("moderationRemovalEmail", () => {
     );
 
     expect(email.text).toContain(appealUrl);
-    expect(hrefs(email.html)).toContain(appealUrl.replaceAll("&", "&amp;"));
+    expect(anchors(email.html)).toContainEqual({
+      href: appealUrl.replaceAll("&", "&amp;"),
+      text: "Appeal this decision",
+    });
+    expect(email.html).not.toContain(`href="${appealUrl}"`);
+    expect(visibleHtml(email.html)).not.toContain(appealUrl);
   });
 
-  it("linkifies each URL in the copy once, with the href escaped and the surrounding prose escaped too", () => {
+  it("places the primary action before the fallback safety note", () => {
+    const email = verificationEmail("https://mytuums.test/verify", "en");
+
+    expect(email.html.indexOf(">Verify my email address</a>")).toBeLessThan(
+      email.html.indexOf("If you didn&#39;t create a MyTuums account"),
+    );
+  });
+
+  it("keeps arbitrary URLs in quoted posts as ordinary safe links, separate from the CTA", () => {
+    const postUrl = "https://author.test/post?ref=moderation&part=quote";
+    const appealUrl = "https://mytuums.test/appeal?token=signed-capability";
     const email = moderationRemovalEmail(
       {
-        postText: "see <b>both</b> https://a.test/one?x=1&y=2 and http://b.test/two",
+        postText: `See ${postUrl}`,
         attachmentCount: 0,
         reason: "spam",
-        appealUrl: "https://mytuums.test/appeal",
+        appealUrl,
       },
       "en",
     );
 
-    // One anchor per URL, in document order: the two the author embedded and
-    // the appeal link. The `&` in a query string survives as a character.
-    expect(hrefs(email.html)).toEqual([
-      "https://a.test/one?x=1&amp;y=2",
-      "http://b.test/two",
-      "https://mytuums.test/appeal",
-    ]);
-    expect(email.html).toContain(
-      '&quot;see &lt;b&gt;both&lt;/b&gt; <a href="https://a.test/one?x=1&amp;y=2"',
-    );
+    expect(anchors(email.html)).toContainEqual({
+      href: postUrl.replaceAll("&", "&amp;"),
+      text: postUrl.replaceAll("&", "&amp;"),
+    });
+    expect(anchors(email.html)).toContainEqual({
+      href: appealUrl,
+      text: "Appeal this decision",
+    });
+    expect(visibleHtml(email.html)).toContain("https://author.test/post");
+    expect(visibleHtml(email.html)).not.toContain(appealUrl);
   });
 
-  it("does not linkify a javascript: or data: URL — it stays escaped text", () => {
-    const email = moderationRemovalEmail(
-      {
-        postText: "javascript:alert(1) data:text/html,<b>x</b>",
-        attachmentCount: 0,
-        reason: "spam",
-        appealUrl: "https://mytuums.test/appeal",
-      },
-      "en",
-    );
-
-    // The appeal link is the only anchor in the message.
-    expect(hrefs(email.html)).toEqual(["https://mytuums.test/appeal"]);
-    expect(email.html).toContain("javascript:alert(1)");
-    expect(email.html).toContain("data:text/html,&lt;b&gt;x&lt;/b&gt;");
-  });
-
-  it("preserves the plain text's paragraph and line-break structure", () => {
+  it("preserves the plain text's paragraph structure while placing the CTA after the copy", () => {
     const email = moderationRemovalEmail(
       {
         postText: "remove me",
@@ -129,11 +192,9 @@ describe("moderationRemovalEmail", () => {
     expect(rendered).toHaveLength(4);
     expect(rendered[0]).toBe("A moderator removed your post.");
     expect(rendered[1]).toBe("Reason: spam");
-    // A single newline becomes a break, not a new paragraph.
     expect(rendered[2]).toBe("Your post:<br>&quot;remove me&quot;");
-    expect(rendered[3]).toContain(
-      'you can appeal the decision:<br><a href="https://mytuums.test/appeal"',
-    );
+    expect(rendered[3]).toBe("If you believe this was a mistake, you can appeal the decision:");
+    expect(email.html).toContain(">Appeal this decision</a>");
   });
 
   it("renders the French subject into <title> and <h1> while the header stays unescaped", () => {
@@ -147,8 +208,6 @@ describe("moderationRemovalEmail", () => {
       "fr",
     );
 
-    // `subject` travels as an email header, where escaping would corrupt it;
-    // the same string is what lands in the two markup slots.
     expect(email.subject).toBe("Votre publication a été retirée de MyTuums");
     expect(email.html).toContain(`<title>${email.subject}</title>`);
     expect(email.html).toContain(`>${email.subject}</h1>`);
@@ -164,6 +223,15 @@ describe("otpEmail", () => {
     vi.resetModules();
   });
 
+  it("keeps the code in the text fallback and gives it restrained emphasis in HTML", () => {
+    const email = otpEmail("123456", "en");
+
+    expect(email.text).toContain("123456");
+    expect(email.html).toContain(">123456</strong>");
+    expect(email.html).toContain("letter-spacing:3px");
+    expect(email.html).not.toContain("href=");
+  });
+
   it("falls back to a usable absolute logo URL when WEB_ORIGIN is malformed", async () => {
     vi.stubEnv("WEB_ORIGIN", "not an origin");
     vi.resetModules();
@@ -171,8 +239,6 @@ describe("otpEmail", () => {
 
     const email = freshOtpEmail("123456", "en");
 
-    // The fallback is the point: a bad origin must cost the email its logo
-    // resolution, not the whole send.
     expect(email.html).toContain('src="http://localhost:5173/mytuums-192.png"');
   });
 

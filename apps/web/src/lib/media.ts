@@ -149,9 +149,9 @@ function readFirstBytes(file: File, max: number): Promise<Uint8Array | null> {
  *
  * WebP because it is in `ALLOWED_IMAGE_TYPES`, is markedly smaller than PNG for
  * photographs, and is supported by every browser this app targets. Banners are
- * always 3:1 (see `calculateDisplayLayout`), and the crop editor, Settings
- * preview and profile banner all use that same aspect, so the encoded
- * composition remains authoritative at every viewport.
+ * always encoded at 3:1 (see `calculateDisplayLayout`), and the crop editor and
+ * Settings preview use that same aspect. The profile preserves the composition
+ * with `object-contain` when its desktop frame widens to 4:1.
  *
  * With a `crop` — what the editor in
  * `components/settings/image-crop-dialog.tsx` produces — the chosen region
@@ -253,9 +253,10 @@ export async function createDisplayVariantImpl(
  * editor and the rendered result on the same composition. The untouched
  * original remains available for a future refit.
  *
- * Banners are always 3:1. The crop editor, Settings preview and profile banner
- * all use that same aspect, so the encoded composition remains authoritative
- * at every viewport without a second hidden crop.
+ * Banners are always encoded at 3:1. The crop editor and Settings preview use
+ * that same aspect; the profile keeps the full encoded composition with
+ * `object-contain` inside its wider desktop frame, without a second hidden
+ * crop.
  *
  * The math itself lives in `lib/media-layout.ts` — re-exported above — because
  * `lib/gif-variant-worker.ts` needs the identical `calculateDisplayLayout` a

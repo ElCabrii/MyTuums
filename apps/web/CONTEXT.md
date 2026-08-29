@@ -108,6 +108,10 @@ app's build from the same origin.
   fallback in `index.html` plus its Organization JSON-LD; what the per-route
   tags deliver is tab titles/descriptions (and mirrors) for signed-in users,
   not public unfurls.
+- **`src/index.css` owns scrollbars globally.** Its Firefox properties and
+  WebKit pseudo-elements style the viewport and every nested overflow surface
+  from the existing theme variables, so components should not introduce their
+  own scrollbar colors or dimensions.
 - **Feed and list parameterisation lives in atoms.** `PostFeed` takes a
   `feedAtom` prop and never knows its own scope or author.
 - **Permalink reply grouping reads the continuation embedded in each direct

@@ -31,20 +31,22 @@ function storageBucketConfigured(): boolean {
 }
 
 /**
- * The uploaded object and its immediate display frame must share the canonical
- * 3:1 aspect. Equal aspects make `object-cover` a no-op: every marker in an
- * asymmetric source remains in the composition instead of being silently
- * removed by a viewport-dependent second crop (issue #234).
+ * The uploaded object keeps the editor's canonical 3:1 composition. Its
+ * immediate frame stays 3:1 on compact layouts, then becomes 4:1 on desktop
+ * to reduce the profile header's height; `object-contain` turns the additional
+ * width into deliberate side gutters instead of a hidden crop or stretch.
  *
- * Aspect and bounded height are two different properties, and both are
- * asserted: a 1440x480 frame and a 1500x500 frame are both exactly 3:1, and so
- * was the unbounded full-bleed frame that rendered 853px tall at 2560px
- * viewports (issue #240). `expectedHeight` catches that where the 1500px
- * measure binds — on viewports wider than the cap, where the height has a
- * single exact value; below the cap the height is viewportWidth / 3 and no
- * number is worth pinning.
+ * Aspect and bounded height are separate properties, so the ultrawide case
+ * also pins the absolute 375px height reached by the 1500px frame cap.
  */
-async function expectCanonicalBannerGeometry(banner: Locator, expectedHeight?: number) {
+async function expectCanonicalBannerGeometry(
+  banner: Locator,
+  {
+    frameAspect = 3,
+    expectedHeight,
+    objectFit,
+  }: { frameAspect?: number; expectedHeight?: number; objectFit?: "contain" } = {},
+) {
   await expect(banner).toBeVisible();
   await expect
     .poll(() =>
@@ -60,11 +62,18 @@ async function expectCanonicalBannerGeometry(banner: Locator, expectedHeight?: n
     return frame.getBoundingClientRect();
   });
   // CSS layout quantizes dimensions to fractional device pixels. Two decimal
-  // places allow that subpixel noise while still rejecting the old responsive
-  // crop ratios (about 2.03 on mobile and 5.63 on desktop).
-  expect(frameBounds.width / frameBounds.height).toBeCloseTo(3, 2);
+  // places allow that subpixel noise while still rejecting either breakpoint's
+  // aspect being applied at the wrong width.
+  expect(frameBounds.width / frameBounds.height).toBeCloseTo(frameAspect, 2);
 
-  // A 3:1 frame says nothing about its size, hence the absolute height.
+  if (objectFit !== undefined) {
+    await expect
+      .poll(() => banner.evaluate((image) => getComputedStyle(image).objectFit))
+      .toBe(objectFit);
+  }
+
+  // An aspect says nothing about the frame's absolute size, hence this second
+  // assertion where the desktop width cap binds.
   if (expectedHeight !== undefined) {
     expect(frameBounds.height).toBeCloseTo(expectedHeight, 1);
   }
@@ -210,16 +219,21 @@ test.describe("images", () => {
     const profileBanner = page.getByRole("img", { name: /banner/i });
     await expect(profileBanner).toHaveAttribute("src", /^\/media\/banners\//);
 
-    for (const width of [390, 1440]) {
-      await page.setViewportSize({ width, height: 900 });
-      await expectCanonicalBannerGeometry(profileBanner);
-    }
+    await page.setViewportSize({ width: 390, height: 900 });
+    await expectCanonicalBannerGeometry(profileBanner, { objectFit: "contain" });
 
-    // 2560 is wide enough that the 1500px measure binds, making the frame
-    // exactly 1500x500. Aspect alone cannot catch an unbounded frame — 2560x853
-    // is as 3:1 as 1500x500 — so the absolute height is what pins the cap here.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expectCanonicalBannerGeometry(profileBanner, { frameAspect: 4, objectFit: "contain" });
+
+    // 2560 is wide enough that the 1500px measure binds, making the desktop
+    // frame exactly 1500x375. Aspect alone cannot catch an unbounded frame, so
+    // the absolute height is what pins the cap here.
     await page.setViewportSize({ width: 2560, height: 900 });
-    await expectCanonicalBannerGeometry(profileBanner, 500);
+    await expectCanonicalBannerGeometry(profileBanner, {
+      frameAspect: 4,
+      expectedHeight: 375,
+      objectFit: "contain",
+    });
   });
 });
 

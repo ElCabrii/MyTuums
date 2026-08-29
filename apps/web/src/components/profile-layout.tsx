@@ -2,7 +2,6 @@ import { useState } from "react";
 import { getRouteApi, Link, Outlet } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { ORPCError } from "@orpc/client";
-import { BANNER_ASPECT_RATIO } from "@my-tuums/api/constants";
 import { authPendingAtom } from "@/atoms/auth";
 import { viewerAtom, isStaffAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
@@ -150,21 +149,16 @@ export function ProfileLayout() {
 
   return (
     <div className="bg-background min-h-screen pb-12">
-      {/* The plain `bg-muted` plate is the fallback, not a placeholder: most
-          profiles have no banner, and it is what the avatar's negative margin
-          and the border below are laid out against either way. The measure cap
-          is a width cap, not a height cap, because a `max-h` would reintroduce
-          the viewport-dependent `object-cover` crop the exact 3:1 aspect
-          removed; bounding the width bounds the height as a consequence. */}
-      <div
-        className="bg-muted border-border relative mx-auto w-full max-w-[1500px] overflow-hidden border-b"
-        style={{ aspectRatio: BANNER_ASPECT_RATIO }}
-      >
+      {/* The stored banner is a canonical 3:1 composition. The wider desktop
+          frame keeps the profile header compact; `object-contain` centers the
+          full image and exposes the muted plate as intentional side gutters
+          instead of cropping or stretching it. */}
+      <div className="bg-muted/40 border-border/60 relative mx-auto aspect-[3/1] w-full max-w-[1500px] overflow-hidden border-x border-b md:aspect-[4/1]">
         {profile.bannerImage && (
           <img
             src={profile.bannerImage}
             alt={m.profile_banner_alt({ name: displayName })}
-            className="h-full w-full object-cover"
+            className="h-full w-full object-contain"
           />
         )}
       </div>
