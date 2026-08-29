@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { webOrigin } from "@my-tuums/auth";
 import { closeDb } from "@my-tuums/db";
 import { and, eq } from "drizzle-orm";
 import { moderationAction, post, postAttachment, report, user } from "@my-tuums/db/schema";
@@ -472,8 +473,10 @@ describe("the moderation entry points deliver their notices", () => {
     // this on an unrelated change.
     expect(email.html).toContain(appealUrl.replaceAll("&", "&amp;"));
     // The logo URL must be absolute — email clients cannot resolve a relative
-    // img src, so only the full origin URL proves the logo will render.
-    expect(email.html).toContain("http://localhost:5173/mytuums-192.png");
+    // img src, so only the full origin URL proves the logo will render. The
+    // expected origin comes from the same `webOrigin` the email builder reads,
+    // so the assertion holds whatever `WEB_ORIGIN` is set to.
+    expect(email.html).toContain(`${webOrigin}/mytuums-192.png`);
     expect(email.html).toContain("remove &lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
     expect(email.html).not.toContain("<script>alert('x')</script>");
     expect(email.text).toContain("spam & scams");
