@@ -67,11 +67,11 @@ ARG VITE_GOOGLE_CLIENT_ID
 # a global ENV: production source maps stay intact without consuming the whole
 # VM, while the runtime server keeps Node's ordinary container-aware limits.
 #
-# The value is a measured figure for THAT VM, so it is an ARG: CI (see
-# .github/workflows/ci.yml) and any other constrained builder pass
-# --build-arg WEB_BUILD_NODE_OPTIONS=... with their own figure, while a
-# builder with room to spare passes an empty string and gets Node's ordinary
-# container-aware default.
+# The default is a measured figure for THAT VM, so it is an ARG: constrained
+# builders can pass --build-arg WEB_BUILD_NODE_OPTIONS=... with their own
+# figure (CI builds without one and gets this default; see
+# .github/workflows/ci.yml), while a builder with room to spare passes an
+# empty string and gets Node's ordinary container-aware default.
 ARG WEB_BUILD_NODE_OPTIONS="--max-old-space-size=640 --max-semi-space-size=4"
 RUN NODE_OPTIONS="$WEB_BUILD_NODE_OPTIONS" pnpm --filter @my-tuums/web run build
 
