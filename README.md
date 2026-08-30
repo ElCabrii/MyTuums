@@ -1,7 +1,7 @@
 # MyTuums
 
 A Twitter-style social app — posts, replies, likes, follows, profiles, search,
-and a full moderation system with appeals. React 19 + Vite SPA, Node 22 + oRPC
+and a full moderation system with appeals. React 19 + Vite SPA, Node 24 + oRPC
 API, Postgres + Drizzle, deployed on Railway in the EU.
 
 This README is about developing it. What the product _does_ is
@@ -12,7 +12,7 @@ This README is about developing it. What the product _does_ is
 
 | Layer    | Tech                                                                         |
 | -------- | ---------------------------------------------------------------------------- |
-| Monorepo | pnpm 10 + Turborepo, Node 22, TypeScript strict everywhere                   |
+| Monorepo | pnpm 12 + Turborepo, Node 24, TypeScript strict everywhere                   |
 | Web      | React 19, Vite, TanStack Router, Jotai, TanStack Query, Paraglide, shadcn/ui |
 | Server   | `node:http`, no framework — auth, RPC, media and the SPA on one origin       |
 | API      | oRPC procedures over Drizzle, keyset pagination, S3 presigned uploads        |
@@ -22,7 +22,7 @@ This README is about developing it. What the product _does_ is
 
 ## Prerequisites
 
-- Node 22 (`.nvmrc`) and pnpm 10
+- Node 24 (`.nvmrc`) and pnpm 12
 - Docker, for Postgres and for running the production image locally
 
 ## Setup

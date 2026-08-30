@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": "^24.15.0 || >=26.0.0"
   },
   "scripts": {
     "dev": "dotenv -e ../../.env -- tsx watch src/index.ts",
@@ -31,7 +31,7 @@
     "dotenv-cli": "^11.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",
-    "typescript": "catalog:",
+    "@typescript/native": "catalog:",
     "vitest": "^4.1.10"
   }
 }

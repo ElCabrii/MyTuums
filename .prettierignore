@@ -21,6 +21,7 @@ tools/oxlint/anti-slop/
 pnpm-lock.yaml
 
 # Tooling artifacts
+.claude/worktrees/
 lighthouse-reports/
 e2e/blob-report/
 playwright/.cache/
