@@ -146,6 +146,7 @@ The router's top-level groups:
 - `post` — `create`, `delete`, `list`, `thread`, `like`, `unlike`
 - `user` — `byUsername`, `uploadImage`, `removeImage`, `follow`, `unfollow`, `followers`, `following`
 - `search` — `typeahead`, `users`, `posts`
+- `notification` — `list`, `unreadCount`, `markRead`
 - `moderation` — reports, blocks, the queue, the staff actions, the audit log, appeals
 
 There is deliberately no RPC-level health check; liveness is plain HTTP at

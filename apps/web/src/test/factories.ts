@@ -3,6 +3,7 @@ import {
   type AuditEntry,
   type ModerationCase,
   type ModerationCaseDetail,
+  type NotificationItem,
   type Post,
   type Profile,
   type TeamMember,
@@ -325,6 +326,20 @@ export function makeTeamMember(overrides: Partial<TeamMember> = {}): TeamMember 
     displayUsername: "JamieRivera",
     image: null,
     role: "moderator",
+    ...overrides,
+  };
+}
+
+/** A minimal notification row — `notification.list`'s shape, a like by default. */
+export function makeNotification(overrides: Partial<NotificationItem> = {}): NotificationItem {
+  return {
+    id: crypto.randomUUID(),
+    type: "like",
+    read: false,
+    createdAt: new Date(),
+    postId: crypto.randomUUID(),
+    actor: makeAuthor(),
+    action: null,
     ...overrides,
   };
 }

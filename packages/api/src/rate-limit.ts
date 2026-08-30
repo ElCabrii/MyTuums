@@ -244,4 +244,12 @@ export const RATE_LIMITS = {
    * cost.
    */
   moderate: { name: "moderate", limit: 60, windowMs: MINUTE },
+  /**
+   * Marking notifications read. One bounded, idempotent stamp per
+   * notifications-page visit — its own namespace (rather than the `write`
+   * tier it resembles by direction) so repeatedly opening the page can never
+   * spend the publishing budget the composer depends on, the same separation
+   * `follow`, `report` and `block` keep.
+   */
+  markRead: { name: "notification", limit: 60, windowMs: MINUTE },
 } as const satisfies Record<string, RateLimitPolicy>;

@@ -20,6 +20,7 @@ import {
   THREAD_REPLY_BRANCH_DESCENDANT_BUDGET,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
+import { insertNotification } from "./notifications.js";
 import { keysetPage } from "./pagination.js";
 import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
@@ -555,9 +556,10 @@ export const postRouter = {
       // rather than hinting it exists. A parent that was *removed* stays
       // replyable — removal is not invisibility, and a removed post is still
       // a real post with a thread.
+      let parentAuthorId: string | undefined;
       if (input.parentId) {
         const [parent] = await context.db
-          .select({ id: post.id })
+          .select({ id: post.id, authorId: post.authorId })
           .from(post)
           .innerJoin(user, eq(user.id, post.authorId))
           .where(and(eq(post.id, input.parentId), not(invisibleAuthor(context.user.id))))
@@ -568,6 +570,7 @@ export const postRouter = {
             message: "The post you replied to no longer exists.",
           });
         }
+        parentAuthorId = parent.authorId;
       }
 
       const mediaInputs = await readPostAttachments(input.attachments);
@@ -596,13 +599,28 @@ export const postRouter = {
             }
           }
 
-          return insertPost(tx, {
+          const inserted = await insertPost(tx, {
             postId,
             authorId: context.user.id,
             content: input.content,
             parentId: input.parentId,
             prepared,
           });
+          if (inserted && parentAuthorId) {
+            // The reply's notification rides the insert's transaction: a
+            // failure between the two leaves neither. The row points at the
+            // reply itself (not the parent) — that is the thing the
+            // recipient will click through to, and it is what makes the
+            // notification tombstone with the reply when the author deletes
+            // it, exactly like the reply's own feed presence.
+            await insertNotification(tx, {
+              recipientId: parentAuthorId,
+              actorId: context.user.id,
+              type: "reply",
+              postId: inserted.id,
+            });
+          }
+          return inserted;
         });
       } catch (error) {
         if (storage) await discardPostAttachments(storage, prepared);
@@ -1038,7 +1056,7 @@ export const postRouter = {
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
       const [target] = await context.db
-        .select({ id: post.id })
+        .select({ id: post.id, authorId: post.authorId })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
         .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
@@ -1048,12 +1066,30 @@ export const postRouter = {
         throw new ORPCError("NOT_FOUND", { message: "Post not found." });
       }
 
-      // The (post_id, user_id) primary key makes the duplicate impossible;
-      // this just declines to error on it.
-      await context.db
-        .insert(postLike)
-        .values({ postId: input.postId, userId: context.user.id })
-        .onConflictDoNothing();
+      // The like and its notification commit together: `.returning()` is
+      // empty exactly when the (post_id, user_id) primary key swallowed the
+      // insert as a duplicate, so a retried like mints no second
+      // notification — the notification's exactly-once rides the like's own
+      // idempotency instead of a second unique key a like→unlike→like
+      // sequence would wrongly collapse.
+      await context.db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(postLike)
+          .values({ postId: input.postId, userId: context.user.id })
+          .onConflictDoNothing()
+          .returning({ postId: postLike.postId });
+
+        if (inserted.length > 0) {
+          // A no-op for the author's own like — `insertNotification` drops
+          // self-caused events so this needs no branch here.
+          await insertNotification(tx, {
+            recipientId: target.authorId,
+            actorId: context.user.id,
+            type: "like",
+            postId: input.postId,
+          });
+        }
+      });
 
       return {
         postId: input.postId,

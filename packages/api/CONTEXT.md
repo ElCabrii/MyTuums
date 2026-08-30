@@ -14,37 +14,40 @@ over HTTP and imports only its browser-safe subpaths.
 
 | File                        | Why                                                                                                                                                                                      |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/router.ts`             | The five groups and what owns each.                                                                                                                                                      |
+| `src/router.ts`             | The six groups and what owns each.                                                                                                                                                       |
 | `src/procedures.ts`         | The four gates, the legal consent and onboarding gates, the two rate-limit mechanisms, the one exception.                                                                                |
 | `src/context.ts`            | What every handler is handed, and why nothing is a module global.                                                                                                                        |
 | `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                                                                                                                                  |
 | `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                                                                                                                       |
+| `src/notifications.ts`      | The notification read side (list, unread count, mark-read) and `insertNotification`, the single mint point every cause's transaction calls.                                              |
 | `src/moderation-actions.ts` | The forward and inverse moderation effects: transaction, guards, audit, owed notices. The one entry point (`applyModerationEffect`) and the per-action wrappers own "commit, then send". |
 | `src/appeal-intake.ts`      | The appeal intake lifecycle: the two sources, the budgets, the gates, the replay policy.                                                                                                 |
 | `src/profile-media.ts`      | The avatar/banner lifecycle: replace/remove, the locked swap, best-effort cleanup.                                                                                                       |
 
 ## Change map
 
-| Intent                                | Primary                                                                                  | Also touch                                                                                               |
-| ------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`) | `src/router.ts` if it is a new group; an `.int.test.ts`                                                  |
-| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                      | a matching index in `packages/db/src/schema/app.ts`                                                      |
-| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                      | `src/rate-limit.test.ts`                                                                                 |
-| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                     | `src/users.int.test.ts` pins it — read the invariant first                                               |
-| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)         | `src/constants.ts` (action code), `docs/product.md` glossary                                             |
-| Change the queue or a case view       | `src/moderation-queue.ts`                                                                | `src/moderation-inputs.ts` if the input shape moves                                                      |
-| Change how a user is matched by text  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                    | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking |
-| Change how an appeal is opened        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                             | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface                  |
-| Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                             | `src/moderation-actions.ts` if the inverse effect changes                                                |
-| Change what an appellant is shown     | `src/moderation-appeals.ts` (`appealPreview`), `src/post-media.ts` (`canViewPostMedia`)  | `src/appeal-preview.int.test.ts`, `src/post-media.int.test.ts`; `docs/security.md` — media retrieval     |
-| Change profile-image upload rules     | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                      | `src/image.test.ts`; `src/dimensions.ts` for a new format                                                |
-| Change post-attachment upload rules   | `src/post-image.ts`, `src/constants.ts` (`POST_ATTACHMENT_*`)                            | `src/image.test.ts`; `src/posts.int.test.ts`                                                             |
-| Change the profile upload lifecycle   | `src/profile-media.ts`                                                                   | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                      |
-| Change the post attachment lifecycle  | `src/post-media.ts`, `src/post-media-lock.ts`                                            | `src/posts.int.test.ts`; `src/reconcile-media.ts`; `scripts/reconcile-media.ts`                          |
-| Change follow, block or unblock       | `src/users.ts`, `src/moderation.ts`                                                      | `src/relationship-lock.ts` — every relationship writer must take the pair lock                           |
-| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                                     |
-| Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                                         |
-| Change an account rule                | `../auth/src/rules.ts`                                                                   | not `src/constants.ts` — see the invariant below                                                         |
+| Intent                                | Primary                                                                                           | Also touch                                                                                               |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`)          | `src/router.ts` if it is a new group; an `.int.test.ts`                                                  |
+| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                               | a matching index in `packages/db/src/schema/app.ts`                                                      |
+| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                               | `src/rate-limit.test.ts`                                                                                 |
+| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                              | `src/users.int.test.ts` pins it — read the invariant first                                               |
+| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)                  | `src/constants.ts` (action code), `docs/product.md` glossary                                             |
+| Change the queue or a case view       | `src/moderation-queue.ts`                                                                         | `src/moderation-inputs.ts` if the input shape moves                                                      |
+| Change how a user is matched by text  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                             | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking |
+| Change how an appeal is opened        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                                      | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface                  |
+| Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                                      | `src/moderation-actions.ts` if the inverse effect changes                                                |
+| Change what an appellant is shown     | `src/moderation-appeals.ts` (`appealPreview`), `src/post-media.ts` (`canViewPostMedia`)           | `src/appeal-preview.int.test.ts`, `src/post-media.int.test.ts`; `docs/security.md` — media retrieval     |
+| Change profile-image upload rules     | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                               | `src/image.test.ts`; `src/dimensions.ts` for a new format                                                |
+| Change post-attachment upload rules   | `src/post-image.ts`, `src/constants.ts` (`POST_ATTACHMENT_*`)                                     | `src/image.test.ts`; `src/posts.int.test.ts`                                                             |
+| Change the profile upload lifecycle   | `src/profile-media.ts`                                                                            | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                      |
+| Change the post attachment lifecycle  | `src/post-media.ts`, `src/post-media-lock.ts`                                                     | `src/posts.int.test.ts`; `src/reconcile-media.ts`; `scripts/reconcile-media.ts`                          |
+| Change follow, block or unblock       | `src/users.ts`, `src/moderation.ts`                                                               | `src/relationship-lock.ts` — every relationship writer must take the pair lock                           |
+| Change the notifications read side    | `src/notifications.ts`                                                                            | `src/notifications.int.test.ts`; the read-time filters live with the table in `packages/db`              |
+| Change when an event notifies         | the cause's own file (`src/posts.ts`, `src/users.ts`, `logAction` in `src/moderation-actions.ts`) | `insertNotification` is the only mint point, and it rides the cause's transaction                        |
+| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                                  | `apps/server/src/request-handler.ts`                                                                     |
+| Add a shared constant for the web app | `src/constants.ts`                                                                                | must stay free of `@my-tuums/db`                                                                         |
+| Change an account rule                | `../auth/src/rules.ts`                                                                            | not `src/constants.ts` — see the invariant below                                                         |
 
 ## Invariants
 
@@ -126,6 +129,26 @@ over HTTP and imports only its browser-safe subpaths.
   that stub before it crosses the API boundary.
 - **`like`/`unlike` and `follow`/`unfollow` are separate idempotent
   procedures, never a toggle** — ordering and retry safety.
+- **A notification is minted only inside the transaction of the event that
+  caused it, and exactly-once is the cause's own idempotency** (issue #259).
+  `post.like` and `user.follow` insert their notification only when the
+  `.returning()` of the cause's `onConflictDoNothing` insert is non-empty, so
+  a retry mints nothing while like → unlike → like is honestly three events;
+  a reply's notification rides `insertPost`'s transaction pointing at the
+  reply itself; and the moderation half lives in `logAction`'s optional
+  `notifyUserId`, which every effect passes — the locked, guarded paths that
+  keep the audit log append-only are what keep it exactly-once, with a null
+  actor because the branded email never names the moderator either.
+  `case_resolved` deliberately passes none: its notices go to the reporters,
+  and email stays that channel. The read side (`src/notifications.ts`) owns
+  the rest: self-caused events are dropped in `insertNotification` (the
+  `notification_not_self` check constraint would otherwise abort the cause
+  transaction with it), and the list and the unread count share one
+  visibility predicate — moderation rows always show, every other row only
+  while its actor is visible to the recipient (which also drops user-caused
+  rows whose actor was hard-deleted; the FK is set-null so moderation rows
+  survive), and a row about an author-deleted post stops surfacing, the same
+  tombstone treatment the reply feed gives deleted replies.
 - **Relationship writes for a pair are serialized by one advisory lock.**
   "A blocked pair has no follow edge" spans `follow` and `user_block`, so no
   database constraint can hold it. `follow`, `block` and `unblock` all take

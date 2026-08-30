@@ -361,7 +361,7 @@ export function contextFor(
 export async function truncateAll(): Promise<void> {
   assertTestDatabase();
   await db.execute(
-    sql`TRUNCATE TABLE "post_like", "follow", "report", "user_block", "appeal", "moderation_action", "post", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE "post_like", "follow", "report", "user_block", "appeal", "moderation_action", "notification", "post", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
   );
 }
 

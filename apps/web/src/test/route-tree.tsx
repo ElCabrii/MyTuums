@@ -153,6 +153,8 @@ function createTestRouteTree(ui: ReactNode) {
     // directly as `ui`.
     stubRoute("/moderation"),
     stubRoute("/appeal"),
+    // The notifications page (issue #259) — the header bell links here.
+    stubRoute("/notifications"),
     // The legal pages are signed-in-gate exemptions — tests for the gate
     // need them reachable without a redirect.
     stubRoute("/privacy"),

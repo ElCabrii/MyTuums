@@ -1,18 +1,33 @@
 import { describe, expect, it, vi } from "vitest";
 import { setTestSession } from "@/test/auth-fixture";
 import { renderWithProviders } from "@/test/render";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { Header } from "@/components/header";
 import { authClient } from "@/lib/auth-client";
+import { installTestOrpc } from "@/lib/orpc";
+import { createTestQueryClient } from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
 import { m } from "@/paraglide/messages.js";
 
 /**
  * The header avatar. Signed in with a handle, clicking it opens the account
- * menu (View profile / Settings / Sign out); signed in without one (an OAuth
+ * menu (View profile, Settings, Sign out); signed in without one (an OAuth
  * sign-up before /welcome) it stays a plain link — the regression
  * `e2e/tests/specs/welcome.spec.ts` pins on the live stack.
  */
+
+// The header now mounts the unread-count query; the fake keeps that off the
+// network for every test in this file, seeded through `queryFixtures` where
+// a test wants a specific count.
+const fakeClient = {
+  notification: {
+    unreadCount: vi.fn(),
+  },
+};
+
+installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 const signedOutSession = {
   data: null,
@@ -104,5 +119,45 @@ describe("Header account menu", () => {
     expect(link).toHaveAttribute("href", "/welcome");
     // Not a button: there is no menu to open until a handle exists.
     expect(screen.queryByRole("button", { name: /Alex Mercer/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("Header notifications bell", () => {
+  it("links to /notifications and carries the unread count on itself and in its label", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).notifications.unreadCount(3);
+
+    const { router } = await renderWithProviders(<Header />, {
+      queryClient,
+      signedInAs: { username: "alexmercer" },
+    });
+
+    // The shadcn Button renders its `render` prop anchor with an explicit
+    // `role="button"`, so that — not "link" — is the accessible role, while
+    // the href keeps it a real anchor for navigation and middle-click.
+    const bell = screen.getByRole("button", { name: m.nav_notifications_unread({ count: 3 }) });
+    expect(bell).toHaveAttribute("href", "/notifications");
+    // The count renders as the badge inside the bell, not free-floating text.
+    expect(within(bell).getByText("3")).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(bell);
+    await waitFor(() => expect(router.state.location.pathname).toBe("/notifications"));
+  });
+
+  it("renders the plain bell — no badge, no unread label — when the count is zero", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).notifications.unreadCount(0);
+
+    await renderWithProviders(<Header />, {
+      queryClient,
+      signedInAs: { username: "alexmercer" },
+    });
+
+    expect(screen.getByRole("button", { name: m.nav_notifications() })).toHaveAttribute(
+      "href",
+      "/notifications",
+    );
+    expect(screen.queryByText(/unread/i)).not.toBeInTheDocument();
   });
 });

@@ -46,6 +46,10 @@ export const SEARCH_PAGE_SIZE_MAX = 50;
 export const MODERATION_PAGE_SIZE = 20;
 export const MODERATION_PAGE_SIZE_MAX = 50;
 
+/** Default and maximum page sizes for `notification.list`. */
+export const NOTIFICATION_PAGE_SIZE = 20;
+export const NOTIFICATION_PAGE_SIZE_MAX = 50;
+
 /** Maximum encoded length accepted for every opaque keyset cursor. */
 export const CURSOR_MAX_ENCODED_LENGTH = 512;
 

@@ -76,6 +76,33 @@ both by the server's page gate and by the client.
 - Feeds come in two scopes — everyone, and the people you follow — and are
   keyset-paginated so a page boundary can never skip or repeat a post.
 
+## Notifications
+
+A like on your post, a reply to your post, a new follower, and a moderation
+action on your content or account each leave one in-app notification — written
+in the same transaction as the event that caused it, and exactly once per
+event: a retried like or follow mints no second notice, while like → unlike →
+like again is honestly three events, not one collapsed one.
+
+- The notifications page (`/notifications`, reached from the header bell)
+  lists them newest first, keyset-paginated like the feeds, with no grouping
+  or ranking. The bell carries an unread count; opening the page is what
+  marks everything read.
+- Self-caused events never notify — liking or replying to your own post
+  creates nothing.
+- Blocks hold on both sides: a user blocked by the recipient cannot generate
+  notifications for them (a block hides the author before the like or reply
+  can happen), and a notification from someone later blocked stops surfacing,
+  coming back if the block is lifted.
+- Deleting a post tombstones the notifications about it — the reply that is
+  gone from the feed takes its notice with it, the way the reply count
+  already drops deleted replies — without deleting the rows.
+- Moderation notifications appear in-app alongside the email the action
+  already sends; the email flow is unchanged. They speak as MyTuums rather
+  than naming the moderator who acted, and carry the action code and the
+  moderator's stated reason. Case resolutions notify nobody in-app — their
+  notices go to the reporters, and email stays that channel.
+
 ## Profiles and search
 
 - A profile carries a display name, lowercase handle, bio (160 characters),
@@ -152,8 +179,10 @@ A role can only be granted or revoked by someone strictly above it.
   for a fixed term between one hour and one year.
 - **Staff powers.** Everything a moderator can do, plus permanent bans and
   unbans, granting and revoking roles, the team view and the audit log.
-- **Notification.** Every moderation action emails the affected user with the
-  reason the moderator wrote — including when an action is undone.
+- **Notification.** Every moderation action on a user's content or account
+  emails the affected user with the reason the moderator wrote — including
+  when an action is undone — and leaves an in-app notification saying the
+  same thing on their notifications page.
 - **Nine recorded action codes:** `post_removed`, `post_restored`,
   `user_suspended`, `user_unsuspended`, `user_banned`, `user_unbanned`,
   `role_changed`, `case_resolved`, `appeal_resolved`.
@@ -244,6 +273,12 @@ history, moderation log.
 **Appeal** — a request by the affected user to reconsider a moderation action.
 Opened from the notification email or a removed-post stub, reviewed by any
 moderator except the one who acted. _Avoid:_ dispute, complaint.
+
+**Notification** — one in-app notice of something that happened to you: a like
+on your post, a reply to it, a new follower, or a moderation action on your
+content or account. Newest first on `/notifications`, unread until the page is
+opened. One per event, never one per retry. _Avoid:_ alert, ping, message (a
+different thing that does not exist yet).
 
 ## Further reading
 

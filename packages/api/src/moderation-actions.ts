@@ -28,6 +28,7 @@ import {
 import { appealToken } from "./appeal-token.js";
 import type { Context } from "./context.js";
 import { lockModerationTarget } from "./moderation-target-lock.js";
+import { insertNotification } from "./notifications.js";
 import { canManageRole, type UserRole } from "./roles.js";
 
 /**
@@ -122,6 +123,19 @@ export interface LogActionInput {
   note?: string;
   /** Structured extra: durationSeconds, oldRole/newRole, outcome, counts. Flat scalars, JSON-safe. */
   details?: Record<string, string | number | boolean | null>;
+  /**
+   * The user this action was performed on — the affected user the email
+   * already goes to. When set, `logAction` also mints the in-app
+   * notification (issue #259) inside this same call, so the audit row and
+   * the notification commit or roll back together, and exactly-once is the
+   * audit log's own: every path here is behind the locked guards that stop
+   * a second row, so it stops a second notification too.
+   *
+   * Omitted by `case_resolved`, whose notices go to the reporters rather
+   * than to anyone the action was performed on — the email stays the
+   * reporters' channel.
+   */
+  notifyUserId?: string;
 }
 
 /**
@@ -130,7 +144,9 @@ export interface LogActionInput {
  * Every moderation effect goes through this — there is no path that changes a
  * removal, a ban, a suspension or a role without leaving a row, which is what
  * makes the audit log append-only rather than best-effort. The returned id is
- * what appeal links bind to.
+ * what appeal links bind to. When `notifyUserId` is set, the affected user's
+ * in-app notification is minted here too, in the same transaction as the row
+ * it mirrors.
  */
 export async function logAction(db: DbLike, input: LogActionInput): Promise<{ id: string }> {
   const [row] = await db
@@ -148,6 +164,16 @@ export async function logAction(db: DbLike, input: LogActionInput): Promise<{ id
     .returning({ id: moderationAction.id });
 
   if (!row) throw new Error("moderation_action insert returned no row");
+  if (input.notifyUserId) {
+    // Null actor: the notice is from MyTuums, matching the branded email —
+    // the moderator's identity is audit-log material, staff-only by design.
+    await insertNotification(db, {
+      recipientId: input.notifyUserId,
+      actorId: null,
+      type: "moderation",
+      actionId: row.id,
+    });
+  }
   return row;
 }
 
@@ -376,6 +402,7 @@ export async function removePostEffect(
       targetType: "post",
       targetPostId: args.postId,
       reason: args.reason,
+      notifyUserId: target.authorId,
     });
     // An image-only post's `content` is "" (issue #202), so the count is what
     // the notice names the post by. Read inside the transaction alongside the
@@ -498,6 +525,7 @@ export async function suspendUserEffect(
       targetUserId: args.userId,
       reason: args.reason,
       details: { durationSeconds: args.durationSeconds },
+      notifyUserId: args.userId,
     });
     return {
       banExpires,
@@ -557,6 +585,7 @@ export async function banUserEffect(
       targetType: "user",
       targetUserId: args.userId,
       reason: args.reason,
+      notifyUserId: args.userId,
     });
     return {
       pending: [
@@ -615,6 +644,7 @@ export async function setRoleEffect(
       targetType: "user",
       targetUserId: args.userId,
       details: { oldRole: target.role ?? "user", newRole: args.role },
+      notifyUserId: args.userId,
     });
   });
   return { pending: [roleNotice({ userId: args.userId, role: args.role })] };
@@ -689,6 +719,7 @@ export async function restoreRoleEffect(
       targetType: "user",
       targetUserId: args.userId,
       details: { oldRole: target.role ?? "user", newRole: args.oldRole },
+      notifyUserId: args.userId,
     });
 
     return { pending: [roleNotice({ userId: args.userId, role: args.oldRole })] };
@@ -871,6 +902,7 @@ export async function restorePostEffect(
       targetType: "post",
       targetPostId: args.postId,
       note: args.note,
+      notifyUserId: target.authorId,
     });
 
     return { pending: [restoreNotice(target.authorId)] };
@@ -955,6 +987,7 @@ export async function unbanEffect(
       targetType: "user",
       targetUserId: args.userId,
       note: args.note,
+      notifyUserId: args.userId,
     });
 
     return { pending: [unbanNotice(args.userId, code)] };
