@@ -25,7 +25,7 @@
 # `build.context: .`), because `turbo prune` needs the whole workspace to
 # compute the pruned subset.
 
-FROM node:22-alpine AS base
+FROM node:24-alpine AS base
 RUN corepack enable
 
 # ---- Prune the monorepo down to what @my-tuums/server needs to build ----
@@ -60,7 +60,20 @@ RUN pnpm --filter @my-tuums/server run build
 # render in production while working fine in dev.
 ARG VITE_SOCIAL_PROVIDERS
 ARG VITE_GOOGLE_CLIENT_ID
-RUN pnpm --filter @my-tuums/web run build
+# The self-hosted CI Docker VM has about 956 MiB available. Node derives an
+# old-space ceiling near 475 MiB from that limit, but Vite's source-map render
+# exhausted even a 580 MiB ceiling after transforming every module.
+# Scope the measured ceilings to this build only via NODE_OPTIONS, rather than
+# a global ENV: production source maps stay intact without consuming the whole
+# VM, while the runtime server keeps Node's ordinary container-aware limits.
+#
+# The default is a measured figure for THAT VM, so it is an ARG: constrained
+# builders can pass --build-arg WEB_BUILD_NODE_OPTIONS=... with their own
+# figure (CI builds without one and gets this default; see
+# .github/workflows/ci.yml), while a builder with room to spare passes an
+# empty string and gets Node's ordinary container-aware default.
+ARG WEB_BUILD_NODE_OPTIONS="--max-old-space-size=640 --max-semi-space-size=4"
+RUN NODE_OPTIONS="$WEB_BUILD_NODE_OPTIONS" pnpm --filter @my-tuums/web run build
 
 # ---- Production image: prod-only deps + the pre-built bundle ----
 FROM base AS runner

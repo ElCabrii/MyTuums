@@ -1,7 +1,7 @@
 {
   "name": "@my-tuums/web",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,9 @@
     "paraglide": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide --emit-ts-declarations",
     "test": "pnpm paraglide && vitest run",
     "test:unit": "pnpm paraglide && vitest run",
-    "test:watch": "pnpm paraglide && vitest"
+    "test:watch": "pnpm paraglide && vitest",
+    "test:node": "pnpm paraglide && vitest run --project node",
+    "test:dom": "pnpm paraglide && vitest run --project dom"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -48,19 +50,19 @@
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/router-plugin": "^1.120.6",
     "@testing-library/dom": "^10.4.1",
-    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "catalog:",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "@vitejs/plugin-react-swc": "^4.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "cross-env": "^10.1.0",
-    "jsdom": "^25.0.1",
+    "jsdom": "^30.0.1",
     "shadcn": "^4.16.1",
     "tailwindcss": "^4.3.3",
-    "typescript": "catalog:",
-    "vite": "^6.3.5",
+    "@typescript/native": "catalog:",
+    "vite": "^8.2.2",
     "vitest": "^4.1.10"
   }
 }

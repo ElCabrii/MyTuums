@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, waitFor } from "@testing-library/react";
-import { renderWithProviders, setTestSession } from "@/test/render";
+import { setTestSession } from "@/test/auth-fixture";
+import { renderWithProviders } from "@/test/render";
 import { useRequireSignedIn } from "@/hooks/use-require-signed-in";
 
 /**

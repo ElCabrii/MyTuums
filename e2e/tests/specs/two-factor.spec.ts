@@ -6,14 +6,19 @@ import { E2E } from "../../playwright.config";
 import { uniqueUser } from "../../support/users";
 
 /**
- * The two-factor surface, end to end: enrolment through the settings UI, the
- * `/two-factor` challenge after a real sign-in, backup codes, the emailed
- * code, and a passkey registered and used through the real WebAuthn ceremony.
+ * The two ceremonies no cheaper layer can carry out: a real TOTP enrolment
+ * followed by a real challenged sign-in, and a passkey registered and used
+ * through the browser's own WebAuthn stack.
  *
- * Every spec signs up its own throwaway account (same reason as
- * settings.spec.ts): enabling 2FA on alice would break every other spec's
- * storage state, and a mid-run failure would leave her locked behind a
- * challenge nobody can answer.
+ * Everything else about two-factor is owned lower down and must not be
+ * repeated here — the challenge page's methods, error banner and backup-code
+ * dispatch by `apps/web/src/routes/two-factor.test.tsx`, and the server rules
+ * (enrolment refused until a code is verified, backup codes single-use,
+ * no session before the second factor) by `packages/api/src/auth.int.test.ts`.
+ *
+ * Both specs sign up their own throwaway account: enabling 2FA on alice would
+ * break every other spec's storage state, and a mid-run failure would leave
+ * her locked behind a challenge nobody can answer.
  */
 test.use({ storageState: { cookies: [], origins: [] } });
 
@@ -63,9 +68,9 @@ async function totpFor(totpURI: string): Promise<string> {
 }
 
 /**
- * Enables two-factor through the settings UI and returns what the server
- * handed the browser: the TOTP URI (captured from the enable response, the
- * same bytes the QR code renders) and the ten backup codes.
+ * Enables two-factor through the settings UI and returns the TOTP URI the
+ * server handed the browser — captured from the enable response, the same
+ * bytes the QR code renders.
  */
 async function enableTwoFactor(
   page: import("@playwright/test").Page,
@@ -83,11 +88,8 @@ async function enableTwoFactor(
   );
   await page.getByRole("button", { name: "Turn on" }).click();
   // SAFETY: This is Better Auth's two-factor enable response; `totpURI` is
-  // checked before use and absent backup codes deliberately become an empty list.
-  const body = (await (await enableResponse).json()) as {
-    totpURI?: string;
-    backupCodes?: string[];
-  };
+  // checked before use.
+  const body = (await (await enableResponse).json()) as { totpURI?: string };
   if (!body.totpURI) throw new Error("two-factor enable response carried no TOTP URI");
 
   await page.getByLabel("Verification code").fill(await totpFor(body.totpURI));
@@ -96,7 +98,7 @@ async function enableTwoFactor(
   // The section flips to the on-state once the session reports the flag.
   await expect(page.getByText("On. You'll be asked for a code when you sign in.")).toBeVisible();
 
-  return { totpURI: body.totpURI, backupCodes: body.backupCodes ?? [] };
+  return { totpURI: body.totpURI };
 }
 
 /** Signs out from the account's own profile and lands on /login. */
@@ -122,16 +124,6 @@ async function signInWithPassword(
   await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
 }
 
-test.describe("enrolment", () => {
-  test("enables two-factor through the UI and the section reports it on", async ({ page }) => {
-    const account = await signUpFresh(page, "twofaon");
-    const { backupCodes } = await enableTwoFactor(page, account);
-
-    expect(backupCodes.length).toBeGreaterThan(0);
-    await expect(page.getByRole("button", { name: "Turn off" })).toBeVisible();
-  });
-});
-
 test.describe("the sign-in challenge", () => {
   test("a correct TOTP code completes the sign-in and lands on the redirect target", async ({
     page,
@@ -151,90 +143,6 @@ test.describe("the sign-in challenge", () => {
     await page.getByRole("button", { name: "Verify" }).click();
 
     await expect(page).toHaveURL(/\/settings\/account$/);
-  });
-
-  test("a wrong code shows the error and stays on the challenge", async ({ page }) => {
-    const account = await signUpFresh(page, "twofawrong");
-    await enableTwoFactor(page, account);
-    await signOut(page, account);
-
-    await page.goto("/login");
-    await signInWithPassword(page, account);
-    await expect(page).toHaveURL(/\/two-factor/);
-
-    await page.getByLabel("Verification code").fill("000000");
-    await page.getByRole("button", { name: "Verify" }).click();
-
-    await expect(page.getByRole("alert")).toBeVisible();
-    await expect(page).toHaveURL(/\/two-factor/);
-  });
-
-  test("a backup code works once and never again", async ({ page }) => {
-    const account = await signUpFresh(page, "twofabackup");
-    const { backupCodes } = await enableTwoFactor(page, account);
-    const [code] = backupCodes;
-    await signOut(page, account);
-
-    await page.goto("/login");
-    await signInWithPassword(page, account);
-    await expect(page).toHaveURL(/\/two-factor/);
-    await page.getByRole("button", { name: "Use a backup code" }).click();
-    await page.getByLabel("Backup code").fill(code);
-    await page.getByRole("button", { name: "Verify" }).click();
-    await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));
-
-    // A backup code that can be replayed is just a password that never
-    // expires — the second use of the same code must fail.
-    await signOut(page, account);
-    await page.goto("/login");
-    await signInWithPassword(page, account);
-    await expect(page).toHaveURL(/\/two-factor/);
-    await page.getByRole("button", { name: "Use a backup code" }).click();
-    await page.getByLabel("Backup code").fill(code);
-    await page.getByRole("button", { name: "Verify" }).click();
-
-    await expect(page.getByRole("alert")).toBeVisible();
-    await expect(page).toHaveURL(/\/two-factor/);
-  });
-
-  test("an emailed code completes the sign-in", async ({ page, db }) => {
-    const account = await signUpFresh(page, "twofaotp");
-    await enableTwoFactor(page, account);
-    await signOut(page, account);
-
-    await page.goto("/login");
-    await signInWithPassword(page, account);
-    await expect(page).toHaveURL(/\/two-factor/);
-
-    const otpResponse = page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/auth/two-factor/send-otp") &&
-        response.request().method() === "POST",
-    );
-    await page.getByRole("button", { name: "Email me a code instead" }).click();
-    await otpResponse;
-
-    // The E2E stack has no mailbox (RESEND_API_KEY is blanked), so the code
-    // is read from the verification table — the same place the plugin wrote
-    // it before the response above landed. The row is keyed on the signed
-    // challenge cookie, which is the challenge's only identity (no session
-    // exists mid-challenge), so the cookie is what the lookup needs.
-    const challengeCookie = (await page.context().cookies()).find(
-      (cookie) => cookie.name === "better-auth.two_factor",
-    );
-    if (!challengeCookie) throw new Error("no two-factor challenge cookie after sign-in");
-    // The cookie value is URL-encoded on the wire (`+` and `=` become %2B and
-    // %3D), and the verification row's identifier is keyed on the *unsigned*
-    // payload — the part before the `.` signature — which is what
-    // `getSignedCookie` hands the plugin. The payload charset (a-z0-9A-Z_-)
-    // contains no `.`, so splitting on the first dot is the same as the
-    // server's split on the last.
-    const challengeKey = decodeURIComponent(challengeCookie.value).split(".")[0];
-    const otp = await db.twoFactorOtpFor(challengeKey);
-    await page.getByLabel("Verification code").fill(otp);
-    await page.getByRole("button", { name: "Verify" }).click();
-
-    await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));
   });
 });
 

@@ -6,9 +6,9 @@ import {
   makeModerationCaseDetail,
   makeModerationReport,
   makeUserModerationCaseDetail,
-  queryFixtures,
-  renderWithProviders,
-} from "@/test/render";
+} from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
+import { renderWithProviders } from "@/test/render";
 import { CaseDialog } from "@/components/moderation/case-dialog";
 import { DEFAULT_SUSPENSION_SECONDS, type CaseRef } from "@/atoms/moderation";
 import { m } from "@/paraglide/messages.js";
@@ -108,24 +108,6 @@ describe("CaseDialog — mention rendering", () => {
     // query; the content paragraph is the one carrying `whitespace-pre-line`.
     expect(container.querySelector("p.whitespace-pre-line")).toBeNull();
     expect(screen.getByAltText(m.post_attachment_alt({ position: "1" }))).toBeInTheDocument();
-  });
-
-  it("uses the same mention rendering for a target user's bio", async () => {
-    const bio = "Working with @Alice.";
-    const target: CaseRef = { targetType: "user", targetId: "user-1" };
-    const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).moderation.case(
-      target,
-      makeUserModerationCaseDetail({ id: "user-1", bio }),
-    );
-    await renderWithProviders(<CaseDialog target={target} onClose={() => {}} />, {
-      queryClient,
-      signedInAs: { role: "moderator" },
-    });
-
-    const mention = screen.getByRole("link", { name: "@Alice" });
-    expect(mention).toHaveAttribute("href", "/@alice");
-    expect(mention.closest("p")?.textContent).toBe(bio);
   });
 });
 

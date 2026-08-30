@@ -2,6 +2,12 @@ import { useState } from "react";
 import { getRouteApi, Link, Outlet } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { ORPCError } from "@orpc/client";
+import { BANNER_ASPECT_RATIO } from "@my-tuums/api/constants";
+import {
+  BANNER_FRAME_MAX_HEIGHT,
+  BANNER_FRAME_MAX_WIDTH,
+  BANNER_FRAME_MIN_HEIGHT,
+} from "@/lib/banner-frame";
 import { authPendingAtom } from "@/atoms/auth";
 import { viewerAtom, isStaffAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
@@ -18,6 +24,7 @@ import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/user-avatar";
 import { ImageViewer } from "@/components/image-viewer";
+import { AvatarUpgradePrompt } from "@/components/avatar-upgrade-prompt";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
@@ -150,8 +157,19 @@ export function ProfileLayout() {
     <div className="bg-background min-h-screen pb-12">
       {/* The plain `bg-muted` plate is the fallback, not a placeholder: most
           profiles have no banner, and it is what the avatar's negative margin
-          and the border below are laid out against either way. */}
-      <div className="bg-muted border-border relative h-48 w-full overflow-hidden border-b sm:h-64">
+          and the border below are laid out against either way. The frame is
+          the canonical 3:1 with its height clamped — the constants and the
+          tradeoffs live in `lib/banner-frame.ts`, next to the safe area the
+          crop editor draws from the same numbers. */}
+      <div
+        className="bg-muted border-border relative mx-auto w-full overflow-hidden border-b"
+        style={{
+          aspectRatio: BANNER_ASPECT_RATIO,
+          maxWidth: BANNER_FRAME_MAX_WIDTH,
+          minHeight: BANNER_FRAME_MIN_HEIGHT,
+          maxHeight: BANNER_FRAME_MAX_HEIGHT,
+        }}
+      >
         {profile.bannerImage && (
           <img
             src={profile.bannerImage}
@@ -257,6 +275,15 @@ export function ProfileLayout() {
             </div>
           )}
         </div>
+
+        {/* The pre-#233 avatar re-crop offer. Own profile only, and only when
+            an original exists to seed the editor from (see the component). */}
+        {isOwnProfile && profile.image && (
+          <AvatarUpgradePrompt
+            avatarUrl={profile.image}
+            originalUrl={viewer?.imageOriginal ?? null}
+          />
+        )}
 
         {/* Profile Info */}
         <div className="mb-6 space-y-3">

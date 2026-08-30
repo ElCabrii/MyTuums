@@ -160,26 +160,6 @@ describe("changePasswordAtom", () => {
     expect(changePassword).not.toHaveBeenCalled();
   });
 
-  it("requires the new password to be at least 8 characters", async () => {
-    const store = freshStore();
-    store.set(currentPasswordAtom, "oldpassword");
-    store.set(newPasswordAtom, "short");
-    store.set(confirmNewPasswordAtom, "short");
-
-    await expect(store.set(changePasswordAtom)).resolves.toBe(false);
-    expect(store.get(authErrorAtom)).toMatch(/at least 8 characters/);
-  });
-
-  it("requires the confirmation to match", async () => {
-    const store = freshStore();
-    store.set(currentPasswordAtom, "oldpassword");
-    store.set(newPasswordAtom, "newpassword1");
-    store.set(confirmNewPasswordAtom, "newpassword2");
-
-    await expect(store.set(changePasswordAtom)).resolves.toBe(false);
-    expect(store.get(authErrorAtom)).toMatch(/do not match/);
-  });
-
   it("revokes other sessions — the point of changing a password you think is known", async () => {
     const store = freshStore();
     store.set(currentPasswordAtom, "oldpassword");

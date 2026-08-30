@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import { renderWithProviders } from "@/test/render";
 import { PostAttachmentGrid, type PostAttachmentView } from "@/components/post-attachment-grid";
 import { m } from "@/paraglide/messages.js";
@@ -79,7 +80,7 @@ describe("PostAttachmentGrid", () => {
   it.each([
     ["single", [makeAttachment()], "grid-cols-1"],
     ["multi", [makeAttachment(), makeAttachment({ id: "attachment-2" })], "grid-cols-2"],
-  ])("lays a %s attachment set out on %s", async (_kind, attachments, columnClass) => {
+  ])("lays a %s attachment set out on the %s grid", async (_kind, attachments, columnClass) => {
     const { container } = await renderWithProviders(
       <PostAttachmentGrid attachments={attachments} />,
     );

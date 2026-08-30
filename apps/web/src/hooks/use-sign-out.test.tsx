@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useSignOut } from "@/hooks/use-sign-out";
-import { renderWithProviders, setTestSignedOut } from "@/test/render";
+import { setTestSignedOut } from "@/test/auth-fixture";
+import { renderWithProviders } from "@/test/render";
 import { authClient } from "@/lib/auth-client";
 import { m } from "@/paraglide/messages.js";
 

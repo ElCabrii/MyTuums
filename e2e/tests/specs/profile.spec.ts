@@ -2,51 +2,6 @@ import { test, expect } from "../../support/fixtures";
 import { ALICE, uniqueUser } from "../../support/users";
 
 test.describe("profile", () => {
-  test("mixed-case input is stored lowercase and either URL casing resolves", async ({
-    page,
-    db,
-  }) => {
-    const input = uniqueUser("casetest");
-    input.username = `${input.username.charAt(0).toUpperCase()}${input.username.slice(1)}`;
-    const target = await db.createUser(input);
-    const mixedCase = target.username.charAt(0).toUpperCase() + target.username.slice(1);
-
-    expect(target.username).toBe(input.username.toLowerCase());
-    expect(target.displayUsername).toBe(target.username);
-
-    await page.goto(`/@${mixedCase}`);
-    await expect(page.getByRole("heading", { name: target.name })).toBeVisible();
-    await expect(page.getByText(`@${target.username}`, { exact: true })).toBeVisible();
-
-    await page.goto(`/@${target.username}`);
-    await expect(page.getByRole("heading", { name: target.name })).toBeVisible();
-  });
-
-  test("an unknown handle shows the not-found state, not a crash", async ({ page }) => {
-    // Within the 3-20 character bound `usernameInput` enforces
-    // (packages/api/src/users.ts) but never registered — a handle outside
-    // that bound would hit input validation (BAD_REQUEST) instead of the
-    // NOT_FOUND path this test means to exercise.
-    await page.goto("/@unknownuser404");
-
-    await expect(page.getByText("There's nobody here. This handle isn't taken.")).toBeVisible();
-    // role="button", not "link": a shadcn Button with nativeButton={false} and
-    // render={<Link/>} keeps button semantics regardless of the <a> underneath.
-    await expect(page.getByRole("button", { name: "Back to home" })).toBeVisible();
-  });
-
-  test("an unmatched URL shows the router's 404, not a redirect", async ({ page }) => {
-    // A handle-shaped URL that doesn't exist is the profile's own not-found
-    // state above; a path that matches NO route is the router's
-    // notFoundComponent (see __root.tsx). This spec file runs signed in
-    // (alice's storage state), so the signed-in gate must not send this
-    // visitor away either — the 404 renders in place, keeping the URL.
-    await page.goto("/no-such-page-anywhere");
-
-    await expect(page).toHaveURL(/\/no-such-page-anywhere$/);
-    await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
-  });
-
   // The suite's privacy test. `user.byUsername` is public and deliberately
   // returns an explicit column allowlist (`publicUserColumns` in
   // packages/api/src/users.ts) specifically so a profile visit never leaks

@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
+import { jsonStorage } from "@/lib/json-storage";
 import { atomEffect } from "jotai-effect";
 import { isThemePreference, type ThemePreference } from "@my-tuums/auth/rules";
 import { viewerAtom } from "@/atoms/session";
@@ -47,7 +48,7 @@ const matchDarkScheme = (): MediaQueryList | undefined => {
  * immediately. The app is a client-rendered SPA, so there is no hydration
  * pass for that first read to mismatch against.
  */
-const storedThemeAtom = atomWithStorage<unknown>(STORAGE_KEY, null, undefined, {
+const storedThemeAtom = atomWithStorage<unknown>(STORAGE_KEY, null, jsonStorage(), {
   getOnInit: true,
 });
 

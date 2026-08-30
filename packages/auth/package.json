@@ -19,7 +19,9 @@
   },
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:unit": "vitest run"
   },
   "dependencies": {
     "@better-auth/i18n": "catalog:",
@@ -31,6 +33,7 @@
   "devDependencies": {
     "@my-tuums/tsconfig": "workspace:*",
     "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "@typescript/native": "catalog:",
+    "vitest": "^4.1.10"
   }
 }

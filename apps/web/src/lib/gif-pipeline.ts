@@ -7,6 +7,7 @@ import {
   type ImageKind,
 } from "@my-tuums/api/constants";
 import {
+  calculateCropRect,
   calculateDisplayLayout,
   ImageError,
   type Crop,
@@ -218,6 +219,89 @@ function resampleRegion(
   return out;
 }
 
+/** Copies `patch` into `target` at the integer offset `at`. */
+function blit(
+  patch: Uint8ClampedArray,
+  target: Uint8ClampedArray,
+  targetWidth: number,
+  at: { x: number; y: number; width: number; height: number },
+): void {
+  for (let y = 0; y < at.height; y += 1) {
+    const srcStart = y * at.width * 4;
+    const dstStart = ((at.y + y) * targetWidth + at.x) * 4;
+    target.set(patch.subarray(srcStart, srcStart + at.width * 4), dstStart);
+  }
+}
+
+/**
+ * Resamples one composited frame into the encode buffer.
+ *
+ * The crop window may overhang the logical screen — a banner zoomed out past
+ * its cover crop (see `minCropScale`), whose overhang must encode as black
+ * letterbox bars exactly as the editor previewed. The inside-source window is
+ * the common case and keeps the plain 1:1 resample; the overhanging one fills
+ * the buffer black first and resamples only the intersection, placed at the
+ * window-relative offset. Box coordinates are whole pixels clamped inside the
+ * buffer, so the ≤1px of rounding at an edge can never write out of bounds.
+ */
+function resampleFrame(
+  frame: { data: Uint8ClampedArray },
+  screen: { width: number; height: number },
+  region: { x: number; y: number; width: number; height: number },
+  layout: DisplayLayout,
+): Uint8ClampedArray {
+  const overhangs =
+    region.x < 0 ||
+    region.y < 0 ||
+    region.x + region.width > screen.width ||
+    region.y + region.height > screen.height;
+  if (!overhangs) {
+    return resampleRegion(frame.data, screen.width, region, layout.width, layout.height);
+  }
+
+  const out = new Uint8ClampedArray(layout.width * layout.height * 4);
+  fillRect(
+    out,
+    layout.width,
+    { left: 0, top: 0, width: layout.width, height: layout.height },
+    [0, 0, 0, 255],
+  );
+
+  const x = Math.max(region.x, 0);
+  const y = Math.max(region.y, 0);
+  const width = Math.min(region.x + region.width, screen.width) - x;
+  const height = Math.min(region.y + region.height, screen.height) - y;
+  if (width <= 0 || height <= 0) return out;
+
+  const boxX = Math.max(
+    0,
+    Math.min(Math.floor((x - region.x) * (layout.width / region.width)), layout.width - 1),
+  );
+  const boxY = Math.max(
+    0,
+    Math.min(Math.floor((y - region.y) * (layout.height / region.height)), layout.height - 1),
+  );
+  const box = {
+    x: boxX,
+    y: boxY,
+    width: Math.max(
+      1,
+      Math.min(Math.round(width * (layout.width / region.width)), layout.width - boxX),
+    ),
+    height: Math.max(
+      1,
+      Math.min(Math.round(height * (layout.height / region.height)), layout.height - boxY),
+    ),
+  };
+  blit(
+    resampleRegion(frame.data, screen.width, { x, y, width, height }, box.width, box.height),
+    out,
+    layout.width,
+    box,
+  );
+  return out;
+}
+
 function hasTransparency(rgba: Uint8ClampedArray): boolean {
   for (let index = 3; index < rgba.length; index += 4) {
     // GIF transparency is 1-bit: anything more than half-transparent is worth
@@ -234,13 +318,19 @@ function fitLayout(
   maxHeight: number,
 ): DisplayLayout {
   const scale = Math.min(maxWidth / source.width, maxHeight / source.height, 1);
+  const width = Math.max(1, Math.round(source.width * scale));
+  const height = Math.max(1, Math.round(source.height * scale));
   return {
     sourceX: 0,
     sourceY: 0,
     sourceWidth: source.width,
     sourceHeight: source.height,
-    width: Math.max(1, Math.round(source.width * scale)),
-    height: Math.max(1, Math.round(source.height * scale)),
+    destinationX: 0,
+    destinationY: 0,
+    destinationWidth: width,
+    destinationHeight: height,
+    width,
+    height,
   };
 }
 
@@ -292,17 +382,25 @@ export function processAnimatedGif(source: ArrayBuffer, target: GifTarget): Anim
     "kind" in target
       ? calculateDisplayLayout(screen, target.kind, target.crop)
       : fitLayout(screen, target.maxWidth, target.maxHeight);
-  const region = {
-    x: layout.sourceX,
-    y: layout.sourceY,
-    width: layout.sourceWidth,
-    height: layout.sourceHeight,
-  };
+  // The resampling window is the CROP RECT, not `layout.source*`: a letterboxed
+  // banner's window overhangs the logical screen, and it is the overhang the
+  // black bars stand in for — while `layout.source*` is only the part of the
+  // screen that intersects it. Without a crop the centered cover frame is the
+  // window, which is exactly `layout.source*`.
+  const region =
+    "kind" in target && target.crop
+      ? calculateCropRect(screen, target.kind, target.crop)
+      : {
+          x: layout.sourceX,
+          y: layout.sourceY,
+          width: layout.sourceWidth,
+          height: layout.sourceHeight,
+        };
   const repeat = loopCount(parsed);
 
   const encoder = GIFEncoder();
   for (const frame of composited) {
-    const resampled = resampleRegion(frame.data, screen.width, region, layout.width, layout.height);
+    const resampled = resampleFrame(frame, screen, region, layout);
 
     // Each encoded frame is the FULL composited canvas, not a delta, so the
     // decoder must clear before drawing the next one (`dispose: 2`) —

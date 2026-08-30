@@ -43,18 +43,6 @@ function seedPages<TPage extends CursorPage>(
   });
 }
 
-function seedInfiniteLoading(queryClient: QueryClient, queryKey: QueryKey): void {
-  void queryClient.fetchInfiniteQuery({
-    queryKey,
-    queryFn: () => new Promise<never>(() => {}),
-    initialPageParam:
-      // SAFETY: the cursor page param is undefined for the first page; the
-      // type parameter comes from the query's input type, not this fixture.
-      undefined as string | undefined,
-    getNextPageParam: () => undefined,
-  });
-}
-
 function seedQueryLoading(queryClient: QueryClient, queryKey: QueryKey): void {
   void queryClient.fetchQuery({ queryKey, queryFn: () => new Promise<never>(() => {}) });
 }
@@ -71,26 +59,6 @@ async function seedQueryError(
   }
 }
 
-async function seedInfiniteError(
-  queryClient: QueryClient,
-  queryKey: QueryKey,
-  message: string,
-): Promise<void> {
-  try {
-    await queryClient.fetchInfiniteQuery({
-      queryKey,
-      queryFn: () => Promise.reject(new Error(message)),
-      initialPageParam:
-        // SAFETY: the cursor page param is undefined for the first page; the
-        // type parameter comes from the query's input type, not this fixture.
-        undefined as string | undefined,
-      getNextPageParam: () => undefined,
-    });
-  } catch {
-    // The cache error state is the fixture this operation produces.
-  }
-}
-
 /**
  * Test-facing interface for server-query state. Callers describe the domain
  * state they need; query keys, pagination metadata, and TanStack cache
@@ -101,15 +69,6 @@ export function queryFixtures(queryClient: QueryClient) {
     postList: {
       data(pages: PostListPage[], params: PostFeedParams = { feed: "global" }): void {
         seedPages(queryClient, postListQueryOptions(params).queryKey, pages);
-      },
-      loading(params: PostFeedParams = { feed: "global" }): void {
-        seedInfiniteLoading(queryClient, postListQueryOptions(params).queryKey);
-      },
-      error(
-        message = "Something went wrong",
-        params: PostFeedParams = { feed: "global" },
-      ): Promise<void> {
-        return seedInfiniteError(queryClient, postListQueryOptions(params).queryKey, message);
       },
     },
     profile: {
@@ -137,20 +96,6 @@ export function queryFixtures(queryClient: QueryClient) {
     userList: {
       data(username: string, direction: FollowDirection, pages: UserListPage[]): void {
         seedPages(queryClient, userListQueryOptions(username, direction).queryKey, pages);
-      },
-      loading(username: string, direction: FollowDirection): void {
-        seedInfiniteLoading(queryClient, userListQueryOptions(username, direction).queryKey);
-      },
-      error(
-        username: string,
-        direction: FollowDirection,
-        message = "Something went wrong",
-      ): Promise<void> {
-        return seedInfiniteError(
-          queryClient,
-          userListQueryOptions(username, direction).queryKey,
-          message,
-        );
       },
     },
     search: {

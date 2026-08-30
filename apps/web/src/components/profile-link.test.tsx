@@ -2,12 +2,9 @@ import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QueryClient } from "@tanstack/react-query";
 import { ProfileLink } from "@/components/profile-link";
-import {
-  createTestQueryClient,
-  makeProfile,
-  queryFixtures,
-  renderWithProviders,
-} from "@/test/render";
+import { createTestQueryClient, makeProfile } from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
+import { renderWithProviders } from "@/test/render";
 import { m } from "@/paraglide/messages.js";
 import { profileQueryOptions } from "@/lib/query-definitions";
 

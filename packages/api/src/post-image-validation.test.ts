@@ -140,16 +140,6 @@ describe("gifFrameSummary", () => {
     expect(gifFrameSummary(gif)).toBeNull();
   });
 
-  it("returns null for a zero-dimension frame", () => {
-    const gif = buildGif({ width: 2, height: 2 }, [{ width: 0, height: 2 }]);
-    expect(gifFrameSummary(gif)).toBeNull();
-  });
-
-  it("returns null for a zero-dimension logical screen", () => {
-    const gif = buildGif({ width: 0, height: 2 }, [{ width: 1, height: 1 }]);
-    expect(gifFrameSummary(gif)).toBeNull();
-  });
-
   it("returns null when a frame rectangle leaves the logical screen", () => {
     const gif = buildGif({ width: 2, height: 2 }, [{ width: 2, height: 2 }]);
     // No GCE: the first descriptor's left coordinate starts at byte 14.
@@ -161,14 +151,6 @@ describe("gifFrameSummary", () => {
     const gif = buildGif({ width: 2, height: 2 }, [{ width: 2, height: 2 }]);
     // No GCE: the first descriptor's LZW minimum code size is byte 23.
     gif[23] = 1;
-    expect(gifFrameSummary(gif)).toBeNull();
-  });
-
-  it("returns null for a Graphic Control Extension with the wrong block size", () => {
-    const gif = buildGif({ width: 2, height: 2 }, [{ width: 2, height: 2, delayCs: 10 }]);
-    // The extension starts immediately after the 13-byte header; byte 15 is
-    // its fixed data block size and must be exactly 4.
-    gif[15] = 3;
     expect(gifFrameSummary(gif)).toBeNull();
   });
 

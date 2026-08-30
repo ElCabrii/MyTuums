@@ -15,7 +15,23 @@ import { resolveTestDatabaseUrl } from "@my-tuums/db/testing";
 const SERVER_PORT = 3101;
 const WEB_PORT = 5273;
 
+// Two loopback spellings, split by who is talking.
+//
+// Anything a BROWSER touches must say `localhost`: cookies are shared across
+// ports of the same host but not across `localhost` and `127.0.0.1` — the
+// email-verification link mints its session on the server origin, and the
+// signed-in app reads it from the web origin, so the two names must agree.
+// WebAuthn adds a second reason: RP IDs reject IP literals, so the passkey
+// spec cannot register credentials against http://127.0.0.1.
+//
+// Anything NODE fetches must say `127.0.0.1`: Node 24 resolves `localhost`
+// to the IPv6 loopback first, while the server binds 127.0.0.1 only — a
+// `localhost` target from Node races families and fails. That covers the
+// health check, the api project, and vite's proxy target. The vite command
+// below binds every family (`--host`) so the web app answers whichever
+// family a `localhost` fetch lands on.
 const serverUrl = `http://localhost:${String(SERVER_PORT)}`;
+const nodeServerUrl = `http://127.0.0.1:${String(SERVER_PORT)}`;
 const webUrl = `http://localhost:${String(WEB_PORT)}`;
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
@@ -115,7 +131,13 @@ export default defineConfig({
   outputDir: "./test-results",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // One retry in CI, not two. A required check has to be trustworthy, and two
+  // retries is enough to keep a genuinely unreliable spec green indefinitely —
+  // the failure mode is not a red build, it is a suite nobody believes. One
+  // absorbs a real infrastructure blip (a service container that answered
+  // slowly on its first request) while a spec that needs a third attempt
+  // shows up as a failure to fix or quarantine, not as noise to absorb.
+  retries: process.env.CI ? 1 : 0,
 
   // One worker. Every spec shares a single Postgres and a single in-process
   // rate limiter on the server, so parallel workers would both contend for
@@ -149,7 +171,7 @@ export default defineConfig({
     {
       name: "api",
       testMatch: /tests\/api\/.*\.spec\.ts/,
-      use: { baseURL: serverUrl },
+      use: { baseURL: nodeServerUrl },
     },
 
     // The browser journeys. Signed in as Alice by default; the signed-out
@@ -167,9 +189,16 @@ export default defineConfig({
 
   webServer: [
     {
-      command: "pnpm --filter @my-tuums/server exec tsx src/index.ts",
-      cwd: repoRoot,
-      url: `${serverUrl}/health`,
+      // The package-local bin shim, not `pnpm --filter @my-tuums/server exec`:
+      // Playwright tears a web server down by killing the process group of the
+      // process it spawned, and pnpm 12 runs its children in groups of their
+      // own — the sh wrapper dies, tsx and the server escape the kill, inherit
+      // the piped stdio, and Playwright waits forever on pipes that never
+      // reach EOF. Spawning the leaf shim keeps the whole tree inside the
+      // group Playwright kills. (pnpm 10 forwarded the signal; 12 does not.)
+      command: "node_modules/.bin/tsx src/index.ts",
+      cwd: path.join(repoRoot, "apps", "server"),
+      url: `${nodeServerUrl}/health`,
       env: stackEnv,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
@@ -181,10 +210,15 @@ export default defineConfig({
       // preview (that needs its own `preview.proxy` block), and dev generates
       // `routeTree.gen.ts` and `src/paraglide/**` — both git-ignored — as a
       // side effect, so a clean checkout needs no separate build step.
-      command: `pnpm --filter @my-tuums/web exec vite --port ${String(WEB_PORT)} --strictPort`,
-      cwd: repoRoot,
+      // Runs from apps/web via its local bin shim for the same process-group
+      // reason as the server above. `--host` binds every family so Node 24's
+      // ::1-first `localhost` fetches reach it (see the URL comment above);
+      // the proxy target is the 127.0.0.1 literal for the same reason in
+      // reverse.
+      command: `node_modules/.bin/vite --host --port ${String(WEB_PORT)} --strictPort`,
+      cwd: path.join(repoRoot, "apps", "web"),
       url: webUrl,
-      env: { RPC_TARGET: serverUrl },
+      env: { RPC_TARGET: nodeServerUrl },
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
       stdout: "pipe",

@@ -68,6 +68,18 @@ export default defineConfig({
           environment: "node",
           include: ["src/**/*.test.ts"],
           exclude: ["src/**/*.int.test.ts"],
+
+          // The unit/integration split, made structural rather than
+          // circumstantial. `@my-tuums/db` reads DATABASE_URL at module scope
+          // and throws when it is falsy, so a unit test that grows a database
+          // dependency fails immediately and by name — even on a developer's
+          // machine, where the dev database is always reachable, and even when
+          // the root `.env` loaded above put a URL in `process.env`.
+          //
+          // This used to be expressed as "the CI unit job has no service
+          // container", which only held in CI and only for as long as nobody
+          // merged the jobs.
+          env: { DATABASE_URL: "" },
         },
       },
       {

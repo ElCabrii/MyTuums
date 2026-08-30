@@ -5,13 +5,10 @@ import { createStore } from "jotai";
 import { ORPCError } from "@orpc/client";
 import { authErrorAtom } from "@/atoms/auth";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
-import {
-  createTestQueryClient,
-  makeProfile,
-  queryFixtures,
-  renderWithProviders,
-  setTestSession,
-} from "@/test/render";
+import { setTestSession } from "@/test/auth-fixture";
+import { createTestQueryClient, makeProfile } from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
+import { renderWithProviders } from "@/test/render";
 import { ProfileLayout } from "@/components/profile-layout";
 import { authClient } from "@/lib/auth-client";
 import { m } from "@/paraglide/messages.js";
@@ -305,22 +302,43 @@ describe("ProfileLayout bio", () => {
       privateBio,
     );
   });
+});
 
-  it("links mentions to canonical profiles and preserves the surrounding text", async () => {
-    const bio = "Building with @Alice,\none day at a time.";
-    const profile = makeProfile({ username: "author", displayUsername: "Author", bio });
+describe("ProfileLayout banner", () => {
+  it("renders the encoded 3:1 composition in a height-clamped frame", async () => {
+    const profile = makeProfile({
+      name: "Banner Owner",
+      username: "banner-owner",
+      bannerImage: "/media/banner-owner.webp",
+    });
     const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).profile.data("author", profile);
+    queryFixtures(queryClient).profile.data("banner-owner", profile);
 
     await renderWithProviders(<ProfileLayout />, {
       queryClient,
-      initialPath: "/@author",
+      initialPath: "/@banner-owner",
       signedInAs: true,
     });
 
-    const mention = screen.getByRole("link", { name: "@Alice" });
-    expect(mention).toHaveAttribute("href", "/@alice");
-    expect(mention.closest("p")?.textContent).toBe(bio);
+    const banner = screen.getByRole("img", {
+      name: m.profile_banner_alt({ name: profile.name }),
+    });
+    // The frame is the canonical 3:1 with its height clamped by the constants
+    // in lib/banner-frame.ts: exact 3:1 wherever the measure holds, a 150px
+    // band on narrow phones, never taller than 320px on wide monitors. The
+    // clamps are inline styles from those constants so this frame and the
+    // crop editor's safe area cannot drift apart.
+    expect(banner.parentElement).toHaveStyle({
+      aspectRatio: "3",
+      maxWidth: "1500px",
+      minHeight: "150px",
+      maxHeight: "320px",
+    });
+    expect(banner.parentElement).toHaveClass("mx-auto");
+    // Each class needs its own negation: jest-dom's toHaveClass(a, b) requires
+    // BOTH, so the negated form would pass if only one of them reappeared.
+    expect(banner.parentElement).not.toHaveClass("h-48");
+    expect(banner.parentElement).not.toHaveClass("sm:h-64");
   });
 });
 

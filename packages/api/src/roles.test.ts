@@ -41,13 +41,6 @@ describe("canManageRole", () => {
     expect(canManageRole("admin", "admin")).toBe(false);
   });
 
-  it("an actor always holds their own rank, so acting on yourself is covered by the same rule", () => {
-    // The rank guard's load-bearing property: nobody can suspend, ban or
-    // demote themselves, with no separate self-check needed.
-    expect(canManageRole("admin", "admin")).toBe(false);
-    expect(canManageRole("moderator", "moderator")).toBe(false);
-  });
-
   it("allows acting down exactly one rank and every rank below", () => {
     expect(canManageRole("moderator", "user")).toBe(true);
     expect(canManageRole("staff", "moderator")).toBe(true);

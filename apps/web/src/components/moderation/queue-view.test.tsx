@@ -7,9 +7,9 @@ import {
   makeModerationCaseDetail,
   makePostPreview,
   makeUserPreview,
-  queryFixtures,
-  renderWithProviders,
-} from "@/test/render";
+} from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
+import { renderWithProviders } from "@/test/render";
 import { QueueView } from "@/components/moderation/queue-view";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";

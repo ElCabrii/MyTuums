@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { act } from "@testing-library/react";
 import { createStore } from "jotai";
+
 import { renderWithProviders } from "@/test/render";
 import { offerTwoFactorAtom } from "@/atoms/onboarding";
 import { useRedirectWhenSignedIn } from "@/hooks/use-redirect-when-signed-in";

@@ -23,7 +23,8 @@ import { m } from "@/paraglide/messages.js";
 import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/forgot-password")({
-  head: () => pageHead(m.auth_forgot_title()),
+  head: () =>
+    pageHead(m.auth_forgot_title(), m.forgot_password_document_description(), "/forgot-password"),
   component: ForgotPasswordPage,
 });
 

@@ -8,16 +8,17 @@ import {
 
 /**
  * The BetterAuth fake and the session-driving calls. The fake is installed by
- * `installTestAuthFixture()`, which `src/test/setup.ts` calls during the Vitest
- * setup phase — before any test module is evaluated. That is what removes the
+ * `installTestAuthFixture()`, which both Vitest setups (`setup-node.ts` for
+ * the node project, `setup-dom.ts` for the dom project) call during the setup
+ * phase — before any test module is evaluated. That is what removes the
  * import-order hazard: `atoms/session.ts` seeds `sessionAtom` from
  * `sessionStore.get()` at its own import time, and the setup phase runs before
  * any test file's static imports are collected, so the fake store is always in
  * place before that capture. A test author never has to remember to import
- * this module (or `@/test/render`) before the component under test.
+ * this module before the component under test.
  *
  * The domain factories and QueryClient tuning live in `./factories.ts` (no
- * side effects); the router stand-in lives in `./route-tree.ts`.
+ * side effects); the router stand-in lives in `./route-tree.tsx`.
  */
 
 export interface TestSessionUser {
@@ -27,6 +28,8 @@ export interface TestSessionUser {
   username?: string | null;
   displayUsername?: string | null;
   image?: string | null;
+  /** The untouched original's /media path (issue #246's re-crop offer reads it). */
+  imageOriginal?: string | null;
   /** A Date, as the session store reports it. Omit it to simulate a session that never declared one. */
   dateOfBirth?: Date | null;
   bio?: string | null;
@@ -82,7 +85,7 @@ export interface TestSessionValue {
 // value — captured at module import — is what the first render sees, and if it
 // read "resolved signed-out" here, a signed-in/pending test would redirect
 // before the immediate-fire subscription below delivers the real value. The
-// same trap is documented in `session.test.ts`.
+// same trap is documented in `session.dom.test.ts`.
 let currentSession: TestSessionValue = {
   data: null,
   isPending: true,
@@ -163,8 +166,9 @@ const fakeAuthClient = {
 const fakeUseSession = () => currentSession;
 
 /**
- * Installs the fake auth client. Called once from `src/test/setup.ts` during
- * the Vitest setup phase, before any test module is evaluated — so
+ * Installs the fake auth client. Called once from each Vitest setup
+ * (`setup-node.ts`, `setup-dom.ts`) during the setup phase, before any test
+ * module is evaluated — so
  * `atoms/session.ts`'s import-time `sessionStore.get()` always reads the fake
  * store, regardless of what a test file imports first. It is idempotent by
  * design: the fake is a module-level singleton, and re-installing it just
@@ -235,6 +239,7 @@ export function signedInSession(user: Partial<TestSessionUser> = {}): TestSessio
         username: "alexmercer",
         displayUsername: "AlexMercer",
         image: null,
+        imageOriginal: null,
         // The editable profile and the stored preferences, all unset — the
         // state a fresh account is in, and the one the theme/locale fallbacks
         // in atoms/theme.ts and atoms/locale.ts are written against. A test

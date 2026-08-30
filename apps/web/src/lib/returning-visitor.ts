@@ -13,8 +13,13 @@
  */
 export const RETURNING_VISITOR_COOKIE = "mytuums_returning";
 
+// Node-safe like the rest of the client core (see orpc.ts): the module is
+// imported by atoms/session.ts, whose tests run under a Node Vitest
+// environment with no document. Outside a browser there is no cookie jar, so
+// "never a returning visitor" is the honest answer.
 /** Whether this device has had a session before, per the stamped cookie. */
 export function isReturningVisitor(): boolean {
+  if (!("document" in globalThis)) return false;
   return document.cookie
     .split("; ")
     .some((part) => part.startsWith(`${RETURNING_VISITOR_COOKIE}=`));
@@ -22,6 +27,7 @@ export function isReturningVisitor(): boolean {
 
 /** Stamps the one-year "returning visitor" cookie; called the moment a session first appears. */
 export function stampReturningVisitor(): void {
+  if (!("document" in globalThis)) return;
   // Year-long, like the app's stored theme/locale overrides. SameSite=Lax so
   // the flag is never sent with cross-site requests.
   document.cookie = `${RETURNING_VISITOR_COOKIE}=1; max-age=31536000; path=/; SameSite=Lax`;

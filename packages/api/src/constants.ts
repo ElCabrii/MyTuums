@@ -225,17 +225,21 @@ export const BANNER_ASPECT_RATIO = 3;
 export const IMAGE_LIMITS = {
   avatar: {
     maxOriginalBytes: 5 * 1024 * 1024,
-    maxDisplayBytes: 1024 * 1024,
-    maxWidth: 512,
-    maxHeight: 512,
+    // The profile page's full-size viewer renders this same object up to
+    // ~900 CSS px (~896px dialog), so the ceiling is where that view is at or
+    // near 1:1 rather than a stretched blur; 2 MiB keeps a photographic PNG
+    // fallback (browsers without a WebP encoder) from being downscaled by the
+    // client's byte-cap retry loop.
+    maxDisplayBytes: 2 * 1024 * 1024,
+    maxWidth: 1024,
+    maxHeight: 1024,
   },
   banner: {
     maxOriginalBytes: 8 * 1024 * 1024,
     // Every display variant is encoded at the canonical 3:1 banner aspect.
-    // The profile frame remains responsive and `object-cover` may hide edges,
-    // so the crop editor exposes the center safe area shared by supported
-    // layouts. 3840px provides a 2x sample on a 1920px-wide display; 1280px is
-    // the matching height and preserves source detail for responsive crops.
+    // The profile renders that composition without a second crop. 3840px
+    // provides a 2x sample on a 1920px-wide display; 1280px is the matching
+    // height.
     maxDisplayBytes: 8 * 1024 * 1024,
     maxWidth: 3840,
     maxHeight: 1280,

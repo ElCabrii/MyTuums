@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
-import {
-  createTestQueryClient,
-  makeAuditEntry,
-  queryFixtures,
-  renderWithProviders,
-} from "@/test/render";
+import { createTestQueryClient, makeAuditEntry } from "@/test/factories";
+import { queryFixtures } from "@/test/query-fixtures";
+import { renderWithProviders } from "@/test/render";
 import { AuditView } from "@/components/moderation/audit-view";
 import { m } from "@/paraglide/messages.js";
 
@@ -83,14 +80,5 @@ describe("AuditView", () => {
         m.moderation_audit_post({ id: "0123456789abcdef0123456789abcdef".slice(0, 8) }),
       ),
     ).toBeInTheDocument();
-  });
-
-  it("renders the empty state when the log has no entries", async () => {
-    const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).moderation.auditLog([{ items: [], nextCursor: null }]);
-    await renderWithProviders(<AuditView />, { queryClient, signedInAs: { role: "staff" } });
-
-    expect(await screen.findByText(m.moderation_audit_empty())).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 });

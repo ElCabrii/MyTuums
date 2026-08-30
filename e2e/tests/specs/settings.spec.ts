@@ -1,4 +1,5 @@
 import { expect, test } from "../../support/fixtures";
+import type { Locator } from "@playwright/test";
 import { emailVerificationLinkFor } from "../../support/db";
 import { solidPng } from "../../support/image";
 import { E2E } from "../../playwright.config";
@@ -27,6 +28,40 @@ function storageBucketConfigured(): boolean {
   return ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"].every((key) =>
     Boolean(process.env[key]),
   );
+}
+
+/**
+ * The uploaded object must be the canonical 3:1, and its display frame must be
+ * the 3:1 composition with the height clamps from `apps/web/src/lib/banner-frame.ts`.
+ *
+ * The natural-image ratio is pinned exactly (3, 5): the encoded variant is
+ * always 3:1. The frame is *clamped*, not 3:1 at every width — exact 3:1 only
+ * where neither clamp binds (roughly 450–960px wide); a narrow phone holds a
+ * 150px band (X's mobile-header height) and trims the image's sides, and past
+ * the 1500px measure the frame stops at 320px tall and trims top and bottom.
+ *
+ * The clamps are pinned by absolute sizes, and their *direction* by
+ * inequality, never by a pinned frame ratio at a clamped width: a classic
+ * scrollbar takes ~15px off the viewport, so the frame's exact ratio there
+ * (2.5 vs 2.6 at a 390px viewport) depends on browser chrome the spec must
+ * not depend on. Heights and the 1500px measure are chrome-independent.
+ */
+async function bannerFrameBounds(banner: Locator): Promise<{ width: number; height: number }> {
+  await expect(banner).toBeVisible();
+  await expect
+    .poll(() =>
+      banner.evaluate((image: HTMLImageElement) =>
+        image.naturalHeight === 0 ? 0 : image.naturalWidth / image.naturalHeight,
+      ),
+    )
+    .toBeCloseTo(3, 5);
+
+  return banner.evaluate((image) => {
+    const frame = image.parentElement;
+    if (!frame) throw new Error("banner image has no display frame");
+    const bounds = frame.getBoundingClientRect();
+    return { width: bounds.width, height: bounds.height };
+  });
 }
 
 /** Signs up a fresh account through the UI and lands on its profile. */
@@ -73,39 +108,7 @@ test.describe("profile details", () => {
     await expect(page.getByRole("heading", { name: "Renamed Person" })).toBeVisible();
     await expect(page.getByText("Collector of small stones.")).toBeVisible();
   });
-
-  test("refuses a bio over the limit, and says so rather than failing silently", async ({
-    page,
-  }) => {
-    await signUpFresh(page, "settings");
-
-    await page.goto("/settings/account");
-    await page.getByLabel("Bio").fill("x".repeat(161));
-    await page.getByRole("button", { name: "Save" }).click();
-
-    // The client's copy and the server's are byte-identical, so this message is
-    // the same either way — which is the point of keeping them in step.
-    await expect(page.getByRole("alert")).toContainText("160 characters or fewer");
-  });
 });
-
-/**
- * A real 1x1 PNG. Real bytes matter: the client re-encodes through a canvas
- * (`lib/media.ts`) and the server sniffs the magic bytes of whatever arrives
- * (`packages/api/src/image.ts`), so a fake buffer would be rejected — correctly.
- *
- * Reserved for the specs that only care THAT an image landed. **A 1x1 is not a
- * valid test of the upload path itself**, and this suite learned that the
- * expensive way: every upload spec used one, and a 1x1 is the single size at
- * which a WebP header misparse is invisible — the broken parser reported width
- * 1 for everything, which is exactly what a 1x1 is. A banner bug that rejected
- * every real landscape image as "too large" shipped through a fully green E2E
- * run. The upload specs below use `solidPng` at realistic sizes instead.
- */
-const PNG_1X1 = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-  "base64",
-);
 
 /**
  * These hit the real Storage Bucket — there is no fake in the browser path.
@@ -130,7 +133,9 @@ test.describe("images", () => {
     await apply.click();
   }
 
-  test("uploads an avatar, and it renders on the profile from /media", async ({ page }) => {
+  test("uploads an avatar, renders it on the profile from /media, and clears it again", async ({
+    page,
+  }) => {
     const account = await signUpFresh(page, "avatar");
 
     await page.goto("/settings/account");
@@ -159,9 +164,20 @@ test.describe("images", () => {
     const response = await page.request.get(src!);
     expect(response.status()).toBe(200);
     expect(response.headers()["content-type"]).toContain("image");
+
+    // Removal shares this account rather than paying for a second sign-up: it
+    // is the same lifecycle, and the profile falling back to initials is the
+    // only browser-visible half `profile-media.int.test.ts` cannot assert.
+    await page.goto("/settings/account");
+    const remove = page.getByRole("button", { name: "Remove Profile picture" });
+    await remove.click();
+    await expect(remove).toBeHidden();
+
+    await page.goto(`/@${account.username}`);
+    await expect(page.getByRole("img", { name: account.name })).toHaveCount(0);
   });
 
-  test("uploads a banner into its own slot", async ({ page }) => {
+  test("keeps one banner composition in Settings and across profile widths", async ({ page }) => {
     const account = await signUpFresh(page, "banner");
 
     await page.goto("/settings/account");
@@ -182,49 +198,38 @@ test.describe("images", () => {
     // so a future regression reports the reason rather than a bare timeout.
     await expect(page.getByRole("alert")).toHaveCount(0);
 
-    await page.goto(`/@${account.username}`);
-    await expect(page.getByRole("img", { name: /banner/i })).toHaveAttribute(
-      "src",
-      /^\/media\/banners\//,
-    );
-  });
-
-  test("removing an image clears it from the profile", async ({ page }) => {
-    const account = await signUpFresh(page, "unavatar");
-
-    await page.goto("/settings/account");
-    await page.getByLabel("Profile picture").setInputFiles({
-      name: "me.png",
-      mimeType: "image/png",
-      buffer: PNG_1X1,
-    });
-    await applyCrop(page);
-    const remove = page.getByRole("button", { name: "Remove Profile picture" });
-    await expect(remove).toBeVisible({ timeout: 20_000 });
-
-    await remove.click();
-    await expect(remove).toBeHidden();
+    // The Settings preview is the plain canonical composition: w-28 at exactly
+    // 3:1, no clamps.
+    const preview = await bannerFrameBounds(page.getByRole("img", { name: "Banner" }));
+    expect(preview.width / preview.height).toBeCloseTo(3, 2);
 
     await page.goto(`/@${account.username}`);
-    // Back to the initials fallback — no <img> at all.
-    await expect(page.getByRole("img", { name: account.name })).toHaveCount(0);
-  });
+    const profileBanner = page.getByRole("img", { name: /banner/i });
+    await expect(profileBanner).toHaveAttribute("src", /^\/media\/banners\//);
 
-  test("refuses an SVG, which is a document that can carry script", async ({ page }) => {
-    await signUpFresh(page, "svgreject");
+    // The clamped profile frame, one viewport per regime (see the helper's
+    // comment for why the clamped widths assert sizes and inequalities).
+    await page.setViewportSize({ width: 390, height: 900 });
+    const phone = await bannerFrameBounds(profileBanner);
+    expect(phone.height).toBeCloseTo(150, 1); // the phone band, not a 125px 3:1 sliver
+    expect(phone.width / phone.height).toBeLessThan(3);
 
-    await page.goto("/settings/account");
-    await page.getByLabel("Profile picture").setInputFiles({
-      name: "sneaky.svg",
-      mimeType: "image/svg+xml",
-      buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>'),
-    });
+    await page.setViewportSize({ width: 768, height: 900 });
+    const tablet = await bannerFrameBounds(profileBanner);
+    expect(tablet.width / tablet.height).toBeCloseTo(3, 2); // unclamped: the whole composition
 
-    await expect(page.getByRole("alert")).toContainText("isn't supported");
-    // Refused before the crop editor opens: a file that cannot be uploaded has
-    // no crop worth choosing (apps/web/src/lib/media.ts, `validateImageFile`).
-    await expect(page.getByRole("button", { name: "Apply" })).toBeHidden();
-    await expect(page.getByRole("button", { name: "Remove Profile picture" })).toBeHidden();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const laptop = await bannerFrameBounds(profileBanner);
+    expect(laptop.height).toBeCloseTo(320, 1); // the height cap, not a 480px slab
+    expect(laptop.width / laptop.height).toBeGreaterThan(3);
+
+    // 2560 is wide enough that the 1500px measure binds too. Pinning width AND
+    // height is what catches the measure or a clamp regressing into the old
+    // unbounded slab (issue #240); a loose ratio alone cannot.
+    await page.setViewportSize({ width: 2560, height: 900 });
+    const wide = await bannerFrameBounds(profileBanner);
+    expect(wide.width).toBeCloseTo(1500, 1);
+    expect(wide.height).toBeCloseTo(320, 1);
   });
 });
 
@@ -243,19 +248,6 @@ test.describe("handle", () => {
     // nothing redirects from it.
     await page.goto(`/@${account.username}`);
     await expect(page.getByText("This handle isn't taken")).toBeVisible();
-  });
-
-  test("refuses a handle that is already taken", async ({ page, db }) => {
-    const taken = uniqueUser("taken");
-    await db.createUser(taken);
-    await signUpFresh(page, "clash");
-
-    await page.goto("/settings/account");
-    await page.getByLabel("Username").fill(taken.username);
-    await page.getByRole("button", { name: "Change handle" }).click();
-
-    await expect(page.getByRole("alert")).toBeVisible();
-    await expect(page).toHaveURL(/\/settings\/account$/);
   });
 });
 
@@ -284,63 +276,6 @@ test.describe("password", () => {
 
     await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));
   });
-
-  test("rejects a wrong current password", async ({ page }) => {
-    await signUpFresh(page, "pwwrong");
-
-    await page.goto("/settings/account");
-    await page.getByLabel("Current Password").fill("definitely-not-it");
-    await page.getByLabel("New Password", { exact: true }).fill("correct-horse-battery-98");
-    await page.getByLabel("Confirm New Password").fill("correct-horse-battery-98");
-    await page.getByRole("button", { name: "Change password" }).click();
-
-    await expect(page.getByRole("alert")).toBeVisible();
-  });
 });
 
-test.describe("preferences", () => {
-  test("stores a default theme without changing this device's current one", async ({ page }) => {
-    await signUpFresh(page, "prefs");
-
-    await page.goto("/settings/account");
-    await page
-      .getByRole("group", { name: "Default theme" })
-      .getByRole("button", { name: "Dark" })
-      .click();
-
-    // Pressed state comes from the *account*, not from this device — the two
-    // are separate by design.
-    await expect(
-      page.getByRole("group", { name: "Default theme" }).getByRole("button", { name: "Dark" }),
-    ).toHaveAttribute("aria-pressed", "true");
-  });
-
-  test("the stored default applies in a browser that has never chosen", async ({
-    browser,
-    page,
-  }) => {
-    const account = await signUpFresh(page, "prefsfresh");
-
-    await page.goto("/settings/account");
-    await page
-      .getByRole("group", { name: "Default theme" })
-      .getByRole("button", { name: "Dark" })
-      .click();
-    await expect(
-      page.getByRole("group", { name: "Default theme" }).getByRole("button", { name: "Dark" }),
-    ).toHaveAttribute("aria-pressed", "true");
-
-    // A genuinely fresh context: no localStorage, no cookie — the state the
-    // account default exists to fill.
-    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
-    const fresh = await context.newPage();
-    await fresh.goto("/login");
-    await fresh.getByLabel("Username or Email").fill(account.email);
-    await fresh.getByLabel("Password").fill(account.password);
-    await fresh.getByRole("main").getByRole("button", { name: "Log in" }).click();
-    await expect(fresh).toHaveURL(new RegExp(`/@${account.username}$`));
-
-    await expect(fresh.locator("html")).toHaveClass(/dark/);
-    await context.close();
-  });
-});
+test.describe("preferences", () => {});

@@ -39,7 +39,7 @@ import { m } from "@/paraglide/messages.js";
 import { pageHead } from "@/lib/document-head";
 
 export const Route = createFileRoute("/welcome")({
-  head: () => pageHead(m.welcome_title()),
+  head: () => pageHead(m.welcome_title(), m.welcome_document_description(), "/welcome"),
   component: WelcomePage,
 });
 

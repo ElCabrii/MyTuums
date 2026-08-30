@@ -294,38 +294,6 @@ export async function passwordResetTokenFor(userId: string): Promise<string> {
 }
 
 /**
- * Reads the newest emailed two-factor OTP minted for a challenge.
- *
- * The two-factor plugin stores it in the `verification` table as
- * `2fa-otp-<key>` where `key` is the *unsigned* payload of the two-factor
- * challenge cookie (better-auth's `verifyTwoFactor` — the challenge has no
- * session, so the cookie is the only identity; `getSignedCookie` strips the
- * `.`-separated HMAC signature before the plugin ever sees it), with the code
- * in `value` (`<otp>:<attempts>`, plaintext by default — `storeOTP` is not
- * configured in packages/auth). Same shape as `passwordResetTokenFor`: the
- * E2E stack has no mailbox, so the DB is the only place a spec can read the
- * code from.
- */
-export async function twoFactorOtpFor(challengeKey: string): Promise<string> {
-  assertTestDatabase();
-  const db = await getDb();
-  const { verification } = await schemaModulePromise;
-
-  const [row] = await db
-    .select({ value: verification.value })
-    .from(verification)
-    // `eq`, not `like`: the identifier is exactly `2fa-otp-<key>` with no
-    // suffix, and the key's charset includes `_`, which LIKE treats as a
-    // single-character wildcard.
-    .where(eq(verification.identifier, `2fa-otp-${challengeKey}`))
-    .orderBy(desc(verification.createdAt))
-    .limit(1);
-
-  if (!row) throw new Error(`twoFactorOtpFor: no OTP for challenge "${challengeKey}".`);
-  return row.value.split(":")[0];
-}
-
-/**
  * Inserts `count` top-level posts by `authorId`, newest last.
  *
  * `createdAt` is set explicitly, one millisecond apart, rather than left to

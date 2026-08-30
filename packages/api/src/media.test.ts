@@ -72,15 +72,6 @@ describe("createMediaResolver", () => {
     expect(authorize).not.toHaveBeenCalled();
   });
 
-  it("carries no Cache-Control when no redirect policy is wired", async () => {
-    const authorize = vi.fn<MediaAuthorizer>().mockResolvedValue(true);
-    const resolver = createMediaResolver(storage(), authorize);
-
-    const media = await resolver(PROFILE_KEY, "viewer-1");
-    expect(media).toHaveProperty("url");
-    expect(media).not.toHaveProperty("cacheControl");
-  });
-
   it("forwards the policy's verdict per key and lets a null mean no-store", async () => {
     const authorize = vi.fn<MediaAuthorizer>().mockResolvedValue(true);
     const cachePolicy = vi

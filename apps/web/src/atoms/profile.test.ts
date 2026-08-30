@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient } from "@tanstack/react-query";
-import { waitFor } from "@testing-library/react";
 import { ORPCError } from "@orpc/client";
 
 const fakeClient = { user: { byUsername: vi.fn() } };
@@ -34,7 +33,7 @@ describe("profileAtomFamily", () => {
     const atom = profileAtomFamily("carol");
     const unsub = store.sub(atom, () => {});
 
-    await waitFor(() => expect(store.get(atom).data?.id).toBe("u1"));
+    await vi.waitFor(() => expect(store.get(atom).data?.id).toBe("u1"));
 
     unsub();
   });
@@ -51,7 +50,7 @@ describe("profileAtomFamily", () => {
     const atom = profileAtomFamily("missing");
     const unsub = store.sub(atom, () => {});
 
-    await waitFor(() => expect(store.get(atom).isError).toBe(true));
+    await vi.waitFor(() => expect(store.get(atom).isError).toBe(true));
 
     expect(fakeClient.user.byUsername).toHaveBeenCalledTimes(1);
 

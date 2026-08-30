@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
+import { installInMemoryStorage } from "@/test/memory-storage";
 
 const STORAGE_KEY = "my-tuums.feed-scope";
+
+// These tests assert persistence, so they install the storage they assert on —
+// the node setup deliberately provides no global `localStorage`.
+installInMemoryStorage();
 
 /**
  * `feedScopeAtom` reads `getOnInit: true` off `atomWithStorage`, which reads

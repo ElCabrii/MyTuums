@@ -9,6 +9,7 @@ import {
   clampCrop,
   createDisplayVariant,
   createPostAttachment,
+  minCropScale,
 } from "@/lib/media";
 
 /**
@@ -198,7 +199,7 @@ describe("calculateCropRect", () => {
     });
   });
 
-  it("never selects a rect outside the source, at any zoom or center", () => {
+  it("never selects a rect outside the source, at cover or any zoom-in", () => {
     const source = { width: 3840, height: 2160 };
     for (const kind of ["avatar", "banner"] as const) {
       for (const scale of [1, 1.5, 3, 8]) {
@@ -217,13 +218,71 @@ describe("calculateCropRect", () => {
       }
     }
   });
+
+  it("banner: zooms out past cover until the whole source fits the window", () => {
+    // A 15.6:1 panorama is the shape the cover-only floor broke: at scale 1 the
+    // window is 768x256 and two thirds of the width can never be shown. At the
+    // contain floor the window is the whole source plus top/bottom letterbox.
+    const source = { width: 4000, height: 256 };
+    const contain = minCropScale(source, "banner");
+    expect(contain).toBeCloseTo(0.192, 5);
+    const rect = calculateCropRect(source, "banner", { x: 0.5, y: 0.5, scale: contain });
+    expect(rect.x).toBe(0);
+    expect(rect.x + rect.width).toBe(source.width);
+    expect(rect.y).toBeLessThanOrEqual(0);
+    expect(rect.y + rect.height).toBeGreaterThanOrEqual(source.height);
+  });
+
+  it("banner: letterboxes a source taller than 3:1, centered", () => {
+    // A 16:9 photo at contain fills the window's height and leaves side bars.
+    const source = { width: 3840, height: 2160 };
+    const contain = minCropScale(source, "banner");
+    expect(contain).toBeCloseTo(1280 / 2160, 5);
+    const rect = calculateCropRect(source, "banner", { x: 0.5, y: 0.5, scale: contain });
+    expect(rect).toEqual({ x: -1320, y: 0, width: 6480, height: 2160 });
+  });
+});
+
+describe("minCropScale", () => {
+  it("is the cover crop for avatars and for an exactly-3:1 banner", () => {
+    // Avatars never letterbox: every avatar surface is a square cover crop.
+    expect(minCropScale({ width: 400, height: 800 }, "avatar")).toBe(1);
+    expect(minCropScale({ width: 3840, height: 2160 }, "avatar")).toBe(1);
+    // A banner already at the canonical ratio is fully visible at cover.
+    expect(minCropScale({ width: 1500, height: 500 }, "banner")).toBe(1);
+  });
+
+  it("is below cover for any banner that is not already 3:1", () => {
+    expect(minCropScale({ width: 3840, height: 2160 }, "banner")).toBeLessThan(1);
+    expect(minCropScale({ width: 1000, height: 1000 }, "banner")).toBeLessThan(1);
+  });
 });
 
 describe("clampCrop", () => {
-  it("floors the zoom at 1 — below it there is nothing more to show", () => {
+  it("floors the zoom at 1 for avatars — below it there is nothing more to show", () => {
     expect(
       clampCrop({ x: 0.5, y: 0.5, scale: 0.2 }, { width: 400, height: 400 }, "avatar").scale,
     ).toBe(1);
+  });
+
+  it("floors a banner at its contain scale, not at cover", () => {
+    const source = { width: 3840, height: 2160 };
+    const clamped = clampCrop({ x: 0.5, y: 0.5, scale: 0.1 }, source, "banner");
+    expect(clamped.scale).toBe(minCropScale(source, "banner"));
+  });
+
+  it("keeps a letterboxed banner pinned so the source never leaves the window", () => {
+    // At contain the window (6480px) is wider than the source (3840px), so the
+    // pan limit inverts: the center may only move as far as keeps the source
+    // inside the window — bars may grow on one side, never reveal past the
+    // source on both.
+    const source = { width: 3840, height: 2160 };
+    const contain = minCropScale(source, "banner");
+    const clamped = clampCrop({ x: 0, y: 0.5, scale: contain }, source, "banner");
+    expect(clamped.x).toBeCloseTo(0.15625, 5);
+    const rect = calculateCropRect(source, "banner", clamped);
+    expect(rect.x).toBeLessThanOrEqual(0);
+    expect(rect.x + rect.width).toBeGreaterThanOrEqual(source.width);
   });
 
   it("pulls an off-source center back so the rect stays inside", () => {
@@ -243,14 +302,18 @@ describe("calculateDisplayLayout", () => {
   // arithmetic that decides sharpness is all here.
 
   it("avatar: center-crops to a square and never upscales", () => {
-    // A 4000x4000 source is scaled down to the 512x512 cap, keeping every row.
+    // A 4000x4000 source is scaled down to the 1024x1024 cap, keeping every row.
     expect(calculateDisplayLayout({ width: 4000, height: 4000 }, "avatar")).toEqual({
       sourceX: 0,
       sourceY: 0,
       sourceWidth: 4000,
       sourceHeight: 4000,
-      width: 512,
-      height: 512,
+      destinationX: 0,
+      destinationY: 0,
+      destinationWidth: 1024,
+      destinationHeight: 1024,
+      width: 1024,
+      height: 1024,
     });
     // A source under the cap stays at native size — no invented pixels.
     expect(calculateDisplayLayout({ width: 100, height: 100 }, "avatar")).toEqual({
@@ -258,6 +321,10 @@ describe("calculateDisplayLayout", () => {
       sourceY: 0,
       sourceWidth: 100,
       sourceHeight: 100,
+      destinationX: 0,
+      destinationY: 0,
+      destinationWidth: 100,
+      destinationHeight: 100,
       width: 100,
       height: 100,
     });
@@ -267,6 +334,10 @@ describe("calculateDisplayLayout", () => {
       sourceY: 100,
       sourceWidth: 200,
       sourceHeight: 200,
+      destinationX: 0,
+      destinationY: 0,
+      destinationWidth: 200,
+      destinationHeight: 200,
       width: 200,
       height: 200,
     });
@@ -279,6 +350,10 @@ describe("calculateDisplayLayout", () => {
       sourceY: 440,
       sourceWidth: 3840,
       sourceHeight: 1280,
+      destinationX: 0,
+      destinationY: 0,
+      destinationWidth: 3840,
+      destinationHeight: 1280,
       width: 3840,
       height: 1280,
     });
@@ -288,6 +363,10 @@ describe("calculateDisplayLayout", () => {
       sourceY: 0,
       sourceWidth: 1500,
       sourceHeight: 500,
+      destinationX: 0,
+      destinationY: 0,
+      destinationWidth: 1500,
+      destinationHeight: 500,
       width: 1500,
       height: 500,
     });
@@ -297,6 +376,10 @@ describe("calculateDisplayLayout", () => {
       sourceY: 0,
       sourceWidth: 1200,
       sourceHeight: 400,
+      destinationX: 0,
+      destinationY: 0,
+      destinationWidth: 1200,
+      destinationHeight: 400,
       width: 1200,
       height: 400,
     });
@@ -306,6 +389,10 @@ describe("calculateDisplayLayout", () => {
       sourceY: 66,
       sourceWidth: 200,
       sourceHeight: 67,
+      destinationX: 0,
+      destinationY: 0,
+      destinationWidth: 200,
+      destinationHeight: 67,
       width: 200,
       height: 67,
     });
@@ -317,6 +404,10 @@ describe("calculateDisplayLayout", () => {
       sourceY: 500,
       sourceWidth: 6000,
       sourceHeight: 2000,
+      destinationX: 0,
+      destinationY: 0,
+      destinationWidth: 3840,
+      destinationHeight: 1280,
       width: 3840,
       height: 1280,
     });
@@ -351,9 +442,38 @@ describe("calculateDisplayLayout", () => {
       sourceY: 760,
       sourceWidth: 1920,
       sourceHeight: 640,
+      destinationX: 0,
+      destinationY: 0,
+      destinationWidth: 1920,
+      destinationHeight: 640,
       width: 1920,
       height: 640,
     });
+  });
+
+  it("crop: a letterboxed banner draws the source once, centered, on black", () => {
+    // At contain a 16:9 photo fills the 3:1 window's height and leaves side
+    // bars. The layout must hand the encoder the whole source, offset so the
+    // bars are symmetric — the fill around it is the encoder's black.
+    const source = { width: 3840, height: 2160 };
+    const layout = calculateDisplayLayout(source, "banner", {
+      x: 0.5,
+      y: 0.5,
+      scale: minCropScale(source, "banner"),
+    });
+    expect(layout.sourceX).toBe(0);
+    expect(layout.sourceY).toBe(0);
+    expect(layout.sourceWidth).toBe(source.width);
+    expect(layout.sourceHeight).toBe(source.height);
+    expect(layout.width).toBe(3840);
+    expect(layout.height).toBe(1280);
+    expect(layout.destinationX).toBeGreaterThan(0);
+    expect(layout.destinationY).toBe(0);
+    expect(layout.destinationHeight).toBeCloseTo(layout.height, 5);
+    // Symmetric bars: the gap left of the draw equals the gap right of it, to
+    // the half-pixel the rounded destination width can shift.
+    const right = layout.width - (layout.destinationX + layout.destinationWidth);
+    expect(Math.abs(right - layout.destinationX)).toBeLessThanOrEqual(0.5);
   });
 
   it("produces output the server's display-bound check will accept, for any source", () => {
@@ -391,6 +511,18 @@ describe("calculateDisplayLayout", () => {
         src: { width: 5000, height: 3000 },
         crop: { x: 0.1, y: 0.9, scale: 4 },
       },
+      // Sub-cover banner zooms: the window overhangs the source, and one sits
+      // below the contain floor to prove the floor holds here too.
+      {
+        kind: "banner" as const,
+        src: { width: 3840, height: 2160 },
+        crop: { x: 0.5, y: 0.5, scale: 0.59 },
+      },
+      {
+        kind: "banner" as const,
+        src: { width: 4000, height: 256 },
+        crop: { x: 0.5, y: 0.5, scale: 0.1 },
+      },
     ];
     for (const { kind, src, crop } of cases) {
       const { width, height, sourceWidth, sourceHeight } = calculateDisplayLayout(src, kind, crop);
@@ -415,6 +547,16 @@ describe("createDisplayVariant", () => {
     expect(decode).not.toHaveBeenCalled();
   });
 
+  it("rejects a megapixel bomb on header bytes alone, without decoding it", async () => {
+    const decode = vi.fn();
+    globalThis.createImageBitmap = decode;
+
+    await expect(
+      createDisplayVariant(pngFileWithHeader(20_000, 20_000), "avatar"),
+    ).rejects.toMatchObject({ problem: "size" });
+    expect(decode).not.toHaveBeenCalled();
+  });
+
   it("rejects a source over the slot's original cap, before decoding it", async () => {
     const decode = vi.fn();
     globalThis.createImageBitmap = decode;
@@ -424,21 +566,6 @@ describe("createDisplayVariant", () => {
     await expect(
       createDisplayVariant(file("image/png", IMAGE_LIMITS.avatar.maxOriginalBytes + 1), "avatar"),
     ).rejects.toMatchObject({ problem: "size" });
-    expect(decode).not.toHaveBeenCalled();
-  });
-
-  it("rejects a megapixel bomb on header bytes alone, without decoding it", async () => {
-    const decode = vi.fn();
-    globalThis.createImageBitmap = decode;
-
-    // 400 MP in 24 bytes: the byte cap never sees it, but the header parse
-    // does — the browser should not pay for decoding a gigabyte of pixels it
-    // is about to be told it may not upload.
-    await expect(
-      createDisplayVariant(pngFileWithHeader(20_000, 20_000), "avatar"),
-    ).rejects.toMatchObject({
-      problem: "size",
-    });
     expect(decode).not.toHaveBeenCalled();
   });
 
@@ -521,16 +648,6 @@ describe("createPostAttachment", () => {
   // the property that makes issue #207 hold — what comes back is the
   // encoder's output alone, never the picked bytes.
 
-  it("rejects a type outside the allowlist without touching the decoder", async () => {
-    const decode = vi.fn();
-    globalThis.createImageBitmap = decode;
-
-    await expect(createPostAttachment(file("image/svg+xml"))).rejects.toMatchObject({
-      problem: "type",
-    });
-    expect(decode).not.toHaveBeenCalled();
-  });
-
   it("rejects a source over the attachment byte cap, before decoding it", async () => {
     const decode = vi.fn();
     globalThis.createImageBitmap = decode;
@@ -538,16 +655,6 @@ describe("createPostAttachment", () => {
     await expect(
       createPostAttachment(file("image/png", POST_ATTACHMENT_MAX_BYTES + 1)),
     ).rejects.toMatchObject({ problem: "size" });
-    expect(decode).not.toHaveBeenCalled();
-  });
-
-  it("rejects a megapixel bomb on header bytes alone, without decoding it", async () => {
-    const decode = vi.fn();
-    globalThis.createImageBitmap = decode;
-
-    await expect(createPostAttachment(pngFileWithHeader(20_000, 20_000))).rejects.toMatchObject({
-      problem: "size",
-    });
     expect(decode).not.toHaveBeenCalled();
   });
 

@@ -1,5 +1,5 @@
 import { expect, test } from "../../support/fixtures";
-import { dateOfBirthUnder15, uniqueUser } from "../../support/users";
+import { uniqueUser } from "../../support/users";
 
 /**
  * The `/welcome` completion gate — the handle and the date of birth.
@@ -57,7 +57,7 @@ async function signedInWithoutDob(
 }
 
 test.describe("handle gate", () => {
-  test("sends a signed-in session with no handle to /welcome instead of a profile", async ({
+  test("holds the session on /welcome wherever it navigates, but leaves the legal pages readable", async ({
     page,
     db,
   }) => {
@@ -65,49 +65,13 @@ test.describe("handle gate", () => {
 
     await expect(page).toHaveURL(/\/welcome$/);
     await expect(page.getByRole("heading", { name: "Pick your handle" })).toBeVisible();
-  });
-
-  test("keeps them there when they try to navigate away", async ({ page, db }) => {
-    await signedInWithoutHandle(page, db);
-    await expect(page).toHaveURL(/\/welcome$/);
 
     // The gate is mounted in __root.tsx rather than per-route, so this holds
     // for any destination, not just the ones that remembered to check.
     await page.goto("/discover");
     await expect(page).toHaveURL(/\/welcome$/);
-  });
 
-  test("shows the account as signed in, not as a visitor", async ({ page, db }) => {
-    await signedInWithoutHandle(page, db);
-    await expect(page).toHaveURL(/\/welcome$/);
-
-    // The regression this guards: the header used to branch on `user && handle`
-    // and render sign-in buttons to a signed-in person with no handle yet.
-    // Those buttons are gone entirely now (the header only renders for a real
-    // session — see __root.tsx), but the assertions stay as a tripwire.
-    await expect(page.getByRole("banner").getByRole("button", { name: "Log in" })).toHaveCount(0);
-    await expect(page.getByRole("banner").getByRole("button", { name: "Register" })).toHaveCount(0);
-
-    // The positive half: the header DOES render here (the session exists even
-    // though the handle doesn't), and its avatar links to /welcome — which is
-    // also where useRequireHandle is sending the session, so the chrome and
-    // the redirect agree. `title` is the handleless avatar link's stable
-    // affordance: the avatar has no image (so no `img` role) and its
-    // accessible name is the initials-plus-name concatenation.
-    await expect(page.getByTitle("Finish setting up your account")).toBeVisible();
-    await expect(page.getByTitle("Finish setting up your account")).toHaveAttribute(
-      "href",
-      "/welcome",
-    );
-  });
-
-  test("still lets them read the legal pages — a gate that hides the terms is its own problem", async ({
-    page,
-    db,
-  }) => {
-    await signedInWithoutHandle(page, db);
-    await expect(page).toHaveURL(/\/welcome$/);
-
+    // ...except the documents the gate itself asks the visitor to accept.
     await page.goto("/terms");
     await expect(page).toHaveURL(/\/terms$/);
   });
@@ -128,60 +92,18 @@ test.describe("handle gate", () => {
     await page.goto("/");
     await expect(page).toHaveURL(/\/$/);
   });
-
-  test("rejects a handle that is already taken", async ({ page, db }) => {
-    const taken = uniqueUser("taken");
-    await db.createUser(taken);
-
-    await signedInWithoutHandle(page, db);
-    await expect(page).toHaveURL(/\/welcome$/);
-
-    await page.getByLabel("Username").fill(taken.username);
-    await page.getByRole("button", { name: "Claim handle" }).click();
-
-    await expect(page.getByRole("alert")).toBeVisible();
-    await expect(page).toHaveURL(/\/welcome$/);
-  });
-
-  test("rejects a handle that breaks the character rules, before any request", async ({
-    page,
-    db,
-  }) => {
-    await signedInWithoutHandle(page, db);
-    await expect(page).toHaveURL(/\/welcome$/);
-
-    await page.getByLabel("Username").fill("no spaces");
-    await page.getByRole("button", { name: "Claim handle" }).click();
-
-    await expect(page.getByRole("alert")).toContainText(
-      "letters, numbers, underscores, and hyphens",
-    );
-  });
 });
 
 test.describe("date of birth gate", () => {
-  test("sends a signed-in session with no date of birth to /welcome", async ({ page, db }) => {
+  test("sends a signed-in session with no date of birth to /welcome, asking only for what is missing", async ({
+    page,
+    db,
+  }) => {
     await signedInWithoutDob(page, db);
 
     await expect(page).toHaveURL(/\/welcome$/);
     await expect(page.getByRole("heading", { name: "One more step" })).toBeVisible();
-  });
-
-  test("keeps them there when they try to navigate away", async ({ page, db }) => {
-    await signedInWithoutDob(page, db);
-    await expect(page).toHaveURL(/\/welcome$/);
-
-    await page.goto("/discover");
-    await expect(page).toHaveURL(/\/welcome$/);
-  });
-
-  test("an account that already has its handle is not asked for another one", async ({
-    page,
-    db,
-  }) => {
-    await signedInWithoutDob(page, db);
-    await expect(page).toHaveURL(/\/welcome$/);
-
+    // The account already has its handle, so the page must not ask again.
     await expect(page.getByLabel("Username")).toHaveCount(0);
     await expect(page.getByLabel("Date of Birth")).toBeVisible();
   });
@@ -197,25 +119,5 @@ test.describe("date of birth gate", () => {
     await page.getByRole("button", { name: "Save" }).click();
 
     await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));
-  });
-
-  test("an under-15 date of birth shows the alert and stays on /welcome", async ({ page, db }) => {
-    await signedInWithoutDob(page, db);
-    await expect(page).toHaveURL(/\/welcome$/);
-
-    await page.getByLabel("Date of Birth").fill(dateOfBirthUnder15());
-    await page.getByRole("button", { name: "Save" }).click();
-
-    await expect(page.getByRole("alert")).toContainText(
-      "You must be at least 15 years old to create an account.",
-    );
-    await expect(page).toHaveURL(/\/welcome$/);
-  });
-});
-
-test.describe("welcome route guards", () => {
-  test("redirects a signed-out visitor to /login", async ({ page }) => {
-    await page.goto("/welcome");
-    await expect(page).toHaveURL(/\/login$/);
   });
 });

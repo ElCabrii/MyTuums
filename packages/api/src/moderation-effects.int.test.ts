@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { webOrigin } from "@my-tuums/auth";
 import { closeDb } from "@my-tuums/db";
 import { and, eq } from "drizzle-orm";
-import { moderationAction, post, postAttachment, report, session, user } from "@my-tuums/db/schema";
+import { moderationAction, post, postAttachment, report, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   applyModerationEffect,
@@ -14,7 +15,6 @@ import {
   setRole,
   setRoleEffect,
   suspendUser,
-  suspendUserEffect,
   unbanUser,
   type DbLike,
 } from "./moderation-actions.js";
@@ -349,48 +349,6 @@ describe("forward moderation effects", () => {
     expect(row?.role).toBe("admin");
   });
 
-  it("suspendUserEffect commits the ban, the session sweep and the audit row, returning the stored expiry", async () => {
-    const victim = await createTestUser();
-    const mod = await createTestUser();
-    await setUserRole(mod.id, "moderator");
-
-    const { banExpires, pending } = await suspendUserEffect(anonContext.db, {
-      userId: victim.id,
-      actorId: mod.id,
-      actorRole: "moderator",
-      reason: "spam",
-      durationSeconds: 3600,
-    });
-
-    const [row] = await anonContext.db
-      .select({ banned: user.banned, banExpires: user.banExpires })
-      .from(user)
-      .where(eq(user.id, victim.id));
-    expect(row?.banned).toBe(true);
-    expect(row?.banExpires).toEqual(banExpires);
-
-    const sessions = await anonContext.db
-      .select({ id: session.id })
-      .from(session)
-      .where(eq(session.userId, victim.id));
-    expect(sessions).toHaveLength(0);
-
-    const [action] = await anonContext.db
-      .select({ details: moderationAction.details })
-      .from(moderationAction)
-      .where(
-        and(
-          eq(moderationAction.action, "user_suspended"),
-          eq(moderationAction.targetUserId, victim.id),
-        ),
-      );
-    expect(action?.details).toEqual({ durationSeconds: 3600 });
-
-    expect(pending).toHaveLength(1);
-    expect(pending[0].build("en").subject).toBe("Your account was suspended");
-    expect(vi.mocked(testEmailSender.send)).not.toHaveBeenCalled();
-  });
-
   it("banUserEffect commits the permanent ban and returns the notice", async () => {
     const victim = await createTestUser();
     const staff = await createTestUser();
@@ -497,75 +455,99 @@ describe("the moderation entry points deliver their notices", () => {
     const author = await createTestUser();
     const mod = await createTestUser();
     await setUserRole(mod.id, "moderator");
-    const postId = await seedPost(author.id, "remove me");
+    const postId = await seedPost(author.id, "remove <script>alert('x')</script>");
 
-    await removePost(anonContext, { postId, actorId: mod.id, reason: "spam" });
+    await removePost(anonContext, { postId, actorId: mod.id, reason: "spam & scams" });
 
-    const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
-    expect(emails).toContain("Your post was removed from MyTuums");
+    const email = vi
+      .mocked(testEmailSender.send)
+      .mock.calls.map(([mail]) => mail)
+      .find((mail) => mail.subject === "Your post was removed from MyTuums");
+    if (!email) throw new Error("expected the removal email to be delivered");
+
+    const appealUrl = email.text.match(/https?:\/\/\S+/)?.[0];
+    if (!appealUrl) throw new Error("expected the text fallback to contain an appeal URL");
+
+    // HTML escapes attribute values, so the URL's `&` separators appear as
+    // `&amp;`; compare in the escaped form so extra query params cannot break
+    // this on an unrelated change.
+    expect(email.html).toContain(appealUrl.replaceAll("&", "&amp;"));
+    // The logo URL must be absolute — email clients cannot resolve a relative
+    // img src, so only the full origin URL proves the logo will render. The
+    // expected origin comes from the same `webOrigin` the email builder reads,
+    // so the assertion holds whatever `WEB_ORIGIN` is set to.
+    expect(email.html).toContain(`${webOrigin}/mytuums-192.png`);
+    expect(email.html).toContain("remove &lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
+    expect(email.html).not.toContain("<script>alert('x')</script>");
+    expect(email.text).toContain("spam & scams");
   });
 
-  it("restorePost delivers its restore notice", async () => {
+  it("removePost delivers branded French HTML from the recipient's stored locale", async () => {
     const author = await createTestUser();
     const mod = await createTestUser();
     await setUserRole(mod.id, "moderator");
-    const postId = await seedPost(author.id, "restore me");
-    await removePost(anonContext, { postId, actorId: mod.id, reason: "spam" });
+    await anonContext.db.update(user).set({ localePreference: "fr" }).where(eq(user.id, author.id));
+    const postId = await seedPost(author.id, "publication en français");
 
-    await restorePost(anonContext, { postId, actorId: mod.id });
+    await removePost(anonContext, { postId, actorId: mod.id, reason: "contenu indésirable" });
 
-    const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
-    expect(emails).toContain("Your post was restored");
+    const email = vi.mocked(testEmailSender.send).mock.calls[0]?.[0];
+    if (!email) throw new Error("expected the French removal email to be delivered");
+    expect(email.subject).toBe("Votre publication a été retirée de MyTuums");
+    expect(email.text).toContain("Motif : contenu indésirable");
+    expect(email.html).toContain('<html lang="fr">');
+    expect(email.html).toContain("Un modérateur a retiré votre publication.");
   });
 
-  it("suspendUser delivers its suspension notice and returns the stored expiry", async () => {
-    const victim = await createTestUser();
+  // One wiring test for the four wrapper-to-runner paths: each entry point
+  // must actually hand its effect's pending notice to the sender. The effect
+  // tests above pin what each effect *returns*; this pins that every wrapper
+  // forwards it. removePost is asserted separately above because its notice
+  // carries untrusted content; the inverse path is covered by the unban test
+  // below.
+  it("each forward entry point delivers its effect's notice", async () => {
     const mod = await createTestUser();
     await setUserRole(mod.id, "moderator");
+    const staff = await createTestUser();
+    await setUserRole(staff.id, "staff");
+    const admin = await createTestUser();
+    await setUserRole(admin.id, "admin");
 
-    const banExpires = await suspendUser(anonContext, {
-      userId: victim.id,
+    const restoreMe = await createTestUser();
+    const postId = await seedPost(restoreMe.id, "restore me");
+    await removePost(anonContext, { postId, actorId: mod.id, reason: "spam" });
+    await restorePost(anonContext, { postId, actorId: mod.id });
+
+    const suspendMe = await createTestUser();
+    await suspendUser(anonContext, {
+      userId: suspendMe.id,
       actorId: mod.id,
       actorRole: "moderator",
       reason: "spam",
       durationSeconds: 3600,
     });
 
-    expect(banExpires).toBeInstanceOf(Date);
-    const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
-    expect(emails).toContain("Your account was suspended");
-  });
-
-  it("banUser delivers its ban notice", async () => {
-    const victim = await createTestUser();
-    const staff = await createTestUser();
-    await setUserRole(staff.id, "staff");
-
+    const banMe = await createTestUser();
     await banUser(anonContext, {
-      userId: victim.id,
+      userId: banMe.id,
       actorId: staff.id,
       actorRole: "staff",
       reason: "permanent spam",
     });
 
-    const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
-    expect(emails).toContain("Your account was banned");
-  });
-
-  it("setRole delivers its role-change notice", async () => {
-    const admin = await createTestUser();
-    await setUserRole(admin.id, "admin");
-    const bob = await createTestUser();
-
+    const promote = await createTestUser();
     await setRole(anonContext, {
-      userId: bob.id,
+      userId: promote.id,
       actorId: admin.id,
       actorRole: "admin",
       role: "moderator",
     });
 
-    const emails = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
-    expect(emails).toContain("Your MyTuums role changed");
+    const subjects = vi.mocked(testEmailSender.send).mock.calls.map(([mail]) => mail.subject);
+    expect(subjects).toContain("Your post was restored");
+    expect(subjects).toContain("Your account was suspended");
+    expect(subjects).toContain("Your account was banned");
+    expect(subjects).toContain("Your MyTuums role changed");
   });
 
   it("the direct inverse effects still deliver (unbanUser) and a no-op inverse sends nothing", async () => {

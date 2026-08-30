@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
-import { waitFor } from "@testing-library/react";
 
 const fakeClient = { post: { create: vi.fn(), list: vi.fn() } };
 
@@ -16,8 +15,13 @@ import { store as singletonStore } from "@/lib/store";
 import { queryClient as singletonQueryClient } from "@/lib/query-client";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
+import { installInMemoryStorage } from "@/test/memory-storage";
 
 const STORAGE_KEY = "my-tuums.composer-draft";
+
+// These tests assert persistence, so they install the storage they assert on —
+// the node setup deliberately provides no global `localStorage`.
+installInMemoryStorage();
 
 beforeEach(() => {
   fakeClient.post.create.mockReset();
@@ -63,11 +67,11 @@ describe("createPostAtom", () => {
     const unsub = singletonStore.sub(createPostAtom, () => {});
     singletonStore.get(createPostAtom).mutate({ content: "hello world" });
 
-    await waitFor(() => expect(singletonStore.get(createPostAtom).isPending).toBe(true));
+    await vi.waitFor(() => expect(singletonStore.get(createPostAtom).isPending).toBe(true));
 
     resolveCreate({ id: "post-1", content: "hello world" });
 
-    await waitFor(() => expect(singletonStore.get(createPostAtom).isSuccess).toBe(true));
+    await vi.waitFor(() => expect(singletonStore.get(createPostAtom).isSuccess).toBe(true));
     expect(singletonStore.get(composerDraftAtom)).toBe("");
 
     unsub();
@@ -81,7 +85,7 @@ describe("createPostAtom", () => {
     const unsub = singletonStore.sub(createPostAtom, () => {});
     singletonStore.get(createPostAtom).mutate({ content: "still typing" });
 
-    await waitFor(() => expect(singletonStore.get(createPostAtom).isError).toBe(true));
+    await vi.waitFor(() => expect(singletonStore.get(createPostAtom).isError).toBe(true));
     // A failed post has nothing to reconcile — the draft is exactly what
     // the composer should still show so the person can retry or edit it.
     expect(singletonStore.get(composerDraftAtom)).toBe("still typing");

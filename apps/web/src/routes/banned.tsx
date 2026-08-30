@@ -5,6 +5,6 @@ import { m } from "@/paraglide/messages.js";
 
 /** The banned-account screen (issue #74) — renders `BannedPage` with no search params of its own. */
 export const Route = createFileRoute("/banned")({
-  head: () => pageHead(m.banned_title()),
+  head: () => pageHead(m.banned_title(), m.banned_document_description(), "/banned"),
   component: BannedPage,
 });

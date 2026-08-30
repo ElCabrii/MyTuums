@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Check, Image as ImageIcon, Loader2, Trash2, Upload, UserRound } from "lucide-react";
-import type { ImageKind } from "@my-tuums/api/constants";
+import { BANNER_ASPECT_RATIO, type ImageKind } from "@my-tuums/api/constants";
 import { authErrorAtom, authPendingAtom } from "@/atoms/auth";
 import { viewerAtom } from "@/atoms/session";
 import {
@@ -86,7 +86,10 @@ export function ProfileSection() {
           hint={m.settings_banner_hint()}
           hasImage={Boolean(viewer?.bannerImage)}
           preview={
-            <div className="border-border/50 bg-muted aspect-[3/1] w-28 shrink-0 overflow-hidden rounded-xl border">
+            <div
+              className="border-border/50 bg-muted w-28 shrink-0 overflow-hidden rounded-xl border"
+              style={{ aspectRatio: BANNER_ASPECT_RATIO }}
+            >
               {viewer?.bannerImage && (
                 <img
                   src={viewer.bannerImage}

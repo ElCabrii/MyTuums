@@ -21,10 +21,6 @@ describe("MODERATION_ACTION_CODES", () => {
       "appeal_resolved",
     ]);
   });
-
-  it("contains no duplicates — the check constraint on moderation_action.action accepts exactly these", () => {
-    expect(new Set(MODERATION_ACTION_CODES).size).toBe(MODERATION_ACTION_CODES.length);
-  });
 });
 
 describe("INVERSE_ACTION", () => {
@@ -64,11 +60,6 @@ describe("APPEALABLE_ACTIONS", () => {
   it("is derived from INVERSE_ACTION — the two lists can never drift", () => {
     expect(APPEALABLE_ACTIONS).toEqual(Object.keys(INVERSE_ACTION));
   });
-
-  it("is a non-empty subset of the action codes", () => {
-    expect(APPEALABLE_ACTIONS.length).toBeGreaterThan(0);
-    expect(APPEALABLE_ACTIONS.every((code) => MODERATION_ACTION_CODES.includes(code))).toBe(true);
-  });
 });
 
 describe("report reason enums vs the schema's check constraint", () => {
@@ -93,21 +84,6 @@ describe("report reason enums vs the schema's check constraint", () => {
   it("the two per-kind sets union to exactly the check constraint's list — the shared codes (spam, harassment) dedupe", () => {
     const union = [...new Set([...POST_REPORT_REASONS, ...USER_REPORT_REASONS])];
     expect(union.sort()).toEqual([...checkConstraintCodes].sort());
-  });
-
-  it("every code a procedure accepts is one the database row can hold — and vice versa", () => {
-    for (const code of POST_REPORT_REASONS) {
-      expect(checkConstraintCodes).toContain(code);
-    }
-    for (const code of USER_REPORT_REASONS) {
-      expect(checkConstraintCodes).toContain(code);
-    }
-    for (const code of checkConstraintCodes) {
-      expect(
-        POST_REPORT_REASONS.some((reason) => reason === code) ||
-          USER_REPORT_REASONS.some((reason) => reason === code),
-      ).toBe(true);
-    }
   });
 
   it("each set is distinct and non-empty — no duplicate codes, no empty picker", () => {

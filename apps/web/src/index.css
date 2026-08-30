@@ -134,7 +134,37 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    /* 85% keeps the thumb above 3:1 against both background and muted
+       surfaces in each theme while retaining a quiet, transparent track. */
+    scrollbar-color: color-mix(in oklch, var(--muted-foreground) 85%, transparent) transparent;
+    scrollbar-width: thin;
   }
+
+  *::-webkit-scrollbar {
+    width: 0.625rem;
+    height: 0.625rem;
+  }
+
+  *::-webkit-scrollbar-track {
+    background-color: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    min-height: 2.5rem;
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-color: color-mix(in oklch, var(--muted-foreground) 85%, transparent);
+    background-clip: content-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background-color: transparent;
+  }
+
   body {
     @apply bg-background text-foreground;
   }

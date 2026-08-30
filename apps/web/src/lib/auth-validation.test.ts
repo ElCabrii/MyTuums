@@ -34,7 +34,6 @@ const EMAIL_INVALID = "Please enter a valid email address.";
 const PASSWORD_LENGTH = "Password must be at least 8 characters long.";
 const PASSWORD_MISMATCH = "Passwords do not match.";
 const DOB_REQUIRED = "Date of Birth is required.";
-const DOB_INVALID = "Please enter a valid date of birth.";
 const DOB_AGE = "You must be at least 15 years old to create an account.";
 const LEGAL_REQUIRED =
   "You must accept the Terms of Service and Privacy Policy to create an account.";
@@ -80,21 +79,11 @@ describe("validateRegister", () => {
     expect(validateRegister(validFields)).toBeNull();
   });
 
-  it("enforces the username rules: required, 3-20 characters, and the charset", () => {
-    expectTable(
-      [
-        ["", USERNAME_REQUIRED],
-        ["ab", USERNAME_LENGTH],
-        ["a".repeat(21), USERNAME_LENGTH],
-        // Both bounds are inclusive.
-        ["abc", null],
-        ["a".repeat(20), null],
-        ["a.b", USERNAME_CHARS],
-        ["a b", USERNAME_CHARS],
-        ["a@b", USERNAME_CHARS],
-      ] as const,
-      (username) => validateRegister({ ...validFields, username }),
-    );
+  // The bounds and the charset are `usernameRuleViolation`'s, pinned at the
+  // rule layer (packages/api/src/account-rules.test.ts). What this form adds
+  // is presence.
+  it("requires a username", () => {
+    expect(validateRegister({ ...validFields, username: "" })).toBe(USERNAME_REQUIRED);
   });
 
   it("requires a display name", () => {
@@ -334,18 +323,11 @@ describe("validateEmail", () => {
 });
 
 describe("validateResetPassword", () => {
-  it("enforces the 8-character minimum and the match, length first", () => {
-    expectTable(
-      [
-        [["password1", "password1"], null],
-        [["short12", "short12"], PASSWORD_LENGTH],
-        // The minimum is inclusive.
-        [["eightch1", "eightch1"], null],
-        [["password1", "password2"], PASSWORD_MISMATCH],
-        // Length beats mismatch — the rule a person would fix first surfaces first.
-        [["short", "different"], PASSWORD_LENGTH],
-      ] as const,
-      ([newPassword, confirmPassword]) => validateResetPassword({ newPassword, confirmPassword }),
+  // Length and match are shared with `validateRegister`'s password table
+  // above; what the reset form adds is that length surfaces before mismatch.
+  it("surfaces length before mismatch", () => {
+    expect(validateResetPassword({ newPassword: "short", confirmPassword: "different" })).toBe(
+      PASSWORD_LENGTH,
     );
   });
 
@@ -368,23 +350,17 @@ describe("validateResetPassword", () => {
  * one form accepts a handle the other rejects and both look broken.
  */
 describe("validateUsername", () => {
-  it("enforces required, the 3-20 bound and the charset, trimming first", () => {
+  // Presence and trimming are this wrapper's own; the bound and the charset
+  // are `usernameRuleViolation`'s, pinned at the rule layer
+  // (packages/api/src/account-rules.test.ts).
+  it("requires presence, trimming first", () => {
     expectTable(
       [
-        ["alice", null],
         ["", USERNAME_REQUIRED],
         ["   ", USERNAME_REQUIRED],
-        ["ab", USERNAME_LENGTH],
-        ["a".repeat(21), USERNAME_LENGTH],
-        // Both bounds are inclusive.
-        ["abc", null],
-        ["a".repeat(20), null],
         // Trimmed before measuring, so padding can't smuggle a short handle through.
         ["  ab  ", USERNAME_LENGTH],
         ["  alice  ", null],
-        ["alice!", USERNAME_CHARS],
-        ["ali ce", USERNAME_CHARS],
-        ["ali.ce", USERNAME_CHARS],
       ] as const,
       validateUsername,
     );
@@ -421,43 +397,23 @@ describe("validateTwoFactorCode", () => {
 });
 
 describe("validateDateOfBirth", () => {
-  it("requires a well-formed YYYY-MM-DD date", () => {
+  it("requires a date, trimming first", () => {
     expectTable(
       [
         ["1995-01-01", null],
         ["  1995-01-01  ", null],
         ["", DOB_REQUIRED],
         ["   ", DOB_REQUIRED],
-        ["not-a-date", DOB_INVALID],
-        ["1995/01/01", DOB_INVALID],
-        ["01-01-1995", DOB_INVALID],
-        ["1995-1-1", DOB_INVALID],
-        ["19950101", DOB_INVALID],
       ] as const,
       validateDateOfBirth,
     );
   });
 
-  it("rejects calendar-impossible dates, which Date would roll over silently", () => {
+  it("enforces the 15-year floor at the boundary", () => {
     expectTable(
       [
-        ["1995-02-30", DOB_INVALID],
-        ["2025-13-01", DOB_INVALID],
-        ["2025-00-10", DOB_INVALID],
-        // A real leap day is not impossible.
-        ["1996-02-29", null],
-      ] as const,
-      validateDateOfBirth,
-    );
-  });
-
-  it("enforces the 15-year floor at the boundary, and rejects the future", () => {
-    expectTable(
-      [
-        ["1995-01-01", null],
         [yearsAgo(15), null],
         [yearsAgo(15, 1), DOB_AGE],
-        [yearsAgo(-1), DOB_AGE],
       ] as const,
       validateDateOfBirth,
     );

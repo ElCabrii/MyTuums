@@ -37,37 +37,23 @@ async function signedInWithoutConsent(
 }
 
 test.describe("legal consent gate", () => {
-  test("holds an account that never accepted, on whatever page it lands", async ({ page, db }) => {
+  test("holds an account that never accepted, across navigations, but not over the documents themselves", async ({
+    page,
+    db,
+  }) => {
     await signedInWithoutConsent(page, db);
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("checkbox")).not.toBeChecked();
-  });
 
-  test("keeps holding after a navigation — the gate is not a one-page banner", async ({
-    page,
-    db,
-  }) => {
-    await signedInWithoutConsent(page, db);
-    await expect(page.getByRole("dialog")).toBeVisible();
-
+    // The gate is not a one-page banner.
     await page.goto("/settings/account");
+    await expect(dialog).toBeVisible();
 
-    await expect(page.getByRole("dialog")).toBeVisible();
-  });
-
-  test("leaves the documents readable, so the ask can be read before it is answered", async ({
-    page,
-    db,
-  }) => {
-    await signedInWithoutConsent(page, db);
-    await expect(page.getByRole("dialog")).toBeVisible();
-
-    // The dialog cannot be dismissed and its links open in a new tab, so the
-    // documents themselves must not be behind it.
+    // ...but the dialog cannot be dismissed and its links open in a new tab,
+    // so the documents themselves must not be behind it.
     await page.goto("/terms");
-
     await expect(page.getByRole("dialog")).toBeHidden();
   });
 

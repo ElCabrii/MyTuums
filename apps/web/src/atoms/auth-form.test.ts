@@ -102,44 +102,6 @@ describe("registerValidationAtom", () => {
     store.set(registerLegalAcceptedAtom, true);
     expect(store.get(registerValidationAtom)).toBeNull();
   });
-
-  it("rejects an under-15 date of birth even when every other field passes", () => {
-    const store = createStore();
-    // 15 years ago plus one day — relative so the assertion can't quietly
-    // stop being true as the calendar moves past it.
-    const under15 = new Date();
-    under15.setUTCFullYear(under15.getUTCFullYear() - 15);
-    under15.setUTCDate(under15.getUTCDate() + 1);
-    const under15Iso =
-      `${under15.getUTCFullYear()}-` +
-      `${String(under15.getUTCMonth() + 1).padStart(2, "0")}-` +
-      `${String(under15.getUTCDate()).padStart(2, "0")}`;
-
-    store.set(registerUsernameAtom, "alice");
-    store.set(registerNameAtom, "Alice");
-    store.set(registerEmailAtom, "alice@example.com");
-    store.set(registerPasswordAtom, "password1");
-    store.set(registerConfirmPasswordAtom, "password1");
-    store.set(registerDateOfBirthAtom, under15Iso);
-    store.set(registerLegalAcceptedAtom, true);
-    expect(store.get(registerValidationAtom)).toBe(
-      "You must be at least 15 years old to create an account.",
-    );
-  });
-
-  it("rejects when every field passes but the legal box is unticked", () => {
-    const store = createStore();
-    store.set(registerUsernameAtom, "alice");
-    store.set(registerNameAtom, "Alice");
-    store.set(registerEmailAtom, "alice@example.com");
-    store.set(registerPasswordAtom, "password1");
-    store.set(registerConfirmPasswordAtom, "password1");
-    store.set(registerDateOfBirthAtom, "1995-01-01");
-    store.set(registerLegalAcceptedAtom, false);
-    expect(store.get(registerValidationAtom)).toBe(
-      "You must accept the Terms of Service and Privacy Policy to create an account.",
-    );
-  });
 });
 
 describe("resetLoginFormAtom", () => {

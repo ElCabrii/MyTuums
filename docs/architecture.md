@@ -251,16 +251,33 @@ sides by CI. See [operations.md](operations.md).
   matches the no-crop encode, while pan and zoom change the square that every
   avatar surface renders without a second hidden `object-cover` crop. Only the
   display variant is square-cropped; the original remains untouched for a
-  future refit.
-- **Banners have a canonical 3:1 source and a responsive display crop.** At
-  zoom 1 the editor rectangle is exactly the region the encoder stores
-  (`calculateCropFrame`), so applying without adjusting anything is a no-op.
-  The profile remains `w-full` behind a fixed `h-48 sm:h-64` frame and uses
-  `object-cover`; consequently narrow layouts may hide the source's sides and
-  wide layouts may hide its top and bottom. The editor outlines the center
-  safe area shared by common 320px-phone through 1920px-desktop frames, making
-  that responsive tradeoff visible before upload. The stored variant can reach
-  3840x1280 for a sharp 2x sample on a 1920px display.
+  future refit. The stored variant can reach 1024x1024 because the profile
+  page's full-size viewer renders this same object at near-viewport scale —
+  feeds still downscale it (issue #229).
+- **Avatars uploaded before #233 stay at 512 px until their owner re-crops
+  them.** The ceiling raise only changed the encode path, so every display
+  variant already in the bucket predates it, and profile media persist no
+  dimensions to notice that from — detection measures the display object in
+  the browser against the live `IMAGE_LIMITS.avatar` ceiling
+  (`apps/web/src/lib/avatar-upgrade.ts`). The owner is offered a one-click
+  re-crop on their own profile (`apps/web/src/components/avatar-upgrade-prompt.tsx`),
+  seeded from the retained original and running the ordinary upload pipeline —
+  never a server-side or silent re-encode, which would recompose the stored
+  crop. Dismissal persists per browser against the dismissed display path, so
+  a new upload re-evaluates from scratch (issue #246).
+- **Banners have one canonical 3:1 composition.** At zoom 1 the editor
+  rectangle is exactly the region the encoder stores (`calculateCropFrame`),
+  so applying without adjusting anything is a no-op. The editor can also zoom
+  out past cover down to _contain_ (`minCropScale`) — the whole source
+  visible, the parts of the 3:1 window it cannot reach encoded as black
+  letterbox bars by both the canvas path and the GIF pipeline. The profile
+  frame displays that one composition with its height clamped
+  (`apps/web/src/lib/banner-frame.ts`): exact 3:1 wherever the measure holds,
+  a 150px band on narrow phones, never taller than 320px past the 1500px
+  measure — so extreme viewports trim bounded edges of the composition
+  instead of re-choosing the crop, and the editor's safe-area outline (derived
+  from the same constants) marks what every viewport keeps. The stored
+  variant can reach 3840x1280 for a sharp 2x sample on a 1920px display.
 - **The pre-decode guards run at file pick, not just at encode.**
   `validateImageFile` owns the type, byte-cap and header megapixel checks, and
   the editor calls it before it decodes anything. The megapixel ceiling is the
@@ -414,19 +431,26 @@ keeps direct database writers from splitting the two representations.
 
 ## Test topology
 
-**Source of truth:** `packages/api/vitest.config.ts`, `apps/web/vitest.config.ts`,
-`e2e/playwright.config.ts`, `.github/workflows/ci.yml`
+**Source of truth:** `packages/api/vitest.config.ts`, `packages/auth/vitest.config.ts`,
+`apps/web/vitest.config.ts`, `e2e/playwright.config.ts`, `.github/workflows/ci.yml`
 
 | Layer       | What runs                                                         | Needs                                         |
 | ----------- | ----------------------------------------------------------------- | --------------------------------------------- |
-| Unit        | `*.test.ts(x)` — pure logic, atoms, components                    | nothing; must pass with no database reachable |
+| Unit        | `*.test.ts(x)` — pure logic, atoms, components, request handling  | nothing; must pass with no database reachable |
 | Integration | `*.int.test.ts` in `packages/api`                                 | real Postgres, `fileParallelism: false`       |
-| E2E         | Playwright `setup` / `api` / `chromium` projects                  | real server, real Postgres, optional bucket   |
-| Docker      | CI builds the image, asserts its contents, boots it and probes it | a Postgres service                            |
+| Contract    | Playwright's `api` project — headers, CORS, body caps, the gates  | the real server; no browser, no auth state    |
+| E2E         | Playwright's `setup` / `chromium` projects                        | real server, real Postgres, optional bucket   |
+| Image       | CI builds the image, asserts its contents, boots it and probes it | a Postgres service                            |
 
-The unit/integration split is enforced by CI giving the `unit` job no database
-service. The `docker` job is the only place the production artefact is ever
-started; the E2E suite runs the dev server.
+The unit/integration split is structural rather than circumstantial: the unit
+projects blank `DATABASE_URL` themselves (`packages/api/vitest.config.ts`,
+`packages/auth/vitest.config.ts`), so a unit test that grows a database
+dependency fails by name on a developer's machine as well as in CI. The
+`image` job is the only place the production artefact is ever started; the E2E
+suite runs the dev server.
+
+What belongs in which layer, and when a test deserves to exist at all:
+[../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
 
 ## Further reading
 

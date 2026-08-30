@@ -6,14 +6,15 @@ packages:
   # Playwright into the root manifest.
   - e2e
 
-onlyBuiltDependencies:
-  - "@swc/core"
-  - esbuild
+allowBuilds:
+  "@swc/core": true
+  esbuild: true
 
 catalog:
   zod: ^4.4.3
-  typescript: ^5.8.3
-  "@types/node": ^22.20.1
+  "@typescript/native": "npm:typescript@^7.0.2"
+  typescript: "npm:@typescript/typescript6@^6.0.2"
+  "@types/node": ^24.13.3
   # The better-auth family, pinned exact as one unit: the plugins and the core
   # must never resolve to different majors, and packages/api verifies its
   # behavior against these internals. Bump all four together.

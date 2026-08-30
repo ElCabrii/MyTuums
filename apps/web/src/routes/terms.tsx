@@ -5,6 +5,6 @@ import { m } from "@/paraglide/messages.js";
 
 /** The terms of service route — renders `TermsOfService` in the current locale. */
 export const Route = createFileRoute("/terms")({
-  head: () => pageHead(m.legal_terms_of_service()),
+  head: () => pageHead(m.legal_terms_of_service(), m.terms_document_description(), "/terms"),
   component: TermsOfService,
 });

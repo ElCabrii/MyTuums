@@ -10,7 +10,7 @@ const originalMatchMedia = globalThis.matchMedia;
  * Installs a single, stable `MediaQueryList` double so a test can both
  * trigger `theme.ts`'s internal `matchDarkScheme()` calls AND dispatch
  * "change" events at the exact listener that call registered — the shared
- * setup.ts stub hands back a fresh object (and a fresh, empty listener set)
+ * setup-dom.ts stub hands back a fresh object (and a fresh, empty listener set)
  * on every call, which would make a test's own `dispatchEvent` a no-op
  * against whatever `theme.ts` itself is holding.
  */

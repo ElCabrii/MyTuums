@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
-import { waitFor } from "@testing-library/react";
 
 // The mock mirrors the real client's procedure tree — the post-cache sweep
 // in `updatePostEverywhere` now also walks `orpc.search.posts.key()`, so a
@@ -97,7 +96,7 @@ describe("toggleLikeAtomFamily", () => {
     store.set(toggleLikeAtomFamily("post-1"));
     expect(readCachedPost(queryClient, "post-1")?.viewerHasLiked).toBe(true);
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(readCachedPost(queryClient, "post-1")?.viewerHasLiked).toBe(false);
     });
     expect(readCachedPost(queryClient, "post-1")?.likeCount).toBe(2);
@@ -134,13 +133,13 @@ describe("toggleLikeAtomFamily", () => {
     // The mutationFn call itself is deferred past a microtask boundary (see
     // the comment on the synchronous-patch test above), so `resolveLike` only
     // exists once the promise executor has actually run.
-    await waitFor(() => expect(fakeClient.post.like).toHaveBeenCalled());
+    await vi.waitFor(() => expect(fakeClient.post.like).toHaveBeenCalled());
     resolveLike({ postId: "post-1", likeCount: 3, viewerHasLiked: true });
 
     // Once the like settles, the queued unlike is released and its
     // mutationFn finally runs — waiting for that call is a reliable signal
     // that the like's onSuccess has already had its chance to (not) reconcile.
-    await waitFor(() => expect(fakeClient.post.unlike).toHaveBeenCalled());
+    await vi.waitFor(() => expect(fakeClient.post.unlike).toHaveBeenCalled());
     expect(readCachedPost(queryClient, "post-1")?.viewerHasLiked).toBe(false);
     expect(readCachedPost(queryClient, "post-1")?.likeCount).toBe(2);
   });
@@ -178,7 +177,7 @@ describe("toggleLikeAtomFamily", () => {
 
     store.set(toggleLikeAtomFamily("search-only-1"));
 
-    await waitFor(() => expect(fakeClient.post.unlike).toHaveBeenCalled());
+    await vi.waitFor(() => expect(fakeClient.post.unlike).toHaveBeenCalled());
     expect(fakeClient.post.like).not.toHaveBeenCalled();
   });
 

@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import { renderWithProviders } from "@/test/render";
 import type { Crop } from "@/lib/media";
+import { BANNER_SAFE_AREA } from "@/lib/banner-frame";
 import { ImageCropDialog } from "@/components/settings/image-crop-dialog";
 import { m } from "@/paraglide/messages.js";
 
@@ -11,10 +13,10 @@ import { m } from "@/paraglide/messages.js";
  *
  * jsdom implements neither `createImageBitmap` nor object URLs nor pointer
  * capture, so all three are stubbed here — the same trade the encoder's own
- * suite makes in `lib/media.test.ts`. What that leaves testable is the part
+ * suite makes in `lib/media.dom.test.ts`. What that leaves testable is the part
  * worth testing: the descriptor the dialog emits, which is what
  * `createDisplayVariant` bakes into the upload. The crop *arithmetic* itself is
- * pinned as pure functions in `lib/media.test.ts`; the pixel-accurate rendering
+ * pinned as pure functions in `lib/media.dom.test.ts`; the pixel-accurate rendering
  * is a browser concern covered by `e2e/tests/specs/settings.spec.ts`.
  */
 
@@ -109,9 +111,9 @@ describe("ImageCropDialog", () => {
     );
   });
 
-  it("names the slot it is editing", async () => {
+  it("names the slot it is editing, and outlines the banner safe area", async () => {
     stubDecode(2000, 1200);
-    await renderWithProviders(
+    const { container } = await renderWithProviders(
       <ImageCropDialog kind="banner" file={file()} onApply={vi.fn()} onCancel={vi.fn()} />,
     );
 
@@ -120,7 +122,20 @@ describe("ImageCropDialog", () => {
         name: m.settings_image_crop_title({ label: m.settings_banner_label() }),
       }),
     ).toBeInTheDocument();
+    expect(screen.getByText(m.settings_image_crop_hint())).toBeInTheDocument();
     expect(screen.getByText(m.settings_banner_crop_safe_area())).toBeInTheDocument();
+    await waitFor(() =>
+      expect(container.ownerDocument.querySelector(".touch-none img")).toBeInTheDocument(),
+    );
+    // The outline marks what every profile frame still shows of the 3:1
+    // composition (lib/banner-frame.ts owns both the fractions and the frame).
+    const outline = container.ownerDocument.querySelector<HTMLElement>(
+      ".touch-none [aria-hidden='true']",
+    );
+    expect(outline).toHaveStyle({
+      width: `${BANNER_SAFE_AREA.width * 100}%`,
+      height: `${BANNER_SAFE_AREA.height * 100}%`,
+    });
     expect(screen.getByRole("dialog")).toHaveClass(
       "max-h-[calc(100dvh-2rem)]",
       "overflow-y-auto",
@@ -212,7 +227,7 @@ describe("ImageCropDialog", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: m.settings_image_crop_apply() })).toBeEnabled(),
     );
-    const frame = container.ownerDocument.querySelector<HTMLElement>(".touch-none");
+    const frame = container.ownerDocument.querySelector(".touch-none");
 
     fireEvent.wheel(frame!, { deltaY: -100 });
     await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
@@ -225,6 +240,39 @@ describe("ImageCropDialog", () => {
     fireEvent.wheel(frame!, { deltaY: 100 });
     await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
     expect(onApply.mock.calls.at(-1)?.[0].scale).toBe(1);
+  });
+
+  it("zooms a banner out to contain, and previews the letterbox", async () => {
+    // A 3:2 photo cannot be shown whole by the 3:1 cover crop — the shape the
+    // contain floor exists for. Scrolling out past the floor's notches stops
+    // exactly at contain, where the whole photo is visible with black bars
+    // beside it and the emitted crop is letterboxed, not cover.
+    stubDecode(1500, 1000);
+    stubFrameSize(1500, 500);
+    const onApply = vi.fn<(crop: Crop) => void>();
+    const { container } = await renderWithProviders(
+      <ImageCropDialog kind="banner" file={file()} onApply={onApply} onCancel={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: m.settings_image_crop_apply() })).toBeEnabled(),
+    );
+    const frame = container.ownerDocument.querySelector(".touch-none");
+
+    for (let notch = 0; notch < 10; notch += 1) {
+      fireEvent.wheel(frame!, { deltaY: 100 });
+    }
+    await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
+
+    const crop = onApply.mock.calls.at(-1)![0];
+    // contain = min(1500/1500, 500/1000) — ten notches asked for 0.39.
+    expect(crop.scale).toBeCloseTo(0.5, 5);
+    // The preview letterboxes: the window is twice the source's width, so the
+    // image spans half the frame, centered.
+    expect(container.ownerDocument.querySelector(".touch-none img")).toHaveStyle({
+      width: "50%",
+      left: "25%",
+    });
   });
 
   it("reports an undecodable file rather than offering a crop of nothing", async () => {

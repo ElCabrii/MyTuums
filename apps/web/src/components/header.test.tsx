@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { renderWithProviders, setTestSession } from "@/test/render";
+import { setTestSession } from "@/test/auth-fixture";
+import { renderWithProviders } from "@/test/render";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Header } from "@/components/header";

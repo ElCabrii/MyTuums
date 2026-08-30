@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
-import { waitFor } from "@testing-library/react";
 
 const fakeClient = { post: { create: vi.fn(), list: vi.fn(), thread: vi.fn() } };
 
@@ -19,6 +18,12 @@ import { store as singletonStore } from "@/lib/store";
 import { queryClient as singletonQueryClient } from "@/lib/query-client";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
+import { installInMemoryStorage } from "@/test/memory-storage";
+
+// The "nothing is written" assertion below reads `localStorage.length`, so
+// this file installs an (empty) in-memory storage itself — the node setup
+// deliberately provides no global `localStorage`.
+installInMemoryStorage();
 
 beforeEach(() => {
   fakeClient.post.create.mockReset();
@@ -68,11 +73,11 @@ describe("createReplyAtomFamily", () => {
     const unsub = singletonStore.sub(mutationAtom, () => {});
     singletonStore.get(mutationAtom).mutate({ content: "a reply", parentId: "parent-1" });
 
-    await waitFor(() => expect(singletonStore.get(mutationAtom).isPending).toBe(true));
+    await vi.waitFor(() => expect(singletonStore.get(mutationAtom).isPending).toBe(true));
 
     resolveCreate({ id: "reply-1" });
 
-    await waitFor(() => expect(singletonStore.get(mutationAtom).isSuccess).toBe(true));
+    await vi.waitFor(() => expect(singletonStore.get(mutationAtom).isSuccess).toBe(true));
 
     expect(singletonStore.get(replyDraftAtomFamily("parent-1"))).toBe("");
     // Two prefixes: the reply list / profile feed under `post.list`, and the
