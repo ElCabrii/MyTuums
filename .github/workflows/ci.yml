@@ -346,15 +346,18 @@ jobs:
       # literals from app-version.ts because the minifier hoists the version
       # into a module constant and renders the footer as a template
       # (`v${na}`), so there is no single version literal to match. The
-      # "alpha":"beta" marker is unique to our module, which rules out the
+      # alpha:beta marker is unique to our module, which rules out the
       # version literals that vendored chunks ship, and the x.y.z pattern is
       # bump-robust — no hardcoded version to edit on release, and an
       # empty/garbage define fails because there is no digits.digits.digits
-      # literal left next to the marker.
+      # literal left next to the marker. Each string may be quoted with
+      # double quotes, single quotes, or backticks: esbuild picks double
+      # quotes while Rolldown (Vite 8) emits backticks, and the check pins
+      # the module's shape, not one minifier's quoting.
       - name: Assert the app version reached the web bundle
         run: |
           grep -rq --include="*.js" "__APP_VERSION__" ./image-web-dist/assets             && { echo "::error::__APP_VERSION__ was not replaced - is define set in apps/web/vite.config.ts?"; exit 1; }
-          grep -rqE --include="*.js" '"alpha":"beta"[^"]{0,80}"[0-9]+\.[0-9]+\.[0-9]+"' ./image-web-dist/assets             || { echo "::error::the version string did not reach the bundle"; exit 1; }
+          grep -rqE --include="*.js" "['\"\`]alpha['\"\`]:['\"\`]beta['\"\`][^'\"\`]{0,80}['\"\`][0-9]+\.[0-9]+\.[0-9]+['\"\`]" ./image-web-dist/assets             || { echo "::error::the version string did not reach the bundle"; exit 1; }
           echo "App version is baked into the bundle."
 
       # The migration runner ships in the image and runs as Railway's
