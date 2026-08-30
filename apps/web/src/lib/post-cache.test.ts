@@ -24,6 +24,7 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     likeCount: 0,
     replyCount: 0,
     viewerHasLiked: false,
+    viewerHasBookmarked: false,
     // The tombstone fields (issue #38, plus #148): never removed or deleted
     // by default.
     removed: false,

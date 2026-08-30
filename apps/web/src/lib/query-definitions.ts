@@ -14,7 +14,7 @@ interface PostListInput {
   continuationRootId?: string;
   includeReplies?: boolean;
   kind?: "posts" | "replies" | "all";
-  feed?: FeedScope;
+  feed?: FeedScope | "bookmarks";
   cursor?: string;
 }
 interface PagedSearchInput {
@@ -39,11 +39,19 @@ export type FollowDirection = "followers" | "following";
 /** The profile activity views; `both` preserves the legacy includeReplies input. */
 export type PostFeedKind = "posts" | "replies" | "both";
 
+/**
+ * Which `post.list` scope a feed atom reads. The two home scopes are the
+ * persisted `FeedScope`; `bookmarks` is the caller's private saved page and is
+ * never a home-feed choice — it deliberately stays out of `feedScopeAtom`'s
+ * enum so a hand-edited `localStorage` value can never select it.
+ */
+export type PostListScope = FeedScope | "bookmarks";
+
 export type PostFeedParams = {
   /** Omit for the global timeline; set to scope the feed to one author. */
   authorId?: string;
   /** "following" requires a signed-in viewer; the server rejects it otherwise. */
-  feed: FeedScope;
+  feed: PostListScope;
   /** Set to list one post's direct replies — the thread page's reply list. */
   parentId?: string;
   /** Replies are excluded unless this is set; a profile feed opts in. */
@@ -67,7 +75,9 @@ export function postListQueryOptions({
       if (parentId) input.parentId = parentId;
       if (kind === "replies") input.kind = "replies";
       else if (kind === "both" || includeReplies) input.includeReplies = true;
-      if (scope === "following") input.feed = scope;
+      // The global feed keeps a bare key (see the note on the conditional
+      // spreads above); the two scoped feeds carry their discriminator.
+      if (scope === "following" || scope === "bookmarks") input.feed = scope;
       if (cursor) input.cursor = cursor;
       return input;
     },

@@ -195,6 +195,14 @@ export const RATE_LIMITS = {
   /** Likes. A human can't out-click this; a script can. */
   like: { name: "like", limit: 120, windowMs: MINUTE },
   /**
+   * Bookmarks. The same single indexed insert a like costs, and no more of a
+   * spam vector — the list is private — but `name` namespaces the counter and
+   * the two are different habits: someone curating a long saved list in one
+   * sitting must not burn through the budget their likes depend on. Own
+   * namespace, like `follow`, for that isolation alone.
+   */
+  bookmark: { name: "bookmark", limit: 120, windowMs: MINUTE },
+  /**
    * Follows and unfollows. The same single indexed insert a like costs, so by
    * cost alone it would share the `like` budget — but `name` is what
    * namespaces the counter, and mass-following is a spam vector in a way

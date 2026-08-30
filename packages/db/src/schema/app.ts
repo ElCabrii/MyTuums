@@ -175,6 +175,46 @@ export const postLike = pgTable(
 );
 
 /**
+ * A bookmark — one row per (post, user) pair; the caller's private saved list
+ * (issue #262).
+ *
+ * The shape deliberately mirrors `post_like`, but the two are different
+ * things and no surface may read one as the other: a like is public state (a
+ * count on the post), a bookmark is private state (an ordering of the saver's
+ * own page). There is deliberately no count column and no reader besides the
+ * saver — `viewerHasBookmarked` in packages/api is an EXISTS probe for the
+ * caller alone, and the bookmarks page is the only list ever built from this
+ * table.
+ */
+export const postBookmark = pgTable(
+  "post_bookmark",
+  {
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => post.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above — and because the bookmarks page keyset-paginates
+    // on (created_at, post_id), the precision is load-bearing here too.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    // This composite primary key *is* the "one bookmark per user per post"
+    // rule, exactly as for post_like: `bookmark` inserts with
+    // `onConflictDoNothing` instead of read-then-write racing, so a retry or a
+    // double-click can neither duplicate nor error.
+    primaryKey({ columns: [t.postId, t.userId] }),
+    // The bookmarks page: the caller's saved posts newest-first, `post_id`
+    // breaking ties between bookmarks sharing a timestamp. The primary key
+    // already covers the other direction — "has the viewer bookmarked this
+    // post".
+    index("post_bookmark_user_created_idx").on(t.userId, t.createdAt.desc(), t.postId.desc()),
+  ],
+);
+
+/**
  * A directed follow edge from `followerId` to `followingId` — the rows the
  * Following feed and the follow lists are built from.
  */
@@ -480,10 +520,11 @@ export const appeal = pgTable(
   ],
 );
 
-/** Drizzle relations for `post` — the joins `with` queries can reach: author, likes, parent, and replies. */
+/** Drizzle relations for `post` — the joins `with` queries can reach: author, likes, bookmarks, parent, and replies. */
 export const postRelations = relations(post, ({ one, many }) => ({
   author: one(user, { fields: [post.authorId], references: [user.id] }),
   likes: many(postLike),
+  bookmarks: many(postBookmark),
   attachments: many(postAttachment),
   // Named for the direction they point, like followRelations below: `parent`
   // is the post being replied to, `replies` the posts replying to this one.
@@ -506,6 +547,12 @@ export const postAttachmentRelations = relations(postAttachment, ({ one }) => ({
 export const postLikeRelations = relations(postLike, ({ one }) => ({
   post: one(post, { fields: [postLike.postId], references: [post.id] }),
   user: one(user, { fields: [postLike.userId], references: [user.id] }),
+}));
+
+/** Drizzle relations for `postBookmark` — the `post` and `user` a bookmark references. */
+export const postBookmarkRelations = relations(postBookmark, ({ one }) => ({
+  post: one(post, { fields: [postBookmark.postId], references: [post.id] }),
+  user: one(user, { fields: [postBookmark.userId], references: [user.id] }),
 }));
 
 /** Drizzle relations for `follow` — the `user` rows on both sides of the edge. */

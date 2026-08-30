@@ -22,6 +22,8 @@ const fakeClient = {
   post: {
     like: vi.fn(() => Promise.resolve({ postId: "", likeCount: 0, viewerHasLiked: true })),
     unlike: vi.fn(() => Promise.resolve({ postId: "", likeCount: 0, viewerHasLiked: false })),
+    bookmark: vi.fn(() => Promise.resolve({ postId: "", viewerHasBookmarked: true })),
+    unbookmark: vi.fn(() => Promise.resolve({ postId: "", viewerHasBookmarked: false })),
     list: vi.fn(),
     thread: vi.fn(),
   },
@@ -70,6 +72,29 @@ describe("PostCard", () => {
         name: m.post_like({ count: String(post.likeCount) }),
       });
       expect(likeButton).toHaveAttribute("aria-pressed", "false");
+    });
+
+    // The wiring only: the pressed state and the accessible name, plus "the
+    // button asked the transport to bookmark this exact post". The optimistic
+    // flip, rollback and intent handling are owned by `atoms/bookmark.ts`.
+    it("renders the bookmark control as a pressed toggle when already saved, and invokes the toggle on click", async () => {
+      const post = makePost({ viewerHasBookmarked: true });
+      const queryClient = new QueryClient();
+      seedPostCache(queryClient, post);
+      await renderWithProviders(<PostCard post={post} />, { queryClient, signedInAs: true });
+
+      const bookmarkButton = screen.getByRole("button", { name: m.post_unbookmark() });
+      expect(bookmarkButton).toHaveAttribute("aria-pressed", "true");
+
+      const user = userEvent.setup();
+      await user.click(bookmarkButton);
+
+      await waitFor(() =>
+        expect(fakeClient.post.unbookmark).toHaveBeenCalledWith(
+          { postId: post.id },
+          expect.anything(),
+        ),
+      );
     });
 
     it("links the reply control to the post's thread, with its accessible name coming from aria-label", async () => {

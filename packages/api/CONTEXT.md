@@ -124,8 +124,16 @@ over HTTP and imports only its browser-safe subpaths.
   profile resolve to its suspended stub instead of 404ing. `user.byUsername`
   redacts authored profile fields, relationship counts and viewer state from
   that stub before it crosses the API boundary.
-- **`like`/`unlike` and `follow`/`unfollow` are separate idempotent
-  procedures, never a toggle** — ordering and retry safety.
+- **`like`/`unlike`, `bookmark`/`unbookmark` and `follow`/`unfollow` are
+  separate idempotent procedures, never a toggle** — ordering and retry
+  safety. A bookmark is the private twin of a like: the composite
+  `post_bookmark` primary key is the one-row rule, `postSelection`'s
+  `viewerHasBookmarked` probe is its only read besides the saver's own
+  `post.list({ feed: "bookmarks" })` page, and no count is ever derived from
+  the table. That page is a mode of `post.list` (keyset on the bookmark's
+  `(created_at, post_id)`, mirrored by `post_bookmark_user_created_idx`), so
+  it shares the projection, the feed rules — author-deleted posts omitted,
+  removals stubbed, visibility filtered — and the web app's optimistic sweeps.
 - **Relationship writes for a pair are serialized by one advisory lock.**
   "A blocked pair has no follow edge" spans `follow` and `user_block`, so no
   database constraint can hold it. `follow`, `block` and `unblock` all take
