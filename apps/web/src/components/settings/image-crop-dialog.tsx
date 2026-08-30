@@ -12,9 +12,11 @@ import {
   calculateCropRect,
   clampCrop,
   DEFAULT_CROP,
+  minCropScale,
   type Crop,
   type ImageSize,
 } from "@/lib/media";
+import { BANNER_SAFE_AREA } from "@/lib/banner-frame";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,6 +37,12 @@ import { m } from "@/paraglide/messages.js";
  * Apply the chosen `Crop` is handed back so the caller can bake it into the
  * display variant (`createDisplayVariant(file, kind, crop)`). The original file
  * is never touched here — the crop is a view, not a mutation.
+ *
+ * A banner can zoom out past its cover crop down to *contain* — the whole
+ * source visible, the parts of the 3:1 frame it cannot reach shown as the
+ * black that encodes as letterbox bars (`minCropScale`). Avatars stop at the
+ * cover crop: every avatar surface is a square cover crop, so a letterboxed
+ * avatar would render as bars behind its round mask.
  *
  * The image is decoded twice on purpose: `createImageBitmap` for the oriented
  * dimensions the math needs (the same primitive `lib/media.ts` uses, and the
@@ -137,13 +145,17 @@ export function ImageCropDialog({
       const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
       // A functional update rather than a captured `crop`: the listener
       // outlives many renders, and reading the state it was attached with
-      // would make every notch zoom from the same starting scale.
+      // would make every notch zoom from the same starting scale. The floor is
+      // the slot's contain scale for a banner, the cover crop for an avatar.
       setCrop((current) =>
         clampCrop(
           {
             x: current.x,
             y: current.y,
-            scale: Math.min(Math.max(current.scale * factor, 1), MAX_CROP_SCALE),
+            scale: Math.min(
+              Math.max(current.scale * factor, minCropScale(dims, kind)),
+              MAX_CROP_SCALE,
+            ),
           },
           dims,
           kind,
@@ -204,9 +216,7 @@ export function ImageCropDialog({
       >
         <DialogHeader>
           <DialogTitle>{m.settings_image_crop_title({ label })}</DialogTitle>
-          <DialogDescription>
-            {kind === "banner" ? m.settings_banner_crop_hint() : m.settings_image_crop_hint()}
-          </DialogDescription>
+          <DialogDescription>{m.settings_image_crop_hint()}</DialogDescription>
         </DialogHeader>
 
         <div className="px-6 pb-2">
@@ -215,7 +225,13 @@ export function ImageCropDialog({
           ) : (
             <div
               ref={frameRef}
-              className="bg-muted relative w-full touch-none overflow-hidden rounded-lg select-none"
+              className={cn(
+                "relative w-full touch-none overflow-hidden rounded-lg select-none",
+                // A banner zoomed past its cover crop shows parts of the frame
+                // the source cannot reach; black is what those parts encode
+                // as, so the preview must show them as black too.
+                kind === "banner" ? "bg-black" : "bg-muted",
+              )}
               style={{ aspectRatio: `${frameAspect}` }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
@@ -231,7 +247,7 @@ export function ImageCropDialog({
                     className="absolute max-w-none"
                     style={imageStyle(source.dims, kind, crop)}
                   />
-                  {kind === "avatar" && (
+                  {kind === "avatar" ? (
                     <div
                       aria-hidden="true"
                       className="pointer-events-none absolute top-1/2 left-1/2 rounded-full border border-white/90 shadow-[0_0_0_9999px_rgb(0_0_0/0.28)]"
@@ -241,10 +257,25 @@ export function ImageCropDialog({
                         transform: "translate(-50%, -50%)",
                       }}
                     />
+                  ) : (
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute top-1/2 left-1/2 rounded-lg border border-white/90 shadow-[0_0_0_9999px_rgb(0_0_0/0.28)]"
+                      style={{
+                        width: `${BANNER_SAFE_AREA.width * 100}%`,
+                        height: `${BANNER_SAFE_AREA.height * 100}%`,
+                        transform: "translate(-50%, -50%)",
+                      }}
+                    />
                   )}
                 </>
               )}
             </div>
+          )}
+          {kind === "banner" && !failed && (
+            <p className="text-muted-foreground mt-2 text-xs">
+              {m.settings_banner_crop_safe_area()}
+            </p>
           )}
         </div>
 
@@ -265,7 +296,10 @@ export function ImageCropDialog({
  * The `<img>`'s size and offset, as percentages of the frame, so the crop rect
  * fills the frame exactly. `rect` has the frame's aspect, so one scale factor
  * maps it to both axes; the negative offset slides the image so the rect's
- * top-left lands on the frame's top-left.
+ * top-left lands on the frame's top-left. A banner zoomed past its cover crop
+ * has a rect larger than the source: the size drops below 100% and the offsets
+ * go positive, which letterboxes the image over the frame's black — the same
+ * bars the encode bakes in.
  */
 function imageStyle(
   dims: { width: number; height: number },

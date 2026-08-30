@@ -18,6 +18,13 @@ import { BANNER_ASPECT_RATIO, IMAGE_LIMITS, type ImageKind } from "@my-tuums/api
  * fraction of the source (0..1), and a zoom where **1 shows the slot's default
  * crop**. Client-only — the crop is baked into the
  * display variant before upload, never sent to the server.
+ *
+ * For banners a `scale` below 1 is valid: the 3:1 window then grows past the
+ * cover crop until the whole source fits inside it, and the parts of the window
+ * with no source under them encode as black letterbox bars (the banner
+ * equivalent of X's zoom-out-to-see-everything). Avatars keep a floor of 1 —
+ * every avatar surface is a square cover crop, so a letterboxed avatar would
+ * render as black bars behind a circular mask.
  */
 export type Crop = { x: number; y: number; scale: number };
 
@@ -75,14 +82,33 @@ export function calculateCropFrame(
 }
 
 /**
+ * The lowest zoom a slot allows: avatars stop at the cover crop; banners can
+ * zoom out to *contain*, the scale at which the whole source fits inside the
+ * 3:1 window (a source already at 3:1 contains at exactly 1). This is both the
+ * editor's wheel-zoom floor and the clamp every emitted crop is held to, so
+ * the two can never disagree about what the minimum means.
+ */
+export function minCropScale(source: { width: number; height: number }, kind: ImageKind): number {
+  if (kind === "avatar") return 1;
+  const frame = calculateCropFrame(source, kind);
+  return Math.min(frame.width / source.width, frame.height / source.height);
+}
+
+/**
  * The source rectangle a crop selects.
  *
  * At `scale` 1 this is exactly `calculateCropFrame` — the whole of what would
  * have been encoded anyway. Zooming in shrinks the rect around
  * `crop.x`/`crop.y` (the center, as a fraction of the source), keeping the
- * frame's aspect so the preview and the encode agree. The rect is clamped
- * inside the source, so a center near an edge is pulled back rather than
- * producing a rectangle the canvas cannot draw.
+ * frame's aspect so the preview and the encode agree.
+ *
+ * On each axis the window and the source stand in exactly one of two
+ * relations, and the bounds below express both: while the window is the
+ * smaller, its top-left is clamped inside the source (the pan limit); once the
+ * window is the larger — banner zoom-out past cover — the bounds invert so the
+ * window must still *contain* the source, which is what keeps a letterboxed
+ * banner pinned instead of floating off the frame. `clamp` receives the bounds
+ * in ascending order either way.
  */
 export type CropRect = { x: number; y: number; width: number; height: number };
 
@@ -91,45 +117,64 @@ export function calculateCropRect(
   kind: ImageKind,
   crop: Crop,
 ): CropRect {
-  const scale = Math.max(1, crop.scale);
+  const scale = Math.max(minCropScale(source, kind), crop.scale);
   const frame = calculateCropFrame(source, kind);
   // Whole pixels throughout: `drawImage` samples a source rectangle, and the
   // no-crop path this must agree with at zoom 1 already rounds. A fractional
   // rect here would make the default crop differ from no crop at all by a
   // half-pixel, which is exactly the drift the zoom-1 test forbids.
-  const width = Math.min(source.width, Math.round(frame.width / scale));
-  const height = Math.min(source.height, Math.round(frame.height / scale));
-  const x = Math.floor(clamp(crop.x * source.width - width / 2, 0, source.width - width));
-  const y = Math.floor(clamp(crop.y * source.height - height / 2, 0, source.height - height));
+  const width = Math.round(frame.width / scale);
+  const height = Math.round(frame.height / scale);
+  const x = Math.floor(
+    clamp(
+      crop.x * source.width - width / 2,
+      Math.min(0, source.width - width),
+      Math.max(0, source.width - width),
+    ),
+  );
+  const y = Math.floor(
+    clamp(
+      crop.y * source.height - height / 2,
+      Math.min(0, source.height - height),
+      Math.max(0, source.height - height),
+    ),
+  );
   return { x, y, width, height };
 }
 
 /**
- * Clamps a crop descriptor so its rect stays inside the source: the center is
- * pulled back from the edges and the zoom is floored at 1. The editor calls
- * this after every pan/zoom so the descriptor it emits is always drawable.
+ * Clamps a crop descriptor so its window keeps its mandated relation to the
+ * source on both axes, and the zoom stays within the slot's floor. The editor
+ * calls this after every pan/zoom so the descriptor it emits is always
+ * drawable.
  */
 export function clampCrop(
   crop: Crop,
   source: { width: number; height: number },
   kind: ImageKind,
 ): Crop {
-  const scale = Math.max(1, crop.scale);
+  const scale = Math.max(minCropScale(source, kind), crop.scale);
   const rect = calculateCropRect(source, kind, { ...crop, scale });
   const halfX = rect.width / (2 * source.width);
   const halfY = rect.height / (2 * source.height);
   return {
-    x: clamp(crop.x, halfX, 1 - halfX),
-    y: clamp(crop.y, halfY, 1 - halfY),
+    x: clamp(crop.x, Math.min(halfX, 1 - halfX), Math.max(halfX, 1 - halfX)),
+    y: clamp(crop.y, Math.min(halfY, 1 - halfY), Math.max(halfY, 1 - halfY)),
     scale,
   };
 }
 
 export type DisplayLayout = {
+  /** The part of the source that is drawn — the crop window intersected with the bitmap. */
   sourceX: number;
   sourceY: number;
   sourceWidth: number;
   sourceHeight: number;
+  /** Where that part lands on the output canvas. Non-zero only when the window letterboxes. */
+  destinationX: number;
+  destinationY: number;
+  destinationWidth: number;
+  destinationHeight: number;
   width: number;
   height: number;
 };
@@ -148,14 +193,26 @@ export function calculateDisplayLayout(
     //
     // Both caps are honoured independently, so changing a slot's dimensions
     // cannot make the browser produce a variant the server rejects. Never
-    // upscales.
+    // upscales. A window wider than the source (banner zoom-out past cover)
+    // overhangs the bitmap; the encoder only draws the intersection, placed at
+    // the window-relative offset so the overhang stays letterbox.
     const rect = calculateCropRect(source, kind, crop);
     const scale = Math.min(maxWidth / rect.width, maxHeight / rect.height, 1);
+    const sourceX = Math.max(rect.x, 0);
+    const sourceY = Math.max(rect.y, 0);
+    const sourceRight = Math.min(rect.x + rect.width, source.width);
+    const sourceBottom = Math.min(rect.y + rect.height, source.height);
     return {
-      sourceX: rect.x,
-      sourceY: rect.y,
-      sourceWidth: rect.width,
-      sourceHeight: rect.height,
+      sourceX,
+      sourceY,
+      sourceWidth: Math.max(0, sourceRight - sourceX),
+      sourceHeight: Math.max(0, sourceBottom - sourceY),
+      destinationX: (sourceX - rect.x) * scale,
+      destinationY: (sourceY - rect.y) * scale,
+      // Rounded like the no-crop branch rounds, so a cover crop at zoom 1 is
+      // byte-for-byte the layout no crop at all produces.
+      destinationWidth: Math.max(1, Math.round((sourceRight - sourceX) * scale)),
+      destinationHeight: Math.max(1, Math.round((sourceBottom - sourceY) * scale)),
       width: Math.max(1, Math.round(rect.width * scale)),
       height: Math.max(1, Math.round(rect.height * scale)),
     };
@@ -170,6 +227,10 @@ export function calculateDisplayLayout(
     sourceY,
     sourceWidth: frame.width,
     sourceHeight: frame.height,
+    destinationX: 0,
+    destinationY: 0,
+    destinationWidth: Math.max(1, Math.round(frame.width * scale)),
+    destinationHeight: Math.max(1, Math.round(frame.height * scale)),
     width: Math.max(1, Math.round(frame.width * scale)),
     height: Math.max(1, Math.round(frame.height * scale)),
   };
