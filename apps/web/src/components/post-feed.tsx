@@ -41,7 +41,14 @@ export function PostFeed({
       listClassName="space-y-4"
     >
       {posts.map((post) => (
-        <PostCard key={post.id} post={post} showParentContext={showParentContext} />
+        // The same post can be two legitimate timeline events — authored at
+        // its own timestamp and reposted later. Key by event identity, not the
+        // original post id, so React never reuses one card for the other.
+        <PostCard
+          key={`${post.id}:${post.repostedBy?.id ?? "post"}:${post.repostedBy?.repostedAt.toISOString() ?? ""}`}
+          post={post}
+          showParentContext={showParentContext}
+        />
       ))}
     </PaginatedState>
   );

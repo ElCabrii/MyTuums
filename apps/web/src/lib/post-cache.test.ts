@@ -24,11 +24,17 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     likeCount: 0,
     replyCount: 0,
     viewerHasLiked: false,
+    quotedPostId: null,
+    quoted: null,
+    repostCount: 0,
+    viewerHasReposted: false,
+    repostedBy: null,
     // The tombstone fields (issue #38, plus #148): never removed or deleted
     // by default.
     removed: false,
     deleted: false,
     removedReason: null,
+    unavailable: false,
     attachments: [],
     ...overrides,
   };
@@ -293,6 +299,37 @@ describe("post-cache", () => {
 
       expect(queryClient.getQueryData(feedKey)).toEqual(before.feed);
       expect(queryClient.getQueryData(threadKey)).toEqual(before.thread);
+    });
+
+    it("restorePosts keeps distinct attribution on authored and repost events for the same post", () => {
+      const queryClient = new QueryClient();
+      const authored = makePost({ id: "duplicate-event-1", likeCount: 5, repostedBy: null });
+      const reposted = makePost({
+        ...authored,
+        repostedBy: {
+          id: "reposter-1",
+          name: "Reposter",
+          username: "reposter",
+          displayUsername: "Reposter",
+          image: null,
+          repostedAt: new Date("2026-01-02T00:00:00.000Z"),
+        },
+      });
+      const feedKey = orpc.post.list.key({ input: { limit: 20 } });
+      queryClient.setQueryData(feedKey, feedPage([authored, reposted]));
+
+      const snapshot = snapshotPosts(queryClient, authored.id);
+      updatePostEverywhere(queryClient, authored.id, (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+      }));
+      restorePosts(queryClient, snapshot!);
+
+      const items = queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items;
+      expect(items?.[0]?.likeCount).toBe(5);
+      expect(items?.[0]?.repostedBy).toBeNull();
+      expect(items?.[1]?.likeCount).toBe(5);
+      expect(items?.[1]?.repostedBy).toEqual(reposted.repostedBy);
     });
 
     it("restorePosts undoes an edit to a post cached only under search.posts", () => {

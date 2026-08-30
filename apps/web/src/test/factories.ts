@@ -80,14 +80,23 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     likeCount: 0,
     replyCount: 0,
     viewerHasLiked: false,
+    // The quote reference (issue #261): not a quote by default — the embedded
+    // card branches in post-card own their own fixtures.
+    quotedPostId: null,
+    repostCount: 0,
+    viewerHasReposted: false,
+    // Attribution is a feed-event property; a plain post row carries none.
+    repostedBy: null,
     // The tombstone fields (issue #38, plus the author's own delete in #148):
     // never removed or deleted by default — the two stub branches in
     // post-card own their own fixtures.
     removed: false,
     deleted: false,
     removedReason: null,
+    unavailable: false,
     ...overrides,
     parent: overrides.parent ?? null,
+    quoted: overrides.quoted ?? null,
     attachments: overrides.attachments ?? [],
   };
 }
@@ -229,6 +238,10 @@ export function makeModerationCaseDetail(
       content: "Hello, world!",
       createdAt: new Date(),
       parentId: null,
+      // Not a quote by default; the case dialog's quoted section owns its own
+      // fixture when a test exercises it.
+      quotedPostId: null,
+      quoted: null,
       removedAt: null,
       removedBy: null,
       removedReason: null,

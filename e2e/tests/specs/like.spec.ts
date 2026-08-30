@@ -59,7 +59,11 @@ test.describe("liking a post", () => {
     if (!seeded) throw new Error("seedPosts returned no row");
 
     await page.goto(`/post/${seeded.id}`);
-    const anyLikeButton = () => page.getByRole("button", { name: /this post/ });
+    // Precise on purpose: the card also carries Repost and Quote controls
+    // whose labels end in "this post" (issue #261), and a bare /this post/
+    // would match all three and break strict mode. This test wants whichever
+    // face the LIKE control currently shows.
+    const anyLikeButton = () => page.getByRole("button", { name: /^(Unlike|Like) this post/ });
 
     await anyLikeButton().click(); // like
     await anyLikeButton().click(); // unlike

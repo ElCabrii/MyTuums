@@ -124,8 +124,8 @@ over HTTP and imports only its browser-safe subpaths.
   profile resolve to its suspended stub instead of 404ing. `user.byUsername`
   redacts authored profile fields, relationship counts and viewer state from
   that stub before it crosses the API boundary.
-- **`like`/`unlike` and `follow`/`unfollow` are separate idempotent
-  procedures, never a toggle** — ordering and retry safety.
+- **`like`/`unlike`, `repost`/`unrepost` and `follow`/`unfollow` are separate
+  idempotent procedures, never a toggle** — ordering and retry safety.
 - **Relationship writes for a pair are serialized by one advisory lock.**
   "A blocked pair has no follow edge" spans `follow` and `user_block`, so no
   database constraint can hold it. `follow`, `block` and `unblock` all take
@@ -164,6 +164,39 @@ over HTTP and imports only its browser-safe subpaths.
   pair is safe because the update compares both tombstones; after losing to a
   concurrent delete or removal, it re-reads the winner and preserves that
   outcome.
+- **Reposts and quote posts are events and references, never posts (issue
+  #261).** A repost is a `post_repost` row — the same idempotent
+  `repost`/`unrepost` pair, composite-PK idempotency and derived count as
+  `like`/`unlike` — so "reposting a repost" has no expressible target: every
+  action names an original post id. A quote is a post row plus `quotedPostId`
+  (deliberately FK-less, the evidence-retention pattern of `report.targetId`:
+  hard-deleting the quoted post must not cascade the quoter's own post away),
+  carrying every post rule and rendering its embedded `quoted` preview in
+  every context through `postSelection` — feed, permalink, thread, search —
+  plus the moderator's raw-content variant (`quotedPostEvidence`) in
+  `moderation.case`. The degradation matrix is decided and pinned in
+  `src/reposts.int.test.ts`: author-deleted original → deletion stub in place
+  of the embedded post (the repost event stays in the feed; the quote's own
+  text survives); moderator-removed original → removal stub, with
+  `removedReason` author-only as everywhere; banned/blocked original author →
+  a quote's embedded post is null, while a repost keeps the visible reposter's
+  event with an `unavailable` original whose identity, content, media, counts
+  and interactions are redacted.
+- **The home feeds walk a merged event timeline.** `post.list` without
+  `parentId` unions authored posts with repost events (`feedEventPage` in
+  `src/posts.ts`), strictly reverse-chronological by event time — a repost
+  places the original at the repost's timestamp — with no ranking and no
+  deduplication: one post can be two events. The event cursor is a three-part
+  key (`createEventCursorCodec` in `src/cursor.ts`): `(event_at, post_id,
+reposter_key)`, where the reposter half is absent for post events and binds
+  as `''` in SQL so the row-value comparison stays a total order. Profile
+  feeds (`authorId`) and reply lists run no repost arm: a profile is the
+  author's own activity, and the reply list is direct replies by their own
+  event time. The repost arm applies the block/ban filter to the reposter
+  (`aliasVisibleTo` — `invisibleAuthor` is bound to the un-aliased table), but
+  deliberately keeps a visible reposter's event when only the original author
+  is hidden; the projection phase re-evaluates that original and emits the
+  redacted `unavailable` shape.
 - **Replies and their inline continuations are modes of `post.list`, not
   separate procedures.** `parentId` remains the keyset-paginated owner of a
   focused post's direct replies; those pages add the bounded original-author

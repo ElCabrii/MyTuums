@@ -235,5 +235,13 @@ export function snapshotPosts(queryClient: QueryClient, postId: string): PostSna
  * new values into them.
  */
 export function restorePosts(queryClient: QueryClient, snapshot: PostSnapshot): void {
-  updatePostEverywhere(queryClient, snapshot.postId, () => snapshot.post);
+  updatePostEverywhere(queryClient, snapshot.postId, (current) => ({
+    ...snapshot.post,
+    // Repost attribution belongs to the feed EVENT, not to the shared post.
+    // The same post can appear twice in one feed (authored and reposted), while
+    // a single snapshot necessarily came from only one of those copies. Keep
+    // each cached event's own attribution when restoring shared post fields,
+    // or a failed like/repost would turn both copies into the same event.
+    repostedBy: current.repostedBy,
+  }));
 }

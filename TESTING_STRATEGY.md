@@ -113,14 +113,14 @@ width, or an axe scan.
 
 What is currently there and why it is there:
 
-| Spec                                                                       | Why no cheaper layer can do it                                             |
-| -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `auth`, `welcome`, `legal-consent`, `email-verification`, `password-reset` | the gates compose across navigations and real redirects                    |
-| `two-factor`                                                               | a real WebAuthn authenticator and a live TOTP round trip                   |
-| `compose`, `thread`, `like`, `follow`, `feed`, `search`, `profile`         | optimistic cache patches, ordering and layout in a real browser            |
-| `settings`                                                                 | a canvas re-encode reaching a real bucket and coming back through `/media` |
-| `moderation`                                                               | report → queue → remove → appeal across two signed-in people               |
-| `a11y`, `csp`, `i18n`, `theme`                                             | properties of a rendered document                                          |
+| Spec                                                                         | Why no cheaper layer can do it                                             |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `auth`, `welcome`, `legal-consent`, `email-verification`, `password-reset`   | the gates compose across navigations and real redirects                    |
+| `two-factor`                                                                 | a real WebAuthn authenticator and a live TOTP round trip                   |
+| `compose`, `thread`, `like`, `repost`, `follow`, `feed`, `search`, `profile` | optimistic cache patches, ordering and layout in a real browser            |
+| `settings`                                                                   | a canvas re-encode reaching a real bucket and coming back through `/media` |
+| `moderation`                                                                 | report → queue → remove → appeal across two signed-in people               |
+| `a11y`, `csp`, `i18n`, `theme`                                               | properties of a rendered document                                          |
 
 ### The image job
 
