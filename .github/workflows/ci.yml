@@ -93,16 +93,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
         with:
-          node-version: 22
-          cache: pnpm
+          runtime: node@24
+          cache: true
+          require-lockfile: true
 
-      # --frozen-lockfile: the committed lockfile is authoritative — any
-      # drift between it and a package.json fails here rather than
-      # installing something different from what CI will run.
-      - run: pnpm install --frozen-lockfile
+      # pnpm/setup reads the exact pnpm version from package.json and installs
+      # with --frozen-lockfile because require-lockfile is true. The committed
+      # lockfile is authoritative: manifest drift fails before verification.
 
       # The db:* scripts all run through `dotenv -e .env`, which errors on a
       # missing file. Writing the workflow env out is simpler than
@@ -179,13 +178,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
         with:
-          node-version: 22
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
+          runtime: node@24
+          cache: true
+          require-lockfile: true
 
       - name: Write .env
         run: |

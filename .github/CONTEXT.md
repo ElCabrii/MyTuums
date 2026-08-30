@@ -67,10 +67,11 @@ would produce a broken one.
 - **Every job runs on a self-hosted runner.** The repo's CI jobs use
   `runs-on: self-hosted` — the owner's own device — so no GitHub-hosted
   minutes are consumed. The runner currently is a Docker Desktop host, and
-  the jobs must keep working on a native Linux host too: it needs Node 22,
-  pnpm, Docker, and the `postgres:16-alpine` image available, and it must be
-  online when a run is triggered. Containers must reach the runner's
-  published ports without assuming they share its network namespace.
+  the jobs must keep working on a native Linux host too: `pnpm/setup` installs
+  pnpm and Node 24, while the host provides Docker and the
+  `postgres:16-alpine` image. It must be online when a run is triggered.
+  Containers must reach the runner's published ports without assuming they
+  share its network namespace.
 - **The `image` job reaches the runner through the `ci-host=host-gateway`
   alias, not `--network host`.** `--network host` shares the host's network
   namespace only on a native Linux Docker install; on Docker Desktop it is

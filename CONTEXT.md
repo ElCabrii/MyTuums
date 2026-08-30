@@ -7,8 +7,8 @@ operations, and security.
 ## Repository
 
 MyTuums — a Twitter-style social app (posts, replies, likes, follows,
-profiles, moderation) with real authentication. pnpm 10 + Turborepo on Node
-22, TypeScript strict everywhere.
+profiles, moderation) with real authentication. pnpm 12 + Turborepo on Node
+24, TypeScript strict everywhere.
 
 | Workspace       | Package            | Owns                                               |
 | --------------- | ------------------ | -------------------------------------------------- |
@@ -40,6 +40,12 @@ are answered in [docs/architecture.md](docs/architecture.md).
 Only invariants that span packages live here. Package-local invariants belong
 to the owning context.
 
+- **The TypeScript 7 CLI and TypeScript 6 API compatibility package are both
+  intentional.** `@typescript/native` supplies the `tsc` binary used by every
+  typecheck, while dependencies named `typescript` resolve to
+  `@typescript/typescript6` for tools such as typescript-eslint that still load
+  the compiler API. Do not collapse them until those tools support the
+  TypeScript 7 API.
 - **One origin in production.** The server serves the built SPA, because
   `apps/web/src/lib/orpc.ts` resolves `/rpc` against `window.location.origin`
   and uploaded images are stored as relative `/media/` paths. Split them

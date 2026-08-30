@@ -72,6 +72,11 @@ const realRouteModules = import.meta.glob<unknown>("../routes/*.tsx");
  * both matches' links.
  */
 describe("real route heads", () => {
+  // The head inventory dynamically imports every route module, and on the
+  // Vite 8 toolchain those transforms cost real seconds — 3.4s in isolation,
+  // more when the suite's other files are transforming in parallel, which is
+  // how the default 5s budget was first breached. The budget is raised rather
+  // than the test split: one pass over all heads is the invariant.
   it("emits exactly one canonical link from every route that declares a head", async () => {
     for (const [file, load] of Object.entries(realRouteModules)) {
       if (file.endsWith(".test.tsx")) continue;
@@ -91,5 +96,5 @@ describe("real route heads", () => {
       );
       expect(canonicals, `head() emitted by ${file}`).toHaveLength(1);
     }
-  });
+  }, 20_000);
 });

@@ -20,7 +20,7 @@
     "@types/node": "catalog:",
     "dotenv-cli": "^11.0.0",
     "drizzle-orm": "^0.45.2",
-    "typescript": "catalog:"
+    "@typescript/native": "catalog:"
   },
   "dependencies": {
     "@my-tuums/api": "workspace:*"

@@ -198,13 +198,14 @@ const PNPM_BUILTINS = new Set([
 // File collection
 // --------------------------------------------------------------------------
 
-// Tool-owned and build-output trees. Their contents are generated — a README
-// the Paraglide compiler writes into `project.inlang/` is not this repository's
-// documentation, and holding it to these rules just fails the build after an
-// unrelated `pnpm build`.
+// Tool-owned and build-output trees. Their contents are generated or belong to
+// separate working trees — a README the Paraglide compiler writes into
+// `project.inlang/` is not this repository's documentation, and holding it to
+// these rules just fails the build after an unrelated `pnpm build`.
 const SKIP_DIRS = new Set([
   "node_modules",
   ".git",
+  ".claude",
   "dist",
   ".turbo",
   "paraglide",

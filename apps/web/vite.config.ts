@@ -1,12 +1,12 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
+import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
-import { preloadInjectionPlugin } from "./build-inject-plugin";
-import { pwaPlugin } from "./pwa-plugin";
+import { preloadInjectionPlugin } from "./build-inject-plugin.ts";
+import { pwaPlugin } from "./pwa-plugin.ts";
 import path from "node:path";
-import pkg from "./package.json";
+import pkg from "./package.json" with { type: "json" };
 
 // Where /rpc and /api/auth are proxied in dev. Overridable so the E2E suite
 // can point the web app at its own server on a different port and run beside
@@ -21,7 +21,7 @@ export default defineConfig({
   // VITE_SOCIAL_PROVIDERS are invisible to import.meta.env, so no OAuth
   // buttons and no One Tap ever render, with nothing in the console to say
   // why - the code has no missing dependency, it just never saw the values.
-  envDir: path.resolve(__dirname, "../.."),
+  envDir: path.resolve(import.meta.dirname, "../.."),
   define: {
     // The footer's "v0.4.2" and the header's alpha/beta tag come from
     // package.json's `version` field, inlined here rather than read at
@@ -57,7 +57,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
   // Pre-bundle every @base-ui module the app imports. Vite's dep optimizer
@@ -103,17 +103,22 @@ export default defineConfig({
     // so neither ends up duplicated across the lazy component chunks. The rest
     // of the graph stays with Vite's default splitter.
     //
-    // Only packages the web app declares directly are listed: Rollup resolves
-    // these entries from the app root, and under pnpm's strict node_modules the
-    // router's own transitive deps (`@tanstack/history`, `@tanstack/router-core`,
-    // `@tanstack/react-store`) are not linked there. That's fine — nothing in
-    // the graph imports them outside `@tanstack/react-router`, so Rollup folds
-    // them into the router-vendor chunk on its own.
-    rollupOptions: {
+    // Rolldown groups resolved module ids rather than accepting Rollup's old
+    // object-form `manualChunks`. Unmatched transitives follow the default
+    // splitter and remain deduplicated.
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          "react-vendor": ["react", "react-dom", "react-dom/client"],
-          "router-vendor": ["@tanstack/react-router"],
+        codeSplitting: {
+          groups: [
+            {
+              name: "react-vendor",
+              test: /node_modules\/(?:react|react-dom)\//,
+            },
+            {
+              name: "router-vendor",
+              test: /node_modules\/@tanstack\/react-router\//,
+            },
+          ],
         },
       },
     },

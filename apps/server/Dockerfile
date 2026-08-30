@@ -25,7 +25,7 @@
 # `build.context: .`), because `turbo prune` needs the whole workspace to
 # compute the pruned subset.
 
-FROM node:22-alpine AS base
+FROM node:24-alpine AS base
 RUN corepack enable
 
 # ---- Prune the monorepo down to what @my-tuums/server needs to build ----
