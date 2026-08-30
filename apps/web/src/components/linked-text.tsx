@@ -1,5 +1,7 @@
+import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
 import type { ReactNode } from "react";
+import { SEARCH_QUERY_MAX_LENGTH } from "@my-tuums/api/constants";
 import {
   isAllowedUsernameCharset,
   normalizeUsername,
@@ -31,12 +33,20 @@ type UrlSegment = {
   start: number;
 };
 
-type Segment = TextSegment | MentionSegment | UrlSegment;
+type HashtagSegment = {
+  kind: "hashtag";
+  label: string;
+  start: number;
+  /** The canonical lowercase tag, without the `#`. */
+  tag: string;
+};
+
+type Segment = TextSegment | MentionSegment | UrlSegment | HashtagSegment;
 
 /** A recognized token, and the offset the scan resumes at after it. */
 type Match = {
   end: number;
-  segment: MentionSegment | UrlSegment;
+  segment: MentionSegment | UrlSegment | HashtagSegment;
 };
 
 const UNICODE_WORD_CHARACTER = /[\p{L}\p{M}\p{N}]/u;
@@ -192,6 +202,69 @@ function matchMention(characters: string[], cursor: number): Match | undefined {
   };
 }
 
+/**
+ * The longest tag a `#` can introduce. Derived from the search query ceiling
+ * rather than invented: a tag link's query is `#` plus the canonical tag, so
+ * any tag this tokenizer recognizes produces a query `search.posts` accepts
+ * instead of one it would reject on length.
+ */
+const HASHTAG_MAX_LENGTH = SEARCH_QUERY_MAX_LENGTH - 1;
+
+/**
+ * The tag charset: ASCII letters, digits and the underscore — the handle
+ * charset minus the hyphen, which no tag syntax treats as part of a tag.
+ * Anchored and without the `g` flag for the same reason as `USERNAME_RE`.
+ */
+const HASHTAG_CHARACTER = /[a-zA-Z0-9_]/;
+
+/**
+ * Whether `character` can appear inside a tag. Accented letters are
+ * deliberately NOT tag characters even though the app is bilingual: a tag is
+ * canonicalized to lowercase in the browser and matched by `ilike` in
+ * Postgres, and only ASCII lowercasing is guaranteed to agree between the two
+ * under every database collation. `#été` therefore stays plain text rather
+ * than linking to a query that might not match the very post it came from.
+ */
+function isHashtagCharacter(character: string | undefined): boolean {
+  return character !== undefined && HASHTAG_CHARACTER.test(character);
+}
+
+function matchHashtag(characters: string[], cursor: number): Match | undefined {
+  // The `#`-before-`#` guard mirrors the mention recognizer's `@@` guard, so
+  // `##tag` is inert text rather than a link buried one character in.
+  if (
+    characters[cursor] !== "#" ||
+    characters[cursor - 1] === "#" ||
+    isWordCharacter(characters[cursor - 1])
+  ) {
+    return undefined;
+  }
+
+  let end = cursor + 1;
+  while (isHashtagCharacter(characters[end])) end += 1;
+
+  const tag = characters.slice(cursor + 1, end).join("");
+  // The trailing boundary check is what keeps a tag from being linkified as a
+  // prefix of what the author wrote: a tag that runs straight into an
+  // accented letter (`#café`) or a hyphen (`#tag-way`) is malformed, exactly
+  // like `@aliçce`, rather than a link ending mid-word.
+  if (tag.length === 0 || tag.length > HASHTAG_MAX_LENGTH || isWordCharacter(characters[end])) {
+    return undefined;
+  }
+
+  return {
+    end,
+    segment: {
+      kind: "hashtag",
+      label: characters.slice(cursor, end).join(""),
+      start: cursor,
+      // The charset is ASCII, so this lowercase is locale-independent — the
+      // same reasoning as `normalizeUsername`.
+      tag: tag.toLowerCase(),
+    },
+  };
+}
+
 function linkedSegments(text: string): Segment[] {
   // Array.from iterates Unicode code points rather than UTF-16 code units.
   // Boundary checks must see a supplementary-plane letter as one character;
@@ -204,8 +277,14 @@ function linkedSegments(text: string): Segment[] {
 
   while (cursor < characters.length) {
     // A URL is tried first at every offset, so `https://example.com/@alice` is
-    // one link rather than a link with a profile mention buried in its path.
-    const match = matchUrl(characters, cursor) ?? matchMention(characters, cursor);
+    // one link rather than a link with a profile mention buried in its path —
+    // and `https://example.com/page#anchor` keeps its fragment out of a tag
+    // link the same way. A mention and a hashtag can never match at the same
+    // offset (`@` versus `#`), so their relative order is immaterial.
+    const match =
+      matchUrl(characters, cursor) ??
+      matchMention(characters, cursor) ??
+      matchHashtag(characters, cursor);
     if (match === undefined) {
       cursor += 1;
       continue;
@@ -258,18 +337,34 @@ function renderSegment(segment: Segment): ReactNode {
           {segment.label}
         </a>
       );
+    case "hashtag":
+      // A tag is nothing but a link into post search filtered to itself: the
+      // query keeps the `#` so the results are posts carrying the tag, not
+      // posts that merely contain the word. The label stays as typed while
+      // the query carries the canonical lowercase tag, the same split as a
+      // mention's label versus its `/@handle` href.
+      return (
+        <Link
+          to="/search"
+          search={{ q: `#${segment.tag}` }}
+          className="text-primary hover:underline"
+        >
+          {segment.label}
+        </Link>
+      );
     case "text":
       return segment.value;
   }
 }
 
 /**
- * Renders the two link shapes MyTuums recognizes inside otherwise plain,
- * author-written text: syntactically valid `@handles` as profile links, and
- * absolute http(s) URLs as external anchors. Unknown handles deliberately link
- * to the canonical profile route, whose existing not-found state is the
- * fallback; malformed handles and every other scheme stay untouched text.
- * React text children keep the entire surface HTML-safe.
+ * Renders the three link shapes MyTuums recognizes inside otherwise plain,
+ * author-written text: syntactically valid `@handles` as profile links,
+ * absolute http(s) URLs as external anchors, and `#tags` as links into post
+ * search filtered to the tag. Unknown handles deliberately link to the
+ * canonical profile route, whose existing not-found state is the fallback;
+ * malformed handles, malformed tags and every other scheme stay untouched
+ * text. React text children keep the entire surface HTML-safe.
  *
  * Nothing here stops a click from bubbling: the surrounding surfaces that
  * navigate on click (`PostCard`) already ignore clicks landing inside an
