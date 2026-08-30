@@ -9,6 +9,7 @@ import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import { deletePostDialogAtom } from "@/atoms/post-delete";
+import { editPostDialogAtom } from "@/atoms/post-edit";
 import { isSignedInAtom, viewerIdAtom } from "@/atoms/session";
 import {
   DropdownMenu,
@@ -65,6 +66,7 @@ export function PostCard({
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
   const setDeleteDialog = useSetAtom(deletePostDialogAtom);
+  const setEditDialog = useSetAtom(editPostDialogAtom);
   const authorHandle = handleOf(post.author);
   const authorName = post.author.name || authorHandle || m.user_unknown();
   const parentAuthorName = post.parent
@@ -77,9 +79,9 @@ export function PostCard({
   // nothing left to like or reply to. Which stub renders still depends on
   // which one it is; only "is it gone" is shared.
   const isGone = post.removed || post.deleted;
-  // A post already gone has nothing left to delete, so the item is dropped
-  // rather than offered as a no-op the server would refuse anyway.
-  const canDelete = isOwnPost && !isGone;
+  // A post already gone has nothing left to edit or delete, so both items
+  // drop rather than being offered as no-ops the server would refuse anyway.
+  const canEdit = isOwnPost && !isGone;
 
   const handleCardClick = (e: MouseEvent<HTMLDivElement>) => {
     if (isFocused) return;
@@ -121,6 +123,16 @@ export function PostCard({
   const timestamp = isFocused
     ? formatDateTime(post.createdAt, locale)
     : formatRelativeTime(post.createdAt, locale, m.post_just_now());
+  // The edit marker rides right beside the creation timestamp and follows the
+  // same relative/exact split: a card scrolling past says "Edited 3 minutes
+  // ago", the focused post — the durable surface — says when exactly. A
+  // `<time>` element for the same reason the creation timestamp has one: the
+  // machine-readable value is the edit instant, not the label around it.
+  const editedTimestamp = post.editedAt
+    ? isFocused
+      ? formatDateTime(post.editedAt, locale)
+      : formatRelativeTime(post.editedAt, locale, m.post_just_now())
+    : null;
   const authorAvatar = (
     <UserAvatar
       user={post.author}
@@ -194,16 +206,29 @@ export function PostCard({
               • <time dateTime={post.createdAt.toISOString()}>{timestamp}</time>
             </span>
 
+            {/* The "Edited" marker (issue #264): visible wherever the post
+                renders, carrying the LAST edit time — never a version
+                history, just the fact and the moment. */}
+            {post.editedAt && editedTimestamp && (
+              <span className="text-muted-foreground text-xs">
+                •{" "}
+                <time dateTime={post.editedAt.toISOString()}>
+                  {m.post_edited({ time: editedTimestamp })}
+                </time>
+              </span>
+            )}
+
             {/* Every item here lives in a shared dialog mounted at the root
-                (identity atoms — see `atoms/moderation.ts` and
-                `atoms/post-delete.ts`), so this menu only has to set the
-                target. Which items it holds is decided by whose post it is:
-                Delete on the viewer's own, Report/Block on everyone else's —
-                you cannot report yourself, and a moderator takes other
-                people's posts down through the case queue, not from here.
-                Other people's posts keep the menu even when removed:
-                reporting the *author* of a removed post is still valid. */}
-            {isSignedIn && (canDelete || !isOwnPost) && (
+                (identity atoms — see `atoms/moderation.ts`,
+                `atoms/post-delete.ts` and `atoms/post-edit.ts`), so this menu
+                only has to set the target. Which items it holds is decided by
+                whose post it is: Edit/Delete on the viewer's own,
+                Report/Block on everyone else's — you cannot report yourself,
+                and a moderator takes other people's posts down through the
+                case queue, not from here. Other people's posts keep the menu
+                even when removed: reporting the *author* of a removed post is
+                still valid. */}
+            {isSignedIn && (canEdit || !isOwnPost) && (
               <DropdownMenu>
                 <DropdownMenuTrigger
                   aria-label={m.moderation_kebab()}
@@ -229,13 +254,21 @@ export function PostCard({
                   onClick={(e) => e.stopPropagation()}
                 >
                   {isOwnPost ? (
-                    <DropdownMenuItem
-                      className="cursor-pointer"
-                      variant="destructive"
-                      onClick={() => setDeleteDialog(post.id)}
-                    >
-                      {m.post_delete()}
-                    </DropdownMenuItem>
+                    <>
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        onClick={() => setEditDialog(post.id)}
+                      >
+                        {m.post_edit()}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        variant="destructive"
+                        onClick={() => setDeleteDialog(post.id)}
+                      >
+                        {m.post_delete()}
+                      </DropdownMenuItem>
+                    </>
                   ) : (
                     <>
                       <DropdownMenuItem

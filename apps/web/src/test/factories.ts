@@ -82,10 +82,12 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     viewerHasLiked: false,
     // The tombstone fields (issue #38, plus the author's own delete in #148):
     // never removed or deleted by default — the two stub branches in
-    // post-card own their own fixtures.
+    // post-card own their own fixtures. Same for the edit marker (#264):
+    // never edited unless a test says so.
     removed: false,
     deleted: false,
     removedReason: null,
+    editedAt: null,
     ...overrides,
     parent: overrides.parent ?? null,
     attachments: overrides.attachments ?? [],

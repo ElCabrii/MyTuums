@@ -68,6 +68,12 @@ export const post = pgTable(
     // No `deletedBy`: the only account that can set this is `authorId`, which
     // the row already carries. No reason either — nobody is owed one.
     deletedAt: timestamp("deleted_at", { withTimezone: true, precision: 3 }),
+    // The author's own edit (issue #264): stamped the first time `post.edit`
+    // rewrites the text and restamped on every later edit, so it carries the
+    // LAST edit time. Null means never edited. `createdAt` deliberately never
+    // moves — an edit must not re-rank feeds — so this column is the marker's
+    // only source. No history is kept: v1 is a marker, not a version log.
+    editedAt: timestamp("edited_at", { withTimezone: true, precision: 3 }),
     // `withTimezone` is not cosmetic. On a bare `timestamp` (no time zone),
     // Postgres resolves `now()` to the *database session's* local wall clock,
     // while Drizzle's `mapFromDriverValue` reads the column back by appending

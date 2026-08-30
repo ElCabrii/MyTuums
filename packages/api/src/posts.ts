@@ -3,7 +3,15 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, getTableName, inArray, isNull, not, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Database } from "@my-tuums/db";
-import { follow, post, postAttachment, postLike, user, userBlock } from "@my-tuums/db/schema";
+import {
+  follow,
+  post,
+  postAttachment,
+  postLike,
+  report,
+  user,
+  userBlock,
+} from "@my-tuums/db/schema";
 import { z } from "zod";
 import {
   POST_MAX_LENGTH,
@@ -295,6 +303,10 @@ export const postSelection = (viewerId: string) => ({
     string | null
   >`case when ${post.removedAt} is not null and ${post.authorId} = ${viewerId} then ${post.removedReason} else null end`,
   createdAt: post.createdAt,
+  // Null until the author edits the text (issue #264); carries the LAST edit
+  // time, which is what the "Edited" marker renders. `createdAt` above stays
+  // the original publication instant — an edit never re-ranks a feed.
+  editedAt: post.editedAt,
   // Null for a top-level post. The web app reads it to decide whether a card
   // needs a "Replying to" line, so it belongs in the shared selection rather
   // than only in the thread payload.
@@ -515,7 +527,43 @@ async function insertPost(
 }
 
 /**
- * The `post` procedure group: create, delete, list, thread, like, unlike.
+ * The text of a post, shared by `post.create` and `post.edit` (issue #264) so
+ * the trim and the length bound have exactly one definition. Trimming first
+ * is what keeps whitespace from persisting as fake content on either path.
+ */
+const postContentInput = z.string().trim().max(POST_MAX_LENGTH);
+
+/**
+ * Whether a post is under active moderation review (issue #264): at least one
+ * unresolved report row targets it. That is exactly the condition that puts a
+ * post in `moderation.queue`, so this predicate and the queue agree on what
+ * "an open case" means without the queue owning a second definition.
+ */
+function hasOpenPostReport(postId: string) {
+  return sql`exists (
+    select 1 from ${report}
+    where ${report.targetType} = 'post'
+      and ${report.targetId} = ${sql.param(postId, report.targetId)}
+      and ${report.resolvedAt} is null
+  )`;
+}
+
+/**
+ * Evaluates `hasOpenPostReport` as its own statement. Both the guard read and
+ * the compare-and-set predicate in `post.edit` go through the one fragment, so
+ * "under active moderation review" cannot drift between the check and the
+ * write it protects.
+ */
+async function hasOpenReport(db: Database, postId: string): Promise<boolean> {
+  const rows = await db.execute<{ under_review: boolean }>(
+    sql`select ${hasOpenPostReport(postId)} as under_review`,
+  );
+  return rows[0]?.under_review === true;
+}
+
+/**
+ * The `post` procedure group: create, edit, delete, list, thread, like,
+ * unlike.
  */
 export const postRouter = {
   /**
@@ -526,10 +574,11 @@ export const postRouter = {
     .input(
       z
         .object({
-          // Trim first so whitespace never persists as fake content. An empty
-          // body is legal only when at least one attachment rides along — the
-          // cross-field rule below is what keeps a fully empty submission out.
-          content: z.string().trim().max(POST_MAX_LENGTH),
+          // The shared content field (see `postContentInput`): trim first so
+          // whitespace never persists as fake content. An empty body is legal
+          // only when at least one attachment rides along — the cross-field
+          // rule below is what keeps a fully empty submission out.
+          content: postContentInput,
           /** Omit for a top-level post; set to reply to an existing one. */
           parentId: z.uuid().optional(),
           /** The same ordered image capability is available to posts and replies. */
@@ -618,10 +667,12 @@ export const postRouter = {
         ...created,
         // Matches the additive tombstone fields of `postSelection` — a fresh
         // post is neither removed nor deleted, so these are constants rather
-        // than columns.
+        // than columns. The same goes for `editedAt`: a fresh post has never
+        // been edited.
         removed: false,
         deleted: false,
         removedReason: null,
+        editedAt: null,
         author: {
           id: context.user.id,
           name: context.user.name,
@@ -644,6 +695,172 @@ export const postRouter = {
           }),
         ),
       };
+    }),
+
+  /**
+   * Edits the text of the caller's own post or reply (issue #264). Requires a
+   * session.
+   *
+   * Text-only for v1: attachments are not editable here. `content` is the one
+   * field this procedure rewrites, through the same shared input field
+   * (`postContentInput`) `post.create` validates with — the trim and the
+   * length bound are not restated. The "text, images, or both" rule (issue
+   * #202) IS re-checked, against the row's existing attachments rather than
+   * an upload batch: clearing the text of a post that carries images is a
+   * legal edit (it stays an image-only post), while emptying a text-only post
+   * is refused with the same message `post.create` returns.
+   *
+   * The guards, in the order they refuse:
+   * - FORBIDDEN — not the author. Ownership is the whole authorisation rule,
+   *   same as `post.delete`.
+   * - BAD_REQUEST — removed by a moderator. Mirrors the delete rule: editing
+   *   on top of a removal would rewrite what the author was told the removal
+   *   was about, and `moderation.appealPreview` hands the author back the
+   *   removed post's own content — the removal rule is what keeps an appealed
+   *   post's story from mutating under the appeal.
+   * - BAD_REQUEST — deleted. A tombstoned post has no editable text left.
+   * - BAD_REQUEST — under active moderation review: an unresolved report row
+   *   targets the post (`hasOpenPostReport`). Pinned choice (issue #264): the
+   *   queue and case view read the live `content` column, so an edit while
+   *   the case is open would swap the evidence a moderator is about to judge;
+   *   once the case resolves without action, editing works again.
+   * - BAD_REQUEST — empty content on a post with no attachments (the create
+   *   cross-field rule, against server state).
+   *
+   * Idempotent, like `like`/`unlike` and `post.delete`: re-sending the content
+   * the row already holds is a no-op that keeps the original `editedAt` rather
+   * than restamping it, so a retry after a lost response must not bump the
+   * marker. Two concurrent different edits are last-write-wins — the update's
+   * predicate holds either way, and there is no ordering between them to
+   * defend.
+   *
+   * Like `post.delete`, the read-then-write is not locked. The update is a
+   * compare-and-set against both tombstones plus the review predicate; a
+   * zero-row update re-reads the winner so the refusal names the real reason.
+   * No audit row to double-write, no email to double-send — so neither a
+   * transaction nor `FOR UPDATE` buys anything. The review predicate is also
+   * only exact to the update's own snapshot: a report committing while the
+   * edit is in flight can still see that one edit land. That residual window
+   * is accepted — closing it would mean locking `report` inserts against
+   * `post` updates — while the state-based rule itself stays enforced.
+   *
+   * `createdAt` never moves: feeds keyset on `(created_at, id)` and search
+   * matches the raw `content` column, so the edited text is simply what
+   * feeds, threads and search return from their next read — no re-ranking, no
+   * bump in the chronological feed.
+   */
+  edit: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.write))
+    .input(z.object({ postId: z.uuid(), content: postContentInput }))
+    .handler(async ({ input, context }) => {
+      const [target] = await context.db
+        .select({
+          authorId: post.authorId,
+          content: post.content,
+          removedAt: post.removedAt,
+          deletedAt: post.deletedAt,
+          editedAt: post.editedAt,
+          // The attachment existence half of the cross-field rule. A count
+          // rather than a read: only "is there at least one" decides whether
+          // empty text is a legal edit. The outer id is table-qualified via
+          // `outerPost` — this select has no join, so a bare `post.id` would
+          // render unqualified and resolve against the inner scope
+          // (post_attachment), matching nothing.
+          attachmentCount: sql<number>`(
+            select count(*)::int from ${postAttachment} where ${postAttachment.postId} = ${outerPost("id")}
+          )`,
+        })
+        .from(post)
+        .where(eq(post.id, input.postId))
+        .limit(1);
+
+      if (!target) {
+        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
+      }
+
+      // FORBIDDEN rather than NOT_FOUND, same as `post.delete`: the post's
+      // existence is not a secret, and "not yours" is the answer that explains
+      // the refusal.
+      if (target.authorId !== context.user.id) {
+        throw new ORPCError("FORBIDDEN", { message: "You can only edit your own posts." });
+      }
+
+      if (target.removedAt) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "This post was removed by a moderator and can no longer be edited.",
+        });
+      }
+
+      if (target.deletedAt) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "This post was deleted and can no longer be edited.",
+        });
+      }
+
+      if (await hasOpenReport(context.db, input.postId)) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "This post is under moderation review and can no longer be edited.",
+        });
+      }
+
+      if (input.content.length === 0 && target.attachmentCount === 0) {
+        throw new ORPCError("BAD_REQUEST", { message: "Post cannot be empty." });
+      }
+
+      // The idempotent no-op: same content in, same row out. Crucially this
+      // sits AFTER the guards — a removed, deleted or under-review post is
+      // refused even for a content-equal retry, because the refusal is about
+      // the post's state, not about this particular payload.
+      if (target.content === input.content) {
+        return { postId: input.postId, content: target.content, editedAt: target.editedAt };
+      }
+
+      const [updated] = await context.db
+        .update(post)
+        .set({ content: input.content, editedAt: new Date() })
+        .where(
+          and(
+            eq(post.id, input.postId),
+            isNull(post.removedAt),
+            isNull(post.deletedAt),
+            sql`not ${hasOpenPostReport(input.postId)}`,
+          ),
+        )
+        .returning({ content: post.content, editedAt: post.editedAt });
+
+      if (updated) {
+        return { postId: input.postId, content: updated.content, editedAt: updated.editedAt };
+      }
+
+      // Another writer changed the guarded state after the guard read, the
+      // same compare-and-set loser path `post.delete` takes. Re-read the
+      // winner so the refusal names what actually happened; a plain missing
+      // row here cannot happen (nothing deletes rows).
+      const [winner] = await context.db
+        .select({ removedAt: post.removedAt, deletedAt: post.deletedAt })
+        .from(post)
+        .where(eq(post.id, input.postId))
+        .limit(1);
+
+      if (winner?.removedAt) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "This post was removed by a moderator and can no longer be edited.",
+        });
+      }
+
+      if (winner?.deletedAt) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "This post was deleted and can no longer be edited.",
+        });
+      }
+
+      if (winner && (await hasOpenReport(context.db, input.postId))) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "This post is under moderation review and can no longer be edited.",
+        });
+      }
+
+      throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Failed to edit post." });
     }),
 
   /**

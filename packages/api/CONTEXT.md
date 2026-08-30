@@ -164,6 +164,25 @@ over HTTP and imports only its browser-safe subpaths.
   pair is safe because the update compares both tombstones; after losing to a
   concurrent delete or removal, it re-reads the winner and preserves that
   outcome.
+- **`post.edit` rewrites text and nothing else (issue #264).** The body field
+  is the shared `postContentInput` — the same trim and bound `post.create`
+  enforces, never restated — and attachments are immutable through it; the
+  create cross-field rule (text, images, or both) is re-checked against the
+  row's existing attachments, so clearing the text of an image post is a legal
+  edit while emptying a text-only post is refused with create's own message.
+  It is author-owned and idempotent like `post.delete`: a content-equal retry
+  keeps the original `edited_at` (the marker never restamps on a retry), and
+  the update is an unlocked compare-and-set whose zero-row path re-reads the
+  winner so the refusal names the real reason. Three states refuse an edit:
+  moderator-removed (the appeal story must not mutate —
+  `moderation.appealPreview` quotes that row's content), author-deleted, and
+  under active moderation review, defined once by `hasOpenPostReport` as "an
+  unresolved report row targets the post" — the same condition that puts it in
+  `moderation.queue`; once the case resolves, editing works again.
+  `created_at` never moves, so feeds and search pick up the new text with no
+  re-ranking. `edited_at` rides `postSelection` beside `createdAt`. One
+  residual window is accepted and documented in the procedure: a report
+  committing while an edit is in flight can still see that edit land.
 - **Replies and their inline continuations are modes of `post.list`, not
   separate procedures.** `parentId` remains the keyset-paginated owner of a
   focused post's direct replies; those pages add the bounded original-author
