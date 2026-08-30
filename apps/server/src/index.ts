@@ -8,6 +8,7 @@ import { CORSPlugin, SimpleCsrfProtectionHandlerPlugin } from "@orpc/server/plug
 import { ORPCError, onError } from "@orpc/server";
 import {
   appRouter,
+  canViewLinkCardMedia,
   canViewPostMedia,
   canViewProfileMedia,
   createContext,
@@ -123,17 +124,21 @@ const handleRequest = createRequestHandler({
 
     return handler.handle(req, nodeResponse(res), { prefix: "/rpc", context });
   },
-  // One resolver, two authorizers: post attachments follow the post's
+  // One resolver, three authorizers: post attachments follow the post's
   // visibility (moderation tombstones, author blocks), profile images follow
-  // the owner's visibility and the owner-only rule for `.orig` originals.
-  // Display-object redirects are the one class whose caching is worth its
-  // staleness budget — window-bounded, private, per-viewer on every miss.
+  // the owner's visibility and the owner-only rule for `.orig` originals, and
+  // a stored link preview image is public web content this app mirrored — the
+  // session the route already demanded is the whole rule. Display-object
+  // redirects are the one class whose caching is worth its staleness budget —
+  // window-bounded, private, per-viewer on every miss.
   resolveMediaUrl: createMediaResolver(
     defaultStorage,
     (key, viewerId) =>
       key.startsWith("posts/")
         ? canViewPostMedia(db, key, viewerId)
-        : canViewProfileMedia(db, key, viewerId),
+        : key.startsWith("link-cards/")
+          ? canViewLinkCardMedia()
+          : canViewProfileMedia(db, key, viewerId),
     profileDisplayRedirectCacheControl,
   ),
   // Only when this deployment bundles the built web app. Unset in dev, where

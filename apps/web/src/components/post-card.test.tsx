@@ -22,6 +22,9 @@ const fakeClient = {
   post: {
     like: vi.fn(() => Promise.resolve({ postId: "", likeCount: 0, viewerHasLiked: true })),
     unlike: vi.fn(() => Promise.resolve({ postId: "", likeCount: 0, viewerHasLiked: false })),
+    // A URL-bearing post mounts the link preview card query (issue #260);
+    // answering "no card" keeps those fixtures about the inline link itself.
+    linkCard: vi.fn(() => Promise.resolve({ card: null })),
     list: vi.fn(),
     thread: vi.fn(),
   },

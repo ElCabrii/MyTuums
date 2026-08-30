@@ -4,8 +4,9 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { Heart, MessageCircle, MoreHorizontal } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileLink } from "@/components/profile-link";
-import { LinkedText } from "@/components/linked-text";
+import { firstLinkUrl, LinkedText } from "@/components/linked-text";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
+import { PostLinkCard } from "@/components/post-link-card";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import { deletePostDialogAtom } from "@/atoms/post-delete";
@@ -77,6 +78,11 @@ export function PostCard({
   // nothing left to like or reply to. Which stub renders still depends on
   // which one it is; only "is it gone" is shared.
   const isGone = post.removed || post.deleted;
+  // The one URL a post may preview (issue #260): the first the linkifier
+  // recognizes, normalized exactly as the inline anchor renders it. Computed
+  // once here so the card component mounts only when there is something to
+  // ask about.
+  const linkPreviewUrl = post.content ? firstLinkUrl(post.content) : null;
   // A post already gone has nothing left to delete, so the item is dropped
   // rather than offered as a no-op the server would refuse anyway.
   const canDelete = isOwnPost && !isGone;
@@ -317,6 +323,13 @@ export function PostCard({
                   <LinkedText text={post.content} />
                 </p>
               )}
+              {/* The card belongs to the first URL of the text (issue #260),
+                  so it renders directly beneath it — before the author's own
+                  images — and only when the linkifier found one to preview.
+                  Everything about resolution and refusal lives in
+                  `PostLinkCard`; for a URL with no card the post is exactly
+                  what it was before. */}
+              {post.content && linkPreviewUrl && <PostLinkCard url={linkPreviewUrl} />}
               <PostAttachmentGrid attachments={post.attachments} />
             </>
           )}

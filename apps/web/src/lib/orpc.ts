@@ -58,6 +58,9 @@ export type Post = PostListPage["items"][number];
 /** The `post.thread` payload: the focused post plus its ancestor chain. */
 export type Thread = Awaited<ReturnType<typeof client.post.thread>>;
 
+/** A resolved link preview card, as `post.linkCard` returns it. */
+export type LinkCard = NonNullable<Awaited<ReturnType<typeof client.post.linkCard>>["card"]>;
+
 /** One page of `user.followers`/`user.following`. */
 export type UserListPage = Awaited<ReturnType<typeof client.user.followers>>;
 /** A person as served in follower/following lists, with viewer-relative follow state. */

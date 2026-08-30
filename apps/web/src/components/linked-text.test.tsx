@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
-import { LinkedText } from "@/components/linked-text";
+import { firstLinkUrl, LinkedText } from "@/components/linked-text";
 import { insertMention, mentionAtCaret } from "@/lib/composer-mentions";
 
 import { renderWithProviders } from "@/test/render";
@@ -149,5 +149,24 @@ describe("LinkedText", () => {
 
     expect(screen.getByRole("article", { name: "Published content" })).toHaveTextContent(accepted);
     expect(screen.getByRole("link", { name: "@alice" })).toHaveAttribute("href", "/@alice");
+  });
+});
+
+describe("firstLinkUrl", () => {
+  it("returns the first URL's href, and only the first (issue #260)", () => {
+    expect(firstLinkUrl("see https://example.com/a then https://example.com/b")).toBe(
+      "https://example.com/a",
+    );
+  });
+
+  it("normalizes exactly as the rendered anchor does", () => {
+    // Trailing sentence punctuation stays out of the address; the parser
+    // percent-encodes and completes whatever the author typed.
+    expect(firstLinkUrl("(https://Example.com/path,)")).toBe("https://example.com/path");
+  });
+
+  it("returns null for text with no recognized URL", () => {
+    expect(firstLinkUrl("@alice javascript:alert(1) name@example.com")).toBeNull();
+    expect(firstLinkUrl("")).toBeNull();
   });
 });

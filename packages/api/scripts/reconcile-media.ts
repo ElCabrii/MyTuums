@@ -5,8 +5,10 @@
  * failed row write after the objects were stored, a swallowed delete error
  * (see packages/api/src/users.ts). This script is the reaper: it lists every
  * object under `avatars/`, `banners/`, and `posts/`, then deletes keys no
- * profile or post-attachment row references. This also reaps objects left
- * behind when a hard account delete cascades its post rows.
+ * profile, post-attachment or link-card row references. This also reaps
+ * objects left behind when a hard account delete cascades its post rows, and
+ * the previous lead image of a link card whose revalidation race lost the
+ * row's upsert.
  *
  * THE GUARD IS THE POINT. A wrong bucket here means deleting real users'
  * avatars, so the script refuses to run unless it is pointed at the bucket
@@ -24,7 +26,7 @@
  * This file is only the guard and the wiring.
  */
 import { closeDb, db } from "@my-tuums/db";
-import { postAttachment, user } from "@my-tuums/db/schema";
+import { linkCard, postAttachment, user } from "@my-tuums/db/schema";
 import { reconcileMedia } from "../src/reconcile-media.ts";
 import { withPostMediaLifecycleLock } from "../src/post-media-lock.ts";
 import { createDestructiveStorage } from "@my-tuums/api/storage";
@@ -77,6 +79,7 @@ const { listed, deleted } = await withPostMediaLifecycleLock(db, async (tx) => {
         .from(user),
     readPostAttachmentRows: () =>
       tx.select({ mediaPath: postAttachment.mediaPath }).from(postAttachment),
+    readLinkCardRows: () => tx.select({ imageMediaPath: linkCard.imageMediaPath }).from(linkCard),
   });
 });
 

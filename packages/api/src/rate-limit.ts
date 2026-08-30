@@ -244,4 +244,14 @@ export const RATE_LIMITS = {
    * cost.
    */
   moderate: { name: "moderate", limit: 60, windowMs: MINUTE },
+  /**
+   * Link preview unfurls (issue #260). The one policy that spends an
+   * *outbound* request per call — a fetch of an author-chosen URL, bounded in
+   * size and time (see LINK_CARD_* in constants) but still traffic we
+   * initiate. 60 covers a first feed load where every post carries a distinct
+   * never-seen URL; repeat views are served from the `link_card` cache and
+   * never reach this budget. Its own namespace so burning it cannot lock a
+   * caller out of reading feeds.
+   */
+  linkCard: { name: "linkCard", limit: 60, windowMs: MINUTE },
 } as const satisfies Record<string, RateLimitPolicy>;

@@ -480,6 +480,51 @@ export const appeal = pgTable(
   ],
 );
 
+/**
+ * A resolved link preview card, keyed by the normalized URL it describes
+ * (issue #260). One row per URL: the card is a property of the target page,
+ * not of any post, so every post carrying the same URL shares it.
+ *
+ * `title` is the card's existence proof. A row with `title` set is a fetched
+ * card; a row with `title` null is a *negative* cache entry — "this URL was
+ * fetched within the revalidation window and produced no card" (dead target,
+ * refused address, missing Open Graph payload). Without that negative half,
+ * a post whose URL has nothing to unfurl would trigger an outbound fetch on
+ * every fresh view of every post carrying it, bounded only by the rate
+ * limiter.
+ *
+ * The row caches a *snapshot*, deliberately: a post's stored content is never
+ * rewritten, and neither is the card until the revalidation window expires
+ * (`fetchedAt` + window ⇒ refetch on the next request). The lead image, when
+ * one was provided and stored, lives in the media bucket under
+ * `link-cards/<uuid>.<ext>` and is served through `/media/` like every other
+ * object — never hot-linked from the target.
+ */
+export const linkCard = pgTable(
+  "link_card",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // The normalized absolute http(s) URL (scheme + host + path + query, the
+    // fragment dropped — it never changes what the server returns). The
+    // unique index below is the "fetched once per window" rule's anchor.
+    url: text("url").notNull(),
+    domain: text("domain"),
+    title: text("title"),
+    description: text("description"),
+    imageMediaPath: text("image_media_path"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("link_card_url_key").on(t.url),
+    // A negative entry is exactly "no title"; a positive one always carries
+    // both a domain and a title. Checked here so no writer can drift.
+    check(
+      "link_card_title",
+      sql`(${t.title} is null and ${t.domain} is null) or (${t.title} is not null and ${t.domain} is not null)`,
+    ),
+  ],
+);
+
 /** Drizzle relations for `post` — the joins `with` queries can reach: author, likes, parent, and replies. */
 export const postRelations = relations(post, ({ one, many }) => ({
   author: one(user, { fields: [post.authorId], references: [user.id] }),

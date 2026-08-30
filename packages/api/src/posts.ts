@@ -20,6 +20,8 @@ import {
   THREAD_REPLY_BRANCH_DESCENDANT_BUDGET,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
+import { LINK_CARD_URL_MAX_LENGTH } from "./constants.js";
+import { resolveLinkCard } from "./link-card.js";
 import { keysetPage } from "./pagination.js";
 import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
@@ -1022,6 +1024,31 @@ export const postRouter = {
         // off the rows we already have rather than costing another query.
         truncated: ancestors[0]?.parentId != null,
       };
+    }),
+
+  /**
+   * Resolves the link preview card for one absolute http(s) URL — the first
+   * URL of a post, as recognized by the client's own linkifier (issue #260).
+   * Requires a session; no anonymous caller can spend an outbound fetch.
+   *
+   * The fetch happens here, server-side, behind the SSRF guard and the
+   * size/time caps in `./link-card-http.ts`, at most once per URL per
+   * revalidation window. Every failure mode — refused address, dead target,
+   * timeout, no Open Graph payload — answers `{ card: null }` so the post
+   * degrades to the plain link it always rendered.
+   */
+  linkCard: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.linkCard))
+    .input(
+      z.object({
+        // The same scheme rule the client's linkifier applies, stated here so
+        // a hand-crafted caller cannot ask the server to dial anything the
+        // browser would not have linked.
+        url: z.url({ protocol: /^https?$/ }).max(LINK_CARD_URL_MAX_LENGTH),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      return { card: await resolveLinkCard(context, input.url) };
     }),
 
   /**

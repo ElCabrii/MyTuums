@@ -114,6 +114,13 @@ app's build from the same origin.
   own scrollbar colors or dimensions.
 - **Feed and list parameterisation lives in atoms.** `PostFeed` takes a
   `feedAtom` prop and never knows its own scope or author.
+- **A link preview card belongs to its URL, not to the viewer (issue #260).**
+  `PostCard` asks `firstLinkUrl` (exported by `linked-text.tsx`, the same
+  scanner that renders the inline links) for the first URL only, and
+  `linkCardAtom` (`src/atoms/link-card.ts`) queries `post.linkCard` per URL —
+  deliberately absent from the sign-out sweep, because no field in a card is
+  viewer-relative. `PostLinkCard` renders nothing for a pending, failed or
+  card-less URL: the plain inline link is the whole fallback.
 - **Permalink reply grouping reads the continuation embedded in each direct
   `post.list({ parentId })` page.** `ThreadReplyFeed` renders the flat direct
   page and its connected branch without recursive indentation;

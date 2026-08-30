@@ -208,6 +208,22 @@ over HTTP and imports only its browser-safe subpaths.
   upload-before-row window without a pending schema state. The reverse order
   still treats a profile upload landing between the two steps as an orphan
   (issue #52; pinned by `src/reconcile-media.test.ts`).
+- **Link preview fetching lives in `src/link-card-http.ts` (the wire) and
+  `src/link-card.ts` (the cache), and the SSRF guard is not optional
+  (issue #260).** Every outbound fetch goes through `guardedLinkFetch`: the
+  scheme must be http(s), the hostname is resolved via the Context-threaded
+  `linkTransport` and every address must be global unicast, redirects are
+  followed manually with each hop re-checked, and size, time and content-type
+  caps bound the response. The guard is unit-pinned with a fake transport and
+  integration-pinned against a real loopback listener. A URL resolves at most
+  once per revalidation window into the `link_card` table — including the
+  "no card" answer, which is cached as a negative row so a dead URL is not
+  refetched on every view. Every failure degrades to `{ card: null }`; a
+  failing revalidation keeps serving the stale card. A lead image is fetched
+  through the same guard, sniffed like an upload, stored under `link-cards/`
+  inside the post-media lifecycle lock, and authorized by
+  `canViewLinkCardMedia` (any signed-in viewer — the session the `/media`
+  route already demands).
 - **Every moderation effect reads its guard `FOR UPDATE`, inside its own
   transaction** (`removePostEffect`, `suspendUserEffect`, `banUserEffect`,
   `setRoleEffect`, `restorePostEffect`, `unbanEffect`, `restoreRoleEffect`).

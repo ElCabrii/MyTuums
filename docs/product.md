@@ -51,8 +51,20 @@ both by the server's page gate and by the client.
   not-found state. Absolute `http` and `https` URLs become external links that
   open in a new tab, keeping the address as it was typed and leaving the
   sentence punctuation around it outside the link. Every other scheme —
-  `javascript:`, `data:`, `ftp:` — stays inert text, and a recognized URL never
-  gets a preview, unfurl or link card.
+  `javascript:`, `data:`, `ftp:` — stays inert text.
+- The first URL in a post or reply may render a link preview card beneath the
+  text: domain, title, description and — when the target provides one — a lead
+  image (issue #260). The second and later URLs stay plain links. Fetching is
+  server-side only, against the same http(s) rule the linkifier applies, with
+  private/loopback/link-local addresses refused, redirects re-checked at every
+  hop, and size and time caps on the fetch. A URL is fetched at most once per
+  revalidation window and cached by URL, so every post carrying it shares one
+  card; a URL with no Open Graph payload is cached as "no card" the same way.
+  The post's stored text is never modified. A fetched lead image is stored in
+  the media bucket and served from `/media/` like any other object, never
+  hot-linked from the target. Every failure mode — a dead or refused target, a
+  timeout, a missing payload — leaves the post with the plain link it always
+  had.
 - A reply is a post with a parent. Threads show the focused post, up to 20
   ancestors of context, and keyset-paginated direct replies. Beneath each
   direct reply, the thread groups the deterministic descendant branch first
@@ -113,6 +125,10 @@ app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
   never leaves a profile pointing at missing media.
 - Images are stored as relative `/media/<key>` paths and served as a redirect
   to a short-lived presigned URL. Viewing one requires a session.
+- A link preview's lead image lives under `link-cards/<uuid>.<ext>` and is
+  public to every signed-in viewer: it is web content this app mirrored into
+  its own bucket, owned by no user, and validated from its bytes before
+  storage exactly like an upload.
 
 ## Locale and theme
 

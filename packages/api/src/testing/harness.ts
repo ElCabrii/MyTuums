@@ -16,6 +16,7 @@ import { testHelpers } from "@my-tuums/auth/testing";
 import { post, user } from "@my-tuums/db/schema";
 import { LEGAL_VERSION } from "@my-tuums/auth/rules";
 import type { Context, EmailSender } from "../context.js";
+import { createLinkFetchTransport } from "../link-card-http.js";
 import { createRateLimiter, type RateLimiter } from "../rate-limit.js";
 import type { UserRole } from "../roles.js";
 import type { DestructiveStorage, Storage } from "../storage.js";
@@ -84,6 +85,13 @@ const forwardingRateLimiter: RateLimiter = {
     return currentTestRateLimiter.size;
   },
 };
+
+/**
+ * The real link-card transport, shared by every harness-built context: only
+ * `link-card.int.test.ts` overrides it (with a fake network), and that suite
+ * builds its contexts by hand for exactly that reason.
+ */
+const defaultTestLinkTransport = createLinkFetchTransport();
 
 /** Recording email adapter shared by integration-test contexts. */
 export const testEmailSender: EmailSender = {
@@ -239,6 +247,7 @@ export async function createTestUser(overrides?: {
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
+      linkTransport: defaultTestLinkTransport,
       emailSender: testEmailSender,
     },
   };
@@ -313,6 +322,7 @@ export async function createPasswordTestUser(): Promise<
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
+      linkTransport: defaultTestLinkTransport,
       emailSender: testEmailSender,
     },
   };
@@ -325,6 +335,7 @@ export const anonContext: Context = {
   requestId: "test-request-id",
   rateLimiter: forwardingRateLimiter,
   storage: testStorage,
+  linkTransport: defaultTestLinkTransport,
   emailSender: testEmailSender,
 };
 
@@ -346,6 +357,7 @@ export function contextFor(
     requestId: "test-request-id",
     rateLimiter,
     storage,
+    linkTransport: defaultTestLinkTransport,
     emailSender,
   };
 }
@@ -361,7 +373,7 @@ export function contextFor(
 export async function truncateAll(): Promise<void> {
   assertTestDatabase();
   await db.execute(
-    sql`TRUNCATE TABLE "post_like", "follow", "report", "user_block", "appeal", "moderation_action", "post", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE "post_like", "follow", "report", "user_block", "appeal", "moderation_action", "post", "link_card", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
   );
 }
 
@@ -444,6 +456,7 @@ export async function freshSessionFor(testUser: TestUser): Promise<TestUser> {
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
+      linkTransport: defaultTestLinkTransport,
       emailSender: testEmailSender,
     },
   };

@@ -280,3 +280,19 @@ export function LinkedText({ text }: { text: string }) {
     <Fragment key={`${segment.kind}-${segment.start}`}>{renderSegment(segment)}</Fragment>
   ));
 }
+
+/**
+ * The normalized `href` of the first URL this text links, or `null` — the one
+ * URL a post may render a link preview card for (issue #260).
+ *
+ * Same scanner, same normalization, same scheme rule as {@link LinkedText}:
+ * the card can only ever describe a URL the renderer itself would have
+ * linked, so a `javascript:` or `data:` address is as inert here as it is
+ * there, and the second and later URLs of a post are simply not asked about.
+ */
+export function firstLinkUrl(text: string): string | null {
+  for (const segment of linkedSegments(text)) {
+    if (segment.kind === "url") return segment.href;
+  }
+  return null;
+}
