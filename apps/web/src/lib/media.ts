@@ -19,6 +19,7 @@ export {
   clampCrop,
   DEFAULT_CROP,
   ImageError,
+  minCropScale,
   type Crop,
   type CropRect,
   type DisplayLayout,
@@ -149,9 +150,10 @@ function readFirstBytes(file: File, max: number): Promise<Uint8Array | null> {
  *
  * WebP because it is in `ALLOWED_IMAGE_TYPES`, is markedly smaller than PNG for
  * photographs, and is supported by every browser this app targets. Banners are
- * always encoded at 3:1 (see `calculateDisplayLayout`), and the crop editor and
- * Settings preview use that same aspect. The profile preserves the composition
- * with `object-contain` when its desktop frame widens to 4:1.
+ * always encoded 3:1 (see `calculateDisplayLayout`); how that composition is
+ * framed on a profile — and how much of it survives at the widest and
+ * narrowest viewports — is owned by `lib/banner-frame.ts`, which the crop
+ * editor's safe-area overlay and the profile banner both read.
  *
  * With a `crop` — what the editor in
  * `components/settings/image-crop-dialog.tsx` produces — the chosen region
@@ -193,16 +195,32 @@ export async function createDisplayVariantImpl(
     if (!context) throw new ImageError("decode");
     let blob: Blob;
     while (true) {
+      // Assigning canvas dimensions clears the canvas, so the letterbox fill
+      // and the draw precede every encode attempt — including the retries
+      // below. The fill matters only for a banner zoomed out past its cover
+      // crop, whose window overhangs the bitmap; the overhang then stays the
+      // black the editor previewed instead of the transparency a cleared
+      // canvas would encode (and avatars cannot letterbox — their zoom floor
+      // is the cover crop).
+      if (crop && kind === "banner") {
+        context.fillStyle = "#000";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      // The retry loop below halves the canvas; the destination rectangle
+      // scales with it so a retried encode is the same composition, smaller —
+      // not the original composition clipped to a corner.
+      const shrinkX = canvas.width / layout.width;
+      const shrinkY = canvas.height / layout.height;
       context.drawImage(
         bitmap,
         layout.sourceX,
         layout.sourceY,
         layout.sourceWidth,
         layout.sourceHeight,
-        0,
-        0,
-        canvas.width,
-        canvas.height,
+        layout.destinationX * shrinkX,
+        layout.destinationY * shrinkY,
+        layout.destinationWidth * shrinkX,
+        layout.destinationHeight * shrinkY,
       );
 
       blob = await toBlob(
@@ -253,10 +271,12 @@ export async function createDisplayVariantImpl(
  * editor and the rendered result on the same composition. The untouched
  * original remains available for a future refit.
  *
- * Banners are always encoded at 3:1. The crop editor and Settings preview use
- * that same aspect; the profile keeps the full encoded composition with
- * `object-contain` inside its wider desktop frame, without a second hidden
- * crop.
+ * Banners are always 3:1. The crop window may be zoomed out past the cover
+ * crop until the whole source fits — the overhang encodes as black letterbox
+ * bars, exactly what the editor previewed. The profile banner then displays
+ * that one composition with its height clamped (see `lib/banner-frame.ts`), so
+ * extreme viewports trim edges of it rather than re-choosing the crop; the
+ * editor's safe-area overlay marks what every viewport keeps.
  *
  * The math itself lives in `lib/media-layout.ts` — re-exported above — because
  * `lib/gif-variant-worker.ts` needs the identical `calculateDisplayLayout` a

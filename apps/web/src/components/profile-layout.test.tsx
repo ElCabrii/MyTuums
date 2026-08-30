@@ -305,7 +305,7 @@ describe("ProfileLayout bio", () => {
 });
 
 describe("ProfileLayout banner", () => {
-  it("preserves the encoded 3:1 image inside a shorter desktop frame", async () => {
+  it("renders the encoded 3:1 composition in a height-clamped frame", async () => {
     const profile = makeProfile({
       name: "Banner Owner",
       username: "banner-owner",
@@ -323,18 +323,22 @@ describe("ProfileLayout banner", () => {
     const banner = screen.getByRole("img", {
       name: m.profile_banner_alt({ name: profile.name }),
     });
-    expect(banner.parentElement).toHaveClass(
-      "aspect-[3/1]",
-      "md:aspect-[4/1]",
-      "mx-auto",
-      "max-w-[1500px]",
-      "border-x",
-      "border-border/60",
-      "bg-muted/40",
-    );
-    expect(banner).toHaveClass("h-full", "w-full", "object-contain");
-    expect(banner).not.toHaveClass("object-cover");
-    expect(banner).toHaveAttribute("src", profile.bannerImage);
+    // The frame is the canonical 3:1 with its height clamped by the constants
+    // in lib/banner-frame.ts: exact 3:1 wherever the measure holds, a 150px
+    // band on narrow phones, never taller than 320px on wide monitors. The
+    // clamps are inline styles from those constants so this frame and the
+    // crop editor's safe area cannot drift apart.
+    expect(banner.parentElement).toHaveStyle({
+      aspectRatio: "3",
+      maxWidth: "1500px",
+      minHeight: "150px",
+      maxHeight: "320px",
+    });
+    expect(banner.parentElement).toHaveClass("mx-auto");
+    // Each class needs its own negation: jest-dom's toHaveClass(a, b) requires
+    // BOTH, so the negated form would pass if only one of them reappeared.
+    expect(banner.parentElement).not.toHaveClass("h-48");
+    expect(banner.parentElement).not.toHaveClass("sm:h-64");
   });
 });
 

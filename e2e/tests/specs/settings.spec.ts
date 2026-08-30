@@ -31,22 +31,22 @@ function storageBucketConfigured(): boolean {
 }
 
 /**
- * The uploaded object keeps the editor's canonical 3:1 composition. Its
- * immediate frame stays 3:1 on compact layouts, then becomes 4:1 on desktop
- * to reduce the profile header's height; `object-contain` turns the additional
- * width into deliberate side gutters instead of a hidden crop or stretch.
+ * The uploaded object must be the canonical 3:1, and its display frame must be
+ * the 3:1 composition with the height clamps from `apps/web/src/lib/banner-frame.ts`.
  *
- * Aspect and bounded height are separate properties, so the ultrawide case
- * also pins the absolute 375px height reached by the 1500px frame cap.
+ * The natural-image ratio is pinned exactly (3, 5): the encoded variant is
+ * always 3:1. The frame is *clamped*, not 3:1 at every width — exact 3:1 only
+ * where neither clamp binds (roughly 450–960px wide); a narrow phone holds a
+ * 150px band (X's mobile-header height) and trims the image's sides, and past
+ * the 1500px measure the frame stops at 320px tall and trims top and bottom.
+ *
+ * The clamps are pinned by absolute sizes, and their *direction* by
+ * inequality, never by a pinned frame ratio at a clamped width: a classic
+ * scrollbar takes ~15px off the viewport, so the frame's exact ratio there
+ * (2.5 vs 2.6 at a 390px viewport) depends on browser chrome the spec must
+ * not depend on. Heights and the 1500px measure are chrome-independent.
  */
-async function expectCanonicalBannerGeometry(
-  banner: Locator,
-  {
-    frameAspect = 3,
-    expectedHeight,
-    objectFit,
-  }: { frameAspect?: number; expectedHeight?: number; objectFit?: "contain" } = {},
-) {
+async function bannerFrameBounds(banner: Locator): Promise<{ width: number; height: number }> {
   await expect(banner).toBeVisible();
   await expect
     .poll(() =>
@@ -56,27 +56,12 @@ async function expectCanonicalBannerGeometry(
     )
     .toBeCloseTo(3, 5);
 
-  const frameBounds = await banner.evaluate((image) => {
+  return banner.evaluate((image) => {
     const frame = image.parentElement;
     if (!frame) throw new Error("banner image has no display frame");
-    return frame.getBoundingClientRect();
+    const bounds = frame.getBoundingClientRect();
+    return { width: bounds.width, height: bounds.height };
   });
-  // CSS layout quantizes dimensions to fractional device pixels. Two decimal
-  // places allow that subpixel noise while still rejecting either breakpoint's
-  // aspect being applied at the wrong width.
-  expect(frameBounds.width / frameBounds.height).toBeCloseTo(frameAspect, 2);
-
-  if (objectFit !== undefined) {
-    await expect
-      .poll(() => banner.evaluate((image) => getComputedStyle(image).objectFit))
-      .toBe(objectFit);
-  }
-
-  // An aspect says nothing about the frame's absolute size, hence this second
-  // assertion where the desktop width cap binds.
-  if (expectedHeight !== undefined) {
-    expect(frameBounds.height).toBeCloseTo(expectedHeight, 1);
-  }
 }
 
 /** Signs up a fresh account through the UI and lands on its profile. */
@@ -213,27 +198,38 @@ test.describe("images", () => {
     // so a future regression reports the reason rather than a bare timeout.
     await expect(page.getByRole("alert")).toHaveCount(0);
 
-    await expectCanonicalBannerGeometry(page.getByRole("img", { name: "Banner" }));
+    // The Settings preview is the plain canonical composition: w-28 at exactly
+    // 3:1, no clamps.
+    const preview = await bannerFrameBounds(page.getByRole("img", { name: "Banner" }));
+    expect(preview.width / preview.height).toBeCloseTo(3, 2);
 
     await page.goto(`/@${account.username}`);
     const profileBanner = page.getByRole("img", { name: /banner/i });
     await expect(profileBanner).toHaveAttribute("src", /^\/media\/banners\//);
 
+    // The clamped profile frame, one viewport per regime (see the helper's
+    // comment for why the clamped widths assert sizes and inequalities).
     await page.setViewportSize({ width: 390, height: 900 });
-    await expectCanonicalBannerGeometry(profileBanner, { objectFit: "contain" });
+    const phone = await bannerFrameBounds(profileBanner);
+    expect(phone.height).toBeCloseTo(150, 1); // the phone band, not a 125px 3:1 sliver
+    expect(phone.width / phone.height).toBeLessThan(3);
+
+    await page.setViewportSize({ width: 768, height: 900 });
+    const tablet = await bannerFrameBounds(profileBanner);
+    expect(tablet.width / tablet.height).toBeCloseTo(3, 2); // unclamped: the whole composition
 
     await page.setViewportSize({ width: 1440, height: 900 });
-    await expectCanonicalBannerGeometry(profileBanner, { frameAspect: 4, objectFit: "contain" });
+    const laptop = await bannerFrameBounds(profileBanner);
+    expect(laptop.height).toBeCloseTo(320, 1); // the height cap, not a 480px slab
+    expect(laptop.width / laptop.height).toBeGreaterThan(3);
 
-    // 2560 is wide enough that the 1500px measure binds, making the desktop
-    // frame exactly 1500x375. Aspect alone cannot catch an unbounded frame, so
-    // the absolute height is what pins the cap here.
+    // 2560 is wide enough that the 1500px measure binds too. Pinning width AND
+    // height is what catches the measure or a clamp regressing into the old
+    // unbounded slab (issue #240); a loose ratio alone cannot.
     await page.setViewportSize({ width: 2560, height: 900 });
-    await expectCanonicalBannerGeometry(profileBanner, {
-      frameAspect: 4,
-      expectedHeight: 375,
-      objectFit: "contain",
-    });
+    const wide = await bannerFrameBounds(profileBanner);
+    expect(wide.width).toBeCloseTo(1500, 1);
+    expect(wide.height).toBeCloseTo(320, 1);
   });
 });
 

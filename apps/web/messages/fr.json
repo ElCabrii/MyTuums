@@ -236,7 +236,7 @@
   "settings_image_remove_label": "Supprimer : {label}",
   "settings_image_crop_title": "Ajuster : {label}",
   "settings_image_crop_hint": "Faites glisser pour repositionner, faites défiler pour zoomer.",
-  "settings_banner_crop_hint": "Faites glisser pour repositionner, faites défiler pour zoomer. Les profils conservent toute cette composition 3:1 ; des marges latérales s’affichent sur ordinateur.",
+  "settings_banner_crop_safe_area": "Gardez le contenu important dans la zone délimitée : les écrans étroits peuvent rogner les côtés, les écrans larges le haut et le bas.",
   "settings_image_crop_apply": "Appliquer",
   "avatar_upgrade_title": "Améliorez votre photo de profil",
   "avatar_upgrade_body": "Cette photo a été envoyée à une résolution inférieure à celle que MyTuums prend désormais en charge. Recadrez-la à partir de l'original pour corriger le flou.",
