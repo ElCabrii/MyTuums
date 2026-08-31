@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { orpc, type Post, type PostListPage, type SearchPostsPage, type Thread } from "@/lib/orpc";
+import { postListQueryOptions } from "@/lib/query-definitions";
 import {
   readCachedPost,
+  removePostFromBookmarksFeed,
   restorePosts,
   snapshotPosts,
   updatePostEverywhere,
@@ -277,7 +279,7 @@ describe("post-cache", () => {
         thread: queryClient.getQueryData(threadKey),
       };
 
-      const snapshot = snapshotPosts(queryClient, "round-trip-1");
+      const snapshot = snapshotPosts(queryClient, "round-trip-1", "like");
       updatePostEverywhere(queryClient, "round-trip-1", (p) => ({
         ...p,
         likeCount: p.likeCount + 1,
@@ -302,7 +304,7 @@ describe("post-cache", () => {
       const searchKey = orpc.search.posts.key({ input: { q: "hello", limit: 20 } });
       queryClient.setQueryData(searchKey, searchPage([post]));
 
-      const snapshot = snapshotPosts(queryClient, "round-trip-search-1");
+      const snapshot = snapshotPosts(queryClient, "round-trip-search-1", "like");
       updatePostEverywhere(queryClient, "round-trip-search-1", (p) => ({
         ...p,
         likeCount: p.likeCount + 1,
@@ -326,7 +328,7 @@ describe("post-cache", () => {
     it("returns no snapshot for a post that isn't cached anywhere", () => {
       const queryClient = new QueryClient();
 
-      expect(snapshotPosts(queryClient, "nothing-cached")).toBeUndefined();
+      expect(snapshotPosts(queryClient, "nothing-cached", "like")).toBeUndefined();
       expect(() => {
         updatePostEverywhere(queryClient, "nothing-cached", (p) => p);
         readCachedPost(queryClient, "nothing-cached");
@@ -345,7 +347,7 @@ describe("post-cache", () => {
       queryClient.setQueryData(feedKey, feedPage([postA, postB]));
 
       // Like A: snapshot, then optimistic patch.
-      const snapshotA = snapshotPosts(queryClient, "post-a");
+      const snapshotA = snapshotPosts(queryClient, "post-a", "like");
       updatePostEverywhere(queryClient, "post-a", (p) => ({
         ...p,
         likeCount: p.likeCount + 1,
@@ -369,6 +371,158 @@ describe("post-cache", () => {
       expect(items?.find((p) => p.id === "post-a")?.viewerHasLiked).toBe(false);
       expect(items?.find((p) => p.id === "post-b")?.likeCount).toBe(42);
       expect(items?.find((p) => p.id === "post-b")?.viewerHasLiked).toBe(true);
+    });
+
+    // The within-row twin of the issue #53 case: like and bookmark mutate the
+    // same cached row under different mutation scopes (`post-like:{id}` vs
+    // `post-bookmark:{id}`), so like's snapshot can be taken, bookmark's
+    // optimistic flip can land, and only then can like's request fail. A
+    // whole-ROW rollback would silently revert the bookmark flip until a
+    // refetch; the snapshot's scope keeps the rollback field-scoped.
+    it("a failed like's rollback leaves a bookmark flip on the same post's row standing", () => {
+      const queryClient = new QueryClient();
+      const post = makePost({
+        id: "interleaved-1",
+        likeCount: 5,
+        viewerHasLiked: false,
+        viewerHasBookmarked: false,
+      });
+      const feedKey = orpc.post.list.key({ input: { limit: 20 } });
+      queryClient.setQueryData(feedKey, feedPage([post]));
+
+      // Like: snapshot (bookmark state happens to be false), then patch.
+      const likeSnapshot = snapshotPosts(queryClient, "interleaved-1", "like");
+      updatePostEverywhere(queryClient, "interleaved-1", (p) => ({
+        ...p,
+        viewerHasLiked: true,
+        likeCount: p.likeCount + 1,
+      }));
+
+      // Bookmark flips the same row while the like is in flight.
+      updatePostEverywhere(queryClient, "interleaved-1", (p) => ({
+        ...p,
+        viewerHasBookmarked: true,
+      }));
+
+      // The like fails: its rollback must undo the like and nothing else.
+      restorePosts(queryClient, likeSnapshot!);
+
+      const rolled =
+        queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items[0];
+      expect(rolled?.viewerHasLiked).toBe(false);
+      expect(rolled?.likeCount).toBe(5);
+      expect(rolled?.viewerHasBookmarked).toBe(true);
+    });
+
+    // …and the mirror image: a failed bookmark's rollback leaves a concurrent
+    // like's optimistic state alone.
+    it("a failed bookmark's rollback leaves a like's optimistic state on the same row standing", () => {
+      const queryClient = new QueryClient();
+      const post = makePost({
+        id: "interleaved-2",
+        likeCount: 5,
+        viewerHasLiked: false,
+        viewerHasBookmarked: false,
+      });
+      const feedKey = orpc.post.list.key({ input: { limit: 20 } });
+      queryClient.setQueryData(feedKey, feedPage([post]));
+
+      const bookmarkSnapshot = snapshotPosts(queryClient, "interleaved-2", "bookmark");
+      updatePostEverywhere(queryClient, "interleaved-2", (p) => ({
+        ...p,
+        viewerHasBookmarked: true,
+      }));
+
+      updatePostEverywhere(queryClient, "interleaved-2", (p) => ({
+        ...p,
+        viewerHasLiked: true,
+        likeCount: p.likeCount + 1,
+      }));
+
+      restorePosts(queryClient, bookmarkSnapshot!);
+
+      const rolled =
+        queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items[0];
+      expect(rolled?.viewerHasBookmarked).toBe(false);
+      expect(rolled?.viewerHasLiked).toBe(true);
+      expect(rolled?.likeCount).toBe(6);
+    });
+  });
+
+  describe("removePostFromBookmarksFeed", () => {
+    // The bookmarks page's cache is one `post.list` entry narrowed by the
+    // `feed: "bookmarks"` input — the same prefix every other feed shares.
+    // The removal must hit that entry alone: an un-bookmark is not a
+    // deletion, and the post keeps rendering everywhere else it is cached.
+    it("drops the row from the bookmarks feed's pages only, leaving every other cache untouched", () => {
+      const queryClient = new QueryClient();
+      const target = makePost({ id: "saved-1", viewerHasBookmarked: true });
+      const neighbour = makePost({ id: "saved-2", viewerHasBookmarked: true });
+      // The bookmarks entry is seeded through the production query-options
+      // helper: oRPC stamps infinite queries with a `type: "infinite"`
+      // discriminator the bare `.key()` form lacks, and the removal matches
+      // exactly the key the bookmarks page's atom registers.
+      const bookmarksKey = postListQueryOptions({ feed: "bookmarks" }).queryKey;
+      const homeKey = orpc.post.list.key({ input: { limit: 20 } });
+      const authorKey = orpc.post.list.key({
+        input: { limit: 20, authorId: "author-1", includeReplies: true },
+      });
+      const followingKey = orpc.post.list.key({ input: { limit: 20, feed: "following" } });
+      const searchKey = orpc.search.posts.key({ input: { q: "hello", limit: 20 } });
+
+      queryClient.setQueryData(bookmarksKey, {
+        pages: [{ items: [target, neighbour], nextCursor: null }],
+        pageParams: [undefined],
+      });
+      queryClient.setQueryData(homeKey, feedPage([target]));
+      queryClient.setQueryData(authorKey, feedPage([target]));
+      queryClient.setQueryData(followingKey, feedPage([target]));
+      queryClient.setQueryData(searchKey, searchPage([target]));
+
+      removePostFromBookmarksFeed(queryClient, "saved-1");
+
+      const bookmarks = queryClient.getQueryData<InfiniteData<PostListPage>>(bookmarksKey);
+      expect(bookmarks?.pages[0]?.items.map((p) => p.id)).toEqual(["saved-2"]);
+
+      // Every other home for the row keeps it.
+      expect(
+        queryClient.getQueryData<InfiniteData<PostListPage>>(homeKey)?.pages[0]?.items[0]?.id,
+      ).toBe("saved-1");
+      expect(
+        queryClient.getQueryData<InfiniteData<PostListPage>>(authorKey)?.pages[0]?.items[0]?.id,
+      ).toBe("saved-1");
+      expect(
+        queryClient.getQueryData<InfiniteData<PostListPage>>(followingKey)?.pages[0]?.items[0]?.id,
+      ).toBe("saved-1");
+      expect(
+        queryClient.getQueryData<InfiniteData<SearchPostsPage>>(searchKey)?.pages[0]?.items[0]?.id,
+      ).toBe("saved-1");
+    });
+
+    // Row removal is pagination-safe because `getNextPageParam` reads the
+    // stored per-page `nextCursor`, not anything derived from the rows the
+    // client holds. Removing an item must leave every page's cursor exactly
+    // where the server put it.
+    it("keeps each page's nextCursor, so a later Load more cannot skip or repeat", () => {
+      const queryClient = new QueryClient();
+      const first = makePost({ id: "page-1-post", viewerHasBookmarked: true });
+      const second = makePost({ id: "page-2-post", viewerHasBookmarked: true });
+      const bookmarksKey = postListQueryOptions({ feed: "bookmarks" }).queryKey;
+
+      queryClient.setQueryData(bookmarksKey, {
+        pages: [
+          { items: [first], nextCursor: "cursor-1" },
+          { items: [second], nextCursor: null },
+        ],
+        pageParams: [undefined, "cursor-1"],
+      });
+
+      removePostFromBookmarksFeed(queryClient, "page-1-post");
+
+      const data = queryClient.getQueryData<InfiniteData<PostListPage>>(bookmarksKey);
+      expect(data?.pages.map((page) => page.nextCursor)).toEqual(["cursor-1", null]);
+      expect(data?.pageParams).toEqual([undefined, "cursor-1"]);
+      expect(data?.pages[1]?.items.map((p) => p.id)).toEqual(["page-2-post"]);
     });
   });
 });

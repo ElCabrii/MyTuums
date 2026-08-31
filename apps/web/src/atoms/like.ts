@@ -9,6 +9,7 @@ import {
   restorePosts,
   updatePostEverywhere,
   type PostSnapshot,
+  type PostSnapshotScope,
 } from "@/lib/post-cache";
 
 /**
@@ -42,6 +43,9 @@ interface LikeResult {
 interface LikeVariables {
   postId: string;
 }
+
+/** The like family's slice of the cached post row — what its rollback may touch. */
+const SNAPSHOT_SCOPE: PostSnapshotScope = "like";
 
 /**
  * Rollback rides on `onMutate` context and a MUTATION-LEVEL `onError`, not on
@@ -101,8 +105,11 @@ function toggleMutationAtom(postId: string, direction: "like" | "unlike") {
         // land between them to poison the rollback. The rollback is scoped to
         // this post (issue #53): likes on two different posts are genuinely
         // concurrent, so it must not replay state another post's mutation — or
-        // confirmation — has since written into the same entries.
-        const snapshot = beginPostPatch(queryClient, postId, (post) => {
+        // confirmation — has since written into the same entries. It is scoped
+        // to the like's own FIELDS for the same reason: a bookmark click on
+        // the same post is concurrent too (different scope id), and its
+        // optimistic flip must survive this like's failure.
+        const snapshot = beginPostPatch(queryClient, postId, SNAPSHOT_SCOPE, (post) => {
           if (post.viewerHasLiked === liked) return post;
           const likeDelta = liked ? 1 : -1;
           return { ...post, viewerHasLiked: liked, likeCount: post.likeCount + likeDelta };

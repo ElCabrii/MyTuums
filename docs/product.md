@@ -78,7 +78,10 @@ both by the server's page gate and by the client.
   saved posts strictly by when they were saved, newest first, keyset-paginated;
   there are no notes, folders or orderings. Saving your own posts is allowed.
   A post deleted by its author drops off the page, a moderator-removed one
-  stays as its stub, and unbookmarking a deleted post is not an error.
+  stays as its stub, and unbookmarking a deleted post is not an error. Neither
+  is unbookmarking a post whose author has since blocked the saver or been
+  banned: the row is the saver's own, so a saved post can always be removed
+  even once it no longer renders.
 - Follows are the same shape: `follow` / `unfollow`, with follower and
   following lists.
 - Feeds come in two scopes — everyone, and the people you follow — and are

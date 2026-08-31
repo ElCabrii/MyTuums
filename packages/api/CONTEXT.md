@@ -134,6 +134,11 @@ over HTTP and imports only its browser-safe subpaths.
   `(created_at, post_id)`, mirrored by `post_bookmark_user_created_idx`), so
   it shares the projection, the feed rules — author-deleted posts omitted,
   removals stubbed, visibility filtered — and the web app's optimistic sweeps.
+  `unbookmark` deliberately carries no target visibility check, unlike
+  `bookmark`: the row it deletes is the caller's own, its response is the same
+  for a missing and an invisible post, and the page's visibility filter hides
+  exactly the saves that would otherwise be stranded — unremovable from the
+  page that no longer renders them.
 - **Relationship writes for a pair are serialized by one advisory lock.**
   "A blocked pair has no follow edge" spans `follow` and `user_block`, so no
   database constraint can hold it. `follow`, `block` and `unblock` all take

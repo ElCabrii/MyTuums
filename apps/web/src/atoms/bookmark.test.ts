@@ -21,6 +21,7 @@ const fakeClient = {
 installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import { orpc, type Post, type PostListPage } from "@/lib/orpc";
+import { postListQueryOptions } from "@/lib/query-definitions";
 import { readCachedPost } from "@/lib/post-cache";
 import { clearBookmarkFamilies, toggleBookmarkAtomFamily } from "@/atoms/bookmark";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
@@ -131,6 +132,79 @@ describe("toggleBookmarkAtomFamily", () => {
 
     store.set(toggleBookmarkAtomFamily("post-1"));
     expect(readCachedPost(queryClient, "post-1")?.viewerHasBookmarked).toBe(false);
+  });
+
+  // The saved page's own cleanup half: a confirmed un-bookmark drops the row
+  // from the bookmarks feed's cached pages on the click itself, instead of
+  // leaving it there until some unrelated refetch. Only that feed's entry
+  // loses the row — everywhere else the post keeps rendering, with its flag
+  // confirmed false.
+  it("a confirmed unbookmark drops the row from the bookmarks feed's cache only", async () => {
+    const store = createStore();
+    const queryClient = new QueryClient();
+    store.set(queryClientAtom, queryClient);
+    const saved = makePost({ id: "post-1", viewerHasBookmarked: true });
+    // Seeded through the production query-options helper — oRPC stamps
+    // infinite queries with a `type: "infinite"` discriminator the bare
+    // `.key()` form lacks, and the row removal matches exactly the key the
+    // bookmarks page's atom registers.
+    const bookmarksKey = postListQueryOptions({ feed: "bookmarks" }).queryKey;
+    const homeKey = orpc.post.list.key({ input: { limit: 20 } });
+    // Seeded as a literal: the options-typed key carries the exact page-param
+    // type, which the `feedPage` helper's wider annotation does not satisfy.
+    queryClient.setQueryData(bookmarksKey, {
+      pages: [{ items: [saved], nextCursor: null }],
+      pageParams: [undefined],
+    });
+    queryClient.setQueryData(homeKey, feedPage([saved]));
+
+    fakeClient.post.unbookmark.mockResolvedValue({ postId: "post-1", viewerHasBookmarked: false });
+
+    store.set(toggleBookmarkAtomFamily("post-1"));
+
+    // Wait on the outcome, not on the mock's call: `mockResolvedValue`
+    // settles a microtask after the call, and the row drop happens in
+    // `onSuccess` — after that settlement.
+    await vi.waitFor(() => {
+      const bookmarks = queryClient.getQueryData<InfiniteData<PostListPage>>(bookmarksKey);
+      expect(bookmarks?.pages[0]?.items).toEqual([]);
+    });
+
+    const home = queryClient.getQueryData<InfiniteData<PostListPage>>(homeKey);
+    expect(home?.pages[0]?.items[0]?.id).toBe("post-1");
+    expect(home?.pages[0]?.items[0]?.viewerHasBookmarked).toBe(false);
+  });
+
+  // The other side of that coin: the row-drop keys off the RESPONSE value, so
+  // a confirmed bookmark — whose response is true — removes nothing.
+  it("a confirmed bookmark keeps the row in the bookmarks feed's cache", async () => {
+    const store = createStore();
+    const queryClient = new QueryClient();
+    store.set(queryClientAtom, queryClient);
+    const bookmarksKey = postListQueryOptions({ feed: "bookmarks" }).queryKey;
+    queryClient.setQueryData(bookmarksKey, {
+      pages: [
+        { items: [makePost({ id: "post-1", viewerHasBookmarked: false })], nextCursor: null },
+      ],
+      pageParams: [undefined],
+    });
+
+    fakeClient.post.bookmark.mockResolvedValue({ postId: "post-1", viewerHasBookmarked: true });
+
+    store.set(toggleBookmarkAtomFamily("post-1"));
+
+    // Let the confirmation settle before asserting the row survived it.
+    await vi.waitFor(() =>
+      expect(
+        queryClient
+          .getMutationCache()
+          .getAll()
+          .some((m) => m.state.status === "success"),
+      ).toBe(true),
+    );
+    const bookmarks = queryClient.getQueryData<InfiniteData<PostListPage>>(bookmarksKey);
+    expect(bookmarks?.pages[0]?.items.map((post) => post.id)).toEqual(["post-1"]);
+    expect(bookmarks?.pages[0]?.items[0]?.viewerHasBookmarked).toBe(true);
   });
 });
 

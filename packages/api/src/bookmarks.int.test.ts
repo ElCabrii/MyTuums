@@ -78,11 +78,16 @@ function callList(viewer: TestUser, limit: number, cursor?: string) {
 }
 
 describe("post.bookmark / post.unbookmark", () => {
-  it("bookmarking an unknown post is NOT_FOUND", async () => {
+  it("bookmarking an unknown post is NOT_FOUND, while unbookmarking one is a no-op — the row being removed is the caller's own", async () => {
     const saver = await createTestUser();
+    const unknownId = randomUUID();
     await expect(
-      call(appRouter.post.bookmark, { postId: randomUUID() }, { context: contextFor(saver) }),
+      call(appRouter.post.bookmark, { postId: unknownId }, { context: contextFor(saver) }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    await expect(
+      call(appRouter.post.unbookmark, { postId: unknownId }, { context: contextFor(saver) }),
+    ).resolves.toEqual({ postId: unknownId, viewerHasBookmarked: false });
   });
 
   it("bookmarking twice is idempotent — the (post_id, user_id) primary key IS the rule; onConflictDoNothing is just the mechanism that avoids erroring on the duplicate", async () => {
@@ -159,7 +164,7 @@ describe("post.bookmark / post.unbookmark", () => {
     expect(page.items.map((item) => item.id)).toEqual([target.id]);
   });
 
-  it("a blocked author's post is NOT_FOUND to bookmark, and a block drops their posts out of the bookmarks page", async () => {
+  it("a blocked author's post is NOT_FOUND to bookmark, but unbookmark keeps working — a saved row must never become unremovable", async () => {
     const author = await createTestUser();
     const saver = await createTestUser();
     const [target, other] = await seedPosts(author.id, 2);
@@ -177,6 +182,22 @@ describe("post.bookmark / post.unbookmark", () => {
 
     const page = await callList(saver, 10);
     expect(page.items).toEqual([]);
+
+    // `unbookmark` carries no target check on purpose: the row is the saver's
+    // own, the block has filtered the post off the page, and with a check
+    // here the row could never be cleaned up at all.
+    const result = await call(
+      appRouter.post.unbookmark,
+      { postId: target.id },
+      { context: contextFor(saver) },
+    );
+    expect(result).toEqual({ postId: target.id, viewerHasBookmarked: false });
+
+    const [remaining] = await saver.context.db
+      .select({ postId: postBookmark.postId })
+      .from(postBookmark)
+      .where(eq(postBookmark.userId, saver.id));
+    expect(remaining?.postId).toBe(other.id);
   });
 
   it("bookmarks are private: viewerHasBookmarked answers for the caller alone, and one caller's page never lists another's saves", async () => {

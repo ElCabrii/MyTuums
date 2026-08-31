@@ -1233,22 +1233,20 @@ export const postRouter = {
    * the post returns at the top of the page rather than at its old position —
    * "bookmark order" is the order the caller last saved, not a remembered
    * rank.
+   *
+   * Deliberately NO target check, unlike `bookmark` (and `unlike`) above. The
+   * only row this can delete is the caller's own, the response is the same
+   * whether the post is missing, tombstoned or merely invisible, and the
+   * saver already knew it existed when they saved it — so the check buys no
+   * privacy. Dropping it buys something instead: a post whose author has
+   * since blocked the saver (or been banned) is filtered off the bookmarks
+   * page, and with the check in place its saved row could then never be
+   * removed at all.
    */
   unbookmark: protectedProcedure
     .use(rateLimit(RATE_LIMITS.bookmark))
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
-      const [target] = await context.db
-        .select({ id: post.id })
-        .from(post)
-        .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
-        .limit(1);
-
-      if (!target) {
-        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
-      }
-
       await context.db
         .delete(postBookmark)
         .where(

@@ -6,9 +6,11 @@ import { orpc } from "@/lib/orpc";
 import {
   beginPostPatch,
   readCachedPost,
+  removePostFromBookmarksFeed,
   restorePosts,
   updatePostEverywhere,
   type PostSnapshot,
+  type PostSnapshotScope,
 } from "@/lib/post-cache";
 
 /**
@@ -34,6 +36,9 @@ interface BookmarkResult {
 interface BookmarkVariables {
   postId: string;
 }
+
+/** The bookmark family's slice of the cached post row — what its rollback may touch. */
+const SNAPSHOT_SCOPE: PostSnapshotScope = "bookmark";
 
 /**
  * `post.bookmark` / `post.unbookmark` as optimistic mutations — structurally
@@ -69,7 +74,7 @@ function toggleMutationAtom(postId: string, direction: "bookmark" | "unbookmark"
       // page's `post.list` entry — threads, and search results), so every
       // cached copy of the post flips together.
       onMutate: (): BookmarkContext => {
-        const snapshot = beginPostPatch(queryClient, postId, (post) => {
+        const snapshot = beginPostPatch(queryClient, postId, SNAPSHOT_SCOPE, (post) => {
           if (post.viewerHasBookmarked === bookmarked) return post;
           return { ...post, viewerHasBookmarked: bookmarked };
         });
@@ -77,8 +82,14 @@ function toggleMutationAtom(postId: string, direction: "bookmark" | "unbookmark"
       },
 
       // The response carries no count to reconcile — private state, nothing
-      // public to re-derive — so success only confirms (or drops, when a
-      // later click has since flipped the intent) the flag.
+      // public to re-derive — so success confirms (or drops, when a later
+      // click has since flipped the intent) the flag. A confirmed UN-bookmark
+      // also drops the row from the bookmarks page's cached pages, so the
+      // saved list updates on the click itself. That is safe and was always
+      // the intent: `getNextPageParam` reads the stored per-page `nextCursor`,
+      // which filtering `items` leaves untouched — cursors come from the
+      // server's page boundaries, not from the rows the client happens to be
+      // holding.
       onSuccess: (result: BookmarkResult) => {
         // Read at callback time, deliberately not via the factory's `get`:
         // `get(intentFamily(...))` here would make intent a dependency of the
@@ -90,6 +101,9 @@ function toggleMutationAtom(postId: string, direction: "bookmark" | "unbookmark"
           ...post,
           viewerHasBookmarked: result.viewerHasBookmarked,
         }));
+        if (result.viewerHasBookmarked === false) {
+          removePostFromBookmarksFeed(queryClient, result.postId);
+        }
       },
 
       onError: (

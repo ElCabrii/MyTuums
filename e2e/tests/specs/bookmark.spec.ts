@@ -42,11 +42,15 @@ test.describe("bookmarks", () => {
     // offers to remove the save, not add a second one.
     await expect(bookmarkButtonFor(page, seeded.content)).toHaveAttribute("aria-pressed", "true");
 
-    // Removing and reloading takes the post off the page — the server's
-    // state, not just the optimistic flip.
+    // Removing takes the post off the page on the click itself — the
+    // confirmed unbookmark drops the row from the bookmarks feed's cached
+    // pages; no reload, no unrelated refetch.
     await bookmarkButtonFor(page, seeded.content).click();
     await expect(bookmarkButtonFor(page, seeded.content)).toHaveAttribute("aria-pressed", "false");
+    await expect(postCardWithText(page, seeded.content)).toHaveCount(0);
 
+    // …and the reload proves that was the server's state, not just the
+    // optimistic cache.
     await page.reload();
     await expect(postCardWithText(page, seeded.content)).toHaveCount(0);
     await expect(page.getByText("Nothing saved yet.")).toBeVisible();
