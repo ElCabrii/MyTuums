@@ -44,9 +44,11 @@ test.describe("bookmarks", () => {
 
     // Removing takes the post off the page on the click itself — the
     // confirmed unbookmark drops the row from the bookmarks feed's cached
-    // pages; no reload, no unrelated refetch.
+    // pages; no reload, no unrelated refetch. There is deliberately no
+    // `aria-pressed="false"` step in between: the row disappears on the
+    // same success path that would flip it, so that intermediate state is
+    // not observable and asserting it only races the removal.
     await bookmarkButtonFor(page, seeded.content).click();
-    await expect(bookmarkButtonFor(page, seeded.content)).toHaveAttribute("aria-pressed", "false");
     await expect(postCardWithText(page, seeded.content)).toHaveCount(0);
 
     // …and the reload proves that was the server's state, not just the
