@@ -242,11 +242,11 @@ describe("ImageCropDialog", () => {
     expect(onApply.mock.calls.at(-1)?.[0].scale).toBe(1);
   });
 
-  it("zooms a banner out to contain, and previews the letterbox", async () => {
-    // A 3:2 photo cannot be shown whole by the 3:1 cover crop — the shape the
-    // contain floor exists for. Scrolling out past the floor's notches stops
-    // exactly at contain, where the whole photo is visible with black bars
-    // beside it and the emitted crop is letterboxed, not cover.
+  it("refuses to zoom a banner out past its default window", async () => {
+    // A 3:2 photo's default window already spans the photo's full width — the
+    // largest 3:1 rectangle there is (issue #273). Scrolling out must stop
+    // there: the emitted crop stays at scale 1 and the preview keeps the image
+    // filling the frame, never shrinking it into letterbox bars.
     stubDecode(1500, 1000);
     stubFrameSize(1500, 500);
     const onApply = vi.fn<(crop: Crop) => void>();
@@ -259,19 +259,19 @@ describe("ImageCropDialog", () => {
     );
     const frame = container.ownerDocument.querySelector(".touch-none");
 
-    for (let notch = 0; notch < 10; notch += 1) {
-      fireEvent.wheel(frame!, { deltaY: 100 });
-    }
+    fireEvent.wheel(frame!, { deltaY: 100 });
+    fireEvent.wheel(frame!, { deltaY: 100 });
     await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
 
-    const crop = onApply.mock.calls.at(-1)![0];
-    // contain = min(1500/1500, 500/1000) — ten notches asked for 0.39.
-    expect(crop.scale).toBeCloseTo(0.5, 5);
-    // The preview letterboxes: the window is twice the source's width, so the
-    // image spans half the frame, centered.
+    expect(onApply.mock.calls.at(-1)![0]).toEqual({ x: 0.5, y: 0.5, scale: 1 });
+    // No letterbox: the window is the full-width 1000x500 band, so the image
+    // spans the frame's width exactly and overflows its height symmetrically
+    // (the centered band; the overflow is what the frame trims).
     expect(container.ownerDocument.querySelector(".touch-none img")).toHaveStyle({
-      width: "50%",
-      left: "25%",
+      width: "100%",
+      height: "200%",
+      left: "0%",
+      top: "-50%",
     });
   });
 

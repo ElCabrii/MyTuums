@@ -38,11 +38,13 @@ import { m } from "@/paraglide/messages.js";
  * display variant (`createDisplayVariant(file, kind, crop)`). The original file
  * is never touched here — the crop is a view, not a mutation.
  *
- * A banner can zoom out past its cover crop down to *contain* — the whole
- * source visible, the parts of the 3:1 frame it cannot reach shown as the
- * black that encodes as letterbox bars (`minCropScale`). Avatars stop at the
- * cover crop: every avatar surface is a square cover crop, so a letterboxed
- * avatar would render as bars behind its round mask.
+ * Neither slot zooms out past its default window: that window is the largest
+ * aspect-true rectangle inside the source, already spanning its full width or
+ * its full height (`minCropScale`), so the wheel only zooms in and a drag
+ * slides the window within the source — an axis it already spans has no slack
+ * and stays pinned to the source's edge. The window therefore never leaves
+ * the image (issue #273), and the preview needs no letterbox: the image fills
+ * the frame exactly at every zoom.
  *
  * The image is decoded twice on purpose: `createImageBitmap` for the oriented
  * dimensions the math needs (the same primitive `lib/media.ts` uses, and the
@@ -146,7 +148,8 @@ export function ImageCropDialog({
       // A functional update rather than a captured `crop`: the listener
       // outlives many renders, and reading the state it was attached with
       // would make every notch zoom from the same starting scale. The floor is
-      // the slot's contain scale for a banner, the cover crop for an avatar.
+      // the slot's default window (`minCropScale`) — below it the window would
+      // leave the source.
       setCrop((current) =>
         clampCrop(
           {
@@ -225,13 +228,7 @@ export function ImageCropDialog({
           ) : (
             <div
               ref={frameRef}
-              className={cn(
-                "relative w-full touch-none overflow-hidden rounded-lg select-none",
-                // A banner zoomed past its cover crop shows parts of the frame
-                // the source cannot reach; black is what those parts encode
-                // as, so the preview must show them as black too.
-                kind === "banner" ? "bg-black" : "bg-muted",
-              )}
+              className="bg-muted relative w-full touch-none overflow-hidden rounded-lg select-none"
               style={{ aspectRatio: `${frameAspect}` }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
@@ -296,10 +293,9 @@ export function ImageCropDialog({
  * The `<img>`'s size and offset, as percentages of the frame, so the crop rect
  * fills the frame exactly. `rect` has the frame's aspect, so one scale factor
  * maps it to both axes; the negative offset slides the image so the rect's
- * top-left lands on the frame's top-left. A banner zoomed past its cover crop
- * has a rect larger than the source: the size drops below 100% and the offsets
- * go positive, which letterboxes the image over the frame's black — the same
- * bars the encode bakes in.
+ * top-left lands on the frame's top-left. The rect is inside the source, so
+ * the image always covers the whole frame — zooming in only enlarges it past
+ * the frame's edges, which `overflow-hidden` trims.
  */
 function imageStyle(
   dims: { width: number; height: number },
