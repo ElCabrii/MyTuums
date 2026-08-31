@@ -454,6 +454,25 @@ describe("search.posts", () => {
     expect(searchRow).toEqual(listRow);
   });
 
+  it("finds a tagged post through the `#tag` query a hashtag link issues — case-folded, and not the bare word", async () => {
+    // The hashtag tokenizer linkifies `#Tag` to post search with the
+    // lowercased, hash-prefixed query `#tag` (apps/web linked-text.tsx). This
+    // pins the server half of that contract: `ilike` folds the case the client
+    // folded, and the `#` keeps posts that merely contain the word out of what
+    // is presented as "posts tagged #tag".
+    const author = await createTestUser();
+    const tag = uniqueTag();
+    const tagged = await seedPostContent(author.id, `loving #${tag.toUpperCase()} today`);
+    await seedPostContent(author.id, `just saying ${tag} without a hash`);
+
+    const posts = await call(
+      appRouter.search.posts,
+      { q: `#${tag}` },
+      { context: contextFor(author) },
+    );
+    expect(posts.items.map((p) => p.id)).toEqual([tagged.id]);
+  });
+
   it("a removed post's content is not matchable by a third party, while the feed still shows the stub", async () => {
     const author = await createTestUser();
     const mod = await moderatorUser();

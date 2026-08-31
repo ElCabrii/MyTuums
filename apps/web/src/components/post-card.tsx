@@ -1,7 +1,7 @@
 import type { MouseEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Heart, MessageCircle, MoreHorizontal, Quote, Repeat2 } from "lucide-react";
+import { Bookmark, Heart, MessageCircle, MoreHorizontal, Quote, Repeat2 } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileLink } from "@/components/profile-link";
 import { LinkedText } from "@/components/linked-text";
@@ -9,6 +9,7 @@ import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { toggleRepostAtomFamily } from "@/atoms/repost";
 import { quoteDialogAtom } from "@/atoms/quote-composer";
+import { toggleBookmarkAtomFamily } from "@/atoms/bookmark";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import { deletePostDialogAtom } from "@/atoms/post-delete";
 import { isSignedInAtom, viewerIdAtom } from "@/atoms/session";
@@ -140,6 +141,7 @@ export function PostCard({
   const toggleLike = useSetAtom(toggleLikeAtomFamily(post.id));
   const toggleRepost = useSetAtom(toggleRepostAtomFamily(post.id));
   const setQuoteDialog = useSetAtom(quoteDialogAtom);
+  const toggleBookmark = useSetAtom(toggleBookmarkAtomFamily(post.id));
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
   const setDeleteDialog = useSetAtom(deletePostDialogAtom);
@@ -181,6 +183,16 @@ export function PostCard({
       <Heart className={`h-4 w-4 ${post.viewerHasLiked ? "fill-destructive" : ""}`} />
       <span>{post.likeCount}</span>
     </>
+  );
+
+  // A bookmark is private state, so the control carries no count — only its
+  // own pressed state. The optimistic flip in `atoms/bookmark.ts` is the
+  // feedback, same as the like control.
+  const bookmarkButtonClass = `flex items-center gap-1.5 transition-colors ${
+    post.viewerHasBookmarked ? "text-primary font-bold" : "hover:text-primary"
+  }`;
+  const bookmarkContent = (
+    <Bookmark className={`h-4 w-4 ${post.viewerHasBookmarked ? "fill-primary" : ""}`} />
   );
 
   const replyLinkClass = "flex items-center gap-1.5 transition-colors hover:text-primary";
@@ -521,6 +533,19 @@ export function PostCard({
                 className={likeButtonClass}
               >
                 {likeContent}
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleBookmark();
+                }}
+                aria-pressed={post.viewerHasBookmarked}
+                aria-label={post.viewerHasBookmarked ? m.post_unbookmark() : m.post_bookmark()}
+                className={bookmarkButtonClass}
+              >
+                {bookmarkContent}
               </button>
             </div>
           )}

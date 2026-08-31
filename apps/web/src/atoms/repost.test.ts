@@ -46,6 +46,7 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     repostCount: 0,
     viewerHasReposted: false,
     repostedBy: null,
+    viewerHasBookmarked: false,
     removed: false,
     deleted: false,
     removedReason: null,

@@ -11,6 +11,7 @@ import {
   Loader2,
   User,
   Shield,
+  Bookmark,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -206,6 +207,13 @@ export function Header() {
                 >
                   <User />
                   <span>{m.menu_view_profile()}</span>
+                </DropdownMenuItem>
+                {/* The private saved list (issue #262) — an account-menu item
+                    rather than a nav link: it belongs to the person, not to
+                    the shared timeline surfaces. */}
+                <DropdownMenuItem className="cursor-pointer" render={<Link to="/bookmarks" />}>
+                  <Bookmark />
+                  <span>{m.nav_bookmarks()}</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="cursor-pointer"

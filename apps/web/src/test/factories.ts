@@ -87,6 +87,7 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     viewerHasReposted: false,
     // Attribution is a feed-event property; a plain post row carries none.
     repostedBy: null,
+    viewerHasBookmarked: false,
     // The tombstone fields (issue #38, plus the author's own delete in #148):
     // never removed or deleted by default — the two stub branches in
     // post-card own their own fixtures.

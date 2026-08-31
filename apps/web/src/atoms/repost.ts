@@ -8,8 +8,9 @@ import {
   readCachedPost,
   restorePosts,
   updatePostEverywhere,
+  type PostSnapshot,
+  type PostSnapshotScope,
 } from "@/lib/post-cache";
-import type { PostSnapshot } from "@/lib/post-cache";
 
 /**
  * The repost mirror of `atoms/like.ts`: the same per-post intent atom, the
@@ -45,6 +46,9 @@ interface RepostContext {
   snapshot: PostSnapshot | undefined;
 }
 
+/** The repost family's slice of the cached post row — what its rollback may touch. */
+const SNAPSHOT_SCOPE: PostSnapshotScope = "repost";
+
 function toggleMutationAtom(postId: string, direction: "repost" | "unrepost") {
   return atomWithMutation<RepostResult, RepostVariables, Error, RepostContext>((get) => {
     const queryClient = get(queryClientAtom);
@@ -60,7 +64,7 @@ function toggleMutationAtom(postId: string, direction: "repost" | "unrepost") {
       scope: { id: `post-repost:${postId}` },
 
       onMutate: (): RepostContext => {
-        const snapshot = beginPostPatch(queryClient, postId, (post) => {
+        const snapshot = beginPostPatch(queryClient, postId, SNAPSHOT_SCOPE, (post) => {
           if (post.viewerHasReposted === reposted) return post;
           const delta = reposted ? 1 : -1;
           return { ...post, viewerHasReposted: reposted, repostCount: post.repostCount + delta };

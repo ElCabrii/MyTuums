@@ -1,6 +1,6 @@
 {
-  "id": "e60338c3-5adf-44c2-a72c-52ec267aa968",
-  "prevId": "58f67752-4f84-4e56-be2b-46ceeca0f365",
+  "id": "20724bd3-c35b-430f-a8f3-c93e9a57414d",
+  "prevId": "e60338c3-5adf-44c2-a72c-52ec267aa968",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1233,6 +1233,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "quoted_post_id": {
+          "name": "quoted_post_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "removed_at": {
           "name": "removed_at",
           "type": "timestamp (3) with time zone",
@@ -1679,6 +1685,101 @@
       "compositePrimaryKeys": {
         "post_like_post_id_user_id_pk": {
           "name": "post_like_post_id_user_id_pk",
+          "columns": [
+            "post_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.post_repost": {
+      "name": "post_repost",
+      "schema": "",
+      "columns": {
+        "post_id": {
+          "name": "post_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "post_repost_created_idx": {
+          "name": "post_repost_created_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "post_id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "post_repost_post_id_post_id_fk": {
+          "name": "post_repost_post_id_post_id_fk",
+          "tableFrom": "post_repost",
+          "tableTo": "post",
+          "columnsFrom": [
+            "post_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "post_repost_user_id_user_id_fk": {
+          "name": "post_repost_user_id_user_id_fk",
+          "tableFrom": "post_repost",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "post_repost_post_id_user_id_pk": {
+          "name": "post_repost_post_id_user_id_pk",
           "columns": [
             "post_id",
             "user_id"

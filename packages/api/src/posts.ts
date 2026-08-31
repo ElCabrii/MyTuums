@@ -7,6 +7,7 @@ import {
   follow,
   post,
   postAttachment,
+  postBookmark,
   postLike,
   postRepost,
   user,
@@ -471,6 +472,19 @@ export function quotedPostEvidence() {
 }
 
 /**
+ * Whether the viewer has bookmarked this post — the bookmark pair's whole
+ * read model. Bookmarks are private by construction (issue #262): no count is
+ * derived from `post_bookmark`, no other reader exists, and this probe answers
+ * for the caller alone.
+ */
+function viewerHasBookmarked(viewerId: string) {
+  return sql<boolean>`exists (
+    select 1 from ${postBookmark}
+    where ${postBookmark.postId} = ${post.id} and ${postBookmark.userId} = ${viewerId}
+  )`;
+}
+
+/**
  * The one projection every feed and thread reads posts through, so no view of
  * a post can drift from another's (an int test asserts the equality).
  */
@@ -529,6 +543,7 @@ export const postSelection = (viewerId: string) => ({
   repostCount,
   viewerHasLiked: viewerHasLiked(viewerId),
   viewerHasReposted: viewerHasReposted(viewerId),
+  viewerHasBookmarked: viewerHasBookmarked(viewerId),
   // Attribution is a property of a feed *event*, not of a post row: every
   // row-shaped reader (thread, search, reply list, this projection) reads a
   // post with no repost attached, and only the merged home feed — which reads
@@ -937,6 +952,7 @@ async function feedEventPage(
         repostCount: 0,
         viewerHasLiked: false,
         viewerHasReposted: false,
+        viewerHasBookmarked: false,
         repostedBy: { ...reposter, repostedAt: event.event_at },
       });
       continue;
@@ -1020,7 +1036,7 @@ async function insertPost(
 
 /**
  * The `post` procedure group: create (posts, replies and quotes), delete,
- * list, thread, like/unlike, repost/unrepost.
+ * list, thread, like/unlike, repost/unrepost, bookmark/unbookmark.
  */
 export const postRouter = {
   /**
@@ -1164,6 +1180,7 @@ export const postRouter = {
         repostCount: 0,
         viewerHasLiked: false,
         viewerHasReposted: false,
+        viewerHasBookmarked: false,
         // `quoted` is deliberately absent, like `parent` above: the response
         // is not a render source (the web invalidates and refetches), and
         // resolving the embedded preview here would cost a query nothing
@@ -1282,9 +1299,9 @@ export const postRouter = {
 
   /**
    * Lists posts, keyset-paginated: the global feed, one author's posts, the
-   * following feed, one post's direct replies, or a selected inline reply
-   * continuation. Requires a session, like every procedure in this app
-   * (issue #36).
+   * following feed, the caller's bookmarks, one post's direct replies, or a
+   * selected inline reply continuation. Requires a session, like every
+   * procedure in this app (issue #36).
    */
   list: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
@@ -1303,8 +1320,13 @@ export const postRouter = {
            * An enum rather than a boolean because this axis will grow (a ranked
            * "for you", lists), and each new value should be a widening here
            * rather than another orthogonal flag with undefined interactions.
+           *
+           * `bookmarks` (issue #262) is the caller's private saved list: it
+           * selects posts joined to their own `post_bookmark` rows and pages
+           * on the *bookmark's* creation time (see the handler branch), which
+           * is why it cannot compose with the scoping filters below.
            */
-          feed: z.enum(["global", "following"]).default("global"),
+          feed: z.enum(["global", "following", "bookmarks"]).default("global"),
           /**
            * Set to list one post's direct replies. This is deliberately a mode
            * of `list` rather than its own `post.replies` procedure: the web
@@ -1356,6 +1378,19 @@ export const postRouter = {
               message: "A continuation cannot be combined with feed filters.",
             });
           }
+          if (
+            input.feed === "bookmarks" &&
+            (input.parentId ||
+              input.authorId ||
+              input.continuationRootId ||
+              input.includeReplies ||
+              input.kind)
+          ) {
+            refinement.addIssue({
+              code: "custom",
+              message: "The bookmarks feed cannot be combined with scoping filters.",
+            });
+          }
         }),
     )
     .handler(async ({ input, context }) => {
@@ -1392,6 +1427,61 @@ export const postRouter = {
         return continuation
           ? { items: continuation.items, nextCursor: continuation.nextCursor }
           : { items: [], nextCursor: null };
+      }
+
+      // The caller's private bookmarks page (issue #262): posts joined to
+      // their own bookmark rows, newest bookmark first, strictly
+      // chronological. It rides `post.list` rather than being its own
+      // procedure for the same reason the reply modes are: the web app's
+      // optimistic like/deletion/moderation sweeps match every cached
+      // `post.list` query by prefix, so a separate procedure would sit
+      // outside them and toggles made on the bookmarks page would silently
+      // stop updating.
+      //
+      // The keyset is on the *bookmark's* (created_at, post_id) — the page's
+      // order is when the caller saved each post, not when the post was
+      // written — which `post_bookmark_user_created_idx` mirrors exactly. The
+      // selection therefore carries `bookmarkedAt`, so the cursor encodes the
+      // row-side of the same pair the SQL compares.
+      if (input.feed === "bookmarks") {
+        const bookmarkSelection = {
+          ...postSelection(viewerId),
+          bookmarkedAt: postBookmark.createdAt,
+        };
+
+        return keysetPage({
+          codec: postCursor,
+          cursor: input.cursor,
+          limit: input.limit,
+          selection: bookmarkSelection,
+          createdAt: postBookmark.createdAt,
+          createdAtField: "bookmarkedAt",
+          id: post.id,
+          idField: "id",
+          query: (cursorFilter) =>
+            context.db
+              .select(bookmarkSelection)
+              .from(post)
+              .innerJoin(user, eq(user.id, post.authorId))
+              .innerJoin(
+                postBookmark,
+                and(eq(postBookmark.postId, post.id), eq(postBookmark.userId, viewerId)),
+              )
+              .where(
+                and(
+                  // The same fresh-feed rules as every other mode: an
+                  // author-deleted post is omitted entirely, a moderator
+                  // removal keeps its stub (removal is not invisibility), and
+                  // banned/blocked authors drop out through the visibility
+                  // filter.
+                  isNull(post.deletedAt),
+                  not(invisibleAuthor(viewerId)),
+                  cursorFilter,
+                ),
+              )
+              .orderBy(desc(postBookmark.createdAt), desc(post.id))
+              .limit(input.limit + 1),
+        });
       }
 
       const kind = input.kind ?? (input.includeReplies ? "all" : "posts");
@@ -1680,5 +1770,75 @@ export const postRouter = {
         repostCount: await countReposts(context.db, input.postId),
         viewerHasReposted: false,
       };
+    }),
+
+  /**
+   * Saves a post to the caller's private bookmarks (issue #262). Requires a
+   * session.
+   *
+   * The same separate-idempotent-procedures reasoning as `like`/`unlike`
+   * above, and the same mechanism: the (post_id, user_id) primary key makes
+   * the duplicate impossible and `onConflictDoNothing` declines to error on
+   * it. The one deliberate difference is the response: a like is public
+   * state, so it answers with the post's count; a bookmark is private, so
+   * there is no count to answer with — only the caller's own flag.
+   *
+   * The target check deliberately does NOT refuse a post the author has since
+   * deleted or a moderator has removed: the row survives either tombstone,
+   * and `unbookmark` must keep working for a post that is already gone from
+   * fresh feeds. Bookmarking one is harmless for the same reason — the
+   * bookmarks list applies the feed rules on read, so a tombstoned post never
+   * renders there.
+   */
+  bookmark: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.bookmark))
+    .input(z.object({ postId: z.uuid() }))
+    .handler(async ({ input, context }) => {
+      const [target] = await context.db
+        .select({ id: post.id })
+        .from(post)
+        .innerJoin(user, eq(user.id, post.authorId))
+        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
+        .limit(1);
+
+      if (!target) {
+        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
+      }
+
+      await context.db
+        .insert(postBookmark)
+        .values({ postId: input.postId, userId: context.user.id })
+        .onConflictDoNothing();
+
+      return { postId: input.postId, viewerHasBookmarked: true };
+    }),
+
+  /**
+   * Removes the post from the caller's bookmarks. Requires a session; a no-op
+   * when the bookmark isn't there. A re-bookmark later inserts a fresh row, so
+   * the post returns at the top of the page rather than at its old position —
+   * "bookmark order" is the order the caller last saved, not a remembered
+   * rank.
+   *
+   * Deliberately NO target check, unlike `bookmark` (and `unlike`) above. The
+   * only row this can delete is the caller's own, the response is the same
+   * whether the post is missing, tombstoned or merely invisible, and the
+   * saver already knew it existed when they saved it — so the check buys no
+   * privacy. Dropping it buys something instead: a post whose author has
+   * since blocked the saver (or been banned) is filtered off the bookmarks
+   * page, and with the check in place its saved row could then never be
+   * removed at all.
+   */
+  unbookmark: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.bookmark))
+    .input(z.object({ postId: z.uuid() }))
+    .handler(async ({ input, context }) => {
+      await context.db
+        .delete(postBookmark)
+        .where(
+          and(eq(postBookmark.postId, input.postId), eq(postBookmark.userId, context.user.id)),
+        );
+
+      return { postId: input.postId, viewerHasBookmarked: false };
     }),
 };

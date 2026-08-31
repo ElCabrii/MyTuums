@@ -199,10 +199,12 @@ describe("calculateCropRect", () => {
     });
   });
 
-  it("never selects a rect outside the source, at cover or any zoom-in", () => {
+  it("never selects a rect outside the source, at the floor or any zoom", () => {
     const source = { width: 3840, height: 2160 };
     for (const kind of ["avatar", "banner"] as const) {
-      for (const scale of [1, 1.5, 3, 8]) {
+      // The sub-1 scales are on purpose: a stale or hostile descriptor below
+      // the floor must clamp up to it, never grow a window past the source.
+      for (const scale of [0.1, 0.59, 1, 1.5, 3, 8]) {
         for (const [x, y] of [
           [0, 0],
           [0.5, 0.5],
@@ -219,42 +221,88 @@ describe("calculateCropRect", () => {
     }
   });
 
-  it("banner: zooms out past cover until the whole source fits the window", () => {
-    // A 15.6:1 panorama is the shape the cover-only floor broke: at scale 1 the
-    // window is 768x256 and two thirds of the width can never be shown. At the
-    // contain floor the window is the whole source plus top/bottom letterbox.
-    const source = { width: 4000, height: 256 };
-    const contain = minCropScale(source, "banner");
-    expect(contain).toBeCloseTo(0.192, 5);
-    const rect = calculateCropRect(source, "banner", { x: 0.5, y: 0.5, scale: contain });
-    expect(rect.x).toBe(0);
-    expect(rect.x + rect.width).toBe(source.width);
-    expect(rect.y).toBeLessThanOrEqual(0);
-    expect(rect.y + rect.height).toBeGreaterThanOrEqual(source.height);
+  it("banner: the floor is the default window, spanning the full width or height", () => {
+    // The rule from issue #273: the window's peak size spans 100% of the
+    // source's width or 100% of its height — and never exceeds the source.
+    // Zoom 1 is that peak for every shape, because the default frame is the
+    // largest aspect-true rectangle that fits inside the source.
+    const sources = [
+      { width: 3840, height: 2160 }, // 16:9 — spans the width
+      { width: 1000, height: 1000 }, // square — spans the width
+      { width: 4000, height: 256 }, // 15.6:1 panorama — spans the height
+      { width: 1500, height: 500 }, // already 3:1 — spans both
+    ];
+    for (const source of sources) {
+      expect(minCropScale(source, "banner")).toBe(1);
+      const rect = calculateCropRect(source, "banner", { x: 0.5, y: 0.5, scale: 1 });
+      expect(rect.width === source.width || rect.height === source.height).toBe(true);
+      expect(rect.x).toBeGreaterThanOrEqual(0);
+      expect(rect.y).toBeGreaterThanOrEqual(0);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(source.width);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(source.height);
+    }
   });
 
-  it("banner: letterboxes a source taller than 3:1, centered", () => {
-    // A 16:9 photo at contain fills the window's height and leaves side bars.
-    const source = { width: 3840, height: 2160 };
-    const contain = minCropScale(source, "banner");
-    expect(contain).toBeCloseTo(1280 / 2160, 5);
-    const rect = calculateCropRect(source, "banner", { x: 0.5, y: 0.5, scale: contain });
-    expect(rect).toEqual({ x: -1320, y: 0, width: 6480, height: 2160 });
+  it("banner: a sub-floor zoom clamps up to the floor instead of letterboxing", () => {
+    // A 15.6:1 panorama is the shape the contain floor used to letterbox:
+    // asking for the whole source must still select the full-height 3:1 band.
+    const source = { width: 4000, height: 256 };
+    const rect = calculateCropRect(source, "banner", { x: 0.5, y: 0.5, scale: 0.192 });
+    expect(rect).toEqual({ x: 1616, y: 0, width: 768, height: 256 });
+  });
+
+  it("never collapses the window below one pixel, even at maximum zoom", () => {
+    // The last hole in issue #273's contract: the window is
+    // `round(frame / scale)` in whole pixels, and a frame at most 3px wide at
+    // the editor's maximum zoom (`MAX_CROP_SCALE`, 8) rounds to 0. A 0x0 rect
+    // still sits "inside" the source but encodes nothing — `drawImage` with
+    // sw = 0 leaves a fully transparent variant, and the GIF resampler writes
+    // transparent black. The window must stay a region of the source: at
+    // least one pixel of it.
+    const sources = [
+      { width: 1, height: 1 },
+      { width: 3, height: 1 },
+      { width: 1, height: 3 },
+      { width: 2, height: 2 },
+      { width: 3, height: 3 },
+      { width: 4000, height: 3 },
+      { width: 3, height: 4000 },
+    ];
+    for (const source of sources) {
+      for (const kind of ["avatar", "banner"] as const) {
+        // 8 is the editor's ceiling; the larger scales prove the floor is a
+        // property of the geometry, not of one chosen constant.
+        for (const scale of [1, 4, 8, 64]) {
+          const crop = { x: 0.5, y: 0.5, scale };
+          const rect = calculateCropRect(source, kind, crop);
+          expect(rect.width).toBeGreaterThanOrEqual(1);
+          expect(rect.height).toBeGreaterThanOrEqual(1);
+          expect(rect.x).toBeGreaterThanOrEqual(0);
+          expect(rect.y).toBeGreaterThanOrEqual(0);
+          expect(rect.x + rect.width).toBeLessThanOrEqual(source.width);
+          expect(rect.y + rect.height).toBeLessThanOrEqual(source.height);
+          const layout = calculateDisplayLayout(source, kind, crop);
+          expect(layout.sourceWidth).toBeGreaterThanOrEqual(1);
+          expect(layout.sourceHeight).toBeGreaterThanOrEqual(1);
+          expect(layout.width).toBeGreaterThanOrEqual(1);
+          expect(layout.height).toBeGreaterThanOrEqual(1);
+        }
+      }
+    }
   });
 });
 
 describe("minCropScale", () => {
-  it("is the cover crop for avatars and for an exactly-3:1 banner", () => {
-    // Avatars never letterbox: every avatar surface is a square cover crop.
+  it("is 1 for every slot and source: the default window already spans an axis", () => {
+    // The floor is the scale at which the window first spans the source's full
+    // width or height, and both slots' default frame — the largest aspect-true
+    // rectangle inside the source — spans one axis at zoom 1 (issue #273).
     expect(minCropScale({ width: 400, height: 800 }, "avatar")).toBe(1);
     expect(minCropScale({ width: 3840, height: 2160 }, "avatar")).toBe(1);
-    // A banner already at the canonical ratio is fully visible at cover.
     expect(minCropScale({ width: 1500, height: 500 }, "banner")).toBe(1);
-  });
-
-  it("is below cover for any banner that is not already 3:1", () => {
-    expect(minCropScale({ width: 3840, height: 2160 }, "banner")).toBeLessThan(1);
-    expect(minCropScale({ width: 1000, height: 1000 }, "banner")).toBeLessThan(1);
+    expect(minCropScale({ width: 3840, height: 2160 }, "banner")).toBe(1);
+    expect(minCropScale({ width: 1000, height: 1000 }, "banner")).toBe(1);
+    expect(minCropScale({ width: 4000, height: 256 }, "banner")).toBe(1);
   });
 });
 
@@ -265,24 +313,20 @@ describe("clampCrop", () => {
     ).toBe(1);
   });
 
-  it("floors a banner at its contain scale, not at cover", () => {
+  it("floors a banner at 1 too, keeping the window inside the source", () => {
+    // The banner rule (issue #273): below the default window the rect would
+    // have to leave the source, so the clamp holds it at the default
+    // composition — the full-width 3:1 band, never a letterboxed contain.
     const source = { width: 3840, height: 2160 };
     const clamped = clampCrop({ x: 0.5, y: 0.5, scale: 0.1 }, source, "banner");
-    expect(clamped.scale).toBe(minCropScale(source, "banner"));
-  });
-
-  it("keeps a letterboxed banner pinned so the source never leaves the window", () => {
-    // At contain the window (6480px) is wider than the source (3840px), so the
-    // pan limit inverts: the center may only move as far as keeps the source
-    // inside the window — bars may grow on one side, never reveal past the
-    // source on both.
-    const source = { width: 3840, height: 2160 };
-    const contain = minCropScale(source, "banner");
-    const clamped = clampCrop({ x: 0, y: 0.5, scale: contain }, source, "banner");
-    expect(clamped.x).toBeCloseTo(0.15625, 5);
-    const rect = calculateCropRect(source, "banner", clamped);
-    expect(rect.x).toBeLessThanOrEqual(0);
-    expect(rect.x + rect.width).toBeGreaterThanOrEqual(source.width);
+    expect(clamped.scale).toBe(1);
+    expect(clamped).toEqual({ x: 0.5, y: 0.5, scale: 1 });
+    expect(calculateCropRect(source, "banner", clamped)).toEqual({
+      x: 0,
+      y: 440,
+      width: 3840,
+      height: 1280,
+    });
   });
 
   it("pulls an off-source center back so the rect stays inside", () => {
@@ -308,8 +352,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 0,
       sourceWidth: 4000,
       sourceHeight: 4000,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 1024,
       destinationHeight: 1024,
       width: 1024,
@@ -321,8 +363,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 0,
       sourceWidth: 100,
       sourceHeight: 100,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 100,
       destinationHeight: 100,
       width: 100,
@@ -334,8 +374,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 100,
       sourceWidth: 200,
       sourceHeight: 200,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 200,
       destinationHeight: 200,
       width: 200,
@@ -350,8 +388,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 440,
       sourceWidth: 3840,
       sourceHeight: 1280,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 3840,
       destinationHeight: 1280,
       width: 3840,
@@ -363,8 +399,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 0,
       sourceWidth: 1500,
       sourceHeight: 500,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 1500,
       destinationHeight: 500,
       width: 1500,
@@ -376,8 +410,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 0,
       sourceWidth: 1200,
       sourceHeight: 400,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 1200,
       destinationHeight: 400,
       width: 1200,
@@ -389,8 +421,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 66,
       sourceWidth: 200,
       sourceHeight: 67,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 200,
       destinationHeight: 67,
       width: 200,
@@ -404,8 +434,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 500,
       sourceWidth: 6000,
       sourceHeight: 2000,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 3840,
       destinationHeight: 1280,
       width: 3840,
@@ -442,8 +470,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 760,
       sourceWidth: 1920,
       sourceHeight: 640,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 1920,
       destinationHeight: 640,
       width: 1920,
@@ -451,29 +477,14 @@ describe("calculateDisplayLayout", () => {
     });
   });
 
-  it("crop: a letterboxed banner draws the source once, centered, on black", () => {
-    // At contain a 16:9 photo fills the 3:1 window's height and leaves side
-    // bars. The layout must hand the encoder the whole source, offset so the
-    // bars are symmetric — the fill around it is the encoder's black.
+  it("crop: a sub-floor zoom clamps to the default composition, never letterboxes", () => {
+    // A crop below the floor is clamped up to it (issue #273): the layout is
+    // exactly the no-crop one — the window is a region of the source, drawn
+    // once with no offset and no bars around it.
     const source = { width: 3840, height: 2160 };
-    const layout = calculateDisplayLayout(source, "banner", {
-      x: 0.5,
-      y: 0.5,
-      scale: minCropScale(source, "banner"),
-    });
-    expect(layout.sourceX).toBe(0);
-    expect(layout.sourceY).toBe(0);
-    expect(layout.sourceWidth).toBe(source.width);
-    expect(layout.sourceHeight).toBe(source.height);
-    expect(layout.width).toBe(3840);
-    expect(layout.height).toBe(1280);
-    expect(layout.destinationX).toBeGreaterThan(0);
-    expect(layout.destinationY).toBe(0);
-    expect(layout.destinationHeight).toBeCloseTo(layout.height, 5);
-    // Symmetric bars: the gap left of the draw equals the gap right of it, to
-    // the half-pixel the rounded destination width can shift.
-    const right = layout.width - (layout.destinationX + layout.destinationWidth);
-    expect(Math.abs(right - layout.destinationX)).toBeLessThanOrEqual(0.5);
+    expect(calculateDisplayLayout(source, "banner", { x: 0.5, y: 0.5, scale: 0.5 })).toEqual(
+      calculateDisplayLayout(source, "banner"),
+    );
   });
 
   it("produces output the server's display-bound check will accept, for any source", () => {
@@ -511,8 +522,8 @@ describe("calculateDisplayLayout", () => {
         src: { width: 5000, height: 3000 },
         crop: { x: 0.1, y: 0.9, scale: 4 },
       },
-      // Sub-cover banner zooms: the window overhangs the source, and one sits
-      // below the contain floor to prove the floor holds here too.
+      // Sub-floor banner zooms: they clamp up to the floor, and must clear
+      // the same bounds from there.
       {
         kind: "banner" as const,
         src: { width: 3840, height: 2160 },
