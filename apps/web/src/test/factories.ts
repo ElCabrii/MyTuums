@@ -340,6 +340,7 @@ export function makeNotification(overrides: Partial<NotificationItem> = {}): Not
     postId: crypto.randomUUID(),
     actor: makeAuthor(),
     action: null,
+    targetPostDeletedAt: null,
     ...overrides,
   };
 }

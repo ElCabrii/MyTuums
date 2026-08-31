@@ -121,25 +121,32 @@ describe("notification writes (issue #259)", () => {
     await call(appRouter.user.unfollow, { userId: followed.id }, { context: contextFor(follower) });
     await call(appRouter.user.follow, { userId: followed.id }, { context: contextFor(follower) });
 
-    // Three intent statements, two edges that actually landed: two notices.
+    // Three intent statements, two edges that actually landed: two notices,
+    // both genuinely unread — read state is the recipient's cursor, never
+    // something the mint decides. The badge's one-tick collapse of the burst
+    // is the next test's subject.
     expect((await listFor(followed)).items).toHaveLength(2);
-    // The second follow landed inside the burst window after the first, so
-    // its row mints but arrives already read — follow cycling is the badge
-    // flood vector, and the damper (pinned by the next test) is what keeps
-    // it from pumping the badge while the honest two rows still show.
-    expect((await listFor(followed)).items.map((item) => item.read)).toEqual([true, false]);
+    expect((await listFor(followed)).items.map((item) => item.read)).toEqual([false, false]);
   });
 
-  it("damps a same-type burst to one badge tick per actor-minute while listing every event", async () => {
+  it("damps the badge to one tick per actor-minute while every row stays listed and unread", async () => {
     const author = await createTestUser();
     const liker = await createTestUser();
     const [first, second, third] = await seedPosts(author.id, 3);
 
-    // The burst's first event ticks; the second, same actor and same type
-    // inside the window, lands born-read — visible on the page, silent to
-    // the badge.
+    // The burst's two events land inside one damping bucket (pinned to a
+    // single instant below — two real-time mints could straddle a minute
+    // boundary, which is the damper's documented best-effort slack, not
+    // something this test should ever roll).
     await call(appRouter.post.like, { postId: first.id }, { context: contextFor(liker) });
     await call(appRouter.post.like, { postId: second.id }, { context: contextFor(liker) });
+    await author.context.db
+      .update(notification)
+      .set({ createdAt: sql`date_trunc('minute', now()) - interval '61 seconds'` })
+      .where(eq(notification.recipientId, author.id));
+
+    // One tick for the burst, but both rows are on the page and both are
+    // unread — the damper counts ticks, it never rewrites read state.
     expect(
       await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
     ).toEqual({
@@ -147,8 +154,7 @@ describe("notification writes (issue #259)", () => {
     });
     const burst = await listFor(author);
     expect(burst.items).toHaveLength(2);
-    expect(burst.items[0]).toMatchObject({ type: "like", read: true });
-    expect(burst.items[1]).toMatchObject({ type: "like", read: false });
+    expect(burst.items.map((item) => item.read)).toEqual([false, false]);
 
     // A different type from the same actor is a different signal: it ticks.
     await call(
@@ -162,21 +168,19 @@ describe("notification writes (issue #259)", () => {
       unreadCount: 2,
     });
 
-    // The window trails the burst, not the calendar: age the rows past it by
-    // hand (a minute is too long to wait honestly) and the same actor's
-    // next like ticks again.
-    await author.context.db
-      .update(notification)
-      .set({ createdAt: sql`${notification.createdAt} - make_interval(secs => 61)` })
-      .where(eq(notification.recipientId, author.id));
+    // The next minute is a new bucket: the same actor's next like ticks
+    // again without anyone touching the rows.
     await call(appRouter.post.like, { postId: third.id }, { context: contextFor(liker) });
     expect(
       await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
     ).toEqual({
       unreadCount: 3,
     });
-    // Nothing was lost: every event the burst caused is still on the page.
-    expect((await listFor(author)).items).toHaveLength(4);
+    // Nothing was lost and nothing was quietly read: every event the burst
+    // caused is still on the page, still unread.
+    const after = await listFor(author);
+    expect(after.items).toHaveLength(4);
+    expect(after.items.every((item) => !item.read)).toBe(true);
   });
 
   it("a moderation action notifies the affected user in-app alongside the email it already sends", async () => {
@@ -356,6 +360,54 @@ describe("notification reads (issue #259)", () => {
       await call(appRouter.notification.unreadCount, {}, { context: contextFor(other) }),
     ).toEqual({
       unreadCount: 0,
+    });
+  });
+
+  it("an event that lands after the page was opened is unread again — the cursor, not a row rewrite, decides", async () => {
+    const author = await createTestUser();
+    const firstLiker = await createTestUser();
+    const lateLiker = await createTestUser();
+    const [a, b] = await seedPosts(author.id, 2);
+
+    await call(appRouter.post.like, { postId: a.id }, { context: contextFor(firstLiker) });
+    await call(appRouter.notification.markRead, {}, { context: contextFor(author) });
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 0,
+    });
+
+    // After the stamp, in the same damping bucket as nothing: a tick.
+    await call(appRouter.post.like, { postId: b.id }, { context: contextFor(lateLiker) });
+    const page = await listFor(author);
+    expect(page.items.map((item) => item.read)).toEqual([false, true]);
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 1,
+    });
+  });
+
+  it("rows past the retention horizon leave the list and the badge together", async () => {
+    const author = await createTestUser();
+    const liker = await createTestUser();
+    const [fresh, old] = await seedPosts(author.id, 2);
+
+    await call(appRouter.post.like, { postId: old.id }, { context: contextFor(liker) });
+    // Past the horizon by the same database clock the read side compares on.
+    await author.context.db
+      .update(notification)
+      .set({ createdAt: sql`now() - interval '91 days'` })
+      .where(eq(notification.postId, old.id));
+    await call(appRouter.post.like, { postId: fresh.id }, { context: contextFor(liker) });
+
+    const page = await listFor(author);
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({ postId: fresh.id });
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 1,
     });
   });
 });

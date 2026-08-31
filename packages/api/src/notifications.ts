@@ -1,11 +1,19 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { Database } from "@my-tuums/db";
-import { moderationAction, notification, post, user } from "@my-tuums/db/schema";
+import {
+  moderationAction,
+  notification,
+  notificationLastSeen,
+  post,
+  user,
+} from "@my-tuums/db/schema";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
   NOTIFICATION_PAGE_SIZE,
   NOTIFICATION_PAGE_SIZE_MAX,
+  NOTIFICATION_RETENTION_DAYS,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { keysetPage } from "./pagination.js";
@@ -21,7 +29,8 @@ import { effectivelyBanned, invisibleUser } from "./visibility.js";
  * Writes never happen here — they ride the cause's own transaction at each
  * call site (`post.like`, `post.create`, `user.follow`, `logAction`), through
  * {@link insertNotification}. This module owns the read side: the
- * newest-first keyset list, the unread count, and the mark-all-read stamp.
+ * newest-first keyset list, the damped unread count, and the mark-read
+ * cursor stamp.
  */
 
 /**
@@ -40,15 +49,19 @@ export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 /**
  * How long a same-type burst from one actor stays badge-silent, in seconds.
- * The first event of the burst ticks the recipient's badge; every further
- * same-type event the same actor causes inside this trailing window still
- * mints its row (the page lists every event) but arrives already read, so
- * like → unlike → like cycling cannot pump the badge faster than one tick
- * per actor-minute. Different types from one actor are different signals and
- * each ticks — a like, a reply and a follow are three things, not one.
- * Moderation rows are never damped: null-actor system notices, each
+ * `unreadCount` collapses user-caused rows to one tick per actor, type and
+ * minute bucket, so like → unlike → like cycling cannot pump the badge faster
+ * than one tick per actor-minute. Different types from one actor are different
+ * signals and each ticks — a like, a reply and a follow are three things, not
+ * one. Moderation rows are never damped: null-actor system notices, each
  * individually meaningful, arriving rarely enough that throttling them would
  * only ever hide real news.
+ *
+ * The damper counts ticks; it never rewrites read state. Every row lands
+ * unread and renders unread on the page — the page is the truth of what the
+ * recipient has seen, the badge is a summary. Bucketing by clock minute (not
+ * a trailing window from each row) is the same best-effort deal: two same-type
+ * likes straddling a bucket boundary can tick twice.
  */
 const BURST_WINDOW_SECONDS = 60;
 
@@ -66,14 +79,10 @@ const BURST_WINDOW_SECONDS = 60;
  * of the write, and having it in one place is what keeps a new call site from
  * forgetting it.
  *
- * User-caused rows carry the burst damper: one `read_at` value computed by
- * the insert itself, `now()` when this actor already notified this recipient
- * of this type of event inside {@link BURST_WINDOW_SECONDS}, null otherwise.
- * A row born read never touches `unreadCount`, which is the whole throttle —
- * the read side needs no change, and the page still shows every event. The
- * damper is deliberately best-effort: two mints racing inside the window can
- * both land unread (one tick more than intended), because this is a damper,
- * not an invariant — the check constraints carry those.
+ * The mint itself is unconditional — no damper here. Read state is the
+ * recipient's `notification_last_seen` cursor, and a row nobody has seen is
+ * never anything but unread; `notification.unreadCount` is where a burst
+ * collapses, so damping can never make history lie about what was shown.
  */
 export async function insertNotification(
   db: Pick<Database, "insert">,
@@ -89,28 +98,13 @@ export async function insertNotification(
   },
 ): Promise<void> {
   if (args.actorId !== null && args.actorId === args.recipientId) return;
-  const values = {
+  await db.insert(notification).values({
     recipientId: args.recipientId,
     actorId: args.actorId,
     type: args.type,
     postId: args.postId ?? null,
     actionId: args.actionId ?? null,
-  };
-  await db.insert(notification).values(
-    args.actorId === null
-      ? values
-      : {
-          ...values,
-          readAt: sql`case when exists (
-            select 1 from ${notification}
-            where ${notification.recipientId} = ${args.recipientId}
-              and ${notification.actorId} = ${args.actorId}
-              and ${notification.type} = ${args.type}
-              and ${notification.createdAt}
-                > now() - make_interval(secs => ${BURST_WINDOW_SECONDS})
-          ) then now() else null end`,
-        },
-  );
+  });
 }
 
 /**
@@ -119,6 +113,21 @@ export async function insertNotification(
  * validates nowhere else.
  */
 const notificationCursor = createCursorCodec(z.uuid());
+
+/**
+ * The retention horizon shared by the list and the badge: older user-caused
+ * rows are not served and not counted, so the two can never disagree about
+ * what still exists. The rows themselves are pruned on the same boundary
+ * (see `scripts/prune-notifications.ts`). Moderation rows are exempt on both
+ * sides — they are rare, individually meaningful, and mirror an audit row
+ * that lives forever.
+ */
+function withinRetention() {
+  return sql`(
+    ${notification.type} = 'moderation'
+    or ${notification.createdAt} > now() - make_interval(days => ${NOTIFICATION_RETENTION_DAYS})
+  )`;
+}
 
 /**
  * What the recipient is allowed to see of their own list — one predicate,
@@ -145,6 +154,23 @@ function visibleNotification(viewerId: string) {
   ) and (${notification.postId} is null or ${post.deletedAt} is null)`;
 }
 
+/**
+ * The rows the badge counts: the visible, retained, unread ones — collapsed
+ * to one tick per user-caused `(actor, type, minute-bucket)` by the
+ * `count(distinct (...))` below. Swapping the first composite slot to the row
+ * id for moderation rows makes each of them distinct, which is the "never
+ * damped" rule expressed in the same expression. The distinct row comparison
+ * treats nulls as equal, so like/reply/follow rows from one actor collapse
+ * exactly as intended.
+ */
+const BURST_BUCKET_SECONDS = sql`floor(extract(epoch from ${notification.createdAt}) / ${BURST_WINDOW_SECONDS})`;
+const badgeTickKey = sql`(
+  case when ${notification.type} = 'moderation' then ${notification.id} end,
+  ${notification.actorId},
+  ${notification.type},
+  ${BURST_BUCKET_SECONDS}
+)`;
+
 /** The `notification` procedure group: list, unreadCount, markRead. */
 export const notificationRouter = {
   /**
@@ -170,10 +196,14 @@ export const notificationRouter = {
       }),
     )
     .handler(async ({ input, context }) => {
+      // The moderation action's target post, aliased away from the row's own
+      // `post_id` join: a `post_removed` notice links to the removed post
+      // only while that post still exists for the recipient to look at.
+      const targetPost = alias(post, "target_post");
       const selection = {
         id: notification.id,
         type: notification.type,
-        read: sql<boolean>`${notification.readAt} is not null`,
+        read: sql<boolean>`${notificationLastSeen.seenAt} is not null and ${notification.createdAt} <= ${notificationLastSeen.seenAt}`,
         createdAt: notification.createdAt,
         postId: notification.postId,
         actor: {
@@ -190,6 +220,14 @@ export const notificationRouter = {
           targetPostId: moderationAction.targetPostId,
           targetUserId: moderationAction.targetUserId,
         },
+        // The moderation action's target post, joined separately from the
+        // row's own `post_id`: it stays null on like/reply rows and tells
+        // the page whether a `post_removed` notice still has a post to
+        // link to. Top-level on purpose — nesting the aliased column inside
+        // `action` breaks drizzle's "the joined object is nullable"
+        // inference, and a moderation-shaped object that TypeScript cannot
+        // deny on a like row is a lie the page would pay for.
+        targetPostDeletedAt: targetPost.deletedAt,
       };
       return keysetPage({
         codec: notificationCursor,
@@ -212,10 +250,18 @@ export const notificationRouter = {
             .leftJoin(user, eq(user.id, notification.actorId))
             .leftJoin(moderationAction, eq(moderationAction.id, notification.actionId))
             .leftJoin(post, eq(post.id, notification.postId))
+            .leftJoin(targetPost, eq(targetPost.id, moderationAction.targetPostId))
+            // The recipient's read cursor: absent means never opened the
+            // page, everything unread.
+            .leftJoin(
+              notificationLastSeen,
+              eq(notificationLastSeen.recipientId, notification.recipientId),
+            )
             .where(
               and(
                 eq(notification.recipientId, context.user.id),
                 visibleNotification(context.user.id),
+                withinRetention(),
                 cursorFilter,
               ),
             )
@@ -225,27 +271,40 @@ export const notificationRouter = {
     }),
 
   /**
-   * How many notifications the caller has not read — the header badge.
+   * How many badge ticks the caller owes — the header bell.
    *
-   * Counts through the same visibility predicate as `list`, deliberately: a
-   * badge number the page behind it cannot reconcile (an actor the recipient
-   * blocked after the event, a post the author deleted) would click through
-   * to a list that never clears it.
+   * Counts through the same visibility predicate and retention horizon as
+   * `list`, deliberately: a badge number the page behind it cannot reconcile
+   * (an actor the recipient blocked after the event, a post the author
+   * deleted, a row aged past retention) would click through to a list that
+   * never clears it. Within that set the count collapses same-type bursts
+   * from one actor to one tick per minute (see `BURST_WINDOW_SECONDS`), so it
+   * can read *lower* than the page's unread rows — never higher, and zero
+   * exactly when there is nothing unread to show.
    */
   unreadCount: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
     .input(z.object({}))
     .handler(async ({ context }) => {
       const [row] = await context.db
-        .select({ count: sql<number>`count(*)::int` })
+        .select({
+          count: sql<number>`count(distinct ${badgeTickKey})::int`,
+        })
         .from(notification)
         .leftJoin(user, eq(user.id, notification.actorId))
         .leftJoin(post, eq(post.id, notification.postId))
+        .leftJoin(
+          notificationLastSeen,
+          eq(notificationLastSeen.recipientId, notification.recipientId),
+        )
         .where(
           and(
             eq(notification.recipientId, context.user.id),
-            isNull(notification.readAt),
+            // Unread against the recipient's cursor: no cursor yet means
+            // nothing has been seen.
+            sql`(${notificationLastSeen.seenAt} is null or ${notification.createdAt} > ${notificationLastSeen.seenAt})`,
             visibleNotification(context.user.id),
+            withinRetention(),
           ),
         );
 
@@ -253,25 +312,50 @@ export const notificationRouter = {
     }),
 
   /**
-   * Marks every one of the caller's unread notifications read. Requires a
-   * session; idempotent — repeating it states the same end state.
+   * Advances the caller's read cursor to now — "opening the page is what
+   * read means". Requires a session; idempotent, and O(1): one upsert on
+   * `notification_last_seen` rather than a stamp per unread row, so a
+   * recipient with thousands of unread notifications pays the same as one
+   * with none.
    *
-   * All-of-them rather than per-row on purpose: the unread state is "things
-   * the page has shown you", and the page shows a list, not a single row.
-   * Invisible rows are stamped too — read state is bookkeeping, not display,
-   * and leaving an unread row the list refuses to render would pin the badge
-   * at a number nothing can clear.
+   * Rows that arrive after the stamp are unread by definition — the cursor
+   * comparison, not a row rewrite, decides. The returned count is the number
+   * of rows the stamp made read (read against the *previous* cursor), all of
+   * them, including any the visibility predicate hides: like the old
+   * stamp-everything behaviour, read state is bookkeeping, not display.
    */
   markRead: protectedProcedure
     .use(rateLimit(RATE_LIMITS.markRead))
     .input(z.object({}))
     .handler(async ({ context }) => {
-      const rows = await context.db
-        .update(notification)
-        .set({ readAt: new Date() })
-        .where(and(eq(notification.recipientId, context.user.id), isNull(notification.readAt)))
-        .returning({ id: notification.id });
+      const stamped = await context.db.transaction(async (tx) => {
+        const [previous] = await tx
+          .select({ seenAt: notificationLastSeen.seenAt })
+          .from(notificationLastSeen)
+          .where(eq(notificationLastSeen.recipientId, context.user.id));
+        // The DB clock, not `new Date()`: `created_at` is stamped by the
+        // database, and a cursor minted from the app clock on a host that
+        // drifts ahead of it would silently read rows minted afterwards.
+        await tx
+          .insert(notificationLastSeen)
+          .values({ recipientId: context.user.id, seenAt: sql`now()` })
+          .onConflictDoUpdate({
+            target: notificationLastSeen.recipientId,
+            set: { seenAt: sql`now()` },
+          });
+        return previous?.seenAt ?? null;
+      });
 
-      return { read: rows.length };
+      const [row] = await context.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(notification)
+        .where(
+          and(
+            eq(notification.recipientId, context.user.id),
+            stamped === null ? sql`true` : gt(notification.createdAt, stamped),
+          ),
+        );
+
+      return { read: row?.count ?? 0 };
     }),
 };

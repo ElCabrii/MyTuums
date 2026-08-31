@@ -148,13 +148,23 @@ over HTTP and imports only its browser-safe subpaths.
   while its actor is visible to the recipient (which also drops user-caused
   rows whose actor was hard-deleted; the FK is set-null so moderation rows
   survive), and a row about an author-deleted post stops surfacing, the same
-  tombstone treatment the reply feed gives deleted replies. A same-type
-  burst from one actor is damped, not blocked: `insertNotification` stamps a
-  row born-read (`read_at` set at mint) when the same actor already notified
-  the same recipient of the same type inside a 60-second trailing window, so
-  the badge ticks at most once per actor-minute while the page still lists
-  every event; moderation rows (null actor) are never damped, and the damper
-  is best-effort under concurrency by design — a damper, not an invariant.
+  tombstone treatment the reply feed gives deleted replies. Read state is a
+  per-recipient seen-at cursor (`notification_last_seen`), not a per-row
+  stamp: a row is read exactly when its `created_at` is at or before the
+  cursor, `markRead` is one idempotent upsert, and no notification is ever
+  _born_ read — what the recipient has and has not seen stays truthful. A
+  same-type burst from one actor is damped in the badge, not in the rows:
+  `unreadCount` counts one tick per actor, type and minute bucket (moderation
+  rows each count; they are never damped), so like → unlike → like cycling
+  cannot pump the badge faster than one tick per actor-minute while the page
+  still lists — and shows unread — every event. The bucketing is best-effort
+  by design — two same-type events straddling a bucket boundary can tick
+  twice — a damper, not an invariant. The list and the badge share one
+  visibility predicate _and_ one retention horizon
+  (`NOTIFICATION_RETENTION_DAYS`; moderation rows exempt on both sides), so
+  the badge can never show a number the page behind it cannot reconcile;
+  `pnpm --filter @my-tuums/api prune:notifications` deletes past that same
+  horizon.
 - **Relationship writes for a pair are serialized by one advisory lock.**
   "A blocked pair has no follow edge" spans `follow` and `user_block`, so no
   database constraint can hold it. `follow`, `block` and `unblock` all take
@@ -325,12 +335,13 @@ over HTTP and imports only its browser-safe subpaths.
 
 ## Verification
 
-| Command                                          | Covers                                 |
-| ------------------------------------------------ | -------------------------------------- |
-| `pnpm --filter @my-tuums/api test:unit`          | pure logic; must pass with no database |
-| `pnpm --filter @my-tuums/api test:integration`   | real Postgres (`pnpm docker:up` first) |
-| `pnpm --filter @my-tuums/api lint` / `typecheck` | this package alone                     |
-| `pnpm --filter @my-tuums/api reconcile:media`    | reap objects no row points at          |
+| Command                                                                       | Covers                                                           |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `pnpm --filter @my-tuums/api test:unit`                                       | pure logic; must pass with no database                           |
+| `pnpm --filter @my-tuums/api test:integration`                                | real Postgres (`pnpm docker:up` first)                           |
+| `pnpm --filter @my-tuums/api lint` / `typecheck`                              | this package alone                                               |
+| `pnpm --filter @my-tuums/api reconcile:media`                                 | reap objects no row points at                                    |
+| `pnpm --filter @my-tuums/api prune:notifications --apply --retention-days=90` | delete notifications past the shared horizon (moderation exempt) |
 
 Suites split by filename: `*.test.ts` is unit (no I/O), `*.int.test.ts` is
 integration. `fileParallelism: false` is deliberate — the harness in

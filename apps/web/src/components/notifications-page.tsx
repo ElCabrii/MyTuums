@@ -123,8 +123,11 @@ function NotificationRow({ item }: { item: NotificationItem }) {
 
   // A follow leads to the follower's profile; a like or reply to the post it
   // happened on (the reply itself for replies — the conversation to rejoin).
-  // A moderation notice leads to its post when it had one, and nowhere for
-  // account-level actions: there is no account-sanction page to send them to.
+  // A moderation notice leads to its post when it had one — and only while
+  // that post still exists, which unlike the like/reply rows is not covered
+  // by the server's tombstone filter (a moderation row carries the action,
+  // not the post) — and nowhere for account-level actions: there is no
+  // account-sanction page to send them to.
   if (item.type === "follow" && handle) {
     return (
       <Link to="/@{$username}" params={{ username: handle }} className={rowClassName(item)}>
@@ -133,7 +136,12 @@ function NotificationRow({ item }: { item: NotificationItem }) {
     );
   }
 
-  const postId = item.type === "moderation" ? item.action?.targetPostId : item.postId;
+  const postId =
+    item.type === "moderation"
+      ? item.targetPostDeletedAt
+        ? null
+        : (item.action?.targetPostId ?? null)
+      : item.postId;
   if (postId) {
     return (
       <Link to="/post/$postId" params={{ postId }} className={rowClassName(item)}>

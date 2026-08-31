@@ -39,10 +39,10 @@ test.describe("notifications", () => {
     const before = await unreadOnBell(page);
 
     // Bob's earlier same-type rows (from previous specs, or from a failed
-    // attempt of this very test being retried) sit inside the burst damper's
-    // 60-second window: his next like, reply and follow would arrive born
-    // read and never move the badge to before + 3. Aging them past the
-    // window makes the three events below deterministic badge ticks.
+    // attempt of this very test being retried) sit inside the badge damper's
+    // current minute bucket: his next like, reply and follow would collapse
+    // into earlier ticks and never move the badge to before + 3. Aging them
+    // into an older bucket makes the three events below deterministic ticks.
     const bobId = await db.getUserId(BOB.username);
     await db.expireNotificationDamperWindow(bobId, aliceId);
 
@@ -78,10 +78,13 @@ test.describe("notifications", () => {
     await expect(page.getByText(`${BOB.name} replied to your post`)).toBeVisible();
     await expect(page.getByText(`${BOB.name} followed you`)).toBeVisible();
 
-    // Opening the page stamped everything read: the badge — re-fetched on
+    // Opening the page advanced the read cursor: the badge — re-fetched on
     // this same navigation — reads as the plain bell again, and the unread
-    // markers are gone from the rows.
-    await expect(page.getByRole("button", { name: "Notifications", exact: true })).toBeVisible();
-    await expect(page.getByText("Unread")).toBeHidden();
+    // markers are gone from the rows. Both assertions poll, and the row one
+    // counts to zero rather than checking hidden-ness: a strict-mode
+    // resolution error on a multi-match "Unread" locator sends the next
+    // debugger hunting a Playwright problem that is really three live rows.
+    await expect.poll(() => unreadOnBell(page), { timeout: 10_000 }).toBe(0);
+    await expect(page.getByText("Unread")).toHaveCount(0);
   });
 });

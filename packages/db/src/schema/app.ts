@@ -524,8 +524,6 @@ export const notification = pgTable(
     // The moderation action the notification mirrors — carries the code,
     // reason and target the page renders. Null for user-caused types.
     actionId: uuid("action_id").references(() => moderationAction.id, { onDelete: "cascade" }),
-    // Null means unread. A stamp, never a delete — read state is history.
-    readAt: timestamp("read_at", { withTimezone: true, precision: 3 }),
     // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above — and because the list is keyset-paginated on
     // (created_at, id), the precision is load-bearing here too.
@@ -548,14 +546,33 @@ export const notification = pgTable(
     // is one.
     check("notification_not_self", sql`${t.actorId} is null or ${t.actorId} <> ${t.recipientId}`),
     // The list's keyset order: newest first, `id` breaking ties — mirrored by
-    // packages/api/src/notifications.ts.
+    // packages/api/src/notifications.ts. It also carries the unread scans:
+    // read state is a per-recipient seen-at cursor
+    // (`notification_last_seen`), so "unread" is `created_at > seen_at` —
+    // exactly the leading columns here.
     index("notification_recipient_created_idx").on(t.recipientId, t.createdAt.desc(), t.id.desc()),
-    // The unread count scans a recipient's unread rows only.
-    index("notification_unread_idx")
-      .on(t.recipientId)
-      .where(sql`${t.readAt} is null`),
   ],
 );
+
+/**
+ * The read-state cursor for one recipient's notifications (issue #259): the
+ * moment they last opened `/notifications`. A row is read exactly when its
+ * `created_at` is at or before `seen_at` — read state lives here rather than
+ * as a per-row stamp so the page's "open means read" is one idempotent
+ * upsert instead of N row updates, and so no notification is ever *born*
+ * read: what the recipient has and has not seen stays truthful even when the
+ * badge damps a burst (the damper counts ticks, it never rewrites history —
+ * see `notification.unreadCount`).
+ *
+ * One row per recipient, created by `notification.markRead`. Absent means
+ * never opened the page: everything is unread.
+ */
+export const notificationLastSeen = pgTable("notification_last_seen", {
+  recipientId: text("recipient_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  seenAt: timestamp("seen_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+});
 
 /** Drizzle relations for `post` — the joins `with` queries can reach: author, likes, parent, and replies. */
 export const postRelations = relations(post, ({ one, many }) => ({

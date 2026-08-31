@@ -44,6 +44,7 @@ describe("NotificationsPage", () => {
         targetPostId: "removed-post",
         targetUserId: null,
       },
+      targetPostDeletedAt: null,
     });
 
     const queryClient = createTestQueryClient();
@@ -86,6 +87,7 @@ describe("NotificationsPage", () => {
         targetPostId: null,
         targetUserId: "user-1",
       },
+      targetPostDeletedAt: null,
     });
 
     const queryClient = createTestQueryClient();
@@ -112,6 +114,36 @@ describe("NotificationsPage", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("link", { name: /liked your post/ }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/post/liked-post"));
+  });
+
+  it("renders a moderation notice about a since-deleted post as a plain row, not a dead link", async () => {
+    const removedThenDeleted = makeNotification({
+      type: "moderation",
+      postId: null,
+      actor: null,
+      action: {
+        code: "post_removed",
+        reason: "rule break",
+        targetType: "post",
+        targetPostId: "gone-post",
+        targetUserId: null,
+      },
+      targetPostDeletedAt: new Date(),
+    });
+
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).notifications.data([
+      { items: [removedThenDeleted], nextCursor: null },
+    ]);
+
+    await renderWithProviders(<NotificationsPage />, {
+      queryClient,
+      initialPath: "/notifications",
+      signedInAs: true,
+    });
+
+    expect(screen.getByText(m.notification_moderation_post_removed())).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /removed by a moderator/ })).not.toBeInTheDocument();
   });
 
   it("marks everything read once on mount — opening the page is what clears the badge", async () => {
