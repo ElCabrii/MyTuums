@@ -47,6 +47,19 @@ export const post = pgTable(
     // `post.delete` into a real DELETE would have to change this first, or
     // one author's delete silently takes an unrelated conversation with it.
     parentId: uuid("parent_id").references((): AnyPgColumn => post.id, { onDelete: "cascade" }),
+    // The post a quote references (issue #261). Unlike `parentId` — a
+    // structural thread edge — a quote is a *reference*: the quoted post is
+    // rendered embedded inside the quoting post, and neither belongs to the
+    // other's reply tree. Null for ordinary posts and replies.
+    //
+    // Deliberately NO foreign key, the same evidence-retention reasoning as
+    // `report.targetId` and `moderation_action.target_*`: a hard row delete
+    // (today only the author's account going away) must not cascade the
+    // QUOTER's post away with the quoted one — a quote is the quoter's words
+    // about their own post, not part of the quoted author's subtree. The
+    // projection in packages/api resolves the id at read time and renders a
+    // null (unavailable) embedded card once the row no longer exists.
+    quotedPostId: uuid("quoted_post_id"),
     // The removal tombstone (issue #38): a removed post is never deleted —
     // it stays in feeds as a stub (see `postSelection` in packages/api) so
     // threads, likes and replies keep their shape. `removedBy` is set null
@@ -68,6 +81,15 @@ export const post = pgTable(
     // No `deletedBy`: the only account that can set this is `authorId`, which
     // the row already carries. No reason either — nobody is owed one.
     deletedAt: timestamp("deleted_at", { withTimezone: true, precision: 3 }),
+    // The author's own edit (issue #264): stamped the first time `post.edit`
+    // rewrites the text and restamped on every later edit, so it carries the
+    // LAST edit time. Null means never edited. `createdAt` deliberately never
+    // moves — an edit must not re-rank feeds — so this column is the marker's
+    // only source. The superseded texts live in `post_edit`: editing stays
+    // open even under moderation review, and the moderation case view shows
+    // the recorded history so a moderator judges what was written, not only
+    // what currently stands.
+    editedAt: timestamp("edited_at", { withTimezone: true, precision: 3 }),
     // `withTimezone` is not cosmetic. On a bare `timestamp` (no time zone),
     // Postgres resolves `now()` to the *database session's* local wall clock,
     // while Drizzle's `mapFromDriverValue` reads the column back by appending
@@ -104,6 +126,47 @@ export const post = pgTable(
     index("post_author_created_idx").on(t.authorId, t.createdAt.desc(), t.id.desc()),
     // The reply list under a single post.
     index("post_parent_created_idx").on(t.parentId, t.createdAt.desc(), t.id.desc()),
+  ],
+);
+
+/**
+ * One superseded version of a post's text (issue #264). Each row stores the
+ * content as it stood BEFORE the edit that replaced it, stamped with that
+ * edit's instant — the same instant `post.edited_at` carries for the latest
+ * one — so a post's full timeline is its `post_edit` rows plus the live
+ * `post.content`.
+ *
+ * Editing stays open even while the post is under moderation review; this
+ * table is what keeps that safe. The moderation case view reads it, so a
+ * moderator judges everything the author wrote, not only what currently
+ * stands — and a rewrite after a dismissal cannot hide what was judged the
+ * first time. Moderator-gated reads only: no public surface exposes history.
+ *
+ * No author column — the only writer is the post's own author, which the
+ * parent row already carries. Rows are never rewritten; the only delete is
+ * the cascade when the post row itself goes (the author's account being
+ * hard-deleted — `post.delete` is a tombstone and keeps the row).
+ */
+export const postEdit = pgTable(
+  "post_edit",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => post.id, { onDelete: "cascade" }),
+    // The text this edit replaced, not the text it wrote: the live
+    // `post.content` is always the newest version, so the original wording
+    // exists nowhere else and this is the only place it can survive.
+    content: text("content").notNull(),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    // The case view's read: one post's history, newest first. `id` breaks
+    // ties between edits landing in the same millisecond the same way the
+    // post keyset indexes do.
+    index("post_edit_post_created_idx").on(t.postId, t.createdAt.desc(), t.id.desc()),
   ],
 );
 
@@ -171,6 +234,90 @@ export const postLike = pgTable(
     // The PK already covers (post_id, user_id) lookups; this covers the
     // other direction — "has the viewer liked these posts".
     index("post_like_user_idx").on(t.userId),
+  ],
+);
+
+/**
+ * A repost (issue #261) — one row per (post, user) pair, mirroring `post_like`
+ * in every structural respect so `repost`/`unrepost` can be the same
+ * idempotent pair `like`/`unlike` is.
+ *
+ * A repost is an *event*, not a post: it carries no text and no images of its
+ * own, so it has no `post` row. The home feeds therefore read a merged
+ * timeline — post rows at their own `created_at`, repost rows amplifying the
+ * original at the repost's `created_at` (see `post.list` in packages/api).
+ */
+export const postRepost = pgTable(
+  "post_repost",
+  {
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => post.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // `timestamptz` with `precision: 3` for the same reasons as
+    // post.created_at above — and, like every feed cursor column here, the
+    // precision is load-bearing: the merged home-feed cursor orders on this
+    // timestamp, and a cursor that cannot round-trip it would silently skip
+    // repost events.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    // This composite primary key *is* the "one repost per user per post" rule,
+    // exactly as in `post_like`: the insert can say `onConflictDoNothing`, so a
+    // double-clicked repost is a no-op rather than a read-then-write race.
+    // Reposting your own post is allowed (no `not_self` check): unlike a
+    // follow, a self-repost has a meaning — amplifying your own post to your
+    // followers. "Reposting a repost" has no row shape at all: a repost has no
+    // id of its own, so the only thing any repost action can target is an
+    // original post.
+    primaryKey({ columns: [t.postId, t.userId] }),
+    // The PK already covers (post_id, user_id) lookups — the derived repost
+    // count and the viewer's has-reposted check. This one covers the merged
+    // home-feed walk: every repost event, newest first, ordered on exactly the
+    // (created_at, post_id, user_id) comparison the event cursor makes.
+    index("post_repost_created_idx").on(t.createdAt.desc(), t.postId.desc(), t.userId.desc()),
+  ],
+);
+
+/**
+ * A bookmark — one row per (post, user) pair; the caller's private saved list
+ * (issue #262).
+ *
+ * The shape deliberately mirrors `post_like`, but the two are different
+ * things and no surface may read one as the other: a like is public state (a
+ * count on the post), a bookmark is private state (an ordering of the saver's
+ * own page). There is deliberately no count column and no reader besides the
+ * saver — `viewerHasBookmarked` in packages/api is an EXISTS probe for the
+ * caller alone, and the bookmarks page is the only list ever built from this
+ * table.
+ */
+export const postBookmark = pgTable(
+  "post_bookmark",
+  {
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => post.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above — and because the bookmarks page keyset-paginates
+    // on (created_at, post_id), the precision is load-bearing here too.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    // This composite primary key *is* the "one bookmark per user per post"
+    // rule, exactly as for post_like: `bookmark` inserts with
+    // `onConflictDoNothing` instead of read-then-write racing, so a retry or a
+    // double-click can neither duplicate nor error.
+    primaryKey({ columns: [t.postId, t.userId] }),
+    // The bookmarks page: the caller's saved posts newest-first, `post_id`
+    // breaking ties between bookmarks sharing a timestamp. The primary key
+    // already covers the other direction — "has the viewer bookmarked this
+    // post".
+    index("post_bookmark_user_created_idx").on(t.userId, t.createdAt.desc(), t.postId.desc()),
   ],
 );
 
@@ -255,6 +402,16 @@ export const report = pgTable(
     // illegal_content/nsfw; users: spam/harassment/impersonation/underage)
     // are enforced at input by the procedure's discriminated union.
     reason: text("reason").notNull(),
+    // The post's content at the moment it was reported (issue #264). Null on
+    // user-target reports and on rows reported before the column existed.
+    // A report row otherwise carries only a reason code; this snapshot is
+    // the exact evidence — what the reporter actually saw — independent of
+    // whether the author has since edited the post. `post_edit` keeps every
+    // version, but correlating versions to reports by timestamp is
+    // reconstruction; this is the quote itself. Refreshed on a repeat
+    // report alongside `createdAt`, since the reporter is re-reporting what
+    // they now see.
+    snapshotContent: text("snapshot_content"),
     // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above.
     createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
@@ -483,30 +640,32 @@ export const appeal = pgTable(
 /**
  * An in-app notification (issue #259) — one row per event its recipient can
  * later discover on the notifications page: a like on their post, a reply to
- * their post, a follow, or a moderation action on their content or account.
+ * their post, a repost of their post, a quote of their post, a follow, or a
+ * moderation action on their content or account.
  *
- * Written only inside the same transaction as its cause (the like/follow
- * insert, the reply insert, the `moderation_action` row), so a rollback
- * leaves neither half. Exactly-once comes from the same shape that makes
- * like/follow idempotent: the notification is minted only when the cause row
- * was newly inserted, or — for moderation — by the same locked, guarded path
- * that mints the append-only audit row.
+ * Written only inside the same transaction as its cause (the like/repost/follow
+ * insert, the reply or quote insert, the `moderation_action` row), so a
+ * rollback leaves neither half. Exactly-once comes from the same shape that
+ * makes like/follow idempotent: the notification is minted only when the cause
+ * row was newly inserted, or — for moderation — by the same locked, guarded
+ * path that mints the append-only audit row.
  *
  * `actorId` is set null (not cascade) when the actor's account goes away:
  * moderation notifications are system rows (null actor by construction) that
  * must survive their moderator's deletion exactly like the audit rows they
- * reference. Like/reply/follow rows whose actor was hard-deleted read as null
- * here, and the list projection drops them — a like notification with no
- * liker has nothing left to say. One column cannot have two FK behaviours,
- * so `set null` plus that read-time filter is what gives user-caused rows
- * their cascade-equivalent semantics without losing the moderation ones.
+ * reference. Like/reply/repost/quote/follow rows whose actor was hard-deleted
+ * read as null here, and the list projection drops them — a like
+ * notification with no liker has nothing left to say. One column cannot have
+ * two FK behaviours, so `set null` plus that read-time filter is what gives
+ * user-caused rows their cascade-equivalent semantics without losing the
+ * moderation ones.
  */
 export const notification = pgTable(
   "notification",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     // The notification's owner — the only person the list ever serves. Their
-    // account going away takes their notifications with it.
+    // account going away takes their notifications with them.
     recipientId: text("recipient_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
@@ -514,12 +673,16 @@ export const notification = pgTable(
     // matching the branded email that never names the moderator); set null on
     // actor deletion, see the table comment.
     actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
-    // `'like'`, `'reply'`, `'follow'` or `'moderation'` (checked below). The
-    // `$type` union mirrors that check constraint so selects carry the four
-    // codes to TypeScript consumers — the same mirroring
-    // `MODERATION_ACTION_CODES` in packages/api does for `moderation_action`.
-    type: text("type").$type<"like" | "reply" | "follow" | "moderation">().notNull(),
-    // The like's post / the reply itself. Null for follow and moderation.
+    // `'like'`, `'reply'`, `'repost'`, `'quote'`, `'follow'` or
+    // `'moderation'` (checked below). The `$type` union mirrors that check
+    // constraint so selects carry the six codes to TypeScript consumers —
+    // the same mirroring `MODERATION_ACTION_CODES` in packages/api does for
+    // `moderation_action`.
+    type: text("type")
+      .$type<"like" | "reply" | "repost" | "quote" | "follow" | "moderation">()
+      .notNull(),
+    // The like's or repost's post / the reply or quote itself (the thing the
+    // recipient clicks through to). Null for follow and moderation.
     postId: uuid("post_id").references(() => post.id, { onDelete: "cascade" }),
     // The moderation action the notification mirrors — carries the code,
     // reason and target the page renders. Null for user-caused types.
@@ -530,13 +693,17 @@ export const notification = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
   },
   (t) => [
-    check("notification_type", sql`${t.type} in ('like', 'reply', 'follow', 'moderation')`),
-    // Like and reply rows name the post they are about; follow and moderation
-    // rows carry no post reference. An equality of booleans rather than a
-    // bare `is not null`, so neither type can smuggle the other's target.
+    check(
+      "notification_type",
+      sql`${t.type} in ('like', 'reply', 'repost', 'quote', 'follow', 'moderation')`,
+    ),
+    // Like, reply, repost and quote rows name the post they are about; follow
+    // and moderation rows carry no post reference. An equality of booleans
+    // rather than a bare `is not null`, so neither type can smuggle the
+    // other's target.
     check(
       "notification_post_ref",
-      sql`(${t.type} in ('like', 'reply')) = (${t.postId} is not null)`,
+      sql`(${t.type} in ('like', 'reply', 'repost', 'quote')) = (${t.postId} is not null)`,
     ),
     // Moderation rows mirror one audit action; every other type has none.
     check("notification_action_ref", sql`(${t.type} = 'moderation') = (${t.actionId} is not null)`),
@@ -574,11 +741,67 @@ export const notificationLastSeen = pgTable("notification_last_seen", {
   seenAt: timestamp("seen_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
 });
 
-/** Drizzle relations for `post` — the joins `with` queries can reach: author, likes, parent, and replies. */
+/**
+ * A resolved link preview card, keyed by the normalized URL it describes
+ * (issue #260). One row per URL: the card is a property of the target page,
+ * not of any post, so every post carrying the same URL shares it.
+ *
+ * `title` is the card's existence proof. A row with `title` set is a fetched
+ * card; a row with `title` null is a *negative* cache entry — "this URL was
+ * fetched within the revalidation window and produced no card" (dead target,
+ * refused address, missing Open Graph payload). Without that negative half,
+ * a post whose URL has nothing to unfurl would trigger an outbound fetch on
+ * every fresh view of every post carrying it, bounded only by the rate
+ * limiter.
+ *
+ * The row caches a *snapshot*, deliberately: a post's stored content is never
+ * rewritten, and neither is the card until the revalidation window expires
+ * (`fetchedAt` + window ⇒ refetch on the next request). The lead image, when
+ * one was provided and stored, lives in the media bucket under
+ * `link-cards/<uuid>.<ext>` and is served through `/media/` like every other
+ * object — never hot-linked from the target.
+ *
+ * A purged row (`purgedAt` set) is the moderation record for a hostile
+ * unfurl: the card fields are nulled, the URL never unfurls again, and the
+ * purge columns carry who removed it and why — the audit trail the
+ * `moderation_action` table cannot hold, its targets being post- and
+ * user-shaped by schema.
+ */
+export const linkCard = pgTable(
+  "link_card",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // The normalized absolute http(s) URL (scheme + host + path + query, the
+    // fragment dropped — it never changes what the server returns). The
+    // unique index below is the "fetched once per window" rule's anchor.
+    url: text("url").notNull(),
+    domain: text("domain"),
+    title: text("title"),
+    description: text("description"),
+    imageMediaPath: text("image_media_path"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    purgedAt: timestamp("purged_at", { withTimezone: true, precision: 3 }),
+    purgedBy: text("purged_by").references(() => user.id, { onDelete: "set null" }),
+    purgedReason: text("purged_reason"),
+  },
+  (t) => [
+    uniqueIndex("link_card_url_key").on(t.url),
+    // A negative entry is exactly "no title"; a positive one always carries
+    // both a domain and a title. Checked here so no writer can drift.
+    check(
+      "link_card_title",
+      sql`(${t.title} is null and ${t.domain} is null) or (${t.title} is not null and ${t.domain} is not null)`,
+    ),
+  ],
+);
+
+/** Drizzle relations for `post` — the joins `with` queries can reach: author, likes, bookmarks, parent, and replies. */
 export const postRelations = relations(post, ({ one, many }) => ({
   author: one(user, { fields: [post.authorId], references: [user.id] }),
   likes: many(postLike),
+  bookmarks: many(postBookmark),
   attachments: many(postAttachment),
+  reposts: many(postRepost),
   // Named for the direction they point, like followRelations below: `parent`
   // is the post being replied to, `replies` the posts replying to this one.
   // Both sides need the same `relationName` for Drizzle to pair them up as
@@ -589,6 +812,21 @@ export const postRelations = relations(post, ({ one, many }) => ({
     relationName: "replies",
   }),
   replies: many(post, { relationName: "replies" }),
+  edits: many(postEdit),
+  // The quote self-relation (issue #261): `quotedPost` is the post this one
+  // references, `quotes` the posts referencing this one. A separate
+  // `relationName` from "replies" so the two self-relations stay distinct.
+  quotedPost: one(post, {
+    fields: [post.quotedPostId],
+    references: [post.id],
+    relationName: "quotes",
+  }),
+  quotes: many(post, { relationName: "quotes" }),
+}));
+
+/** Drizzle relations for `postEdit` — the post whose text this version superseded. */
+export const postEditRelations = relations(postEdit, ({ one }) => ({
+  post: one(post, { fields: [postEdit.postId], references: [post.id] }),
 }));
 
 /** Drizzle relations for post attachments — the owning post. */
@@ -600,6 +838,18 @@ export const postAttachmentRelations = relations(postAttachment, ({ one }) => ({
 export const postLikeRelations = relations(postLike, ({ one }) => ({
   post: one(post, { fields: [postLike.postId], references: [post.id] }),
   user: one(user, { fields: [postLike.userId], references: [user.id] }),
+}));
+
+/** Drizzle relations for `postRepost` — the amplified `post` and the reposter. */
+export const postRepostRelations = relations(postRepost, ({ one }) => ({
+  post: one(post, { fields: [postRepost.postId], references: [post.id] }),
+  user: one(user, { fields: [postRepost.userId], references: [user.id] }),
+}));
+
+/** Drizzle relations for `postBookmark` — the `post` and `user` a bookmark references. */
+export const postBookmarkRelations = relations(postBookmark, ({ one }) => ({
+  post: one(post, { fields: [postBookmark.postId], references: [post.id] }),
+  user: one(user, { fields: [postBookmark.userId], references: [user.id] }),
 }));
 
 /** Drizzle relations for `follow` — the `user` rows on both sides of the edge. */

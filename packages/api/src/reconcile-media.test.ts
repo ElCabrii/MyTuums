@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { reconcileMedia, type MediaAttachmentRow, type MediaImageRow } from "./reconcile-media.js";
+import {
+  reconcileMedia,
+  type MediaAttachmentRow,
+  type MediaImageRow,
+  type MediaLinkCardRow,
+} from "./reconcile-media.js";
 
 /** A realistic key: `isSafeObjectKey` requires the slug and grouped-uuid shape. */
 const LIVE_KEY = "avatars/alicemedia/11111111-1111-4111-8111-111111111111.webp";
@@ -9,6 +14,8 @@ const POST_LIVE_KEY =
   "posts/alice/44444444-4444-4444-8444-444444444444/55555555-5555-4555-8555-555555555555.webp";
 const POST_ORPHAN_KEY =
   "posts/bob/66666666-6666-4666-8666-666666666666/77777777-7777-4777-8777-777777777777.png";
+const CARD_LIVE_KEY = "link-cards/88888888-8888-4888-8888-888888888888.webp";
+const CARD_ORPHAN_KEY = "link-cards/99999999-9999-4999-8999-999999999999.jpg";
 
 /**
  * A bucket that exists only in memory, plus the destructive-storage surface
@@ -117,5 +124,25 @@ describe("reconcileMedia", () => {
 
     expect(deleted).toEqual([POST_ORPHAN_KEY]);
     expect(bucket.has(POST_ORPHAN_KEY)).toBe(false);
+  });
+
+  it("reaps a link preview image no link_card row references, and keeps a live one (issue #260)", async () => {
+    const { bucket, deleted, storage } = fakeBucket([CARD_LIVE_KEY, CARD_ORPHAN_KEY]);
+    // A negative cache entry carries no image at all; a positive one's path
+    // is the only reference to its object.
+    const cards: MediaLinkCardRow[] = [
+      { imageMediaPath: `/media/${CARD_LIVE_KEY}` },
+      { imageMediaPath: null },
+    ];
+
+    await reconcileMedia({
+      storage,
+      readUserRows: () => Promise.resolve([]),
+      readLinkCardRows: () => Promise.resolve(cards),
+    });
+
+    expect(deleted).toEqual([CARD_ORPHAN_KEY]);
+    expect(bucket.has(CARD_LIVE_KEY)).toBe(true);
+    expect(bucket.has(CARD_ORPHAN_KEY)).toBe(false);
   });
 });

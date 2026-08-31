@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { closeDb } from "@my-tuums/db";
-import { post, postAttachment, user } from "@my-tuums/db/schema";
+import { post, postAttachment, postEdit, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   POST_MAX_LENGTH,
@@ -19,7 +19,9 @@ import {
   anonContext,
   contextFor,
   createTestUser,
+  freshSessionFor,
   seedPosts,
+  setUserRole,
   testStorage,
   testStorageObjects,
   truncateAll,
@@ -48,6 +50,17 @@ const POST_PNG = new Uint8Array(
 
 function postImage(name: string): File {
   return new File([POST_PNG], name, { type: "image/png" });
+}
+
+/**
+ * A user promoted to moderator through the row, re-fetched so the session
+ * carries the role — the same helper moderation.int.test.ts uses, local to
+ * this file because `moderation.case` is read exactly once below.
+ */
+async function moderatorUser() {
+  const user = await createTestUser();
+  await setUserRole(user.id, "moderator");
+  return freshSessionFor(user);
 }
 
 /** Little-endian byte pair for a 16-bit value, the way GIF stores widths/heights/delays. */
@@ -761,6 +774,350 @@ describe("post.delete", () => {
       postId: target.id,
       deletedAt: winningDeletedAt,
     });
+  });
+});
+
+describe("post.edit", () => {
+  it("is NOT_FOUND for a post that doesn't exist", async () => {
+    const author = await createTestUser();
+
+    await expect(
+      call(
+        appRouter.post.edit,
+        { postId: randomUUID(), content: "nothing" },
+        { context: contextFor(author) },
+      ),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("refuses someone else's post and leaves its content alone — ownership is server-enforced", async () => {
+    const author = await createTestUser();
+    const stranger = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await expect(
+      call(
+        appRouter.post.edit,
+        { postId: target.id, content: "hijacked" },
+        { context: contextFor(stranger) },
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const thread = await call(
+      appRouter.post.thread,
+      { postId: target.id },
+      { context: contextFor(stranger) },
+    );
+    expect(thread.post.content).not.toBe("hijacked");
+    expect(thread.post.editedAt).toBeNull();
+  });
+
+  it("edits the author's own post: the marker rides every projection, and createdAt — so feed order — does not move", async () => {
+    const author = await createTestUser();
+    const viewer = await createTestUser();
+    const base = Date.now();
+    const seeded = await seedPosts(author.id, 2, { createdAt: (i) => new Date(base + i * 1000) });
+    const [older] = seeded;
+
+    const before = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(viewer) },
+    );
+    expect(before.items.find((p) => p.id === older.id)?.editedAt).toBeNull();
+
+    const result = await call(
+      appRouter.post.edit,
+      { postId: older.id, content: "edited text zebra" },
+      { context: contextFor(author) },
+    );
+    expect(result.postId).toBe(older.id);
+    expect(result.content).toBe("edited text zebra");
+    expect(result.editedAt).toBeInstanceOf(Date);
+
+    const after = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(viewer) },
+    );
+    const edited = after.items.find((p) => p.id === older.id);
+    expect(edited?.content).toBe("edited text zebra");
+    expect(edited?.editedAt).toBeInstanceOf(Date);
+    // The edit bumps nothing: the older post stays behind the newer one, at
+    // its original creation instant.
+    expect(after.items.map((p) => p.id)).toEqual(before.items.map((p) => p.id));
+    expect(edited?.createdAt.getTime()).toBe(older.createdAt.getTime());
+
+    // Search matches the raw `content` column, so the edited text is what it
+    // finds; the thread carries the same row.
+    const search = await call(
+      appRouter.search.posts,
+      { q: "zebra" },
+      { context: contextFor(viewer) },
+    );
+    expect(search.items.some((p) => p.id === older.id)).toBe(true);
+    const thread = await call(
+      appRouter.post.thread,
+      { postId: older.id },
+      { context: contextFor(viewer) },
+    );
+    expect(thread.post.content).toBe("edited text zebra");
+    expect(thread.post.editedAt).toBeInstanceOf(Date);
+  });
+
+  it("edits a reply like a top-level post", async () => {
+    const author = await createTestUser();
+    const [root] = await seedPosts(author.id, 1);
+    const [reply] = await seedPosts(author.id, 1, { parentId: root.id });
+
+    await call(
+      appRouter.post.edit,
+      { postId: reply.id, content: "edited reply" },
+      { context: contextFor(author) },
+    );
+
+    const listed = await call(
+      appRouter.post.list,
+      { parentId: root.id },
+      { context: contextFor(author) },
+    );
+    expect(listed.items.find((p) => p.id === reply.id)?.content).toBe("edited reply");
+  });
+
+  it("is idempotent: re-sending the same content keeps the original editedAt", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    const first = await call(
+      appRouter.post.edit,
+      { postId: target.id, content: "same words" },
+      { context: contextFor(author) },
+    );
+    const second = await call(
+      appRouter.post.edit,
+      { postId: target.id, content: "same words" },
+      { context: contextFor(author) },
+    );
+    expect(second.editedAt?.getTime()).toBe(first.editedAt?.getTime());
+
+    // The trim is part of the shared input, so whitespace-only differences
+    // are the same edit too.
+    const third = await call(
+      appRouter.post.edit,
+      { postId: target.id, content: "  same words  " },
+      { context: contextFor(author) },
+    );
+    expect(third.editedAt?.getTime()).toBe(first.editedAt?.getTime());
+  });
+
+  it("refuses a post a moderator already removed — the appeal story cannot mutate under the appeal", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+    // The removal state is what the guard reads; how it got there belongs to
+    // moderation.int.test.ts, so this stamps it directly.
+    await anonContext.db
+      .update(post)
+      .set({ removedAt: new Date(), removedReason: "spam" })
+      .where(eq(post.id, target.id));
+
+    await expect(
+      call(
+        appRouter.post.edit,
+        { postId: target.id, content: "rewritten" },
+        { context: contextFor(author) },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This post was removed by a moderator and can no longer be edited.",
+    });
+
+    // `moderation.appealPreview` reads this row's content back to the author;
+    // the refusal above is what keeps that quote from being rewritable.
+    const [row] = await anonContext.db
+      .select({ content: post.content })
+      .from(post)
+      .where(eq(post.id, target.id));
+    expect(row?.content).not.toBe("rewritten");
+  });
+
+  it("refuses an author-deleted post", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+    await anonContext.db.update(post).set({ deletedAt: new Date() }).where(eq(post.id, target.id));
+
+    await expect(
+      call(
+        appRouter.post.edit,
+        { postId: target.id, content: "edited" },
+        { context: contextFor(author) },
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This post was deleted and can no longer be edited.",
+    });
+  });
+
+  it("stays editable while the post is under moderation review — the superseded text becomes history the case view shows", async () => {
+    const author = await createTestUser();
+    const reporter = await createTestUser();
+    const moderator = await moderatorUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await call(
+      appRouter.moderation.report,
+      { targetType: "post", targetId: target.id, reason: "spam" },
+      { context: contextFor(reporter) },
+    );
+
+    // An open report no longer freezes the text (the pinned choice this test
+    // guards): the history is what protects the evidence, not the refusal.
+    const edited = await call(
+      appRouter.post.edit,
+      { postId: target.id, content: "edited during review" },
+      { context: contextFor(author) },
+    );
+    expect(edited.content).toBe("edited during review");
+
+    // The moderator judging the case sees both the rewritten text and every
+    // version it replaced. The evidence is doubled: the report row carries a
+    // snapshot of the exact wording it was raised against, and the history
+    // keeps every version — neither can be rewritten away by the author.
+    const detail = await call(
+      appRouter.moderation.case,
+      { targetType: "post", targetId: target.id },
+      { context: contextFor(moderator) },
+    );
+    if (detail.target.kind !== "post") throw new Error("expected a post target");
+    expect(detail.target.content).toBe("edited during review");
+    expect(detail.target.editedAt?.getTime()).toBe(edited.editedAt?.getTime());
+    expect(detail.target.editHistory).toHaveLength(1);
+    expect(detail.target.editHistory[0]?.content).toContain("seed post 0");
+    // The history row is stamped with the same instant as the marker: the
+    // newest version's replacement time and `editedAt` are one edit.
+    expect(detail.target.editHistory[0]?.createdAt.getTime()).toBe(edited.editedAt?.getTime());
+    // The report's snapshot is the seed wording — what the reporter saw, not
+    // what the author rewrote it to — and the untruncated flag is honest.
+    expect(detail.reports).toHaveLength(1);
+    expect(detail.reports[0]?.snapshotContent).toContain("seed post 0");
+    expect(detail.target.editHistoryTruncated).toBe(false);
+
+    // A repeat report refreshes the snapshot alongside the case's clock
+    // (moderation.report's upsert): the reporter is re-reporting what they now
+    // see, so the moderators judge the current wording while the history keeps
+    // the one it replaced.
+    await call(
+      appRouter.moderation.report,
+      { targetType: "post", targetId: target.id, reason: "spam" },
+      { context: contextFor(reporter) },
+    );
+    const refreshed = await call(
+      appRouter.moderation.case,
+      { targetType: "post", targetId: target.id },
+      { context: contextFor(moderator) },
+    );
+    expect(refreshed.reports).toHaveLength(1);
+    expect(refreshed.reports[0]?.snapshotContent).toContain("edited during review");
+  });
+
+  it("cannot lose a version to concurrent edits: the row lock serializes the history", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    // Two overlapping edits from the same author (two tabs, a double-fire).
+    // Both guard reads may see the seed text before either commits; without
+    // serialization the loser would record the seed text twice and the
+    // winner's wording would survive nowhere — invisible to the moderator
+    // judging the case. `post.edit` opens its transaction by locking the
+    // row, so each edit records what it *actually* superseded.
+    await Promise.all(
+      ["first writer", "second writer"].map((content) =>
+        call(appRouter.post.edit, { postId: target.id, content }, { context: contextFor(author) }),
+      ),
+    );
+
+    const [row] = await anonContext.db
+      .select({ content: post.content })
+      .from(post)
+      .where(eq(post.id, target.id));
+    const history = await anonContext.db
+      .select({ content: postEdit.content })
+      .from(postEdit)
+      .where(eq(postEdit.postId, target.id));
+
+    // Whichever edit committed last stands in `content`; the other is a
+    // history row. Every version ever published is accounted for exactly
+    // once — the seed once, each edit once.
+    const allVersions = [row?.content, ...history.map((h) => h.content)];
+    expect(new Set(allVersions)).toEqual(
+      new Set(["first writer", "second writer", expect.stringContaining("seed post 0")]),
+    );
+    expect(allVersions).toHaveLength(3);
+  });
+
+  it("records one history row per edit — and none for an idempotent retry", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await call(
+      appRouter.post.edit,
+      { postId: target.id, content: "v1" },
+      { context: contextFor(author) },
+    );
+    // Content-equal retry: a no-op that must not grow the history.
+    await call(
+      appRouter.post.edit,
+      { postId: target.id, content: "v1" },
+      { context: contextFor(author) },
+    );
+    await call(
+      appRouter.post.edit,
+      { postId: target.id, content: "v2" },
+      { context: contextFor(author) },
+    );
+
+    const history = await anonContext.db
+      .select({ content: postEdit.content })
+      .from(postEdit)
+      .where(eq(postEdit.postId, target.id))
+      .orderBy(desc(postEdit.createdAt));
+    // Newest first: the text edit two replaced, then the seeded original.
+    expect(history[0]?.content).toBe("v1");
+    expect(history[1]?.content).toContain("seed post 0");
+    expect(history).toHaveLength(2);
+  });
+
+  it("applies create's text-or-images rule against the row's existing attachments", async () => {
+    const author = await createTestUser();
+    const [textOnly] = await seedPosts(author.id, 1);
+
+    await expect(
+      call(
+        appRouter.post.edit,
+        { postId: textOnly.id, content: "" },
+        { context: contextFor(author) },
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Post cannot be empty." });
+
+    // A post that already carries images keeps the image-only shape create
+    // allows: clearing its text is a legal edit, not an empty post.
+    const [withImages] = await seedPosts(author.id, 1);
+    await anonContext.db.insert(postAttachment).values({
+      postId: withImages.id,
+      position: 0,
+      mediaPath: `/media/posts/${author.id}/${withImages.id}/${randomUUID()}.png`,
+      contentType: "image/png",
+      byteSize: POST_PNG.byteLength,
+      width: 2,
+      height: 2,
+    });
+
+    const emptied = await call(
+      appRouter.post.edit,
+      { postId: withImages.id, content: "" },
+      { context: contextFor(author) },
+    );
+    expect(emptied.content).toBe("");
+    expect(emptied.editedAt).toBeInstanceOf(Date);
   });
 });
 

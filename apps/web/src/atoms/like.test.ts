@@ -3,11 +3,19 @@ import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 
-// The mock mirrors the real client's procedure tree — the post-cache sweep
-// in `updatePostEverywhere` now also walks `orpc.search.posts.key()`, so a
-// missing group here throws inside every like mutation.
+// The mock mirrors the real client's procedure tree — the post-cache sweep in
+// `updatePostEverywhere` walks `orpc.post.list`/`orpc.search.posts` keys, and
+// the like×bookmark rollback test below needs the bookmark pair, so a missing
+// group here throws inside every like mutation.
 const fakeClient = {
-  post: { like: vi.fn(), unlike: vi.fn(), list: vi.fn(), thread: vi.fn() },
+  post: {
+    like: vi.fn(),
+    unlike: vi.fn(),
+    bookmark: vi.fn(),
+    unbookmark: vi.fn(),
+    list: vi.fn(),
+    thread: vi.fn(),
+  },
   search: { typeahead: vi.fn(), users: vi.fn(), posts: vi.fn() },
 };
 
@@ -16,6 +24,7 @@ installTestOrpc(createTanstackQueryUtils(fakeClient));
 import { orpc, type Post, type PostListPage, type SearchPostsPage } from "@/lib/orpc";
 import { readCachedPost } from "@/lib/post-cache";
 import { clearLikeFamilies, toggleLikeAtomFamily } from "@/atoms/like";
+import { toggleBookmarkAtomFamily } from "@/atoms/bookmark";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
 
@@ -35,11 +44,19 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     likeCount: 0,
     replyCount: 0,
     viewerHasLiked: false,
+    quotedPostId: null,
+    quoted: null,
+    repostCount: 0,
+    viewerHasReposted: false,
+    repostedBy: null,
+    viewerHasBookmarked: false,
     // The tombstone fields (issue #38, plus #148): never removed or deleted
-    // by default.
+    // by default. Same for the edit marker (#264): never edited by default.
     removed: false,
     deleted: false,
     removedReason: null,
+    editedAt: null,
+    unavailable: false,
     attachments: [],
     ...overrides,
   };
@@ -179,6 +196,45 @@ describe("toggleLikeAtomFamily", () => {
 
     await vi.waitFor(() => expect(fakeClient.post.unlike).toHaveBeenCalled());
     expect(fakeClient.post.like).not.toHaveBeenCalled();
+  });
+
+  // Like and bookmark mutate the SAME cached row under different mutation
+  // scopes (`post-like:{id}` vs `post-bookmark:{id}`), so TanStack genuinely
+  // interleaves them: the like's snapshot is taken, the bookmark's optimistic
+  // flip lands, and only then does the like's request fail. A whole-row
+  // rollback — what `restorePosts` used to do — reverts the bookmark flip
+  // with the like until the next refetch. The snapshot's field scope is what
+  // keeps the failure to the like's own flags.
+  it("a failed like leaves a concurrent bookmark's optimistic flip on the same post standing", async () => {
+    const { store, queryClient } = freshStoreWithPost(
+      makePost({ id: "post-1", viewerHasLiked: false, likeCount: 2, viewerHasBookmarked: false }),
+    );
+
+    let rejectLike!: (error: Error) => void;
+    fakeClient.post.like.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectLike = reject;
+        }),
+    );
+    fakeClient.post.bookmark.mockImplementation(() => new Promise(() => {}));
+
+    // Like first (its snapshot sees viewerHasBookmarked: false), then the
+    // bookmark click flips the same cached row while the like is in flight.
+    store.set(toggleLikeAtomFamily("post-1"));
+    store.set(toggleBookmarkAtomFamily("post-1"));
+    expect(readCachedPost(queryClient, "post-1")?.viewerHasBookmarked).toBe(true);
+
+    // The mutationFn call is deferred past a microtask boundary, so wait for
+    // the promise executor to have run before rejecting it.
+    await vi.waitFor(() => expect(fakeClient.post.like).toHaveBeenCalled());
+    rejectLike(new Error("network down"));
+
+    await vi.waitFor(() => {
+      expect(readCachedPost(queryClient, "post-1")?.viewerHasLiked).toBe(false);
+    });
+    expect(readCachedPost(queryClient, "post-1")?.likeCount).toBe(2);
+    expect(readCachedPost(queryClient, "post-1")?.viewerHasBookmarked).toBe(true);
   });
 
   it("reads the like direction from the cache, so a burst of clicks alternates", () => {

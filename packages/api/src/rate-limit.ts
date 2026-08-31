@@ -75,7 +75,7 @@ export function createRateLimiter(
      * (packages/api/src/procedures.ts) to key on `appeal:<nonce>` or
      * `appeal:<actionId>` instead — a capability the server itself mints and
      * HMAC-signs (`appeal-token.ts`), never one an outside caller can choose.
-     * So the keyspace is bounded by registered users times the 9 policies in
+     * So the keyspace is bounded by registered users times the 10 policies in
      * `RATE_LIMITS`, plus however many appeal capabilities happen to be
      * outstanding at once — all server-issued, none of it grown on purpose by
      * an attacker spraying requests from many addresses. What `maxKeys`
@@ -195,6 +195,14 @@ export const RATE_LIMITS = {
   /** Likes. A human can't out-click this; a script can. */
   like: { name: "like", limit: 120, windowMs: MINUTE },
   /**
+   * Bookmarks. The same single indexed insert a like costs, and no more of a
+   * spam vector — the list is private — but `name` namespaces the counter and
+   * the two are different habits: someone curating a long saved list in one
+   * sitting must not burn through the budget their likes depend on. Own
+   * namespace, like `follow`, for that isolation alone.
+   */
+  bookmark: { name: "bookmark", limit: 120, windowMs: MINUTE },
+  /**
    * Follows and unfollows. The same single indexed insert a like costs, so by
    * cost alone it would share the `like` budget — but `name` is what
    * namespaces the counter, and mass-following is a spam vector in a way
@@ -203,6 +211,15 @@ export const RATE_LIMITS = {
    * following a full screen of suggestions never trips it.
    */
   follow: { name: "follow", limit: 60, windowMs: MINUTE },
+  /**
+   * Reposts and unreposts. The same single indexed insert a like costs, so by
+   * cost alone it would share the `like` budget — but mass-reposting is an
+   * amplification vector in a way mass-liking isn't (every repost lands in a
+   * follower feed), so it gets its own namespace: someone burning it can't
+   * also lock themselves out of liking. The same 60 as `follow`, the other
+   * mass-action spam vector with the same per-call cost.
+   */
+  repost: { name: "repost", limit: 60, windowMs: MINUTE },
   /** Publishing. Deliberately tight — this is the one that writes rows. */
   write: { name: "write", limit: 15, windowMs: MINUTE },
   /**
@@ -252,4 +269,19 @@ export const RATE_LIMITS = {
    * `follow`, `report` and `block` keep.
    */
   markRead: { name: "notification", limit: 60, windowMs: MINUTE },
+  /**
+   * Link preview unfurls (issue #260). The one policy that can spend an
+   * *outbound* request per call — a fetch of an author-chosen URL, bounded in
+   * size and time (see LINK_CARD_* in constants). Its own namespace so burning
+   * it cannot lock a caller out of reading feeds.
+   *
+   * 300, the same budget as `read`, because this middleware charges a unit on
+   * EVERY call — a cache hit consumes the budget exactly like a first fetch,
+   * and the feed asks for a card per post: at 20 posts a page, a tier of 60
+   * was three pages of card-bearing posts inside one window, silently
+   * dropping every card after them. Only the rare first view of a URL costs
+   * an outbound request; the tier is sized for the views, not the fetches,
+   * which the per-URL revalidation window already bounds.
+   */
+  linkCard: { name: "linkCard", limit: 300, windowMs: MINUTE },
 } as const satisfies Record<string, RateLimitPolicy>;

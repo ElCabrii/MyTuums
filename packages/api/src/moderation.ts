@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Database } from "@my-tuums/db";
 import { follow, moderationAction, post, report, user, userBlock } from "@my-tuums/db/schema";
 import {
+  LINK_CARD_URL_MAX_LENGTH,
   MODERATION_NOTE_MAX_LENGTH,
   POST_REPORT_REASONS,
   SEARCH_QUERY_MAX_LENGTH,
@@ -13,6 +14,7 @@ import {
   USER_REPORT_REASONS,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
+import { purgeLinkCard } from "./link-card.js";
 import { appealsRouter } from "./moderation-appeals.js";
 import {
   banUser,
@@ -101,6 +103,12 @@ const suspensionInput = z.object({
   durationSeconds: z.number().int().min(SUSPENSION_MIN_SECONDS).max(SUSPENSION_MAX_SECONDS),
 });
 
+/** The purge input: the card's URL under the same scheme rule reads accept. */
+const linkCardPurgeInput = z.object({
+  url: z.url({ protocol: /^https?$/ }).max(LINK_CARD_URL_MAX_LENGTH),
+  reason: z.string().trim().min(1).max(MODERATION_NOTE_MAX_LENGTH),
+});
+
 export const moderationRouter = {
   // The triage procedures (queue, case, resolve) and the two appeal
   // procedures live in their own files; the spreads assemble them here.
@@ -128,15 +136,19 @@ export const moderationRouter = {
         throw new ORPCError("BAD_REQUEST", { message: "You can't report yourself." });
       }
 
+      // A post report also snapshots the content it is raised against
+      // (issue #264): the reason code says *why*, this says *what* — the
+      // reporter's own evidence, immune to any later edit of the post. The
+      // user branch selects a typed null so both sides share one shape.
       const [target] =
         input.targetType === "post"
           ? await context.db
-              .select({ id: post.id })
+              .select({ id: post.id, snapshotContent: post.content })
               .from(post)
               .where(eq(post.id, input.targetId))
               .limit(1)
           : await context.db
-              .select({ id: user.id })
+              .select({ id: user.id, snapshotContent: sql<string | null>`null` })
               .from(user)
               .where(eq(user.id, input.targetId))
               .limit(1);
@@ -157,6 +169,7 @@ export const moderationRouter = {
           targetType: input.targetType,
           targetId: input.targetId,
           reason: input.reason,
+          snapshotContent: target.snapshotContent,
         })
         .onConflictDoUpdate({
           target: [report.reporterId, report.targetType, report.targetId],
@@ -165,6 +178,11 @@ export const moderationRouter = {
             resolvedBy: null,
             resolvedOutcome: null,
             resolutionNote: null,
+            // The snapshot refreshes with the clock on a repeat report: the
+            // reporter is re-reporting what they now see, and the moderators
+            // should judge that wording — the edit history keeps whatever it
+            // replaced.
+            snapshotContent: target.snapshotContent,
             // A repeat report refreshes the case's clock whether the row is
             // open or resolved (docs/product.md: "a repeat report refreshes
             // the row's timestamp without creating a new one"). `reason` is
@@ -311,6 +329,26 @@ export const moderationRouter = {
         note: input.note,
       });
       return { postId: input.postId, restored: true };
+    }),
+
+  /**
+   * Purges a link preview card — the staff lever for a hostile unfurl. A
+   * card is shared by every post carrying the URL, so a phishing or NSFW
+   * preview is one viewer-wide object; purging nulls the row, removes the
+   * stored lead image, and makes the URL never unfurl again. The actor and
+   * reason are recorded on the row — the audit trail `moderation_action`
+   * cannot carry, its targets being post- and user-shaped by schema.
+   */
+  purgeLinkCard: moderatorProcedure
+    .use(rateLimit(RATE_LIMITS.moderate))
+    .input(linkCardPurgeInput)
+    .handler(async ({ input, context }) => {
+      await purgeLinkCard(context, {
+        url: input.url,
+        actorId: context.user.id,
+        reason: input.reason,
+      });
+      return { url: input.url, purged: true };
     }),
 
   /**

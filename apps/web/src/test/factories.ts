@@ -81,14 +81,26 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     likeCount: 0,
     replyCount: 0,
     viewerHasLiked: false,
+    // The quote reference (issue #261): not a quote by default — the embedded
+    // card branches in post-card own their own fixtures.
+    quotedPostId: null,
+    repostCount: 0,
+    viewerHasReposted: false,
+    // Attribution is a feed-event property; a plain post row carries none.
+    repostedBy: null,
+    viewerHasBookmarked: false,
     // The tombstone fields (issue #38, plus the author's own delete in #148):
     // never removed or deleted by default — the two stub branches in
-    // post-card own their own fixtures.
+    // post-card own their own fixtures. Same for the edit marker (#264):
+    // never edited unless a test says so.
     removed: false,
     deleted: false,
     removedReason: null,
+    editedAt: null,
+    unavailable: false,
     ...overrides,
     parent: overrides.parent ?? null,
+    quoted: overrides.quoted ?? null,
     attachments: overrides.attachments ?? [],
   };
 }
@@ -230,9 +242,18 @@ export function makeModerationCaseDetail(
       content: "Hello, world!",
       createdAt: new Date(),
       parentId: null,
+      // Not a quote by default; the case dialog's quoted section owns its own
+      // fixture when a test exercises it.
+      quotedPostId: null,
+      quoted: null,
       removedAt: null,
       removedBy: null,
       removedReason: null,
+      // Same convention as makePost's `editedAt`: never edited by default, so
+      // a test that wants history says so.
+      editedAt: null,
+      editHistory: [],
+      editHistoryTruncated: false,
       attachments: [],
       author: makeAuthor(),
       ...overrides,
@@ -287,6 +308,9 @@ export function makeModerationReport(
   return {
     reporterId: crypto.randomUUID(),
     reason: "spam",
+    // No snapshot by default: a report needs one only when the test is about
+    // the wording it was raised against (issue #264).
+    snapshotContent: null,
     createdAt: new Date(),
     resolvedAt: null,
     resolvedBy: null,

@@ -8,12 +8,14 @@ import {
   ExternalLink,
   Flag,
   Gavel,
+  History,
   Hourglass,
   MessageSquareReply,
+  Pencil,
   Trash2,
   Undo2,
 } from "lucide-react";
-import { MODERATION_NOTE_MAX_LENGTH } from "@my-tuums/api/constants";
+import { EDIT_HISTORY_CASE_LIMIT, MODERATION_NOTE_MAX_LENGTH } from "@my-tuums/api/constants";
 import {
   appealReviewFamily,
   banUserAtom,
@@ -35,6 +37,7 @@ import {
 import { isStaffAtom } from "@/atoms/session";
 import { LinkedText } from "@/components/linked-text";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
+import { PostTimestamps } from "@/components/post-timestamps";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -198,7 +201,11 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
       {targetPost && <TargetPostCard target={targetPost} />}
       {targetUser && <TargetUserCard target={targetUser} />}
 
-      <ReportsSection reports={detail.reports} />
+      <ReportsSection
+        reports={detail.reports}
+        targetEditedAt={targetPost?.editedAt ?? null}
+        currentContent={targetPost?.content ?? null}
+      />
 
       {/* One section per open appeal. Two control families can be appealed
           against the same target at once (a ban and a role change), and each
@@ -220,7 +227,6 @@ function TargetPostCard({
   target: Extract<ModerationCaseDetail["target"], { kind: "post" }>;
 }) {
   const authorHandle = handleOf(target.author);
-  const locale = getLocale();
 
   return (
     <Card size="sm">
@@ -240,9 +246,9 @@ function TargetPostCard({
           )}
         </CardTitle>
         <CardDescription className="flex flex-wrap items-center gap-1.5">
-          <span title={formatDateTime(target.createdAt, locale)}>
-            {formatRelativeTime(target.createdAt, locale, m.post_just_now())}
-          </span>
+          {/* The shared timestamp + "Edited" marker, so the case view says a
+              post was edited exactly like every public surface does. */}
+          <PostTimestamps createdAt={target.createdAt} editedAt={target.editedAt} />
           {target.parentId && (
             <Badge variant="outline">
               <MessageSquareReply />
@@ -280,6 +286,72 @@ function TargetPostCard({
           </p>
         )}
         <PostAttachmentGrid attachments={target.attachments} />
+        {/* Every superseded version of the text (issue #264). Editing stays
+            open while a case is pending, so the current content above may
+            have been rewritten after the reports below were filed — this is
+            the moderator's only record of what those reports were raised
+            against. Newest first, matching the reports section. */}
+        {target.editHistory.length > 0 && (
+          <EditHistorySection
+            history={target.editHistory}
+            truncated={target.editHistoryTruncated}
+          />
+        )}
+        {/* The quoted post (issue #261), with the moderator's raw-content
+            projection — the evidence rule the target's own content follows
+            above. A removed or deleted quoted original renders its stub
+            markers rather than disappearing: the moderator needs to see what
+            the quote amplified, including its tombstones. The quoted
+            original's own edit history rides along (its author can rewrite it
+            after being quoted, and the report snapshots below captured the
+            quoter's text, not the original's — the history is the only record
+            of the wording that was amplified). */}
+        {target.quoted && (
+          <div className="border-border space-y-2 rounded-lg border p-3">
+            <p className="text-muted-foreground text-xs font-medium">
+              {m.moderation_case_quoted_label()}
+            </p>
+            <div className="flex min-w-0 items-center gap-2">
+              <UserAvatar
+                user={target.quoted.author}
+                alt={target.quoted.author.name || m.user_unknown()}
+                className="size-6"
+                fallbackClassName="text-[10px]"
+              />
+              <span className="truncate text-sm font-medium">
+                {target.quoted.author.name || m.user_unknown()}
+              </span>
+              {handleOf(target.quoted.author) && (
+                <span className="text-muted-foreground truncate text-xs">
+                  @{handleOf(target.quoted.author)}
+                </span>
+              )}
+            </div>
+            {target.quoted.content && (
+              <p className="text-sm break-words whitespace-pre-line">
+                <LinkedText text={target.quoted.content} />
+              </p>
+            )}
+            <PostAttachmentGrid attachments={target.quoted.attachments} />
+            {target.quoted.removed && (
+              <p className="text-muted-foreground text-xs">
+                {m.moderation_post_removed_stub()}
+                {target.quoted.removedReason
+                  ? ` — ${m.moderation_post_removed_reason({ reason: target.quoted.removedReason })}`
+                  : ""}
+              </p>
+            )}
+            {target.quoted.deleted && (
+              <p className="text-muted-foreground text-xs">{m.post_deleted_stub()}</p>
+            )}
+            {target.quoted.editHistory.length > 0 && (
+              <EditHistorySection
+                history={target.quoted.editHistory}
+                truncated={target.quoted.editHistoryTruncated}
+              />
+            )}
+          </div>
+        )}
         {target.removedAt && (
           <Alert variant="destructive">
             <Trash2 />
@@ -293,6 +365,69 @@ function TargetPostCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * The superseded versions of a post's text, newest first (issue #264).
+ * Rendered inside the card whose text it explains — the target post's own, or
+ * the quoted original's inside the quote box — rather than as its own: the
+ * versions are part of what is being judged, not metadata about it.
+ *
+ * Each row says what the text said and when it stopped saying it — the edit
+ * that replaced it — because that pairing is what tells a moderator whether a
+ * rewrite landed before or after the reports were filed.
+ */
+function EditHistorySection({
+  history,
+  truncated,
+}: {
+  history: ReadonlyArray<{ content: string; createdAt: Date }>;
+  truncated: boolean;
+}) {
+  const locale = getLocale();
+
+  return (
+    <div className="space-y-2">
+      <Separator />
+      <p className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
+        <History className="size-3.5" />
+        {m.moderation_case_edit_history_title()}
+      </p>
+      {/* `role="listitem"` on each row: `ItemGroup` renders `role="list"`, the
+          same aria-required-children rule the reports section follows. */}
+      <ItemGroup className="gap-1.5">
+        {history.map((version) => (
+          <Item
+            key={String(version.createdAt.getTime()) + version.content}
+            role="listitem"
+            variant="muted"
+            size="xs"
+          >
+            <ItemContent className="space-y-0.5">
+              <p className="text-sm break-words whitespace-pre-line">
+                <LinkedText text={version.content} />
+              </p>
+              <ItemTitle>
+                <span
+                  className="text-muted-foreground text-xs font-normal"
+                  title={formatDateTime(version.createdAt, locale)}
+                >
+                  {m.moderation_case_edit_history_replaced({
+                    time: formatRelativeTime(version.createdAt, locale, m.post_just_now()),
+                  })}
+                </span>
+              </ItemTitle>
+            </ItemContent>
+          </Item>
+        ))}
+      </ItemGroup>
+      {truncated && (
+        <p className="text-muted-foreground text-xs">
+          {m.moderation_case_edit_history_truncated({ count: EDIT_HISTORY_CASE_LIMIT })}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -382,8 +517,26 @@ function TargetUserCard({
   );
 }
 
-/** Every report against the target, newest first, with resolved state. */
-function ReportsSection({ reports }: { reports: ModerationCaseDetail["reports"] }) {
+/**
+ * Every report against the target, newest first, with resolved state.
+ *
+ * A post-target report also carries what it was raised against: the
+ * post's content snapshot taken at report time. It is quoted on the row
+ * whenever it differs from what currently stands — the reporter's own
+ * evidence, not a reconstruction from the edit history's timestamps —
+ * beside an "edited after this report" badge when the last edit landed
+ * after the report was filed. User-target reports carry no snapshot and
+ * no edit axis, so neither renders there.
+ */
+function ReportsSection({
+  reports,
+  targetEditedAt,
+  currentContent,
+}: {
+  reports: ModerationCaseDetail["reports"];
+  targetEditedAt: Date | null;
+  currentContent: string | null;
+}) {
   const locale = getLocale();
   const open = reports.filter(isOpenReport).length;
 
@@ -406,7 +559,7 @@ function ReportsSection({ reports }: { reports: ModerationCaseDetail["reports"] 
           <ItemGroup className="gap-1.5">
             {reports.map((report) => (
               <Item key={report.reporterId} role="listitem" variant="muted" size="xs">
-                <ItemContent>
+                <ItemContent className="space-y-0.5">
                   <ItemTitle>
                     <Badge variant={reasonBadgeVariant(report.reason)}>
                       {reasonLabel(report.reason)}
@@ -417,7 +570,26 @@ function ReportsSection({ reports }: { reports: ModerationCaseDetail["reports"] 
                     >
                       {formatRelativeTime(report.createdAt, locale, m.post_just_now())}
                     </span>
+                    {targetEditedAt && targetEditedAt > report.createdAt && (
+                      <Badge variant="secondary">
+                        <Pencil />
+                        {m.moderation_case_edited_after_report()}
+                      </Badge>
+                    )}
                   </ItemTitle>
+                  {/* The snapshot is quoted only when it no longer matches the
+                      live text: an unedited post needs no quote — the content
+                      card above already says exactly what was reported. */}
+                  {report.snapshotContent !== null && report.snapshotContent !== currentContent && (
+                    <div>
+                      <p className="text-muted-foreground text-xs font-medium">
+                        {m.moderation_case_report_snapshot_title()}
+                      </p>
+                      <p className="text-sm break-words whitespace-pre-line">
+                        <LinkedText text={report.snapshotContent} />
+                      </p>
+                    </div>
+                  )}
                 </ItemContent>
                 {report.resolvedAt && (
                   <ItemActions>

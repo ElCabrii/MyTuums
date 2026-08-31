@@ -159,8 +159,36 @@
     {
       "idx": 22,
       "version": "7",
-      "when": 1788166218233,
-      "tag": "0022_spicy_valkyrie",
+      "when": 1788117588070,
+      "tag": "0022_medical_ozymandias",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788186520704,
+      "tag": "0023_nebulous_starhawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788188264781,
+      "tag": "0024_flashy_lily_hollister",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788204865843,
+      "tag": "0025_outstanding_sir_ram",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1788207621958,
+      "tag": "0026_vengeful_quasar",
       "breakpoints": true
     }
   ]

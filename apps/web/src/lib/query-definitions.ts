@@ -15,7 +15,7 @@ interface PostListInput {
   continuationRootId?: string;
   includeReplies?: boolean;
   kind?: "posts" | "replies" | "all";
-  feed?: FeedScope;
+  feed?: FeedScope | "bookmarks";
   cursor?: string;
 }
 interface PagedSearchInput {
@@ -44,11 +44,19 @@ export type FollowDirection = "followers" | "following";
 /** The profile activity views; `both` preserves the legacy includeReplies input. */
 export type PostFeedKind = "posts" | "replies" | "both";
 
+/**
+ * Which `post.list` scope a feed atom reads. The two home scopes are the
+ * persisted `FeedScope`; `bookmarks` is the caller's private saved page and is
+ * never a home-feed choice — it deliberately stays out of `feedScopeAtom`'s
+ * enum so a hand-edited `localStorage` value can never select it.
+ */
+export type PostListScope = FeedScope | "bookmarks";
+
 export type PostFeedParams = {
   /** Omit for the global timeline; set to scope the feed to one author. */
   authorId?: string;
   /** "following" requires a signed-in viewer; the server rejects it otherwise. */
-  feed: FeedScope;
+  feed: PostListScope;
   /** Set to list one post's direct replies — the thread page's reply list. */
   parentId?: string;
   /** Replies are excluded unless this is set; a profile feed opts in. */
@@ -72,7 +80,9 @@ export function postListQueryOptions({
       if (parentId) input.parentId = parentId;
       if (kind === "replies") input.kind = "replies";
       else if (kind === "both" || includeReplies) input.includeReplies = true;
-      if (scope === "following") input.feed = scope;
+      // The global feed keeps a bare key (see the note on the conditional
+      // spreads above); the two scoped feeds carry their discriminator.
+      if (scope === "following" || scope === "bookmarks") input.feed = scope;
       if (cursor) input.cursor = cursor;
       return input;
     },
@@ -112,6 +122,24 @@ export function profileQueryOptions(username: string) {
 export function threadQueryOptions(postId: string) {
   return {
     ...orpc.post.thread.queryOptions({ input: { postId } }),
+    retry: retryUnlessClientError,
+  };
+}
+
+/**
+ * The link preview card for one URL — the first URL of a post, as picked by
+ * the linkifier (`firstLinkUrl`), never a URL the renderer would not link.
+ *
+ * The server caches the fetch per URL with its own revalidation window; this
+ * staleTime only keeps remounts (a feed scrolling the same card back into
+ * view) from re-asking. A `{ card: null }` answer is cached the same way —
+ * "no card" is a stable property of the URL within the window, and refetching
+ * it per view is exactly what the procedure's rate tier exists to stop.
+ */
+export function linkCardQueryOptions(url: string) {
+  return {
+    ...orpc.post.linkCard.queryOptions({ input: { url } }),
+    staleTime: 5 * 60_000,
     retry: retryUnlessClientError,
   };
 }

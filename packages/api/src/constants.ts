@@ -68,6 +68,18 @@ export const CURSOR_ID_MAX_LENGTH = 128;
 export const MODERATION_NOTE_MAX_LENGTH = 1000;
 
 /**
+ * How many superseded versions of a post's text `moderation.case` returns,
+ * newest first. The cap keeps one author's edit spree from turning the case
+ * dialog into an unbounded list; the report snapshots (`report.snapshot_content`)
+ * carry the evidence beyond it, so cutting there loses no load-bearing fact.
+ *
+ * Lives here, in the dependency-free constants module, because the case view's
+ * truncation copy states this number — parameterized from this constant, so
+ * the sentence can never fall out of step with the cap it describes.
+ */
+export const EDIT_HISTORY_CASE_LIMIT = 50;
+
+/**
  * The nine stable moderation action codes — the `moderation_action.action`
  * check constraint's list (packages/db/src/schema/app.ts).
  *
@@ -294,6 +306,41 @@ export const MAX_IMAGE_MEGAPIXELS = 50;
 export const GIF_MAX_FRAMES = 500;
 export const GIF_MAX_TOTAL_DURATION_MS = 200_000;
 export const GIF_MAX_CUMULATIVE_PIXELS = 50_000_000;
+
+/**
+ * Link preview cards (issue #260): bounds for unfurling the first URL of a
+ * post server-side. Every one of these is a defence line on an outbound fetch
+ * an author's text triggered, so they live beside the other caps rather than
+ * inside the fetch module — the client reads them too, for its URL input
+ * bound.
+ */
+/** Longest absolute URL accepted as a card target, in characters. */
+export const LINK_CARD_URL_MAX_LENGTH = 2048;
+/** Most HTML bytes read from a target before it is declared oversized. */
+export const LINK_CARD_HTML_MAX_BYTES = 512 * 1024;
+/** Most image bytes read from a target's lead image. */
+export const LINK_CARD_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+/** Wall-clock ceiling on one outbound request, redirects included. */
+export const LINK_CARD_FETCH_TIMEOUT_MS = 5000;
+/** Most redirects followed, each hop re-checked against the address guard. */
+export const LINK_CARD_MAX_REDIRECTS = 4;
+/**
+ * How long a stored card (positive or negative) is served before the next
+ * request refetches it. A fetched-once-per-window budget: shorter refreshes
+ * cost outbound fetches, longer ones serve stale titles.
+ */
+export const LINK_CARD_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+/** Longest card title stored, in characters; longer ones are truncated. */
+export const LINK_CARD_TITLE_MAX_LENGTH = 300;
+/** Longest card description stored, in characters; longer ones are truncated. */
+export const LINK_CARD_DESCRIPTION_MAX_LENGTH = 500;
+/**
+ * Longest card domain stored, in characters; longer ones are truncated. The
+ * value is the target's `og:site_name` or, absent that, its hostname — both
+ * are page-controlled text shipped to every viewer of every post carrying
+ * the URL, so the cap bounds them like the title and description.
+ */
+export const LINK_CARD_SITE_NAME_MAX_LENGTH = 300;
 
 /**
  * The largest request body the RPC endpoint will accept.

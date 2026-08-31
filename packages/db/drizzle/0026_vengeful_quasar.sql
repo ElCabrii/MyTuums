@@ -6,8 +6,8 @@ CREATE TABLE "notification" (
 	"post_id" uuid,
 	"action_id" uuid,
 	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "notification_type" CHECK ("notification"."type" in ('like', 'reply', 'follow', 'moderation')),
-	CONSTRAINT "notification_post_ref" CHECK (("notification"."type" in ('like', 'reply')) = ("notification"."post_id" is not null)),
+	CONSTRAINT "notification_type" CHECK ("notification"."type" in ('like', 'reply', 'repost', 'quote', 'follow', 'moderation')),
+	CONSTRAINT "notification_post_ref" CHECK (("notification"."type" in ('like', 'reply', 'repost', 'quote')) = ("notification"."post_id" is not null)),
 	CONSTRAINT "notification_action_ref" CHECK (("notification"."type" = 'moderation') = ("notification"."action_id" is not null)),
 	CONSTRAINT "notification_not_self" CHECK ("notification"."actor_id" is null or "notification"."actor_id" <> "notification"."recipient_id")
 );

@@ -120,6 +120,100 @@ describe("notification writes (issue #259)", () => {
     });
   });
 
+  it("reposting a post notifies the author exactly once, including under retry", async () => {
+    const author = await createTestUser();
+    const reposter = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await call(appRouter.post.repost, { postId: target.id }, { context: contextFor(reposter) });
+    // The retried repost: the composite primary key swallowed the insert, so
+    // the notice must not mint a second time either.
+    await call(appRouter.post.repost, { postId: target.id }, { context: contextFor(reposter) });
+
+    const page = await listFor(author);
+    expect(page.items).toHaveLength(1);
+    // The notice points at the reposted post — the recipient's own — on the
+    // same rule the like row follows.
+    expect(page.items[0]).toMatchObject({
+      type: "repost",
+      postId: target.id,
+      read: false,
+      actor: { id: reposter.id },
+    });
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 1,
+    });
+  });
+
+  it("an unrepost removes nothing; reposting again is a new event, like → unlike → like", async () => {
+    const author = await createTestUser();
+    const reposter = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await call(appRouter.post.repost, { postId: target.id }, { context: contextFor(reposter) });
+    await call(appRouter.post.unrepost, { postId: target.id }, { context: contextFor(reposter) });
+    // Rows are historical — the unrepost leaves the notice standing.
+    expect((await listFor(author)).items).toHaveLength(1);
+
+    await call(appRouter.post.repost, { postId: target.id }, { context: contextFor(reposter) });
+    // Three intent statements, two reposts that actually landed: two notices.
+    const page = await listFor(author);
+    expect(page.items).toHaveLength(2);
+    expect(page.items.map((item) => item.type)).toEqual(["repost", "repost"]);
+  });
+
+  it("a repost the author caused themselves never notifies", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    // Allowed — amplifying your own post — and silent, like a self-like.
+    await call(appRouter.post.repost, { postId: target.id }, { context: contextFor(author) });
+
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 0,
+    });
+    expect((await listFor(author)).items).toHaveLength(0);
+  });
+
+  it("quoting a post notifies its author once; a self-quote does not", async () => {
+    const author = await createTestUser();
+    const quoter = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    const quote = await call(
+      appRouter.post.create,
+      { content: "a quote", quotedPostId: target.id },
+      { context: contextFor(quoter) },
+    );
+    // Quoting your own post is allowed by the same rule a self-reply is.
+    await call(
+      appRouter.post.create,
+      { content: "my own words back", quotedPostId: target.id },
+      { context: contextFor(author) },
+    );
+
+    const page = await listFor(author);
+    expect(page.items).toHaveLength(1);
+    // The notice points at the quote itself — what the quoter said is the
+    // thing to click through to, the reply's shape exactly.
+    expect(page.items[0]).toMatchObject({
+      type: "quote",
+      postId: quote.id,
+      read: false,
+      actor: { id: quoter.id },
+    });
+    // The self-quote created no row: one notice, not two.
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 1,
+    });
+  });
+
   it("following notifies once under retry; unfollow and follow again is a new event, not a collapsed one", async () => {
     const followed = await createTestUser();
     const follower = await createTestUser();

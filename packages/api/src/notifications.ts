@@ -22,19 +22,20 @@ import { RATE_LIMITS } from "./rate-limit.js";
 import { effectivelyBanned, invisibleUser } from "./visibility.js";
 
 /**
- * The notification surface (issue #259): the one place a like, reply, follow
- * or moderation action leaves an in-app trace for its recipient, and the
- * procedures that read it back.
+ * The notification surface (issue #259): the one place a like, reply,
+ * repost, quote, follow or moderation action leaves an in-app trace for its
+ * recipient, and the procedures that read it back.
  *
  * Writes never happen here — they ride the cause's own transaction at each
- * call site (`post.like`, `post.create`, `user.follow`, `logAction`), through
+ * call site (`post.like`, `post.repost`, `post.create`, `user.follow`,
+ * `logAction`), through
  * {@link insertNotification}. This module owns the read side: the
  * newest-first keyset list, the damped unread count, and the mark-read
  * cursor stamp.
  */
 
 /**
- * The four notification type codes — the `notification.type` check
+ * The six notification type codes — the `notification.type` check
  * constraint's list (packages/db/src/schema/app.ts).
  *
  * Server-side only, unlike the moderation action codes in `./constants.ts`:
@@ -42,9 +43,16 @@ import { effectivelyBanned, invisibleUser } from "./visibility.js";
  * type flows from the inferred router contract, so the browser never needs
  * the list at runtime.
  */
-export const NOTIFICATION_TYPES = ["like", "reply", "follow", "moderation"] as const;
+export const NOTIFICATION_TYPES = [
+  "like",
+  "reply",
+  "repost",
+  "quote",
+  "follow",
+  "moderation",
+] as const;
 
-/** One of the four notification type codes. */
+/** One of the six notification type codes. */
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 /**
@@ -91,7 +99,10 @@ export async function insertNotification(
     /** Null for moderation rows — the notice is from MyTuums, like the email. */
     actorId: string | null;
     type: NotificationType;
-    /** The like's post, or the reply itself. Required for `like`/`reply`. */
+    /**
+     * The like's or repost's post, or the reply/quote itself. Required for
+     * `like`/`reply`/`repost`/`quote`.
+     */
     postId?: string;
     /** The mirrored audit action. Required for `moderation`. */
     actionId?: string;

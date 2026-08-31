@@ -14,8 +14,9 @@ import { getLocale } from "@/paraglide/runtime.js";
 
 /**
  * The `/notifications` page (issue #259): everything that happened to the
- * viewer while they were elsewhere — likes, replies, follows and moderation
- * notices — newest first, keyset-paginated, no grouping and no ranking.
+ * viewer while they were elsewhere — likes, replies, reposts, quotes,
+ * follows and moderation notices — newest first, keyset-paginated, no
+ * grouping and no ranking.
  *
  * Opening the page is what "read" means here: the mount effect below stamps
  * every unread row read, which is also what clears the header badge. The
@@ -121,9 +122,10 @@ function NotificationRow({ item }: { item: NotificationItem }) {
     </>
   );
 
-  // A follow leads to the follower's profile; a like or reply to the post it
-  // happened on (the reply itself for replies — the conversation to rejoin).
-  // A moderation notice leads to its post when it had one — and only while
+  // A follow leads to the follower's profile; a like, reply, repost or quote
+  // to the post it happened on (the reply or quote itself — the conversation
+  // to rejoin, or what the quoter said; a repost to the recipient's own
+  // post). A moderation notice leads to its post when it had one — and only while
   // that post still exists, which unlike the like/reply rows is not covered
   // by the server's tombstone filter (a moderation row carries the action,
   // not the post) — and nowhere for account-level actions: there is no
@@ -165,6 +167,10 @@ function notificationText(item: NotificationItem, displayName: string): string {
       return m.notification_like({ name: displayName });
     case "reply":
       return m.notification_reply({ name: displayName });
+    case "repost":
+      return m.notification_repost({ name: displayName });
+    case "quote":
+      return m.notification_quote({ name: displayName });
     case "follow":
       return m.notification_follow({ name: displayName });
     case "moderation":

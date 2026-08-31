@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { orpc, type Post, type PostListPage, type SearchPostsPage, type Thread } from "@/lib/orpc";
+import { postListQueryOptions } from "@/lib/query-definitions";
 import {
   readCachedPost,
+  removePostFromBookmarksFeed,
   restorePosts,
   snapshotPosts,
   updatePostEverywhere,
@@ -24,11 +26,19 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     likeCount: 0,
     replyCount: 0,
     viewerHasLiked: false,
+    quotedPostId: null,
+    quoted: null,
+    repostCount: 0,
+    viewerHasReposted: false,
+    repostedBy: null,
+    viewerHasBookmarked: false,
     // The tombstone fields (issue #38, plus #148): never removed or deleted
-    // by default.
+    // by default. Same for the edit marker (#264): never edited by default.
     removed: false,
     deleted: false,
     removedReason: null,
+    editedAt: null,
+    unavailable: false,
     attachments: [],
     ...overrides,
   };
@@ -64,6 +74,43 @@ function searchPage(posts: Post[]): InfiniteData<SearchPostsPage> {
   return {
     pages: [{ items: posts, nextCursor: null }],
     pageParams: [undefined],
+  };
+}
+
+/**
+ * The redacted repost event of `base` — the shape `feedEventPage` emits when
+ * a visible reposter's original author became hidden between page fetches:
+ * same post id, `unavailable: true`, and every shared field replaced (no
+ * content, sentinel author, zeroed counts and viewer flags). Only the
+ * reposter's own attribution survives.
+ */
+function redactedRepostEvent(base: Post): Post {
+  return {
+    ...base,
+    content: null,
+    removed: false,
+    deleted: false,
+    removedReason: null,
+    unavailable: true,
+    parentId: null,
+    parent: null,
+    quotedPostId: null,
+    quoted: null,
+    attachments: [],
+    author: { id: "", name: "", username: null, displayUsername: null, image: null },
+    likeCount: 0,
+    replyCount: 0,
+    repostCount: 0,
+    viewerHasLiked: false,
+    viewerHasReposted: false,
+    repostedBy: {
+      id: "reposter-1",
+      name: "Reposter",
+      username: "reposter",
+      displayUsername: "Reposter",
+      image: null,
+      repostedAt: new Date("2026-01-02T00:00:00.000Z"),
+    },
   };
 }
 
@@ -259,6 +306,33 @@ describe("post-cache", () => {
       expect(() => readCachedPost(queryClient, "pending-1")).not.toThrow();
       expect(readCachedPost(queryClient, "pending-1")).toBeUndefined();
     });
+
+    // The merged feed can hold one post id as two events at once: authored,
+    // and as a redacted repost event whose original author became hidden
+    // between page fetches. The redacted copy shares nothing but the id —
+    // its counts and viewer flags are server-zeroed — so reading current
+    // state from it would compute a like/repost direction from redacted
+    // flags. An available copy of the same id wins; the redacted one is
+    // still returned when it is all the cache holds.
+    it("prefers an available copy over a redacted repost event with the same id", () => {
+      const queryClient = new QueryClient();
+      const authored = makePost({ id: "both-events-1", viewerHasLiked: true, likeCount: 8 });
+      // Redacted first: as the newer event, it is also the first plain find.
+      queryClient.setQueryData(
+        orpc.post.list.key({ input: { limit: 20 } }),
+        feedPage([redactedRepostEvent(authored), authored]),
+      );
+
+      expect(readCachedPost(queryClient, "both-events-1")).toEqual(authored);
+    });
+
+    it("still returns the redacted copy when it is the only one cached", () => {
+      const queryClient = new QueryClient();
+      const redacted = redactedRepostEvent(makePost({ id: "redacted-only-1" }));
+      queryClient.setQueryData(orpc.post.list.key({ input: { limit: 20 } }), feedPage([redacted]));
+
+      expect(readCachedPost(queryClient, "redacted-only-1")).toEqual(redacted);
+    });
   });
 
   describe("snapshot / restore round trip", () => {
@@ -276,7 +350,7 @@ describe("post-cache", () => {
         thread: queryClient.getQueryData(threadKey),
       };
 
-      const snapshot = snapshotPosts(queryClient, "round-trip-1");
+      const snapshot = snapshotPosts(queryClient, "round-trip-1", "like");
       updatePostEverywhere(queryClient, "round-trip-1", (p) => ({
         ...p,
         likeCount: p.likeCount + 1,
@@ -295,13 +369,118 @@ describe("post-cache", () => {
       expect(queryClient.getQueryData(threadKey)).toEqual(before.thread);
     });
 
+    it("restorePosts keeps distinct attribution on authored and repost events for the same post", () => {
+      const queryClient = new QueryClient();
+      const authored = makePost({ id: "duplicate-event-1", likeCount: 5, repostedBy: null });
+      const reposted = makePost({
+        ...authored,
+        repostedBy: {
+          id: "reposter-1",
+          name: "Reposter",
+          username: "reposter",
+          displayUsername: "Reposter",
+          image: null,
+          repostedAt: new Date("2026-01-02T00:00:00.000Z"),
+        },
+      });
+      const feedKey = orpc.post.list.key({ input: { limit: 20 } });
+      queryClient.setQueryData(feedKey, feedPage([authored, reposted]));
+
+      const snapshot = snapshotPosts(queryClient, authored.id, "like");
+      updatePostEverywhere(queryClient, authored.id, (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+      }));
+      restorePosts(queryClient, snapshot!);
+
+      const items = queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items;
+      expect(items?.[0]?.likeCount).toBe(5);
+      expect(items?.[0]?.repostedBy).toBeNull();
+      expect(items?.[1]?.likeCount).toBe(5);
+      expect(items?.[1]?.repostedBy).toEqual(reposted.repostedBy);
+    });
+
+    // PR #272 review follow-up: the redaction cohort is event state like
+    // `repostedBy` above. A redacted repost event shares the post's id but
+    // none of its shared fields, so a rollback must not carry those fields
+    // across the boundary in either direction — writing an authored snapshot
+    // into the redacted event would un-redact a hidden original back into the
+    // feed, and writing a redacted snapshot into an available copy would
+    // blank that card.
+    it("restorePosts leaves a redacted repost event redacted when the snapshot came from the authored copy", () => {
+      const queryClient = new QueryClient();
+      const authored = makePost({ id: "split-events-1", content: "the words", likeCount: 5 });
+      const redacted = redactedRepostEvent(authored);
+      const feedKey = orpc.post.list.key({ input: { limit: 20 } });
+      queryClient.setQueryData(feedKey, feedPage([redacted, authored]));
+
+      // The snapshot prefers the available copy (see `readCachedPost`).
+      const snapshot = snapshotPosts(queryClient, "split-events-1", "like");
+      expect(snapshot?.post.unavailable).toBe(false);
+      updatePostEverywhere(queryClient, "split-events-1", (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+      }));
+      restorePosts(queryClient, snapshot!);
+
+      const items = queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items;
+      // The repost event keeps its own redacted copy — the authored row's
+      // content, author and availability never land in it. (Its counts were
+      // touched by the optimistic patch, which renders nowhere on an
+      // unavailable card and is re-zeroed by the next refetch.)
+      expect(items?.[0]?.unavailable).toBe(true);
+      expect(items?.[0]?.content).toBeNull();
+      expect(items?.[0]?.author).toEqual({
+        id: "",
+        name: "",
+        username: null,
+        displayUsername: null,
+        image: null,
+      });
+      expect(items?.[0]?.repostedBy).toEqual(redacted.repostedBy);
+      // The authored event is rolled back to its pre-click row.
+      expect(items?.[1]?.likeCount).toBe(5);
+      expect(items?.[1]?.unavailable).toBe(false);
+    });
+
+    it("restorePosts does not write a redacted snapshot into an authored copy of the same post", () => {
+      const queryClient = new QueryClient();
+      const redacted = redactedRepostEvent(makePost({ id: "split-events-2" }));
+      const homeKey = orpc.post.list.key({ input: { limit: 20 } });
+      queryClient.setQueryData(homeKey, feedPage([redacted]));
+
+      // The snapshot necessarily came from the redacted copy — the only one
+      // cached at click time.
+      const snapshot = snapshotPosts(queryClient, "split-events-2", "like");
+      expect(snapshot?.post.unavailable).toBe(true);
+      updatePostEverywhere(queryClient, "split-events-2", (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+        viewerHasLiked: true,
+      }));
+
+      // An authored event for the same post then lands in another cached
+      // feed — a page fetched before the author became hidden.
+      const authored = makePost({ id: "split-events-2", content: "the words", likeCount: 5 });
+      const authorFeedKey = orpc.post.list.key({ input: { limit: 20, authorId: "author-1" } });
+      queryClient.setQueryData(authorFeedKey, feedPage([authored]));
+
+      restorePosts(queryClient, snapshot!);
+
+      // The authored copy is left exactly as it was cached: no
+      // `unavailable: true`, no nulled content, no sentinel author.
+      const restored =
+        queryClient.getQueryData<InfiniteData<PostListPage>>(authorFeedKey)?.pages[0]?.items[0];
+      expect(restored).toEqual(authored);
+    });
+
     it("restorePosts undoes an edit to a post cached only under search.posts", () => {
       const queryClient = new QueryClient();
       const post = makePost({ id: "round-trip-search-1", likeCount: 5, viewerHasLiked: false });
       const searchKey = orpc.search.posts.key({ input: { q: "hello", limit: 20 } });
       queryClient.setQueryData(searchKey, searchPage([post]));
 
-      const snapshot = snapshotPosts(queryClient, "round-trip-search-1");
+      const snapshot = snapshotPosts(queryClient, "round-trip-search-1", "like");
       updatePostEverywhere(queryClient, "round-trip-search-1", (p) => ({
         ...p,
         likeCount: p.likeCount + 1,
@@ -325,7 +504,7 @@ describe("post-cache", () => {
     it("returns no snapshot for a post that isn't cached anywhere", () => {
       const queryClient = new QueryClient();
 
-      expect(snapshotPosts(queryClient, "nothing-cached")).toBeUndefined();
+      expect(snapshotPosts(queryClient, "nothing-cached", "like")).toBeUndefined();
       expect(() => {
         updatePostEverywhere(queryClient, "nothing-cached", (p) => p);
         readCachedPost(queryClient, "nothing-cached");
@@ -344,7 +523,7 @@ describe("post-cache", () => {
       queryClient.setQueryData(feedKey, feedPage([postA, postB]));
 
       // Like A: snapshot, then optimistic patch.
-      const snapshotA = snapshotPosts(queryClient, "post-a");
+      const snapshotA = snapshotPosts(queryClient, "post-a", "like");
       updatePostEverywhere(queryClient, "post-a", (p) => ({
         ...p,
         likeCount: p.likeCount + 1,
@@ -368,6 +547,158 @@ describe("post-cache", () => {
       expect(items?.find((p) => p.id === "post-a")?.viewerHasLiked).toBe(false);
       expect(items?.find((p) => p.id === "post-b")?.likeCount).toBe(42);
       expect(items?.find((p) => p.id === "post-b")?.viewerHasLiked).toBe(true);
+    });
+
+    // The within-row twin of the issue #53 case: like and bookmark mutate the
+    // same cached row under different mutation scopes (`post-like:{id}` vs
+    // `post-bookmark:{id}`), so like's snapshot can be taken, bookmark's
+    // optimistic flip can land, and only then can like's request fail. A
+    // whole-ROW rollback would silently revert the bookmark flip until a
+    // refetch; the snapshot's scope keeps the rollback field-scoped.
+    it("a failed like's rollback leaves a bookmark flip on the same post's row standing", () => {
+      const queryClient = new QueryClient();
+      const post = makePost({
+        id: "interleaved-1",
+        likeCount: 5,
+        viewerHasLiked: false,
+        viewerHasBookmarked: false,
+      });
+      const feedKey = orpc.post.list.key({ input: { limit: 20 } });
+      queryClient.setQueryData(feedKey, feedPage([post]));
+
+      // Like: snapshot (bookmark state happens to be false), then patch.
+      const likeSnapshot = snapshotPosts(queryClient, "interleaved-1", "like");
+      updatePostEverywhere(queryClient, "interleaved-1", (p) => ({
+        ...p,
+        viewerHasLiked: true,
+        likeCount: p.likeCount + 1,
+      }));
+
+      // Bookmark flips the same row while the like is in flight.
+      updatePostEverywhere(queryClient, "interleaved-1", (p) => ({
+        ...p,
+        viewerHasBookmarked: true,
+      }));
+
+      // The like fails: its rollback must undo the like and nothing else.
+      restorePosts(queryClient, likeSnapshot!);
+
+      const rolled =
+        queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items[0];
+      expect(rolled?.viewerHasLiked).toBe(false);
+      expect(rolled?.likeCount).toBe(5);
+      expect(rolled?.viewerHasBookmarked).toBe(true);
+    });
+
+    // …and the mirror image: a failed bookmark's rollback leaves a concurrent
+    // like's optimistic state alone.
+    it("a failed bookmark's rollback leaves a like's optimistic state on the same row standing", () => {
+      const queryClient = new QueryClient();
+      const post = makePost({
+        id: "interleaved-2",
+        likeCount: 5,
+        viewerHasLiked: false,
+        viewerHasBookmarked: false,
+      });
+      const feedKey = orpc.post.list.key({ input: { limit: 20 } });
+      queryClient.setQueryData(feedKey, feedPage([post]));
+
+      const bookmarkSnapshot = snapshotPosts(queryClient, "interleaved-2", "bookmark");
+      updatePostEverywhere(queryClient, "interleaved-2", (p) => ({
+        ...p,
+        viewerHasBookmarked: true,
+      }));
+
+      updatePostEverywhere(queryClient, "interleaved-2", (p) => ({
+        ...p,
+        viewerHasLiked: true,
+        likeCount: p.likeCount + 1,
+      }));
+
+      restorePosts(queryClient, bookmarkSnapshot!);
+
+      const rolled =
+        queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items[0];
+      expect(rolled?.viewerHasBookmarked).toBe(false);
+      expect(rolled?.viewerHasLiked).toBe(true);
+      expect(rolled?.likeCount).toBe(6);
+    });
+  });
+
+  describe("removePostFromBookmarksFeed", () => {
+    // The bookmarks page's cache is one `post.list` entry narrowed by the
+    // `feed: "bookmarks"` input — the same prefix every other feed shares.
+    // The removal must hit that entry alone: an un-bookmark is not a
+    // deletion, and the post keeps rendering everywhere else it is cached.
+    it("drops the row from the bookmarks feed's pages only, leaving every other cache untouched", () => {
+      const queryClient = new QueryClient();
+      const target = makePost({ id: "saved-1", viewerHasBookmarked: true });
+      const neighbour = makePost({ id: "saved-2", viewerHasBookmarked: true });
+      // The bookmarks entry is seeded through the production query-options
+      // helper: oRPC stamps infinite queries with a `type: "infinite"`
+      // discriminator the bare `.key()` form lacks, and the removal matches
+      // exactly the key the bookmarks page's atom registers.
+      const bookmarksKey = postListQueryOptions({ feed: "bookmarks" }).queryKey;
+      const homeKey = orpc.post.list.key({ input: { limit: 20 } });
+      const authorKey = orpc.post.list.key({
+        input: { limit: 20, authorId: "author-1", includeReplies: true },
+      });
+      const followingKey = orpc.post.list.key({ input: { limit: 20, feed: "following" } });
+      const searchKey = orpc.search.posts.key({ input: { q: "hello", limit: 20 } });
+
+      queryClient.setQueryData(bookmarksKey, {
+        pages: [{ items: [target, neighbour], nextCursor: null }],
+        pageParams: [undefined],
+      });
+      queryClient.setQueryData(homeKey, feedPage([target]));
+      queryClient.setQueryData(authorKey, feedPage([target]));
+      queryClient.setQueryData(followingKey, feedPage([target]));
+      queryClient.setQueryData(searchKey, searchPage([target]));
+
+      removePostFromBookmarksFeed(queryClient, "saved-1");
+
+      const bookmarks = queryClient.getQueryData<InfiniteData<PostListPage>>(bookmarksKey);
+      expect(bookmarks?.pages[0]?.items.map((p) => p.id)).toEqual(["saved-2"]);
+
+      // Every other home for the row keeps it.
+      expect(
+        queryClient.getQueryData<InfiniteData<PostListPage>>(homeKey)?.pages[0]?.items[0]?.id,
+      ).toBe("saved-1");
+      expect(
+        queryClient.getQueryData<InfiniteData<PostListPage>>(authorKey)?.pages[0]?.items[0]?.id,
+      ).toBe("saved-1");
+      expect(
+        queryClient.getQueryData<InfiniteData<PostListPage>>(followingKey)?.pages[0]?.items[0]?.id,
+      ).toBe("saved-1");
+      expect(
+        queryClient.getQueryData<InfiniteData<SearchPostsPage>>(searchKey)?.pages[0]?.items[0]?.id,
+      ).toBe("saved-1");
+    });
+
+    // Row removal is pagination-safe because `getNextPageParam` reads the
+    // stored per-page `nextCursor`, not anything derived from the rows the
+    // client holds. Removing an item must leave every page's cursor exactly
+    // where the server put it.
+    it("keeps each page's nextCursor, so a later Load more cannot skip or repeat", () => {
+      const queryClient = new QueryClient();
+      const first = makePost({ id: "page-1-post", viewerHasBookmarked: true });
+      const second = makePost({ id: "page-2-post", viewerHasBookmarked: true });
+      const bookmarksKey = postListQueryOptions({ feed: "bookmarks" }).queryKey;
+
+      queryClient.setQueryData(bookmarksKey, {
+        pages: [
+          { items: [first], nextCursor: "cursor-1" },
+          { items: [second], nextCursor: null },
+        ],
+        pageParams: [undefined, "cursor-1"],
+      });
+
+      removePostFromBookmarksFeed(queryClient, "page-1-post");
+
+      const data = queryClient.getQueryData<InfiniteData<PostListPage>>(bookmarksKey);
+      expect(data?.pages.map((page) => page.nextCursor)).toEqual(["cursor-1", null]);
+      expect(data?.pageParams).toEqual([undefined, "cursor-1"]);
+      expect(data?.pages[1]?.items.map((p) => p.id)).toEqual(["page-2-post"]);
     });
   });
 });

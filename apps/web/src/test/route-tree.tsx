@@ -166,6 +166,9 @@ function createTestRouteTree(ui: ReactNode) {
     // and the handle-less avatar's /welcome link (header.test.tsx).
     stubRoute("/welcome"),
     stubRoute("/settings/account"),
+    // The bookmarks page (issue #262) — a header-test navigation target via
+    // the account menu's Bookmarks item.
+    stubRoute("/bookmarks"),
     // two-factor.test.tsx mounts the real challenge page as `ui` — the route
     // has to exist in the tree for `Route.useSearch()` to resolve, same as
     // `/search` and `/appeal` above.

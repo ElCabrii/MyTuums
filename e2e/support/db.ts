@@ -360,6 +360,17 @@ export async function seedLike(postId: string, userId: string): Promise<void> {
 }
 
 /**
+ * Inserts a repost row directly — the composite PK makes it idempotent, the
+ * same way `seedFollow` and `seedLike` are. A spec that needs a repost event
+ * sitting in a feed should not pay for the UI walk to create it.
+ */
+export async function seedRepost(postId: string, userId: string): Promise<void> {
+  const db = await getDb();
+  const { postRepost } = await schemaModulePromise;
+  await db.insert(postRepost).values({ postId, userId }).onConflictDoNothing();
+}
+
+/**
  * Inserts a report row directly — the composite PK (reporter, target) makes
  * this idempotent, the same way `seedFollow` and `seedLike` are.
  *
@@ -457,7 +468,7 @@ export async function expireNotificationDamperWindow(
  * also call it directly for a guaranteed-clean slate of its own rather than
  * trusting no earlier spec left state behind (workers are pinned to 1, so
  * specs do share one database — see playwright.config.ts).
- * The list is explicit — the same sixteen tables the API harness truncates
+ * The list is explicit — the same tables the API harness truncates
  * (`packages/api/src/testing/harness.ts`) — and not a thinner `user`-only
  * `cascade` version. Most moderation tables would be reached through the
  * `user` foreign keys anyway, but `moderation_action.target_post_id` and
@@ -475,7 +486,7 @@ export async function truncateAll(): Promise<void> {
       ${schema.postLike}, ${schema.follow}, ${schema.report},
       ${schema.userBlock}, ${schema.appeal}, ${schema.moderationAction},
       ${schema.notification}, ${schema.notificationLastSeen},
-      ${schema.post},
+      ${schema.post}, ${schema.linkCard},
       ${schema.session}, ${schema.account}, ${schema.verification},
       ${schema.rateLimit}, ${schema.twoFactor}, ${schema.passkey},
       ${schema.user}
@@ -523,6 +534,7 @@ async function purgeUploadedImages(): Promise<void> {
       storage.removeByPrefix("avatars/"),
       storage.removeByPrefix("banners/"),
       storage.removeByPrefix("posts/"),
+      storage.removeByPrefix("link-cards/"),
     ]);
   } catch (error) {
     console.warn("Could not purge uploaded test images from the bucket:", error);

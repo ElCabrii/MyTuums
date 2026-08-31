@@ -31,7 +31,7 @@ over HTTP and imports only its browser-safe subpaths.
 | Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`)          | `src/router.ts` if it is a new group; an `.int.test.ts`                                                  |
 | Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                               | a matching index in `packages/db/src/schema/app.ts`                                                      |
 | Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                               | `src/rate-limit.test.ts`                                                                                 |
-| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                              | `src/users.int.test.ts` pins it — read the invariant first                                               |
+| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                              | `src/users.int.test.ts` pins the invariant first                                                         |
 | Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)                  | `src/constants.ts` (action code), `docs/product.md` glossary                                             |
 | Change the queue or a case view       | `src/moderation-queue.ts`                                                                         | `src/moderation-inputs.ts` if the input shape moves                                                      |
 | Change how a user is matched by text  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                             | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking |
@@ -46,6 +46,8 @@ over HTTP and imports only its browser-safe subpaths.
 | Change the notifications read side    | `src/notifications.ts`                                                                            | `src/notifications.int.test.ts`; the read-time filters live with the table in `packages/db`              |
 | Change when an event notifies         | the cause's own file (`src/posts.ts`, `src/users.ts`, `logAction` in `src/moderation-actions.ts`) | `insertNotification` is the only mint point, and it rides the cause's transaction                        |
 | Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                                  | `apps/server/src/request-handler.ts`                                                                     |
+| Change the link-card wire rules       | `src/link-card-http.ts`                                                                           | `src/link-card-http.test.ts`                                                                             |
+| Purge or re-serve link cards          | `src/link-card.ts` (`resolveLinkCard`, `purgeLinkCard`)                                           | `src/moderation.ts` (the procedure); `link-card.int.test.ts`                                             |
 | Add a shared constant for the web app | `src/constants.ts`                                                                                | must stay free of `@my-tuums/db`                                                                         |
 | Change an account rule                | `../auth/src/rules.ts`                                                                            | not `src/constants.ts` — see the invariant below                                                         |
 
@@ -127,28 +129,41 @@ over HTTP and imports only its browser-safe subpaths.
   profile resolve to its suspended stub instead of 404ing. `user.byUsername`
   redacts authored profile fields, relationship counts and viewer state from
   that stub before it crosses the API boundary.
-- **`like`/`unlike` and `follow`/`unfollow` are separate idempotent
-  procedures, never a toggle** — ordering and retry safety.
+- **`like`/`unlike`, `repost`/`unrepost`, `bookmark`/`unbookmark` and
+  `follow`/`unfollow` are separate idempotent procedures, never a toggle** —
+  ordering and retry safety. A bookmark is the private twin of a like: the
+  composite `post_bookmark` primary key is the one-row rule,
+  `postSelection`'s `viewerHasBookmarked` probe is its only read besides the
+  saver's own `post.list({ feed: "bookmarks" })` page, and no count is ever
+  derived from the table. That page is a mode of `post.list` (keyset on the
+  bookmark's `(created_at, post_id)`, mirrored by
+  `post_bookmark_user_created_idx`), so it shares the projection, the feed
+  rules — author-deleted posts omitted, removals stubbed, visibility
+  filtered — and the web app's optimistic sweeps. `unbookmark` deliberately
+  carries no target visibility check, unlike `bookmark`: the row it deletes
+  is the caller's own, its response is the same for a missing and an
+  invisible post, and the page's visibility filter hides exactly the saves
+  that would otherwise be stranded — unremovable from the page that no
+  longer renders them.
 - **A notification is minted only inside the transaction of the event that
   caused it, and exactly-once is the cause's own idempotency** (issue #259).
-  `post.like` and `user.follow` insert their notification only when the
-  `.returning()` of the cause's `onConflictDoNothing` insert is non-empty, so
-  a retry mints nothing while like → unlike → like is honestly three events;
-  a reply's notification rides `insertPost`'s transaction pointing at the
-  reply itself; and the moderation half lives in `logAction`'s optional
-  `notifyUserId`, which every effect passes — the locked, guarded paths that
-  keep the audit log append-only are what keep it exactly-once, with a null
-  actor because the branded email never names the moderator either.
+  `post.like`, `post.repost` and `user.follow` insert their notification only
+  when the `.returning()` of the cause's `onConflictDoNothing` insert is
+  non-empty, so a retry mints nothing while like → unlike → like is honestly
+  three events and an unrepost removes nothing (rows are historical); a
+  reply's or quote's notification rides `insertPost`'s transaction pointing
+  at the new post itself (the quote's recipient is the quoted author); and
+  the moderation half lives in `logAction`'s optional `notifyUserId`, which
+  every effect passes — the locked, guarded paths that keep the audit log
+  append-only are what keep it exactly-once, with a null actor because the
+  branded email never names the moderator either.
   `case_resolved` deliberately passes none: its notices go to the reporters,
-  and email stays that channel. The silence is enumerated, and the release
-  branch's incoming actions are decided too: reposts and quotes WILL notify
-  the original author through the same `.returning()` pattern — that
-  emission is the integration phase's job, landing when this PR integrates
-  with the release branch — while edits never notify (an edit is not an
-  event about the recipient), bookmarks never notify (private by design; no
-  emission point exists), and link-card fetches and purges never notify
-  (not actions on a person; the purge audit trail lives on `link_card` by
-  design). The read side (`src/notifications.ts`) owns
+  and email stays that channel. The silence is enumerated too: edits never
+  notify (an edit is not an event about the recipient), bookmarks never
+  notify (private by design; no emission point exists), and link-card
+  fetches and purges never notify (not actions on a person; the purge audit
+  trail lives on `link_card` by design). The read side
+  (`src/notifications.ts`) owns
   the rest: self-caused events are dropped in `insertNotification` (the
   `notification_not_self` check constraint would otherwise abort the cause
   transaction with it), and the list and the unread count share one
@@ -214,6 +229,78 @@ over HTTP and imports only its browser-safe subpaths.
   pair is safe because the update compares both tombstones; after losing to a
   concurrent delete or removal, it re-reads the winner and preserves that
   outcome.
+- **`post.edit` rewrites text and nothing else (issue #264).** The body field
+  is the shared `postContentInput` — the same trim and bound `post.create`
+  enforces, never restated — and attachments are immutable through it; the
+  create cross-field rule (text, images, or both) is re-checked against the
+  row's existing attachments, so clearing the text of an image post is a legal
+  edit while emptying a text-only post is refused with create's own message.
+  It is author-owned and idempotent like `post.delete`: a content-equal retry
+  keeps the original `edited_at` (the marker never restamps, and no history
+  row is written), and the state guards refuse even for a content-equal
+  retry. Two states refuse an edit: moderator-removed (the appeal story must
+  not mutate — `moderation.appealPreview` quotes that row's content) and
+  author-deleted. Editing deliberately stays OPEN under active moderation
+  review: instead of freezing the text, every edit records the version it
+  superseded in `post_edit` (stamped with the same instant as `edited_at`),
+  and `moderation.case` returns that history beside the current text —
+  moderator-gated, no public surface reads it, capped at the newest 50 rows
+  (`EDIT_HISTORY_CASE_LIMIT`) with an `editHistoryTruncated` flag. The
+  evidence is doubled: a post report snapshots the content it was raised
+  against (`report.snapshot_content`, refreshed on a repeat report), so a
+  rewrite mid-case or after a dismissal can hide what was judged through
+  neither the snapshot nor the history. The same claim covers the quote shape
+  (issue #264 meets #261): a quote case is judged against the ORIGINAL's
+  wording too, but the report snapshots belong to the quoting post — the
+  original may never have been reported itself — so `moderation.case` also
+  returns the quoted original's own `post_edit` history (same cap, same
+  helper) spliced into the `quoted` evidence beside its live content, and a
+  rewrite of the original after being quoted is no more hiding than a rewrite
+  of the target. That is also why the write opens
+  with `SELECT … FOR UPDATE` where `post.delete` needs no lock: concurrent
+  editors serialize on the row, so each history row records the text its
+  edit _actually_ superseded and no version can be lost between two
+  overlapping edits — an unlocked pair would record the same superseded
+  text twice and the first edit's wording would survive nowhere.
+  `created_at` never moves, so feeds and search pick up the new text with no
+  re-ranking. `edited_at` rides `postSelection` beside `createdAt`.
+- **Reposts and quote posts are events and references, never posts (issue
+  #261).** A repost is a `post_repost` row — the same idempotent
+  `repost`/`unrepost` pair, composite-PK idempotency and derived count as
+  `like`/`unlike` — so "reposting a repost" has no expressible target: every
+  action names an original post id. A quote is a post row plus `quotedPostId`
+  (deliberately FK-less, the evidence-retention pattern of `report.targetId`:
+  hard-deleting the quoted post must not cascade the quoter's own post away),
+  carrying every post rule and rendering its embedded `quoted` preview in
+  every context through `postSelection` — feed, permalink, thread, search —
+  plus the moderator's raw-content variant (`quotedPostEvidence`) in
+  `moderation.case`. The degradation matrix is decided and pinned in
+  `src/reposts.int.test.ts`: author-deleted original → deletion stub in place
+  of the embedded post (the repost event stays in the feed; the quote's own
+  text survives); moderator-removed original → removal stub, with
+  `removedReason` author-only as everywhere; banned/blocked original author →
+  a quote's embedded post is null, while a repost keeps the visible reposter's
+  event with an `unavailable` original whose identity, content, media, counts
+  and interactions are redacted.
+- **The home feeds walk a merged event timeline.** `post.list` without
+  `parentId` unions authored posts with repost events (`feedEventPage` in
+  `src/posts.ts`), strictly reverse-chronological by event time — a repost
+  places the original at the repost's timestamp — with no ranking and no
+  deduplication: one post can be two events. The event cursor is a three-part
+  key (`createEventCursorCodec` in `src/cursor.ts`): `(event_at, post_id,
+reposter_key)`, where the reposter half is absent for post events and binds
+  as `''` in SQL so the row-value comparison stays a total order. Profile
+  feeds (`authorId`) and reply lists run no repost arm: a profile is the
+  author's own activity, and the reply list is direct replies by their own
+  event time. The same rule excludes reposts _of_ replies under
+  `kind: "posts"` — no shipped feed can show such an event, so the web hides
+  the repost control on replies rather than offer an action whose result
+  never renders anywhere. The repost arm applies the block/ban filter to the
+  reposter
+  (`aliasVisibleTo` — `invisibleAuthor` is bound to the un-aliased table), but
+  deliberately keeps a visible reposter's event when only the original author
+  is hidden; the projection phase re-evaluates that original and emits the
+  redacted `unavailable` shape.
 - **Replies and their inline continuations are modes of `post.list`, not
   separate procedures.** `parentId` remains the keyset-paginated owner of a
   focused post's direct replies; those pages add the bounded original-author
@@ -258,6 +345,43 @@ over HTTP and imports only its browser-safe subpaths.
   upload-before-row window without a pending schema state. The reverse order
   still treats a profile upload landing between the two steps as an orphan
   (issue #52; pinned by `src/reconcile-media.test.ts`).
+- **Link preview fetching lives in `src/link-card-http.ts` (the wire) and
+  `src/link-card.ts` (the cache), and the SSRF guard is not optional
+  (issue #260).** Every outbound fetch goes through `guardedLinkFetch`: the
+  scheme must be http(s), only the scheme's own port is dialled (80/443 —
+  a host's database or internal status port is not a card target), the
+  hostname is resolved via the Context-threaded `linkTransport` and every
+  address must be global unicast — including IPv4-mapped IPv6 in its hex
+  spelling, which is the form the URL parser actually produces from
+  `[::ffff:127.0.0.1]` — redirects are followed manually with each hop
+  re-checked, and size, time and content-type caps bound the response.
+  Bracketed IPv6 literals are unwrapped in the transport's lookup
+  short-circuit; that unwrap is safe only while `::ffff:0:0/96` stays in the
+  refused table. The guard is unit-pinned with a fake transport and
+  integration-pinned against a real loopback listener. A URL resolves at most
+  once per revalidation window into the `link_card` table — including the
+  "no card" answer, which is cached as a negative row so a dead URL is not
+  refetched on every view. Every failure degrades to `{ card: null }`; a
+  failing revalidation keeps serving the stale card. A lead image is fetched
+  through the same guard, sniffed like an upload, stored under `link-cards/`
+  inside the post-media lifecycle lock, and authorized by
+  `canViewLinkCardMedia` (any signed-in viewer — the session the `/media`
+  route already demands). Every card field, `domain` included, is capped at
+  its `LINK_CARD_*_MAX_LENGTH`.
+- **A link card's moderation lever is `moderation.purgeLinkCard`, and its
+  audit trail is the row, not `moderation_action`.** A card is shared by
+  every post carrying the URL, so purging is the one action that removes a
+  hostile preview viewer-wide. The row is stamped `purgedAt`/`purgedBy`/
+  `purgedReason` rather than deleted (a deletion would be refetched and the
+  card would return) and `resolveLinkCard` refuses a purged URL before any
+  freshness check, so no revalidation window re-opens it; the upsert carries
+  `setWhere: purgedAt is null` so a revalidation in flight when the purge
+  committed cannot write card fields back onto the row. The purge does not
+  log a `moderation_action` row: that table's target columns are post- and
+  user-shaped by schema, and stretching them to hold a URL would ripple
+  through the queue, the audit view and their tests. The who/why/when lives
+  on the row instead, guarded `FOR UPDATE` inside one transaction like every
+  other moderation effect.
 - **Every moderation effect reads its guard `FOR UPDATE`, inside its own
   transaction** (`removePostEffect`, `suspendUserEffect`, `banUserEffect`,
   `setRoleEffect`, `restorePostEffect`, `unbanEffect`, `restoreRoleEffect`).
@@ -297,9 +421,14 @@ over HTTP and imports only its browser-safe subpaths.
   `sql.param(value, column)` — interpolating a JS `Date` hands postgres.js
   something it cannot serialise.
 - **`keysetPage`'s `createdAtField` is type-tied to the `createdAt` column**, so
-  a cursor can never encode a different timestamp than the SQL compares. One
-  list bypasses the skeleton on purpose: `moderation.queue` merges two shapes
-  in JS, which does not fit a single query.
+  a cursor can never encode a different timestamp than the SQL compares. Two
+  lists bypass the skeleton on purpose: `moderation.queue` merges two shapes
+  in JS, which does not fit a single query; and the home feeds'
+  `feedEventPage` (`src/posts.ts`) unions authored-post and repost events
+  whose cursor key is a three-part row value — `(event_at, post_id,
+reposter_key)` — so it hand-rolls the same three parts the skeleton owns
+  (row-value cursor filter, +1 lookahead, next-cursor anchored on the last
+  returned row) rather than fit a pair-shaped helper.
 - **Presigned URLs are windowed** (`MEDIA_SIGNING_WINDOW_MS`): byte-identical
   within a window, which is what keeps repeat views off the bucket. Every
   `/media/` redirect is `private, no-store` — a viewer-authorized decision —
