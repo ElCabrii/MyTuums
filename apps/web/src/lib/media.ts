@@ -197,9 +197,11 @@ export async function createDisplayVariantImpl(
     while (true) {
       // Assigning canvas dimensions clears the canvas, so the draw precedes
       // every encode attempt — including the retries below.
-      // The retry loop below halves the canvas; the destination rectangle
-      // scales with it so a retried encode is the same composition, smaller —
-      // not the original composition clipped to a corner.
+      // The retry loop below halves the canvas; the destination size scales
+      // with it so a retried encode is the same composition, smaller — not the
+      // original composition clipped to a corner. The destination origin is
+      // always the canvas origin: the crop window is a region of the source
+      // with nothing around it, so there is no offset to scale.
       const shrinkX = canvas.width / layout.width;
       const shrinkY = canvas.height / layout.height;
       context.drawImage(
@@ -208,8 +210,8 @@ export async function createDisplayVariantImpl(
         layout.sourceY,
         layout.sourceWidth,
         layout.sourceHeight,
-        layout.destinationX * shrinkX,
-        layout.destinationY * shrinkY,
+        0,
+        0,
         layout.destinationWidth * shrinkX,
         layout.destinationHeight * shrinkY,
       );

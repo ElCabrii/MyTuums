@@ -250,6 +250,46 @@ describe("calculateCropRect", () => {
     const rect = calculateCropRect(source, "banner", { x: 0.5, y: 0.5, scale: 0.192 });
     expect(rect).toEqual({ x: 1616, y: 0, width: 768, height: 256 });
   });
+
+  it("never collapses the window below one pixel, even at maximum zoom", () => {
+    // The last hole in issue #273's contract: the window is
+    // `round(frame / scale)` in whole pixels, and a frame at most 3px wide at
+    // the editor's maximum zoom (`MAX_CROP_SCALE`, 8) rounds to 0. A 0x0 rect
+    // still sits "inside" the source but encodes nothing — `drawImage` with
+    // sw = 0 leaves a fully transparent variant, and the GIF resampler writes
+    // transparent black. The window must stay a region of the source: at
+    // least one pixel of it.
+    const sources = [
+      { width: 1, height: 1 },
+      { width: 3, height: 1 },
+      { width: 1, height: 3 },
+      { width: 2, height: 2 },
+      { width: 3, height: 3 },
+      { width: 4000, height: 3 },
+      { width: 3, height: 4000 },
+    ];
+    for (const source of sources) {
+      for (const kind of ["avatar", "banner"] as const) {
+        // 8 is the editor's ceiling; the larger scales prove the floor is a
+        // property of the geometry, not of one chosen constant.
+        for (const scale of [1, 4, 8, 64]) {
+          const crop = { x: 0.5, y: 0.5, scale };
+          const rect = calculateCropRect(source, kind, crop);
+          expect(rect.width).toBeGreaterThanOrEqual(1);
+          expect(rect.height).toBeGreaterThanOrEqual(1);
+          expect(rect.x).toBeGreaterThanOrEqual(0);
+          expect(rect.y).toBeGreaterThanOrEqual(0);
+          expect(rect.x + rect.width).toBeLessThanOrEqual(source.width);
+          expect(rect.y + rect.height).toBeLessThanOrEqual(source.height);
+          const layout = calculateDisplayLayout(source, kind, crop);
+          expect(layout.sourceWidth).toBeGreaterThanOrEqual(1);
+          expect(layout.sourceHeight).toBeGreaterThanOrEqual(1);
+          expect(layout.width).toBeGreaterThanOrEqual(1);
+          expect(layout.height).toBeGreaterThanOrEqual(1);
+        }
+      }
+    }
+  });
 });
 
 describe("minCropScale", () => {
@@ -312,8 +352,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 0,
       sourceWidth: 4000,
       sourceHeight: 4000,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 1024,
       destinationHeight: 1024,
       width: 1024,
@@ -325,8 +363,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 0,
       sourceWidth: 100,
       sourceHeight: 100,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 100,
       destinationHeight: 100,
       width: 100,
@@ -338,8 +374,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 100,
       sourceWidth: 200,
       sourceHeight: 200,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 200,
       destinationHeight: 200,
       width: 200,
@@ -354,8 +388,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 440,
       sourceWidth: 3840,
       sourceHeight: 1280,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 3840,
       destinationHeight: 1280,
       width: 3840,
@@ -367,8 +399,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 0,
       sourceWidth: 1500,
       sourceHeight: 500,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 1500,
       destinationHeight: 500,
       width: 1500,
@@ -380,8 +410,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 0,
       sourceWidth: 1200,
       sourceHeight: 400,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 1200,
       destinationHeight: 400,
       width: 1200,
@@ -393,8 +421,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 66,
       sourceWidth: 200,
       sourceHeight: 67,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 200,
       destinationHeight: 67,
       width: 200,
@@ -408,8 +434,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 500,
       sourceWidth: 6000,
       sourceHeight: 2000,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 3840,
       destinationHeight: 1280,
       width: 3840,
@@ -446,8 +470,6 @@ describe("calculateDisplayLayout", () => {
       sourceY: 760,
       sourceWidth: 1920,
       sourceHeight: 640,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: 1920,
       destinationHeight: 640,
       width: 1920,

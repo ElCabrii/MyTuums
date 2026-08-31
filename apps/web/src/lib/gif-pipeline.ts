@@ -257,8 +257,6 @@ function fitLayout(
     sourceY: 0,
     sourceWidth: source.width,
     sourceHeight: source.height,
-    destinationX: 0,
-    destinationY: 0,
     destinationWidth: width,
     destinationHeight: height,
     width,

@@ -242,6 +242,47 @@ describe("ImageCropDialog", () => {
     expect(onApply.mock.calls.at(-1)?.[0].scale).toBe(1);
   });
 
+  it("keeps a mid-drag wheel zoom: the next move pans at the zoom on screen", async () => {
+    // Regression: `dragRef` captured the descriptor at pointer-down, so a wheel
+    // zoom during the drag updated the preview but not the capture — and the
+    // next pointer-move recomputed the crop from the pre-zoom scale, snapping
+    // the zoom back. The drag anchor must follow what the person is seeing.
+    stubDecode(400, 800);
+    stubFrameSize(400, 400);
+    const onApply = vi.fn<(crop: Crop) => void>();
+    const { container } = await renderWithProviders(
+      <ImageCropDialog kind="avatar" file={file()} onApply={onApply} onCancel={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: m.settings_image_crop_apply() })).toBeEnabled(),
+    );
+    const frame = container.ownerDocument.querySelector<HTMLElement>(".touch-none");
+
+    // Drag the image down 100px at scale 1, then zoom in one notch over the
+    // same spot, then drag 100px further.
+    await user.pointer([
+      { target: frame!, coords: { clientX: 200, clientY: 100 }, keys: "[MouseLeft>]" },
+      { target: frame!, coords: { clientX: 200, clientY: 200 } },
+    ]);
+    fireEvent.wheel(frame!, { deltaY: -100, clientX: 200, clientY: 200 });
+    await user.pointer([
+      { target: frame!, coords: { clientX: 200, clientY: 300 } },
+      { target: frame!, keys: "[/MouseLeft]" },
+    ]);
+    await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
+
+    const crop = onApply.mock.calls.at(-1)![0];
+    // The zoom survives the move that follows it.
+    expect(crop.scale).toBeCloseTo(1.1, 5);
+    // The first 100px pans against the 400px rect: 100/400 · 400/800 moves the
+    // center from 0.5 to 0.375. The zoom rebases the anchor (the wheel fires
+    // over the pointer's position), so the next 100px pans against the zoomed
+    // 364px rect instead of counting the first stretch twice.
+    expect(crop.y).toBeCloseTo(0.375 - (100 / 400) * (364 / 800), 5);
+    expect(crop.x).toBe(0.5);
+  });
+
   it("refuses to zoom a banner out past its default window", async () => {
     // A 3:2 photo's default window already spans the photo's full width — the
     // largest 3:1 rectangle there is (issue #273). Scrolling out must stop

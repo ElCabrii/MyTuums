@@ -111,6 +111,14 @@ export function ImageCropDialog({
     frameWidth: number;
     frameHeight: number;
   } | null>(null);
+  /**
+   * The crop every writer sees, mirroring the state. The wheel listener below
+   * outlives many renders, so the `crop` it closed over would be the one it
+   * attached with — and a functional `setCrop` update cannot rebase the drag
+   * anchor, because the updater must stay pure. Every path that sets the state
+   * writes this ref too, so the two can never disagree.
+   */
+  const cropRef = useRef(crop);
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -145,25 +153,39 @@ export function ImageCropDialog({
       // The page must not scroll while the person is zooming the crop.
       event.preventDefault();
       const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
-      // A functional update rather than a captured `crop`: the listener
-      // outlives many renders, and reading the state it was attached with
-      // would make every notch zoom from the same starting scale. The floor is
-      // the slot's default window (`minCropScale`) — below it the window would
-      // leave the source.
-      setCrop((current) =>
-        clampCrop(
-          {
-            x: current.x,
-            y: current.y,
-            scale: Math.min(
-              Math.max(current.scale * factor, minCropScale(dims, kind)),
-              MAX_CROP_SCALE,
-            ),
-          },
-          dims,
-          kind,
-        ),
+      // Zoom from the latest descriptor, not the one this listener attached
+      // with: reading a captured `crop` would make every notch zoom from the
+      // same starting scale. The floor is the slot's default window
+      // (`minCropScale`) — below it the window would leave the source.
+      const next = clampCrop(
+        {
+          x: cropRef.current.x,
+          y: cropRef.current.y,
+          scale: Math.min(
+            Math.max(cropRef.current.scale * factor, minCropScale(dims, kind)),
+            MAX_CROP_SCALE,
+          ),
+        },
+        dims,
+        kind,
       );
+      cropRef.current = next;
+      setCrop(next);
+      // Zooming mid-drag must not strand the drag on the descriptor captured
+      // at pointer-down: the next pointer-move would pan at the pre-zoom scale
+      // and revert the zoom the person just chose. Rebase the anchor onto the
+      // zoomed descriptor — and onto the pointer's current position, because
+      // the zoomed crop already includes every pixel panned so far and the
+      // move delta must not count them twice.
+      const drag = dragRef.current;
+      if (drag) {
+        dragRef.current = {
+          ...drag,
+          startX: event.clientX,
+          startY: event.clientY,
+          crop: next,
+        };
+      }
     };
     // Not React's `onWheel`: React attaches wheel passively at the root, so a
     // passive handler cannot `preventDefault()` and the page would scroll
@@ -182,7 +204,10 @@ export function ImageCropDialog({
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      crop,
+      // The ref rather than the rendered `crop`: a wheel notch in the same
+      // frame as this press may not have re-rendered yet, and the drag must
+      // start from the descriptor the person is actually looking at.
+      crop: cropRef.current,
       frameWidth: rect.width,
       frameHeight: rect.height,
     };
@@ -200,7 +225,9 @@ export function ImageCropDialog({
     const rect = calculateCropRect(dims, kind, drag.crop);
     const x = drag.crop.x - (dx / drag.frameWidth) * (rect.width / dims.width);
     const y = drag.crop.y - (dy / drag.frameHeight) * (rect.height / dims.height);
-    setCrop(clampCrop({ x, y, scale: drag.crop.scale }, dims, kind));
+    const next = clampCrop({ x, y, scale: drag.crop.scale }, dims, kind);
+    cropRef.current = next;
+    setCrop(next);
   }
 
   function onPointerEnd(event: PointerEvent<HTMLDivElement>) {

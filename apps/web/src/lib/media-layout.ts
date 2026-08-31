@@ -106,6 +106,12 @@ export function minCropScale(source: { width: number; height: number }, kind: Im
  * The rect never leaves the source: its top-left is clamped to
  * [0, source − rect] on both axes, so every axis the window does not already
  * span is pan slack, and an axis it spans is pinned to the source's edge.
+ *
+ * It also never collapses: a whole-pixel window floors at 1×1, so even a
+ * few-pixels-wide source at the editor's maximum zoom still selects a drawable
+ * region of the source — a 0×0 rect is technically "inside" it, but
+ * `drawImage` with `sw = 0` draws nothing (a fully transparent variant) and
+ * the GIF resampler writes transparent black.
  */
 export type CropRect = { x: number; y: number; width: number; height: number };
 
@@ -119,9 +125,11 @@ export function calculateCropRect(
   // Whole pixels throughout: `drawImage` samples a source rectangle, and the
   // no-crop path this must agree with at zoom 1 already rounds. A fractional
   // rect here would make the default crop differ from no crop at all by a
-  // half-pixel, which is exactly the drift the zoom-1 test forbids.
-  const width = Math.round(frame.width / scale);
-  const height = Math.round(frame.height / scale);
+  // half-pixel, which is exactly the drift the zoom-1 test forbids. The floor
+  // at 1 is the contract above: a frame at most 3px wide at the editor's
+  // maximum zoom (8) would otherwise round to 0 and encode nothing.
+  const width = Math.max(1, Math.round(frame.width / scale));
+  const height = Math.max(1, Math.round(frame.height / scale));
   const x = Math.floor(clamp(crop.x * source.width - width / 2, 0, source.width - width));
   const y = Math.floor(clamp(crop.y * source.height - height / 2, 0, source.height - height));
   return { x, y, width, height };
@@ -154,9 +162,11 @@ export type DisplayLayout = {
   sourceY: number;
   sourceWidth: number;
   sourceHeight: number;
-  /** Where that part lands on the output canvas. */
-  destinationX: number;
-  destinationY: number;
+  /**
+   * Where that part lands: the whole canvas, from its origin. The window is a
+   * region of the source with nothing around it (issue #273), so there is no
+   * destination offset to express.
+   */
   destinationWidth: number;
   destinationHeight: number;
   width: number;
@@ -190,8 +200,6 @@ export function calculateDisplayLayout(
       sourceY: rect.y,
       sourceWidth: rect.width,
       sourceHeight: rect.height,
-      destinationX: 0,
-      destinationY: 0,
       destinationWidth: width,
       destinationHeight: height,
       width,
@@ -208,8 +216,6 @@ export function calculateDisplayLayout(
     sourceY,
     sourceWidth: frame.width,
     sourceHeight: frame.height,
-    destinationX: 0,
-    destinationY: 0,
     destinationWidth: Math.max(1, Math.round(frame.width * scale)),
     destinationHeight: Math.max(1, Math.round(frame.height * scale)),
     width: Math.max(1, Math.round(frame.width * scale)),
