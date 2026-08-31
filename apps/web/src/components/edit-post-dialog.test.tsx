@@ -102,7 +102,7 @@ describe("EditPostDialog", () => {
 
   it("stays open with the server's refusal when the save fails — the card behind it still shows the old text", async () => {
     fakeClient.post.edit.mockRejectedValue(
-      new Error("This post is under moderation review and can no longer be edited."),
+      new Error("This post was removed by a moderator and can no longer be edited."),
     );
     const store = createStore();
     store.set(editPostDialogAtom, "post-1");
@@ -118,7 +118,7 @@ describe("EditPostDialog", () => {
     // said. Asserted through the message key rather than the raw string: the
     // alert must route through `localizeEditPostError`, or the refusal renders
     // untranslated in every locale but English.
-    expect(await screen.findByRole("alert")).toHaveTextContent(m.post_edit_under_review());
+    expect(await screen.findByRole("alert")).toHaveTextContent(m.post_edit_removed());
     expect(store.get(editPostDialogAtom)).toBe("post-1");
   });
 });

@@ -9,7 +9,6 @@ describe("localizeEditPostError", () => {
   const knownMessages: [string, () => string][] = [
     ["This post was removed by a moderator and can no longer be edited.", m.post_edit_removed],
     ["This post was deleted and can no longer be edited.", m.post_edit_deleted],
-    ["This post is under moderation review and can no longer be edited.", m.post_edit_under_review],
   ];
 
   it.each(knownMessages)("translates %s", (raw, expected) => {

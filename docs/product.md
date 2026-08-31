@@ -71,15 +71,16 @@ both by the server's page gate and by the client.
 - An author can edit the text of their own post or reply. The same
   500-character trim rule as creation applies, and images are not editable —
   an edit rewrites the body and nothing else. An edited post carries a visible
-  "Edited" marker with the last edit time wherever it renders; there is no
-  version history. Editing never changes the post's timestamp, so feeds and
-  search reflect the new text without re-ranking or bumping the post. A
-  removed, deleted or under-review post cannot be edited: a removal keeps the
-  story the author would appeal about immutable, and a post with an unresolved
-  report — an open case in the moderation queue — is refused until the case
-  resolves, so the evidence a moderator is about to judge cannot be swapped
-  underneath them. Editing is idempotent: re-sending the same text is a no-op
-  that does not restamp the marker.
+  "Edited" marker with the last edit time wherever it renders. Editing never
+  changes the post's timestamp, so feeds and search reflect the new text
+  without re-ranking or bumping the post. A removed or deleted post cannot be
+  edited — a removal keeps the story the author would appeal about immutable.
+  A post under review stays editable: every edit records the text it replaced,
+  and the moderation case view shows that full history, so a moderator judges
+  everything the author wrote rather than only what currently stands, and a
+  rewrite cannot hide the wording a report was raised against. Editing is
+  idempotent: re-sending the same text is a no-op that does not restamp the
+  marker.
 - Likes are two idempotent operations, `like` and `unlike`, never a toggle —
   so a retry is safe and ordering cannot invert the result. Like and reply
   counts are derived on read, not denormalised.
@@ -239,9 +240,10 @@ it cannot be restored. _Avoid:_ removed post, withdrawn post.
 
 **Edited post** — a post whose author rewrote its text after publishing. The
 row carries the last edit time and every surface renders an "Edited" marker;
-the creation timestamp never moves, so an edit never re-ranks a feed. Not a
-moderation concept — a removed, deleted or under-review post cannot be edited.
-_Avoid:_ updated post, revised post.
+the creation timestamp never moves, so an edit never re-ranks a feed. Each
+edit records the text it replaced; that history is visible to moderators in
+the case view, never on public surfaces. A removed or deleted post cannot be
+edited. _Avoid:_ updated post, revised post.
 
 **Moderation action** — any act by a moderator, staff member or admin that the
 audit log records. Every one of them emails the affected user, including

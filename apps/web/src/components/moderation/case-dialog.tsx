@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Flag,
   Gavel,
+  History,
   Hourglass,
   MessageSquareReply,
   Trash2,
@@ -243,6 +244,17 @@ function TargetPostCard({
           <span title={formatDateTime(target.createdAt, locale)}>
             {formatRelativeTime(target.createdAt, locale, m.post_just_now())}
           </span>
+          {target.editedAt && (
+            <span
+              className="text-muted-foreground text-xs"
+              title={formatDateTime(target.editedAt, locale)}
+            >
+              •{" "}
+              {m.post_edited({
+                time: formatRelativeTime(target.editedAt, locale, m.post_just_now()),
+              })}
+            </span>
+          )}
           {target.parentId && (
             <Badge variant="outline">
               <MessageSquareReply />
@@ -280,6 +292,12 @@ function TargetPostCard({
           </p>
         )}
         <PostAttachmentGrid attachments={target.attachments} />
+        {/* Every superseded version of the text (issue #264). Editing stays
+            open while a case is pending, so the current content above may
+            have been rewritten after the reports below were filed — this is
+            the moderator's only record of what those reports were raised
+            against. Newest first, matching the reports section. */}
+        {target.editHistory.length > 0 && <EditHistorySection target={target} />}
         {target.removedAt && (
           <Alert variant="destructive">
             <Trash2 />
@@ -293,6 +311,61 @@ function TargetPostCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * The superseded versions of the post's text, newest first (issue #264).
+ * Rendered inside the target post's card rather than as its own: the
+ * versions are part of what is being judged, not metadata about it.
+ *
+ * Each row says what the text said and when it stopped saying it — the edit
+ * that replaced it — because that pairing is what tells a moderator whether a
+ * rewrite landed before or after the reports were filed.
+ */
+function EditHistorySection({
+  target,
+}: {
+  target: Extract<ModerationCaseDetail["target"], { kind: "post" }>;
+}) {
+  const locale = getLocale();
+
+  return (
+    <div className="space-y-2">
+      <Separator />
+      <p className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
+        <History className="size-3.5" />
+        {m.moderation_case_edit_history_title()}
+      </p>
+      {/* `role="listitem"` on each row: `ItemGroup` renders `role="list"`, the
+          same aria-required-children rule the reports section follows. */}
+      <ItemGroup className="gap-1.5">
+        {target.editHistory.map((version) => (
+          <Item
+            key={String(version.createdAt.getTime()) + version.content}
+            role="listitem"
+            variant="muted"
+            size="xs"
+          >
+            <ItemContent className="space-y-0.5">
+              <p className="text-sm break-words whitespace-pre-line">
+                <LinkedText text={version.content} />
+              </p>
+              <ItemTitle>
+                <span
+                  className="text-muted-foreground text-xs font-normal"
+                  title={formatDateTime(version.createdAt, locale)}
+                >
+                  {m.moderation_case_edit_history_replaced({
+                    time: formatRelativeTime(version.createdAt, locale, m.post_just_now()),
+                  })}
+                </span>
+              </ItemTitle>
+            </ItemContent>
+          </Item>
+        ))}
+      </ItemGroup>
+    </div>
   );
 }
 

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { closeDb } from "@my-tuums/db";
-import { post, postAttachment, report, user } from "@my-tuums/db/schema";
+import { post, postAttachment, postEdit, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   POST_MAX_LENGTH,
@@ -19,7 +19,9 @@ import {
   anonContext,
   contextFor,
   createTestUser,
+  freshSessionFor,
   seedPosts,
+  setUserRole,
   testStorage,
   testStorageObjects,
   truncateAll,
@@ -48,6 +50,17 @@ const POST_PNG = new Uint8Array(
 
 function postImage(name: string): File {
   return new File([POST_PNG], name, { type: "image/png" });
+}
+
+/**
+ * A user promoted to moderator through the row, re-fetched so the session
+ * carries the role — the same helper moderation.int.test.ts uses, local to
+ * this file because `moderation.case` is read exactly once below.
+ */
+async function moderatorUser() {
+  const user = await createTestUser();
+  await setUserRole(user.id, "moderator");
+  return freshSessionFor(user);
 }
 
 /** Little-endian byte pair for a 16-bit value, the way GIF stores widths/heights/delays. */
@@ -944,9 +957,10 @@ describe("post.edit", () => {
     });
   });
 
-  it("refuses while the post is under moderation review, and allows editing again once the case resolves", async () => {
+  it("stays editable while the post is under moderation review — the superseded text becomes history the case view shows", async () => {
     const author = await createTestUser();
     const reporter = await createTestUser();
+    const moderator = await moderatorUser();
     const [target] = await seedPosts(author.id, 1);
 
     await call(
@@ -955,37 +969,63 @@ describe("post.edit", () => {
       { context: contextFor(reporter) },
     );
 
-    await expect(
-      call(
-        appRouter.post.edit,
-        { postId: target.id, content: "edited during review" },
-        { context: contextFor(author) },
-      ),
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: "This post is under moderation review and can no longer be edited.",
-    });
-
-    // A resolved case is no longer under review. The resolution itself is
-    // moderation-queue territory; here the stamp is the premise for the edit
-    // rule being tested.
-    await anonContext.db
-      .update(report)
-      .set({ resolvedAt: new Date(), resolvedOutcome: "dismissed" })
-      .where(
-        and(
-          eq(report.targetType, "post"),
-          eq(report.targetId, target.id),
-          isNull(report.resolvedAt),
-        ),
-      );
-
-    const result = await call(
+    // An open report no longer freezes the text (the pinned choice this test
+    // guards): the history is what protects the evidence, not the refusal.
+    const edited = await call(
       appRouter.post.edit,
-      { postId: target.id, content: "edited after review" },
+      { postId: target.id, content: "edited during review" },
       { context: contextFor(author) },
     );
-    expect(result.content).toBe("edited after review");
+    expect(edited.content).toBe("edited during review");
+
+    // The moderator judging the case sees both the rewritten text and every
+    // version it replaced — a report row carries a reason code, so this
+    // history is the only record of the wording that was reported.
+    const detail = await call(
+      appRouter.moderation.case,
+      { targetType: "post", targetId: target.id },
+      { context: contextFor(moderator) },
+    );
+    if (detail.target.kind !== "post") throw new Error("expected a post target");
+    expect(detail.target.content).toBe("edited during review");
+    expect(detail.target.editedAt?.getTime()).toBe(edited.editedAt?.getTime());
+    expect(detail.target.editHistory).toHaveLength(1);
+    expect(detail.target.editHistory[0]?.content).toContain("seed post 0");
+    // The history row is stamped with the same instant as the marker: the
+    // newest version's replacement time and `editedAt` are one edit.
+    expect(detail.target.editHistory[0]?.createdAt.getTime()).toBe(edited.editedAt?.getTime());
+  });
+
+  it("records one history row per edit — and none for an idempotent retry", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await call(
+      appRouter.post.edit,
+      { postId: target.id, content: "v1" },
+      { context: contextFor(author) },
+    );
+    // Content-equal retry: a no-op that must not grow the history.
+    await call(
+      appRouter.post.edit,
+      { postId: target.id, content: "v1" },
+      { context: contextFor(author) },
+    );
+    await call(
+      appRouter.post.edit,
+      { postId: target.id, content: "v2" },
+      { context: contextFor(author) },
+    );
+
+    const history = await anonContext.db
+      .select({ content: postEdit.content })
+      .from(postEdit)
+      .where(eq(postEdit.postId, target.id))
+      .orderBy(desc(postEdit.createdAt));
+    // Newest first: the text edit two replaced, then the seeded original.
+    expect(history[0]?.content).toBe("v1");
+    expect(history[1]?.content).toContain("seed post 0");
+    expect(history).toHaveLength(2);
   });
 
   it("applies create's text-or-images rule against the row's existing attachments", async () => {

@@ -72,7 +72,10 @@ export const post = pgTable(
     // rewrites the text and restamped on every later edit, so it carries the
     // LAST edit time. Null means never edited. `createdAt` deliberately never
     // moves — an edit must not re-rank feeds — so this column is the marker's
-    // only source. No history is kept: v1 is a marker, not a version log.
+    // only source. The superseded texts live in `post_edit`: editing stays
+    // open even under moderation review, and the moderation case view shows
+    // the recorded history so a moderator judges what was written, not only
+    // what currently stands.
     editedAt: timestamp("edited_at", { withTimezone: true, precision: 3 }),
     // `withTimezone` is not cosmetic. On a bare `timestamp` (no time zone),
     // Postgres resolves `now()` to the *database session's* local wall clock,
@@ -110,6 +113,47 @@ export const post = pgTable(
     index("post_author_created_idx").on(t.authorId, t.createdAt.desc(), t.id.desc()),
     // The reply list under a single post.
     index("post_parent_created_idx").on(t.parentId, t.createdAt.desc(), t.id.desc()),
+  ],
+);
+
+/**
+ * One superseded version of a post's text (issue #264). Each row stores the
+ * content as it stood BEFORE the edit that replaced it, stamped with that
+ * edit's instant — the same instant `post.edited_at` carries for the latest
+ * one — so a post's full timeline is its `post_edit` rows plus the live
+ * `post.content`.
+ *
+ * Editing stays open even while the post is under moderation review; this
+ * table is what keeps that safe. The moderation case view reads it, so a
+ * moderator judges everything the author wrote, not only what currently
+ * stands — and a rewrite after a dismissal cannot hide what was judged the
+ * first time. Moderator-gated reads only: no public surface exposes history.
+ *
+ * No author column — the only writer is the post's own author, which the
+ * parent row already carries. Rows are never rewritten; the only delete is
+ * the cascade when the post row itself goes (the author's account being
+ * hard-deleted — `post.delete` is a tombstone and keeps the row).
+ */
+export const postEdit = pgTable(
+  "post_edit",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => post.id, { onDelete: "cascade" }),
+    // The text this edit replaced, not the text it wrote: the live
+    // `post.content` is always the newest version, so the original wording
+    // exists nowhere else and this is the only place it can survive.
+    content: text("content").notNull(),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    // The case view's read: one post's history, newest first. `id` breaks
+    // ties between edits landing in the same millisecond the same way the
+    // post keyset indexes do.
+    index("post_edit_post_created_idx").on(t.postId, t.createdAt.desc(), t.id.desc()),
   ],
 );
 
@@ -501,6 +545,12 @@ export const postRelations = relations(post, ({ one, many }) => ({
     relationName: "replies",
   }),
   replies: many(post, { relationName: "replies" }),
+  edits: many(postEdit),
+}));
+
+/** Drizzle relations for `postEdit` — the post whose text this version superseded. */
+export const postEditRelations = relations(postEdit, ({ one }) => ({
+  post: one(post, { fields: [postEdit.postId], references: [post.id] }),
 }));
 
 /** Drizzle relations for post attachments — the owning post. */

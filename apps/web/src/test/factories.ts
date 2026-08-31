@@ -234,6 +234,10 @@ export function makeModerationCaseDetail(
       removedAt: null,
       removedBy: null,
       removedReason: null,
+      // Same convention as makePost's `editedAt`: never edited by default, so
+      // a test that wants history says so.
+      editedAt: null,
+      editHistory: [],
       attachments: [],
       author: makeAuthor(),
       ...overrides,

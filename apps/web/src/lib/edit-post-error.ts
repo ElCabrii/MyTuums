@@ -1,7 +1,7 @@
 import { m } from "@/paraglide/messages.js";
 
 /**
- * The three state refusals `post.edit` throws (packages/api/src/posts.ts) and
+ * The two state refusals `post.edit` throws (packages/api/src/posts.ts) and
  * nothing else. The dialog surfaces the server's message rather than a generic
  * banner because each refusal has a distinct reason worth naming, and these
  * are the keys that keep those names translated — the same arrangement as
@@ -12,8 +12,6 @@ import { m } from "@/paraglide/messages.js";
 const editPostErrors = {
   "This post was removed by a moderator and can no longer be edited.": () => m.post_edit_removed(),
   "This post was deleted and can no longer be edited.": () => m.post_edit_deleted(),
-  "This post is under moderation review and can no longer be edited.": () =>
-    m.post_edit_under_review(),
 } satisfies Record<string, () => string>;
 
 /**

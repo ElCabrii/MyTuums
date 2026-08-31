@@ -11,6 +11,8 @@ import { queryFixtures } from "@/test/query-fixtures";
 import { renderWithProviders } from "@/test/render";
 import { CaseDialog } from "@/components/moderation/case-dialog";
 import { DEFAULT_SUSPENSION_SECONDS, type CaseRef } from "@/atoms/moderation";
+import { formatDateTime, formatRelativeTime } from "@/lib/format";
+import { getLocale } from "@/paraglide/runtime.js";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
@@ -609,5 +611,48 @@ describe("CaseDialog — two open appeals on one case", () => {
     await waitFor(() =>
       expect(screen.getAllByText(m.moderation_case_appeal_done())).toHaveLength(1),
     );
+  });
+});
+
+describe("CaseDialog — edit history", () => {
+  it("lists every superseded version newest-first when the post was edited, and the header carries the edited marker", async () => {
+    const older = new Date(Date.now() - 2 * 60_000);
+    const newer = new Date(Date.now() - 60_000);
+    const target: CaseRef = { targetType: "post", targetId: "post-1" };
+    await renderCase(
+      target,
+      makeModerationCaseDetail({
+        id: "post-1",
+        content: "current text",
+        editedAt: newer,
+        editHistory: [
+          { content: "second version", createdAt: newer },
+          { content: "original wording", createdAt: older },
+        ],
+      }),
+    );
+
+    // The section exists and the server's order is preserved: the version
+    // replaced last reads first, the original below it.
+    expect(screen.getByText(m.moderation_case_edit_history_title())).toBeInTheDocument();
+    const second = screen.getByText("second version");
+    const original = screen.getByText("original wording");
+    expect(second.compareDocumentPosition(original)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    // Each version says when it was replaced, the same relative-time + title
+    // pairing the reports section uses.
+    const replaced = screen.getByText(
+      m.moderation_case_edit_history_replaced({
+        time: formatRelativeTime(older, getLocale(), m.post_just_now()),
+      }),
+    );
+    expect(replaced).toHaveAttribute("title", formatDateTime(older, getLocale()));
+  });
+
+  it("renders no history section for a never-edited post", async () => {
+    const target: CaseRef = { targetType: "post", targetId: "post-2" };
+    await renderCase(target, makeModerationCaseDetail({ id: "post-2" }));
+
+    expect(screen.queryByText(m.moderation_case_edit_history_title())).not.toBeInTheDocument();
   });
 });

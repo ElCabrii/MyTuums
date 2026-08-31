@@ -7,8 +7,8 @@ import {
   follow,
   post,
   postAttachment,
+  postEdit,
   postLike,
-  report,
   user,
   userBlock,
 } from "@my-tuums/db/schema";
@@ -534,34 +534,6 @@ async function insertPost(
 const postContentInput = z.string().trim().max(POST_MAX_LENGTH);
 
 /**
- * Whether a post is under active moderation review (issue #264): at least one
- * unresolved report row targets it. That is exactly the condition that puts a
- * post in `moderation.queue`, so this predicate and the queue agree on what
- * "an open case" means without the queue owning a second definition.
- */
-function hasOpenPostReport(postId: string) {
-  return sql`exists (
-    select 1 from ${report}
-    where ${report.targetType} = 'post'
-      and ${report.targetId} = ${sql.param(postId, report.targetId)}
-      and ${report.resolvedAt} is null
-  )`;
-}
-
-/**
- * Evaluates `hasOpenPostReport` as its own statement. Both the guard read and
- * the compare-and-set predicate in `post.edit` go through the one fragment, so
- * "under active moderation review" cannot drift between the check and the
- * write it protects.
- */
-async function hasOpenReport(db: Database, postId: string): Promise<boolean> {
-  const rows = await db.execute<{ under_review: boolean }>(
-    sql`select ${hasOpenPostReport(postId)} as under_review`,
-  );
-  return rows[0]?.under_review === true;
-}
-
-/**
  * The `post` procedure group: create, edit, delete, list, thread, like,
  * unlike.
  */
@@ -719,30 +691,31 @@ export const postRouter = {
    *   removed post's own content — the removal rule is what keeps an appealed
    *   post's story from mutating under the appeal.
    * - BAD_REQUEST — deleted. A tombstoned post has no editable text left.
-   * - BAD_REQUEST — under active moderation review: an unresolved report row
-   *   targets the post (`hasOpenPostReport`). Pinned choice (issue #264): the
-   *   queue and case view read the live `content` column, so an edit while
-   *   the case is open would swap the evidence a moderator is about to judge;
-   *   once the case resolves without action, editing works again.
    * - BAD_REQUEST — empty content on a post with no attachments (the create
    *   cross-field rule, against server state).
    *
+   * Editing deliberately stays OPEN while the post is under moderation review
+   * (pinned choice, issue #264): rather than freezing the text, every edit
+   * records the version it superseded in `post_edit`, and `moderation.case`
+   * hands the moderator that history beside the current text. A report row
+   * carries only a reason code — the history table is the only record of the
+   * reported wording — so a rewrite mid-case (or after a dismissal) cannot
+   * hide what was written; the moderator judges every version the author
+   * published. The history is moderator-gated: no public surface exposes it.
+   *
    * Idempotent, like `like`/`unlike` and `post.delete`: re-sending the content
    * the row already holds is a no-op that keeps the original `editedAt` rather
-   * than restamping it, so a retry after a lost response must not bump the
-   * marker. Two concurrent different edits are last-write-wins — the update's
-   * predicate holds either way, and there is no ordering between them to
-   * defend.
+   * than restamping it (and records no history row), so a retry after a lost
+   * response must not bump the marker. Two concurrent different edits are
+   * last-write-wins — the update's predicate holds either way, and there is
+   * no ordering between them to defend.
    *
-   * Like `post.delete`, the read-then-write is not locked. The update is a
-   * compare-and-set against both tombstones plus the review predicate; a
-   * zero-row update re-reads the winner so the refusal names the real reason.
-   * No audit row to double-write, no email to double-send — so neither a
-   * transaction nor `FOR UPDATE` buys anything. The review predicate is also
-   * only exact to the update's own snapshot: a report committing while the
-   * edit is in flight can still see that one edit land. That residual window
-   * is accepted — closing it would mean locking `report` inserts against
-   * `post` updates — while the state-based rule itself stays enforced.
+   * Unlike `post.delete`, the write IS a transaction: the post row and its
+   * history row must agree, and an unlocked pair could leave a version
+   * unwritten (or orphaned) if the process died between them. There is still
+   * no `FOR UPDATE` and no audit row to double-write — the update remains a
+   * compare-and-set against both tombstones, and a zero-row update re-reads
+   * the winner so the refusal names the real reason.
    *
    * `createdAt` never moves: feeds keyset on `(created_at, id)` and search
    * matches the raw `content` column, so the edited text is simply what
@@ -797,36 +770,34 @@ export const postRouter = {
         });
       }
 
-      if (await hasOpenReport(context.db, input.postId)) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: "This post is under moderation review and can no longer be edited.",
-        });
-      }
-
       if (input.content.length === 0 && target.attachmentCount === 0) {
         throw new ORPCError("BAD_REQUEST", { message: "Post cannot be empty." });
       }
 
       // The idempotent no-op: same content in, same row out. Crucially this
-      // sits AFTER the guards — a removed, deleted or under-review post is
-      // refused even for a content-equal retry, because the refusal is about
-      // the post's state, not about this particular payload.
+      // sits AFTER the guards — a removed or deleted post is refused even for
+      // a content-equal retry, because the refusal is about the post's state,
+      // not about this particular payload.
       if (target.content === input.content) {
         return { postId: input.postId, content: target.content, editedAt: target.editedAt };
       }
 
-      const [updated] = await context.db
-        .update(post)
-        .set({ content: input.content, editedAt: new Date() })
-        .where(
-          and(
-            eq(post.id, input.postId),
-            isNull(post.removedAt),
-            isNull(post.deletedAt),
-            sql`not ${hasOpenPostReport(input.postId)}`,
-          ),
-        )
-        .returning({ content: post.content, editedAt: post.editedAt });
+      const editedAt = new Date();
+      const updated = await context.db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(post)
+          .set({ content: input.content, editedAt })
+          .where(and(eq(post.id, input.postId), isNull(post.removedAt), isNull(post.deletedAt)))
+          .returning({ content: post.content, editedAt: post.editedAt });
+        if (!row) return undefined;
+        // The superseded text becomes history in the same transaction, stamped
+        // with the same instant as the marker — the newest history row's
+        // `createdAt` and the post's `editedAt` are the same edit.
+        await tx
+          .insert(postEdit)
+          .values({ postId: input.postId, content: target.content, createdAt: editedAt });
+        return row;
+      });
 
       if (updated) {
         return { postId: input.postId, content: updated.content, editedAt: updated.editedAt };
@@ -851,12 +822,6 @@ export const postRouter = {
       if (winner?.deletedAt) {
         throw new ORPCError("BAD_REQUEST", {
           message: "This post was deleted and can no longer be edited.",
-        });
-      }
-
-      if (winner && (await hasOpenReport(context.db, input.postId))) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: "This post is under moderation review and can no longer be edited.",
         });
       }
 

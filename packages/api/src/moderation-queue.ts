@@ -3,7 +3,7 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { moderationCaseResolutionEmail, type EmailLocale } from "@my-tuums/auth";
 import type { Database } from "@my-tuums/db";
-import { appeal, moderationAction, post, report, user } from "@my-tuums/db/schema";
+import { appeal, moderationAction, post, postEdit, report, user } from "@my-tuums/db/schema";
 import { createCursorCodec } from "./cursor.js";
 import { applyModerationEffect, logAction, stampReports } from "./moderation-actions.js";
 import { noteInput, queueInput } from "./moderation-inputs.js";
@@ -257,7 +257,10 @@ export const queueRouter = {
   /**
    * One moderation case: the target's full report history (resolved and not),
    * its open appeal if any, and a moderator projection of the target — raw
-   * content for posts (tombstoned or not), account state for users.
+   * content for posts (tombstoned or not), account state for users. A post
+   * target also carries its edit history (`post_edit`, newest first), so the
+   * moderator sees every version the author published, not just the text that
+   * currently stands.
    */
   case: moderatorProcedure
     .use(rateLimit(RATE_LIMITS.moderate))
@@ -316,6 +319,7 @@ export const queueRouter = {
                   removedAt: post.removedAt,
                   removedBy: post.removedBy,
                   removedReason: post.removedReason,
+                  editedAt: post.editedAt,
                   attachments: postAttachmentsSelection(true),
                   author: {
                     id: user.id,
@@ -332,7 +336,18 @@ export const queueRouter = {
               if (!targetPost) {
                 throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
               }
-              return { kind: "post" as const, ...targetPost };
+              // Every superseded version of the text, newest first (issue
+              // #264). Editing stays open while a case is pending; this
+              // history is what lets the moderator judge what was written
+              // before each edit — the current `content` above is only the
+              // latest version, and a report row carries a reason code, not
+              // the wording it was raised against.
+              const editHistory = await context.db
+                .select({ content: postEdit.content, createdAt: postEdit.createdAt })
+                .from(postEdit)
+                .where(eq(postEdit.postId, input.targetId))
+                .orderBy(desc(postEdit.createdAt), desc(postEdit.id));
+              return { kind: "post" as const, ...targetPost, editHistory };
             })()
           : await (async () => {
               const [targetUser] = await context.db
