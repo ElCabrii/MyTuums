@@ -39,6 +39,20 @@ export const NOTIFICATION_TYPES = ["like", "reply", "follow", "moderation"] as c
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 /**
+ * How long a same-type burst from one actor stays badge-silent, in seconds.
+ * The first event of the burst ticks the recipient's badge; every further
+ * same-type event the same actor causes inside this trailing window still
+ * mints its row (the page lists every event) but arrives already read, so
+ * like → unlike → like cycling cannot pump the badge faster than one tick
+ * per actor-minute. Different types from one actor are different signals and
+ * each ticks — a like, a reply and a follow are three things, not one.
+ * Moderation rows are never damped: null-actor system notices, each
+ * individually meaningful, arriving rarely enough that throttling them would
+ * only ever hide real news.
+ */
+const BURST_WINDOW_SECONDS = 60;
+
+/**
  * Mints one notification row — the single writer-side entry point.
  *
  * Called inside the transaction that writes the cause, so the pair commits or
@@ -51,6 +65,15 @@ export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
  * the whole cause transaction down with it, so the guard has to sit in front
  * of the write, and having it in one place is what keeps a new call site from
  * forgetting it.
+ *
+ * User-caused rows carry the burst damper: one `read_at` value computed by
+ * the insert itself, `now()` when this actor already notified this recipient
+ * of this type of event inside {@link BURST_WINDOW_SECONDS}, null otherwise.
+ * A row born read never touches `unreadCount`, which is the whole throttle —
+ * the read side needs no change, and the page still shows every event. The
+ * damper is deliberately best-effort: two mints racing inside the window can
+ * both land unread (one tick more than intended), because this is a damper,
+ * not an invariant — the check constraints carry those.
  */
 export async function insertNotification(
   db: Pick<Database, "insert">,
@@ -66,13 +89,28 @@ export async function insertNotification(
   },
 ): Promise<void> {
   if (args.actorId !== null && args.actorId === args.recipientId) return;
-  await db.insert(notification).values({
+  const values = {
     recipientId: args.recipientId,
     actorId: args.actorId,
     type: args.type,
     postId: args.postId ?? null,
     actionId: args.actionId ?? null,
-  });
+  };
+  await db.insert(notification).values(
+    args.actorId === null
+      ? values
+      : {
+          ...values,
+          readAt: sql`case when exists (
+            select 1 from ${notification}
+            where ${notification.recipientId} = ${args.recipientId}
+              and ${notification.actorId} = ${args.actorId}
+              and ${notification.type} = ${args.type}
+              and ${notification.createdAt}
+                > now() - make_interval(secs => ${BURST_WINDOW_SECONDS})
+          ) then now() else null end`,
+        },
+  );
 }
 
 /**

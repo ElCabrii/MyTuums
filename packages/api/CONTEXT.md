@@ -148,7 +148,13 @@ over HTTP and imports only its browser-safe subpaths.
   while its actor is visible to the recipient (which also drops user-caused
   rows whose actor was hard-deleted; the FK is set-null so moderation rows
   survive), and a row about an author-deleted post stops surfacing, the same
-  tombstone treatment the reply feed gives deleted replies.
+  tombstone treatment the reply feed gives deleted replies. A same-type
+  burst from one actor is damped, not blocked: `insertNotification` stamps a
+  row born-read (`read_at` set at mint) when the same actor already notified
+  the same recipient of the same type inside a 60-second trailing window, so
+  the badge ticks at most once per actor-minute while the page still lists
+  every event; moderation rows (null actor) are never damped, and the damper
+  is best-effort under concurrency by design — a damper, not an invariant.
 - **Relationship writes for a pair are serialized by one advisory lock.**
   "A blocked pair has no follow edge" spans `follow` and `user_block`, so no
   database constraint can hold it. `follow`, `block` and `unblock` all take

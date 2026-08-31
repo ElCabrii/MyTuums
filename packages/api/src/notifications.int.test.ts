@@ -1,7 +1,7 @@
 import { call } from "@orpc/server";
 import { closeDb } from "@my-tuums/db";
 import { notification, user } from "@my-tuums/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";
 import {
@@ -123,6 +123,60 @@ describe("notification writes (issue #259)", () => {
 
     // Three intent statements, two edges that actually landed: two notices.
     expect((await listFor(followed)).items).toHaveLength(2);
+    // The second follow landed inside the burst window after the first, so
+    // its row mints but arrives already read — follow cycling is the badge
+    // flood vector, and the damper (pinned by the next test) is what keeps
+    // it from pumping the badge while the honest two rows still show.
+    expect((await listFor(followed)).items.map((item) => item.read)).toEqual([true, false]);
+  });
+
+  it("damps a same-type burst to one badge tick per actor-minute while listing every event", async () => {
+    const author = await createTestUser();
+    const liker = await createTestUser();
+    const [first, second, third] = await seedPosts(author.id, 3);
+
+    // The burst's first event ticks; the second, same actor and same type
+    // inside the window, lands born-read — visible on the page, silent to
+    // the badge.
+    await call(appRouter.post.like, { postId: first.id }, { context: contextFor(liker) });
+    await call(appRouter.post.like, { postId: second.id }, { context: contextFor(liker) });
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 1,
+    });
+    const burst = await listFor(author);
+    expect(burst.items).toHaveLength(2);
+    expect(burst.items[0]).toMatchObject({ type: "like", read: true });
+    expect(burst.items[1]).toMatchObject({ type: "like", read: false });
+
+    // A different type from the same actor is a different signal: it ticks.
+    await call(
+      appRouter.post.create,
+      { content: "a burst reply", parentId: first.id },
+      { context: contextFor(liker) },
+    );
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 2,
+    });
+
+    // The window trails the burst, not the calendar: age the rows past it by
+    // hand (a minute is too long to wait honestly) and the same actor's
+    // next like ticks again.
+    await author.context.db
+      .update(notification)
+      .set({ createdAt: sql`${notification.createdAt} - make_interval(secs => 61)` })
+      .where(eq(notification.recipientId, author.id));
+    await call(appRouter.post.like, { postId: third.id }, { context: contextFor(liker) });
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 3,
+    });
+    // Nothing was lost: every event the burst caused is still on the page.
+    expect((await listFor(author)).items).toHaveLength(4);
   });
 
   it("a moderation action notifies the affected user in-app alongside the email it already sends", async () => {
@@ -261,10 +315,14 @@ describe("notification reads (issue #259)", () => {
 
   it("markRead stamps every unread row once and takes the badge to zero", async () => {
     const author = await createTestUser();
-    const liker = await createTestUser();
+    // Two likers, not one: a same-type event from the same actor inside the
+    // burst window arrives born-read (see the damper test), and this test is
+    // about stamping two genuinely unread rows.
+    const firstLiker = await createTestUser();
+    const secondLiker = await createTestUser();
     const [a, b] = await seedPosts(author.id, 2);
-    await call(appRouter.post.like, { postId: a.id }, { context: contextFor(liker) });
-    await call(appRouter.post.like, { postId: b.id }, { context: contextFor(liker) });
+    await call(appRouter.post.like, { postId: a.id }, { context: contextFor(firstLiker) });
+    await call(appRouter.post.like, { postId: b.id }, { context: contextFor(secondLiker) });
     expect(
       await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
     ).toEqual({

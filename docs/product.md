@@ -88,6 +88,11 @@ like again is honestly three events, not one collapsed one.
   lists them newest first, keyset-paginated like the feeds, with no grouping
   or ranking. The bell carries an unread count; opening the page is what
   marks everything read.
+- A rapid burst of one kind of event from one person — like → unlike → like
+  cycling — moves the badge at most once a minute: the burst's first event
+  ticks, the rest still appear on the page but arrive already read. Different
+  kinds of event each tick — a like, a reply and a follow are three signals,
+  not one — and moderation notices are never damped.
 - Self-caused events never notify — liking or replying to your own post
   creates nothing.
 - Blocks hold on both sides: a user blocked by the recipient cannot generate
@@ -277,8 +282,9 @@ moderator except the one who acted. _Avoid:_ dispute, complaint.
 **Notification** — one in-app notice of something that happened to you: a like
 on your post, a reply to it, a new follower, or a moderation action on your
 content or account. Newest first on `/notifications`, unread until the page is
-opened. One per event, never one per retry. _Avoid:_ alert, ping, message (a
-different thing that does not exist yet).
+opened (a damped burst row arrives already read). One per event, never one per
+retry. _Avoid:_ alert, ping, message (a different thing that does not exist
+yet).
 
 ## Further reading
 
