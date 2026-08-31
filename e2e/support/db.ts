@@ -435,6 +435,34 @@ export async function setUserRole(userId: string, role: UserRole): Promise<void>
 }
 
 /**
+ * Ages one actor's notification rows to one recipient past the burst damper's
+ * minute bucket (`unreadCount` in packages/api collapses same-type rows from
+ * one actor per bucket), so the actor's next like/reply/follow each tick the
+ * recipient's badge again.
+ *
+ * The notifications spec needs this for retries to mean anything: a retried
+ * attempt re-likes, re-replies and re-follows within a minute of the failed
+ * attempt's rows, and same-bucket rows collapse to one tick — the badge could
+ * never reach the asserted delta, no matter how healthy the stack is.
+ * Backdating on the database clock (not a JS Date) keeps the bucket
+ * comparison against the server's `now()` honest when the browser and
+ * database hosts drift.
+ */
+export async function expireNotificationDamperWindow(
+  actorId: string,
+  recipientId: string,
+): Promise<void> {
+  assertTestDatabase();
+  const db = await getDb();
+  const { notification } = await schemaModulePromise;
+
+  await db
+    .update(notification)
+    .set({ createdAt: sql`${notification.createdAt} - interval '61 seconds'` })
+    .where(and(eq(notification.actorId, actorId), eq(notification.recipientId, recipientId)));
+}
+
+/**
  * Empties every table and purges the suite's uploaded bucket objects.
  * `global-setup.ts` calls this once at the start of every run; a spec can
  * also call it directly for a guaranteed-clean slate of its own rather than
@@ -457,6 +485,7 @@ export async function truncateAll(): Promise<void> {
     truncate table
       ${schema.postLike}, ${schema.follow}, ${schema.report},
       ${schema.userBlock}, ${schema.appeal}, ${schema.moderationAction},
+      ${schema.notification}, ${schema.notificationLastSeen},
       ${schema.post}, ${schema.linkCard},
       ${schema.session}, ${schema.account}, ${schema.verification},
       ${schema.rateLimit}, ${schema.twoFactor}, ${schema.passkey},

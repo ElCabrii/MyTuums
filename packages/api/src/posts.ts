@@ -32,6 +32,7 @@ import {
 } from "./constants.js";
 import { createCursorCodec, createEventCursorCodec } from "./cursor.js";
 import { resolveLinkCard } from "./link-card.js";
+import { insertNotification } from "./notifications.js";
 import { keysetPage } from "./pagination.js";
 import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
@@ -1120,7 +1121,7 @@ export const postRouter = {
       // whose author is hidden reads as "no such post".
       const resolveVisiblePost = async (postId: string) => {
         const [visible] = await context.db
-          .select({ id: post.id })
+          .select({ id: post.id, authorId: post.authorId })
           .from(post)
           .innerJoin(user, eq(user.id, post.authorId))
           .where(and(eq(post.id, postId), not(invisibleAuthor(context.user.id))))
@@ -1128,13 +1129,24 @@ export const postRouter = {
         return visible;
       };
 
-      if (input.parentId && !(await resolveVisiblePost(input.parentId))) {
+      // The reply's notification (below) needs the parent's author, so the
+      // resolution selects `authorId` alongside `id`: one lookup keeps the
+      // existence check and the notification recipient in step, instead of
+      // re-reading the row inside the insert's transaction.
+      const parent = input.parentId ? await resolveVisiblePost(input.parentId) : undefined;
+      const parentAuthorId = parent?.authorId;
+      if (input.parentId && !parent) {
         throw new ORPCError("NOT_FOUND", {
           message: "The post you replied to no longer exists.",
         });
       }
 
-      if (input.quotedPostId && !(await resolveVisiblePost(input.quotedPostId))) {
+      // The quote's notification needs the quoted post's author for the same
+      // reason the reply's needs the parent's, so this resolution keeps the
+      // author too — one lookup serves the existence check and the recipient.
+      const quoted = input.quotedPostId ? await resolveVisiblePost(input.quotedPostId) : undefined;
+      const quotedAuthorId = quoted?.authorId;
+      if (input.quotedPostId && !quoted) {
         throw new ORPCError("NOT_FOUND", {
           message: "The post you quoted no longer exists.",
         });
@@ -1166,7 +1178,7 @@ export const postRouter = {
             }
           }
 
-          return insertPost(tx, {
+          const inserted = await insertPost(tx, {
             postId,
             authorId: context.user.id,
             content: input.content,
@@ -1174,6 +1186,36 @@ export const postRouter = {
             quotedPostId: input.quotedPostId,
             prepared,
           });
+          if (inserted && parentAuthorId) {
+            // The reply's notification rides the insert's transaction: a
+            // failure between the two leaves neither. The row points at the
+            // reply itself (not the parent) — that is the thing the
+            // recipient will click through to, and it is what makes the
+            // notification tombstone with the reply when the author deletes
+            // it, exactly like the reply's own feed presence.
+            await insertNotification(tx, {
+              recipientId: parentAuthorId,
+              actorId: context.user.id,
+              type: "reply",
+              postId: inserted.id,
+            });
+          }
+          if (inserted && quotedAuthorId) {
+            // The quote's notification is the reply's shape exactly: same
+            // transaction, and the row points at the quote itself — the
+            // thing the recipient will click through to is what the quoter
+            // said, not their own post back. A quote is a new post with no
+            // natural idempotency key of its own, so its exactly-once is the
+            // reply's too: the insert either commits (one post, one
+            // notification) or it does not.
+            await insertNotification(tx, {
+              recipientId: quotedAuthorId,
+              actorId: context.user.id,
+              type: "quote",
+              postId: inserted.id,
+            });
+          }
+          return inserted;
         });
       } catch (error) {
         if (storage) await discardPostAttachments(storage, prepared);
@@ -1878,7 +1920,7 @@ export const postRouter = {
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
       const [target] = await context.db
-        .select({ id: post.id })
+        .select({ id: post.id, authorId: post.authorId })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
         .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
@@ -1888,12 +1930,30 @@ export const postRouter = {
         throw new ORPCError("NOT_FOUND", { message: "Post not found." });
       }
 
-      // The (post_id, user_id) primary key makes the duplicate impossible;
-      // this just declines to error on it.
-      await context.db
-        .insert(postLike)
-        .values({ postId: input.postId, userId: context.user.id })
-        .onConflictDoNothing();
+      // The like and its notification commit together: `.returning()` is
+      // empty exactly when the (post_id, user_id) primary key swallowed the
+      // insert as a duplicate, so a retried like mints no second
+      // notification — the notification's exactly-once rides the like's own
+      // idempotency instead of a second unique key a like→unlike→like
+      // sequence would wrongly collapse.
+      await context.db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(postLike)
+          .values({ postId: input.postId, userId: context.user.id })
+          .onConflictDoNothing()
+          .returning({ postId: postLike.postId });
+
+        if (inserted.length > 0) {
+          // A no-op for the author's own like — `insertNotification` drops
+          // self-caused events so this needs no branch here.
+          await insertNotification(tx, {
+            recipientId: target.authorId,
+            actorId: context.user.id,
+            type: "like",
+            postId: input.postId,
+          });
+        }
+      });
 
       return {
         postId: input.postId,
@@ -1949,7 +2009,7 @@ export const postRouter = {
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
       const [target] = await context.db
-        .select({ id: post.id })
+        .select({ id: post.id, authorId: post.authorId })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
         .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
@@ -1959,12 +2019,30 @@ export const postRouter = {
         throw new ORPCError("NOT_FOUND", { message: "Post not found." });
       }
 
-      // The (post_id, user_id) primary key makes the duplicate impossible;
-      // this just declines to error on it.
-      await context.db
-        .insert(postRepost)
-        .values({ postId: input.postId, userId: context.user.id })
-        .onConflictDoNothing();
+      // The repost and its notification commit together — the like's shape
+      // exactly. `.returning()` is empty exactly when the (post_id, user_id)
+      // primary key swallowed the insert as a duplicate, so a retried repost
+      // mints no second notification, and repost → unrepost → repost is
+      // honestly three events. `unrepost` removes nothing: the rows are
+      // historical, the same deal like notifications already get.
+      await context.db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(postRepost)
+          .values({ postId: input.postId, userId: context.user.id })
+          .onConflictDoNothing()
+          .returning({ postId: postRepost.postId });
+
+        if (inserted.length > 0) {
+          // A no-op for the author's own repost (allowed, and dropped by
+          // `insertNotification`'s self guard, like the like handler's).
+          await insertNotification(tx, {
+            recipientId: target.authorId,
+            actorId: context.user.id,
+            type: "repost",
+            postId: input.postId,
+          });
+        }
+      });
 
       return {
         postId: input.postId,

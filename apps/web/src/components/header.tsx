@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SearchBox } from "@/components/search-box";
+import { unreadCountAtom } from "@/atoms/notifications";
 import { isModeratorAtom, viewerAtom, viewerHandleAtom } from "@/atoms/session";
 import { authPendingAtom } from "@/atoms/auth";
 import { UserAvatar } from "@/components/user-avatar";
@@ -56,9 +57,13 @@ export function Header() {
   const handle = useAtomValue(viewerHandleAtom);
   const isSigningOut = useAtomValue(authPendingAtom);
   const isModerator = useAtomValue(isModeratorAtom);
+  const unread = useAtomValue(unreadCountAtom);
   const handleSignOut = useSignOut();
-
   if (!user) return null;
+
+  // A pending or errored count reads as zero: the bell stays a plain link
+  // rather than flashing a badge on a guess.
+  const unreadCount = unread.data?.unreadCount ?? 0;
 
   const nameDisplay = user.name || user.displayUsername || user.username || m.nav_profile();
 
@@ -138,8 +143,8 @@ export function Header() {
 
         {/* Right Section: Messages, Notifications, Theme Toggle, Auth / Profile */}
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-3 xl:flex-1 xl:justify-end">
-          {/* Not shipped yet — kept as disabled stubs rather than inert-looking
-              buttons so nobody mistakes them for live controls. */}
+          {/* Not shipped yet — kept as a disabled stub rather than an inert-looking
+              button so nobody mistakes it for a live control. */}
           <Button
             variant="ghost"
             size="icon"
@@ -150,15 +155,46 @@ export function Header() {
           >
             <MessageSquare className="h-5 w-5" />
           </Button>
+          {/* The notifications bell (issue #259): a live link to /notifications
+              carrying the unread count, visible at every width — below `sm` it
+              is the page's only entry point, and the header's own contract is
+              that actions stay reachable while the wordmark yields (`min-w-0`
+              plus `truncate`), so one more size-9 icon never overflows the
+              row. The badge renders only when the count is both loaded and
+              non-zero, so a pending or empty count reads as the plain bell
+              instead of a false "0". Capped at 99+ — the badge is a signal,
+              not an accountant. */}
           <Button
             variant="ghost"
             size="icon"
-            disabled
-            title={m.nav_notifications()}
-            aria-label={m.nav_notifications()}
-            className="hidden sm:inline-flex"
+            nativeButton={false}
+            render={
+              <Link
+                to="/notifications"
+                title={m.nav_notifications()}
+                aria-label={
+                  unreadCount > 0
+                    ? // The keyed one/many pair, like every other count in
+                      // the messages: French agrees "non lue(s)" with the
+                      // count, and 1 is the badge's most common state.
+                      unreadCount === 1
+                      ? m.nav_notifications_unread_one({ count: unreadCount })
+                      : m.nav_notifications_unread_many({ count: unreadCount })
+                    : m.nav_notifications()
+                }
+                className="relative"
+              />
+            }
           >
             <Bell className="h-5 w-5" />
+            {unreadCount > 0 && (
+              <span
+                aria-hidden="true"
+                className="bg-primary text-primary-foreground absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-bold"
+              >
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            )}
           </Button>
 
           {/* The fallback is a plain, non-focusable div sized to the icon

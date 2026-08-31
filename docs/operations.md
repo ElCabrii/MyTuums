@@ -247,6 +247,20 @@ completed, an interrupted replacement) are reaped by:
 pnpm --filter @my-tuums/api reconcile:media
 ```
 
+**Notification pruning.** Likes, replies and follows past the ninety-day
+retention horizon (`NOTIFICATION_RETENTION_DAYS` — the same boundary the page
+and the badge already serve) are deleted by:
+
+```bash
+pnpm --filter @my-tuums/api prune:notifications --apply --retention-days=90
+```
+
+Dry-run by default; moderation notices are exempt, and read cursors
+(`notification_last_seen`) are never deleted — one row per recipient, kept
+so a recipient returning past the horizon does not find every retained
+moderation notice unread again. Run it on a schedule that suits the volume
+— weekly is plenty at this scale.
+
 It lists the bucket before reading the `user` rows, so an upload landing
 between the two steps is never mistaken for an orphan. Point it at the same
 bucket as the environment whose rows you are reading, never across

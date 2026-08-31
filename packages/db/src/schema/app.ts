@@ -638,6 +638,110 @@ export const appeal = pgTable(
 );
 
 /**
+ * An in-app notification (issue #259) — one row per event its recipient can
+ * later discover on the notifications page: a like on their post, a reply to
+ * their post, a repost of their post, a quote of their post, a follow, or a
+ * moderation action on their content or account.
+ *
+ * Written only inside the same transaction as its cause (the like/repost/follow
+ * insert, the reply or quote insert, the `moderation_action` row), so a
+ * rollback leaves neither half. Exactly-once comes from the same shape that
+ * makes like/follow idempotent: the notification is minted only when the cause
+ * row was newly inserted, or — for moderation — by the same locked, guarded
+ * path that mints the append-only audit row.
+ *
+ * `actorId` is set null (not cascade) when the actor's account goes away:
+ * moderation notifications are system rows (null actor by construction) that
+ * must survive their moderator's deletion exactly like the audit rows they
+ * reference. Like/reply/repost/quote/follow rows whose actor was hard-deleted
+ * read as null here, and the list projection drops them — a like
+ * notification with no liker has nothing left to say. One column cannot have
+ * two FK behaviours, so `set null` plus that read-time filter is what gives
+ * user-caused rows their cascade-equivalent semantics without losing the
+ * moderation ones.
+ */
+export const notification = pgTable(
+  "notification",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // The notification's owner — the only person the list ever serves. Their
+    // account going away takes their notifications with them.
+    recipientId: text("recipient_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // Who caused it. Null for moderation rows (the notice is from MyTuums,
+    // matching the branded email that never names the moderator); set null on
+    // actor deletion, see the table comment.
+    actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
+    // `'like'`, `'reply'`, `'repost'`, `'quote'`, `'follow'` or
+    // `'moderation'` (checked below). The `$type` union mirrors that check
+    // constraint so selects carry the six codes to TypeScript consumers —
+    // the same mirroring `MODERATION_ACTION_CODES` in packages/api does for
+    // `moderation_action`.
+    type: text("type")
+      .$type<"like" | "reply" | "repost" | "quote" | "follow" | "moderation">()
+      .notNull(),
+    // The like's or repost's post / the reply or quote itself (the thing the
+    // recipient clicks through to). Null for follow and moderation.
+    postId: uuid("post_id").references(() => post.id, { onDelete: "cascade" }),
+    // The moderation action the notification mirrors — carries the code,
+    // reason and target the page renders. Null for user-caused types.
+    actionId: uuid("action_id").references(() => moderationAction.id, { onDelete: "cascade" }),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above — and because the list is keyset-paginated on
+    // (created_at, id), the precision is load-bearing here too.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    check(
+      "notification_type",
+      sql`${t.type} in ('like', 'reply', 'repost', 'quote', 'follow', 'moderation')`,
+    ),
+    // Like, reply, repost and quote rows name the post they are about; follow
+    // and moderation rows carry no post reference. An equality of booleans
+    // rather than a bare `is not null`, so neither type can smuggle the
+    // other's target.
+    check(
+      "notification_post_ref",
+      sql`(${t.type} in ('like', 'reply', 'repost', 'quote')) = (${t.postId} is not null)`,
+    ),
+    // Moderation rows mirror one audit action; every other type has none.
+    check("notification_action_ref", sql`(${t.type} = 'moderation') = (${t.actionId} is not null)`),
+    // Self-caused events never notify — the check behind the handler-side
+    // guard, so no other write path can reintroduce it. Null (moderation
+    // system rows) stays legal: the check is only about the actor when there
+    // is one.
+    check("notification_not_self", sql`${t.actorId} is null or ${t.actorId} <> ${t.recipientId}`),
+    // The list's keyset order: newest first, `id` breaking ties — mirrored by
+    // packages/api/src/notifications.ts. It also carries the unread scans:
+    // read state is a per-recipient seen-at cursor
+    // (`notification_last_seen`), so "unread" is `created_at > seen_at` —
+    // exactly the leading columns here.
+    index("notification_recipient_created_idx").on(t.recipientId, t.createdAt.desc(), t.id.desc()),
+  ],
+);
+
+/**
+ * The read-state cursor for one recipient's notifications (issue #259): the
+ * moment they last opened `/notifications`. A row is read exactly when its
+ * `created_at` is at or before `seen_at` — read state lives here rather than
+ * as a per-row stamp so the page's "open means read" is one idempotent
+ * upsert instead of N row updates, and so no notification is ever *born*
+ * read: what the recipient has and has not seen stays truthful even when the
+ * badge damps a burst (the damper counts ticks, it never rewrites history —
+ * see `notification.unreadCount`).
+ *
+ * One row per recipient, created by `notification.markRead`. Absent means
+ * never opened the page: everything is unread.
+ */
+export const notificationLastSeen = pgTable("notification_last_seen", {
+  recipientId: text("recipient_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  seenAt: timestamp("seen_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+});
+
+/**
  * A resolved link preview card, keyed by the normalized URL it describes
  * (issue #260). One row per URL: the card is a property of the target page,
  * not of any post, so every post carrying the same URL shares it.
@@ -692,7 +796,6 @@ export const linkCard = pgTable(
 );
 
 /** Drizzle relations for `post` — the joins `with` queries can reach: author, likes, bookmarks, parent, and replies. */
-
 export const postRelations = relations(post, ({ one, many }) => ({
   author: one(user, { fields: [post.authorId], references: [user.id] }),
   likes: many(postLike),
@@ -826,5 +929,27 @@ export const appealRelations = relations(appeal, ({ one }) => ({
     fields: [appeal.reviewedBy],
     references: [user.id],
     relationName: "reviewedBy",
+  }),
+}));
+
+/** Drizzle relations for `notification` — the recipient, the actor, the post and the mirrored action. */
+export const notificationRelations = relations(notification, ({ one }) => ({
+  recipient: one(user, {
+    fields: [notification.recipientId],
+    references: [user.id],
+    relationName: "recipient",
+  }),
+  actor: one(user, {
+    fields: [notification.actorId],
+    references: [user.id],
+    relationName: "actor",
+  }),
+  post: one(post, {
+    fields: [notification.postId],
+    references: [post.id],
+  }),
+  action: one(moderationAction, {
+    fields: [notification.actionId],
+    references: [moderationAction.id],
   }),
 }));

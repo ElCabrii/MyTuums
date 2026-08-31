@@ -262,6 +262,14 @@ export const RATE_LIMITS = {
    */
   moderate: { name: "moderate", limit: 60, windowMs: MINUTE },
   /**
+   * Marking notifications read. One bounded, idempotent stamp per
+   * notifications-page visit — its own namespace (rather than the `write`
+   * tier it resembles by direction) so repeatedly opening the page can never
+   * spend the publishing budget the composer depends on, the same separation
+   * `follow`, `report` and `block` keep.
+   */
+  markRead: { name: "notification", limit: 60, windowMs: MINUTE },
+  /**
    * Link preview unfurls (issue #260). The one policy that can spend an
    * *outbound* request per call — a fetch of an author-chosen URL, bounded in
    * size and time (see LINK_CARD_* in constants). Its own namespace so burning

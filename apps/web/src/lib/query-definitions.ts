@@ -1,6 +1,7 @@
 import {
   FOLLOW_PAGE_SIZE,
   MODERATION_PAGE_SIZE,
+  NOTIFICATION_PAGE_SIZE,
   POST_PAGE_SIZE,
   SEARCH_PAGE_SIZE,
 } from "@my-tuums/api/constants";
@@ -28,6 +29,10 @@ interface PagedUserListInput {
   cursor?: string;
 }
 interface PagedModerationInput {
+  limit: number;
+  cursor?: string;
+}
+interface PagedNotificationInput {
   limit: number;
   cursor?: string;
 }
@@ -234,6 +239,31 @@ export function moderationCaseQueryOptions(ref: CaseRef) {
 
 export function teamQueryOptions() {
   return orpc.moderation.team.queryOptions();
+}
+
+/** The viewer's notifications, newest first — one feed, no scope parameters. */
+export function notificationsQueryOptions() {
+  return orpc.notification.list.infiniteOptions({
+    input: (cursor: string | undefined) => {
+      const input: PagedNotificationInput = { limit: NOTIFICATION_PAGE_SIZE };
+      if (cursor) input.cursor = cursor;
+      return input;
+    },
+    initialPageParam:
+      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+      undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  });
+}
+
+/**
+ * The unread badge count. No polling and no custom staleness: the app's
+ * QueryClient defaults refetch on mount and on window focus, which is the
+ * same freshness contract every other surface lives by — the badge moves
+ * when the reader next looks at the app, not on a timer.
+ */
+export function unreadCountQueryOptions() {
+  return orpc.notification.unreadCount.queryOptions({ input: {} });
 }
 
 /**
