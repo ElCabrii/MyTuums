@@ -54,9 +54,13 @@ both by the server's page gate and by the client.
   `javascript:`, `data:`, `ftp:` — stays inert text, and a recognized URL never
   gets a preview, unfurl or link card. A `#tag` — a hash followed by one or
   more ASCII letters, digits or underscores — becomes a link to post search
-  filtered to that tag, canonicalized to lowercase exactly like a handle. The
-  query keeps the `#`, so the results are posts carrying the tag rather than
-  posts that merely contain the word. Accented letters are not tag characters
+  filtered to that tag, canonicalized to lowercase exactly like a handle.
+  One character is a complete tag: unlike a handle, there is no minimum
+  length. The query keeps the `#` so it matches hash-marked occurrences
+  rather than the bare word — but post search is a case-insensitive
+  substring scan, so a longer tag (`#tag_expo`), a glued word (`word#tag`)
+  or a URL fragment (`https://example.com/#tag`) matches it all the same.
+  Accented letters are not tag characters
   even though the app is bilingual, so `#café` and `#été` stay plain text —
   as does any hash that is not followed by a complete tag (a lone `#`,
   `##tag`, `word#tag`, `#tag-way`), exactly like a malformed handle. A tag

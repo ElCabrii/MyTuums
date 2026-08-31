@@ -84,9 +84,9 @@ function isUsernameCharacter(character: string | undefined): boolean {
 
 /**
  * Whether a token may not start or end against this character: a handle
- * character, or any Unicode letter, mark or number. Both recognizers share it,
- * so `name@example.com` stays an address and `seehttps://example.com` stays a
- * typo.
+ * character, or any Unicode letter, mark or number. The URL and mention
+ * recognizers share it, so `name@example.com` stays an address and
+ * `seehttps://example.com` stays a typo.
  */
 function isWordCharacter(character: string | undefined): boolean {
   return (
@@ -213,7 +213,9 @@ const HASHTAG_MAX_LENGTH = SEARCH_QUERY_MAX_LENGTH - 1;
 /**
  * The tag charset: ASCII letters, digits and the underscore — the handle
  * charset minus the hyphen, which no tag syntax treats as part of a tag.
- * Anchored and without the `g` flag for the same reason as `USERNAME_RE`.
+ * Unlike `USERNAME_RE` it is never tested against a whole tag, only against
+ * one code point at a time, so it carries no anchors. It stays flagless for
+ * the same reason as `USERNAME_RE`: a `g` flag would make `.test()` stateful.
  */
 const HASHTAG_CHARACTER = /[a-zA-Z0-9_]/;
 
@@ -229,13 +231,29 @@ function isHashtagCharacter(character: string | undefined): boolean {
   return character !== undefined && HASHTAG_CHARACTER.test(character);
 }
 
+/**
+ * Whether a `#` may not start against this character: a tag character, or
+ * any Unicode letter, mark or number. This is `isWordCharacter` narrowed to
+ * the tag charset, because the hyphen is a handle character but not a tag
+ * character — `x-#tag` links while `x-@handle` stays inert.
+ */
+function isTagWordCharacter(character: string | undefined): boolean {
+  return (
+    character !== undefined &&
+    (HASHTAG_CHARACTER.test(character) || UNICODE_WORD_CHARACTER.test(character))
+  );
+}
+
 function matchHashtag(characters: string[], cursor: number): Match | undefined {
   // The `#`-before-`#` guard mirrors the mention recognizer's `@@` guard, so
-  // `##tag` is inert text rather than a link buried one character in.
+  // `##tag` is inert text rather than a link buried one character in. The
+  // leading boundary is `isTagWordCharacter`, not the mention recognizer's
+  // `isWordCharacter`: a hyphen is not a tag character, so it is a valid
+  // boundary before a `#` even though it blocks a mention.
   if (
     characters[cursor] !== "#" ||
     characters[cursor - 1] === "#" ||
-    isWordCharacter(characters[cursor - 1])
+    isTagWordCharacter(characters[cursor - 1])
   ) {
     return undefined;
   }
@@ -339,10 +357,12 @@ function renderSegment(segment: Segment): ReactNode {
       );
     case "hashtag":
       // A tag is nothing but a link into post search filtered to itself: the
-      // query keeps the `#` so the results are posts carrying the tag, not
-      // posts that merely contain the word. The label stays as typed while
-      // the query carries the canonical lowercase tag, the same split as a
-      // mention's label versus its `/@handle` href.
+      // query keeps the `#` so it matches hash-marked occurrences rather than
+      // the bare word. Post search is a substring scan, so a longer tag
+      // (`#tag_expo`), a glued word (`word#tag`) or a URL fragment still
+      // matches. The label stays as typed while the query carries the
+      // canonical lowercase tag, the same split as a mention's label versus
+      // its `/@handle` href.
       return (
         <Link
           to="/search"
@@ -364,7 +384,9 @@ function renderSegment(segment: Segment): ReactNode {
  * search filtered to the tag. Unknown handles deliberately link to the
  * canonical profile route, whose existing not-found state is the fallback;
  * malformed handles, malformed tags and every other scheme stay untouched
- * text. React text children keep the entire surface HTML-safe.
+ * text. A tag has no minimum length, unlike a handle (`USERNAME_MIN_LENGTH`):
+ * one character after the `#` is a complete tag, a deliberate asymmetry with
+ * mentions. React text children keep the entire surface HTML-safe.
  *
  * Nothing here stops a click from bubbling: the surrounding surfaces that
  * navigate on click (`PostCard`) already ignore clicks landing inside an
