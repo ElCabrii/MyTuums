@@ -1,5 +1,5 @@
 {
-  "id": "a5854d81-e758-4509-8b77-570a1a4fe141",
+  "id": "6de111a7-1bf6-40e3-9c3c-294eb211c0df",
   "prevId": "58f67752-4f84-4e56-be2b-46ceeca0f365",
   "version": "7",
   "dialect": "postgresql",
@@ -1518,6 +1518,87 @@
       },
       "isRLSEnabled": false
     },
+    "public.post_edit": {
+      "name": "post_edit",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "post_id": {
+          "name": "post_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content": {
+          "name": "content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "post_edit_post_created_idx": {
+          "name": "post_edit_post_created_idx",
+          "columns": [
+            {
+              "expression": "post_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "post_edit_post_id_post_id_fk": {
+          "name": "post_edit_post_id_post_id_fk",
+          "tableFrom": "post_edit",
+          "tableTo": "post",
+          "columnsFrom": [
+            "post_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.post_like": {
       "name": "post_like",
       "schema": "",
@@ -1628,6 +1709,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "snapshot_content": {
+          "name": "snapshot_content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",

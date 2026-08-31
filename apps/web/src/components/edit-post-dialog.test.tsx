@@ -1,15 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient } from "@tanstack/react-query";
 import { createStore } from "jotai";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
-import { editPostDialogAtom } from "@/atoms/post-edit";
-import { makePost } from "@/test/factories";
+import { editPostDialogAtom, type EditPostTarget } from "@/atoms/post-edit";
 import { renderWithProviders } from "@/test/render";
 import { EditPostDialog } from "@/components/edit-post-dialog";
 import { m } from "@/paraglide/messages.js";
-import { installTestOrpc, orpc } from "@/lib/orpc";
+import { installTestOrpc } from "@/lib/orpc";
 import { POST_CACHE_KEYS } from "@/lib/post-cache";
 
 const fakeClient = {
@@ -20,15 +18,12 @@ const fakeClient = {
 installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 /**
- * The dialog seeds its textarea from the cache the card rendered through, so
- * the post has to be in one before the dialog opens — same seeding shape as
- * `post-card.test.tsx`.
+ * The card hands the atom a snapshot of the post as it rendered — text and
+ * attachment count included — so the dialog never reads a cache. Opening it
+ * is exactly what the kebab's click does.
  */
-function seedPostCache(queryClient: QueryClient, post: ReturnType<typeof makePost>): void {
-  queryClient.setQueryData(orpc.post.list.key({ input: { limit: 20 } }), {
-    pages: [{ items: [post], nextCursor: null }],
-    pageParams: [undefined],
-  });
+function openDialog(store: ReturnType<typeof createStore>, target: EditPostTarget) {
+  store.set(editPostDialogAtom, target);
 }
 
 beforeEach(() => {
@@ -36,17 +31,15 @@ beforeEach(() => {
 });
 
 describe("EditPostDialog", () => {
-  it("prefills the cached text, submits the edited content, and closes once the server confirms", async () => {
+  it("prefills the target's text, submits the edited content, and closes once the server confirms", async () => {
     fakeClient.post.edit.mockResolvedValue({
       postId: "post-1",
       content: "fixed typo",
       editedAt: new Date(),
     });
     const store = createStore();
-    store.set(editPostDialogAtom, "post-1");
-    const queryClient = new QueryClient();
-    seedPostCache(queryClient, makePost({ id: "post-1", content: "fixed typoo" }));
-    await renderWithProviders(<EditPostDialog />, { store, queryClient, signedInAs: true });
+    openDialog(store, { postId: "post-1", content: "fixed typoo", attachmentCount: 0 });
+    await renderWithProviders(<EditPostDialog />, { store, signedInAs: true });
 
     // The session (and with it the composer chrome) settles asynchronously —
     // findByRole awaits the textarea instead of racing the first paint. The
@@ -68,6 +61,48 @@ describe("EditPostDialog", () => {
     await waitFor(() => expect(store.get(editPostDialogAtom)).toBeNull());
   });
 
+  it("can save the text down to empty on a post that carries images — the cross-field rule against server state", async () => {
+    fakeClient.post.edit.mockResolvedValue({
+      postId: "post-1",
+      content: "",
+      editedAt: new Date(),
+    });
+    const store = createStore();
+    openDialog(store, { postId: "post-1", content: "a caption", attachmentCount: 1 });
+    await renderWithProviders(<EditPostDialog />, { store, signedInAs: true });
+
+    const user = userEvent.setup();
+    const textarea = await screen.findByRole("combobox");
+    await user.clear(textarea);
+
+    // The post's own images satisfy "text, images, or both" (issue #202), so
+    // the cleared text is submittable — the API allows this edit, and the UI
+    // no longer refuses what the server accepts.
+    const submit = screen.getByRole("button", { name: m.post_edit_submit() });
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+
+    await waitFor(() =>
+      expect(fakeClient.post.edit).toHaveBeenCalledWith(
+        { postId: "post-1", content: "" },
+        expect.anything(),
+      ),
+    );
+  });
+
+  it("refuses an empty text on an imageless post — the composer's own cross-field rule", async () => {
+    const store = createStore();
+    openDialog(store, { postId: "post-1", content: "just text", attachmentCount: 0 });
+    await renderWithProviders(<EditPostDialog />, { store, signedInAs: true });
+
+    const user = userEvent.setup();
+    const textarea = await screen.findByRole("combobox");
+    await user.clear(textarea);
+
+    expect(screen.getByRole("button", { name: m.post_edit_submit() })).toBeDisabled();
+    expect(fakeClient.post.edit).not.toHaveBeenCalled();
+  });
+
   it("refetches every cached copy of the post — feeds, threads and post search", async () => {
     fakeClient.post.edit.mockResolvedValue({
       postId: "post-1",
@@ -75,23 +110,19 @@ describe("EditPostDialog", () => {
       editedAt: new Date(),
     });
     const store = createStore();
-    store.set(editPostDialogAtom, "post-1");
-    const queryClient = new QueryClient();
-    seedPostCache(queryClient, makePost({ id: "post-1", content: "fixed typoo" }));
-    const { queryClient: renderedClient } = await renderWithProviders(<EditPostDialog />, {
+    openDialog(store, { postId: "post-1", content: "fixed typo", attachmentCount: 0 });
+    const { queryClient } = await renderWithProviders(<EditPostDialog />, {
       store,
-      queryClient,
       signedInAs: true,
     });
-    const invalidate = vi.spyOn(renderedClient, "invalidateQueries");
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: m.post_edit_submit() }));
 
-    // The dialog opens from a card, so the post is cached in at least one of
-    // the three shapes `lib/post-cache.ts` lists; the sweep must cover all of
-    // them, asserted against that module's own inventory so a cache added
-    // there is a failure here until it is swept.
+    // The sweep must cover every shape `lib/post-cache.ts` lists, asserted
+    // against that module's own inventory so a cache added there is a failure
+    // here until it is swept.
     await waitFor(() => {
       for (const queryKey of POST_CACHE_KEYS) {
         expect(invalidate).toHaveBeenCalledWith({ queryKey });
@@ -105,10 +136,8 @@ describe("EditPostDialog", () => {
       new Error("This post was removed by a moderator and can no longer be edited."),
     );
     const store = createStore();
-    store.set(editPostDialogAtom, "post-1");
-    const queryClient = new QueryClient();
-    seedPostCache(queryClient, makePost({ id: "post-1", content: "fixed typoo" }));
-    await renderWithProviders(<EditPostDialog />, { store, queryClient, signedInAs: true });
+    openDialog(store, { postId: "post-1", content: "fixed typoo", attachmentCount: 0 });
+    await renderWithProviders(<EditPostDialog />, { store, signedInAs: true });
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: m.post_edit_submit() }));
@@ -119,6 +148,6 @@ describe("EditPostDialog", () => {
     // alert must route through `localizeEditPostError`, or the refusal renders
     // untranslated in every locale but English.
     expect(await screen.findByRole("alert")).toHaveTextContent(m.post_edit_removed());
-    expect(store.get(editPostDialogAtom)).toBe("post-1");
+    expect(store.get(editPostDialogAtom)).not.toBeNull();
   });
 });

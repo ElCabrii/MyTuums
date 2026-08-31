@@ -11,6 +11,7 @@ import {
   History,
   Hourglass,
   MessageSquareReply,
+  Pencil,
   Trash2,
   Undo2,
 } from "lucide-react";
@@ -36,6 +37,7 @@ import {
 import { isStaffAtom } from "@/atoms/session";
 import { LinkedText } from "@/components/linked-text";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
+import { PostTimestamps } from "@/components/post-timestamps";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -199,7 +201,11 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
       {targetPost && <TargetPostCard target={targetPost} />}
       {targetUser && <TargetUserCard target={targetUser} />}
 
-      <ReportsSection reports={detail.reports} />
+      <ReportsSection
+        reports={detail.reports}
+        targetEditedAt={targetPost?.editedAt ?? null}
+        currentContent={targetPost?.content ?? null}
+      />
 
       {/* One section per open appeal. Two control families can be appealed
           against the same target at once (a ban and a role change), and each
@@ -221,7 +227,6 @@ function TargetPostCard({
   target: Extract<ModerationCaseDetail["target"], { kind: "post" }>;
 }) {
   const authorHandle = handleOf(target.author);
-  const locale = getLocale();
 
   return (
     <Card size="sm">
@@ -241,20 +246,9 @@ function TargetPostCard({
           )}
         </CardTitle>
         <CardDescription className="flex flex-wrap items-center gap-1.5">
-          <span title={formatDateTime(target.createdAt, locale)}>
-            {formatRelativeTime(target.createdAt, locale, m.post_just_now())}
-          </span>
-          {target.editedAt && (
-            <span
-              className="text-muted-foreground text-xs"
-              title={formatDateTime(target.editedAt, locale)}
-            >
-              •{" "}
-              {m.post_edited({
-                time: formatRelativeTime(target.editedAt, locale, m.post_just_now()),
-              })}
-            </span>
-          )}
+          {/* The shared timestamp + "Edited" marker, so the case view says a
+              post was edited exactly like every public surface does. */}
+          <PostTimestamps createdAt={target.createdAt} editedAt={target.editedAt} />
           {target.parentId && (
             <Badge variant="outline">
               <MessageSquareReply />
@@ -365,6 +359,11 @@ function EditHistorySection({
           </Item>
         ))}
       </ItemGroup>
+      {target.editHistoryTruncated && (
+        <p className="text-muted-foreground text-xs">
+          {m.moderation_case_edit_history_truncated()}
+        </p>
+      )}
     </div>
   );
 }
@@ -455,8 +454,26 @@ function TargetUserCard({
   );
 }
 
-/** Every report against the target, newest first, with resolved state. */
-function ReportsSection({ reports }: { reports: ModerationCaseDetail["reports"] }) {
+/**
+ * Every report against the target, newest first, with resolved state.
+ *
+ * A post-target report also carries what it was raised against: the
+ * post's content snapshot taken at report time. It is quoted on the row
+ * whenever it differs from what currently stands — the reporter's own
+ * evidence, not a reconstruction from the edit history's timestamps —
+ * beside an "edited after this report" badge when the last edit landed
+ * after the report was filed. User-target reports carry no snapshot and
+ * no edit axis, so neither renders there.
+ */
+function ReportsSection({
+  reports,
+  targetEditedAt,
+  currentContent,
+}: {
+  reports: ModerationCaseDetail["reports"];
+  targetEditedAt: Date | null;
+  currentContent: string | null;
+}) {
   const locale = getLocale();
   const open = reports.filter(isOpenReport).length;
 
@@ -479,7 +496,7 @@ function ReportsSection({ reports }: { reports: ModerationCaseDetail["reports"] 
           <ItemGroup className="gap-1.5">
             {reports.map((report) => (
               <Item key={report.reporterId} role="listitem" variant="muted" size="xs">
-                <ItemContent>
+                <ItemContent className="space-y-0.5">
                   <ItemTitle>
                     <Badge variant={reasonBadgeVariant(report.reason)}>
                       {reasonLabel(report.reason)}
@@ -490,7 +507,26 @@ function ReportsSection({ reports }: { reports: ModerationCaseDetail["reports"] 
                     >
                       {formatRelativeTime(report.createdAt, locale, m.post_just_now())}
                     </span>
+                    {targetEditedAt && targetEditedAt > report.createdAt && (
+                      <Badge variant="secondary">
+                        <Pencil />
+                        {m.moderation_case_edited_after_report()}
+                      </Badge>
+                    )}
                   </ItemTitle>
+                  {/* The snapshot is quoted only when it no longer matches the
+                      live text: an unedited post needs no quote — the content
+                      card above already says exactly what was reported. */}
+                  {report.snapshotContent !== null && report.snapshotContent !== currentContent && (
+                    <div>
+                      <p className="text-muted-foreground text-xs font-medium">
+                        {m.moderation_case_report_snapshot_title()}
+                      </p>
+                      <p className="text-sm break-words whitespace-pre-line">
+                        <LinkedText text={report.snapshotContent} />
+                      </p>
+                    </div>
+                  )}
                 </ItemContent>
                 {report.resolvedAt && (
                   <ItemActions>

@@ -238,6 +238,7 @@ export function makeModerationCaseDetail(
       // a test that wants history says so.
       editedAt: null,
       editHistory: [],
+      editHistoryTruncated: false,
       attachments: [],
       author: makeAuthor(),
       ...overrides,
@@ -292,6 +293,9 @@ export function makeModerationReport(
   return {
     reporterId: crypto.randomUUID(),
     reason: "spam",
+    // No snapshot by default: a report needs one only when the test is about
+    // the wording it was raised against (issue #264).
+    snapshotContent: null,
     createdAt: new Date(),
     resolvedAt: null,
     resolvedBy: null,

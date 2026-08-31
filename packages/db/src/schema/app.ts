@@ -305,7 +305,17 @@ export const report = pgTable(
     // illegal_content/nsfw; users: spam/harassment/impersonation/underage)
     // are enforced at input by the procedure's discriminated union.
     reason: text("reason").notNull(),
-    // `timestamptz` and `precision: 3` for the same reasons as
+    // The post's content at the moment it was reported (issue #264). Null on
+    // user-target reports and on rows reported before the column existed.
+    // A report row otherwise carries only a reason code; this snapshot is
+    // the exact evidence — what the reporter actually saw — independent of
+    // whether the author has since edited the post. `post_edit` keeps every
+    // version, but correlating versions to reports by timestamp is
+    // reconstruction; this is the quote itself. Refreshed on a repeat
+    // report alongside `createdAt`, since the reporter is re-reporting what
+    // they now see.
+    snapshotContent: text("snapshot_content"),
+    // `timestamaptz` and `precision: 3` for the same reasons as
     // post.created_at above.
     createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
     // A null `resolvedAt` means the case is open. Resolution is a stamp

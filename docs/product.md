@@ -76,9 +76,13 @@ both by the server's page gate and by the client.
   without re-ranking or bumping the post. A removed or deleted post cannot be
   edited — a removal keeps the story the author would appeal about immutable.
   A post under review stays editable: every edit records the text it replaced,
-  and the moderation case view shows that full history, so a moderator judges
-  everything the author wrote rather than only what currently stands, and a
-  rewrite cannot hide the wording a report was raised against. Editing is
+  and the moderation case view shows that history (the 50 most recent
+  versions) beside the current text, so a moderator judges everything the
+  author wrote rather than only what currently stands. A report also
+  snapshots the post's text at the moment it was filed, and the case view
+  quotes that snapshot on the report — so a rewrite cannot hide the wording a
+  report was raised against, and the moderator sees exactly what the
+  reporter saw without reconstructing it from timestamps. Editing is
   idempotent: re-sending the same text is a no-op that does not restamp the
   marker.
 - Likes are two idempotent operations, `like` and `unlike`, never a toggle —
@@ -157,7 +161,10 @@ A role can only be granted or revoked by someone strictly above it.
 - **Reporting.** Any signed-in user can report a post or a user with one
   reason code. Post reasons: spam, harassment, hate speech, misinformation,
   self-harm, illegal content, NSFW. User reasons: spam, harassment,
-  impersonation, underage. Self-reports are refused.
+  impersonation, underage. Self-reports are refused. A post report snapshots
+  the post's text as it stood when filed, so the reported wording survives
+  any later edit; a repeat report refreshes the snapshot along with the
+  case's clock.
 - **Queue.** Moderators see unresolved reports grouped by target, merged with
   every independently open appeal, newest first. Resolving a case marks it
   actioned or dismissed.

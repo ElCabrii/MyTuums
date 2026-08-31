@@ -304,8 +304,14 @@ describe("PostCard", () => {
 
       // The card only sets the target; the dialogs themselves are mounted at
       // the root layout (see `atoms/post-edit.ts` and `atoms/post-delete.ts`).
+      // The edit target carries the text and attachment count the card just
+      // rendered, so the dialog seeds itself from the card, not a cache.
       await user.click(editItem);
-      expect(store.get(editPostDialogAtom)).toBe(post.id);
+      expect(store.get(editPostDialogAtom)).toEqual({
+        postId: post.id,
+        content: post.content,
+        attachmentCount: post.attachments.length,
+      });
 
       await user.click(screen.getByLabelText(m.moderation_kebab()));
       await user.click(await screen.findByRole("menuitem", { name: m.post_delete() }));

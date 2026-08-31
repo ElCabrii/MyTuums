@@ -6,6 +6,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { ProfileLink } from "@/components/profile-link";
 import { LinkedText } from "@/components/linked-text";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
+import { PostTimestamps } from "@/components/post-timestamps";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import { deletePostDialogAtom } from "@/atoms/post-delete";
@@ -18,11 +19,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatDateTime, formatRelativeTime } from "@/lib/format";
 import type { Post } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
-import { getLocale } from "@/paraglide/runtime.js";
 
 /**
  * How prominently a card renders. The thread page shows all three at once:
@@ -115,24 +114,6 @@ export function PostCard({
           isFocused ? "" : "hover:border-primary/30 cursor-pointer"
         }`;
 
-  const locale = getLocale();
-  // The permalink is the durable surface for a post: a relative label is
-  // enough while scrolling a feed, but the page a link points at is where the
-  // exact date and time belong. `Intl` resolves both in the reader's own
-  // timezone.
-  const timestamp = isFocused
-    ? formatDateTime(post.createdAt, locale)
-    : formatRelativeTime(post.createdAt, locale, m.post_just_now());
-  // The edit marker rides right beside the creation timestamp and follows the
-  // same relative/exact split: a card scrolling past says "Edited 3 minutes
-  // ago", the focused post — the durable surface — says when exactly. A
-  // `<time>` element for the same reason the creation timestamp has one: the
-  // machine-readable value is the edit instant, not the label around it.
-  const editedTimestamp = post.editedAt
-    ? isFocused
-      ? formatDateTime(post.editedAt, locale)
-      : formatRelativeTime(post.editedAt, locale, m.post_just_now())
-    : null;
   const authorAvatar = (
     <UserAvatar
       user={post.author}
@@ -199,24 +180,10 @@ export function PostCard({
             ) : (
               <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
             )}
-            {/* `<time>` regardless of variant: the rendered label differs, but
-                the machine-readable value assistive technology and tooling
-                read is `post.createdAt` either way. */}
-            <span className="text-muted-foreground text-xs">
-              • <time dateTime={post.createdAt.toISOString()}>{timestamp}</time>
-            </span>
-
-            {/* The "Edited" marker (issue #264): visible wherever the post
-                renders, carrying the LAST edit time — never a version
-                history, just the fact and the moment. */}
-            {post.editedAt && editedTimestamp && (
-              <span className="text-muted-foreground text-xs">
-                •{" "}
-                <time dateTime={post.editedAt.toISOString()}>
-                  {m.post_edited({ time: editedTimestamp })}
-                </time>
-              </span>
-            )}
+            {/* The creation timestamp and the "Edited" marker (issue #264)
+                render as one unit — see `PostTimestamps` for why both ride
+                the same relative/exact split. */}
+            <PostTimestamps createdAt={post.createdAt} editedAt={post.editedAt} exact={isFocused} />
 
             {/* Every item here lives in a shared dialog mounted at the root
                 (identity atoms — see `atoms/moderation.ts`,
@@ -257,7 +224,15 @@ export function PostCard({
                     <>
                       <DropdownMenuItem
                         className="cursor-pointer"
-                        onClick={() => setEditDialog(post.id)}
+                        onClick={() =>
+                          setEditDialog({
+                            postId: post.id,
+                            // The wire type is nullable; an image-only post
+                            // edits from an empty draft, same as its stored "".
+                            content: post.content ?? "",
+                            attachmentCount: post.attachments.length,
+                          })
+                        }
                       >
                         {m.post_edit()}
                       </DropdownMenuItem>

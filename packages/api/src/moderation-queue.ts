@@ -28,6 +28,14 @@ import { postAttachmentsSelection, type PostAttachment } from "./posts.js";
 /** Opaque keyset cursor for the merged queue, tie-broken on the case id (text). */
 const caseCursor = createCursorCodec(z.string().min(1));
 
+/**
+ * How many superseded versions of a post's text `moderation.case` returns,
+ * newest first. The cap keeps one author's edit spree from turning the case
+ * dialog into an unbounded list; the report snapshots (`report.snapshot_content`)
+ * carry the evidence beyond it, so cutting there loses no load-bearing fact.
+ */
+const EDIT_HISTORY_CASE_LIMIT = 50;
+
 /** One group of unresolved reports, raw from the GROUP BY. */
 // Raw `db.execute` rows carry postgres.js's own timestamptz string format
 // (`2026-08-06 06:33:09.451822+00`), not a `Date` — drizzle's `select()`
@@ -270,6 +278,10 @@ export const queueRouter = {
         .select({
           reporterId: report.reporterId,
           reason: report.reason,
+          // What the reporter actually saw (issue #264) — the exact evidence
+          // a report was raised against, immune to any later edit of the
+          // post. Null on user-target reports.
+          snapshotContent: report.snapshotContent,
           createdAt: report.createdAt,
           resolvedAt: report.resolvedAt,
           resolvedBy: report.resolvedBy,
@@ -340,14 +352,23 @@ export const queueRouter = {
               // #264). Editing stays open while a case is pending; this
               // history is what lets the moderator judge what was written
               // before each edit — the current `content` above is only the
-              // latest version, and a report row carries a reason code, not
-              // the wording it was raised against.
+              // latest version. Capped at the newest EDIT_HISTORY_CASE_LIMIT
+              // rows: an author's write budget still admits hundreds of
+              // versions over time, and the report snapshots above carry
+              // the load-bearing evidence beyond whatever the cap cuts.
               const editHistory = await context.db
                 .select({ content: postEdit.content, createdAt: postEdit.createdAt })
                 .from(postEdit)
                 .where(eq(postEdit.postId, input.targetId))
-                .orderBy(desc(postEdit.createdAt), desc(postEdit.id));
-              return { kind: "post" as const, ...targetPost, editHistory };
+                .orderBy(desc(postEdit.createdAt), desc(postEdit.id))
+                .limit(EDIT_HISTORY_CASE_LIMIT + 1);
+              const editHistoryTruncated = editHistory.length > EDIT_HISTORY_CASE_LIMIT;
+              return {
+                kind: "post" as const,
+                ...targetPost,
+                editHistory: editHistoryTruncated ? editHistory.slice(0, -1) : editHistory,
+                editHistoryTruncated,
+              };
             })()
           : await (async () => {
               const [targetUser] = await context.db

@@ -172,20 +172,24 @@ over HTTP and imports only its browser-safe subpaths.
   edit while emptying a text-only post is refused with create's own message.
   It is author-owned and idempotent like `post.delete`: a content-equal retry
   keeps the original `edited_at` (the marker never restamps, and no history
-  row is written), and the update is a compare-and-set over both tombstones
-  whose zero-row path re-reads the winner so the refusal names the real
-  reason. Two states refuse an edit: moderator-removed (the appeal story must
+  row is written), and the state guards refuse even for a content-equal
+  retry. Two states refuse an edit: moderator-removed (the appeal story must
   not mutate — `moderation.appealPreview` quotes that row's content) and
   author-deleted. Editing deliberately stays OPEN under active moderation
   review: instead of freezing the text, every edit records the version it
-  superseded in `post_edit` (same transaction as the rewrite, stamped with the
-  same instant as `edited_at`), and `moderation.case` returns that history
-  beside the current text — moderator-gated, no public surface reads it. A
-  report row carries only a reason code, so the history table is the only
-  record of the wording a report was raised against; a rewrite mid-case or
-  after a dismissal cannot hide what was judged. That is also why the write is
-  a transaction where `post.delete`'s is not: the post row and its history row
-  must agree, and an unlocked pair could drop a version between them.
+  superseded in `post_edit` (stamped with the same instant as `edited_at`),
+  and `moderation.case` returns that history beside the current text —
+  moderator-gated, no public surface reads it, capped at the newest 50 rows
+  (`EDIT_HISTORY_CASE_LIMIT`) with an `editHistoryTruncated` flag. The
+  evidence is doubled: a post report snapshots the content it was raised
+  against (`report.snapshot_content`, refreshed on a repeat report), so a
+  rewrite mid-case or after a dismissal can hide what was judged through
+  neither the snapshot nor the history. That is also why the write opens
+  with `SELECT … FOR UPDATE` where `post.delete` needs no lock: concurrent
+  editors serialize on the row, so each history row records the text its
+  edit _actually_ superseded and no version can be lost between two
+  overlapping edits — an unlocked pair would record the same superseded
+  text twice and the first edit's wording would survive nowhere.
   `created_at` never moves, so feeds and search pick up the new text with no
   re-ranking. `edited_at` rides `postSelection` beside `createdAt`.
 - **Replies and their inline continuations are modes of `post.list`, not

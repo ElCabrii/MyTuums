@@ -656,3 +656,63 @@ describe("CaseDialog — edit history", () => {
     expect(screen.queryByText(m.moderation_case_edit_history_title())).not.toBeInTheDocument();
   });
 });
+
+describe("CaseDialog — report snapshots", () => {
+  const target: CaseRef = { targetType: "post", targetId: "post-1" };
+
+  // A report raised against wording the author has since rewritten: the
+  // snapshot is the reporter's evidence, and the badge says the rewrite
+  // landed after the report — together they are why editing under review
+  // cannot hide what was judged.
+  it("quotes the reported text beside an edited-after-report badge when the post was rewritten", async () => {
+    const reportedAt = new Date(Date.now() - 5 * 60_000);
+    await renderCase(
+      target,
+      makeModerationCaseDetail(
+        { id: "post-1", content: "innocuous rewrite", editedAt: new Date() },
+        {
+          reports: [
+            makeModerationReport({
+              snapshotContent: "the offending wording",
+              createdAt: reportedAt,
+            }),
+          ],
+        },
+      ),
+    );
+
+    expect(
+      screen.getByText(m.moderation_case_report_snapshot_title()).nextElementSibling,
+    ).toHaveTextContent("the offending wording");
+    expect(screen.getByText(m.moderation_case_edited_after_report())).toBeInTheDocument();
+  });
+
+  // An unedited post needs no quote — the content card above already says
+  // exactly what was reported, and a matching snapshot would say it twice.
+  it("renders neither the quote nor the badge when the report matches the live text", async () => {
+    await renderCase(
+      target,
+      makeModerationCaseDetail(
+        { id: "post-1", content: "what it says" },
+        { reports: [makeModerationReport({ snapshotContent: "what it says" })] },
+      ),
+    );
+
+    expect(screen.queryByText(m.moderation_case_report_snapshot_title())).not.toBeInTheDocument();
+    expect(screen.queryByText(m.moderation_case_edited_after_report())).not.toBeInTheDocument();
+  });
+
+  it("says when the history is truncated to the newest versions", async () => {
+    await renderCase(
+      target,
+      makeModerationCaseDetail({
+        id: "post-1",
+        editedAt: new Date(),
+        editHistory: [{ content: "one visible version", createdAt: new Date() }],
+        editHistoryTruncated: true,
+      }),
+    );
+
+    expect(screen.getByText(m.moderation_case_edit_history_truncated())).toBeInTheDocument();
+  });
+});

@@ -534,6 +534,17 @@ async function insertPost(
 const postContentInput = z.string().trim().max(POST_MAX_LENGTH);
 
 /**
+ * `post.edit`'s two state refusals, thrown from the fast-path guard and again
+ * under the row lock inside the transaction. Module constants because each
+ * refusal is thrown from two places that must not drift; the literals are
+ * shared byte-for-byte with the keys of `localizeEditPostError`
+ * (apps/web/src/lib/edit-post-error.ts), so restating one anywhere else
+ * renders the refusal untranslated.
+ */
+const EDIT_REMOVED_MESSAGE = "This post was removed by a moderator and can no longer be edited.";
+const EDIT_DELETED_MESSAGE = "This post was deleted and can no longer be edited.";
+
+/**
  * The `post` procedure group: create, edit, delete, list, thread, like,
  * unlike.
  */
@@ -697,25 +708,28 @@ export const postRouter = {
    * Editing deliberately stays OPEN while the post is under moderation review
    * (pinned choice, issue #264): rather than freezing the text, every edit
    * records the version it superseded in `post_edit`, and `moderation.case`
-   * hands the moderator that history beside the current text. A report row
-   * carries only a reason code — the history table is the only record of the
-   * reported wording — so a rewrite mid-case (or after a dismissal) cannot
-   * hide what was written; the moderator judges every version the author
+   * hands the moderator that history beside the current text. The evidence
+   * is belt and braces: a report row snapshots the content it was raised
+   * against (`report.snapshot_content`), and `post_edit` keeps every
+   * version — a rewrite mid-case (or after a dismissal) can hide what was
+   * written through neither. The moderator judges every version the author
    * published. The history is moderator-gated: no public surface exposes it.
    *
    * Idempotent, like `like`/`unlike` and `post.delete`: re-sending the content
    * the row already holds is a no-op that keeps the original `editedAt` rather
    * than restamping it (and records no history row), so a retry after a lost
-   * response must not bump the marker. Two concurrent different edits are
-   * last-write-wins — the update's predicate holds either way, and there is
-   * no ordering between them to defend.
+   * response must not bump the marker.
    *
-   * Unlike `post.delete`, the write IS a transaction: the post row and its
-   * history row must agree, and an unlocked pair could leave a version
-   * unwritten (or orphaned) if the process died between them. There is still
-   * no `FOR UPDATE` and no audit row to double-write — the update remains a
-   * compare-and-set against both tombstones, and a zero-row update re-reads
-   * the winner so the refusal names the real reason.
+   * Unlike `post.delete`, the write IS a transaction that opens with a
+   * `SELECT … FOR UPDATE` on the post row: the post row, its `editedAt`
+   * marker and its history row must all agree, and — more than that — the
+   * history row must record the text this edit *actually* superseded.
+   * Concurrent editors serialize on the row lock, so no version can be lost
+   * between two overlapping edits (an unlocked pair could record the same
+   * superseded text twice and leave the first edit's wording surviving
+   * nowhere). The unlocked compare-and-set `post.delete` uses is enough
+   * there because a tombstone idempotently absorbs races; a version history
+   * does not.
    *
    * `createdAt` never moves: feeds keyset on `(created_at, id)` and search
    * matches the raw `content` column, so the edited text is simply what
@@ -759,15 +773,11 @@ export const postRouter = {
       }
 
       if (target.removedAt) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: "This post was removed by a moderator and can no longer be edited.",
-        });
+        throw new ORPCError("BAD_REQUEST", { message: EDIT_REMOVED_MESSAGE });
       }
 
       if (target.deletedAt) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: "This post was deleted and can no longer be edited.",
-        });
+        throw new ORPCError("BAD_REQUEST", { message: EDIT_DELETED_MESSAGE });
       }
 
       if (input.content.length === 0 && target.attachmentCount === 0) {
@@ -784,48 +794,65 @@ export const postRouter = {
 
       const editedAt = new Date();
       const updated = await context.db.transaction(async (tx) => {
+        // The authoritative read, under the row lock. Concurrent editors
+        // serialize here, so the history row below records the text this
+        // edit *actually* superseded — never the stale text the guard read
+        // above may have seen. Without the lock, two overlapping edits both
+        // record the same superseded text and the first edit's wording
+        // survives nowhere (not in `content`, not in history) — the one
+        // hole a mid-case rewrite could otherwise hide a version through.
+        const [current] = await tx
+          .select({
+            content: post.content,
+            editedAt: post.editedAt,
+            removedAt: post.removedAt,
+            deletedAt: post.deletedAt,
+          })
+          .from(post)
+          .where(eq(post.id, input.postId))
+          .for("update")
+          .limit(1);
+        if (!current) return undefined;
+
+        // The guard above is a fast path; the state is re-checked under the
+        // lock, where no moderator removal or delete can land between the
+        // check and the write.
+        if (current.removedAt) {
+          throw new ORPCError("BAD_REQUEST", { message: EDIT_REMOVED_MESSAGE });
+        }
+        if (current.deletedAt) {
+          throw new ORPCError("BAD_REQUEST", { message: EDIT_DELETED_MESSAGE });
+        }
+
+        // The idempotent no-op, re-checked under the lock: another edit may
+        // have landed since the guard read, and if it wrote this same text
+        // the retry is a no-op against *that* row — keeping its editedAt
+        // and writing no history row.
+        if (current.content === input.content) {
+          return { content: current.content, editedAt: current.editedAt };
+        }
+
         const [row] = await tx
           .update(post)
           .set({ content: input.content, editedAt })
-          .where(and(eq(post.id, input.postId), isNull(post.removedAt), isNull(post.deletedAt)))
+          .where(eq(post.id, input.postId))
           .returning({ content: post.content, editedAt: post.editedAt });
-        if (!row) return undefined;
         // The superseded text becomes history in the same transaction, stamped
         // with the same instant as the marker — the newest history row's
         // `createdAt` and the post's `editedAt` are the same edit.
         await tx
           .insert(postEdit)
-          .values({ postId: input.postId, content: target.content, createdAt: editedAt });
+          .values({ postId: input.postId, content: current.content, createdAt: editedAt });
         return row;
       });
 
-      if (updated) {
-        return { postId: input.postId, content: updated.content, editedAt: updated.editedAt };
+      // A missing row cannot happen (the guard read found it and nothing
+      // deletes post rows); the branch keeps the return honest if it ever did.
+      if (!updated) {
+        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
       }
 
-      // Another writer changed the guarded state after the guard read, the
-      // same compare-and-set loser path `post.delete` takes. Re-read the
-      // winner so the refusal names what actually happened; a plain missing
-      // row here cannot happen (nothing deletes rows).
-      const [winner] = await context.db
-        .select({ removedAt: post.removedAt, deletedAt: post.deletedAt })
-        .from(post)
-        .where(eq(post.id, input.postId))
-        .limit(1);
-
-      if (winner?.removedAt) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: "This post was removed by a moderator and can no longer be edited.",
-        });
-      }
-
-      if (winner?.deletedAt) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: "This post was deleted and can no longer be edited.",
-        });
-      }
-
-      throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Failed to edit post." });
+      return { postId: input.postId, content: updated.content, editedAt: updated.editedAt };
     }),
 
   /**

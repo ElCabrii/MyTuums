@@ -979,8 +979,9 @@ describe("post.edit", () => {
     expect(edited.content).toBe("edited during review");
 
     // The moderator judging the case sees both the rewritten text and every
-    // version it replaced — a report row carries a reason code, so this
-    // history is the only record of the wording that was reported.
+    // version it replaced. The evidence is doubled: the report row carries a
+    // snapshot of the exact wording it was raised against, and the history
+    // keeps every version — neither can be rewritten away by the author.
     const detail = await call(
       appRouter.moderation.case,
       { targetType: "post", targetId: target.id },
@@ -994,6 +995,46 @@ describe("post.edit", () => {
     // The history row is stamped with the same instant as the marker: the
     // newest version's replacement time and `editedAt` are one edit.
     expect(detail.target.editHistory[0]?.createdAt.getTime()).toBe(edited.editedAt?.getTime());
+    // The report's snapshot is the seed wording — what the reporter saw, not
+    // what the author rewrote it to — and the untruncated flag is honest.
+    expect(detail.reports).toHaveLength(1);
+    expect(detail.reports[0]?.snapshotContent).toContain("seed post 0");
+    expect(detail.target.editHistoryTruncated).toBe(false);
+  });
+
+  it("cannot lose a version to concurrent edits: the row lock serializes the history", async () => {
+    const author = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    // Two overlapping edits from the same author (two tabs, a double-fire).
+    // Both guard reads may see the seed text before either commits; without
+    // serialization the loser would record the seed text twice and the
+    // winner's wording would survive nowhere — invisible to the moderator
+    // judging the case. `post.edit` opens its transaction by locking the
+    // row, so each edit records what it *actually* superseded.
+    await Promise.all(
+      ["first writer", "second writer"].map((content) =>
+        call(appRouter.post.edit, { postId: target.id, content }, { context: contextFor(author) }),
+      ),
+    );
+
+    const [row] = await anonContext.db
+      .select({ content: post.content })
+      .from(post)
+      .where(eq(post.id, target.id));
+    const history = await anonContext.db
+      .select({ content: postEdit.content })
+      .from(postEdit)
+      .where(eq(postEdit.postId, target.id));
+
+    // Whichever edit committed last stands in `content`; the other is a
+    // history row. Every version ever published is accounted for exactly
+    // once — the seed once, each edit once.
+    const allVersions = [row?.content, ...history.map((h) => h.content)];
+    expect(new Set(allVersions)).toEqual(
+      new Set(["first writer", "second writer", expect.stringContaining("seed post 0")]),
+    );
+    expect(allVersions).toHaveLength(3);
   });
 
   it("records one history row per edit — and none for an idempotent retry", async () => {
