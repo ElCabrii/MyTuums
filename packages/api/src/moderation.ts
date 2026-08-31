@@ -136,15 +136,19 @@ export const moderationRouter = {
         throw new ORPCError("BAD_REQUEST", { message: "You can't report yourself." });
       }
 
+      // A post report also snapshots the content it is raised against
+      // (issue #264): the reason code says *why*, this says *what* — the
+      // reporter's own evidence, immune to any later edit of the post. The
+      // user branch selects a typed null so both sides share one shape.
       const [target] =
         input.targetType === "post"
           ? await context.db
-              .select({ id: post.id })
+              .select({ id: post.id, snapshotContent: post.content })
               .from(post)
               .where(eq(post.id, input.targetId))
               .limit(1)
           : await context.db
-              .select({ id: user.id })
+              .select({ id: user.id, snapshotContent: sql<string | null>`null` })
               .from(user)
               .where(eq(user.id, input.targetId))
               .limit(1);
@@ -165,6 +169,7 @@ export const moderationRouter = {
           targetType: input.targetType,
           targetId: input.targetId,
           reason: input.reason,
+          snapshotContent: target.snapshotContent,
         })
         .onConflictDoUpdate({
           target: [report.reporterId, report.targetType, report.targetId],
@@ -173,6 +178,11 @@ export const moderationRouter = {
             resolvedBy: null,
             resolvedOutcome: null,
             resolutionNote: null,
+            // The snapshot refreshes with the clock on a repeat report: the
+            // reporter is re-reporting what they now see, and the moderators
+            // should judge that wording — the edit history keeps whatever it
+            // replaced.
+            snapshotContent: target.snapshotContent,
             // A repeat report refreshes the case's clock whether the row is
             // open or resolved (docs/product.md: "a repeat report refreshes
             // the row's timestamp without creating a new one"). `reason` is

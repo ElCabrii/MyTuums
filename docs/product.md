@@ -95,6 +95,27 @@ both by the server's page gate and by the client.
   moderator already removed cannot be deleted on top, so the author keeps the
   stated reason and the appeal link. Deleted posts are not search results, for
   the same reason removed ones aren't.
+- An author can edit the text of their own post or reply. The same
+  500-character trim rule as creation applies, and images are not editable —
+  an edit rewrites the body and nothing else. An edited post carries a visible
+  "Edited" marker with the last edit time wherever it renders. Editing never
+  changes the post's timestamp, so feeds and search reflect the new text
+  without re-ranking or bumping the post. A removed or deleted post cannot be
+  edited — a removal keeps the story the author would appeal about immutable.
+  A post under review stays editable: every edit records the text it replaced,
+  and the moderation case view shows that history (the 50 most recent
+  versions) beside the current text, so a moderator judges everything the
+  author wrote rather than only what currently stands. A report also
+  snapshots the post's text at the moment it was filed, and the case view
+  quotes that snapshot on the report — so a rewrite cannot hide the wording a
+  report was raised against, and the moderator sees exactly what the
+  reporter saw without reconstructing it from timestamps. The same holds when
+  the judged post is a quote: the case view shows the quoted original's edit
+  history beside its current text too, so the original's author rewriting it
+  after being quoted cannot hide the wording the quote amplified (the report
+  snapshots cover the quoting post's text, not the original's). Editing is
+  idempotent: re-sending the same text is a no-op that does not restamp the
+  marker.
 - Likes are two idempotent operations, `like` and `unlike`, never a toggle —
   so a retry is safe and ordering cannot invert the result. Like and reply
   counts are derived on read, not denormalised.
@@ -216,7 +237,10 @@ A role can only be granted or revoked by someone strictly above it.
 - **Reporting.** Any signed-in user can report a post or a user with one
   reason code. Post reasons: spam, harassment, hate speech, misinformation,
   self-harm, illegal content, NSFW. User reasons: spam, harassment,
-  impersonation, underage. Self-reports are refused.
+  impersonation, underage. Self-reports are refused. A post report snapshots
+  the post's text as it stood when filed, so the reported wording survives
+  any later edit; a repeat report refreshes the snapshot along with the
+  case's clock.
 - **Queue.** Moderators see unresolved reports grouped by target, merged with
   every independently open appeal, newest first. Resolving a case marks it
   actioned or dismissed.
@@ -296,6 +320,13 @@ it is a tombstone rather than a row delete, but fresh feeds and profiles omit
 it; its own URL and thread context render the stub. It is not a moderation
 action: nothing is audited, nobody is emailed, there is nothing to appeal, and
 it cannot be restored. _Avoid:_ removed post, withdrawn post.
+
+**Edited post** — a post whose author rewrote its text after publishing. The
+row carries the last edit time and every surface renders an "Edited" marker;
+the creation timestamp never moves, so an edit never re-ranks a feed. Each
+edit records the text it replaced; that history is visible to moderators in
+the case view, never on public surfaces. A removed or deleted post cannot be
+edited. _Avoid:_ updated post, revised post.
 
 **Repost** — a user re-sharing an existing post to their followers, with no
 added text or images. An event about the original, not a post of its own: the

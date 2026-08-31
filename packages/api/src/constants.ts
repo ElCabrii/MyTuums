@@ -56,6 +56,18 @@ export const CURSOR_ID_MAX_LENGTH = 128;
 export const MODERATION_NOTE_MAX_LENGTH = 1000;
 
 /**
+ * How many superseded versions of a post's text `moderation.case` returns,
+ * newest first. The cap keeps one author's edit spree from turning the case
+ * dialog into an unbounded list; the report snapshots (`report.snapshot_content`)
+ * carry the evidence beyond it, so cutting there loses no load-bearing fact.
+ *
+ * Lives here, in the dependency-free constants module, because the case view's
+ * truncation copy states this number — parameterized from this constant, so
+ * the sentence can never fall out of step with the cap it describes.
+ */
+export const EDIT_HISTORY_CASE_LIMIT = 50;
+
+/**
  * The nine stable moderation action codes — the `moderation_action.action`
  * check constraint's list (packages/db/src/schema/app.ts).
  *

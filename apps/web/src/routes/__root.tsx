@@ -16,10 +16,10 @@ import { fallbackHead } from "@/lib/document-head";
 // pages) yet must exist in exactly one place: they are bound to shared
 // identity atoms, so a second mounted instance would stack a second dialog
 // on top of the first. Lazy, like the ModeToggle in the header — the dialogs
-// are only ever useful to someone who clicks Report, Block or Delete, so
-// their chunk (the Select, the mutations, the reason-code labels) stays out
-// of first paint. The named exports are mapped to `default` so the dynamic
-// modules can render as lazy components.
+// are only ever useful to someone who clicks Report, Block, Delete or Edit,
+// so their chunk (the Select, the mutations, the reason-code labels) stays
+// out of first paint. The named exports are mapped to `default` so the
+// dynamic modules can render as lazy components.
 const ReportDialog = lazy(() =>
   import("@/components/moderation/report-dialog").then((mod) => ({ default: mod.ReportDialog })),
 );
@@ -28,6 +28,9 @@ const BlockDialog = lazy(() =>
 );
 const DeletePostDialog = lazy(() =>
   import("@/components/delete-post-dialog").then((mod) => ({ default: mod.DeletePostDialog })),
+);
+const EditPostDialog = lazy(() =>
+  import("@/components/edit-post-dialog").then((mod) => ({ default: mod.EditPostDialog })),
 );
 const QuoteDialog = lazy(() =>
   import("@/components/quote-dialog").then((mod) => ({ default: mod.QuoteDialog })),
@@ -112,6 +115,7 @@ function RootLayout() {
           <ReportDialog />
           <BlockDialog />
           <DeletePostDialog />
+          <EditPostDialog />
           <QuoteDialog />
         </Suspense>
         {/* Mounted unconditionally: the dialog owns the whole decision — signed

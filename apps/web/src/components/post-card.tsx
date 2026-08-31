@@ -6,6 +6,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { ProfileLink } from "@/components/profile-link";
 import { firstLinkUrl, LinkedText } from "@/components/linked-text";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
+import { PostTimestamps } from "@/components/post-timestamps";
 import { PostLinkCard } from "@/components/post-link-card";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { toggleRepostAtomFamily } from "@/atoms/repost";
@@ -13,6 +14,7 @@ import { quoteDialogAtom } from "@/atoms/quote-composer";
 import { toggleBookmarkAtomFamily } from "@/atoms/bookmark";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import { deletePostDialogAtom } from "@/atoms/post-delete";
+import { editPostDialogAtom } from "@/atoms/post-edit";
 import { isSignedInAtom, viewerIdAtom } from "@/atoms/session";
 import {
   DropdownMenu,
@@ -21,11 +23,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatDateTime, formatRelativeTime } from "@/lib/format";
 import type { Post } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
-import { getLocale } from "@/paraglide/runtime.js";
 
 /**
  * How prominently a card renders. The thread page shows all three at once:
@@ -146,6 +146,7 @@ export function PostCard({
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
   const setDeleteDialog = useSetAtom(deletePostDialogAtom);
+  const setEditDialog = useSetAtom(editPostDialogAtom);
   const authorHandle = handleOf(post.author);
   const authorName = post.author.name || authorHandle || m.user_unknown();
   const parentAuthorName = post.parent
@@ -166,9 +167,9 @@ export function PostCard({
   // ask about. A tombstoned post has null content, hence no first URL, hence
   // no card — the guard is the `content` check itself.
   const linkPreviewUrl = post.content ? firstLinkUrl(post.content) : null;
-  // A post already gone has nothing left to delete, so the item is dropped
-  // rather than offered as a no-op the server would refuse anyway.
-  const canDelete = isOwnPost && !isGone;
+  // A post already gone has nothing left to edit or delete, so both items
+  // drop rather than being offered as no-ops the server would refuse anyway.
+  const canEdit = isOwnPost && !isGone;
   // Only top-level posts can be reposted. The server accepts a repost of a
   // reply, but no shipped surface can show that event — the home feeds'
   // repost arm excludes replies (`kind: "posts"` filters the original's
@@ -228,14 +229,6 @@ export function PostCard({
           isFocused || post.unavailable ? "" : "hover:border-primary/30 cursor-pointer"
         }`;
 
-  const locale = getLocale();
-  // The permalink is the durable surface for a post: a relative label is
-  // enough while scrolling a feed, but the page a link points at is where the
-  // exact date and time belong. `Intl` resolves both in the reader's own
-  // timezone.
-  const timestamp = isFocused
-    ? formatDateTime(post.createdAt, locale)
-    : formatRelativeTime(post.createdAt, locale, m.post_just_now());
   const authorAvatar = (
     <UserAvatar
       user={post.author}
@@ -318,23 +311,29 @@ export function PostCard({
               ) : (
                 <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
               )}
-              {/* `<time>` regardless of variant: the rendered label differs, but
-                the machine-readable value assistive technology and tooling
-                read is `post.createdAt` either way. */}
-              <span className="text-muted-foreground text-xs">
-                • <time dateTime={post.createdAt.toISOString()}>{timestamp}</time>
-              </span>
+              {/* The creation timestamp and the "Edited" marker (issue #264)
+                  render as one unit — see `PostTimestamps` for why both ride
+                  the same relative/exact split. `<time>` regardless of variant:
+                  the rendered label differs, but the machine-readable value
+                  assistive technology and tooling read is `post.createdAt`
+                  either way. */}
+              <PostTimestamps
+                createdAt={post.createdAt}
+                editedAt={post.editedAt}
+                exact={isFocused}
+              />
 
               {/* Every item here lives in a shared dialog mounted at the root
-                (identity atoms — see `atoms/moderation.ts` and
-                `atoms/post-delete.ts`), so this menu only has to set the
-                target. Which items it holds is decided by whose post it is:
-                Delete on the viewer's own, Report/Block on everyone else's —
-                you cannot report yourself, and a moderator takes other
-                people's posts down through the case queue, not from here.
-                Other people's posts keep the menu even when removed:
-                reporting the *author* of a removed post is still valid. */}
-              {isSignedIn && (canDelete || !isOwnPost) && (
+                (identity atoms — see `atoms/moderation.ts`,
+                `atoms/post-delete.ts` and `atoms/post-edit.ts`), so this menu
+                only has to set the target. Which items it holds is decided by
+                whose post it is: Edit/Delete on the viewer's own,
+                Report/Block on everyone else's — you cannot report yourself,
+                and a moderator takes other people's posts down through the
+                case queue, not from here. Other people's posts keep the menu
+                even when removed: reporting the *author* of a removed post is
+                still valid. */}
+              {isSignedIn && (canEdit || !isOwnPost) && (
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     aria-label={m.moderation_kebab()}
@@ -360,13 +359,29 @@ export function PostCard({
                     onClick={(e) => e.stopPropagation()}
                   >
                     {isOwnPost ? (
-                      <DropdownMenuItem
-                        className="cursor-pointer"
-                        variant="destructive"
-                        onClick={() => setDeleteDialog(post.id)}
-                      >
-                        {m.post_delete()}
-                      </DropdownMenuItem>
+                      <>
+                        <DropdownMenuItem
+                          className="cursor-pointer"
+                          onClick={() =>
+                            setEditDialog({
+                              postId: post.id,
+                              // The wire type is nullable; an image-only post
+                              // edits from an empty draft, same as its stored "".
+                              content: post.content ?? "",
+                              attachmentCount: post.attachments.length,
+                            })
+                          }
+                        >
+                          {m.post_edit()}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="cursor-pointer"
+                          variant="destructive"
+                          onClick={() => setDeleteDialog(post.id)}
+                        >
+                          {m.post_delete()}
+                        </DropdownMenuItem>
+                      </>
                     ) : (
                       <>
                         <DropdownMenuItem

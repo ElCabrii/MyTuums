@@ -51,10 +51,11 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     repostedBy: null,
     viewerHasBookmarked: false,
     // The tombstone fields (issue #38, plus #148): never removed or deleted
-    // by default.
+    // by default. Same for the edit marker (#264): never edited by default.
     removed: false,
     deleted: false,
     removedReason: null,
+    editedAt: null,
     unavailable: false,
     attachments: [],
     ...overrides,

@@ -9,6 +9,7 @@ import { renderWithProviders } from "@/test/render";
 import { installTestOrpc, orpc } from "@/lib/orpc";
 import { quoteDialogAtom } from "@/atoms/quote-composer";
 import { deletePostDialogAtom } from "@/atoms/post-delete";
+import { editPostDialogAtom } from "@/atoms/post-edit";
 import { PostCard } from "@/components/post-card";
 import { m } from "@/paraglide/messages.js";
 import { getLocale } from "@/paraglide/runtime.js";
@@ -149,6 +150,21 @@ describe("PostCard", () => {
       expect(timestamp.tagName).toBe("TIME");
       expect(timestamp).toHaveAttribute("datetime", createdAt.toISOString());
     });
+
+    it("shows the edited marker with the exact last-edit time, tied to editedAt through a <time> element", async () => {
+      const createdAt = new Date("2026-08-06T14:30:00Z");
+      const editedAt = new Date("2026-08-06T15:00:00Z");
+      const post = makePost({ createdAt, editedAt });
+      await renderWithProviders(<PostCard post={post} variant="focused" />, { signedInAs: true });
+
+      // The permalink says exactly when the last edit landed, the same way it
+      // says exactly when the post was written (issue #264).
+      const marker = screen.getByText(
+        m.post_edited({ time: formatDateTime(editedAt, getLocale()) }),
+      );
+      expect(marker.tagName).toBe("TIME");
+      expect(marker).toHaveAttribute("datetime", editedAt.toISOString());
+    });
   });
 
   describe("variant=feed", () => {
@@ -162,6 +178,27 @@ describe("PostCard", () => {
       );
       expect(timestamp.tagName).toBe("TIME");
       expect(timestamp).toHaveAttribute("datetime", createdAt.toISOString());
+    });
+
+    it("shows the compact edited marker on a card, and no marker at all before the first edit", async () => {
+      const editedAt = new Date(Date.now() - 5 * 60 * 1000);
+      const edited = await renderWithProviders(<PostCard post={makePost({ editedAt })} />, {
+        signedInAs: true,
+      });
+
+      const marker = screen.getByText(
+        m.post_edited({ time: formatRelativeTime(editedAt, getLocale(), m.post_just_now()) }),
+      );
+      expect(marker.tagName).toBe("TIME");
+      expect(marker).toHaveAttribute("datetime", editedAt.toISOString());
+
+      // A never-edited post carries exactly one machine-readable time: its
+      // creation instant. The marker is absent, not blank.
+      const fresh = await renderWithProviders(<PostCard post={makePost()} />, {
+        signedInAs: true,
+      });
+      expect(fresh.container.querySelectorAll("time")).toHaveLength(1);
+      expect(edited.container.querySelectorAll("time")).toHaveLength(2);
     });
   });
 
@@ -280,7 +317,7 @@ describe("PostCard", () => {
   });
 
   describe("the kebab menu", () => {
-    it("offers Delete — and only Delete — on the viewer's own post, and names it as the dialog target", async () => {
+    it("offers Edit and Delete — and only those — on the viewer's own post, naming each dialog's target", async () => {
       const author = makeAuthor();
       const post = makePost({ author });
       const store = createStore();
@@ -291,7 +328,8 @@ describe("PostCard", () => {
 
       const user = userEvent.setup();
       await user.click(screen.getByLabelText(m.moderation_kebab()));
-      const deleteItem = await screen.findByRole("menuitem", { name: m.post_delete() });
+      const editItem = await screen.findByRole("menuitem", { name: m.post_edit() });
+      expect(screen.getByRole("menuitem", { name: m.post_delete() })).toBeInTheDocument();
 
       // You cannot report or block yourself, so neither item belongs here.
       expect(
@@ -301,14 +339,23 @@ describe("PostCard", () => {
         screen.queryByRole("menuitem", { name: m.moderation_kebab_block() }),
       ).not.toBeInTheDocument();
 
-      await user.click(deleteItem);
+      // The card only sets the target; the dialogs themselves are mounted at
+      // the root layout (see `atoms/post-edit.ts` and `atoms/post-delete.ts`).
+      // The edit target carries the text and attachment count the card just
+      // rendered, so the dialog seeds itself from the card, not a cache.
+      await user.click(editItem);
+      expect(store.get(editPostDialogAtom)).toEqual({
+        postId: post.id,
+        content: post.content,
+        attachmentCount: post.attachments.length,
+      });
 
-      // The card only sets the target; the dialog itself is mounted at the
-      // root layout (see `atoms/post-delete.ts`).
+      await user.click(screen.getByLabelText(m.moderation_kebab()));
+      await user.click(await screen.findByRole("menuitem", { name: m.post_delete() }));
       expect(store.get(deletePostDialogAtom)).toBe(post.id);
     });
 
-    it("offers Report/Block — and no Delete — on someone else's post", async () => {
+    it("offers Report/Block — and neither Edit nor Delete — on someone else's post", async () => {
       const post = makePost();
       await renderWithProviders(<PostCard post={post} />, { signedInAs: { id: "viewer-1" } });
 
@@ -321,6 +368,7 @@ describe("PostCard", () => {
       expect(
         screen.getByRole("menuitem", { name: m.moderation_kebab_block() }),
       ).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: m.post_edit() })).not.toBeInTheDocument();
       expect(screen.queryByRole("menuitem", { name: m.post_delete() })).not.toBeInTheDocument();
     });
 

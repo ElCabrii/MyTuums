@@ -180,6 +180,41 @@ over HTTP and imports only its browser-safe subpaths.
   pair is safe because the update compares both tombstones; after losing to a
   concurrent delete or removal, it re-reads the winner and preserves that
   outcome.
+- **`post.edit` rewrites text and nothing else (issue #264).** The body field
+  is the shared `postContentInput` — the same trim and bound `post.create`
+  enforces, never restated — and attachments are immutable through it; the
+  create cross-field rule (text, images, or both) is re-checked against the
+  row's existing attachments, so clearing the text of an image post is a legal
+  edit while emptying a text-only post is refused with create's own message.
+  It is author-owned and idempotent like `post.delete`: a content-equal retry
+  keeps the original `edited_at` (the marker never restamps, and no history
+  row is written), and the state guards refuse even for a content-equal
+  retry. Two states refuse an edit: moderator-removed (the appeal story must
+  not mutate — `moderation.appealPreview` quotes that row's content) and
+  author-deleted. Editing deliberately stays OPEN under active moderation
+  review: instead of freezing the text, every edit records the version it
+  superseded in `post_edit` (stamped with the same instant as `edited_at`),
+  and `moderation.case` returns that history beside the current text —
+  moderator-gated, no public surface reads it, capped at the newest 50 rows
+  (`EDIT_HISTORY_CASE_LIMIT`) with an `editHistoryTruncated` flag. The
+  evidence is doubled: a post report snapshots the content it was raised
+  against (`report.snapshot_content`, refreshed on a repeat report), so a
+  rewrite mid-case or after a dismissal can hide what was judged through
+  neither the snapshot nor the history. The same claim covers the quote shape
+  (issue #264 meets #261): a quote case is judged against the ORIGINAL's
+  wording too, but the report snapshots belong to the quoting post — the
+  original may never have been reported itself — so `moderation.case` also
+  returns the quoted original's own `post_edit` history (same cap, same
+  helper) spliced into the `quoted` evidence beside its live content, and a
+  rewrite of the original after being quoted is no more hiding than a rewrite
+  of the target. That is also why the write opens
+  with `SELECT … FOR UPDATE` where `post.delete` needs no lock: concurrent
+  editors serialize on the row, so each history row records the text its
+  edit _actually_ superseded and no version can be lost between two
+  overlapping edits — an unlocked pair would record the same superseded
+  text twice and the first edit's wording would survive nowhere.
+  `created_at` never moves, so feeds and search pick up the new text with no
+  re-ranking. `edited_at` rides `postSelection` beside `createdAt`.
 - **Reposts and quote posts are events and references, never posts (issue
   #261).** A repost is a `post_repost` row — the same idempotent
   `repost`/`unrepost` pair, composite-PK idempotency and derived count as

@@ -8,6 +8,7 @@ import {
   post,
   postAttachment,
   postBookmark,
+  postEdit,
   postLike,
   postRepost,
   user,
@@ -520,6 +521,10 @@ export const postSelection = (viewerId: string) => ({
   // `author` off a feed item.
   unavailable: sql<boolean>`false`,
   createdAt: post.createdAt,
+  // Null until the author edits the text (issue #264); carries the LAST edit
+  // time, which is what the "Edited" marker renders. `createdAt` above stays
+  // the original publication instant — an edit never re-ranks a feed.
+  editedAt: post.editedAt,
   // Null for a top-level post. The web app reads it to decide whether a card
   // needs a "Replying to" line, so it belongs in the shared selection rather
   // than only in the thread payload.
@@ -1037,8 +1042,26 @@ async function insertPost(
 }
 
 /**
- * The `post` procedure group: create (posts, replies and quotes), delete,
- * list, thread, like/unlike, repost/unrepost, bookmark/unbookmark.
+ * The text of a post, shared by `post.create` and `post.edit` (issue #264) so
+ * the trim and the length bound have exactly one definition. Trimming first
+ * is what keeps whitespace from persisting as fake content on either path.
+ */
+const postContentInput = z.string().trim().max(POST_MAX_LENGTH);
+
+/**
+ * `post.edit`'s two state refusals, thrown from the fast-path guard and again
+ * under the row lock inside the transaction. Module constants because each
+ * refusal is thrown from two places that must not drift; the literals are
+ * shared byte-for-byte with the keys of `localizeEditPostError`
+ * (apps/web/src/lib/edit-post-error.ts), so restating one anywhere else
+ * renders the refusal untranslated.
+ */
+const EDIT_REMOVED_MESSAGE = "This post was removed by a moderator and can no longer be edited.";
+const EDIT_DELETED_MESSAGE = "This post was deleted and can no longer be edited.";
+
+/**
+ * The `post` procedure group: create (posts, replies and quotes), edit,
+ * delete, list, thread, like/unlike, repost/unrepost, bookmark/unbookmark.
  */
 export const postRouter = {
   /**
@@ -1049,10 +1072,11 @@ export const postRouter = {
     .input(
       z
         .object({
-          // Trim first so whitespace never persists as fake content. An empty
-          // body is legal only when at least one attachment rides along — the
-          // cross-field rule below is what keeps a fully empty submission out.
-          content: z.string().trim().max(POST_MAX_LENGTH),
+          // The shared content field (see `postContentInput`): trim first so
+          // whitespace never persists as fake content. An empty body is legal
+          // only when at least one attachment rides along — the cross-field
+          // rule below is what keeps a fully empty submission out.
+          content: postContentInput,
           /** Omit for a top-level post; set to reply to an existing one. */
           parentId: z.uuid().optional(),
           /**
@@ -1165,10 +1189,12 @@ export const postRouter = {
         ...created,
         // Matches the additive tombstone fields of `postSelection` — a fresh
         // post is neither removed nor deleted, so these are constants rather
-        // than columns.
+        // than columns. The same goes for `editedAt`: a fresh post has never
+        // been edited.
         removed: false,
         deleted: false,
         removedReason: null,
+        editedAt: null,
         unavailable: false,
         author: {
           id: context.user.id,
@@ -1200,6 +1226,181 @@ export const postRouter = {
           }),
         ),
       };
+    }),
+
+  /**
+   * Edits the text of the caller's own post or reply (issue #264). Requires a
+   * session.
+   *
+   * Text-only for v1: attachments are not editable here. `content` is the one
+   * field this procedure rewrites, through the same shared input field
+   * (`postContentInput`) `post.create` validates with — the trim and the
+   * length bound are not restated. The "text, images, or both" rule (issue
+   * #202) IS re-checked, against the row's existing attachments rather than
+   * an upload batch: clearing the text of a post that carries images is a
+   * legal edit (it stays an image-only post), while emptying a text-only post
+   * is refused with the same message `post.create` returns.
+   *
+   * The guards, in the order they refuse:
+   * - FORBIDDEN — not the author. Ownership is the whole authorisation rule,
+   *   same as `post.delete`.
+   * - BAD_REQUEST — removed by a moderator. Mirrors the delete rule: editing
+   *   on top of a removal would rewrite what the author was told the removal
+   *   was about, and `moderation.appealPreview` hands the author back the
+   *   removed post's own content — the removal rule is what keeps an appealed
+   *   post's story from mutating under the appeal.
+   * - BAD_REQUEST — deleted. A tombstoned post has no editable text left.
+   * - BAD_REQUEST — empty content on a post with no attachments (the create
+   *   cross-field rule, against server state).
+   *
+   * Editing deliberately stays OPEN while the post is under moderation review
+   * (pinned choice, issue #264): rather than freezing the text, every edit
+   * records the version it superseded in `post_edit`, and `moderation.case`
+   * hands the moderator that history beside the current text. The evidence
+   * is belt and braces: a report row snapshots the content it was raised
+   * against (`report.snapshot_content`), and `post_edit` keeps every
+   * version — a rewrite mid-case (or after a dismissal) can hide what was
+   * written through neither. The moderator judges every version the author
+   * published. The history is moderator-gated: no public surface exposes it.
+   *
+   * Idempotent, like `like`/`unlike` and `post.delete`: re-sending the content
+   * the row already holds is a no-op that keeps the original `editedAt` rather
+   * than restamping it (and records no history row), so a retry after a lost
+   * response must not bump the marker.
+   *
+   * Unlike `post.delete`, the write IS a transaction that opens with a
+   * `SELECT … FOR UPDATE` on the post row: the post row, its `editedAt`
+   * marker and its history row must all agree, and — more than that — the
+   * history row must record the text this edit *actually* superseded.
+   * Concurrent editors serialize on the row lock, so no version can be lost
+   * between two overlapping edits (an unlocked pair could record the same
+   * superseded text twice and leave the first edit's wording surviving
+   * nowhere). The unlocked compare-and-set `post.delete` uses is enough
+   * there because a tombstone idempotently absorbs races; a version history
+   * does not.
+   *
+   * `createdAt` never moves: feeds keyset on `(created_at, id)` and search
+   * matches the raw `content` column, so the edited text is simply what
+   * feeds, threads and search return from their next read — no re-ranking, no
+   * bump in the chronological feed.
+   */
+  edit: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.write))
+    .input(z.object({ postId: z.uuid(), content: postContentInput }))
+    .handler(async ({ input, context }) => {
+      const [target] = await context.db
+        .select({
+          authorId: post.authorId,
+          content: post.content,
+          removedAt: post.removedAt,
+          deletedAt: post.deletedAt,
+          editedAt: post.editedAt,
+          // The attachment existence half of the cross-field rule. A count
+          // rather than a read: only "is there at least one" decides whether
+          // empty text is a legal edit. The outer id is table-qualified via
+          // `outerPost` — this select has no join, so a bare `post.id` would
+          // render unqualified and resolve against the inner scope
+          // (post_attachment), matching nothing.
+          attachmentCount: sql<number>`(
+            select count(*)::int from ${postAttachment} where ${postAttachment.postId} = ${outerPost("id")}
+          )`,
+        })
+        .from(post)
+        .where(eq(post.id, input.postId))
+        .limit(1);
+
+      if (!target) {
+        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
+      }
+
+      // FORBIDDEN rather than NOT_FOUND, same as `post.delete`: the post's
+      // existence is not a secret, and "not yours" is the answer that explains
+      // the refusal.
+      if (target.authorId !== context.user.id) {
+        throw new ORPCError("FORBIDDEN", { message: "You can only edit your own posts." });
+      }
+
+      if (target.removedAt) {
+        throw new ORPCError("BAD_REQUEST", { message: EDIT_REMOVED_MESSAGE });
+      }
+
+      if (target.deletedAt) {
+        throw new ORPCError("BAD_REQUEST", { message: EDIT_DELETED_MESSAGE });
+      }
+
+      if (input.content.length === 0 && target.attachmentCount === 0) {
+        throw new ORPCError("BAD_REQUEST", { message: "Post cannot be empty." });
+      }
+
+      // The idempotent no-op: same content in, same row out. Crucially this
+      // sits AFTER the guards — a removed or deleted post is refused even for
+      // a content-equal retry, because the refusal is about the post's state,
+      // not about this particular payload.
+      if (target.content === input.content) {
+        return { postId: input.postId, content: target.content, editedAt: target.editedAt };
+      }
+
+      const editedAt = new Date();
+      const updated = await context.db.transaction(async (tx) => {
+        // The authoritative read, under the row lock. Concurrent editors
+        // serialize here, so the history row below records the text this
+        // edit *actually* superseded — never the stale text the guard read
+        // above may have seen. Without the lock, two overlapping edits both
+        // record the same superseded text and the first edit's wording
+        // survives nowhere (not in `content`, not in history) — the one
+        // hole a mid-case rewrite could otherwise hide a version through.
+        const [current] = await tx
+          .select({
+            content: post.content,
+            editedAt: post.editedAt,
+            removedAt: post.removedAt,
+            deletedAt: post.deletedAt,
+          })
+          .from(post)
+          .where(eq(post.id, input.postId))
+          .for("update")
+          .limit(1);
+        if (!current) return undefined;
+
+        // The guard above is a fast path; the state is re-checked under the
+        // lock, where no moderator removal or delete can land between the
+        // check and the write.
+        if (current.removedAt) {
+          throw new ORPCError("BAD_REQUEST", { message: EDIT_REMOVED_MESSAGE });
+        }
+        if (current.deletedAt) {
+          throw new ORPCError("BAD_REQUEST", { message: EDIT_DELETED_MESSAGE });
+        }
+
+        // The idempotent no-op, re-checked under the lock: another edit may
+        // have landed since the guard read, and if it wrote this same text
+        // the retry is a no-op against *that* row — keeping its editedAt
+        // and writing no history row.
+        if (current.content === input.content) {
+          return { content: current.content, editedAt: current.editedAt };
+        }
+
+        const [row] = await tx
+          .update(post)
+          .set({ content: input.content, editedAt })
+          .where(eq(post.id, input.postId))
+          .returning({ content: post.content, editedAt: post.editedAt });
+        // The superseded text becomes history in the same transaction, stamped
+        // with the same instant as the marker — the newest history row's
+        // `createdAt` and the post's `editedAt` are the same edit.
+        await tx
+          .insert(postEdit)
+          .values({ postId: input.postId, content: current.content, createdAt: editedAt });
+        return row;
+      });
+
+      // A missing row cannot happen (the guard read found it and nothing
+      // deletes post rows); the branch keeps the return honest if it ever did.
+      if (!updated) {
+        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
+      }
+
+      return { postId: input.postId, content: updated.content, editedAt: updated.editedAt };
     }),
 
   /**
