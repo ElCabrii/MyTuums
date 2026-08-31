@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
+import { SEARCH_QUERY_MAX_LENGTH } from "@my-tuums/api/constants";
 import { LinkedText } from "@/components/linked-text";
 import { insertMention, mentionAtCaret } from "@/lib/composer-mentions";
 
@@ -21,7 +22,10 @@ describe("LinkedText", () => {
   });
 
   it("leaves malformed handles and email addresses as plain text", async () => {
-    const text = "@ab name@example.com @@alice @abcdefghijklmnopqrstu @aliçce";
+    // `x-@alice` pins the mention half of the hyphen asymmetry: `-` is a
+    // handle character, so it still blocks a mention even though a tag is
+    // allowed to start after one.
+    const text = "@ab name@example.com @@alice @abcdefghijklmnopqrstu @aliçce x-@alice";
     await renderWithProviders(
       <article aria-label="Published content">
         <LinkedText text={text} />
@@ -149,5 +153,100 @@ describe("LinkedText", () => {
 
     expect(screen.getByRole("article", { name: "Published content" })).toHaveTextContent(accepted);
     expect(screen.getByRole("link", { name: "@alice" })).toHaveAttribute("href", "/@alice");
+  });
+
+  it("links valid tags to post search filtered to the canonical lowercase tag", async () => {
+    const text = "#Tuums day! Join #MY_EVENT_2 x-#after_hyphen now";
+    await renderWithProviders(
+      <article aria-label="Published content">
+        <LinkedText text={text} />
+      </article>,
+    );
+
+    expect(screen.getByRole("article", { name: "Published content" }).textContent).toBe(text);
+    // The query keeps the `#` so it matches hash-marked occurrences rather
+    // than the bare word (post search is a substring scan) — and it is
+    // lowercased like a handle's route while the label stays as typed.
+    expect(screen.getByRole("link", { name: "#Tuums" })).toHaveAttribute(
+      "href",
+      "/search?q=%23tuums",
+    );
+    expect(screen.getByRole("link", { name: "#MY_EVENT_2" })).toHaveAttribute(
+      "href",
+      "/search?q=%23my_event_2",
+    );
+    // A hyphen is not a tag character, so it is a valid boundary before a
+    // `#` — unlike before an `@`, where the hyphen is a handle character.
+    expect(screen.getByRole("link", { name: "#after_hyphen" })).toHaveAttribute(
+      "href",
+      "/search?q=%23after_hyphen",
+    );
+  });
+
+  it("leaves malformed tags as plain text — a lone #, ##tag, a glued word, accents and hyphens", async () => {
+    const text = "# ##tag word#tag #café #été #tag-way #tag𐐀";
+    await renderWithProviders(
+      <article aria-label="Published content">
+        <LinkedText text={text} />
+      </article>,
+    );
+
+    expect(screen.getByRole("article", { name: "Published content" }).textContent).toBe(text);
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("recognizes a tag only up to the length whose `#tag` query the search procedures still accept", async () => {
+    const longest = `#${"a".repeat(SEARCH_QUERY_MAX_LENGTH - 1)}`;
+    const tooLong = `#${"a".repeat(SEARCH_QUERY_MAX_LENGTH)}`;
+    await renderWithProviders(
+      <article aria-label="Published content">
+        <LinkedText text={`${longest} ${tooLong}`} />
+      </article>,
+    );
+
+    // The longest tag links; one character more would link to a query the
+    // server rejects on length, so it stays inert text instead.
+    expect(screen.getByRole("link", { name: longest })).toHaveAttribute(
+      "href",
+      `/search?q=%23${"a".repeat(SEARCH_QUERY_MAX_LENGTH - 1)}`,
+    );
+    expect(screen.queryByRole("link", { name: tooLong })).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Published content" }).textContent).toBe(
+      `${longest} ${tooLong}`,
+    );
+  });
+
+  it("treats a # inside a URL as part of the URL, not a tag", async () => {
+    await renderWithProviders(
+      <article aria-label="Published content">
+        <LinkedText text="See https://example.com/docs#section for details" />
+      </article>,
+    );
+
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "https://example.com/docs#section" })).toHaveAttribute(
+      "href",
+      "https://example.com/docs#section",
+    );
+  });
+
+  it("renders a mention, a tag and a URL in the same text as their own links", async () => {
+    const text = "@alice tagged #Tuums in https://example.com";
+    await renderWithProviders(
+      <article aria-label="Published content">
+        <LinkedText text={text} />
+      </article>,
+    );
+
+    expect(screen.getByRole("article", { name: "Published content" }).textContent).toBe(text);
+    expect(screen.getByRole("link", { name: "@alice" })).toHaveAttribute("href", "/@alice");
+    expect(screen.getByRole("link", { name: "#Tuums" })).toHaveAttribute(
+      "href",
+      "/search?q=%23tuums",
+    );
+    expect(screen.getByRole("link", { name: "https://example.com" })).toHaveAttribute(
+      "href",
+      "https://example.com/",
+    );
   });
 });

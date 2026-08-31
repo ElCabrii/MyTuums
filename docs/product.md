@@ -45,14 +45,27 @@ both by the server's page gate and by the client.
   text, up to four images, or both — a submission with neither is refused, and
   an image-only post stores an empty body rather than placeholder whitespace.
   Rendering recognizes
-  two link shapes in that text and nothing else. Syntactically valid `@handles`
+  three link shapes in that text and nothing else. Syntactically valid `@handles`
   become links to lowercase canonical profile routes; malformed handles stay as
   plain text, and an unknown handle lands on the profile route's existing
   not-found state. Absolute `http` and `https` URLs become external links that
   open in a new tab, keeping the address as it was typed and leaving the
   sentence punctuation around it outside the link. Every other scheme —
   `javascript:`, `data:`, `ftp:` — stays inert text, and a recognized URL never
-  gets a preview, unfurl or link card.
+  gets a preview, unfurl or link card. A `#tag` — a hash followed by one or
+  more ASCII letters, digits or underscores — becomes a link to post search
+  filtered to that tag, canonicalized to lowercase exactly like a handle.
+  One character is a complete tag: unlike a handle, there is no minimum
+  length. The query keeps the `#` so it matches hash-marked occurrences
+  rather than the bare word — but post search is a case-insensitive
+  substring scan, so a longer tag (`#tag_expo`), a glued word (`word#tag`)
+  or a URL fragment (`https://example.com/#tag`) matches it all the same.
+  Accented letters are not tag characters
+  even though the app is bilingual, so `#café` and `#été` stay plain text —
+  as does any hash that is not followed by a complete tag (a lone `#`,
+  `##tag`, `word#tag`, `#tag-way`), exactly like a malformed handle. A tag
+  link is nothing more than an entry into chronological post search: there is
+  no trending, no tag ranking, no suggested tags and no tag follow.
 - A reply is a post with a parent. Threads show the focused post, up to 20
   ancestors of context, and keyset-paginated direct replies. Beneath each
   direct reply, the thread groups the deterministic descendant branch first
