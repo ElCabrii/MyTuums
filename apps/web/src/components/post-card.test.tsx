@@ -23,12 +23,19 @@ const fakeClient = {
   post: {
     like: vi.fn(() => Promise.resolve({ postId: "", likeCount: 0, viewerHasLiked: true })),
     unlike: vi.fn(() => Promise.resolve({ postId: "", likeCount: 0, viewerHasLiked: false })),
+    // A URL-bearing post mounts the link preview card query (issue #260);
+    // answering "no card" keeps those fixtures about the inline link itself.
+    linkCard: vi.fn(() => Promise.resolve({ card: null })),
     repost: vi.fn(() => Promise.resolve({ postId: "", repostCount: 0, viewerHasReposted: true })),
     unrepost: vi.fn(() =>
       Promise.resolve({ postId: "", repostCount: 0, viewerHasReposted: false }),
     ),
-    bookmark: vi.fn(() => Promise.resolve({ postId: "", viewerHasBookmarked: true })),
-    unbookmark: vi.fn(() => Promise.resolve({ postId: "", viewerHasBookmarked: false })),
+    bookmark: vi.fn(() =>
+      Promise.resolve({ postId: "", repostCount: 0, viewerHasBookmarked: true }),
+    ),
+    unbookmark: vi.fn(() =>
+      Promise.resolve({ postId: "", repostCount: 0, viewerHasBookmarked: false }),
+    ),
     list: vi.fn(),
     thread: vi.fn(),
   },
@@ -603,6 +610,11 @@ describe("PostCard", () => {
       expect(screen.getByText(m.post_quoted_unavailable())).toBeInTheDocument();
       expect(screen.queryByRole("link", { name: /Unknown/ })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: m.post_quote() })).not.toBeInTheDocument();
+      // The redaction boundary covers the link preview too (issue #260): a
+      // redacted original has null content, hence no first URL, so no
+      // `linkCard` probe is ever mounted for it — the card cannot leak what
+      // the redaction took away.
+      expect(fakeClient.post.linkCard).not.toHaveBeenCalled();
     });
 
     it("offers the original author the appeal path from a removed quoted-post stub", async () => {

@@ -284,6 +284,41 @@ export const GIF_MAX_TOTAL_DURATION_MS = 200_000;
 export const GIF_MAX_CUMULATIVE_PIXELS = 50_000_000;
 
 /**
+ * Link preview cards (issue #260): bounds for unfurling the first URL of a
+ * post server-side. Every one of these is a defence line on an outbound fetch
+ * an author's text triggered, so they live beside the other caps rather than
+ * inside the fetch module — the client reads them too, for its URL input
+ * bound.
+ */
+/** Longest absolute URL accepted as a card target, in characters. */
+export const LINK_CARD_URL_MAX_LENGTH = 2048;
+/** Most HTML bytes read from a target before it is declared oversized. */
+export const LINK_CARD_HTML_MAX_BYTES = 512 * 1024;
+/** Most image bytes read from a target's lead image. */
+export const LINK_CARD_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+/** Wall-clock ceiling on one outbound request, redirects included. */
+export const LINK_CARD_FETCH_TIMEOUT_MS = 5000;
+/** Most redirects followed, each hop re-checked against the address guard. */
+export const LINK_CARD_MAX_REDIRECTS = 4;
+/**
+ * How long a stored card (positive or negative) is served before the next
+ * request refetches it. A fetched-once-per-window budget: shorter refreshes
+ * cost outbound fetches, longer ones serve stale titles.
+ */
+export const LINK_CARD_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+/** Longest card title stored, in characters; longer ones are truncated. */
+export const LINK_CARD_TITLE_MAX_LENGTH = 300;
+/** Longest card description stored, in characters; longer ones are truncated. */
+export const LINK_CARD_DESCRIPTION_MAX_LENGTH = 500;
+/**
+ * Longest card domain stored, in characters; longer ones are truncated. The
+ * value is the target's `og:site_name` or, absent that, its hostname — both
+ * are page-controlled text shipped to every viewer of every post carrying
+ * the URL, so the cap bounds them like the title and description.
+ */
+export const LINK_CARD_SITE_NAME_MAX_LENGTH = 300;
+
+/**
  * The largest request body the RPC endpoint will accept.
  *
  * Derived from the image caps rather than written as a literal, so raising a

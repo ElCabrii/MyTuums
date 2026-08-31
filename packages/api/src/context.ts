@@ -1,5 +1,6 @@
 import { auth, sendEmail, type OutgoingEmail } from "@my-tuums/auth";
 import { db, type Database } from "@my-tuums/db";
+import { createLinkFetchTransport, type LinkFetchTransport } from "./link-card-http.js";
 import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { createStorage, type Storage } from "./storage.js";
 
@@ -55,6 +56,15 @@ export interface Context {
    * unconfigured OAuth provider is simply absent rather than fatal.
    */
   storage: Storage | null;
+  /**
+   * The outbound HTTP + DNS transport link preview cards fetch through
+   * (`packages/api/src/link-card-http.ts`). Threading it here rather than
+   * importing a singleton follows the same rule as `rateLimiter` and
+   * `storage`: the SSRF guard around every card fetch is real code tests must
+   * be able to drive with a fake network, and no other module should reach
+   * for a global client.
+   */
+  linkTransport: LinkFetchTransport;
   /** Email delivery is explicit so tests can record sends without replacing the auth module. */
   emailSender: EmailSender;
   /**
@@ -104,6 +114,14 @@ const defaultStorage: Storage | null =
     : null;
 
 /**
+ * The process-wide link-card fetch transport: the real DNS resolver and
+ * `fetch`. Created once here, on the same terms as `defaultStorage` — a module
+ * in `./link-card-http.ts` that instantiated its own would be the kind of
+ * invisible global `Context` exists to prevent.
+ */
+const defaultLinkTransport = createLinkFetchTransport();
+
+/**
  * Builds a `Context` for one request: resolves the session from the request
  * headers and threads the process-wide limiter and storage.
  */
@@ -113,6 +131,7 @@ export async function createContext({
   rateLimiter = defaultRateLimiter,
   storage = defaultStorage,
   emailSender = defaultEmailSender,
+  linkTransport = defaultLinkTransport,
 }: {
   headers: Headers;
   /** The server's per-request identity — see `Context.requestId`. */
@@ -123,9 +142,11 @@ export async function createContext({
   storage?: Storage | null;
   /** Override for tests; production uses the auth package's sender. */
   emailSender?: EmailSender;
+  /** Override so a test can drive the card fetch guard with a fake network. */
+  linkTransport?: LinkFetchTransport;
 }): Promise<Context> {
   const session = await auth.api.getSession({ headers });
-  return { db, session, requestId, rateLimiter, storage, emailSender, headers };
+  return { db, session, requestId, rateLimiter, storage, linkTransport, emailSender, headers };
 }
 
 /** The process-wide storage client, for callers outside a procedure (the `/media` route). */

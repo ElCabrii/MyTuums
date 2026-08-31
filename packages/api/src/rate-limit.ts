@@ -261,4 +261,19 @@ export const RATE_LIMITS = {
    * cost.
    */
   moderate: { name: "moderate", limit: 60, windowMs: MINUTE },
+  /**
+   * Link preview unfurls (issue #260). The one policy that can spend an
+   * *outbound* request per call — a fetch of an author-chosen URL, bounded in
+   * size and time (see LINK_CARD_* in constants). Its own namespace so burning
+   * it cannot lock a caller out of reading feeds.
+   *
+   * 300, the same budget as `read`, because this middleware charges a unit on
+   * EVERY call — a cache hit consumes the budget exactly like a first fetch,
+   * and the feed asks for a card per post: at 20 posts a page, a tier of 60
+   * was three pages of card-bearing posts inside one window, silently
+   * dropping every card after them. Only the rare first view of a URL costs
+   * an outbound request; the tier is sized for the views, not the fetches,
+   * which the per-URL revalidation window already bounds.
+   */
+  linkCard: { name: "linkCard", limit: 300, windowMs: MINUTE },
 } as const satisfies Record<string, RateLimitPolicy>;

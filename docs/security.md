@@ -150,15 +150,54 @@ lookup), so deriving it earlier would mean doing that work twice. It is never
 keyed on an IP, so the "no anonymous IP-keyed bucket" property holds there
 too.
 
-The ten policies in `packages/api/src/rate-limit.ts` are per-minute:
-read 300, like 120, follow 60, repost 60, write 15, upload 10, search 120,
-report 20, block 30, moderate 60.
+The twelve policies in `packages/api/src/rate-limit.ts` are per-minute:
+read 300, like 120, bookmark 120, follow 60, repost 60, write 15, upload 10,
+search 120, report 20, block 30, moderate 60, linkCard 300. The `linkCard`
+tier is sized like `read` because its middleware charges every call —
+cache-served cards included — and a feed asks for one card per post.
 
 The limiter is **fixed-window and in-memory**: it resets on deploy and
 multiplies per replica. That is right for bounding one client and wrong for
 anything billed. `maxKeys` is a leak alarm, not an admission gate — at
 capacity a brand-new key is let through, never refused, because refusing there
 used to 429 every request from a fresh session.
+
+## Outbound fetches
+
+**Link preview cards** (`packages/api/src/link-card-http.ts`,
+`packages/api/src/link-card.ts`) are the one surface where author-chosen text
+makes the server dial out (issue #260):
+
+- Only `http`/`https` targets are fetched — the same scheme rule the client's
+  linkifier applies — and only for a signed-in caller: the procedure is
+  session-gated and rate-limited under its own `linkCard` tier.
+- The hostname is resolved by the server and **every** resolved address must be
+  global unicast before any request is made. Loopback, RFC 1918 private,
+  link-local (including `169.254.169.254`), CGNAT, unique-local, NAT64 (both
+  the well-known and local-use blocks), Teredo, benchmarking, multicast and
+  the reserved/documentation ranges of both families are refused, as is
+  anything unparseable — fail closed. IPv4-mapped IPv6 is refused outright in
+  **both** spellings: the URL parser canonicalizes `[::ffff:127.0.0.1]` to
+  the hex form `[::ffff:7f00:1]`, so judging only the dotted spelling judged
+  nothing a request can actually carry.
+- Only the scheme's own port is dialled — 80 for `http`, 443 for `https`,
+  explicit or default. A host's non-web ports (databases, internal status
+  endpoints) are not card targets, first hop or redirect hop.
+- Redirects are followed manually, at most four, and every hop re-runs the
+  scheme, port and address checks — a public first hop cannot launder a
+  redirect to a private one.
+- One wall-clock deadline covers every hop, the body is cut off at a byte cap,
+  and an HTML content type is required before parsing. Every refusal — plus a
+  missing Open Graph payload — is cached as "no card" for the window, so a
+  hostile or dead URL is asked about once, not per view.
+- A target's lead image is fetched through the same guard, validated from its
+  bytes like an upload, and stored in this app's own bucket under
+  `link-cards/` — never hot-linked. `/media/link-cards/*` is served to any
+  signed-in viewer, decided only by the session the route already demands.
+- A card is shared by every post carrying its URL, so a hostile unfurl is a
+  viewer-wide object: `moderation.purgeLinkCard` (moderator gate, `moderate`
+  tier) nulls the row, removes the stored image, and stops the URL from ever
+  unfurling again — the purge's actor and reason are recorded on the row.
 
 ## Media
 

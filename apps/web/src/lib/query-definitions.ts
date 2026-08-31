@@ -121,6 +121,24 @@ export function threadQueryOptions(postId: string) {
   };
 }
 
+/**
+ * The link preview card for one URL — the first URL of a post, as picked by
+ * the linkifier (`firstLinkUrl`), never a URL the renderer would not link.
+ *
+ * The server caches the fetch per URL with its own revalidation window; this
+ * staleTime only keeps remounts (a feed scrolling the same card back into
+ * view) from re-asking. A `{ card: null }` answer is cached the same way —
+ * "no card" is a stable property of the URL within the window, and refetching
+ * it per view is exactly what the procedure's rate tier exists to stop.
+ */
+export function linkCardQueryOptions(url: string) {
+  return {
+    ...orpc.post.linkCard.queryOptions({ input: { url } }),
+    staleTime: 5 * 60_000,
+    retry: retryUnlessClientError,
+  };
+}
+
 export function userListQueryOptions(username: string, direction: FollowDirection) {
   const procedure = direction === "followers" ? orpc.user.followers : orpc.user.following;
   return procedure.infiniteOptions({
