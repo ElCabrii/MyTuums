@@ -65,8 +65,10 @@ app's build from the same origin.
   mutation-level `onError` — per-call callbacks never fire for write-only
   atoms read with `useSetAtom`. `src/atoms/repost.ts` is the same contract again
   (the file points back at `src/atoms/like.ts` for the reasoning), with one
-  addition: a successful repost invalidates the `post.list` queries, because a
-  repost is a feed _event_ whose position is server-ordered.
+  addition: success in either direction invalidates the `post.list` queries,
+  because a repost is a feed _event_ whose position is server-ordered — a new
+  one lands at the top of the home feeds, and an unrepost removes one from
+  them.
 - **Persisted atoms read `localStorage` as `unknown`, sanitise on read, and
   set `getOnInit: true`** — without it the first render flashes the default.
 - **Exactly one effect owns each redirect.** Auth pages call

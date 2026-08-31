@@ -17,11 +17,14 @@ import type { PostSnapshot } from "@/lib/post-cache";
  * and the same mutation-level rollback contract (the doc comment there is the
  * full reasoning — this file deliberately restates only what differs).
  *
- * What differs: reposting also has a *feed placement* effect a like does not
- * — the repost event belongs at the top of the home feeds. The optimistic
- * patch only flips the count and the viewer flag; the event's position is
- * server-ordered, so success invalidates the feed queries rather than trying
- * to splice an event in. A refetch landing mid-scroll is the same trade
+ * What differs: a repost is also a feed *event*, and success in either
+ * direction changes the event list — a new repost belongs at the top of the
+ * home feeds at the event's own timestamp, and an unrepost removes one (the
+ * primary flow: unreposting from the "You reposted" card at the top of the
+ * viewer's own home feed). The optimistic patch only flips the count and the
+ * viewer flag; the event list is server-ordered, so success invalidates the
+ * feed queries rather than trying to splice an event in or guess which cached
+ * page holds one. A refetch landing mid-scroll is the same trade
  * `createPostAtom` makes for a fresh post.
  */
 const intentFamily = atomFamily<string, PrimitiveAtom<boolean | null>>(() =>
@@ -75,11 +78,14 @@ function toggleMutationAtom(postId: string, direction: "repost" | "unrepost") {
           viewerHasReposted: result.viewerHasReposted,
         }));
 
-        if (reposted) {
-          // A new repost event belongs at the top of the home feeds at the
-          // event's own timestamp; refetch rather than guess the position.
-          void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
-        }
+        // A repost is a feed event whose position is server-ordered — and so
+        // is the removal of one. Success refetches the feed lists in both
+        // directions: a new repost lands at the top of the home feeds at the
+        // event's own timestamp, and an unrepost (typically from the "You
+        // reposted" card at the top of the viewer's own home feed) takes an
+        // event out that no cached page knows is gone. Refetch rather than
+        // splice in either direction.
+        void queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
       },
 
       onError: (_error: Error, _variables: RepostVariables, context: RepostContext | undefined) => {

@@ -93,28 +93,32 @@ function updatePostListPage(
  * than from a prop: a prop is a render-time snapshot, so a burst of clicks
  * would all see the same starting value and resolve to the same direction.
  *
- * Feeds are checked first only because they are the common case; the three
- * shapes always agree, since every write goes through
- * {@link updatePostEverywhere}.
+ * When the same id is cached more than once, an available copy wins over a
+ * redacted one. A repost event whose original author is hidden shares the
+ * post's id while the server deliberately zeros its counts and viewer flags
+ * and blanks its content and author (`unavailable: true`) — reading current
+ * state from that copy would compute a like/repost direction from redacted
+ * viewer flags and snapshot redacted fields as if they were the post's. The
+ * redacted copy is still returned when it is the only one cached: feeds are
+ * walked before search, and search before threads, as the tie-break order.
  */
 export function readCachedPost(queryClient: QueryClient, postId: string): Post | undefined {
-  const fromFeed = feedQueries(queryClient)
-    .flatMap(([, data]) => data?.pages ?? [])
-    .flatMap(postsInListPage)
-    .find((item) => item.id === postId);
+  const candidates = [
+    ...feedQueries(queryClient)
+      .flatMap(([, data]) => data?.pages ?? [])
+      .flatMap(postsInListPage),
+    ...searchPostsQueries(queryClient)
+      .flatMap(([, data]) => data?.pages ?? [])
+      .flatMap((page) => page.items),
+    ...threadQueries(queryClient).flatMap(([, data]) =>
+      data ? [data.post, ...data.ancestors] : [],
+    ),
+  ];
 
-  if (fromFeed) return fromFeed;
-
-  const fromSearch = searchPostsQueries(queryClient)
-    .flatMap(([, data]) => data?.pages ?? [])
-    .flatMap((page) => page.items)
-    .find((item) => item.id === postId);
-
-  if (fromSearch) return fromSearch;
-
-  return threadQueries(queryClient)
-    .flatMap(([, data]) => (data ? [data.post, ...data.ancestors] : []))
-    .find((item) => item.id === postId);
+  return (
+    candidates.find((item) => item.id === postId && !item.unavailable) ??
+    candidates.find((item) => item.id === postId)
+  );
 }
 
 /**
@@ -233,15 +237,30 @@ export function snapshotPosts(queryClient: QueryClient, postId: string): PostSna
  * all three caches — and touches no other post's fields in those same
  * entries, even when another post's concurrent mutation has since confirmed
  * new values into them.
+ *
+ * Two states belong to the feed EVENT rather than the shared post, and each
+ * cached copy keeps its own while shared fields are restored:
+ *
+ * - `repostedBy` — the same post can appear twice in one feed (authored and
+ *   reposted), while a single snapshot necessarily came from only one of
+ *   those copies; restoring must not turn both copies into the same event.
+ * - the whole `unavailable` redaction — a repost event whose original author
+ *   is hidden shares this post's id but none of its state: content, author,
+ *   counts and viewer flags are the hidden original's, redacted. Shared
+ *   fields must not cross that boundary in either direction: writing an
+ *   authored snapshot into the redacted event would un-redact a hidden
+ *   original back into the feed, and writing a redacted snapshot into an
+ *   available copy would blank that card (`unavailable: true`, no content,
+ *   sentinel author, zeroed counts). A copy that is unavailable on either
+ *   side of the restore is therefore left exactly as it is.
  */
 export function restorePosts(queryClient: QueryClient, snapshot: PostSnapshot): void {
-  updatePostEverywhere(queryClient, snapshot.postId, (current) => ({
-    ...snapshot.post,
-    // Repost attribution belongs to the feed EVENT, not to the shared post.
-    // The same post can appear twice in one feed (authored and reposted), while
-    // a single snapshot necessarily came from only one of those copies. Keep
-    // each cached event's own attribution when restoring shared post fields,
-    // or a failed like/repost would turn both copies into the same event.
-    repostedBy: current.repostedBy,
-  }));
+  updatePostEverywhere(queryClient, snapshot.postId, (current) =>
+    current.unavailable || snapshot.post.unavailable
+      ? current
+      : {
+          ...snapshot.post,
+          repostedBy: current.repostedBy,
+        },
+  );
 }

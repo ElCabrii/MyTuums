@@ -498,7 +498,10 @@ export const postSelection = (viewerId: string) => ({
   // Ordinary post readers filter hidden authors before this projection, so
   // their rows are always available. The merged feed can keep a visible
   // reposter's event while redacting its newly blocked original; that one
-  // feed-only branch replaces this flag and every sensitive field below.
+  // feed-only branch replaces this flag and every sensitive field below —
+  // including a deliberately non-nullable sentinel `author` (see the
+  // redaction in `feedEventPage`): read `unavailable` before ever reading
+  // `author` off a feed item.
   unavailable: sql<boolean>`false`,
   createdAt: post.createdAt,
   // Null for a top-level post. The web app reads it to decide whether a card
@@ -749,7 +752,11 @@ type FeedEventRow = {
  *   treatment: no identity, content, media, counts or viewer interactions.
  * - The repost arm runs only for the home feeds. A profile feed
  *   (`authorId`) is the author's own activity, and the `kind: "replies"`
- *   axis selects reply rows, not amplification events.
+ *   axis selects reply rows, not amplification events. Under
+ *   `kind: "posts"` the arm also excludes reposts of replies (the
+ *   original's `parentId` must be null): no shipped feed can show such an
+ *   event, so the web does not offer the repost control on replies rather
+ *   than sell an action whose result never renders anywhere.
  */
 async function feedEventPage(
   db: Database,
@@ -765,12 +772,16 @@ async function feedEventPage(
   const decoded = args.cursor ? postFeedCursor.decode(args.cursor) : undefined;
   // The absent reposter half of a post-event cursor binds as '' — the value
   // the authored arm emits for `reposter_key` — so one row-value comparison
-  // serves both event kinds.
+  // serves both event kinds. Each bound is typed by the column that arm
+  // selects into the key: the reposter half is the repost arm's `user_id`
+  // (text, like every user id; the authored arm's '' literal is what makes
+  // the union's column text), and the param encoder must be a text column —
+  // a uuid one would reject the '' bound.
   const cursorFilter = decoded
     ? sql`(event_at, post_id, reposter_key) < (
         ${sql.param(decoded.createdAt, post.createdAt)},
         ${sql.param(decoded.first, post.id)},
-        ${sql.param(decoded.second ?? "", userBlock.blockerId)}
+        ${sql.param(decoded.second ?? "", postRepost.userId)}
       )`
     : undefined;
 
@@ -914,6 +925,12 @@ async function feedEventPage(
         quotedPostId: null,
         quoted: null,
         attachments: [],
+        // The sentinel author: this row has no author the viewer may learn
+        // anything about, and the post shape keeps `author` non-nullable —
+        // widening it here would ripple through every web render to say
+        // "unknown" in exactly one place. Consumers must guard every author
+        // read on `unavailable` first (the web card does); the empty id,
+        // empty name and null handle are placeholders, not a real user.
         author: { id: "", name: "", username: null, displayUsername: null, image: null },
         likeCount: 0,
         replyCount: 0,

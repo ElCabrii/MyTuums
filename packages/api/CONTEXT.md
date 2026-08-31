@@ -192,7 +192,11 @@ reposter_key)`, where the reposter half is absent for post events and binds
   as `''` in SQL so the row-value comparison stays a total order. Profile
   feeds (`authorId`) and reply lists run no repost arm: a profile is the
   author's own activity, and the reply list is direct replies by their own
-  event time. The repost arm applies the block/ban filter to the reposter
+  event time. The same rule excludes reposts _of_ replies under
+  `kind: "posts"` — no shipped feed can show such an event, so the web hides
+  the repost control on replies rather than offer an action whose result
+  never renders anywhere. The repost arm applies the block/ban filter to the
+  reposter
   (`aliasVisibleTo` — `invisibleAuthor` is bound to the un-aliased table), but
   deliberately keeps a visible reposter's event when only the original author
   is hidden; the projection phase re-evaluates that original and emits the
@@ -280,9 +284,14 @@ reposter_key)`, where the reposter half is absent for post events and binds
   `sql.param(value, column)` — interpolating a JS `Date` hands postgres.js
   something it cannot serialise.
 - **`keysetPage`'s `createdAtField` is type-tied to the `createdAt` column**, so
-  a cursor can never encode a different timestamp than the SQL compares. One
-  list bypasses the skeleton on purpose: `moderation.queue` merges two shapes
-  in JS, which does not fit a single query.
+  a cursor can never encode a different timestamp than the SQL compares. Two
+  lists bypass the skeleton on purpose: `moderation.queue` merges two shapes
+  in JS, which does not fit a single query; and the home feeds'
+  `feedEventPage` (`src/posts.ts`) unions authored-post and repost events
+  whose cursor key is a three-part row value — `(event_at, post_id,
+reposter_key)` — so it hand-rolls the same three parts the skeleton owns
+  (row-value cursor filter, +1 lookahead, next-cursor anchored on the last
+  returned row) rather than fit a pair-shaped helper.
 - **Presigned URLs are windowed** (`MEDIA_SIGNING_WINDOW_MS`): byte-identical
   within a window, which is what keeps repeat views off the bucket. Every
   `/media/` redirect is `private, no-store` — a viewer-authorized decision —

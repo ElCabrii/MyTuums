@@ -159,6 +159,12 @@ export function PostCard({
   // A post already gone has nothing left to delete, so the item is dropped
   // rather than offered as a no-op the server would refuse anyway.
   const canDelete = isOwnPost && !isGone;
+  // Only top-level posts can be reposted. The server accepts a repost of a
+  // reply, but no shipped surface can show that event — the home feeds'
+  // repost arm excludes replies (`kind: "posts"` filters the original's
+  // `parentId`, and profile feeds run no repost arm at all) — so the control
+  // would be a dead end: counted, never rendered anywhere.
+  const canRepost = !post.parentId;
 
   const handleCardClick = (e: MouseEvent<HTMLDivElement>) => {
     if (isFocused || post.unavailable) return;
@@ -463,22 +469,26 @@ export function PostCard({
                 </Link>
               )}
 
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleRepost();
-                }}
-                aria-pressed={post.viewerHasReposted}
-                aria-label={
-                  post.viewerHasReposted
-                    ? m.post_unrepost({ count: String(post.repostCount) })
-                    : m.post_repost({ count: String(post.repostCount) })
-                }
-                className={repostButtonClass}
-              >
-                {repostContent}
-              </button>
+              {/* Offered only where its event can be shown — see `canRepost`
+                  above: a reply's repost would never render anywhere. */}
+              {canRepost && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleRepost();
+                  }}
+                  aria-pressed={post.viewerHasReposted}
+                  aria-label={
+                    post.viewerHasReposted
+                      ? m.post_unrepost({ count: String(post.repostCount) })
+                      : m.post_repost({ count: String(post.repostCount) })
+                  }
+                  className={repostButtonClass}
+                >
+                  {repostContent}
+                </button>
+              )}
 
               {/* Quoting opens the app-wide dialog (mounted at the root like
                   the delete confirmation): a quote is composed from anywhere a

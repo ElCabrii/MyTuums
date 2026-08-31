@@ -509,6 +509,27 @@ describe("PostCard", () => {
       );
     });
 
+    // The server would accept a repost of a reply, but no shipped surface can
+    // show that event — the home feeds' repost arm excludes replies and
+    // profile feeds run no repost arm — so a control whose effect is a dead
+    // end is not offered. The reply's other controls stay.
+    it("hides the repost control on a reply, while keeping the like control", async () => {
+      const post = makePost({ parentId: "parent-1", parent: null });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(
+        screen.queryByRole("button", { name: m.post_repost({ count: String(post.repostCount) }) }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: m.post_unrepost({ count: String(post.repostCount) }),
+        }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: m.post_like({ count: String(post.likeCount) }) }),
+      ).toBeInTheDocument();
+    });
+
     it("embeds the quoted post with its own author and a dedicated permalink header", async () => {
       const quotedAuthor = makeAuthor({ name: "Quoted Author" });
       const post = makePost({

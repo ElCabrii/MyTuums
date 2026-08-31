@@ -135,6 +135,33 @@ describe("toggleRepostAtomFamily", () => {
     expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
   });
 
+  // A repost is a feed event in both directions: an unrepost removes an
+  // event (the primary flow unreposts from the "You reposted" card at the
+  // top of the viewer's own home feed), and no cached page knows it is gone
+  // until the same server-ordered refetch runs. Without this, the stale
+  // event card sat in the feed until an unrelated refetch landed.
+  it("invalidates the feed lists after an unrepost too — the removed event is server-ordered out of the feed", async () => {
+    const { store, queryClient } = freshStoreWithPost(
+      makePost({ id: "post-1", viewerHasReposted: true, repostCount: 5 }),
+    );
+    fakeClient.post.unrepost.mockResolvedValue({
+      postId: "post-1",
+      repostCount: 3,
+      viewerHasReposted: false,
+    });
+
+    store.set(toggleRepostAtomFamily("post-1"));
+
+    // 3 is a value only the reconcile can write — the optimistic patch
+    // alone produces 4 (5 minus one), so this waits for onSuccess.
+    await vi.waitFor(() => {
+      expect(readCachedPost(queryClient, "post-1")?.repostCount).toBe(3);
+    });
+
+    const listKey = orpc.post.list.key({ input: { limit: 20 } });
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+  });
+
   it("scopes the mutation to the post only, shared by both directions", () => {
     const { store, queryClient } = freshStoreWithPost(makePost({ id: "post-1" }));
     fakeClient.post.repost.mockImplementation(() => new Promise(() => {}));
