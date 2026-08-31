@@ -38,6 +38,14 @@ test.describe("notifications", () => {
     await page.goto("/");
     const before = await unreadOnBell(page);
 
+    // Bob's earlier same-type rows (from previous specs, or from a failed
+    // attempt of this very test being retried) sit inside the burst damper's
+    // 60-second window: his next like, reply and follow would arrive born
+    // read and never move the badge to before + 3. Aging them past the
+    // window makes the three events below deterministic badge ticks.
+    const bobId = await db.getUserId(BOB.username);
+    await db.expireNotificationDamperWindow(bobId, aliceId);
+
     // Three events from bob: a like, a reply on the same post, and a follow.
     // The follow is made fresh first — a leftover edge from another spec
     // would make clicking "Follow" a no-op that notifies nobody.
@@ -46,6 +54,12 @@ test.describe("notifications", () => {
     await bobPage.getByPlaceholder("Post your reply...").fill(`a bob reply ${Date.now()}`);
     await bobPage.getByRole("button", { name: "Reply" }).click();
     await bobPage.goto(`/@${ALICE.username}`);
+    // Wait for the profile's follow control to render before branching on
+    // its label: isVisible() on a still-loading profile returns false, the
+    // unfollow would be skipped, and the wait for "Follow" below would then
+    // hang on a button that says "Unfollow" for the rest of the run.
+    const followControl = bobPage.getByRole("button", { name: /^(Follow|Unfollow)$/ });
+    await expect(followControl.first()).toBeVisible();
     const unfollow = bobPage.getByRole("button", { name: "Unfollow" });
     if (await unfollow.isVisible()) {
       await unfollow.click();
