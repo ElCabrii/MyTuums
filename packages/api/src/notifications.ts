@@ -316,7 +316,7 @@ export const notificationRouter = {
    * read means". Requires a session; idempotent, and O(1): one upsert on
    * `notification_last_seen` rather than a stamp per unread row, so a
    * recipient with thousands of unread notifications pays the same as one
-   * with none.
+   * with none. The cursor only ever moves forward — see the stamp below.
    *
    * Rows that arrive after the stamp are unread by definition — the cursor
    * comparison, not a row rewrite, decides. The returned count is the number
@@ -336,12 +336,16 @@ export const notificationRouter = {
         // The DB clock, not `new Date()`: `created_at` is stamped by the
         // database, and a cursor minted from the app clock on a host that
         // drifts ahead of it would silently read rows minted afterwards.
+        // The stamp is monotonic on top of that: `now()` reads the
+        // transaction's start time, so two concurrent page opens that
+        // commit out of order would otherwise leave the older stamp as the
+        // cursor and resurrect rows the newer one had already read.
         await tx
           .insert(notificationLastSeen)
           .values({ recipientId: context.user.id, seenAt: sql`now()` })
           .onConflictDoUpdate({
             target: notificationLastSeen.recipientId,
-            set: { seenAt: sql`now()` },
+            set: { seenAt: sql`greatest(${notificationLastSeen.seenAt}, now())` },
           });
         return previous?.seenAt ?? null;
       });

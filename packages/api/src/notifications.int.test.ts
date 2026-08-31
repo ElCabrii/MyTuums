@@ -1,6 +1,6 @@
 import { call } from "@orpc/server";
 import { closeDb } from "@my-tuums/db";
-import { notification, user } from "@my-tuums/db/schema";
+import { notification, notificationLastSeen, user } from "@my-tuums/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";
@@ -28,6 +28,16 @@ async function moderatorUser(): Promise<TestUser> {
   const moderator = await createTestUser();
   await setUserRole(moderator.id, "moderator");
   return freshSessionFor(moderator);
+}
+
+/**
+ * Same idea at the staff rank: `banUser`/`unbanUser` are staff+ procedures,
+ * and this test is the notification surface under them, not the ban gate.
+ */
+async function staffUser(): Promise<TestUser> {
+  const staff = await createTestUser();
+  await setUserRole(staff.id, "staff");
+  return freshSessionFor(staff);
 }
 
 /** The caller's notifications through the list procedure — the surface under test. */
@@ -240,6 +250,42 @@ describe("notification writes (issue #259)", () => {
     expect((await listFor(author)).items).toHaveLength(1);
   });
 
+  it("a banned actor's notifications stop surfacing and come back when the ban is lifted", async () => {
+    const author = await createTestUser();
+    const liker = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await call(appRouter.post.like, { postId: target.id }, { context: contextFor(liker) });
+    expect((await listFor(author)).items).toHaveLength(1);
+
+    // No generation half to pin here, unlike the block test above: a ban
+    // sweeps the banned account's sessions, so the cause itself is already
+    // unreachable — that refusal is the ban's own, pinned in
+    // moderation.int.test.ts. This test owns the surfacing half: the ban
+    // term of `visibleNotification`.
+    const staff = await staffUser();
+    await call(
+      appRouter.moderation.banUser,
+      { userId: liker.id, reason: "spam" },
+      { context: contextFor(staff) },
+    );
+    expect((await listFor(author)).items).toHaveLength(0);
+    // The badge cannot show a number the page behind it would not clear.
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 0,
+    });
+
+    // The row survives the ban — lifting it brings the history back.
+    await call(
+      appRouter.moderation.unbanUser,
+      { userId: liker.id },
+      { context: contextFor(staff) },
+    );
+    expect((await listFor(author)).items).toHaveLength(1);
+  });
+
   it("deleting a post tombstones its notifications, like it tombstones its replies", async () => {
     const author = await createTestUser();
     const liker = await createTestUser();
@@ -345,6 +391,39 @@ describe("notification reads (issue #259)", () => {
     // Idempotent: repeating states the same end state.
     const second = await call(appRouter.notification.markRead, {}, { context: contextFor(author) });
     expect(second).toEqual({ read: 0 });
+  });
+
+  it("markRead never moves the cursor backwards — an out-of-order commit cannot resurrect rows as unread", async () => {
+    const author = await createTestUser();
+    const liker = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await call(appRouter.post.like, { postId: target.id }, { context: contextFor(liker) });
+    await call(appRouter.notification.markRead, {}, { context: contextFor(author) });
+
+    // `now()` reads the transaction's start time, so a page open that
+    // started later can commit first; its newer stamp is what the cursor
+    // must keep. Simulated deterministically by a stamp ahead of this
+    // markRead's transaction clock: a blind `seen_at = now()` upsert would
+    // write its own earlier time and the cursor would move backwards.
+    await author.context.db
+      .update(notificationLastSeen)
+      .set({ seenAt: sql`now() + interval '1 hour'` })
+      .where(eq(notificationLastSeen.recipientId, author.id));
+    const [ahead] = await author.context.db
+      .select({ seenAt: notificationLastSeen.seenAt })
+      .from(notificationLastSeen)
+      .where(eq(notificationLastSeen.recipientId, author.id));
+
+    await call(appRouter.notification.markRead, {}, { context: contextFor(author) });
+
+    const [after] = await author.context.db
+      .select({ seenAt: notificationLastSeen.seenAt })
+      .from(notificationLastSeen)
+      .where(eq(notificationLastSeen.recipientId, author.id));
+    expect(after.seenAt.getTime()).toBe(ahead.seenAt.getTime());
+    // And the page still reads the row the ahead stamp covered.
+    expect((await listFor(author)).items.every((item) => item.read)).toBe(true);
   });
 
   it("the list serves only its recipient", async () => {

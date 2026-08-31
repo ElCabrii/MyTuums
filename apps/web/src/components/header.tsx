@@ -173,7 +173,12 @@ export function Header() {
                 title={m.nav_notifications()}
                 aria-label={
                   unreadCount > 0
-                    ? m.nav_notifications_unread({ count: unreadCount })
+                    ? // The keyed one/many pair, like every other count in
+                      // the messages: French agrees "non lue(s)" with the
+                      // count, and 1 is the badge's most common state.
+                      unreadCount === 1
+                      ? m.nav_notifications_unread_one({ count: unreadCount })
+                      : m.nav_notifications_unread_many({ count: unreadCount })
                     : m.nav_notifications()
                 }
                 className="relative"

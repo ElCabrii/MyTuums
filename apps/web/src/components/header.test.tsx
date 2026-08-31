@@ -135,7 +135,9 @@ describe("Header notifications bell", () => {
     // The shadcn Button renders its `render` prop anchor with an explicit
     // `role="button"`, so that — not "link" — is the accessible role, while
     // the href keeps it a real anchor for navigation and middle-click.
-    const bell = screen.getByRole("button", { name: m.nav_notifications_unread({ count: 3 }) });
+    const bell = screen.getByRole("button", {
+      name: m.nav_notifications_unread_many({ count: 3 }),
+    });
     expect(bell).toHaveAttribute("href", "/notifications");
     // The count renders as the badge inside the bell, not free-floating text.
     expect(within(bell).getByText("3")).toBeInTheDocument();

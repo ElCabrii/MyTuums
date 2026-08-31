@@ -140,7 +140,15 @@ over HTTP and imports only its browser-safe subpaths.
   keep the audit log append-only are what keep it exactly-once, with a null
   actor because the branded email never names the moderator either.
   `case_resolved` deliberately passes none: its notices go to the reporters,
-  and email stays that channel. The read side (`src/notifications.ts`) owns
+  and email stays that channel. The silence is enumerated, and the release
+  branch's incoming actions are decided too: reposts and quotes WILL notify
+  the original author through the same `.returning()` pattern — that
+  emission is the integration phase's job, landing when this PR integrates
+  with the release branch — while edits never notify (an edit is not an
+  event about the recipient), bookmarks never notify (private by design; no
+  emission point exists), and link-card fetches and purges never notify
+  (not actions on a person; the purge audit trail lives on `link_card` by
+  design). The read side (`src/notifications.ts`) owns
   the rest: self-caused events are dropped in `insertNotification` (the
   `notification_not_self` check constraint would otherwise abort the cause
   transaction with it), and the list and the unread count share one
@@ -163,8 +171,11 @@ over HTTP and imports only its browser-safe subpaths.
   visibility predicate _and_ one retention horizon
   (`NOTIFICATION_RETENTION_DAYS`; moderation rows exempt on both sides), so
   the badge can never show a number the page behind it cannot reconcile;
-  `pnpm --filter @my-tuums/api prune:notifications` deletes past that same
-  horizon.
+  `pnpm --filter @my-tuums/api prune:notifications` deletes rows past that
+  same horizon and never deletes read cursors — moderation rows being
+  exempt means a recipient returning past the horizon still has retained
+  rows to show, and their cursor is what keeps those notices read (one row
+  per recipient is nothing).
 - **Relationship writes for a pair are serialized by one advisory lock.**
   "A blocked pair has no follow edge" spans `follow` and `user_block`, so no
   database constraint can hold it. `follow`, `block` and `unblock` all take

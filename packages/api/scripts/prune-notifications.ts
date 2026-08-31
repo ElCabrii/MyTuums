@@ -6,8 +6,15 @@
  *
  * Moderation rows are exempt: they are rare, individually meaningful, and
  * mirror an audit row that lives forever — a returning user finding their
- * year-old ban notice intact is worth a handful of retained rows. Read
- * cursors older than the horizon go with their rows.
+ * year-old ban notice intact is worth a handful of retained rows.
+ *
+ * Read cursors (`notification_last_seen`) are never deleted. Moderation
+ * rows being exempt means a recipient returning past the horizon still
+ * has retained rows to be shown, and deleting their cursor would mark
+ * every one of them unread again — the badge ticking on notices the
+ * recipient had already seen. One row per recipient is nothing, so the
+ * cursor is kept and "what the recipient has and has not seen stays
+ * truthful" (packages/db/src/schema/app.ts) survives the prune.
  *
  * Dry-run by default; `--apply` deletes. The retention-days flag is the arm
  * switch, deliberately explicit and deliberately checked against the
@@ -19,7 +26,7 @@
  */
 import { lt, sql, and, ne } from "drizzle-orm";
 import { closeDb, db } from "@my-tuums/db";
-import { notification, notificationLastSeen } from "@my-tuums/db/schema";
+import { notification } from "@my-tuums/db/schema";
 import { NOTIFICATION_RETENTION_DAYS } from "../src/constants.ts";
 
 const apply = process.argv.includes("--apply");
@@ -57,11 +64,7 @@ if (!apply) {
   console.log("Dry run — nothing deleted. Pass --apply to prune.");
 } else {
   const deleted = await db.delete(notification).where(expired).returning({ id: notification.id });
-  const cursors = await db
-    .delete(notificationLastSeen)
-    .where(lt(notificationLastSeen.seenAt, horizon))
-    .returning({ recipientId: notificationLastSeen.recipientId });
-  console.log(`Deleted ${deleted.length} notification rows, ${cursors.length} stale read cursors.`);
+  console.log(`Deleted ${deleted.length} notification rows.`);
 }
 
 await closeDb();

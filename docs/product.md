@@ -107,6 +107,15 @@ like again is honestly three events, not one collapsed one.
   than naming the moderator who acted, and carry the action code and the
   moderator's stated reason. Case resolutions notify nobody in-app — their
   notices go to the reporters, and email stays that channel.
+- The actions the release adds are decided up front, not left open.
+  Reposts and quotes will notify the original author ("X reposted your
+  post", "X quoted your post") on the same exactly-once rule as likes;
+  they arrive when this feature integrates with the release branch, which
+  is that phase's job. Edits never notify — an edit is not an event about
+  the recipient. Bookmarks never notify — they are private by design, and
+  no emission point exists. Link-card fetches and purges never notify —
+  neither is an action on a person, and the purge audit trail lives on
+  the link card itself, by design.
 
 ## Profiles and search
 
@@ -284,8 +293,8 @@ on your post, a reply to it, a new follower, or a moderation action on your
 content or account. Newest first on `/notifications`, unread until the page
 is opened. One per event, never one per retry. Likes, replies and follows
 older than ninety days fall out of the page and the badge together;
-moderation notices are kept. _Avoid:_ alert, ping, message (a different thing that does not exist
-yet).
+moderation notices are kept. _Avoid:_ alert, ping, message (a different
+thing that does not exist yet).
 
 ## Further reading
 
