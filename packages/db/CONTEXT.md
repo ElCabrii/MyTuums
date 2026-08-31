@@ -42,8 +42,14 @@ databases. It serves data only — no HTTP, no business logic.
   and then `scripts/patch-auth-schema.ts`. That script's header explains what
   it patches and why.
 - **Composite primary keys are the idempotency mechanism.** Uniqueness for
-  likes, follows, reports and blocks lives in the PK, so handlers use
+  likes, reposts, follows, reports and blocks lives in the PK, so handlers use
   `onConflictDoNothing` instead of a read-then-write race.
+- **A quote reference is deliberately FK-less.** `post.quoted_post_id` names
+  another post, but a hard delete of that row (today, through its author's
+  account cascade) must not delete the quoting author's own post. Readers
+  resolve the reference and render the embedded post as unavailable when the
+  target row is gone; do not add the self-reference cascade used by
+  `post.parent_id`.
 - **`timestamptz` with `precision: 3` on every `created_at`.** Microsecond
   precision silently drops rows from keyset cursors, because a JS `Date`
   carries only milliseconds. Do not "optimise" it.

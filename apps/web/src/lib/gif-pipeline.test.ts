@@ -2,7 +2,6 @@ import { applyPalette, GIFEncoder, quantize } from "gifenc";
 import { decompressFrames, parseGIF } from "gifuct-js";
 import { describe, expect, it } from "vitest";
 import { processAnimatedGif } from "@/lib/gif-pipeline";
-import { minCropScale } from "@/lib/media-layout";
 
 const GIF_WIDTH = 2;
 const GIF_HEIGHT = 2;
@@ -137,16 +136,14 @@ describe("processAnimatedGif", () => {
     ).toThrowError("size");
   });
 
-  it("letterboxes a banner zoomed past its cover crop, frame for frame", () => {
-    // A square source in the banner slot at contain: the 3:1 window is wider
-    // than the logical screen, so the re-encode must draw each composited
-    // frame once between black bars — the same bars the still-image encoder
-    // bakes in and the editor previewed (a still letterbox encode's geometry
-    // is pinned in media.dom.test.ts; this pins the animated half).
-    const source = { width: GIF_WIDTH, height: GIF_HEIGHT };
+  it("crops a banner to its default window, frame for frame — never letterboxes", () => {
+    // A square source in the banner slot: the largest 3:1 rectangle inside it
+    // is the 2x1 band, and even a crop asking to zoom out past that (scale
+    // 0.1, the shape that used to encode black bars — issue #273) clamps to
+    // it. Each composited frame is drawn once, edge to edge.
     const result = processAnimatedGif(sourceGif(), {
       kind: "banner",
-      crop: { x: 0.5, y: 0.5, scale: minCropScale(source, "banner") },
+      crop: { x: 0.5, y: 0.5, scale: 0.1 },
       maxBytes: 64 * 1024,
     });
     const frames = decompressFrames(parseGIF(copyBuffer(result.bytes)), true);
@@ -157,13 +154,10 @@ describe("processAnimatedGif", () => {
       [0, 255, 0],
     ] as const;
     for (const [index, frame] of frames.entries()) {
-      expect([frame.dims.width, frame.dims.height]).toEqual([4, 2]);
+      expect([frame.dims.width, frame.dims.height]).toEqual([2, 1]);
       const [r, g, b] = frameColors[index] ?? [0, 0, 0];
-      // One black bar, the whole 2x2 source in this frame's colour, the bar.
-      expect(rgbaAt(frame.patch, 0)).toEqual([0, 0, 0, 255]);
-      expect(rgbaAt(frame.patch, 3)).toEqual([0, 0, 0, 255]);
+      expect(rgbaAt(frame.patch, 0)).toEqual([r, g, b, 255]);
       expect(rgbaAt(frame.patch, 1)).toEqual([r, g, b, 255]);
-      expect(rgbaAt(frame.patch, 2)).toEqual([r, g, b, 255]);
     }
   });
 });

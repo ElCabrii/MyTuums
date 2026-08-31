@@ -360,6 +360,17 @@ export async function seedLike(postId: string, userId: string): Promise<void> {
 }
 
 /**
+ * Inserts a repost row directly — the composite PK makes it idempotent, the
+ * same way `seedFollow` and `seedLike` are. A spec that needs a repost event
+ * sitting in a feed should not pay for the UI walk to create it.
+ */
+export async function seedRepost(postId: string, userId: string): Promise<void> {
+  const db = await getDb();
+  const { postRepost } = await schemaModulePromise;
+  await db.insert(postRepost).values({ postId, userId }).onConflictDoNothing();
+}
+
+/**
  * Inserts a report row directly — the composite PK (reporter, target) makes
  * this idempotent, the same way `seedFollow` and `seedLike` are.
  *

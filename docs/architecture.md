@@ -267,11 +267,11 @@ sides by CI. See [operations.md](operations.md).
   a new upload re-evaluates from scratch (issue #246).
 - **Banners have one canonical 3:1 composition.** At zoom 1 the editor
   rectangle is exactly the region the encoder stores (`calculateCropFrame`),
-  so applying without adjusting anything is a no-op. The editor can also zoom
-  out past cover down to _contain_ (`minCropScale`) — the whole source
-  visible, the parts of the 3:1 window it cannot reach encoded as black
-  letterbox bars by both the canvas path and the GIF pipeline. The profile
-  frame displays that one composition with its height clamped
+  so applying without adjusting anything is a no-op. That rectangle is also
+  the peak of the zoom range: it already spans the source's full width or
+  full height — the largest 3:1 window that fits — so the window never leaves
+  the source; zoom only goes in, and drag pans within it (issue #273). The
+  profile frame displays that one composition with its height clamped
   (`apps/web/src/lib/banner-frame.ts`): exact 3:1 wherever the measure holds,
   a 150px band on narrow phones, never taller than 320px past the 1500px
   measure — so extreme viewports trim bounded edges of the composition

@@ -7,6 +7,7 @@ import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { makeAuthor, makePost } from "@/test/factories";
 import { renderWithProviders } from "@/test/render";
 import { installTestOrpc, orpc } from "@/lib/orpc";
+import { quoteDialogAtom } from "@/atoms/quote-composer";
 import { deletePostDialogAtom } from "@/atoms/post-delete";
 import { PostCard } from "@/components/post-card";
 import { m } from "@/paraglide/messages.js";
@@ -25,6 +26,16 @@ const fakeClient = {
     // A URL-bearing post mounts the link preview card query (issue #260);
     // answering "no card" keeps those fixtures about the inline link itself.
     linkCard: vi.fn(() => Promise.resolve({ card: null })),
+    repost: vi.fn(() => Promise.resolve({ postId: "", repostCount: 0, viewerHasReposted: true })),
+    unrepost: vi.fn(() =>
+      Promise.resolve({ postId: "", repostCount: 0, viewerHasReposted: false }),
+    ),
+    bookmark: vi.fn(() =>
+      Promise.resolve({ postId: "", repostCount: 0, viewerHasBookmarked: true }),
+    ),
+    unbookmark: vi.fn(() =>
+      Promise.resolve({ postId: "", repostCount: 0, viewerHasBookmarked: false }),
+    ),
     list: vi.fn(),
     thread: vi.fn(),
   },
@@ -73,6 +84,29 @@ describe("PostCard", () => {
         name: m.post_like({ count: String(post.likeCount) }),
       });
       expect(likeButton).toHaveAttribute("aria-pressed", "false");
+    });
+
+    // The wiring only: the pressed state and the accessible name, plus "the
+    // button asked the transport to bookmark this exact post". The optimistic
+    // flip, rollback and intent handling are owned by `atoms/bookmark.ts`.
+    it("renders the bookmark control as a pressed toggle when already saved, and invokes the toggle on click", async () => {
+      const post = makePost({ viewerHasBookmarked: true });
+      const queryClient = new QueryClient();
+      seedPostCache(queryClient, post);
+      await renderWithProviders(<PostCard post={post} />, { queryClient, signedInAs: true });
+
+      const bookmarkButton = screen.getByRole("button", { name: m.post_unbookmark() });
+      expect(bookmarkButton).toHaveAttribute("aria-pressed", "true");
+
+      const user = userEvent.setup();
+      await user.click(bookmarkButton);
+
+      await waitFor(() =>
+        expect(fakeClient.post.unbookmark).toHaveBeenCalledWith(
+          { postId: post.id },
+          expect.anything(),
+        ),
+      );
     });
 
     it("links the reply control to the post's thread, with its accessible name coming from aria-label", async () => {
@@ -470,6 +504,177 @@ describe("PostCard", () => {
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       expect(router.state.location.pathname).toBe("/");
       expect(router.state.location.pathname).not.toBe(`/post/${post.id}`);
+    });
+  });
+
+  // Issue #261: repost events and quoted posts. The degradation matrix —
+  // deleted, removed, hidden — is decided by the server's projection; these
+  // pin that the card renders what the projection says rather than guessing.
+  describe("reposts and quotes", () => {
+    it("attributes a reposted event to the reposter while the author stays the original's", async () => {
+      const reposter = makeAuthor({ name: "Reposter Name", username: "reposter" });
+      const post = makePost({
+        repostedBy: { ...reposter, repostedAt: new Date("2026-08-30T10:00:00Z") },
+      });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(screen.getByText(m.post_reposted_by({ name: "Reposter Name" }))).toBeInTheDocument();
+    });
+
+    it("renders the repost control as a pressed toggle and invokes the toggle on click", async () => {
+      const post = makePost({ viewerHasReposted: true, repostCount: 5 });
+      const queryClient = new QueryClient();
+      seedPostCache(queryClient, post);
+      await renderWithProviders(<PostCard post={post} />, { queryClient, signedInAs: true });
+
+      const repostButton = screen.getByRole("button", { name: m.post_unrepost({ count: "5" }) });
+      expect(repostButton).toHaveAttribute("aria-pressed", "true");
+
+      const user = userEvent.setup();
+      await user.click(repostButton);
+
+      await waitFor(() =>
+        expect(fakeClient.post.unrepost).toHaveBeenCalledWith(
+          { postId: post.id },
+          expect.anything(),
+        ),
+      );
+    });
+
+    // The server would accept a repost of a reply, but no shipped surface can
+    // show that event — the home feeds' repost arm excludes replies and
+    // profile feeds run no repost arm — so a control whose effect is a dead
+    // end is not offered. The reply's other controls stay.
+    it("hides the repost control on a reply, while keeping the like control", async () => {
+      const post = makePost({ parentId: "parent-1", parent: null });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(
+        screen.queryByRole("button", { name: m.post_repost({ count: String(post.repostCount) }) }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: m.post_unrepost({ count: String(post.repostCount) }),
+        }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: m.post_like({ count: String(post.likeCount) }) }),
+      ).toBeInTheDocument();
+    });
+
+    it("embeds the quoted post with its own author and a dedicated permalink header", async () => {
+      const quotedAuthor = makeAuthor({ name: "Quoted Author" });
+      const post = makePost({
+        content: "look at this",
+        quotedPostId: "quoted-1",
+        quoted: {
+          id: "quoted-1",
+          content: "the quoted words at https://example.com",
+          removed: false,
+          deleted: false,
+          removedReason: null,
+          attachments: [],
+          author: quotedAuthor,
+        },
+      });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      const quotedPermalink = screen.getByRole("link", { name: /Quoted Author/ });
+      expect(quotedPermalink).toHaveAttribute("href", "/post/quoted-1");
+      expect(screen.getByText(/the quoted words at/)).toBeInTheDocument();
+      // The quoted body keeps its own safe links; it is not nested inside the
+      // quoted-post permalink.
+      expect(screen.getByRole("link", { name: "https://example.com" })).toHaveAttribute(
+        "href",
+        "https://example.com/",
+      );
+    });
+
+    it("renders a blocked original as unavailable while preserving only the reposter attribution", async () => {
+      const post = makePost({
+        unavailable: true,
+        content: null,
+        author: { id: "", name: "", username: null, displayUsername: null, image: null },
+        repostedBy: {
+          id: "reposter-1",
+          name: "Reposter Name",
+          username: "reposter",
+          displayUsername: "Reposter",
+          image: null,
+          repostedAt: new Date("2026-08-30T10:00:00Z"),
+        },
+      });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(screen.getByText(m.post_reposted_by({ name: "Reposter Name" }))).toBeInTheDocument();
+      expect(screen.getByText(m.post_quoted_unavailable())).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /Unknown/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: m.post_quote() })).not.toBeInTheDocument();
+      // The redaction boundary covers the link preview too (issue #260): a
+      // redacted original has null content, hence no first URL, so no
+      // `linkCard` probe is ever mounted for it — the card cannot leak what
+      // the redaction took away.
+      expect(fakeClient.post.linkCard).not.toHaveBeenCalled();
+    });
+
+    it("offers the original author the appeal path from a removed quoted-post stub", async () => {
+      const post = makePost({
+        content: "quote survives",
+        quotedPostId: "quoted-1",
+        quoted: {
+          id: "quoted-1",
+          content: null,
+          removed: true,
+          deleted: false,
+          removedReason: "spam",
+          attachments: [],
+          author: makeAuthor(),
+        },
+      });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(screen.getByText(m.moderation_post_removed_stub())).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: m.moderation_post_removed_appeal() }),
+      ).toHaveAttribute("href", "/appeal?postId=quoted-1");
+    });
+
+    it("renders the deletion stub in place of a deleted quoted post, keeping the quote's own text", async () => {
+      const post = makePost({
+        content: "quote survives",
+        quotedPostId: "quoted-1",
+        quoted: {
+          id: "quoted-1",
+          content: null,
+          removed: false,
+          deleted: true,
+          removedReason: null,
+          attachments: [],
+          author: makeAuthor(),
+        },
+      });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(screen.getByText("quote survives")).toBeInTheDocument();
+      expect(screen.getByText(m.post_deleted_stub())).toBeInTheDocument();
+    });
+
+    it("renders the unavailable card when the quoted author is hidden from the viewer", async () => {
+      const post = makePost({ quotedPostId: "quoted-1", quoted: null });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(screen.getByText(m.post_quoted_unavailable())).toBeInTheDocument();
+    });
+
+    it("opens the quote dialog with the post as its target", async () => {
+      const store = createStore();
+      const post = makePost();
+      await renderWithProviders(<PostCard post={post} />, { store, signedInAs: true });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: m.post_quote() }));
+
+      expect(store.get(quoteDialogAtom)?.id).toBe(post.id);
     });
   });
 });

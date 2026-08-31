@@ -38,11 +38,13 @@ import { m } from "@/paraglide/messages.js";
  * display variant (`createDisplayVariant(file, kind, crop)`). The original file
  * is never touched here — the crop is a view, not a mutation.
  *
- * A banner can zoom out past its cover crop down to *contain* — the whole
- * source visible, the parts of the 3:1 frame it cannot reach shown as the
- * black that encodes as letterbox bars (`minCropScale`). Avatars stop at the
- * cover crop: every avatar surface is a square cover crop, so a letterboxed
- * avatar would render as bars behind its round mask.
+ * Neither slot zooms out past its default window: that window is the largest
+ * aspect-true rectangle inside the source, already spanning its full width or
+ * its full height (`minCropScale`), so the wheel only zooms in and a drag
+ * slides the window within the source — an axis it already spans has no slack
+ * and stays pinned to the source's edge. The window therefore never leaves
+ * the image (issue #273), and the preview needs no letterbox: the image fills
+ * the frame exactly at every zoom.
  *
  * The image is decoded twice on purpose: `createImageBitmap` for the oriented
  * dimensions the math needs (the same primitive `lib/media.ts` uses, and the
@@ -109,6 +111,14 @@ export function ImageCropDialog({
     frameWidth: number;
     frameHeight: number;
   } | null>(null);
+  /**
+   * The crop every writer sees, mirroring the state. The wheel listener below
+   * outlives many renders, so the `crop` it closed over would be the one it
+   * attached with — and a functional `setCrop` update cannot rebase the drag
+   * anchor, because the updater must stay pure. Every path that sets the state
+   * writes this ref too, so the two can never disagree.
+   */
+  const cropRef = useRef(crop);
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -143,24 +153,39 @@ export function ImageCropDialog({
       // The page must not scroll while the person is zooming the crop.
       event.preventDefault();
       const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
-      // A functional update rather than a captured `crop`: the listener
-      // outlives many renders, and reading the state it was attached with
-      // would make every notch zoom from the same starting scale. The floor is
-      // the slot's contain scale for a banner, the cover crop for an avatar.
-      setCrop((current) =>
-        clampCrop(
-          {
-            x: current.x,
-            y: current.y,
-            scale: Math.min(
-              Math.max(current.scale * factor, minCropScale(dims, kind)),
-              MAX_CROP_SCALE,
-            ),
-          },
-          dims,
-          kind,
-        ),
+      // Zoom from the latest descriptor, not the one this listener attached
+      // with: reading a captured `crop` would make every notch zoom from the
+      // same starting scale. The floor is the slot's default window
+      // (`minCropScale`) — below it the window would leave the source.
+      const next = clampCrop(
+        {
+          x: cropRef.current.x,
+          y: cropRef.current.y,
+          scale: Math.min(
+            Math.max(cropRef.current.scale * factor, minCropScale(dims, kind)),
+            MAX_CROP_SCALE,
+          ),
+        },
+        dims,
+        kind,
       );
+      cropRef.current = next;
+      setCrop(next);
+      // Zooming mid-drag must not strand the drag on the descriptor captured
+      // at pointer-down: the next pointer-move would pan at the pre-zoom scale
+      // and revert the zoom the person just chose. Rebase the anchor onto the
+      // zoomed descriptor — and onto the pointer's current position, because
+      // the zoomed crop already includes every pixel panned so far and the
+      // move delta must not count them twice.
+      const drag = dragRef.current;
+      if (drag) {
+        dragRef.current = {
+          ...drag,
+          startX: event.clientX,
+          startY: event.clientY,
+          crop: next,
+        };
+      }
     };
     // Not React's `onWheel`: React attaches wheel passively at the root, so a
     // passive handler cannot `preventDefault()` and the page would scroll
@@ -179,7 +204,10 @@ export function ImageCropDialog({
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      crop,
+      // The ref rather than the rendered `crop`: a wheel notch in the same
+      // frame as this press may not have re-rendered yet, and the drag must
+      // start from the descriptor the person is actually looking at.
+      crop: cropRef.current,
       frameWidth: rect.width,
       frameHeight: rect.height,
     };
@@ -197,7 +225,9 @@ export function ImageCropDialog({
     const rect = calculateCropRect(dims, kind, drag.crop);
     const x = drag.crop.x - (dx / drag.frameWidth) * (rect.width / dims.width);
     const y = drag.crop.y - (dy / drag.frameHeight) * (rect.height / dims.height);
-    setCrop(clampCrop({ x, y, scale: drag.crop.scale }, dims, kind));
+    const next = clampCrop({ x, y, scale: drag.crop.scale }, dims, kind);
+    cropRef.current = next;
+    setCrop(next);
   }
 
   function onPointerEnd(event: PointerEvent<HTMLDivElement>) {
@@ -225,13 +255,7 @@ export function ImageCropDialog({
           ) : (
             <div
               ref={frameRef}
-              className={cn(
-                "relative w-full touch-none overflow-hidden rounded-lg select-none",
-                // A banner zoomed past its cover crop shows parts of the frame
-                // the source cannot reach; black is what those parts encode
-                // as, so the preview must show them as black too.
-                kind === "banner" ? "bg-black" : "bg-muted",
-              )}
+              className="bg-muted relative w-full touch-none overflow-hidden rounded-lg select-none"
               style={{ aspectRatio: `${frameAspect}` }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
@@ -296,10 +320,9 @@ export function ImageCropDialog({
  * The `<img>`'s size and offset, as percentages of the frame, so the crop rect
  * fills the frame exactly. `rect` has the frame's aspect, so one scale factor
  * maps it to both axes; the negative offset slides the image so the rect's
- * top-left lands on the frame's top-left. A banner zoomed past its cover crop
- * has a rect larger than the source: the size drops below 100% and the offsets
- * go positive, which letterboxes the image over the frame's black — the same
- * bars the encode bakes in.
+ * top-left lands on the frame's top-left. The rect is inside the source, so
+ * the image always covers the whole frame — zooming in only enlarges it past
+ * the frame's edges, which `overflow-hidden` trims.
  */
 function imageStyle(
   dims: { width: number; height: number },

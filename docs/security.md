@@ -150,11 +150,11 @@ lookup), so deriving it earlier would mean doing that work twice. It is never
 keyed on an IP, so the "no anonymous IP-keyed bucket" property holds there
 too.
 
-The ten policies in `packages/api/src/rate-limit.ts` are per-minute:
-read 300, like 120, follow 60, write 15, upload 10, search 120, report 20,
-block 30, moderate 60, linkCard 300. The `linkCard` tier is sized like `read`
-because its middleware charges every call — cache-served cards included — and
-a feed asks for one card per post.
+The twelve policies in `packages/api/src/rate-limit.ts` are per-minute:
+read 300, like 120, bookmark 120, follow 60, repost 60, write 15, upload 10,
+search 120, report 20, block 30, moderate 60, linkCard 300. The `linkCard`
+tier is sized like `read` because its middleware charges every call —
+cache-served cards included — and a feed asks for one card per post.
 
 The limiter is **fixed-window and in-memory**: it resets on deploy and
 multiplies per replica. That is right for bounding one client and wrong for

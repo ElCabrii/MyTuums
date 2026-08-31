@@ -1,6 +1,6 @@
 {
-  "id": "e60338c3-5adf-44c2-a72c-52ec267aa968",
-  "prevId": "58f67752-4f84-4e56-be2b-46ceeca0f365",
+  "id": "e7f8573b-b406-4419-8407-716c2d4a053b",
+  "prevId": "20724bd3-c35b-430f-a8f3-c93e9a57414d",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1042,6 +1042,116 @@
       },
       "isRLSEnabled": false
     },
+    "public.link_card": {
+      "name": "link_card",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "image_media_path": {
+          "name": "image_media_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "purged_at": {
+          "name": "purged_at",
+          "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "purged_by": {
+          "name": "purged_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "purged_reason": {
+          "name": "purged_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "link_card_url_key": {
+          "name": "link_card_url_key",
+          "columns": [
+            {
+              "expression": "url",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "link_card_purged_by_user_id_fk": {
+          "name": "link_card_purged_by_user_id_fk",
+          "tableFrom": "link_card",
+          "tableTo": "user",
+          "columnsFrom": [
+            "purged_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "link_card_title": {
+          "name": "link_card_title",
+          "value": "(\"link_card\".\"title\" is null and \"link_card\".\"domain\" is null) or (\"link_card\".\"title\" is not null and \"link_card\".\"domain\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.moderation_action": {
       "name": "moderation_action",
       "schema": "",
@@ -1229,6 +1339,12 @@
         },
         "parent_id": {
           "name": "parent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quoted_post_id": {
+          "name": "quoted_post_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -1679,6 +1795,101 @@
       "compositePrimaryKeys": {
         "post_like_post_id_user_id_pk": {
           "name": "post_like_post_id_user_id_pk",
+          "columns": [
+            "post_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.post_repost": {
+      "name": "post_repost",
+      "schema": "",
+      "columns": {
+        "post_id": {
+          "name": "post_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "post_repost_created_idx": {
+          "name": "post_repost_created_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "post_id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "post_repost_post_id_post_id_fk": {
+          "name": "post_repost_post_id_post_id_fk",
+          "tableFrom": "post_repost",
+          "tableTo": "post",
+          "columnsFrom": [
+            "post_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "post_repost_user_id_user_id_fk": {
+          "name": "post_repost_user_id_user_id_fk",
+          "tableFrom": "post_repost",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "post_repost_post_id_user_id_pk": {
+          "name": "post_repost_post_id_user_id_pk",
           "columns": [
             "post_id",
             "user_id"
