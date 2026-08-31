@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { localizeEditPostError } from "@/lib/edit-post-error";
 import { readCachedPost } from "@/lib/post-cache";
 import { viewerAtom } from "@/atoms/session";
 import { m } from "@/paraglide/messages.js";
@@ -86,7 +87,17 @@ function EditPostDialogBody({ postId }: { postId: string }) {
             editPost.mutate({ postId, content });
           }}
           isPending={editPost.isPending}
-          errorMessage={editPost.isError ? editPost.error.message || m.post_edit_error() : null}
+          // The server's own refusal, not the generic one: every refusal
+          // `post.edit` makes has a distinct reason, and the dialog is the only
+          // place it can be said. The three state refusals map to translated
+          // copy through `localizeEditPostError`; anything else (including a
+          // message-less transport error) falls through verbatim or to the
+          // generic string.
+          errorMessage={
+            editPost.isError
+              ? localizeEditPostError(editPost.error.message) || m.post_edit_error()
+              : null
+          }
           placeholder={m.post_edit_placeholder()}
           submitLabel={m.post_edit_submit()}
           mentionScope="edit-post"

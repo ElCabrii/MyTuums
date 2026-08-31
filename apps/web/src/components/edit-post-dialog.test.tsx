@@ -115,10 +115,10 @@ describe("EditPostDialog", () => {
 
     // The server's own message, not the generic one: every refusal `post.edit`
     // makes has a distinct reason, and the dialog is the only place it can be
-    // said.
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This post is under moderation review and can no longer be edited.",
-    );
+    // said. Asserted through the message key rather than the raw string: the
+    // alert must route through `localizeEditPostError`, or the refusal renders
+    // untranslated in every locale but English.
+    expect(await screen.findByRole("alert")).toHaveTextContent(m.post_edit_under_review());
     expect(store.get(editPostDialogAtom)).toBe("post-1");
   });
 });
