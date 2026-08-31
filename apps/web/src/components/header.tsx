@@ -155,10 +155,14 @@ export function Header() {
             <MessageSquare className="h-5 w-5" />
           </Button>
           {/* The notifications bell (issue #259): a live link to /notifications
-              carrying the unread count. The badge renders only when the count
-              is both loaded and non-zero, so a pending or empty count reads as
-              the plain bell instead of a false "0". Capped at 99+ — the badge
-              is a signal, not an accountant. */}
+              carrying the unread count, visible at every width — below `sm` it
+              is the page's only entry point, and the header's own contract is
+              that actions stay reachable while the wordmark yields (`min-w-0`
+              plus `truncate`), so one more size-9 icon never overflows the
+              row. The badge renders only when the count is both loaded and
+              non-zero, so a pending or empty count reads as the plain bell
+              instead of a false "0". Capped at 99+ — the badge is a signal,
+              not an accountant. */}
           <Button
             variant="ghost"
             size="icon"
@@ -172,7 +176,7 @@ export function Header() {
                     ? m.nav_notifications_unread({ count: unreadCount })
                     : m.nav_notifications()
                 }
-                className="relative hidden sm:inline-flex"
+                className="relative"
               />
             }
           >
