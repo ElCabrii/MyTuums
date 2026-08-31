@@ -3,7 +3,11 @@ import { atomFamily } from "jotai-family";
 import { atomWithInfiniteQuery } from "jotai-tanstack-query";
 import { isSignedInAtom, sessionPendingAtom } from "@/atoms/session";
 import { feedScopeAtom, type FeedScope } from "@/lib/feed-scope";
-import { postListQueryOptions, type PostFeedParams } from "@/lib/query-definitions";
+import {
+  postListQueryOptions,
+  type PostFeedParams,
+  type PostListScope,
+} from "@/lib/query-definitions";
 
 export type { PostFeedParams } from "@/lib/query-definitions";
 
@@ -41,8 +45,9 @@ export const decode = (key: string): PostFeedParams => {
   const authorId = key.slice(feed.length + replies.length + parentId.length + 3);
 
   const params: PostFeedParams = {
-    // SAFETY: encode only ever writes one of the two literal feed scopes.
-    feed: feed as FeedScope,
+    // SAFETY: encode only ever writes one of the three literal list scopes —
+    // the two home feeds and the bookmarks page.
+    feed: feed as PostListScope,
   };
   if (authorId) params.authorId = authorId;
   if (parentId) params.parentId = parentId;

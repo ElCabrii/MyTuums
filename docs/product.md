@@ -45,14 +45,41 @@ both by the server's page gate and by the client.
   text, up to four images, or both — a submission with neither is refused, and
   an image-only post stores an empty body rather than placeholder whitespace.
   Rendering recognizes
-  two link shapes in that text and nothing else. Syntactically valid `@handles`
+  three link shapes in that text and nothing else. Syntactically valid `@handles`
   become links to lowercase canonical profile routes; malformed handles stay as
   plain text, and an unknown handle lands on the profile route's existing
   not-found state. Absolute `http` and `https` URLs become external links that
   open in a new tab, keeping the address as it was typed and leaving the
   sentence punctuation around it outside the link. Every other scheme —
-  `javascript:`, `data:`, `ftp:` — stays inert text, and a recognized URL never
-  gets a preview, unfurl or link card.
+  `javascript:`, `data:`, `ftp:` — stays inert text. A `#tag` — a hash followed by one or
+  more ASCII letters, digits or underscores — becomes a link to post search
+  filtered to that tag, canonicalized to lowercase exactly like a handle.
+  One character is a complete tag: unlike a handle, there is no minimum
+  length. The query keeps the `#` so it matches hash-marked occurrences
+  rather than the bare word — but post search is a case-insensitive
+  substring scan, so a longer tag (`#tag_expo`), a glued word (`word#tag`)
+  or a URL fragment (`https://example.com/#tag`) matches it all the same.
+  Accented letters are not tag characters
+  even though the app is bilingual, so `#café` and `#été` stay plain text —
+  as does any hash that is not followed by a complete tag (a lone `#`,
+  `##tag`, `word#tag`, `#tag-way`), exactly like a malformed handle. A tag
+  link is nothing more than an entry into chronological post search: there is
+  no trending, no tag ranking, no suggested tags and no tag follow.
+- The first URL in a post or reply may render a link preview card beneath the
+  text: domain, title, description and — when the target provides one — a lead
+  image (issue #260). The second and later URLs stay plain links. Fetching is
+  server-side only, against the same http(s) rule the linkifier applies, with
+  private/loopback/link-local addresses refused, redirects re-checked at every
+  hop, only the scheme's own port dialled, and size and time caps on the
+  fetch. A URL is fetched at most once per revalidation window and cached by
+  URL, so every post carrying it shares one card; a URL with no Open Graph
+  payload is cached as "no card" the same way. The post's stored text is never
+  modified. A fetched lead image is stored in the media bucket and served
+  from `/media/` like any other object, never hot-linked from the target.
+  Every failure mode — a dead or refused target, a timeout, a missing payload
+  — leaves the post with the plain link it always had. A moderator can purge
+  a URL's card (`moderation.purgeLinkCard`), which removes the preview from
+  every post carrying the URL and stops the URL from ever unfurling again.
 - A reply is a post with a parent. Threads show the focused post, up to 20
   ancestors of context, and keyset-paginated direct replies. Beneath each
   direct reply, the thread groups the deterministic descendant branch first
@@ -88,10 +115,51 @@ both by the server's page gate and by the client.
 - Likes are two idempotent operations, `like` and `unlike`, never a toggle —
   so a retry is safe and ordering cannot invert the result. Like and reply
   counts are derived on read, not denormalised.
+- Reposts (re-sharing an existing post, no added text) are the same shape:
+  `repost` / `unrepost`, idempotent, with the repost count derived on read. A
+  repost is an event, not a post: it has no text or images of its own, and the
+  home feeds render the original post attributed to the reposter at the
+  repost's timestamp. Reposting your own post is allowed; "reposting a repost"
+  has no target — every repost action names an original post. Profile feeds
+  stay the author's own activity and carry no repost events. Only top-level
+  posts are offered the repost control: no feed shows a repost of a reply, so
+  the action would never render anywhere (the row remains legal — the API
+  accepts it — it is the surfaces that have nowhere to put it).
+- A quote is a normal post — every text and image rule applies — plus a
+  reference to the quoted post, which renders embedded inside it in every
+  context: feed, permalink, thread, search results and the moderation case
+  view. A reply cannot also be a quote. Quotes render one level deep: a quote
+  may itself be quoted, but the embedded preview carries no quote reference of
+  its own, so a quote-of-quote shows the middle post's words and drops the
+  card embedded in them. Quoting a reply is allowed, and its embedded card
+  shows the reply without the "Replying to…" line a reply in a feed carries —
+  a known gap in the embedded preview, not a rule.
+- Both degrade the same way when the original goes away, decided with the
+  issue: an author-deleted original renders the deletion stub in place of the
+  embedded post (a repost event stays in the feed, and the quote's own text
+  survives); a moderator-removed original renders the removal stub; an
+  original whose author is banned or blocked reads like the author is gone —
+  a quote keeps its own words with an unavailable embedded post, while a repost
+  keeps the reposter's event but redacts the original author, content, media,
+  counts and interactions to the unavailable treatment.
+- Bookmarks are the same idempotent pair — `bookmark` / `unbookmark` — holding
+  a post for later. They are private by construction: no counts, no visibility
+  to other users or to the post's author, nothing on the public profile, and
+  no surface reads them but the saver's own bookmarks page. That page lists
+  saved posts strictly by when they were saved, newest first, keyset-paginated;
+  there are no notes, folders or orderings. Saving your own posts is allowed.
+  A post deleted by its author drops off the page, a moderator-removed one
+  stays as its stub, and unbookmarking a deleted post is not an error. Neither
+  is unbookmarking a post whose author has since blocked the saver or been
+  banned: the row is the saver's own, so a saved post can always be removed
+  even once it no longer renders.
 - Follows are the same shape: `follow` / `unfollow`, with follower and
   following lists.
 - Feeds come in two scopes — everyone, and the people you follow — and are
-  keyset-paginated so a page boundary can never skip or repeat a post.
+  keyset-paginated so a page boundary can never skip or repeat an event. The
+  timeline is strictly reverse-chronological by event time — a post at its own
+  creation, a repost at the repost's — with no ranking and no deduplication:
+  the same post can appear once authored and once reposted.
 
 ## Profiles and search
 
@@ -130,6 +198,10 @@ app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
   never leaves a profile pointing at missing media.
 - Images are stored as relative `/media/<key>` paths and served as a redirect
   to a short-lived presigned URL. Viewing one requires a session.
+- A link preview's lead image lives under `link-cards/<uuid>.<ext>` and is
+  public to every signed-in viewer: it is web content this app mirrored into
+  its own bucket, owned by no user, and validated from its bytes before
+  storage exactly like an upload.
 
 ## Locale and theme
 
@@ -251,6 +323,16 @@ the creation timestamp never moves, so an edit never re-ranks a feed. Each
 edit records the text it replaced; that history is visible to moderators in
 the case view, never on public surfaces. A removed or deleted post cannot be
 edited. _Avoid:_ updated post, revised post.
+
+**Repost** — a user re-sharing an existing post to their followers, with no
+added text or images. An event about the original, not a post of its own: the
+feed renders the original attributed to the reposter. Idempotent as a pair
+(`repost` / `unrepost`). _Avoid:_ retweet, boost, share.
+
+**Quote post** — a normal post that references another post, which renders
+embedded inside it. Carries every post rule; a reply cannot also be a quote.
+The embedded card renders one level deep: a quoted quote loses its own
+embedded card. _Avoid:_ quote tweet, comment with quote.
 
 **Moderation action** — any act by a moderator, staff member or admin that the
 audit log records. Every one of them emails the affected user, including

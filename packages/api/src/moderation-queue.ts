@@ -12,7 +12,7 @@ import { moderatorProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { publicUserColumns } from "./users.js";
 import { effectivelyBanned } from "./visibility.js";
-import { postAttachmentsSelection, type PostAttachment } from "./posts.js";
+import { postAttachmentsSelection, quotedPostEvidence, type PostAttachment } from "./posts.js";
 
 /**
  * The moderator triage procedures: the merged queue, the case view, and
@@ -321,6 +321,11 @@ export const queueRouter = {
                   content: post.content,
                   createdAt: post.createdAt,
                   parentId: post.parentId,
+                  // The quoted post a quote targets (issue #261): raw content
+                  // regardless of tombstones, the same evidence rule as the
+                  // target's own content and attachments above.
+                  quotedPostId: post.quotedPostId,
+                  quoted: quotedPostEvidence(),
                   removedAt: post.removedAt,
                   removedBy: post.removedBy,
                   removedReason: post.removedReason,

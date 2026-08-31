@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Database } from "@my-tuums/db";
 import { follow, moderationAction, post, report, user, userBlock } from "@my-tuums/db/schema";
 import {
+  LINK_CARD_URL_MAX_LENGTH,
   MODERATION_NOTE_MAX_LENGTH,
   POST_REPORT_REASONS,
   SEARCH_QUERY_MAX_LENGTH,
@@ -13,6 +14,7 @@ import {
   USER_REPORT_REASONS,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
+import { purgeLinkCard } from "./link-card.js";
 import { appealsRouter } from "./moderation-appeals.js";
 import {
   banUser,
@@ -99,6 +101,12 @@ const suspensionInput = z.object({
   userId: z.string().min(1),
   reason: z.string().trim().min(1).max(MODERATION_NOTE_MAX_LENGTH),
   durationSeconds: z.number().int().min(SUSPENSION_MIN_SECONDS).max(SUSPENSION_MAX_SECONDS),
+});
+
+/** The purge input: the card's URL under the same scheme rule reads accept. */
+const linkCardPurgeInput = z.object({
+  url: z.url({ protocol: /^https?$/ }).max(LINK_CARD_URL_MAX_LENGTH),
+  reason: z.string().trim().min(1).max(MODERATION_NOTE_MAX_LENGTH),
 });
 
 export const moderationRouter = {
@@ -321,6 +329,26 @@ export const moderationRouter = {
         note: input.note,
       });
       return { postId: input.postId, restored: true };
+    }),
+
+  /**
+   * Purges a link preview card — the staff lever for a hostile unfurl. A
+   * card is shared by every post carrying the URL, so a phishing or NSFW
+   * preview is one viewer-wide object; purging nulls the row, removes the
+   * stored lead image, and makes the URL never unfurl again. The actor and
+   * reason are recorded on the row — the audit trail `moderation_action`
+   * cannot carry, its targets being post- and user-shaped by schema.
+   */
+  purgeLinkCard: moderatorProcedure
+    .use(rateLimit(RATE_LIMITS.moderate))
+    .input(linkCardPurgeInput)
+    .handler(async ({ input, context }) => {
+      await purgeLinkCard(context, {
+        url: input.url,
+        actorId: context.user.id,
+        reason: input.reason,
+      });
+      return { url: input.url, purged: true };
     }),
 
   /**

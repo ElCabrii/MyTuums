@@ -54,16 +54,21 @@ app's build from the same origin.
   the optimistic sweeps match on exactly those prefixes. "Cleaning them up"
   forks every cache entry silently.
 - **Sign-out clears the QueryClient and sweeps every family.** Cached rows
-  carry viewer-relative fields (`viewerHasLiked`, `viewerIsFollowing`) under
-  viewer-less keys. `src/atoms/session-teardown.ts` owns that whole inventory
-  behind one call; a new viewer-owned family is added there, not in
-  `signOutAtom`. Its lightweight coordinator clears the QueryClient
+  carry viewer-relative fields (`viewerHasLiked`, `viewerHasBookmarked`,
+  `viewerIsFollowing`) under viewer-less keys. `src/atoms/session-teardown.ts`
+  owns that whole inventory behind one call; a new viewer-owned family is
+  added there, not in `signOutAtom`. Its lightweight coordinator clears the QueryClient
   synchronously, then dynamically imports each family for an independent,
   best-effort sweep so chunk loading cannot block sign-out.
 - **Like and follow serialise per entity.** One `scope` id per entity,
   per-entity intent atoms drop superseded responses, and rollback rides on
   mutation-level `onError` — per-call callbacks never fire for write-only
-  atoms read with `useSetAtom`.
+  atoms read with `useSetAtom`. `src/atoms/repost.ts` is the same contract again
+  (the file points back at `src/atoms/like.ts` for the reasoning), with one
+  addition: success in either direction invalidates the `post.list` queries,
+  because a repost is a feed _event_ whose position is server-ordered — a new
+  one lands at the top of the home feeds, and an unrepost removes one from
+  them.
 - **Persisted atoms read `localStorage` as `unknown`, sanitise on read, and
   set `getOnInit: true`** — without it the first render flashes the default.
 - **Exactly one effect owns each redirect.** Auth pages call
@@ -114,6 +119,21 @@ app's build from the same origin.
   own scrollbar colors or dimensions.
 - **Feed and list parameterisation lives in atoms.** `PostFeed` takes a
   `feedAtom` prop and never knows its own scope or author.
+- **A link preview card belongs to its URL, not to the viewer (issue #260).**
+  `PostCard` asks `firstLinkUrl` (exported by `linked-text.tsx`, the same
+  scanner that renders the inline links) for the first URL only, and
+  `linkCardAtom` (`src/atoms/link-card.ts`) queries `post.linkCard` per URL —
+  deliberately absent from the sign-out sweep, because no field in a card is
+  viewer-relative. `PostLinkCard` renders nothing for a pending, failed or
+  card-less URL: the plain inline link is the whole fallback. A redacted post
+  never asks: the card is derived from `content`, and a tombstoned or
+  unavailable post reads null content.
+- **The quote composer is one root-mounted dialog, not a page.** Any card's
+  Quote button sets `quoteDialogAtom` (the full post row — the dialog previews
+  the embedded card from it), and `QuoteDialog` in `__root.tsx` is the only
+  mounted instance, the same identity-atom shape as the delete confirmation.
+  Its draft is in-memory: one dialog, bounded lifetime, nothing to evict from
+  `localStorage`.
 - **Permalink reply grouping reads the continuation embedded in each direct
   `post.list({ parentId })` page.** `ThreadReplyFeed` renders the flat direct
   page and its connected branch without recursive indentation;

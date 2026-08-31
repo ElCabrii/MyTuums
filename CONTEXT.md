@@ -6,9 +6,9 @@ operations, and security.
 
 ## Repository
 
-MyTuums — a Twitter-style social app (posts, replies, likes, follows,
-profiles, moderation) with real authentication. pnpm 12 + Turborepo on Node
-24, TypeScript strict everywhere.
+MyTuums — a Twitter-style social app (posts, replies, likes, bookmarks,
+follows, profiles, moderation) with real authentication. pnpm 12 + Turborepo
+on Node 24, TypeScript strict everywhere.
 
 | Workspace       | Package            | Owns                                               |
 | --------------- | ------------------ | -------------------------------------------------- |

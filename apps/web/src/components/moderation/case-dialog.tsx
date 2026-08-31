@@ -292,6 +292,51 @@ function TargetPostCard({
             the moderator's only record of what those reports were raised
             against. Newest first, matching the reports section. */}
         {target.editHistory.length > 0 && <EditHistorySection target={target} />}
+        {/* The quoted post (issue #261), with the moderator's raw-content
+            projection — the evidence rule the target's own content follows
+            above. A removed or deleted quoted original renders its stub
+            markers rather than disappearing: the moderator needs to see what
+            the quote amplified, including its tombstones. */}
+        {target.quoted && (
+          <div className="border-border space-y-2 rounded-lg border p-3">
+            <p className="text-muted-foreground text-xs font-medium">
+              {m.moderation_case_quoted_label()}
+            </p>
+            <div className="flex min-w-0 items-center gap-2">
+              <UserAvatar
+                user={target.quoted.author}
+                alt={target.quoted.author.name || m.user_unknown()}
+                className="size-6"
+                fallbackClassName="text-[10px]"
+              />
+              <span className="truncate text-sm font-medium">
+                {target.quoted.author.name || m.user_unknown()}
+              </span>
+              {handleOf(target.quoted.author) && (
+                <span className="text-muted-foreground truncate text-xs">
+                  @{handleOf(target.quoted.author)}
+                </span>
+              )}
+            </div>
+            {target.quoted.content && (
+              <p className="text-sm break-words whitespace-pre-line">
+                <LinkedText text={target.quoted.content} />
+              </p>
+            )}
+            <PostAttachmentGrid attachments={target.quoted.attachments} />
+            {target.quoted.removed && (
+              <p className="text-muted-foreground text-xs">
+                {m.moderation_post_removed_stub()}
+                {target.quoted.removedReason
+                  ? ` — ${m.moderation_post_removed_reason({ reason: target.quoted.removedReason })}`
+                  : ""}
+              </p>
+            )}
+            {target.quoted.deleted && (
+              <p className="text-muted-foreground text-xs">{m.post_deleted_stub()}</p>
+            )}
+          </div>
+        )}
         {target.removedAt && (
           <Alert variant="destructive">
             <Trash2 />
