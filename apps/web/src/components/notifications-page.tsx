@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { Bell } from "lucide-react";
@@ -25,12 +25,20 @@ import { getLocale } from "@/paraglide/runtime.js";
 export function NotificationsPage() {
   const feed = useAtomValue(notificationsFeedAtom);
   const markAllRead = useAtomValue(markAllReadAtom);
+  // The once-per-mount guard is the ref, not the mutation state. The atom's
+  // value is a fresh object on every emit (query events, pending → success
+  // transitions), and on a slow machine the first `mutate`'s isPending flip
+  // can land after the next effect run — both runs see `isIdle` and the call
+  // fires twice (seen on a loaded self-hosted runner; harmless server-side,
+  // but the guarantee is the page's, so the ref owns it). `isIdle` stays as
+  // the semantic gate — never re-fire a mutation that already ran.
+  const markedOnMount = useRef(false);
 
-  // `isIdle` is the once-guard: the mutation result object changes identity
-  // through pending → success, and an effect keyed on it alone would refire
-  // the mutation on each of those transitions. Idle only ever turns one way.
   useEffect(() => {
-    if (markAllRead.isIdle) markAllRead.mutate({});
+    if (!markedOnMount.current && markAllRead.isIdle) {
+      markedOnMount.current = true;
+      markAllRead.mutate({});
+    }
   }, [markAllRead]);
 
   const items = feed.data?.pages.flatMap((page) => page.items) ?? [];
