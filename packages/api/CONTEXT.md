@@ -124,21 +124,22 @@ over HTTP and imports only its browser-safe subpaths.
   profile resolve to its suspended stub instead of 404ing. `user.byUsername`
   redacts authored profile fields, relationship counts and viewer state from
   that stub before it crosses the API boundary.
-- **`like`/`unlike`, `bookmark`/`unbookmark` and `follow`/`unfollow` are
-  separate idempotent procedures, never a toggle** — ordering and retry
-  safety. A bookmark is the private twin of a like: the composite
-  `post_bookmark` primary key is the one-row rule, `postSelection`'s
-  `viewerHasBookmarked` probe is its only read besides the saver's own
-  `post.list({ feed: "bookmarks" })` page, and no count is ever derived from
-  the table. That page is a mode of `post.list` (keyset on the bookmark's
-  `(created_at, post_id)`, mirrored by `post_bookmark_user_created_idx`), so
-  it shares the projection, the feed rules — author-deleted posts omitted,
-  removals stubbed, visibility filtered — and the web app's optimistic sweeps.
-  `unbookmark` deliberately carries no target visibility check, unlike
-  `bookmark`: the row it deletes is the caller's own, its response is the same
-  for a missing and an invisible post, and the page's visibility filter hides
-  exactly the saves that would otherwise be stranded — unremovable from the
-  page that no longer renders them.
+- **`like`/`unlike`, `repost`/`unrepost`, `bookmark`/`unbookmark` and
+  `follow`/`unfollow` are separate idempotent procedures, never a toggle** —
+  ordering and retry safety. A bookmark is the private twin of a like: the
+  composite `post_bookmark` primary key is the one-row rule,
+  `postSelection`'s `viewerHasBookmarked` probe is its only read besides the
+  saver's own `post.list({ feed: "bookmarks" })` page, and no count is ever
+  derived from the table. That page is a mode of `post.list` (keyset on the
+  bookmark's `(created_at, post_id)`, mirrored by
+  `post_bookmark_user_created_idx`), so it shares the projection, the feed
+  rules — author-deleted posts omitted, removals stubbed, visibility
+  filtered — and the web app's optimistic sweeps. `unbookmark` deliberately
+  carries no target visibility check, unlike `bookmark`: the row it deletes
+  is the caller's own, its response is the same for a missing and an
+  invisible post, and the page's visibility filter hides exactly the saves
+  that would otherwise be stranded — unremovable from the page that no
+  longer renders them.
 - **Relationship writes for a pair are serialized by one advisory lock.**
   "A blocked pair has no follow edge" spans `follow` and `user_block`, so no
   database constraint can hold it. `follow`, `block` and `unblock` all take
@@ -177,6 +178,43 @@ over HTTP and imports only its browser-safe subpaths.
   pair is safe because the update compares both tombstones; after losing to a
   concurrent delete or removal, it re-reads the winner and preserves that
   outcome.
+- **Reposts and quote posts are events and references, never posts (issue
+  #261).** A repost is a `post_repost` row — the same idempotent
+  `repost`/`unrepost` pair, composite-PK idempotency and derived count as
+  `like`/`unlike` — so "reposting a repost" has no expressible target: every
+  action names an original post id. A quote is a post row plus `quotedPostId`
+  (deliberately FK-less, the evidence-retention pattern of `report.targetId`:
+  hard-deleting the quoted post must not cascade the quoter's own post away),
+  carrying every post rule and rendering its embedded `quoted` preview in
+  every context through `postSelection` — feed, permalink, thread, search —
+  plus the moderator's raw-content variant (`quotedPostEvidence`) in
+  `moderation.case`. The degradation matrix is decided and pinned in
+  `src/reposts.int.test.ts`: author-deleted original → deletion stub in place
+  of the embedded post (the repost event stays in the feed; the quote's own
+  text survives); moderator-removed original → removal stub, with
+  `removedReason` author-only as everywhere; banned/blocked original author →
+  a quote's embedded post is null, while a repost keeps the visible reposter's
+  event with an `unavailable` original whose identity, content, media, counts
+  and interactions are redacted.
+- **The home feeds walk a merged event timeline.** `post.list` without
+  `parentId` unions authored posts with repost events (`feedEventPage` in
+  `src/posts.ts`), strictly reverse-chronological by event time — a repost
+  places the original at the repost's timestamp — with no ranking and no
+  deduplication: one post can be two events. The event cursor is a three-part
+  key (`createEventCursorCodec` in `src/cursor.ts`): `(event_at, post_id,
+reposter_key)`, where the reposter half is absent for post events and binds
+  as `''` in SQL so the row-value comparison stays a total order. Profile
+  feeds (`authorId`) and reply lists run no repost arm: a profile is the
+  author's own activity, and the reply list is direct replies by their own
+  event time. The same rule excludes reposts _of_ replies under
+  `kind: "posts"` — no shipped feed can show such an event, so the web hides
+  the repost control on replies rather than offer an action whose result
+  never renders anywhere. The repost arm applies the block/ban filter to the
+  reposter
+  (`aliasVisibleTo` — `invisibleAuthor` is bound to the un-aliased table), but
+  deliberately keeps a visible reposter's event when only the original author
+  is hidden; the projection phase re-evaluates that original and emits the
+  redacted `unavailable` shape.
 - **Replies and their inline continuations are modes of `post.list`, not
   separate procedures.** `parentId` remains the keyset-paginated owner of a
   focused post's direct replies; those pages add the bounded original-author
@@ -260,9 +298,14 @@ over HTTP and imports only its browser-safe subpaths.
   `sql.param(value, column)` — interpolating a JS `Date` hands postgres.js
   something it cannot serialise.
 - **`keysetPage`'s `createdAtField` is type-tied to the `createdAt` column**, so
-  a cursor can never encode a different timestamp than the SQL compares. One
-  list bypasses the skeleton on purpose: `moderation.queue` merges two shapes
-  in JS, which does not fit a single query.
+  a cursor can never encode a different timestamp than the SQL compares. Two
+  lists bypass the skeleton on purpose: `moderation.queue` merges two shapes
+  in JS, which does not fit a single query; and the home feeds'
+  `feedEventPage` (`src/posts.ts`) unions authored-post and repost events
+  whose cursor key is a three-part row value — `(event_at, post_id,
+reposter_key)` — so it hand-rolls the same three parts the skeleton owns
+  (row-value cursor filter, +1 lookahead, next-cursor anchored on the last
+  returned row) rather than fit a pair-shaped helper.
 - **Presigned URLs are windowed** (`MEDIA_SIGNING_WINDOW_MS`): byte-identical
   within a window, which is what keeps repeat views off the bucket. Every
   `/media/` redirect is `private, no-store` — a viewer-authorized decision —

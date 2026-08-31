@@ -75,7 +75,7 @@ export function createRateLimiter(
      * (packages/api/src/procedures.ts) to key on `appeal:<nonce>` or
      * `appeal:<actionId>` instead — a capability the server itself mints and
      * HMAC-signs (`appeal-token.ts`), never one an outside caller can choose.
-     * So the keyspace is bounded by registered users times the 9 policies in
+     * So the keyspace is bounded by registered users times the 10 policies in
      * `RATE_LIMITS`, plus however many appeal capabilities happen to be
      * outstanding at once — all server-issued, none of it grown on purpose by
      * an attacker spraying requests from many addresses. What `maxKeys`
@@ -211,6 +211,15 @@ export const RATE_LIMITS = {
    * following a full screen of suggestions never trips it.
    */
   follow: { name: "follow", limit: 60, windowMs: MINUTE },
+  /**
+   * Reposts and unreposts. The same single indexed insert a like costs, so by
+   * cost alone it would share the `like` budget — but mass-reposting is an
+   * amplification vector in a way mass-liking isn't (every repost lands in a
+   * follower feed), so it gets its own namespace: someone burning it can't
+   * also lock themselves out of liking. The same 60 as `follow`, the other
+   * mass-action spam vector with the same per-call cost.
+   */
+  repost: { name: "repost", limit: 60, windowMs: MINUTE },
   /** Publishing. Deliberately tight — this is the one that writes rows. */
   write: { name: "write", limit: 15, windowMs: MINUTE },
   /**

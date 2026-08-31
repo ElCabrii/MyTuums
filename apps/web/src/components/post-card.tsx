@@ -1,12 +1,14 @@
 import type { MouseEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Bookmark, Heart, MessageCircle, MoreHorizontal } from "lucide-react";
+import { Bookmark, Heart, MessageCircle, MoreHorizontal, Quote, Repeat2 } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileLink } from "@/components/profile-link";
 import { LinkedText } from "@/components/linked-text";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { toggleLikeAtomFamily } from "@/atoms/like";
+import { toggleRepostAtomFamily } from "@/atoms/repost";
+import { quoteDialogAtom } from "@/atoms/quote-composer";
 import { toggleBookmarkAtomFamily } from "@/atoms/bookmark";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import { deletePostDialogAtom } from "@/atoms/post-delete";
@@ -41,6 +43,80 @@ import { getLocale } from "@/paraglide/runtime.js";
  */
 type PostCardVariant = "feed" | "ancestor" | "focused";
 
+/** The embedded quoted post's own compact author line — name and handle, linkable. */
+function quotedAuthorName(quoted: NonNullable<Post["quoted"]>): string {
+  return quoted.author.name || handleOf(quoted.author) || m.user_unknown();
+}
+
+/**
+ * The post embedded inside a quote (issue #261): a compact, linked card that
+ * degrades exactly the way the server's `quoted` projection decides —
+ * removal stub, deletion stub, or "unavailable" when the quoted author is
+ * hidden from the viewer. Kept non-interactive apart from its link so it
+ * cannot nest action rows inside the outer card's shell.
+ */
+function QuotedPostCard({ quoted }: { quoted: NonNullable<Post["quoted"]> }) {
+  const quotedHandle = handleOf(quoted.author);
+  const authorName = quotedAuthorName(quoted);
+
+  if (quoted.removed) {
+    return (
+      <div className="border-border/60 bg-muted/30 mb-3 rounded-lg border p-3">
+        <p className="text-muted-foreground text-sm">{m.moderation_post_removed_stub()}</p>
+        {quoted.removedReason && (
+          <>
+            <p className="text-foreground/80 mt-1 text-sm">
+              {m.moderation_post_removed_reason({ reason: quoted.removedReason })}
+            </p>
+            {/* `removedReason` is original-author-only, so its presence gates
+                the same appeal capability the original post's own stub shows. */}
+            <Link
+              to="/appeal"
+              search={{ postId: quoted.id }}
+              className="text-primary mt-1 inline-block text-xs hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {m.moderation_post_removed_appeal()}
+            </Link>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  if (quoted.deleted) {
+    return (
+      <div className="border-border/60 bg-muted/30 mb-3 rounded-lg border p-3">
+        <p className="text-muted-foreground text-sm">{m.post_deleted_stub()}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-border bg-muted/20 mb-3 rounded-lg border p-3">
+      {/* Only the compact header links to the quoted permalink. The body can
+          contain LinkedText anchors and attachment-viewer buttons, so making
+          the whole card a link would create invalid nested interactive
+          controls and ambiguous keyboard behavior. */}
+      <Link
+        to="/post/$postId"
+        params={{ postId: quoted.id }}
+        className="mb-1 flex flex-wrap items-center gap-1.5 hover:underline"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
+        {quotedHandle && <span className="text-muted-foreground text-xs">@{quotedHandle}</span>}
+      </Link>
+      {quoted.content && (
+        <p className="text-foreground/90 text-sm leading-relaxed break-words whitespace-pre-line">
+          <LinkedText text={quoted.content} />
+        </p>
+      )}
+      <PostAttachmentGrid attachments={quoted.attachments} />
+    </div>
+  );
+}
+
 /**
  * One post rendered as a card — author link, timestamp, content, and the
  * like/reply actions — in the `feed`, `ancestor` or `focused` variants (see
@@ -63,6 +139,8 @@ export function PostCard({
   // reading it would re-render every visible card for nothing.
   const viewerId = useAtomValue(viewerIdAtom);
   const toggleLike = useSetAtom(toggleLikeAtomFamily(post.id));
+  const toggleRepost = useSetAtom(toggleRepostAtomFamily(post.id));
+  const setQuoteDialog = useSetAtom(quoteDialogAtom);
   const toggleBookmark = useSetAtom(toggleBookmarkAtomFamily(post.id));
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
@@ -76,15 +154,22 @@ export function PostCard({
   const isFocused = variant === "focused";
   // Both tombstones hide the content and take the actions away with it — the
   // server nulls `content` for either (see `postSelection`), so there is
-  // nothing left to like or reply to. Which stub renders still depends on
-  // which one it is; only "is it gone" is shared.
-  const isGone = post.removed || post.deleted;
+  // nothing left to like or reply to. A blocked original inside a repost event
+  // is unavailable on the same terms: attribution stays, original identity and
+  // actions do not.
+  const isGone = post.removed || post.deleted || post.unavailable;
   // A post already gone has nothing left to delete, so the item is dropped
   // rather than offered as a no-op the server would refuse anyway.
   const canDelete = isOwnPost && !isGone;
+  // Only top-level posts can be reposted. The server accepts a repost of a
+  // reply, but no shipped surface can show that event — the home feeds'
+  // repost arm excludes replies (`kind: "posts"` filters the original's
+  // `parentId`, and profile feeds run no repost arm at all) — so the control
+  // would be a dead end: counted, never rendered anywhere.
+  const canRepost = !post.parentId;
 
   const handleCardClick = (e: MouseEvent<HTMLDivElement>) => {
-    if (isFocused) return;
+    if (isFocused || post.unavailable) return;
     const target = e.target;
     if (target instanceof Element && target.closest("a, button, [role='button']")) return;
     void navigate({ to: "/post/$postId", params: { postId: post.id } });
@@ -118,11 +203,21 @@ export function PostCard({
     </>
   );
 
+  const repostButtonClass = `flex items-center gap-1.5 transition-colors ${
+    post.viewerHasReposted ? "text-primary font-bold" : "hover:text-primary"
+  }`;
+  const repostContent = (
+    <>
+      <Repeat2 className={`h-4 w-4 ${post.viewerHasReposted ? "stroke-[2.5]" : ""}`} />
+      <span>{post.repostCount}</span>
+    </>
+  );
+
   const containerClass =
     variant === "ancestor"
-      ? "px-1 py-2 cursor-pointer"
+      ? `px-1 py-2 ${post.unavailable ? "" : "cursor-pointer"}`
       : `p-4 sm:p-5 rounded-xl border border-border bg-card shadow-sm transition-colors ${
-          isFocused ? "" : "hover:border-primary/30 cursor-pointer"
+          isFocused || post.unavailable ? "" : "hover:border-primary/30 cursor-pointer"
         }`;
 
   const locale = getLocale();
@@ -144,6 +239,20 @@ export function PostCard({
 
   return (
     <div className={containerClass} onClick={handleCardClick}>
+      {post.repostedBy && (
+        // A feed event's attribution: who amplified this post, and the event
+        // is theirs — the author line below stays the ORIGINAL's. Rendered in
+        // every variant, because it is event context, not card chrome.
+        <p className="text-muted-foreground mb-2 flex items-center gap-1.5 text-xs">
+          <Repeat2 className="h-3.5 w-3.5" />
+          {m.post_reposted_by({
+            name:
+              post.repostedBy.name ||
+              (post.repostedBy.username ?? post.repostedBy.displayUsername) ||
+              m.user_unknown(),
+          })}
+        </p>
+      )}
       {variant === "feed" && showParentContext && post.parentId && (
         // A quiet one-line "Replying to …" above the whole card header —
         // avatar, name and timestamp included — so a profile feed of replies
@@ -174,39 +283,41 @@ export function PostCard({
         </p>
       )}
       <div className="flex gap-3">
-        {authorHandle ? (
-          <ProfileLink
-            username={authorHandle}
-            className="shrink-0 rounded-full transition-opacity hover:opacity-90"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {authorAvatar}
-          </ProfileLink>
-        ) : (
-          authorAvatar
-        )}
+        {!post.unavailable &&
+          (authorHandle ? (
+            <ProfileLink
+              username={authorHandle}
+              className="shrink-0 rounded-full transition-opacity hover:opacity-90"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {authorAvatar}
+            </ProfileLink>
+          ) : (
+            authorAvatar
+          ))}
         <div className="min-w-0 flex-1">
-          <div className="mb-1 flex flex-wrap items-center gap-1.5">
-            {authorHandle ? (
-              <ProfileLink
-                username={authorHandle}
-                className="flex items-center gap-1.5 hover:underline"
-                onClick={(e) => e.stopPropagation()}
-              >
+          {!post.unavailable && (
+            <div className="mb-1 flex flex-wrap items-center gap-1.5">
+              {authorHandle ? (
+                <ProfileLink
+                  username={authorHandle}
+                  className="flex items-center gap-1.5 hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
+                  <span className="text-muted-foreground text-xs">@{authorHandle}</span>
+                </ProfileLink>
+              ) : (
                 <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
-                <span className="text-muted-foreground text-xs">@{authorHandle}</span>
-              </ProfileLink>
-            ) : (
-              <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
-            )}
-            {/* `<time>` regardless of variant: the rendered label differs, but
+              )}
+              {/* `<time>` regardless of variant: the rendered label differs, but
                 the machine-readable value assistive technology and tooling
                 read is `post.createdAt` either way. */}
-            <span className="text-muted-foreground text-xs">
-              • <time dateTime={post.createdAt.toISOString()}>{timestamp}</time>
-            </span>
+              <span className="text-muted-foreground text-xs">
+                • <time dateTime={post.createdAt.toISOString()}>{timestamp}</time>
+              </span>
 
-            {/* Every item here lives in a shared dialog mounted at the root
+              {/* Every item here lives in a shared dialog mounted at the root
                 (identity atoms — see `atoms/moderation.ts` and
                 `atoms/post-delete.ts`), so this menu only has to set the
                 target. Which items it holds is decided by whose post it is:
@@ -215,78 +326,83 @@ export function PostCard({
                 people's posts down through the case queue, not from here.
                 Other people's posts keep the menu even when removed:
                 reporting the *author* of a removed post is still valid. */}
-            {isSignedIn && (canDelete || !isOwnPost) && (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  aria-label={m.moderation_kebab()}
-                  title={m.moderation_kebab()}
-                  // The card shell navigates to the thread on click (see
-                  // `handleCardClick` below) — like every other control inside
-                  // the card, the kebab must not let its click bubble there,
-                  // or "More" would also navigate.
-                  onClick={(e) => e.stopPropagation()}
-                  className="text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring ml-auto flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors outline-none focus-visible:ring-2"
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  className="min-w-44"
-                  // The popup is portaled to <body>, but React events still
-                  // bubble through the React tree — which passes through this
-                  // card's clickable shell. Without this, clicking a menu item
-                  // would also fire `handleCardClick` and navigate to the
-                  // thread (the trigger itself already stops propagation in
-                  // its own click, see above).
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {isOwnPost ? (
-                    <DropdownMenuItem
-                      className="cursor-pointer"
-                      variant="destructive"
-                      onClick={() => setDeleteDialog(post.id)}
-                    >
-                      {m.post_delete()}
-                    </DropdownMenuItem>
-                  ) : (
-                    <>
-                      <DropdownMenuItem
-                        className="cursor-pointer"
-                        onClick={() =>
-                          setReportDialog({ targetType: "post", targetId: post.id, post })
-                        }
-                      >
-                        {m.moderation_kebab_report_post()}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="cursor-pointer"
-                        onClick={() =>
-                          setReportDialog({ targetType: "user", targetId: post.author.id })
-                        }
-                      >
-                        {m.moderation_kebab_report_author()}
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
+              {isSignedIn && (canDelete || !isOwnPost) && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    aria-label={m.moderation_kebab()}
+                    title={m.moderation_kebab()}
+                    // The card shell navigates to the thread on click (see
+                    // `handleCardClick` below) — like every other control inside
+                    // the card, the kebab must not let its click bubble there,
+                    // or "More" would also navigate.
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring ml-auto flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors outline-none focus-visible:ring-2"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className="min-w-44"
+                    // The popup is portaled to <body>, but React events still
+                    // bubble through the React tree — which passes through this
+                    // card's clickable shell. Without this, clicking a menu item
+                    // would also fire `handleCardClick` and navigate to the
+                    // thread (the trigger itself already stops propagation in
+                    // its own click, see above).
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {isOwnPost ? (
                       <DropdownMenuItem
                         className="cursor-pointer"
                         variant="destructive"
-                        onClick={() =>
-                          setBlockDialog({
-                            userId: post.author.id,
-                            handle: authorHandle ?? m.user_unknown(),
-                          })
-                        }
+                        onClick={() => setDeleteDialog(post.id)}
                       >
-                        {m.moderation_kebab_block()}
+                        {m.post_delete()}
                       </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
+                    ) : (
+                      <>
+                        <DropdownMenuItem
+                          className="cursor-pointer"
+                          onClick={() =>
+                            setReportDialog({ targetType: "post", targetId: post.id, post })
+                          }
+                        >
+                          {m.moderation_kebab_report_post()}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="cursor-pointer"
+                          onClick={() =>
+                            setReportDialog({ targetType: "user", targetId: post.author.id })
+                          }
+                        >
+                          {m.moderation_kebab_report_author()}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="cursor-pointer"
+                          variant="destructive"
+                          onClick={() =>
+                            setBlockDialog({
+                              userId: post.author.id,
+                              handle: authorHandle ?? m.user_unknown(),
+                            })
+                          }
+                        >
+                          {m.moderation_kebab_block()}
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          )}
 
-          {post.removed ? (
+          {post.unavailable ? (
+            <div className="border-border/60 bg-muted/30 mb-3 rounded-lg border p-3">
+              <p className="text-muted-foreground text-sm">{m.post_quoted_unavailable()}</p>
+            </div>
+          ) : post.removed ? (
             /* The removal stub. `removedReason` is author-only (the server
                 nulls it for everyone else), so its presence is also what gates
                 the appeal link — only the author can appeal from here. */
@@ -330,15 +446,26 @@ export function PostCard({
                 </p>
               )}
               <PostAttachmentGrid attachments={post.attachments} />
+              {/* The embedded quoted post — a reference, not a reply: rendered
+                  inside the card, linked to its own permalink, and degraded by
+                  the projection (stub or unavailable) rather than hidden. */}
+              {post.quotedPostId &&
+                (post.quoted ? (
+                  <QuotedPostCard quoted={post.quoted} />
+                ) : (
+                  <div className="border-border/60 bg-muted/30 mb-3 rounded-lg border p-3">
+                    <p className="text-muted-foreground text-sm">{m.post_quoted_unavailable()}</p>
+                  </div>
+                ))}
             </>
           )}
 
           {!isGone && (
             <div className="text-muted-foreground flex max-w-md items-center gap-6 text-xs">
               {/* Replying is a navigation, not a mutation — the composer lives
-                on the thread page — so this is a link, and the focused post
-                (whose composer is directly below) degrades it to plain text
-                rather than linking to the page you are on. */}
+                  on the thread page — so this is a link, and the focused post
+                  (whose composer is directly below) degrades it to plain text
+                  rather than linking to the page you are on. */}
               {isFocused ? (
                 <span className="flex items-center gap-1.5">{replyContent}</span>
               ) : (
@@ -353,6 +480,43 @@ export function PostCard({
                   {replyContent}
                 </Link>
               )}
+
+              {/* Offered only where its event can be shown — see `canRepost`
+                  above: a reply's repost would never render anywhere. */}
+              {canRepost && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleRepost();
+                  }}
+                  aria-pressed={post.viewerHasReposted}
+                  aria-label={
+                    post.viewerHasReposted
+                      ? m.post_unrepost({ count: String(post.repostCount) })
+                      : m.post_repost({ count: String(post.repostCount) })
+                  }
+                  className={repostButtonClass}
+                >
+                  {repostContent}
+                </button>
+              )}
+
+              {/* Quoting opens the app-wide dialog (mounted at the root like
+                  the delete confirmation): a quote is composed from anywhere a
+                  card renders, not only from the thread page. */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setQuoteDialog(post);
+                }}
+                aria-label={m.post_quote()}
+                title={m.post_quote()}
+                className="hover:text-primary flex items-center gap-1.5 transition-colors"
+              >
+                <Quote className="h-4 w-4" />
+              </button>
 
               <button
                 type="button"

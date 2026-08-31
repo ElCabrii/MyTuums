@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, getTableName, inArray, isNull, not, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { alias, type PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "@my-tuums/db";
 import {
   follow,
@@ -9,6 +9,7 @@ import {
   postAttachment,
   postBookmark,
   postLike,
+  postRepost,
   user,
   userBlock,
 } from "@my-tuums/db/schema";
@@ -27,12 +28,12 @@ import {
   THREAD_REPLY_BRANCH_CHILD_FANOUT,
   THREAD_REPLY_BRANCH_DESCENDANT_BUDGET,
 } from "./constants.js";
-import { createCursorCodec } from "./cursor.js";
+import { createCursorCodec, createEventCursorCodec } from "./cursor.js";
 import { keysetPage } from "./pagination.js";
 import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
-import { invisibleAuthor } from "./visibility.js";
+import { invisibleAuthor, visibleUser } from "./visibility.js";
 import { acceptPostImage, type ImageRejection } from "./post-image.js";
 import {
   discardPostAttachments,
@@ -53,6 +54,17 @@ import { selectReplyBranch, type ReplyBranchNode } from "./reply-branch.js";
 const postCursor = createCursorCodec(z.uuid());
 
 /**
+ * The merged home-feed cursor (issue #261). The timeline a feed walks is a
+ * union of two event kinds — an authored post at its own `created_at`, a
+ * repost amplifying the original at the repost's `created_at` — so the
+ * stopping point names both the post and, for a repost event, the reposter.
+ * The reposter half is absent for authored-post events; the SQL comparison
+ * binds that absence as `''` (the smallest text value), keeping the
+ * `(event_at, post_id, reposter_key)` comparison a total order.
+ */
+const postFeedCursor = createEventCursorCodec(z.uuid());
+
+/**
  * Like counts are derived on read rather than denormalised onto a
  * `post.like_count` column. A correlated count over the `post_like` primary
  * key is cheap at this scale, and it can't drift out of sync the way a
@@ -62,6 +74,16 @@ const postCursor = createCursorCodec(z.uuid());
  */
 const likeCount = sql<number>`(
   select count(*)::int from ${postLike} where ${postLike.postId} = ${post.id}
+)`;
+
+/**
+ * Derived exactly like `likeCount` above, over the `post_repost` primary key:
+ * cheap at this scale, and it cannot drift out of sync the way a maintained
+ * counter can. A repost is an event about the post, so the count belongs to
+ * the post, not to any one feed it appears in.
+ */
+const repostCount = sql<number>`(
+  select count(*)::int from ${postRepost} where ${postRepost.postId} = ${post.id}
 )`;
 
 /**
@@ -109,6 +131,10 @@ const PARENT_EXCERPT_LENGTH = 140;
 const parentPost = alias(post, "parent_post");
 const parentAuthor = alias(user, "parent_author");
 
+/** Same reason as the parent aliases: the quoted preview is correlated inside `postSelection`. */
+const quotedPostTable = alias(post, "quoted_post");
+const quotedAuthor = alias(user, "quoted_author");
+
 export type PostAttachment = {
   id: string;
   url: string;
@@ -132,7 +158,7 @@ export type PostAttachment = {
  * than leave every caller to discover. Qualifying explicitly makes the
  * fragment correct whether or not the caller happens to join another table.
  */
-function outerPost(column: "id" | "removed_at" | "deleted_at") {
+function outerPost(column: "id" | "removed_at" | "deleted_at" | "quoted_post_id") {
   return sql`${sql.identifier(getTableName(post))}.${sql.identifier(column)}`;
 }
 
@@ -277,6 +303,174 @@ function viewerHasLiked(viewerId: string) {
   )`;
 }
 
+/** Whether the viewer has reposted this post — the same shape as `viewerHasLiked`. */
+function viewerHasReposted(viewerId: string) {
+  return sql<boolean>`exists (
+    select 1 from ${postRepost}
+    where ${postRepost.postId} = ${post.id} and ${postRepost.userId} = ${viewerId}
+  )`;
+}
+
+/** The embedded quoted post a quote renders inside itself (issue #261). */
+export type QuotedPostPreview = {
+  id: string;
+  content: string | null;
+  removed: boolean;
+  deleted: boolean;
+  removedReason: string | null;
+  attachments: PostAttachment[];
+  author: {
+    id: string;
+    name: string | null;
+    username: string | null;
+    displayUsername: string | null;
+    image: string | null;
+  };
+};
+
+/**
+ * The quoted post, embedded as a correlated projection so every surface that
+ * reads a post through `postSelection` renders the same quote card — feed,
+ * permalink, thread, search — without a second request per row.
+ *
+ * Degradation is the point (issue #261, "decided and documented"):
+ *
+ * - Removed or author-deleted original: the row stays and the flags say which
+ *   stub to render. The quote's own text is the quoting post's; it survives.
+ *   `removedReason` follows the same author-only rule as the outer post's.
+ * - Banned or blocked original author: the whole subquery yields null, so the
+ *   card reads "unavailable" — the same treatment `parentPreview` gives a
+ *   hidden parent, leaking neither the author's identity nor the content.
+ *   Unlike a deleted parent, a deleted *quoted* post is still projected:
+ *   hiding it would take the quoting post's own words hostage to someone
+ *   else's delete.
+ * - Attachments ride along except under either tombstone, matching the outer
+ *   post's `postAttachments` (a removed original keeps its rows for restore,
+ *   but they must not render).
+ */
+function quotedPreview(viewerId: string) {
+  return sql<QuotedPostPreview | null>`(
+    select jsonb_build_object(
+      'id', ${quotedPostTable.id},
+      'content', case
+        when ${quotedPostTable.removedAt} is not null or ${quotedPostTable.deletedAt} is not null then null
+        else ${quotedPostTable.content}
+      end,
+      'removed', ${quotedPostTable.removedAt} is not null,
+      'deleted', ${quotedPostTable.deletedAt} is not null,
+      'removedReason', case
+        when ${quotedPostTable.removedAt} is not null and ${quotedPostTable.authorId} = ${viewerId}
+        then ${quotedPostTable.removedReason}
+        else null
+      end,
+      'attachments', coalesce((
+        select jsonb_agg(
+          jsonb_build_object(
+            'id', ${postAttachment.id},
+            'url', ${postAttachment.mediaPath},
+            'position', ${postAttachment.position},
+            'contentType', ${postAttachment.contentType},
+            'byteSize', ${postAttachment.byteSize},
+            'width', ${postAttachment.width},
+            'height', ${postAttachment.height}
+          ) order by ${postAttachment.position}
+        )
+        from ${postAttachment}
+        where ${postAttachment.postId} = ${quotedPostTable.id}
+          and ${quotedPostTable.removedAt} is null
+          and ${quotedPostTable.deletedAt} is null
+      ), '[]'::jsonb),
+      'author', jsonb_build_object(
+        'id', ${quotedAuthor.id},
+        'name', ${quotedAuthor.name},
+        'username', ${quotedAuthor.username},
+        'displayUsername', ${quotedAuthor.displayUsername},
+        'image', ${quotedAuthor.image}
+      )
+    )
+    from ${post} as "quoted_post"
+    inner join ${user} as "quoted_author" on ${quotedAuthor.id} = ${quotedPostTable.authorId}
+    where ${quotedPostTable.id} = ${outerPost("quoted_post_id")}
+      and not (
+        (
+          ${quotedAuthor.banned}
+          and (${quotedAuthor.banExpires} is null or ${quotedAuthor.banExpires} > now())
+        )
+        or exists (
+          select 1 from ${userBlock}
+          where ${userBlock.blockerId} = ${quotedPostTable.authorId}
+            and ${userBlock.blockedId} = ${viewerId}
+        )
+        or exists (
+          select 1 from ${userBlock}
+          where ${userBlock.blockerId} = ${viewerId}
+            and ${userBlock.blockedId} = ${quotedPostTable.authorId}
+        )
+      )
+    limit 1
+  )`;
+}
+
+/**
+ * The reposter a feed event attributes: who amplified the post, and when they
+ * did (the event time the feed ordered the row by). A property of the *event*,
+ * not the post — see `repostedBy` in `postSelection`.
+ */
+export type RepostAttribution = {
+  id: string;
+  name: string | null;
+  username: string | null;
+  displayUsername: string | null;
+  image: string | null;
+  repostedAt: Date;
+};
+
+/**
+ * The moderator's view of a quoted post: raw content regardless of either
+ * tombstone — the same evidence rule `moderation.case` applies to the target
+ * post itself (`postAttachmentsSelection(true)`) — and no visibility filter,
+ * because the case view is a staff surface that has to reach a banned or
+ * blocked author's evidence. Null only when the quoted row no longer exists
+ * (its author's account was hard-deleted).
+ */
+export function quotedPostEvidence() {
+  return sql<QuotedPostPreview | null>`(
+    select jsonb_build_object(
+      'id', ${quotedPostTable.id},
+      'content', ${quotedPostTable.content},
+      'removed', ${quotedPostTable.removedAt} is not null,
+      'deleted', ${quotedPostTable.deletedAt} is not null,
+      'removedReason', ${quotedPostTable.removedReason},
+      'attachments', coalesce((
+        select jsonb_agg(
+          jsonb_build_object(
+            'id', ${postAttachment.id},
+            'url', ${postAttachment.mediaPath},
+            'position', ${postAttachment.position},
+            'contentType', ${postAttachment.contentType},
+            'byteSize', ${postAttachment.byteSize},
+            'width', ${postAttachment.width},
+            'height', ${postAttachment.height}
+          ) order by ${postAttachment.position}
+        )
+        from ${postAttachment}
+        where ${postAttachment.postId} = ${quotedPostTable.id}
+      ), '[]'::jsonb),
+      'author', jsonb_build_object(
+        'id', ${quotedAuthor.id},
+        'name', ${quotedAuthor.name},
+        'username', ${quotedAuthor.username},
+        'displayUsername', ${quotedAuthor.displayUsername},
+        'image', ${quotedAuthor.image}
+      )
+    )
+    from ${post} as "quoted_post"
+    inner join ${user} as "quoted_author" on ${quotedAuthor.id} = ${quotedPostTable.authorId}
+    where ${quotedPostTable.id} = ${outerPost("quoted_post_id")}
+    limit 1
+  )`;
+}
+
 /**
  * Whether the viewer has bookmarked this post — the bookmark pair's whole
  * read model. Bookmarks are private by construction (issue #262): no count is
@@ -315,12 +509,27 @@ export const postSelection = (viewerId: string) => ({
   removedReason: sql<
     string | null
   >`case when ${post.removedAt} is not null and ${post.authorId} = ${viewerId} then ${post.removedReason} else null end`,
+  // Ordinary post readers filter hidden authors before this projection, so
+  // their rows are always available. The merged feed can keep a visible
+  // reposter's event while redacting its newly blocked original; that one
+  // feed-only branch replaces this flag and every sensitive field below —
+  // including a deliberately non-nullable sentinel `author` (see the
+  // redaction in `feedEventPage`): read `unavailable` before ever reading
+  // `author` off a feed item.
+  unavailable: sql<boolean>`false`,
   createdAt: post.createdAt,
   // Null for a top-level post. The web app reads it to decide whether a card
   // needs a "Replying to" line, so it belongs in the shared selection rather
   // than only in the thread payload.
   parentId: post.parentId,
   parent: parentPreview(viewerId),
+  // The quote reference (issue #261): `quotedPostId` names the quoted post,
+  // `quoted` is its embedded preview — full content and attachments, or the
+  // tombstone flags, or null when the quoted author is hidden from this
+  // viewer. A quote is a normal post everywhere else, which is why this lives
+  // in the shared selection: every reader renders the same quote card.
+  quotedPostId: post.quotedPostId,
+  quoted: quotedPreview(viewerId),
   attachments: postAttachments,
   author: {
     id: user.id,
@@ -331,8 +540,16 @@ export const postSelection = (viewerId: string) => ({
   },
   likeCount,
   replyCount,
+  repostCount,
   viewerHasLiked: viewerHasLiked(viewerId),
+  viewerHasReposted: viewerHasReposted(viewerId),
   viewerHasBookmarked: viewerHasBookmarked(viewerId),
+  // Attribution is a property of a feed *event*, not of a post row: every
+  // row-shaped reader (thread, search, reply list, this projection) reads a
+  // post with no repost attached, and only the merged home feed — which reads
+  // events — replaces it per item (see `post.list`). Typed as the full
+  // nullable attribution so one item type covers both event kinds.
+  repostedBy: sql<RepostAttribution | null>`null`,
 });
 
 type ReplyDescendant = ReplyBranchNode & { rootPostId: string };
@@ -488,6 +705,274 @@ async function replyContinuationPages(args: ReplyContinuationPageArgs) {
   });
 }
 
+/** The repost arm of the merged feed joins the original post and two users, so all three need aliases. */
+const feedOriginal = alias(post, "feed_original");
+const feedReposter = alias(user, "feed_reposter");
+const feedOriginalAuthor = alias(user, "feed_original_author");
+
+/** The three columns the per-alias visibility predicate reads — any `alias(user, …)` provides them. */
+type UserVisibilityColumns = { id: PgColumn; banned: PgColumn; banExpires: PgColumn };
+
+/**
+ * The block/ban visibility half of `invisibleAuthor` (./visibility.ts),
+ * restated over an aliased `user` row because the repost arm of the merged
+ * feed has two of them (the reposter and the original's author) and the
+ * shared helper is bound to the un-aliased table. Must stay in step with it.
+ */
+function aliasVisibleTo(viewerId: string, u: UserVisibilityColumns) {
+  return sql<boolean>`not (
+    (${u.banned} and (${u.banExpires} is null or ${u.banExpires} > now()))
+    or exists (
+      select 1 from ${userBlock}
+      where ${userBlock.blockerId} = ${u.id} and ${userBlock.blockedId} = ${viewerId}
+    )
+    or exists (
+      select 1 from ${userBlock}
+      where ${userBlock.blockerId} = ${viewerId} and ${userBlock.blockedId} = ${u.id}
+    )
+  )`;
+}
+
+/** One row of the merged event timeline the home feeds walk (raw keys, as selected). */
+type FeedEventRow = {
+  /**
+   * `db.execute` hands back the driver's value for a timestamptz — a string,
+   * unlike the drizzle-mapped `Date` a built query returns — so it is parsed
+   * once, right after the fetch.
+   */
+  event_at: Date | string;
+  post_id: string;
+  /** Null for an authored-post event; the reposter's id for a repost event. */
+  reposter_id: string | null;
+  /** The reposter's id again, `''` for authored-post events — the cursor's third key. */
+  reposter_key: string;
+};
+
+/**
+ * The event-union half of the merged feed timeline: authored posts at their
+ * own `created_at`, repost events amplifying the original at the repost's
+ * `created_at` (issue #261 — a repost places the original at the repost's
+ * timestamp; strictly reverse-chronological, no ranking, no deduplication).
+ *
+ * The two arms are separate scopes, each with its own FROM, so the un-aliased
+ * `post`/`user` references in the authored arm coexist with the aliases in
+ * the repost arm. Degradation rules, decided with the issue:
+ *
+ * - A repost whose original was author-deleted or moderator-removed STAYS —
+ *   the event renders the same stub the post itself would, because the
+ *   repost is the reposter's event, not the original author's. (Authored
+ *   posts with an author-delete tombstone drop from feeds, as before.)
+ * - A repost whose original author is banned or blocked — either direction —
+ *   keeps the reposter's event but redacts the original to the unavailable
+ *   treatment: no identity, content, media, counts or viewer interactions.
+ * - The repost arm runs only for the home feeds. A profile feed
+ *   (`authorId`) is the author's own activity, and the `kind: "replies"`
+ *   axis selects reply rows, not amplification events. Under
+ *   `kind: "posts"` the arm also excludes reposts of replies (the
+ *   original's `parentId` must be null): no shipped feed can show such an
+ *   event, so the web does not offer the repost control on replies rather
+ *   than sell an action whose result never renders anywhere.
+ */
+async function feedEventPage(
+  db: Database,
+  args: {
+    viewerId: string;
+    cursor: string | undefined;
+    limit: number;
+    authorId?: string;
+    feed: "global" | "following";
+    kind: "posts" | "replies" | "all";
+  },
+) {
+  const decoded = args.cursor ? postFeedCursor.decode(args.cursor) : undefined;
+  // The absent reposter half of a post-event cursor binds as '' — the value
+  // the authored arm emits for `reposter_key` — so one row-value comparison
+  // serves both event kinds. Each bound is typed by the column that arm
+  // selects into the key: the reposter half is the repost arm's `user_id`
+  // (text, like every user id; the authored arm's '' literal is what makes
+  // the union's column text), and the param encoder must be a text column —
+  // a uuid one would reject the '' bound.
+  const cursorFilter = decoded
+    ? sql`(event_at, post_id, reposter_key) < (
+        ${sql.param(decoded.createdAt, post.createdAt)},
+        ${sql.param(decoded.first, post.id)},
+        ${sql.param(decoded.second ?? "", postRepost.userId)}
+      )`
+    : undefined;
+
+  const authoredArmFilters = [
+    // Author-deleted posts drop from a fresh feed read, as before the merge.
+    isNull(post.deletedAt),
+    args.authorId ? eq(post.authorId, args.authorId) : undefined,
+    args.kind === "posts"
+      ? isNull(post.parentId)
+      : args.kind === "replies"
+        ? not(isNull(post.parentId))
+        : undefined,
+    // A semi-join rather than an INNER JOIN on `follow`: EXISTS cannot
+    // duplicate a post row, and it composes as one more entry in this array.
+    // Your own posts are included unconditionally — the composer sits
+    // directly above this feed, and a post that appears to vanish on submit
+    // reads as a bug. This walks post_created_idx newest-first and probes the
+    // follow primary key per candidate.
+    args.feed === "following"
+      ? sql`(${post.authorId} = ${args.viewerId} or exists (
+            select 1 from ${follow}
+            where ${follow.followingId} = ${post.authorId} and ${follow.followerId} = ${args.viewerId}
+          ))`
+      : undefined,
+    not(invisibleAuthor(args.viewerId)),
+  ];
+
+  const repostArmFilters = [
+    // The reposter is the event's author: hidden reposter, hidden event. The
+    // ORIGINAL author is deliberately not a filter — a hidden original keeps
+    // the reposter's event and is redacted to the unavailable treatment below,
+    // which is the same "the author is gone" result blocked profiles use.
+    aliasVisibleTo(args.viewerId, feedReposter),
+    args.kind === "posts" ? isNull(feedOriginal.parentId) : undefined,
+    args.feed === "following"
+      ? sql`(${postRepost.userId} = ${args.viewerId} or exists (
+            select 1 from ${follow}
+            where ${follow.followingId} = ${postRepost.userId} and ${follow.followerId} = ${args.viewerId}
+          ))`
+      : undefined,
+  ];
+
+  const repostArm =
+    args.authorId || args.kind === "replies"
+      ? undefined
+      : sql`
+    select ${postRepost.createdAt} as event_at, ${postRepost.postId} as post_id, ${postRepost.userId} as reposter_id, ${postRepost.userId} as reposter_key
+    from ${postRepost}
+    inner join ${user} as "feed_reposter" on ${feedReposter.id} = ${postRepost.userId}
+    inner join ${post} as "feed_original" on ${feedOriginal.id} = ${postRepost.postId}
+    inner join ${user} as "feed_original_author" on ${feedOriginalAuthor.id} = ${feedOriginal.authorId}
+    where ${and(...repostArmFilters)}
+  `;
+
+  // `new Date(iso)` round-trips exactly at precision 3 (the reason every
+  // cursor column in the schema is ms, not µs — see the schema comment).
+  const events = (
+    await db.execute<FeedEventRow>(sql`
+      with events as (
+        select ${post.createdAt} as event_at, ${post.id} as post_id, null::text as reposter_id, '' as reposter_key
+        from ${post}
+        inner join ${user} on ${user.id} = ${post.authorId}
+        where ${and(...authoredArmFilters)}
+        ${repostArm ? sql`union all ${repostArm}` : sql``}
+      )
+      select event_at, post_id, reposter_id, reposter_key from events
+      ${cursorFilter ? sql`where ${cursorFilter}` : sql``}
+      order by event_at desc, post_id desc, reposter_key desc
+      limit ${args.limit + 1}
+    `)
+  ).map((row) => ({ ...row, event_at: new Date(row.event_at) }));
+
+  const hasMore = events.length > args.limit;
+  const page = hasMore ? events.slice(0, args.limit) : events;
+  const last = page.at(-1);
+  if (page.length === 0 || !last) return { items: [], nextCursor: null };
+
+  // The events are identity rows; the visible post rows come back through the
+  // one shared projection, so a repost event renders the original exactly as
+  // its own permalink would — tombstones included.
+  const postRows = await db
+    .select({
+      ...postSelection(args.viewerId),
+      // Re-evaluated in the projection phase, closing a block/ban race between
+      // the event query and this read without throwing the reposter's event
+      // away. Only repost events consume a hidden row; authored events below
+      // still disappear exactly like every other feed surface.
+      originalUnavailable: invisibleAuthor(args.viewerId),
+    })
+    .from(post)
+    .innerJoin(user, eq(user.id, post.authorId))
+    .where(inArray(post.id, [...new Set(page.map((event) => event.post_id))]));
+  const rowById = new Map(postRows.map((row) => [row.id, row]));
+
+  const reposterIds = [
+    ...new Set(page.map((e) => e.reposter_id).filter((id): id is string => id !== null)),
+  ];
+  const reposters = reposterIds.length
+    ? await db
+        .select({
+          id: user.id,
+          name: user.name,
+          username: user.username,
+          displayUsername: user.displayUsername,
+          image: user.image,
+        })
+        .from(user)
+        .where(and(inArray(user.id, reposterIds), visibleUser(args.viewerId)))
+    : [];
+  const reposterById = new Map(reposters.map((rep) => [rep.id, rep]));
+
+  type FeedItem = Omit<(typeof postRows)[number], "originalUnavailable">;
+  const items: FeedItem[] = [];
+
+  for (const event of page) {
+    const row = rowById.get(event.post_id);
+    // The row vanished between the two queries (a hard delete raced us):
+    // drop the event rather than 500 on a missing row.
+    if (!row) continue;
+    const reposter = event.reposter_id ? reposterById.get(event.reposter_id) : undefined;
+    if (event.reposter_id && !reposter) continue;
+
+    const { originalUnavailable, ...visibleRow } = row;
+
+    // An authored event with a newly hidden author disappears. A repost event
+    // survives because its visible reposter still owns the event, but every
+    // original field that can identify or expose the hidden author is replaced
+    // with the existing unavailable treatment — no permalink, content, media,
+    // counts or viewer actions cross the boundary.
+    if (originalUnavailable) {
+      if (!reposter) continue;
+      items.push({
+        ...visibleRow,
+        content: null,
+        removed: false,
+        deleted: false,
+        removedReason: null,
+        unavailable: true,
+        parentId: null,
+        parent: null,
+        quotedPostId: null,
+        quoted: null,
+        attachments: [],
+        // The sentinel author: this row has no author the viewer may learn
+        // anything about, and the post shape keeps `author` non-nullable —
+        // widening it here would ripple through every web render to say
+        // "unknown" in exactly one place. Consumers must guard every author
+        // read on `unavailable` first (the web card does); the empty id,
+        // empty name and null handle are placeholders, not a real user.
+        author: { id: "", name: "", username: null, displayUsername: null, image: null },
+        likeCount: 0,
+        replyCount: 0,
+        repostCount: 0,
+        viewerHasLiked: false,
+        viewerHasReposted: false,
+        viewerHasBookmarked: false,
+        repostedBy: { ...reposter, repostedAt: event.event_at },
+      });
+      continue;
+    }
+
+    items.push({
+      ...visibleRow,
+      repostedBy: reposter ? { ...reposter, repostedAt: event.event_at } : null,
+    });
+  }
+
+  return {
+    items,
+    nextCursor:
+      hasMore && last
+        ? postFeedCursor.encode(last.event_at, last.post_id, last.reposter_id ?? undefined)
+        : null,
+  };
+}
+
 async function countLikes(db: Database, postId: string): Promise<number> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -497,11 +982,21 @@ async function countLikes(db: Database, postId: string): Promise<number> {
   return row?.count ?? 0;
 }
 
+async function countReposts(db: Database, postId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(postRepost)
+    .where(eq(postRepost.postId, postId));
+
+  return row?.count ?? 0;
+}
+
 type CreatedPost = {
   id: string;
   content: string;
   createdAt: Date;
   parentId: string | null;
+  quotedPostId: string | null;
 };
 
 /** Inserts the post and its already-prepared attachment rows atomically. */
@@ -512,6 +1007,7 @@ async function insertPost(
     authorId: string;
     content: string;
     parentId: string | undefined;
+    quotedPostId: string | undefined;
     prepared: ReturnType<typeof preparePostAttachments>;
   },
 ): Promise<CreatedPost | undefined> {
@@ -522,12 +1018,14 @@ async function insertPost(
       authorId: args.authorId,
       content: args.content,
       parentId: args.parentId ?? null,
+      quotedPostId: args.quotedPostId ?? null,
     })
     .returning({
       id: post.id,
       content: post.content,
       createdAt: post.createdAt,
       parentId: post.parentId,
+      quotedPostId: post.quotedPostId,
     });
 
   if (!inserted) return undefined;
@@ -537,8 +1035,8 @@ async function insertPost(
 }
 
 /**
- * The `post` procedure group: create, delete, list, thread, like, unlike,
- * bookmark, unbookmark.
+ * The `post` procedure group: create (posts, replies and quotes), delete,
+ * list, thread, like/unlike, repost/unrepost, bookmark/unbookmark.
  */
 export const postRouter = {
   /**
@@ -555,6 +1053,15 @@ export const postRouter = {
           content: z.string().trim().max(POST_MAX_LENGTH),
           /** Omit for a top-level post; set to reply to an existing one. */
           parentId: z.uuid().optional(),
+          /**
+           * Set to quote an existing post (issue #261). A quote is a normal
+           * post — every text/image rule above applies unchanged — plus this
+           * reference. Quoting your own post is allowed; a quote may itself be
+           * quoted. Mutually exclusive with `parentId`: a quote is a top-level
+           * post form, and a row that was both would have to render two
+           * embedded posts.
+           */
+          quotedPostId: z.uuid().optional(),
           /** The same ordered image capability is available to posts and replies. */
           attachments: z.array(z.file()).max(POST_ATTACHMENT_MAX_COUNT).default([]),
         })
@@ -565,6 +1072,10 @@ export const postRouter = {
         .refine(({ content, attachments }) => content.length > 0 || attachments.length > 0, {
           error: "Post cannot be empty.",
           path: ["content"],
+        })
+        .refine(({ parentId, quotedPostId }) => !(parentId && quotedPostId), {
+          error: "A reply cannot also be a quote.",
+          path: ["quotedPostId"],
         }),
     )
     .handler(async ({ input, context }) => {
@@ -577,20 +1088,30 @@ export const postRouter = {
       // from you (banned author, a block either way) reads as nonexistent
       // rather than hinting it exists. A parent that was *removed* stays
       // replyable — removal is not invisibility, and a removed post is still
-      // a real post with a thread.
-      if (input.parentId) {
-        const [parent] = await context.db
+      // a real post with a thread. The quoted target below resolves through
+      // exactly the same rule, for the same reasons: quoting a removed post
+      // is allowed (the embedded card renders the removal stub), quoting one
+      // whose author is hidden reads as "no such post".
+      const resolveVisiblePost = async (postId: string) => {
+        const [visible] = await context.db
           .select({ id: post.id })
           .from(post)
           .innerJoin(user, eq(user.id, post.authorId))
-          .where(and(eq(post.id, input.parentId), not(invisibleAuthor(context.user.id))))
+          .where(and(eq(post.id, postId), not(invisibleAuthor(context.user.id))))
           .limit(1);
+        return visible;
+      };
 
-        if (!parent) {
-          throw new ORPCError("NOT_FOUND", {
-            message: "The post you replied to no longer exists.",
-          });
-        }
+      if (input.parentId && !(await resolveVisiblePost(input.parentId))) {
+        throw new ORPCError("NOT_FOUND", {
+          message: "The post you replied to no longer exists.",
+        });
+      }
+
+      if (input.quotedPostId && !(await resolveVisiblePost(input.quotedPostId))) {
+        throw new ORPCError("NOT_FOUND", {
+          message: "The post you quoted no longer exists.",
+        });
       }
 
       const mediaInputs = await readPostAttachments(input.attachments);
@@ -624,6 +1145,7 @@ export const postRouter = {
             authorId: context.user.id,
             content: input.content,
             parentId: input.parentId,
+            quotedPostId: input.quotedPostId,
             prepared,
           });
         });
@@ -645,6 +1167,7 @@ export const postRouter = {
         removed: false,
         deleted: false,
         removedReason: null,
+        unavailable: false,
         author: {
           id: context.user.id,
           name: context.user.name,
@@ -654,8 +1177,15 @@ export const postRouter = {
         },
         likeCount: 0,
         replyCount: 0,
+        repostCount: 0,
         viewerHasLiked: false,
+        viewerHasReposted: false,
         viewerHasBookmarked: false,
+        // `quoted` is deliberately absent, like `parent` above: the response
+        // is not a render source (the web invalidates and refetches), and
+        // resolving the embedded preview here would cost a query nothing
+        // consumes.
+        repostedBy: null,
         attachments: prepared.map(
           ({ id, mediaPath, position, contentType, byteSize, width, height }) => ({
             id,
@@ -956,44 +1486,29 @@ export const postRouter = {
 
       const kind = input.kind ?? (input.includeReplies ? "all" : "posts");
 
+      // The home and profile feeds walk the merged event timeline
+      // (`feedEventPage` above): authored posts, plus repost events on the
+      // home feeds. A reply list under one post stays a plain post query —
+      // it lists the parent's direct replies by their own event time, and an
+      // amplification is not a reply.
+      if (!input.parentId) {
+        return feedEventPage(context.db, {
+          viewerId,
+          cursor: input.cursor,
+          limit: input.limit,
+          authorId: input.authorId,
+          feed: input.feed,
+          kind,
+        });
+      }
+
       const filters = [
         // Author-deleted posts survive for direct thread URLs and ancestor
         // context, but a fresh feed/profile/reply-list read must not render a
         // tombstone card. Moderator removals deliberately remain visible.
         isNull(post.deletedAt),
+        eq(post.parentId, input.parentId),
         input.authorId ? eq(post.authorId, input.authorId) : undefined,
-        // Three-way, in priority order: an explicit `parentId` asks for one
-        // post's replies; otherwise `kind` selects top-level posts, replies,
-        // or both. The `is null` branch is what `post_created_idx` is a
-        // partial index on, so the global and Following timelines match it
-        // exactly.
-        input.parentId
-          ? eq(post.parentId, input.parentId)
-          : kind === "posts"
-            ? isNull(post.parentId)
-            : kind === "replies"
-              ? not(isNull(post.parentId))
-              : undefined,
-        // A semi-join rather than an INNER JOIN on `follow`: EXISTS cannot
-        // duplicate a post row, whereas a join relies on the follow primary
-        // key to avoid fanning out — true today, but a weaker statement of
-        // intent. It also composes as one more entry in this array.
-        //
-        // Your own posts are included unconditionally. The composer sits
-        // directly above this feed on the home page, and a post that appears
-        // to vanish on submit reads as a bug.
-        //
-        // This walks post_created_idx newest-first and probes the follow
-        // primary key per candidate. If it ever shows up slow — the bad case
-        // is following very few people relative to global post volume — the
-        // rewrite is `author_id = any(array(select following_id ...))`, which
-        // follow_follower_created_idx already covers.
-        input.feed === "following"
-          ? sql`(${post.authorId} = ${viewerId} or exists (
-              select 1 from ${follow}
-              where ${follow.followingId} = ${post.authorId} and ${follow.followerId} = ${viewerId}
-            ))`
-          : undefined,
         // The visibility filter (issue #38): posts by a banned author or by
         // someone blocked in either direction drop out of every feed. This
         // does NOT drop removed posts — removal is not invisibility.
@@ -1024,7 +1539,7 @@ export const postRouter = {
             .limit(input.limit + 1),
       });
 
-      if (!input.parentId || page.items.length === 0) return page;
+      if (page.items.length === 0) return page;
 
       const focusedAuthorId = await visiblePostAuthorId(context.db, viewerId, input.parentId);
       if (!focusedAuthorId) return { ...page, continuations: [] };
@@ -1183,6 +1698,77 @@ export const postRouter = {
         postId: input.postId,
         likeCount: await countLikes(context.db, input.postId),
         viewerHasLiked: false,
+      };
+    }),
+
+  /**
+   * Reposts a post for the caller (issue #261). Requires a session.
+   *
+   * The same idempotent pair as `like`/`unlike` above, for the same reasons —
+   * and the same target rules: a post whose author is hidden from the caller
+   * reads as nonexistent. Tombstones are not checked, matching `like`: removal
+   * is not invisibility, and the feed renders the stub for a repost whose
+   * original was later removed or deleted.
+   *
+   * Reposting your own post is allowed (amplifying it to your followers).
+   * "Reposting a repost" cannot be expressed: a repost is an event in
+   * `post_repost`, not a post row, so the only id any client can send names an
+   * original — re-amplifying an already-reposted post is a second repost event
+   * about the same original, and no more.
+   */
+  repost: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.repost))
+    .input(z.object({ postId: z.uuid() }))
+    .handler(async ({ input, context }) => {
+      const [target] = await context.db
+        .select({ id: post.id })
+        .from(post)
+        .innerJoin(user, eq(user.id, post.authorId))
+        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
+        .limit(1);
+
+      if (!target) {
+        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
+      }
+
+      // The (post_id, user_id) primary key makes the duplicate impossible;
+      // this just declines to error on it.
+      await context.db
+        .insert(postRepost)
+        .values({ postId: input.postId, userId: context.user.id })
+        .onConflictDoNothing();
+
+      return {
+        postId: input.postId,
+        repostCount: await countReposts(context.db, input.postId),
+        viewerHasReposted: true,
+      };
+    }),
+
+  /** Removes the caller's repost. Requires a session; a no-op when the repost isn't there. */
+  unrepost: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.repost))
+    .input(z.object({ postId: z.uuid() }))
+    .handler(async ({ input, context }) => {
+      const [target] = await context.db
+        .select({ id: post.id })
+        .from(post)
+        .innerJoin(user, eq(user.id, post.authorId))
+        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
+        .limit(1);
+
+      if (!target) {
+        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
+      }
+
+      await context.db
+        .delete(postRepost)
+        .where(and(eq(postRepost.postId, input.postId), eq(postRepost.userId, context.user.id)));
+
+      return {
+        postId: input.postId,
+        repostCount: await countReposts(context.db, input.postId),
+        viewerHasReposted: false,
       };
     }),
 

@@ -29,6 +29,9 @@ const BlockDialog = lazy(() =>
 const DeletePostDialog = lazy(() =>
   import("@/components/delete-post-dialog").then((mod) => ({ default: mod.DeletePostDialog })),
 );
+const QuoteDialog = lazy(() =>
+  import("@/components/quote-dialog").then((mod) => ({ default: mod.QuoteDialog })),
+);
 
 export const Route = createRootRoute({
   head: fallbackHead,
@@ -109,6 +112,7 @@ function RootLayout() {
           <ReportDialog />
           <BlockDialog />
           <DeletePostDialog />
+          <QuoteDialog />
         </Suspense>
         {/* Mounted unconditionally: the dialog owns the whole decision — signed
             in, consent missing or stale, and not currently on one of the legal

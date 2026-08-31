@@ -134,6 +134,23 @@ export function clearViewerState(queryClient: QueryClient): void {
       clearLikeFamilies();
     },
   );
+  // Repost toggles are per-post intent, same reasoning as likes.
+  sweepFamily(
+    "repost",
+    () => import("@/atoms/repost"),
+    ({ clearRepostFamilies }) => {
+      clearRepostFamilies();
+    },
+  );
+  // The quote dialog's draft belongs to whoever opened it, and its target is
+  // a cached post row from the signed-out session.
+  sweepFamily(
+    "quote composer",
+    () => import("@/atoms/quote-composer"),
+    ({ clearQuoteComposerState }) => {
+      clearQuoteComposerState();
+    },
+  );
   sweepFamily(
     "bookmark",
     () => import("@/atoms/bookmark"),

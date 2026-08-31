@@ -63,7 +63,12 @@ app's build from the same origin.
 - **Like and follow serialise per entity.** One `scope` id per entity,
   per-entity intent atoms drop superseded responses, and rollback rides on
   mutation-level `onError` — per-call callbacks never fire for write-only
-  atoms read with `useSetAtom`.
+  atoms read with `useSetAtom`. `src/atoms/repost.ts` is the same contract again
+  (the file points back at `src/atoms/like.ts` for the reasoning), with one
+  addition: success in either direction invalidates the `post.list` queries,
+  because a repost is a feed _event_ whose position is server-ordered — a new
+  one lands at the top of the home feeds, and an unrepost removes one from
+  them.
 - **Persisted atoms read `localStorage` as `unknown`, sanitise on read, and
   set `getOnInit: true`** — without it the first render flashes the default.
 - **Exactly one effect owns each redirect.** Auth pages call
@@ -114,6 +119,12 @@ app's build from the same origin.
   own scrollbar colors or dimensions.
 - **Feed and list parameterisation lives in atoms.** `PostFeed` takes a
   `feedAtom` prop and never knows its own scope or author.
+- **The quote composer is one root-mounted dialog, not a page.** Any card's
+  Quote button sets `quoteDialogAtom` (the full post row — the dialog previews
+  the embedded card from it), and `QuoteDialog` in `__root.tsx` is the only
+  mounted instance, the same identity-atom shape as the delete confirmation.
+  Its draft is in-memory: one dialog, bounded lifetime, nothing to evict from
+  `localStorage`.
 - **Permalink reply grouping reads the continuation embedded in each direct
   `post.list({ parentId })` page.** `ThreadReplyFeed` renders the flat direct
   page and its connected branch without recursive indentation;

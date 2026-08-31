@@ -32,15 +32,15 @@ type CachedSearchPosts = [readonly unknown[], InfiniteData<SearchPostsPage> | un
  * The slice of a post's cached row one mutation family owns — and therefore
  * the only slice its rollback may restore.
  *
- * Like and bookmark mutations patch the SAME cached row concurrently under
- * different `scope` ids (`post-like:{id}` vs `post-bookmark:{id}`), so
- * TanStack runs them interleaved: like's snapshot can be taken, bookmark's
- * optimistic flip can land, and only then can like's request fail. A
- * whole-row rollback would silently revert that flip until the next refetch,
- * which is why the ownership is part of the snapshot, not of the caller's
- * discipline.
+ * Like, bookmark and repost mutations patch the SAME cached row concurrently
+ * under different `scope` ids (`post-like:{id}` vs `post-bookmark:{id}` vs
+ * `post-repost:{id}`), so TanStack runs them interleaved: like's snapshot can
+ * be taken, bookmark's optimistic flip can land, and only then can like's
+ * request fail. A whole-row rollback would silently revert that flip until the
+ * next refetch, which is why the ownership is part of the snapshot, not of the
+ * caller's discipline.
  */
-export type PostSnapshotScope = "like" | "bookmark";
+export type PostSnapshotScope = "like" | "bookmark" | "repost";
 
 /**
  * The pre-mutation state of ONE post, captured before an optimistic edit so
@@ -57,9 +57,10 @@ export type PostSnapshotScope = "like" | "bookmark";
  * are.
  *
  * Scoped to one {@link PostSnapshotScope} for the same reason *within* a
- * row: a like and a bookmark on the SAME post are concurrent too, so the
- * like's rollback must not replay the bookmark state it happened to snapshot
- * — {@link restorePosts} restores only the fields the failing mutation owns.
+ * row: a like, a bookmark and a repost on the SAME post are concurrent too,
+ * so the like's rollback must not replay the bookmark or repost state it
+ * happened to snapshot — {@link restorePosts} restores only the fields the
+ * failing mutation owns.
  */
 export interface PostSnapshot {
   /** The post this snapshot is scoped to. */
@@ -115,28 +116,32 @@ function updatePostListPage(
  * than from a prop: a prop is a render-time snapshot, so a burst of clicks
  * would all see the same starting value and resolve to the same direction.
  *
- * Feeds are checked first only because they are the common case; the three
- * shapes always agree, since every write goes through
- * {@link updatePostEverywhere}.
+ * When the same id is cached more than once, an available copy wins over a
+ * redacted one. A repost event whose original author is hidden shares the
+ * post's id while the server deliberately zeros its counts and viewer flags
+ * and blanks its content and author (`unavailable: true`) — reading current
+ * state from that copy would compute a like/repost direction from redacted
+ * viewer flags and snapshot redacted fields as if they were the post's. The
+ * redacted copy is still returned when it is the only one cached: feeds are
+ * walked before search, and search before threads, as the tie-break order.
  */
 export function readCachedPost(queryClient: QueryClient, postId: string): Post | undefined {
-  const fromFeed = feedQueries(queryClient)
-    .flatMap(([, data]) => data?.pages ?? [])
-    .flatMap(postsInListPage)
-    .find((item) => item.id === postId);
+  const candidates = [
+    ...feedQueries(queryClient)
+      .flatMap(([, data]) => data?.pages ?? [])
+      .flatMap(postsInListPage),
+    ...searchPostsQueries(queryClient)
+      .flatMap(([, data]) => data?.pages ?? [])
+      .flatMap((page) => page.items),
+    ...threadQueries(queryClient).flatMap(([, data]) =>
+      data ? [data.post, ...data.ancestors] : [],
+    ),
+  ];
 
-  if (fromFeed) return fromFeed;
-
-  const fromSearch = searchPostsQueries(queryClient)
-    .flatMap(([, data]) => data?.pages ?? [])
-    .flatMap((page) => page.items)
-    .find((item) => item.id === postId);
-
-  if (fromSearch) return fromSearch;
-
-  return threadQueries(queryClient)
-    .flatMap(([, data]) => (data ? [data.post, ...data.ancestors] : []))
-    .find((item) => item.id === postId);
+  return (
+    candidates.find((item) => item.id === postId && !item.unavailable) ??
+    candidates.find((item) => item.id === postId)
+  );
 }
 
 /**
@@ -291,16 +296,28 @@ export function snapshotPosts(
 }
 
 /**
- * The fields each snapshot scope may write back during a rollback — the
- * like family owns the public count and its flag, the bookmark family its
- * private flag, and neither may touch the other's.
+ * The fields each snapshot scope may write back during a rollback — the like
+ * family owns the public count and its flag, the bookmark family its private
+ * flag, the repost family the public repost count and its flag — and no family
+ * may touch the others'.
  */
 function ownedFields(
   snapshot: PostSnapshot,
-): Pick<Post, "likeCount" | "viewerHasLiked"> | Pick<Post, "viewerHasBookmarked"> {
-  return snapshot.scope === "like"
-    ? { likeCount: snapshot.post.likeCount, viewerHasLiked: snapshot.post.viewerHasLiked }
-    : { viewerHasBookmarked: snapshot.post.viewerHasBookmarked };
+):
+  | Pick<Post, "likeCount" | "viewerHasLiked">
+  | Pick<Post, "viewerHasBookmarked">
+  | Pick<Post, "repostCount" | "viewerHasReposted"> {
+  switch (snapshot.scope) {
+    case "like":
+      return { likeCount: snapshot.post.likeCount, viewerHasLiked: snapshot.post.viewerHasLiked };
+    case "bookmark":
+      return { viewerHasBookmarked: snapshot.post.viewerHasBookmarked };
+    case "repost":
+      return {
+        repostCount: snapshot.post.repostCount,
+        viewerHasReposted: snapshot.post.viewerHasReposted,
+      };
+  }
 }
 
 /**
@@ -311,8 +328,27 @@ function ownedFields(
  * concurrent mutation — and, within this post's row, without clobbering the
  * OTHER family's optimistic flip: a like that fails after a bookmark's flip
  * lands must revert the like, not the bookmark.
+ *
+ * Two states belong to the feed EVENT rather than the shared post, and each
+ * cached copy keeps its own while owned fields are restored:
+ *
+ * - `repostedBy` — the same post can appear twice in one feed (authored and
+ *   reposted), while a single snapshot necessarily came from only one of
+ *   those copies. The field-scoped write-back never touches `repostedBy`, so
+ *   restoring cannot turn both copies into the same event.
+ * - the whole `unavailable` redaction — a repost event whose original author
+ *   is hidden shares this post's id but none of its state: content, author,
+ *   counts and viewer flags are the hidden original's, redacted. Owned fields
+ *   must not cross that boundary in either direction: writing an authored
+ *   snapshot's counts into the redacted event would partly un-redact a hidden
+ *   original back into the feed, and writing a redacted snapshot's zeroed
+ *   fields into an available copy would blank that card's counts. A copy that
+ *   is unavailable on either side of the restore is therefore left exactly as
+ *   it is.
  */
 export function restorePosts(queryClient: QueryClient, snapshot: PostSnapshot): void {
   const owned = ownedFields(snapshot);
-  updatePostEverywhere(queryClient, snapshot.postId, (post) => ({ ...post, ...owned }));
+  updatePostEverywhere(queryClient, snapshot.postId, (current) =>
+    current.unavailable || snapshot.post.unavailable ? current : { ...current, ...owned },
+  );
 }

@@ -26,12 +26,18 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     likeCount: 0,
     replyCount: 0,
     viewerHasLiked: false,
+    quotedPostId: null,
+    quoted: null,
+    repostCount: 0,
+    viewerHasReposted: false,
+    repostedBy: null,
     viewerHasBookmarked: false,
     // The tombstone fields (issue #38, plus #148): never removed or deleted
     // by default.
     removed: false,
     deleted: false,
     removedReason: null,
+    unavailable: false,
     attachments: [],
     ...overrides,
   };
@@ -67,6 +73,43 @@ function searchPage(posts: Post[]): InfiniteData<SearchPostsPage> {
   return {
     pages: [{ items: posts, nextCursor: null }],
     pageParams: [undefined],
+  };
+}
+
+/**
+ * The redacted repost event of `base` — the shape `feedEventPage` emits when
+ * a visible reposter's original author became hidden between page fetches:
+ * same post id, `unavailable: true`, and every shared field replaced (no
+ * content, sentinel author, zeroed counts and viewer flags). Only the
+ * reposter's own attribution survives.
+ */
+function redactedRepostEvent(base: Post): Post {
+  return {
+    ...base,
+    content: null,
+    removed: false,
+    deleted: false,
+    removedReason: null,
+    unavailable: true,
+    parentId: null,
+    parent: null,
+    quotedPostId: null,
+    quoted: null,
+    attachments: [],
+    author: { id: "", name: "", username: null, displayUsername: null, image: null },
+    likeCount: 0,
+    replyCount: 0,
+    repostCount: 0,
+    viewerHasLiked: false,
+    viewerHasReposted: false,
+    repostedBy: {
+      id: "reposter-1",
+      name: "Reposter",
+      username: "reposter",
+      displayUsername: "Reposter",
+      image: null,
+      repostedAt: new Date("2026-01-02T00:00:00.000Z"),
+    },
   };
 }
 
@@ -262,6 +305,33 @@ describe("post-cache", () => {
       expect(() => readCachedPost(queryClient, "pending-1")).not.toThrow();
       expect(readCachedPost(queryClient, "pending-1")).toBeUndefined();
     });
+
+    // The merged feed can hold one post id as two events at once: authored,
+    // and as a redacted repost event whose original author became hidden
+    // between page fetches. The redacted copy shares nothing but the id —
+    // its counts and viewer flags are server-zeroed — so reading current
+    // state from it would compute a like/repost direction from redacted
+    // flags. An available copy of the same id wins; the redacted one is
+    // still returned when it is all the cache holds.
+    it("prefers an available copy over a redacted repost event with the same id", () => {
+      const queryClient = new QueryClient();
+      const authored = makePost({ id: "both-events-1", viewerHasLiked: true, likeCount: 8 });
+      // Redacted first: as the newer event, it is also the first plain find.
+      queryClient.setQueryData(
+        orpc.post.list.key({ input: { limit: 20 } }),
+        feedPage([redactedRepostEvent(authored), authored]),
+      );
+
+      expect(readCachedPost(queryClient, "both-events-1")).toEqual(authored);
+    });
+
+    it("still returns the redacted copy when it is the only one cached", () => {
+      const queryClient = new QueryClient();
+      const redacted = redactedRepostEvent(makePost({ id: "redacted-only-1" }));
+      queryClient.setQueryData(orpc.post.list.key({ input: { limit: 20 } }), feedPage([redacted]));
+
+      expect(readCachedPost(queryClient, "redacted-only-1")).toEqual(redacted);
+    });
   });
 
   describe("snapshot / restore round trip", () => {
@@ -296,6 +366,111 @@ describe("post-cache", () => {
 
       expect(queryClient.getQueryData(feedKey)).toEqual(before.feed);
       expect(queryClient.getQueryData(threadKey)).toEqual(before.thread);
+    });
+
+    it("restorePosts keeps distinct attribution on authored and repost events for the same post", () => {
+      const queryClient = new QueryClient();
+      const authored = makePost({ id: "duplicate-event-1", likeCount: 5, repostedBy: null });
+      const reposted = makePost({
+        ...authored,
+        repostedBy: {
+          id: "reposter-1",
+          name: "Reposter",
+          username: "reposter",
+          displayUsername: "Reposter",
+          image: null,
+          repostedAt: new Date("2026-01-02T00:00:00.000Z"),
+        },
+      });
+      const feedKey = orpc.post.list.key({ input: { limit: 20 } });
+      queryClient.setQueryData(feedKey, feedPage([authored, reposted]));
+
+      const snapshot = snapshotPosts(queryClient, authored.id, "like");
+      updatePostEverywhere(queryClient, authored.id, (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+      }));
+      restorePosts(queryClient, snapshot!);
+
+      const items = queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items;
+      expect(items?.[0]?.likeCount).toBe(5);
+      expect(items?.[0]?.repostedBy).toBeNull();
+      expect(items?.[1]?.likeCount).toBe(5);
+      expect(items?.[1]?.repostedBy).toEqual(reposted.repostedBy);
+    });
+
+    // PR #272 review follow-up: the redaction cohort is event state like
+    // `repostedBy` above. A redacted repost event shares the post's id but
+    // none of its shared fields, so a rollback must not carry those fields
+    // across the boundary in either direction — writing an authored snapshot
+    // into the redacted event would un-redact a hidden original back into the
+    // feed, and writing a redacted snapshot into an available copy would
+    // blank that card.
+    it("restorePosts leaves a redacted repost event redacted when the snapshot came from the authored copy", () => {
+      const queryClient = new QueryClient();
+      const authored = makePost({ id: "split-events-1", content: "the words", likeCount: 5 });
+      const redacted = redactedRepostEvent(authored);
+      const feedKey = orpc.post.list.key({ input: { limit: 20 } });
+      queryClient.setQueryData(feedKey, feedPage([redacted, authored]));
+
+      // The snapshot prefers the available copy (see `readCachedPost`).
+      const snapshot = snapshotPosts(queryClient, "split-events-1", "like");
+      expect(snapshot?.post.unavailable).toBe(false);
+      updatePostEverywhere(queryClient, "split-events-1", (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+      }));
+      restorePosts(queryClient, snapshot!);
+
+      const items = queryClient.getQueryData<InfiniteData<PostListPage>>(feedKey)?.pages[0]?.items;
+      // The repost event keeps its own redacted copy — the authored row's
+      // content, author and availability never land in it. (Its counts were
+      // touched by the optimistic patch, which renders nowhere on an
+      // unavailable card and is re-zeroed by the next refetch.)
+      expect(items?.[0]?.unavailable).toBe(true);
+      expect(items?.[0]?.content).toBeNull();
+      expect(items?.[0]?.author).toEqual({
+        id: "",
+        name: "",
+        username: null,
+        displayUsername: null,
+        image: null,
+      });
+      expect(items?.[0]?.repostedBy).toEqual(redacted.repostedBy);
+      // The authored event is rolled back to its pre-click row.
+      expect(items?.[1]?.likeCount).toBe(5);
+      expect(items?.[1]?.unavailable).toBe(false);
+    });
+
+    it("restorePosts does not write a redacted snapshot into an authored copy of the same post", () => {
+      const queryClient = new QueryClient();
+      const redacted = redactedRepostEvent(makePost({ id: "split-events-2" }));
+      const homeKey = orpc.post.list.key({ input: { limit: 20 } });
+      queryClient.setQueryData(homeKey, feedPage([redacted]));
+
+      // The snapshot necessarily came from the redacted copy — the only one
+      // cached at click time.
+      const snapshot = snapshotPosts(queryClient, "split-events-2", "like");
+      expect(snapshot?.post.unavailable).toBe(true);
+      updatePostEverywhere(queryClient, "split-events-2", (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+        viewerHasLiked: true,
+      }));
+
+      // An authored event for the same post then lands in another cached
+      // feed — a page fetched before the author became hidden.
+      const authored = makePost({ id: "split-events-2", content: "the words", likeCount: 5 });
+      const authorFeedKey = orpc.post.list.key({ input: { limit: 20, authorId: "author-1" } });
+      queryClient.setQueryData(authorFeedKey, feedPage([authored]));
+
+      restorePosts(queryClient, snapshot!);
+
+      // The authored copy is left exactly as it was cached: no
+      // `unavailable: true`, no nulled content, no sentinel author.
+      const restored =
+        queryClient.getQueryData<InfiniteData<PostListPage>>(authorFeedKey)?.pages[0]?.items[0];
+      expect(restored).toEqual(authored);
     });
 
     it("restorePosts undoes an edit to a post cached only under search.posts", () => {
