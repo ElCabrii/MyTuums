@@ -1,5 +1,6 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import { orpc, type Post, type PostListPage, type SearchPostsPage, type Thread } from "@/lib/orpc";
+import { postListQueryOptions } from "@/lib/query-definitions";
 
 /**
  * The caches this module writes, listed once so the pre-patch cancel has a
@@ -28,6 +29,20 @@ type CachedThreads = [readonly unknown[], Thread | undefined][];
 type CachedSearchPosts = [readonly unknown[], InfiniteData<SearchPostsPage> | undefined][];
 
 /**
+ * The slice of a post's cached row one mutation family owns — and therefore
+ * the only slice its rollback may restore.
+ *
+ * Like and bookmark mutations patch the SAME cached row concurrently under
+ * different `scope` ids (`post-like:{id}` vs `post-bookmark:{id}`), so
+ * TanStack runs them interleaved: like's snapshot can be taken, bookmark's
+ * optimistic flip can land, and only then can like's request fail. A
+ * whole-row rollback would silently revert that flip until the next refetch,
+ * which is why the ownership is part of the snapshot, not of the caller's
+ * discipline.
+ */
+export type PostSnapshotScope = "like" | "bookmark";
+
+/**
  * The pre-mutation state of ONE post, captured before an optimistic edit so
  * it can be undone.
  *
@@ -40,10 +55,17 @@ type CachedSearchPosts = [readonly unknown[], InfiniteData<SearchPostsPage> | un
  * {@link updatePostEverywhere}, which touches only A's fields in every
  * entry it appears in and leaves every other post's fields exactly as they
  * are.
+ *
+ * Scoped to one {@link PostSnapshotScope} for the same reason *within* a
+ * row: a like and a bookmark on the SAME post are concurrent too, so the
+ * like's rollback must not replay the bookmark state it happened to snapshot
+ * — {@link restorePosts} restores only the fields the failing mutation owns.
  */
 export interface PostSnapshot {
   /** The post this snapshot is scoped to. */
   postId: string;
+  /** Which mutation family's optimistic patch this snapshot can undo. */
+  scope: PostSnapshotScope;
   /** The post's full pre-mutation row, as read from whichever cache held it. */
   post: Post;
 }
@@ -187,6 +209,41 @@ export function updatePostEverywhere(
 }
 
 /**
+ * Drops one post's row from the bookmarks page's cached pages — the cleanup
+ * half of a confirmed un-bookmark, so the saved list updates on click instead
+ * of on the next unrelated refetch.
+ *
+ * Targets ONLY that feed's cache: the key narrows the shared `post.list`
+ * prefix by the `feed: "bookmarks"` input discriminator, so the post's rows
+ * in the home timeline, profile feeds, reply lists, threads and search
+ * results all stay — an un-bookmark is not a deletion, and those surfaces
+ * keep rendering the post with its flipped flag.
+ *
+ * Removing rows from `items` is pagination-safe by construction:
+ * `getNextPageParam` reads the per-page `nextCursor` the server sent, which
+ * still sits untouched on each page — cursors were computed from page
+ * boundaries, never from the rows the client happens to hold, so a shorter
+ * page cannot make a later "Load more" skip or repeat. The bookmarks feed
+ * never carries inline continuations (the server refuses `feed: "bookmarks"`
+ * combined with the reply scoping inputs), so `items` is the whole page.
+ */
+export function removePostFromBookmarksFeed(queryClient: QueryClient, postId: string): void {
+  queryClient.setQueriesData<InfiniteData<PostListPage>>(
+    { queryKey: postListQueryOptions({ feed: "bookmarks" }).queryKey },
+    (cached) =>
+      cached
+        ? {
+            ...cached,
+            pages: cached.pages.map((page) => ({
+              ...page,
+              items: page.items.filter((post) => post.id !== postId),
+            })),
+          }
+        : cached,
+  );
+}
+
+/**
  * Cancels every cache this module writes, then captures the pre-update row and
  * applies `update` across all of them — one call, so the cancel list is
  * {@link POST_CACHE_KEYS}, the same keys the sweep writes, and can't be
@@ -195,11 +252,14 @@ export function updatePostEverywhere(
  * `await` between them, so no refetch can land between the read and the write
  * to poison the rollback. Returns the snapshot for `onError` to feed
  * {@link restorePosts} — `undefined` when the post was cached nowhere (then
- * the patch is a no-op and there is nothing to undo).
+ * the patch is a no-op and there is nothing to undo). `owns` records which
+ * mutation family the patch belongs to, so the rollback below stays
+ * field-scoped.
  */
 export function beginPostPatch(
   queryClient: QueryClient,
   postId: string,
+  owns: PostSnapshotScope,
   update: (post: Post) => Post,
 ): PostSnapshot | undefined {
   // Cancelling the exact keys this module is about to write stops an in-flight
@@ -208,32 +268,51 @@ export function beginPostPatch(
   for (const queryKey of POST_CACHE_KEYS) {
     void queryClient.cancelQueries({ queryKey });
   }
-  const snapshot = snapshotPosts(queryClient, postId);
+  const snapshot = snapshotPosts(queryClient, postId, owns);
   updatePostEverywhere(queryClient, postId, update);
   return snapshot;
 }
 
 /**
  * Captures the pre-mutation state of `postId` — its full row, read from
- * whichever cache happens to hold it — so a failed mutation can undo exactly
- * its own optimistic patch.
+ * whichever cache happens to hold it, stamped with the `owns` family — so a
+ * failed mutation can undo exactly its own optimistic patch.
  *
  * Returns undefined when the post is cached nowhere: then the optimistic
  * patch was a no-op and there is nothing to undo.
  */
-export function snapshotPosts(queryClient: QueryClient, postId: string): PostSnapshot | undefined {
+export function snapshotPosts(
+  queryClient: QueryClient,
+  postId: string,
+  owns: PostSnapshotScope,
+): PostSnapshot | undefined {
   const post = readCachedPost(queryClient, postId);
-  return post ? { postId, post } : undefined;
+  return post ? { postId, scope: owns, post } : undefined;
+}
+
+/**
+ * The fields each snapshot scope may write back during a rollback — the
+ * like family owns the public count and its flag, the bookmark family its
+ * private flag, and neither may touch the other's.
+ */
+function ownedFields(
+  snapshot: PostSnapshot,
+): Pick<Post, "likeCount" | "viewerHasLiked"> | Pick<Post, "viewerHasBookmarked"> {
+  return snapshot.scope === "like"
+    ? { likeCount: snapshot.post.likeCount, viewerHasLiked: snapshot.post.viewerHasLiked }
+    : { viewerHasBookmarked: snapshot.post.viewerHasBookmarked };
 }
 
 /**
  * Undoes an optimistic edit captured by {@link snapshotPosts}, e.g. on a
- * failed mutation. The pre-mutation row is written back through
- * {@link updatePostEverywhere}, so it replaces every copy of THIS post in
- * all three caches — and touches no other post's fields in those same
- * entries, even when another post's concurrent mutation has since confirmed
- * new values into them.
+ * failed mutation. Only the fields the snapshot's scope owns are written
+ * back, through {@link updatePostEverywhere}, so the rollback replaces every
+ * copy of THIS post in all three caches without clobbering another post's
+ * concurrent mutation — and, within this post's row, without clobbering the
+ * OTHER family's optimistic flip: a like that fails after a bookmark's flip
+ * lands must revert the like, not the bookmark.
  */
 export function restorePosts(queryClient: QueryClient, snapshot: PostSnapshot): void {
-  updatePostEverywhere(queryClient, snapshot.postId, () => snapshot.post);
+  const owned = ownedFields(snapshot);
+  updatePostEverywhere(queryClient, snapshot.postId, (post) => ({ ...post, ...owned }));
 }

@@ -80,6 +80,7 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     likeCount: 0,
     replyCount: 0,
     viewerHasLiked: false,
+    viewerHasBookmarked: false,
     // The tombstone fields (issue #38, plus the author's own delete in #148):
     // never removed or deleted by default — the two stub branches in
     // post-card own their own fixtures.

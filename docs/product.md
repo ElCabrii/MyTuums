@@ -84,6 +84,17 @@ both by the server's page gate and by the client.
 - Likes are two idempotent operations, `like` and `unlike`, never a toggle —
   so a retry is safe and ordering cannot invert the result. Like and reply
   counts are derived on read, not denormalised.
+- Bookmarks are the same idempotent pair — `bookmark` / `unbookmark` — holding
+  a post for later. They are private by construction: no counts, no visibility
+  to other users or to the post's author, nothing on the public profile, and
+  no surface reads them but the saver's own bookmarks page. That page lists
+  saved posts strictly by when they were saved, newest first, keyset-paginated;
+  there are no notes, folders or orderings. Saving your own posts is allowed.
+  A post deleted by its author drops off the page, a moderator-removed one
+  stays as its stub, and unbookmarking a deleted post is not an error. Neither
+  is unbookmarking a post whose author has since blocked the saver or been
+  banned: the row is the saver's own, so a saved post can always be removed
+  even once it no longer renders.
 - Follows are the same shape: `follow` / `unfollow`, with follower and
   following lists.
 - Feeds come in two scopes — everyone, and the people you follow — and are

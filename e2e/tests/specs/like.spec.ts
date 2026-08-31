@@ -59,7 +59,9 @@ test.describe("liking a post", () => {
     if (!seeded) throw new Error("seedPosts returned no row");
 
     await page.goto(`/post/${seeded.id}`);
-    const anyLikeButton = () => page.getByRole("button", { name: /this post/ });
+    // Anchored: the bookmark control's label ("Bookmark this post") also ends
+    // in "this post", so a bare substring match would resolve to two buttons.
+    const anyLikeButton = () => page.getByRole("button", { name: /^(un)?like this post/i });
 
     await anyLikeButton().click(); // like
     await anyLikeButton().click(); // unlike

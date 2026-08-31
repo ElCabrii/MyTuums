@@ -135,6 +135,13 @@ export function clearViewerState(queryClient: QueryClient): void {
     },
   );
   sweepFamily(
+    "bookmark",
+    () => import("@/atoms/bookmark"),
+    ({ clearBookmarkFamilies }) => {
+      clearBookmarkFamilies();
+    },
+  );
+  sweepFamily(
     "follow",
     () => import("@/atoms/follow"),
     ({ clearFollowFamilies }) => {

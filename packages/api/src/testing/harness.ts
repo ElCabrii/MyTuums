@@ -361,7 +361,7 @@ export function contextFor(
 export async function truncateAll(): Promise<void> {
   assertTestDatabase();
   await db.execute(
-    sql`TRUNCATE TABLE "post_like", "follow", "report", "user_block", "appeal", "moderation_action", "post", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE "post_like", "post_bookmark", "follow", "report", "user_block", "appeal", "moderation_action", "post", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
   );
 }
 
@@ -399,7 +399,20 @@ export async function seedPosts(
     return row;
   });
 
-  return db.insert(post).values(rows).returning({ id: post.id, createdAt: post.createdAt });
+  const seeded = await db
+    .insert(post)
+    .values(rows)
+    .returning({ id: post.id, createdAt: post.createdAt });
+
+  // The contract every caller destructures against ("give me N posts, get N
+  // rows"), refused here rather than guarded at each call site — the e2e
+  // specs guard per site because their helper is a different implementation;
+  // here one refusal keeps a harness regression from surfacing three lines
+  // later as `Cannot read properties of undefined`.
+  if (seeded.length !== count) {
+    throw new Error(`seedPosts returned ${seeded.length} rows for count ${count}`);
+  }
+  return seeded;
 }
 
 /**

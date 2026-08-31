@@ -17,6 +17,7 @@ export function PostFeed({
   feedAtom,
   emptyMessage,
   emptyAction,
+  emptyIcon = MessageSquare,
   showParentContext = false,
 }: {
   /** The feed atom to read — parameterisation (scope, author) lives entirely in atom-land; see `atoms/post-feed.ts`. */
@@ -24,6 +25,8 @@ export function PostFeed({
   emptyMessage: string;
   /** Rendered under `emptyMessage` — e.g. a "find people to follow" CTA. */
   emptyAction?: ReactNode;
+  /** The empty state's icon; a bookmark for the saved list, a message square elsewhere. */
+  emptyIcon?: typeof MessageSquare;
   /** Render the immediate-parent preview used by profile activity cards. */
   showParentContext?: boolean;
 }) {
@@ -34,7 +37,7 @@ export function PostFeed({
     <PaginatedState
       query={feed}
       errorMessage={m.feed_load_error()}
-      emptyIcon={MessageSquare}
+      emptyIcon={emptyIcon}
       emptyMessage={emptyMessage}
       isEmpty={posts.length === 0}
       emptyAction={emptyAction}

@@ -28,7 +28,20 @@ export function postCardWithText(page: Page, text: string): Locator {
  * The like control within one card, signed in: a real `<button>` whose
  * `aria-label` flips between "Like this post" and "Unlike this post"
  * (post-card.tsx). Matches either state.
+ *
+ * Anchored: the bookmark control's label ("Bookmark this post") also ends in
+ * "this post", so a bare substring match would resolve to two buttons and
+ * trip Playwright's strict mode.
  */
 export function likeButtonFor(page: Page, text: string): Locator {
-  return postCardWithText(page, text).getByRole("button", { name: /this post/ });
+  return postCardWithText(page, text).getByRole("button", { name: /^(un)?like this post/i });
+}
+
+/**
+ * The bookmark control within one card, signed in: a real `<button>` whose
+ * `aria-label` flips between "Bookmark this post" and "Remove bookmark"
+ * (post-card.tsx). Matches either state.
+ */
+export function bookmarkButtonFor(page: Page, text: string): Locator {
+  return postCardWithText(page, text).getByRole("button", { name: /bookmark/i });
 }

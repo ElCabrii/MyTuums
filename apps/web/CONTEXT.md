@@ -54,10 +54,10 @@ app's build from the same origin.
   the optimistic sweeps match on exactly those prefixes. "Cleaning them up"
   forks every cache entry silently.
 - **Sign-out clears the QueryClient and sweeps every family.** Cached rows
-  carry viewer-relative fields (`viewerHasLiked`, `viewerIsFollowing`) under
-  viewer-less keys. `src/atoms/session-teardown.ts` owns that whole inventory
-  behind one call; a new viewer-owned family is added there, not in
-  `signOutAtom`. Its lightweight coordinator clears the QueryClient
+  carry viewer-relative fields (`viewerHasLiked`, `viewerHasBookmarked`,
+  `viewerIsFollowing`) under viewer-less keys. `src/atoms/session-teardown.ts`
+  owns that whole inventory behind one call; a new viewer-owned family is
+  added there, not in `signOutAtom`. Its lightweight coordinator clears the QueryClient
   synchronously, then dynamically imports each family for an independent,
   best-effort sweep so chunk loading cannot block sign-out.
 - **Like and follow serialise per entity.** One `scope` id per entity,
