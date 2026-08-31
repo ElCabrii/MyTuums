@@ -4,6 +4,7 @@ import { z } from "zod";
 import { moderationCaseResolutionEmail, type EmailLocale } from "@my-tuums/auth";
 import type { Database } from "@my-tuums/db";
 import { appeal, moderationAction, post, postEdit, report, user } from "@my-tuums/db/schema";
+import { EDIT_HISTORY_CASE_LIMIT } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { applyModerationEffect, logAction, stampReports } from "./moderation-actions.js";
 import { noteInput, queueInput } from "./moderation-inputs.js";
@@ -27,14 +28,6 @@ import { postAttachmentsSelection, type PostAttachment } from "./posts.js";
 
 /** Opaque keyset cursor for the merged queue, tie-broken on the case id (text). */
 const caseCursor = createCursorCodec(z.string().min(1));
-
-/**
- * How many superseded versions of a post's text `moderation.case` returns,
- * newest first. The cap keeps one author's edit spree from turning the case
- * dialog into an unbounded list; the report snapshots (`report.snapshot_content`)
- * carry the evidence beyond it, so cutting there loses no load-bearing fact.
- */
-const EDIT_HISTORY_CASE_LIMIT = 50;
 
 /** One group of unresolved reports, raw from the GROUP BY. */
 // Raw `db.execute` rows carry postgres.js's own timestamptz string format

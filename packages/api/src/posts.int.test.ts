@@ -1000,6 +1000,23 @@ describe("post.edit", () => {
     expect(detail.reports).toHaveLength(1);
     expect(detail.reports[0]?.snapshotContent).toContain("seed post 0");
     expect(detail.target.editHistoryTruncated).toBe(false);
+
+    // A repeat report refreshes the snapshot alongside the case's clock
+    // (moderation.report's upsert): the reporter is re-reporting what they now
+    // see, so the moderators judge the current wording while the history keeps
+    // the one it replaced.
+    await call(
+      appRouter.moderation.report,
+      { targetType: "post", targetId: target.id, reason: "spam" },
+      { context: contextFor(reporter) },
+    );
+    const refreshed = await call(
+      appRouter.moderation.case,
+      { targetType: "post", targetId: target.id },
+      { context: contextFor(moderator) },
+    );
+    expect(refreshed.reports).toHaveLength(1);
+    expect(refreshed.reports[0]?.snapshotContent).toContain("edited during review");
   });
 
   it("cannot lose a version to concurrent edits: the row lock serializes the history", async () => {

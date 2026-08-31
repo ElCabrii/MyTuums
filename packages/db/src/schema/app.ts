@@ -315,7 +315,7 @@ export const report = pgTable(
     // report alongside `createdAt`, since the reporter is re-reporting what
     // they now see.
     snapshotContent: text("snapshot_content"),
-    // `timestamaptz` and `precision: 3` for the same reasons as
+    // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above.
     createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
     // A null `resolvedAt` means the case is open. Resolution is a stamp

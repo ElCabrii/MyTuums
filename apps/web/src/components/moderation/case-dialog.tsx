@@ -15,7 +15,7 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
-import { MODERATION_NOTE_MAX_LENGTH } from "@my-tuums/api/constants";
+import { EDIT_HISTORY_CASE_LIMIT, MODERATION_NOTE_MAX_LENGTH } from "@my-tuums/api/constants";
 import {
   appealReviewFamily,
   banUserAtom,
@@ -361,7 +361,7 @@ function EditHistorySection({
       </ItemGroup>
       {target.editHistoryTruncated && (
         <p className="text-muted-foreground text-xs">
-          {m.moderation_case_edit_history_truncated()}
+          {m.moderation_case_edit_history_truncated({ count: EDIT_HISTORY_CASE_LIMIT })}
         </p>
       )}
     </div>

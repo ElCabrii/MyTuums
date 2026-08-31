@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { EDIT_HISTORY_CASE_LIMIT } from "@my-tuums/api/constants";
 import {
   createTestQueryClient,
   makeModerationCaseDetail,
@@ -616,6 +617,7 @@ describe("CaseDialog — two open appeals on one case", () => {
 
 describe("CaseDialog — edit history", () => {
   it("lists every superseded version newest-first when the post was edited, and the header carries the edited marker", async () => {
+    const created = new Date(Date.now() - 3 * 60_000);
     const older = new Date(Date.now() - 2 * 60_000);
     const newer = new Date(Date.now() - 60_000);
     const target: CaseRef = { targetType: "post", targetId: "post-1" };
@@ -624,6 +626,7 @@ describe("CaseDialog — edit history", () => {
       makeModerationCaseDetail({
         id: "post-1",
         content: "current text",
+        createdAt: created,
         editedAt: newer,
         editHistory: [
           { content: "second version", createdAt: newer },
@@ -647,6 +650,19 @@ describe("CaseDialog — edit history", () => {
       }),
     );
     expect(replaced).toHaveAttribute("title", formatDateTime(older, getLocale()));
+
+    // The header timestamps keep the hover-exact instant this view had before
+    // its timestamps moved into `PostTimestamps`: a relative label still
+    // reveals the full date and time on hover, on the creation time and the
+    // edited marker both.
+    const createdLabel = screen.getByText(
+      formatRelativeTime(created, getLocale(), m.post_just_now()),
+    );
+    expect(createdLabel).toHaveAttribute("title", formatDateTime(created, getLocale()));
+    const editedMarker = screen.getByText(
+      m.post_edited({ time: formatRelativeTime(newer, getLocale(), m.post_just_now()) }),
+    );
+    expect(editedMarker).toHaveAttribute("title", formatDateTime(newer, getLocale()));
   });
 
   it("renders no history section for a never-edited post", async () => {
@@ -713,6 +729,10 @@ describe("CaseDialog — report snapshots", () => {
       }),
     );
 
-    expect(screen.getByText(m.moderation_case_edit_history_truncated())).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        m.moderation_case_edit_history_truncated({ count: EDIT_HISTORY_CASE_LIMIT }),
+      ),
+    ).toBeInTheDocument();
   });
 });
