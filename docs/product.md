@@ -109,7 +109,11 @@ both by the server's page gate and by the client.
   snapshots the post's text at the moment it was filed, and the case view
   quotes that snapshot on the report — so a rewrite cannot hide the wording a
   report was raised against, and the moderator sees exactly what the
-  reporter saw without reconstructing it from timestamps. Editing is
+  reporter saw without reconstructing it from timestamps. The same holds when
+  the judged post is a quote: the case view shows the quoted original's edit
+  history beside its current text too, so the original's author rewriting it
+  after being quoted cannot hide the wording the quote amplified (the report
+  snapshots cover the quoting post's text, not the original's). Editing is
   idempotent: re-sending the same text is a no-op that does not restamp the
   marker.
 - Likes are two idempotent operations, `like` and `unlike`, never a toggle —

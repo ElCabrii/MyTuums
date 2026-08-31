@@ -72,6 +72,40 @@ const resolveInput = z.discriminatedUnion("targetType", [
   }),
 ]);
 
+/**
+ * One post's capped edit history for the case view, newest first (issue #264).
+ * Shared by the target post and the quoted original of a quote target so the
+ * two reads — and their `EDIT_HISTORY_CASE_LIMIT` cap and truncation flag —
+ * cannot drift.
+ *
+ * The cap admits an author's edit spree without turning the case into an
+ * unbounded list. For the TARGET itself the report snapshots carry the
+ * load-bearing evidence beyond whatever the cap cuts; the quoted original has
+ * no snapshots of its own (reports against the quote snapshot the quoter's
+ * text), which is exactly why its history is surfaced at all.
+ */
+interface CaseEditHistory {
+  editHistory: { content: string; createdAt: Date }[];
+  editHistoryTruncated: boolean;
+}
+
+/** The no-history case: a post nobody has edited (or whose row is gone). */
+const EMPTY_CASE_HISTORY: CaseEditHistory = { editHistory: [], editHistoryTruncated: false };
+
+async function caseEditHistory(db: Database, postId: string): Promise<CaseEditHistory> {
+  const rows = await db
+    .select({ content: postEdit.content, createdAt: postEdit.createdAt })
+    .from(postEdit)
+    .where(eq(postEdit.postId, postId))
+    .orderBy(desc(postEdit.createdAt), desc(postEdit.id))
+    .limit(EDIT_HISTORY_CASE_LIMIT + 1);
+  const editHistoryTruncated = rows.length > EDIT_HISTORY_CASE_LIMIT;
+  return {
+    editHistory: editHistoryTruncated ? rows.slice(0, -1) : rows,
+    editHistoryTruncated,
+  };
+}
+
 export const queueRouter = {
   /**
    * The moderation queue: unresolved reports grouped by target, merged with
@@ -261,7 +295,8 @@ export const queueRouter = {
    * content for posts (tombstoned or not), account state for users. A post
    * target also carries its edit history (`post_edit`, newest first), so the
    * moderator sees every version the author published, not just the text that
-   * currently stands.
+   * currently stands. The quoted original of a quote target carries its own
+   * history the same way, spliced into the quoted evidence.
    */
   case: moderatorProcedure
     .use(rateLimit(RATE_LIMITS.moderate))
@@ -323,7 +358,8 @@ export const queueRouter = {
                   parentId: post.parentId,
                   // The quoted post a quote targets (issue #261): raw content
                   // regardless of tombstones, the same evidence rule as the
-                  // target's own content and attachments above.
+                  // target's own content and attachments above. The edit
+                  // history is spliced in below (see `caseEditHistory`).
                   quotedPostId: post.quotedPostId,
                   quoted: quotedPostEvidence(),
                   removedAt: post.removedAt,
@@ -350,22 +386,24 @@ export const queueRouter = {
               // #264). Editing stays open while a case is pending; this
               // history is what lets the moderator judge what was written
               // before each edit — the current `content` above is only the
-              // latest version. Capped at the newest EDIT_HISTORY_CASE_LIMIT
-              // rows: an author's write budget still admits hundreds of
-              // versions over time, and the report snapshots above carry
-              // the load-bearing evidence beyond whatever the cap cuts.
-              const editHistory = await context.db
-                .select({ content: postEdit.content, createdAt: postEdit.createdAt })
-                .from(postEdit)
-                .where(eq(postEdit.postId, input.targetId))
-                .orderBy(desc(postEdit.createdAt), desc(postEdit.id))
-                .limit(EDIT_HISTORY_CASE_LIMIT + 1);
-              const editHistoryTruncated = editHistory.length > EDIT_HISTORY_CASE_LIMIT;
+              // latest version.
+              const history = await caseEditHistory(context.db, input.targetId);
+              // The quoted original's own history rides the quoted evidence
+              // (issue #264 meets #261): a quote case is judged against the
+              // ORIGINAL's wording, but the report snapshots belong to the
+              // quoting post — the original may never have been reported
+              // itself. When its author edits it after being quoted, the
+              // pre-edit wording exists nowhere but its `post_edit` rows, so
+              // the case view carries them beside the quoted content exactly
+              // as it carries the target's own above.
+              const quotedHistory = targetPost.quoted
+                ? await caseEditHistory(context.db, targetPost.quoted.id)
+                : EMPTY_CASE_HISTORY;
               return {
                 kind: "post" as const,
                 ...targetPost,
-                editHistory: editHistoryTruncated ? editHistory.slice(0, -1) : editHistory,
-                editHistoryTruncated,
+                quoted: targetPost.quoted ? { ...targetPost.quoted, ...quotedHistory } : null,
+                ...history,
               };
             })()
           : await (async () => {

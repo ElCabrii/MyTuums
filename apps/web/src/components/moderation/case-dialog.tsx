@@ -291,12 +291,21 @@ function TargetPostCard({
             have been rewritten after the reports below were filed — this is
             the moderator's only record of what those reports were raised
             against. Newest first, matching the reports section. */}
-        {target.editHistory.length > 0 && <EditHistorySection target={target} />}
+        {target.editHistory.length > 0 && (
+          <EditHistorySection
+            history={target.editHistory}
+            truncated={target.editHistoryTruncated}
+          />
+        )}
         {/* The quoted post (issue #261), with the moderator's raw-content
             projection — the evidence rule the target's own content follows
             above. A removed or deleted quoted original renders its stub
             markers rather than disappearing: the moderator needs to see what
-            the quote amplified, including its tombstones. */}
+            the quote amplified, including its tombstones. The quoted
+            original's own edit history rides along (its author can rewrite it
+            after being quoted, and the report snapshots below captured the
+            quoter's text, not the original's — the history is the only record
+            of the wording that was amplified). */}
         {target.quoted && (
           <div className="border-border space-y-2 rounded-lg border p-3">
             <p className="text-muted-foreground text-xs font-medium">
@@ -335,6 +344,12 @@ function TargetPostCard({
             {target.quoted.deleted && (
               <p className="text-muted-foreground text-xs">{m.post_deleted_stub()}</p>
             )}
+            {target.quoted.editHistory.length > 0 && (
+              <EditHistorySection
+                history={target.quoted.editHistory}
+                truncated={target.quoted.editHistoryTruncated}
+              />
+            )}
           </div>
         )}
         {target.removedAt && (
@@ -354,8 +369,9 @@ function TargetPostCard({
 }
 
 /**
- * The superseded versions of the post's text, newest first (issue #264).
- * Rendered inside the target post's card rather than as its own: the
+ * The superseded versions of a post's text, newest first (issue #264).
+ * Rendered inside the card whose text it explains — the target post's own, or
+ * the quoted original's inside the quote box — rather than as its own: the
  * versions are part of what is being judged, not metadata about it.
  *
  * Each row says what the text said and when it stopped saying it — the edit
@@ -363,9 +379,11 @@ function TargetPostCard({
  * rewrite landed before or after the reports were filed.
  */
 function EditHistorySection({
-  target,
+  history,
+  truncated,
 }: {
-  target: Extract<ModerationCaseDetail["target"], { kind: "post" }>;
+  history: ReadonlyArray<{ content: string; createdAt: Date }>;
+  truncated: boolean;
 }) {
   const locale = getLocale();
 
@@ -379,7 +397,7 @@ function EditHistorySection({
       {/* `role="listitem"` on each row: `ItemGroup` renders `role="list"`, the
           same aria-required-children rule the reports section follows. */}
       <ItemGroup className="gap-1.5">
-        {target.editHistory.map((version) => (
+        {history.map((version) => (
           <Item
             key={String(version.createdAt.getTime()) + version.content}
             role="listitem"
@@ -404,7 +422,7 @@ function EditHistorySection({
           </Item>
         ))}
       </ItemGroup>
-      {target.editHistoryTruncated && (
+      {truncated && (
         <p className="text-muted-foreground text-xs">
           {m.moderation_case_edit_history_truncated({ count: EDIT_HISTORY_CASE_LIMIT })}
         </p>

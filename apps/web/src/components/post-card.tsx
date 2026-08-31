@@ -317,7 +317,11 @@ export function PostCard({
                   the rendered label differs, but the machine-readable value
                   assistive technology and tooling read is `post.createdAt`
                   either way. */}
-              <PostTimestamps createdAt={post.createdAt} editedAt={post.editedAt} exact={isFocused} />
+              <PostTimestamps
+                createdAt={post.createdAt}
+                editedAt={post.editedAt}
+                exact={isFocused}
+              />
 
               {/* Every item here lives in a shared dialog mounted at the root
                 (identity atoms — see `atoms/moderation.ts`,

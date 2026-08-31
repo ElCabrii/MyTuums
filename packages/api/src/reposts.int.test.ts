@@ -524,6 +524,58 @@ describe("quote posts", () => {
     }
   });
 
+  it("a quote case carries the quoted original's edit history — the pre-edit wording stays judgeable after the original's author rewrites it", async () => {
+    const moderator = await createModerator();
+    const author = await createTestUser();
+    const quoter = await createTestUser();
+    const reporter = await createTestUser();
+    const [original] = await seedPosts(author.id, 1);
+
+    const created = await call(
+      appRouter.post.create,
+      { content: "look what they said", quotedPostId: original.id },
+      { context: contextFor(quoter) },
+    );
+    await call(
+      appRouter.moderation.report,
+      { targetType: "post", targetId: created.id, reason: "spam" },
+      { context: contextFor(reporter) },
+    );
+
+    // The ORIGINAL's author rewrites their post after being quoted. The
+    // report snapshot cannot help the moderator here: it captured the
+    // quoter's text, not the original's — the original was never reported.
+    await call(
+      appRouter.post.edit,
+      { postId: original.id, content: "perfectly innocent wording" },
+      { context: contextFor(author) },
+    );
+
+    const target = await call(
+      appRouter.moderation.case,
+      { targetType: "post", targetId: created.id },
+      { context: contextFor(moderator) },
+    );
+
+    expect(target.target.kind).toBe("post");
+    if (target.target.kind === "post") {
+      // The live evidence is the edited text...
+      expect(target.target.quoted?.content).toBe("perfectly innocent wording");
+      // ...and the history beside it is the wording the quoter amplified —
+      // the same doubled evidence the target's own text gets (issue #264).
+      expect(target.target.quoted?.editHistory).toHaveLength(1);
+      expect(target.target.quoted?.editHistory[0]?.content).toContain("seed post 0");
+      expect(target.target.quoted?.editHistoryTruncated).toBe(false);
+      // The histories are per-post: the quoter never edited, so the target's
+      // own history stays empty even though its quoted original has one.
+      expect(target.target.editHistory).toHaveLength(0);
+      // The report snapshot is the quoter's text, which is why the quoted
+      // history above is the only staff-reachable record of the pre-edit
+      // wording.
+      expect(target.reports[0]?.snapshotContent).toBe("look what they said");
+    }
+  });
+
   it("hard-deleting the quoted post leaves the quote standing with a null embedded card — quoted_post_id carries no FK on purpose", async () => {
     const author = await createTestUser();
     const quoter = await createTestUser();

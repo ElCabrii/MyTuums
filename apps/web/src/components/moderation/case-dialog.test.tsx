@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { EDIT_HISTORY_CASE_LIMIT } from "@my-tuums/api/constants";
 import {
   createTestQueryClient,
+  makeAuthor,
   makeModerationCaseDetail,
   makeModerationReport,
   makeUserModerationCaseDetail,
@@ -669,6 +670,81 @@ describe("CaseDialog — edit history", () => {
     const target: CaseRef = { targetType: "post", targetId: "post-2" };
     await renderCase(target, makeModerationCaseDetail({ id: "post-2" }));
 
+    expect(screen.queryByText(m.moderation_case_edit_history_title())).not.toBeInTheDocument();
+  });
+
+  // The quoted original of a quote target can be rewritten by its author
+  // after being quoted. The report snapshots cover the quoter's text only,
+  // so the original's own history is the one record of the wording that was
+  // amplified — the case view must render it inside the quoted box.
+  it("lists the quoted original's superseded versions inside the quoted box, beside its current text", async () => {
+    const replacedAt = new Date(Date.now() - 60_000);
+    const target: CaseRef = { targetType: "post", targetId: "post-1" };
+    await renderCase(
+      target,
+      makeModerationCaseDetail({
+        id: "post-1",
+        content: "look what they said",
+        quotedPostId: "post-original",
+        quoted: {
+          id: "post-original",
+          content: "softened wording",
+          removed: false,
+          deleted: false,
+          removedReason: null,
+          attachments: [],
+          author: makeAuthor({ id: "author-original", name: "Original Author" }),
+          editHistory: [{ content: "the wording that was quoted", createdAt: replacedAt }],
+          editHistoryTruncated: false,
+        },
+      }),
+    );
+
+    // Both halves of the evidence render: the live (edited) text the original
+    // now carries, and the pre-edit wording the quoter amplified.
+    expect(screen.getByText(m.moderation_case_quoted_label())).toBeInTheDocument();
+    expect(screen.getByText("softened wording")).toBeInTheDocument();
+    expect(screen.getByText("the wording that was quoted")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        m.moderation_case_edit_history_replaced({
+          time: formatRelativeTime(replacedAt, getLocale(), m.post_just_now()),
+        }),
+      ),
+    ).toBeInTheDocument();
+    // The quoted history section lives inside the quoted box, after the
+    // quoted content — the same reading order the target's own history keeps.
+    const quotedBox = screen.getByText(m.moderation_case_quoted_label()).parentElement;
+    expect(quotedBox).toContainElement(screen.getByText("the wording that was quoted"));
+    expect(
+      screen
+        .getByText("softened wording")
+        .compareDocumentPosition(screen.getByText("the wording that was quoted")),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("renders no history inside the quoted box when the quoted original was never edited", async () => {
+    const target: CaseRef = { targetType: "post", targetId: "post-1" };
+    await renderCase(
+      target,
+      makeModerationCaseDetail({
+        id: "post-1",
+        quotedPostId: "post-original",
+        quoted: {
+          id: "post-original",
+          content: "stable wording",
+          removed: false,
+          deleted: false,
+          removedReason: null,
+          attachments: [],
+          author: makeAuthor(),
+          editHistory: [],
+          editHistoryTruncated: false,
+        },
+      }),
+    );
+
+    expect(screen.getByText("stable wording")).toBeInTheDocument();
     expect(screen.queryByText(m.moderation_case_edit_history_title())).not.toBeInTheDocument();
   });
 });

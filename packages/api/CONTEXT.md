@@ -200,7 +200,14 @@ over HTTP and imports only its browser-safe subpaths.
   evidence is doubled: a post report snapshots the content it was raised
   against (`report.snapshot_content`, refreshed on a repeat report), so a
   rewrite mid-case or after a dismissal can hide what was judged through
-  neither the snapshot nor the history. That is also why the write opens
+  neither the snapshot nor the history. The same claim covers the quote shape
+  (issue #264 meets #261): a quote case is judged against the ORIGINAL's
+  wording too, but the report snapshots belong to the quoting post — the
+  original may never have been reported itself — so `moderation.case` also
+  returns the quoted original's own `post_edit` history (same cap, same
+  helper) spliced into the `quoted` evidence beside its live content, and a
+  rewrite of the original after being quoted is no more hiding than a rewrite
+  of the target. That is also why the write opens
   with `SELECT … FOR UPDATE` where `post.delete` needs no lock: concurrent
   editors serialize on the row, so each history row records the text its
   edit _actually_ superseded and no version can be lost between two
@@ -232,7 +239,7 @@ over HTTP and imports only its browser-safe subpaths.
   places the original at the repost's timestamp — with no ranking and no
   deduplication: one post can be two events. The event cursor is a three-part
   key (`createEventCursorCodec` in `src/cursor.ts`): `(event_at, post_id,
-  reposter_key)`, where the reposter half is absent for post events and binds
+reposter_key)`, where the reposter half is absent for post events and binds
   as `''` in SQL so the row-value comparison stays a total order. Profile
   feeds (`authorId`) and reply lists run no repost arm: a profile is the
   author's own activity, and the reply list is direct replies by their own
