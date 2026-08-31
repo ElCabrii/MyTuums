@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createLinkFetchTransport,
   guardedLinkFetch,
   isGlobalUnicastAddress,
   parseOpenGraphMetadata,
@@ -56,9 +57,20 @@ describe("isGlobalUnicastAddress", () => {
     ["fd12:3456:789a::1", "unique local, inside fd00::/8"],
     ["ff02::1", "multicast"],
     ["2001:db8::1", "documentation"],
-    ["::ffff:127.0.0.1", "IPv4-mapped loopback — judged by the IPv4 it lands on"],
+    // The mapped block is refused in BOTH spellings. The hex forms were the
+    // P1 gap: the URL parser canonicalizes `[::ffff:127.0.0.1]` to
+    // `[::ffff:7f00:1]` before the guard ever sees the hostname, so a
+    // dotted-only delegation never fired on a real request.
+    ["::ffff:127.0.0.1", "IPv4-mapped loopback, dotted spelling"],
+    ["::ffff:7f00:1", "IPv4-mapped loopback, hex spelling (the canonicalized form)"],
     ["::ffff:192.168.0.1", "IPv4-mapped private"],
+    ["::ffff:a00:2", "IPv4-mapped RFC 1918 10.0.0.2, hex spelling"],
+    ["::ffff:a9fe:a9fe", "IPv4-mapped cloud metadata 169.254.169.254, hex spelling"],
+    ["::ffff:93.184.216.34", "IPv4-mapped global — the block is refused wholesale, not delegated"],
     ["64:ff9b::127.0.0.1", "NAT64 into loopback"],
+    ["64:ff9b:1::a9fe:a9fe", "local-use NAT64 into the cloud metadata address"],
+    ["2001:0:1234:abcd::1", "Teredo 2001::/32"],
+    ["2001:2::123", "benchmarking 2001:2::/48"],
     ["100::", "discard-only"],
   ])("refuses the IPv6 address %s (%s)", (address) => {
     expect(isGlobalUnicastAddress(address)).toBe(false);
@@ -69,6 +81,45 @@ describe("isGlobalUnicastAddress", () => {
     expect(isGlobalUnicastAddress("")).toBe(false);
     expect(isGlobalUnicastAddress("999.1.1.1")).toBe(false);
     expect(isGlobalUnicastAddress("fe80::1%eth0")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createLinkFetchTransport — the literal short-circuit
+// ---------------------------------------------------------------------------
+
+describe("createLinkFetchTransport", () => {
+  // Only literal inputs go through these — the short-circuit returns before
+  // the resolver is touched, so nothing here performs I/O.
+
+  it("resolves a literal IP to itself without touching the resolver", async () => {
+    const transport = createLinkFetchTransport();
+    await expect(transport.lookup("93.184.216.34")).resolves.toEqual(["93.184.216.34"]);
+  });
+
+  it("unwraps a bracketed IPv6 literal so the address guard judges the address", async () => {
+    // `new URL("http://[2606:...]/").hostname` keeps the brackets; without
+    // the unwrap, the literal misses `isIP` and dies in the resolver with
+    // ENOTFOUND instead of ever being classified.
+    const transport = createLinkFetchTransport();
+    const address = "2606:2800:220:1:248:1893:25c8:1946";
+    await expect(transport.lookup(`[${address}]`)).resolves.toEqual([address]);
+    expect(isGlobalUnicastAddress(address)).toBe(true);
+  });
+
+  it("a bracketed loopback literal is classified and refused, not resolved", async () => {
+    const transport = createLinkFetchTransport();
+    const addresses = await transport.lookup("[::1]");
+    expect(addresses.every((address) => isGlobalUnicastAddress(address))).toBe(false);
+  });
+
+  it("a bracketed mapped literal cannot smuggle a private IPv4 as a global IPv6", async () => {
+    // The URL parser canonicalizes `[::ffff:127.0.0.1]` to the hex spelling,
+    // so that is the form the lookup must survive: bracket-stripping is safe
+    // only while `::ffff:0:0/96` stays in the refused table.
+    const transport = createLinkFetchTransport();
+    const addresses = await transport.lookup("[::ffff:7f00:1]");
+    expect(addresses.every((address) => isGlobalUnicastAddress(address))).toBe(false);
   });
 });
 
@@ -150,6 +201,42 @@ describe("guardedLinkFetch", () => {
       acceptContentType: () => true,
     });
     expect(result).toEqual({ ok: false, reason: "address" });
+  });
+
+  it.each(["https://example.com:8080/x", "http://example.com:8443/x"])(
+    "refuses the non-standard port of %s before any request is made",
+    async (target) => {
+      const transport = scriptableTransport({ addresses: GLOBAL });
+      const result = await guardedLinkFetch(new URL(target), {
+        transport,
+        maxBytes: 1024,
+        acceptContentType: () => true,
+      });
+      expect(result).toEqual({ ok: false, reason: "port" });
+      expect(transport.requests).toHaveLength(0);
+    },
+  );
+
+  it("refuses a redirect whose target is a non-standard port", async () => {
+    const transport = scriptableTransport({
+      addresses: GLOBAL,
+      responses: (url) =>
+        url.pathname === "/start"
+          ? new Response(null, {
+              status: 302,
+              headers: { location: "https://example.com:8443/hop" },
+            })
+          : undefined,
+    });
+
+    const result = await guardedLinkFetch(new URL("https://example.com/start"), {
+      transport,
+      maxBytes: 1024,
+      acceptContentType: () => true,
+    });
+
+    expect(result).toEqual({ ok: false, reason: "port" });
+    expect(transport.requests.map((url) => url.pathname)).toEqual(["/start"]);
   });
 
   it("follows a bounded redirect and re-checks the target of every hop", async () => {
@@ -384,12 +471,17 @@ describe("parseOpenGraphMetadata", () => {
     const html = `
       <meta property="og:title" content="${"t".repeat(400)}">
       <meta property="og:description" content="${"d".repeat(600)}">
+      <meta property="og:site_name" content="${"s".repeat(4000)}">
       <meta property="og:image" content="javascript:alert(1)">`;
 
     const metadata = parseOpenGraphMetadata(html, base);
     expect(metadata).not.toBeNull();
     expect(metadata!.title.length).toBe(300);
     expect(metadata!.description?.length).toBe(500);
+    // The site name is shipped to every viewer like the title and
+    // description, so a page cannot use it to store half a megabyte.
+    expect(metadata!.siteName?.length).toBe(300);
+    expect(metadata!.siteName?.endsWith("…")).toBe(true);
     expect(metadata!.imageUrl).toBeNull();
   });
 });

@@ -499,6 +499,12 @@ export const appeal = pgTable(
  * one was provided and stored, lives in the media bucket under
  * `link-cards/<uuid>.<ext>` and is served through `/media/` like every other
  * object — never hot-linked from the target.
+ *
+ * A purged row (`purgedAt` set) is the moderation record for a hostile
+ * unfurl: the card fields are nulled, the URL never unfurls again, and the
+ * purge columns carry who removed it and why — the audit trail the
+ * `moderation_action` table cannot hold, its targets being post- and
+ * user-shaped by schema.
  */
 export const linkCard = pgTable(
   "link_card",
@@ -513,6 +519,9 @@ export const linkCard = pgTable(
     description: text("description"),
     imageMediaPath: text("image_media_path"),
     fetchedAt: timestamp("fetched_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    purgedAt: timestamp("purged_at", { withTimezone: true, precision: 3 }),
+    purgedBy: text("purged_by").references(() => user.id, { onDelete: "set null" }),
+    purgedReason: text("purged_reason"),
   },
   (t) => [
     uniqueIndex("link_card_url_key").on(t.url),

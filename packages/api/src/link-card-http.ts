@@ -18,6 +18,7 @@ import {
   LINK_CARD_DESCRIPTION_MAX_LENGTH,
   LINK_CARD_FETCH_TIMEOUT_MS,
   LINK_CARD_MAX_REDIRECTS,
+  LINK_CARD_SITE_NAME_MAX_LENGTH,
   LINK_CARD_TITLE_MAX_LENGTH,
 } from "./constants.js";
 
@@ -43,9 +44,23 @@ export interface LinkFetchTransport {
 export function createLinkFetchTransport(): LinkFetchTransport {
   return {
     async lookup(hostname) {
+      // A bracketed IPv6 literal (`new URL("http://[::1]/").hostname` keeps
+      // the brackets) is unwrapped first: `isIP` and the resolver both
+      // refuse the bracketed spelling, so without this a literal IPv6 target
+      // would miss the short-circuit and fail resolution instead of being
+      // judged by the address guard.
+      //
+      // SAFETY: this is safe only because `isGlobalUnicastAddress` refuses
+      // `::ffff:0:0/96` in both spellings. A bracketed IPv4-mapped literal
+      // (`[::ffff:127.0.0.1]`, canonicalized by the URL parser to
+      // `[::ffff:7f00:1]`) must not be able to reach the resolver as a
+      // "literal IPv6 address" that is really a private IPv4; the range
+      // table, not the brackets, is what refuses it.
+      const literal =
+        hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
       // A literal IP resolves to itself; dnsLookup would accept it too, but
       // short-circuiting keeps literal-IP targets off the resolver entirely.
-      if (isIP(hostname) !== 0) return [hostname];
+      if (isIP(literal) !== 0) return [literal];
       const results = await dnsLookup(hostname, { all: true, verbatim: true });
       return results.map((result) => result.address);
     },
@@ -167,11 +182,27 @@ function cidrRange(firstAddress: bigint, bits: number): readonly [bigint, bigint
   return [firstAddress, firstAddress | ((1n << hostBits) - 1n)];
 }
 
-/** Refused IPv6 ranges — the IPv6 half of the IANA special-purpose registry. */
+/**
+ * Refused IPv6 ranges — the special-purpose blocks of the IANA registry that
+ * could name a host a URL points at: the unspecified and loopback singles,
+ * IPv4-mapped (in BOTH spellings — see `isGlobalUnicastAddress`), the
+ * well-known and local-use NAT64 blocks, discard-only, Teredo, benchmarking,
+ * documentation, unique local, link-local and multicast. Registry blocks that
+ * are pure protocol machinery rather than host addresses (ORCHID, 6to4, the
+ * AS112 anycast) have no page behind them, so they are not listed — refusing
+ * the ranges that do name hosts is what keeps the answer "non-global ⇒ no".
+ */
 const REFUSED_IPV6_RANGES: ReadonlyArray<readonly [bigint, bigint]> = [
   [0n, 1n], // :: (unspecified) and ::1 (loopback)
-  cidrRange(0x64ff9bn << 96n, 96), // NAT64 — reaches IPv4 space by gateway policy
+  // Each literal is the CIDR's first address, written out: `::ffff:0:0/96`,
+  // `64:ff9b:1::/48`, … — the shift is the count of trailing zero groups,
+  // not a derived constant, so a wrong table entry is visible as one.
+  cidrRange(0xffff00000000n, 96), // IPv4-mapped, both spellings — the IPv4 it lands on is where the socket goes
+  cidrRange(0x64ff9bn << 96n, 96), // NAT64 well-known — reaches IPv4 space by gateway policy
+  cidrRange(0x64ff9b0001n << 80n, 48), // NAT64 local use
   cidrRange(0x100n << 112n, 64), // discard-only
+  cidrRange(0x2001n << 112n, 32), // Teredo — tunnels through arbitrary peers
+  cidrRange(0x20010002n << 96n, 48), // benchmarking
   cidrRange(0x20010db8n << 96n, 32), // documentation
   cidrRange(0xfc00n << 112n, 7), // unique local
   cidrRange(0xfe80n << 112n, 10), // link-local
@@ -181,10 +212,13 @@ const REFUSED_IPV6_RANGES: ReadonlyArray<readonly [bigint, bigint]> = [
 /**
  * Whether `address` is a global unicast target this app is willing to fetch.
  *
- * The one address form that resolves to another family — IPv4-mapped IPv6
- * (`::ffff:a.b.c.d`) — is judged by the IPv4 address it denotes, because that
- * is where the connection actually lands. Every special-purpose range of
- * either family is refused; anything unparseable is refused (fail closed).
+ * The one address family that can denote another — IPv4-mapped IPv6
+ * (`::ffff:a.b.c.d` and its hex spelling `::ffff:aabb:ccdd`) — is refused
+ * outright, in both spellings, by the table above: the socket a mapped
+ * literal opens lands on the IPv4 address it carries, and no legitimate
+ * target is published in that form, so there is no global case to delegate
+ * to. Every special-purpose range of either family is refused; anything
+ * unparseable is refused (fail closed).
  */
 export function isGlobalUnicastAddress(address: string): boolean {
   const family = isIP(address);
@@ -196,8 +230,6 @@ export function isGlobalUnicastAddress(address: string): boolean {
   }
 
   if (family === 6) {
-    const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address);
-    if (mapped?.[1]) return isGlobalUnicastAddress(mapped[1]);
     const value = parseIpv6(address);
     if (value === null) return false;
     return !REFUSED_IPV6_RANGES.some(([first, last]) => value >= first && value <= last);
@@ -213,6 +245,7 @@ export function isGlobalUnicastAddress(address: string): boolean {
 /** Why a guarded fetch refused. Coarse on purpose — every reason degrades identically. */
 export type GuardedFetchFailure =
   | "scheme"
+  | "port"
   | "address"
   | "redirects"
   | "timeout"
@@ -233,16 +266,34 @@ export interface GuardedFetchSuccess {
 export type GuardedFetchResult = GuardedFetchSuccess | { ok: false; reason: GuardedFetchFailure };
 
 /**
+ * The only ports a card target may dial: the scheme's own, default or
+ * explicit. An author-chosen URL (or a redirect it leads to) must not be able
+ * to reach administrative services that happen to be reachable on the host —
+ * a database, an internal status page, a Redis port speaking HTTP-ish enough
+ * to answer. A public web page lives on 80 or 443; anything else is not a
+ * card target.
+ *
+ * `URL` drops an explicitly stated default port, so `http://host:80/` arrives
+ * here with `port === ""` and only the non-default spellings need comparing.
+ */
+function isAllowedPort(url: URL): boolean {
+  if (url.protocol === "https:") return url.port === "" || url.port === "443";
+  return url.port === "" || url.port === "80";
+}
+
+/**
  * Fetches `url` under the card's whole defence line:
  *
  * - only `http`/`https` — the same scheme rule the client's linkifier applies,
  *   so `javascript:`/`data:` targets never become an outbound request;
+ * - only the scheme's own port (80 for http, 443 for https) — a host's
+ *   non-web ports are not card targets;
  * - the hostname is resolved and EVERY resolved address must be global
  *   unicast, before any bytes are requested;
  * - redirects are followed manually, at most `LINK_CARD_MAX_REDIRECTS`, and
- *   every hop re-runs the scheme and address checks — a public first hop that
- *   redirects to `169.254.169.254` is refused at the hop, not discovered
- *   after the response body arrives;
+ *   every hop re-runs the scheme, port and address checks — a public first
+ *   hop that redirects to `169.254.169.254` is refused at the hop, not
+ *   discovered after the response body arrives;
  * - one wall-clock deadline covers every hop, enforced by racing the transport
  *   (an uncooperative transport cannot out-wait it);
  * - the body is streamed and cut off at `maxBytes`;
@@ -269,7 +320,10 @@ export async function guardedLinkFetch(
 
     // Resolve and validate before connecting. A hostname that fails to
     // resolve is as refused as one that resolves somewhere private: there is
-    // no address this app is willing to dial for it.
+    // no address this app is willing to dial for it. This runs before the
+    // port check on purpose: a literal or resolved private address is the
+    // more serious refusal, and the integration pins hold a real loopback
+    // listener on a random port against exactly this path.
     if (current.hostname.length === 0) return { ok: false, reason: "address" };
     let addresses: string[];
     try {
@@ -280,6 +334,7 @@ export async function guardedLinkFetch(
     if (addresses.length === 0 || !addresses.every((address) => isGlobalUnicastAddress(address))) {
       return { ok: false, reason: "address" };
     }
+    if (!isAllowedPort(current)) return { ok: false, reason: "port" };
 
     let response: Response | "timeout";
     try {
@@ -302,8 +357,9 @@ export async function guardedLinkFetch(
     ) {
       if (!location) return { ok: false, reason: "network" };
       const next = new URL(location, current);
-      // The next iteration re-runs every check on `next` — scheme, DNS,
-      // ranges — which is the entire point of following redirects manually.
+      // The next iteration re-runs every check on `next` — scheme, port,
+      // DNS, ranges — which is the entire point of following redirects
+      // manually.
       if (hop === LINK_CARD_MAX_REDIRECTS) return { ok: false, reason: "redirects" };
       current = next;
       continue;
@@ -485,7 +541,13 @@ function decodeEntities(value: string): string {
   });
 }
 
-function truncate(value: string, max: number): string {
+/**
+ * Caps one stored card field, marking the cut with an ellipsis. Exported
+ * because the domain fallback in `./link-card.ts` — the fetched page's
+ * hostname — is page-influenced text stored beside these fields and must be
+ * bounded by the same rule.
+ */
+export function truncateCardField(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
@@ -541,12 +603,15 @@ export function parseOpenGraphMetadata(html: string, baseUrl: URL): OpenGraphMet
   }
 
   return {
-    title: truncate(decodeEntities(rawTitle), LINK_CARD_TITLE_MAX_LENGTH),
+    title: truncateCardField(decodeEntities(rawTitle), LINK_CARD_TITLE_MAX_LENGTH),
     description:
       rawDescription === undefined
         ? null
-        : truncate(decodeEntities(rawDescription), LINK_CARD_DESCRIPTION_MAX_LENGTH),
+        : truncateCardField(decodeEntities(rawDescription), LINK_CARD_DESCRIPTION_MAX_LENGTH),
     imageUrl,
-    siteName: rawSiteName === undefined ? null : decodeEntities(rawSiteName),
+    siteName:
+      rawSiteName === undefined
+        ? null
+        : truncateCardField(decodeEntities(rawSiteName), LINK_CARD_SITE_NAME_MAX_LENGTH),
   };
 }

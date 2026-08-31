@@ -57,14 +57,16 @@ both by the server's page gate and by the client.
   image (issue #260). The second and later URLs stay plain links. Fetching is
   server-side only, against the same http(s) rule the linkifier applies, with
   private/loopback/link-local addresses refused, redirects re-checked at every
-  hop, and size and time caps on the fetch. A URL is fetched at most once per
-  revalidation window and cached by URL, so every post carrying it shares one
-  card; a URL with no Open Graph payload is cached as "no card" the same way.
-  The post's stored text is never modified. A fetched lead image is stored in
-  the media bucket and served from `/media/` like any other object, never
-  hot-linked from the target. Every failure mode — a dead or refused target, a
-  timeout, a missing payload — leaves the post with the plain link it always
-  had.
+  hop, only the scheme's own port dialled, and size and time caps on the
+  fetch. A URL is fetched at most once per revalidation window and cached by
+  URL, so every post carrying it shares one card; a URL with no Open Graph
+  payload is cached as "no card" the same way. The post's stored text is never
+  modified. A fetched lead image is stored in the media bucket and served
+  from `/media/` like any other object, never hot-linked from the target.
+  Every failure mode — a dead or refused target, a timeout, a missing payload
+  — leaves the post with the plain link it always had. A moderator can purge
+  a URL's card (`moderation.purgeLinkCard`), which removes the preview from
+  every post carrying the URL and stops the URL from ever unfurling again.
 - A reply is a post with a parent. Threads show the focused post, up to 20
   ancestors of context, and keyset-paginated direct replies. Beneath each
   direct reply, the thread groups the deterministic descendant branch first

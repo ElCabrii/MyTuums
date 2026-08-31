@@ -310,6 +310,13 @@ export const LINK_CARD_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
 export const LINK_CARD_TITLE_MAX_LENGTH = 300;
 /** Longest card description stored, in characters; longer ones are truncated. */
 export const LINK_CARD_DESCRIPTION_MAX_LENGTH = 500;
+/**
+ * Longest card domain stored, in characters; longer ones are truncated. The
+ * value is the target's `og:site_name` or, absent that, its hostname — both
+ * are page-controlled text shipped to every viewer of every post carrying
+ * the URL, so the cap bounds them like the title and description.
+ */
+export const LINK_CARD_SITE_NAME_MAX_LENGTH = 300;
 
 /**
  * The largest request body the RPC endpoint will accept.

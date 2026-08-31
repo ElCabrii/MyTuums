@@ -14,18 +14,21 @@
  * and looked up by whichever post carries that URL.
  */
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
+import { ORPCError } from "@orpc/server";
 import type { Context } from "./context.js";
 import { linkCard } from "@my-tuums/db/schema";
 import {
   LINK_CARD_HTML_MAX_BYTES,
   LINK_CARD_IMAGE_MAX_BYTES,
   LINK_CARD_REFRESH_MS,
+  LINK_CARD_SITE_NAME_MAX_LENGTH,
   type AllowedImageType,
 } from "./constants.js";
 import {
   guardedLinkFetch,
   parseOpenGraphMetadata,
+  truncateCardField,
   type LinkFetchTransport,
 } from "./link-card-http.js";
 import { mediaPathFor, objectKeyFromMediaPath } from "./image.js";
@@ -153,6 +156,9 @@ export async function resolveLinkCard(
   if (url === null) return null;
 
   const [cached] = await context.db.select().from(linkCard).where(eq(linkCard.url, url)).limit(1);
+  // A purged URL never unfurls again — the row is a moderation decision, and
+  // no revalidation window re-opens it (see `purgeLinkCard`).
+  if (cached?.purgedAt) return null;
   if (cached && Date.now() - cached.fetchedAt.getTime() < LINK_CARD_REFRESH_MS) {
     return cardView(cached);
   }
@@ -189,13 +195,13 @@ export async function resolveLinkCard(
     : null;
   const imageMediaPath = image ? mediaPathFor(image.key) : null;
 
-  const card = metadata
+  const card = fetched?.metadata
     ? {
-        // SAFETY: `fetched` is non-null whenever `metadata` is — the metadata
-        // only exists inside a successful fetch result.
-        domain: metadata.siteName ?? fetched!.finalUrl.hostname,
-        title: metadata.title,
-        description: metadata.description,
+        domain:
+          fetched.metadata.siteName ??
+          truncateCardField(fetched.finalUrl.hostname, LINK_CARD_SITE_NAME_MAX_LENGTH),
+        title: fetched.metadata.title,
+        description: fetched.metadata.description,
       }
     : { domain: null, title: null, description: null };
 
@@ -233,16 +239,22 @@ export async function resolveLinkCard(
           imageMediaPath,
           fetchedAt: new Date(),
         },
+        // A purge may have committed between this call's cache read and the
+        // upsert: without this condition a revalidation in flight when the
+        // purge landed would write its card fields back onto the purged row.
+        // Losing that race leaves the fetched snapshot unconsumed; the row
+        // keeps its purge, which is the newer decision.
+        setWhere: isNull(linkCard.purgedAt),
       });
   });
 
-  // The object the previous row pointed at, if any, is now unreferenced. Best
-  // effort: a missed removal is an orphan the reconcile pass reaps, and a
-  // failed one must never fail the card.
+  // The object the previous row pointed at, if any, is now unreferenced —
+  // whether the new snapshot replaced it with another image or dropped the
+  // image entirely. Best effort: a missed removal is an orphan the reconcile
+  // pass reaps, and a failed one must never fail the card.
   const previousPath = cached?.imageMediaPath ?? null;
-  const previousKey =
-    image && previousPath !== imageMediaPath ? objectKeyFromMediaPath(previousPath) : null;
-  if (image && storage && previousKey) {
+  const previousKey = previousPath !== imageMediaPath ? objectKeyFromMediaPath(previousPath) : null;
+  if (storage && previousKey) {
     await storage.remove(previousKey).catch(() => {});
   }
 
@@ -295,4 +307,75 @@ async function fetchCardMetadata(
 
   const html = new TextDecoder().decode(result.bytes);
   return { metadata: parseOpenGraphMetadata(html, result.finalUrl), finalUrl: result.finalUrl };
+}
+
+/**
+ * Purges a URL's preview card — the staff lever for a hostile unfurl
+ * (`moderation.purgeLinkCard`).
+ *
+ * A card is shared by every post carrying the URL, so this is the one action
+ * that makes all of them lose the preview at once. The row is not deleted: a
+ * deletion would be refetched on the very next view and the card would come
+ * back. It is stamped `purgedAt` with the actor and reason, its card fields
+ * are nulled, and `resolveLinkCard` refuses a purged URL outright — no
+ * revalidation window ever re-opens it.
+ *
+ * The attribution lives on the row rather than in `moderation_action`, whose
+ * target columns are post- and user-shaped by schema; the purge keeps the
+ * audit trail the moderation effects keep (who, why, when, `FOR UPDATE` on
+ * the guarded row inside one transaction) against the thing it acts on.
+ *
+ * The superseded image object is removed best-effort AFTER the commit, the
+ * same ordering as the profile-media lifecycle: a failed removal is an orphan
+ * the reconcile pass reaps, never a purge that half-happened.
+ */
+export async function purgeLinkCard(
+  context: Context,
+  input: { url: string; actorId: string; reason: string },
+): Promise<void> {
+  const url = normalizeCardUrl(input.url);
+  if (url === null) {
+    throw new ORPCError("BAD_REQUEST", { message: "This URL can't have a preview card." });
+  }
+
+  let previousPath: string | null = null;
+  await context.db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({
+        title: linkCard.title,
+        purgedAt: linkCard.purgedAt,
+        imageMediaPath: linkCard.imageMediaPath,
+      })
+      .from(linkCard)
+      .where(eq(linkCard.url, url))
+      .for("update")
+      .limit(1);
+    if (!row || row.title === null) {
+      throw new ORPCError("NOT_FOUND", { message: "This URL has no preview card." });
+    }
+    // Refused rather than a no-op so a repeat purge cannot overwrite the
+    // first purge's attribution — the same reasoning that makes
+    // `removePost` refuse an already-removed post.
+    if (row.purgedAt) {
+      throw new ORPCError("BAD_REQUEST", { message: "This URL's preview card is already purged." });
+    }
+    previousPath = row.imageMediaPath;
+    await tx
+      .update(linkCard)
+      .set({
+        domain: null,
+        title: null,
+        description: null,
+        imageMediaPath: null,
+        purgedAt: new Date(),
+        purgedBy: input.actorId,
+        purgedReason: input.reason,
+      })
+      .where(eq(linkCard.url, url));
+  });
+
+  const previousKey = objectKeyFromMediaPath(previousPath);
+  if (context.storage && previousKey) {
+    await context.storage.remove(previousKey).catch(() => {});
+  }
 }

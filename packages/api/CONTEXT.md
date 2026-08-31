@@ -43,6 +43,8 @@ over HTTP and imports only its browser-safe subpaths.
 | Change the post attachment lifecycle  | `src/post-media.ts`, `src/post-media-lock.ts`                                            | `src/posts.int.test.ts`; `src/reconcile-media.ts`; `scripts/reconcile-media.ts`                          |
 | Change follow, block or unblock       | `src/users.ts`, `src/moderation.ts`                                                      | `src/relationship-lock.ts` — every relationship writer must take the pair lock                           |
 | Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                         | `apps/server/src/request-handler.ts`                                                                     |
+| Change the link-card wire rules       | `src/link-card-http.ts`                                                                  | `src/link-card-http.test.ts`                                                                             |
+| Purge or re-serve link cards          | `src/link-card.ts` (`resolveLinkCard`, `purgeLinkCard`)                                  | `src/moderation.ts` (the procedure); `link-card.int.test.ts`                                             |
 | Add a shared constant for the web app | `src/constants.ts`                                                                       | must stay free of `@my-tuums/db`                                                                         |
 | Change an account rule                | `../auth/src/rules.ts`                                                                   | not `src/constants.ts` — see the invariant below                                                         |
 
@@ -211,10 +213,16 @@ over HTTP and imports only its browser-safe subpaths.
 - **Link preview fetching lives in `src/link-card-http.ts` (the wire) and
   `src/link-card.ts` (the cache), and the SSRF guard is not optional
   (issue #260).** Every outbound fetch goes through `guardedLinkFetch`: the
-  scheme must be http(s), the hostname is resolved via the Context-threaded
-  `linkTransport` and every address must be global unicast, redirects are
-  followed manually with each hop re-checked, and size, time and content-type
-  caps bound the response. The guard is unit-pinned with a fake transport and
+  scheme must be http(s), only the scheme's own port is dialled (80/443 —
+  a host's database or internal status port is not a card target), the
+  hostname is resolved via the Context-threaded `linkTransport` and every
+  address must be global unicast — including IPv4-mapped IPv6 in its hex
+  spelling, which is the form the URL parser actually produces from
+  `[::ffff:127.0.0.1]` — redirects are followed manually with each hop
+  re-checked, and size, time and content-type caps bound the response.
+  Bracketed IPv6 literals are unwrapped in the transport's lookup
+  short-circuit; that unwrap is safe only while `::ffff:0:0/96` stays in the
+  refused table. The guard is unit-pinned with a fake transport and
   integration-pinned against a real loopback listener. A URL resolves at most
   once per revalidation window into the `link_card` table — including the
   "no card" answer, which is cached as a negative row so a dead URL is not
@@ -223,7 +231,22 @@ over HTTP and imports only its browser-safe subpaths.
   through the same guard, sniffed like an upload, stored under `link-cards/`
   inside the post-media lifecycle lock, and authorized by
   `canViewLinkCardMedia` (any signed-in viewer — the session the `/media`
-  route already demands).
+  route already demands). Every card field, `domain` included, is capped at
+  its `LINK_CARD_*_MAX_LENGTH`.
+- **A link card's moderation lever is `moderation.purgeLinkCard`, and its
+  audit trail is the row, not `moderation_action`.** A card is shared by
+  every post carrying the URL, so purging is the one action that removes a
+  hostile preview viewer-wide. The row is stamped `purgedAt`/`purgedBy`/
+  `purgedReason` rather than deleted (a deletion would be refetched and the
+  card would return) and `resolveLinkCard` refuses a purged URL before any
+  freshness check, so no revalidation window re-opens it; the upsert carries
+  `setWhere: purgedAt is null` so a revalidation in flight when the purge
+  committed cannot write card fields back onto the row. The purge does not
+  log a `moderation_action` row: that table's target columns are post- and
+  user-shaped by schema, and stretching them to hold a URL would ripple
+  through the queue, the audit view and their tests. The who/why/when lives
+  on the row instead, guarded `FOR UPDATE` inside one transaction like every
+  other moderation effect.
 - **Every moderation effect reads its guard `FOR UPDATE`, inside its own
   transaction** (`removePostEffect`, `suspendUserEffect`, `banUserEffect`,
   `setRoleEffect`, `restorePostEffect`, `unbanEffect`, `restoreRoleEffect`).

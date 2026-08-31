@@ -18,9 +18,9 @@ import {
   THREAD_REPLY_BRANCH_MAX_DEPTH,
   THREAD_REPLY_BRANCH_CHILD_FANOUT,
   THREAD_REPLY_BRANCH_DESCENDANT_BUDGET,
+  LINK_CARD_URL_MAX_LENGTH,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
-import { LINK_CARD_URL_MAX_LENGTH } from "./constants.js";
 import { resolveLinkCard } from "./link-card.js";
 import { keysetPage } from "./pagination.js";
 import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";

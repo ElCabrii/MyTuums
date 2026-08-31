@@ -25,6 +25,9 @@ import {
   anonContext,
   contextFor,
   createTestUser,
+  freshSessionFor,
+  setUserRole,
+  testStorageObjects,
   truncateAll,
   type TestUser,
 } from "./testing/harness.js";
@@ -111,9 +114,14 @@ describe("post.linkCard", () => {
     const port = (server.address() as { port: number }).port;
 
     try {
-      // A literal loopback IP, and the `localhost` name that resolves to it —
-      // both must be refused before any connection is attempted.
-      for (const target of [`http://127.0.0.1:${port}/page`, `http://localhost:${port}/page`]) {
+      // A literal loopback IP (dotted and bracketed IPv6), and the
+      // `localhost` name that resolves to it — all must be refused before any
+      // connection is attempted.
+      for (const target of [
+        `http://127.0.0.1:${port}/page`,
+        `http://localhost:${port}/page`,
+        `http://[::1]:${port}/page`,
+      ]) {
         const result = await call(
           appRouter.post.linkCard,
           { url: target },
@@ -313,19 +321,141 @@ describe("post.linkCard", () => {
     ).toBeNull();
   });
 
-  it("the linkCard tier gates the procedure — a 61st unfurl in a minute trips TOO_MANY_REQUESTS", async () => {
+  it("a refresh whose new snapshot has no image removes the previous object too", async () => {
+    const user = await createTestUser();
+    const pageUrl = url("/image-dropped");
+    // First fetch: a card with a lead image.
+    const withImage = scriptedTransport({ html: () => OG_PAGE, image: () => PNG_BYTES });
+    const first = await call(
+      appRouter.post.linkCard,
+      { url: pageUrl },
+      { context: contextWithTransport(user, withImage) },
+    );
+    expect(first.card?.imageUrl).toMatch(/^\/media\/link-cards\//);
+    const firstKey = first.card?.imageUrl?.replace("/media/", "");
+    expect(firstKey && testStorageObjects.has(firstKey)).toBe(true);
+
+    // Age the row, then refetch a page that no longer offers an image: the
+    // old object must not linger in the bucket until reconcile-media runs.
+    await db
+      .update(linkCard)
+      .set({ fetchedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) })
+      .where(eq(linkCard.url, pageUrl));
+
+    const bare = `<html><head>
+        <meta property="og:site_name" content="Example Weekly">
+        <meta property="og:title" content="A very good article">
+      </head></html>`;
+    const withoutImage = scriptedTransport({ html: () => bare });
+    const second = await call(
+      appRouter.post.linkCard,
+      { url: pageUrl },
+      { context: contextWithTransport(user, withoutImage) },
+    );
+    expect(second.card?.imageUrl).toBeNull();
+    expect(firstKey && testStorageObjects.has(firstKey)).toBe(false);
+  });
+
+  it("the linkCard tier gates the procedure — a 301st unfurl in a minute trips TOO_MANY_REQUESTS", async () => {
     const user = await createTestUser();
     const transport = scriptedTransport({ html: () => OG_PAGE, image: () => PNG_BYTES });
     const isolated = createRateLimiter();
     const context: Context = { ...contextFor(user, isolated), linkTransport: transport };
 
     const pageUrl = url("/budget");
-    for (let i = 0; i < 60; i += 1) {
+    for (let i = 0; i < 300; i += 1) {
       await call(appRouter.post.linkCard, { url: pageUrl }, { context });
     }
 
     await expect(
       call(appRouter.post.linkCard, { url: pageUrl }, { context }),
     ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+  });
+});
+
+describe("moderation.purgeLinkCard", () => {
+  /** A user promoted to moderator through the row, re-fetched so the session carries the role. */
+  async function moderatorUser(): Promise<TestUser> {
+    const user = await createTestUser();
+    await setUserRole(user.id, "moderator");
+    return freshSessionFor(user);
+  }
+
+  it("purges the card for every post carrying the URL — permanently, and removes the stored image", async () => {
+    const viewer = await createTestUser();
+    const moderator = await moderatorUser();
+    const transport = scriptedTransport({ html: () => OG_PAGE, image: () => PNG_BYTES });
+
+    const pageUrl = url("/purge");
+    const seeded = await call(
+      appRouter.post.linkCard,
+      { url: pageUrl },
+      { context: contextWithTransport(viewer, transport) },
+    );
+    expect(seeded.card).not.toBeNull();
+    const imageKey = seeded.card?.imageUrl?.replace("/media/", "");
+    expect(imageKey && testStorageObjects.has(imageKey)).toBe(true);
+
+    const purged = await call(
+      appRouter.moderation.purgeLinkCard,
+      { url: pageUrl, reason: "phishing preview" },
+      { context: contextWithTransport(moderator, transport) },
+    );
+    expect(purged).toEqual({ url: pageUrl, purged: true });
+
+    // Every post sharing the URL loses the preview…
+    const after = await call(
+      appRouter.post.linkCard,
+      { url: pageUrl },
+      { context: contextWithTransport(viewer, transport) },
+    );
+    expect(after.card).toBeNull();
+
+    // …the stored image object is gone…
+    expect(imageKey && testStorageObjects.has(imageKey)).toBe(false);
+
+    // …the row records the purge rather than deleting it (a deletion would be
+    // refetched and the card would return)…
+    const [row] = await db.select().from(linkCard).where(eq(linkCard.url, pageUrl));
+    expect(row?.title).toBeNull();
+    expect(row?.imageMediaPath).toBeNull();
+    expect(row?.purgedAt).not.toBeNull();
+    expect(row?.purgedBy).toBe(moderator.id);
+    expect(row?.purgedReason).toBe("phishing preview");
+
+    // …and no revalidation window re-opens it: aging the row past the window
+    // still serves no card and refetches nothing.
+    await db
+      .update(linkCard)
+      .set({ fetchedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) })
+      .where(eq(linkCard.url, pageUrl));
+    const refetchAttempt = await call(
+      appRouter.post.linkCard,
+      { url: pageUrl },
+      { context: contextWithTransport(viewer, transport) },
+    );
+    expect(refetchAttempt.card).toBeNull();
+    expect(transport.htmlRequests).toBe(1);
+  });
+
+  it("refuses a caller below the moderation hierarchy, and a URL with no card", async () => {
+    const user = await createTestUser();
+    const moderator = await moderatorUser();
+
+    await expect(
+      call(
+        appRouter.moderation.purgeLinkCard,
+        { url: url("/unpurged"), reason: "no card to purge" },
+        { context: contextFor(user) },
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await expect(
+      call(
+        appRouter.moderation.purgeLinkCard,
+        { url: url("/unpurged"), reason: "no card to purge" },
+        { context: contextFor(moderator) },
+      ),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
