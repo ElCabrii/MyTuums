@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, getTableName, inArray, isNull, not, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, not, sql } from "drizzle-orm";
 import { alias, type PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "@my-tuums/db";
 import {
@@ -42,9 +42,12 @@ import { acceptPostImage, type ImageRejection } from "./post-image.js";
 import {
   discardPostAttachments,
   cleanupDeletedPostAttachments,
+  outerPost,
   postAttachmentRows,
+  postAttachments,
   preparePostAttachments,
   writePostAttachments,
+  type PostAttachment,
   type PostAttachmentInput,
 } from "./post-media.js";
 import { requireStorage } from "./profile-media.js";
@@ -138,59 +141,6 @@ const parentAuthor = alias(user, "parent_author");
 /** Same reason as the parent aliases: the quoted preview is correlated inside `postSelection`. */
 const quotedPostTable = alias(post, "quoted_post");
 const quotedAuthor = alias(user, "quoted_author");
-
-export type PostAttachment = {
-  id: string;
-  url: string;
-  position: number;
-  contentType: string;
-  byteSize: number;
-  width: number;
-  height: number;
-};
-
-/**
- * The outer post's columns, always table-qualified.
- *
- * Drizzle drops the table prefix from a column reference when the query it is
- * building has no join — a harmless optimization at the top level, and a
- * silent wrong answer inside the correlated subquery below: an unqualified
- * `"id"` there resolves against `post_attachment`, the inner scope, so the
- * correlation becomes `post_attachment.post_id = post_attachment.id` and the
- * aggregate matches nothing. It fails as an empty attachment list rather than
- * an error, which is exactly the kind of thing to spell out once here rather
- * than leave every caller to discover. Qualifying explicitly makes the
- * fragment correct whether or not the caller happens to join another table.
- */
-function outerPost(column: "id" | "removed_at" | "deleted_at" | "quoted_post_id") {
-  return sql`${sql.identifier(getTableName(post))}.${sql.identifier(column)}`;
-}
-
-/** Attachments are ordered in one correlated aggregate so every post surface shares the same shape. */
-export function postAttachmentsSelection(includeTombstones = false) {
-  return sql<PostAttachment[]>`coalesce((
-    select jsonb_agg(
-      jsonb_build_object(
-        'id', ${postAttachment.id},
-        'url', ${postAttachment.mediaPath},
-        'position', ${postAttachment.position},
-        'contentType', ${postAttachment.contentType},
-        'byteSize', ${postAttachment.byteSize},
-        'width', ${postAttachment.width},
-        'height', ${postAttachment.height}
-      ) order by ${postAttachment.position}
-    )
-    from ${postAttachment}
-    where ${postAttachment.postId} = ${outerPost("id")}
-      ${
-        includeTombstones
-          ? sql``
-          : sql`and ${outerPost("removed_at")} is null and ${outerPost("deleted_at")} is null`
-      }
-  ), '[]'::jsonb)`;
-}
-
-export const postAttachments = postAttachmentsSelection();
 
 const POST_IMAGE_REJECTIONS = {
   type: "That image format isn't supported. Use a PNG, JPEG, WebP or GIF.",

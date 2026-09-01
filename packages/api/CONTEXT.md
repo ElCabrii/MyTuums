@@ -171,7 +171,14 @@ over HTTP and imports only its browser-safe subpaths.
   while its actor is visible to the recipient (which also drops user-caused
   rows whose actor was hard-deleted; the FK is set-null so moderation rows
   survive), and a row about an author-deleted post stops surfacing, the same
-  tombstone treatment the reply feed gives deleted replies. Read state is a
+  tombstone treatment the reply feed gives deleted replies. Each surfaced
+  row about a post also carries that post's content and attachments for the
+  row's preview (issue #281) — served through the shared
+  `postAttachmentsSelection` aggregate (`src/post-media.ts`, where it lives
+  so this module can import it without cycling through `posts.ts`), with the
+  text nulled under the removal tombstone by the same rule `postSelection`
+  applies, so a removed post previews nothing on any recipient's page. Read
+  state is a
   per-recipient seen-at cursor (`notification_last_seen`), not a per-row
   stamp: a row is read exactly when its `created_at` is at or before the
   cursor, `markRead` is one idempotent upsert, and no notification is ever

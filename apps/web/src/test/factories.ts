@@ -362,6 +362,10 @@ export function makeNotification(overrides: Partial<NotificationItem> = {}): Not
     read: false,
     createdAt: new Date(),
     postId: crypto.randomUUID(),
+    // No post preview by default (issue #281): a row asserting the preview
+    // sets these itself, and every other fixture stays a bare sentence.
+    postContent: null,
+    postAttachments: [],
     actor: makeAuthor(),
     action: null,
     targetPostDeletedAt: null,

@@ -5,6 +5,7 @@ import { Bell } from "lucide-react";
 import { markAllReadAtom, notificationsFeedAtom } from "@/atoms/notifications";
 import { actionIcon, actionLabel } from "@/components/moderation/labels";
 import { PaginatedState } from "@/components/paginated-state";
+import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { UserAvatar } from "@/components/user-avatar";
 import { formatRelativeTime } from "@/lib/format";
 import type { NotificationItem } from "@/lib/orpc";
@@ -100,6 +101,22 @@ function NotificationRow({ item }: { item: NotificationItem }) {
 
       <div className="min-w-0 flex-1">
         <p className="text-foreground text-sm">{notificationText(item, displayName)}</p>
+        {/*
+          The post preview (issue #281): the liked post's words, or the reply
+          itself — `postId` already points at the row worth quoting. A
+          single truncated line plus compact thumbnails, both absent when the
+          server has nothing to show: follow and moderation rows carry no
+          post, and a moderator-removed post previews nothing (the same
+          tombstone rule every post surface follows).
+        */}
+        {item.postContent && (
+          <p className="text-muted-foreground mt-0.5 truncate text-xs">{item.postContent}</p>
+        )}
+        {item.postAttachments.length > 0 && (
+          <div className="mt-1.5">
+            <PostAttachmentGrid attachments={item.postAttachments} compact />
+          </div>
+        )}
         {reason && (
           <p className="text-muted-foreground mt-0.5 truncate text-xs">
             {m.notification_reason({ reason })}

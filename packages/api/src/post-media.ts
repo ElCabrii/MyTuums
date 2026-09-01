@@ -1,12 +1,12 @@
 /**
- * Post-attachment storage and read authorization.
+ * Post-attachment storage, read authorization, and the served projection.
  *
  * Post images are deliberately separate from profile media: a post can have
  * several ordered objects, and its visibility follows the post (including
  * moderation tombstones and blocks), not just the signed-in state.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull, not, or } from "drizzle-orm";
+import { and, eq, getTableName, isNull, not, or, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import { post, postAttachment, user } from "@my-tuums/db/schema";
 import { roleAtLeast } from "./roles.js";
@@ -177,6 +177,66 @@ export function postAttachmentRows(
     }),
   );
 }
+
+/** One served attachment — the wire shape every post surface renders. */
+export type PostAttachment = {
+  id: string;
+  url: string;
+  position: number;
+  contentType: string;
+  byteSize: number;
+  width: number;
+  height: number;
+};
+
+/**
+ * The outer post's columns, always table-qualified.
+ *
+ * Drizzle drops the table prefix from a column reference when the query it is
+ * building has no join — a harmless optimization at the top level, and a
+ * silent wrong answer inside a correlated subquery: an unqualified `"id"`
+ * there resolves against `post_attachment`, the inner scope, so the
+ * correlation becomes `post_attachment.post_id = post_attachment.id` and the
+ * aggregate matches nothing. It fails as an empty attachment list rather than
+ * an error, which is exactly the kind of thing to spell out once here rather
+ * than leave every caller to discover. Qualifying explicitly makes the
+ * fragment correct whether or not the caller happens to join another table.
+ */
+export function outerPost(column: "id" | "removed_at" | "deleted_at" | "quoted_post_id") {
+  return sql`${sql.identifier(getTableName(post))}.${sql.identifier(column)}`;
+}
+
+/**
+ * Attachments are ordered in one correlated aggregate so every post surface
+ * shares the same shape. Lives here rather than in `posts.ts` so surfaces
+ * that must not import the post router — the notification list, whose module
+ * `posts.ts` already imports for `insertNotification` — still share the one
+ * definition instead of cycling two modules or forking the projection.
+ */
+export function postAttachmentsSelection(includeTombstones = false) {
+  return sql<PostAttachment[]>`coalesce((
+    select jsonb_agg(
+      jsonb_build_object(
+        'id', ${postAttachment.id},
+        'url', ${postAttachment.mediaPath},
+        'position', ${postAttachment.position},
+        'contentType', ${postAttachment.contentType},
+        'byteSize', ${postAttachment.byteSize},
+        'width', ${postAttachment.width},
+        'height', ${postAttachment.height}
+      ) order by ${postAttachment.position}
+    )
+    from ${postAttachment}
+    where ${postAttachment.postId} = ${outerPost("id")}
+      ${
+        includeTombstones
+          ? sql``
+          : sql`and ${outerPost("removed_at")} is null and ${outerPost("deleted_at")} is null`
+      }
+  ), '[]'::jsonb)`;
+}
+
+export const postAttachments = postAttachmentsSelection();
 
 /**
  * Authorizes a `/media/` request for a post attachment. Moderators can inspect
