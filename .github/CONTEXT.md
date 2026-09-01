@@ -129,8 +129,9 @@ would produce a broken one.
   GitHub-hosted runner (the self-hosted invariant covers CI jobs, and an
   interactive agent session does not belong on the owner's device) and takes
   `ZHIPU_API_KEY` for the model it runs. It is triggered by comments, not by
-  pushes, so it never runs on a fork's or a contributor's behalf unprompted.
-  PR reviews (including on specific code lines) go through it too, via
+  pushes, and only comments from the owner, members, and collaborators count
+  (`author_association` guard) — an outside commenter cannot spend its API
+  quota. PR reviews (including on specific code lines) go through it too, via
   `/oc review` — there is deliberately no per-push automatic review job.
 
 ## Verification
