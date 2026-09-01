@@ -18,6 +18,7 @@ export default tseslint.config(
       "**/dist/**",
       "**/.turbo/**",
       "apps/web/src/paraglide/**",
+      "apps/branding/src/paraglide/**",
       "packages/db/drizzle/**",
       "e2e/test-results/**",
       "e2e/playwright-report/**",
@@ -25,9 +26,9 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
-  // The react-hooks plugin's flat-config entrypoint, scoped to the web app:
-  // it is the only React surface in the monorepo, and the rules misfire
-  // elsewhere — Playwright fixtures name their handoff callback `use`
+  // The react-hooks plugin's flat-config entrypoint, scoped to the two React
+  // surfaces in the monorepo (the SPA and the branding site): the rules
+  // misfire elsewhere — Playwright fixtures name their handoff callback `use`
   // (`async ({ browser }, use) => …`), which rules-of-hooks misreads as
   // React 19's `use` hook in a non-component (e2e/support/fixtures.ts).
   //
@@ -38,7 +39,7 @@ export default tseslint.config(
   // removed or has its severity changed here; the entrypoint remains the
   // single source of truth.
   {
-    files: ["apps/web/**"],
+    files: ["apps/web/**", "apps/branding/**"],
     plugins: { "react-hooks": reactHooks },
     rules: reactHooks.configs.flat.recommended.rules,
   },

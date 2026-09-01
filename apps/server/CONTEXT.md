@@ -19,6 +19,7 @@ files, env validation, observability, shutdown. Business rules live in
 | `src/index.ts`               | The real entrypoint: wiring, graceful shutdown, the one `process.exit(1)`.    |
 | `src/error-observation.ts`   | Which faults are logged, reported, ignored, or require shutdown.              |
 | `src/env.ts`                 | Every variable the server reads, and the all-or-nothing group rules.          |
+| `src/branding-host.ts`       | The branding hostname decision — host routing's other half.                   |
 | `Dockerfile`                 | How the production artefact is assembled.                                     |
 | `../../docs/architecture.md` | Route order and one-origin routing in prose.                                  |
 
@@ -28,17 +29,18 @@ by the Playwright `api` project.
 
 ## Change map
 
-| Intent                                | Primary                                              | Also touch                                                                         |
-| ------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Add or reorder an HTTP route          | `src/request-handler.ts`                             | `src/request-handler.test.ts`, `../../e2e/tests/api`                               |
-| Change who may reach a page           | `packages/api/src/constants.ts` (`SIGNED_OUT_PATHS`) | never duplicate it — the client gate reads the same set                            |
-| Add an environment variable           | `src/env.ts`                                         | `../../.env.example`, `../../docker-compose.yml`, `Dockerfile` if it is a `VITE_*` |
-| Change security or cache headers      | `src/response-decorators.ts`, `src/static-files.ts`  | `../../e2e/tests/api/headers.spec.ts`                                              |
-| Change compression behaviour          | `src/compression.ts`                                 | both call sites: the decorator and static files                                    |
-| Change access logging or request ids  | `src/observability.ts`                               | `src/request-handler.ts`                                                           |
-| Change error classification/reporting | `src/error-observation.ts`, `src/sentry.ts`          | `src/index.ts`                                                                     |
-| Change what ships in the image        | `Dockerfile`                                         | `.github/workflows/ci.yml` (`docker` job asserts it)                               |
-| Change the migration runner           | `src/migrate.ts`                                     | `../../docker-compose.yml`                                                         |
+| Intent                                | Primary                                              | Also touch                                                                                                            |
+| ------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Add or reorder an HTTP route          | `src/request-handler.ts`                             | `src/request-handler.test.ts`, `../../e2e/tests/api`                                                                  |
+| Change the branding site              | `apps/branding` (a separate workspace)               | `src/branding-host.ts` only when the hostname itself changes; `src/request-handler.test.ts` pins the branch placement |
+| Change who may reach a page           | `packages/api/src/constants.ts` (`SIGNED_OUT_PATHS`) | never duplicate it — the client gate reads the same set                                                               |
+| Add an environment variable           | `src/env.ts`                                         | `../../.env.example`, `../../docker-compose.yml`, `Dockerfile` if it is a `VITE_*`                                    |
+| Change security or cache headers      | `src/response-decorators.ts`, `src/static-files.ts`  | `../../e2e/tests/api/headers.spec.ts`                                                                                 |
+| Change compression behaviour          | `src/compression.ts`                                 | both call sites: the decorator and static files                                                                       |
+| Change access logging or request ids  | `src/observability.ts`                               | `src/request-handler.ts`                                                                                              |
+| Change error classification/reporting | `src/error-observation.ts`, `src/sentry.ts`          | `src/index.ts`                                                                                                        |
+| Change what ships in the image        | `Dockerfile`                                         | `.github/workflows/ci.yml` (`docker` job asserts it)                                                                  |
+| Change the migration runner           | `src/migrate.ts`                                     | `../../docker-compose.yml`                                                                                            |
 
 ## Invariants
 
@@ -105,6 +107,17 @@ by the Playwright `api` project.
   else.
 - **The page gate must recognise the `__Secure-` cookie prefix.** A mismatch
   redirects every signed-in visitor on every page in production.
+- **The branding host serves the branding site, never the app.** Requests whose
+  Host is `home.mytuums.com` are answered from the built `apps/branding` dist
+  (`BRANDING_DIST`, served through the same static-file handler as the SPA),
+  branched after every API prefix and before the page gate — the gate never
+  sees a branding-host document, so the site is public with zero changes to
+  `SIGNED_OUT_PATHS`, and the SPA shell never boots on that host (session
+  cookies are host-only to the apex, so it would look signed out while its
+  canonical and Open Graph tags lied about their origin). The site's scripts
+  are same-origin module scripts, covered by the CSP's `script-src 'self'` —
+  but no _inline_ script is allowed anywhere, including its `index.html`.
+  HSTS `includeSubDomains` already covers the subdomain, which is intended.
 - **The page gate reads `SIGNED_OUT_PATHS` from `@my-tuums/api/constants`.** A
   local copy lets the server and client gates disagree and bounce a visitor
   between them forever. `request-handler.test.ts` pins every member as exempt.

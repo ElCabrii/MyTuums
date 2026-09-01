@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/mytuums.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#171719" media="(prefers-color-scheme: dark)" />
+    <title>MyTuums — The social media, for gamers</title>
+    <meta name="description" content="The social media, for gamers." />
+    <!-- Static unfurl metadata for the branding host. Unlike apps/web, this
+         page IS the document a crawler sees (one URL, no client routes), so
+         these are not fallbacks behind a JS-rendered head — keep the tagline
+         in step with apps/web/messages (issue #280) and the copy in
+         messages/. English-only, like the app's index.html: Paraglide lives
+         in the bundle and cannot reach this markup. -->
+    <meta property="og:title" content="MyTuums — The social media, for gamers" />
+    <meta property="og:description" content="The social media, for gamers." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://home.mytuums.com/" />
+    <meta property="og:site_name" content="MyTuums" />
+    <meta property="og:image" content="https://home.mytuums.com/mytuums-512.png" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="MyTuums — The social media, for gamers" />
+    <meta name="twitter:description" content="The social media, for gamers." />
+    <meta name="twitter:image" content="https://home.mytuums.com/mytuums-512.png" />
+    <style>
+      /* First-paint background only. The theme class is applied by the
+         bundle, but a white flash on a dark-mode load reads as broken —
+         light-dark() follows the OS scheme, which is also the bundle's
+         default before any stored choice is read. No scripts inline: the
+         server's CSP allows same-origin module scripts only. */
+      html {
+        background: oklch(1 0 0);
+        background: light-dark(oklch(1 0 0), oklch(0.141 0.005 285.823));
+        color-scheme: light dark;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

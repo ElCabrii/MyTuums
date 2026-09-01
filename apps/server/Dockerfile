@@ -32,14 +32,15 @@ RUN corepack enable
 FROM base AS pruner
 WORKDIR /app
 COPY . .
-# Both workspaces, since this image builds and ships both halves.
-# The second, server-only prune feeds the runner stage: `pnpm install --prod`
-# over the both-workspaces prune would install apps/web's entire production
-# dependency tree (react, jotai, shadcn, lucide-react, ...) into an image
-# whose process never imports any of it — Vite already bundled the SPA into
-# apps/web/dist at build time. Pruning to @my-tuums/server alone keeps the
-# web tree out of the runtime image structurally, not by install-time luck.
-RUN npx -y turbo@^2 prune @my-tuums/server @my-tuums/web --docker && \
+# All three workspaces, since this image builds and ships the app, the
+# branding site and the server. The second, server-only prune feeds the runner
+# stage: `pnpm install --prod` over the all-workspaces prune would install
+# apps/web's and apps/branding's entire production dependency trees (react,
+# jotai, shadcn, lucide-react, ...) into an image whose process never imports
+# any of it — Vite already bundled both sites into their dist/ at build time.
+# Pruning to @my-tuums/server alone keeps the web trees out of the runtime
+# image structurally, not by install-time luck.
+RUN npx -y turbo@^2 prune @my-tuums/server @my-tuums/web @my-tuums/branding --docker && \
     npx -y turbo@^2 prune @my-tuums/server --docker --out-dir out-runner
 
 # ---- Install full (dev+prod) deps and build the pruned subset ----
@@ -74,6 +75,10 @@ ARG VITE_GOOGLE_CLIENT_ID
 # empty string and gets Node's ordinary container-aware default.
 ARG WEB_BUILD_NODE_OPTIONS="--max-old-space-size=640 --max-semi-space-size=4"
 RUN NODE_OPTIONS="$WEB_BUILD_NODE_OPTIONS" pnpm --filter @my-tuums/web run build
+# The branding site (home.mytuums.com): a second, much smaller Vite build with
+# no VITE_* reads, so it needs no ARGs of its own. Same NODE_OPTIONS scope for
+# consistency, even though its bundle is a fraction of the SPA's.
+RUN NODE_OPTIONS="$WEB_BUILD_NODE_OPTIONS" pnpm --filter @my-tuums/branding run build
 
 # ---- Production image: prod-only deps + the pre-built bundle ----
 FROM base AS runner
@@ -86,6 +91,7 @@ COPY --from=pruner /app/out-runner/json/ .
 RUN pnpm install --prod --frozen-lockfile
 COPY --from=builder /app/apps/server/dist ./apps/server/dist
 COPY --from=builder /app/apps/web/dist ./apps/web/dist
+COPY --from=builder /app/apps/branding/dist ./apps/branding/dist
 # The generated SQL, for the pre-deploy migration step (apps/server/src/
 # migrate.ts). Only the `drizzle/` output is needed — `drizzle-kit` itself is a
 # dev dependency and deliberately does NOT ship: `drizzle-orm`, which is already
@@ -95,6 +101,9 @@ COPY --from=builder /app/packages/db/drizzle ./packages/db/drizzle
 # Where ./src/static-files.ts looks. Absolute, because the process's working
 # directory is not something this image should depend on.
 ENV WEB_DIST=/app/apps/web/dist
+# Where the branding-host branch of ./src/request-handler.ts looks (see
+# ./src/branding-host.ts).
+ENV BRANDING_DIST=/app/apps/branding/dist
 
 # Not running as root in the final image.
 RUN addgroup -S mytuums && adduser -S mytuums -G mytuums

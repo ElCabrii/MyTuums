@@ -61,6 +61,13 @@ const envSchema = z
     // `apps/web/src/lib/orpc.ts` resolves /rpc against window.location.origin,
     // and uploaded images are stored as relative /media/ paths. Unset in dev.
     WEB_DIST: z.string().optional(),
+
+    // Absolute path to the built branding site (apps/branding/dist). When set,
+    // requests whose Host is the branding hostname are served from it instead
+    // of the app — see ./branding-host.ts. Unset in dev, where the branding
+    // site runs under its own Vite server (`pnpm --filter @my-tuums/branding
+    // dev`) exactly the way the SPA does.
+    BRANDING_DIST: z.string().optional(),
   })
   /**
    * A provider configured with only half its credentials is the failure worth

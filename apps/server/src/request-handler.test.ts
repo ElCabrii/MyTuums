@@ -134,6 +134,8 @@ function deps(overrides: Partial<RequestHandlerDeps> = {}): RequestHandlerDeps {
     // Defaults to "this deployment serves no static files", which is exactly
     // what `pnpm dev` does — Vite serves the app and proxies here.
     serveStatic: vi.fn().mockResolvedValue({ served: false }),
+    // Same for the branding site — and in dev its Vite server owns it too.
+    serveBranding: vi.fn().mockResolvedValue({ served: false }),
     // Defaults to "no session" — the tests that care about a signed-in
     // visitor override it.
     resolveSession: vi.fn().mockResolvedValue({ kind: "anonymous" }),
@@ -331,6 +333,112 @@ describe("createRequestHandler", () => {
 
     expect(calls.statusCode).not.toBe(302);
     expect(serveStatic).toHaveBeenCalledOnce();
+  });
+
+  // The branding host (issue #279): home.mytuums.com serves the built
+  // branding site (apps/branding, through BRANDING_DIST) instead of the app.
+  // These pin the routing decision — the placement of the host branch
+  // relative to every other gate — which is this file's job; the handler's
+  // own file/compression behavior is owned by static-files.test.ts, and the
+  // document content by the branding app it serves.
+  describe("branding host", () => {
+    const BRANDING_HEADERS = { host: "home.mytuums.com" };
+
+    /** A stand-in for the branding static handler: serves one fixture page. */
+    const serveBrandingHit = () =>
+      vi.fn((_req: IncomingMessage, res: RequestResponse) => {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end("<!doctype html>branding fixture");
+        return Promise.resolve({ served: true });
+      });
+
+    it("serves the branding site to a signed-out visitor at / — no redirect, no session lookup, no SPA", async () => {
+      // The page gate would 302 this request to /login before the bundle ever
+      // downloads. The host branch runs ahead of the gate instead of the gate
+      // growing a host exemption, so a public marketing page needs zero
+      // changes to SIGNED_OUT_PATHS.
+      const { res, calls } = resStub();
+      const serveStatic = vi.fn();
+      const resolveSession = vi.fn();
+      const branding = serveBrandingHit();
+      const handle = createRequestHandler(
+        deps({ serveBranding: branding, serveStatic, resolveSession }),
+      );
+
+      await handle(reqStub("/", "GET", BRANDING_HEADERS), res);
+
+      expect(branding).toHaveBeenCalledOnce();
+      expect(calls.statusCode).toBe(200);
+      expect(resolveSession).not.toHaveBeenCalled();
+      expect(serveStatic).not.toHaveBeenCalled();
+    });
+
+    it("recognises the host with a port and in any letter case", async () => {
+      const { res, calls } = resStub();
+      const branding = serveBrandingHit();
+      const handle = createRequestHandler(deps({ serveBranding: branding }));
+
+      await handle(reqStub("/", "GET", { host: "HOME.mytuums.com:3001" }), res);
+
+      expect(branding).toHaveBeenCalledOnce();
+      expect(calls.statusCode).toBe(200);
+    });
+
+    it("still answers /health on the branding host — the host branch shadows nothing the server owns", async () => {
+      // Checked after every API prefix, so probes against either hostname hit
+      // the same health check rather than a marketing page.
+      const { res, calls } = resStub();
+      const pingDb = vi.fn().mockResolvedValue(undefined);
+      const branding = serveBrandingHit();
+      const handle = createRequestHandler(deps({ pingDb, serveBranding: branding }));
+
+      await handle(reqStub("/health", "GET", BRANDING_HEADERS), res);
+
+      expect(branding).not.toHaveBeenCalled();
+      expect(pingDb).toHaveBeenCalledOnce();
+      expect(calls.statusCode).toBe(200);
+      expect(JSON.parse(calls.body)).toEqual({ status: "ok" });
+    });
+
+    it("falls through to the ordinary tree when the branding handler declines — an asset-shaped miss", async () => {
+      // The site's hashed assets that do exist are served by the same handler;
+      // one that misses (or any served:false) must reach the same static/404
+      // handling as on the apex.
+      const { res, calls } = resStub();
+      const serveStatic = vi.fn().mockResolvedValue({ served: false });
+      const handle = createRequestHandler(deps({ serveStatic }));
+
+      await handle(reqStub("/assets/missing.css", "GET", BRANDING_HEADERS), res);
+
+      expect(serveStatic).toHaveBeenCalledOnce();
+      expect(calls.statusCode).toBe(404);
+      expect(calls.body).toBe("Not found");
+    });
+
+    it("falls through to the ordinary tree for a non-GET/HEAD verb", async () => {
+      const { res, calls } = resStub();
+      const serveStatic = vi.fn().mockResolvedValue({ served: false });
+      const handle = createRequestHandler(deps({ serveStatic }));
+
+      await handle(reqStub("/", "POST", BRANDING_HEADERS), res);
+
+      expect(serveStatic).toHaveBeenCalledOnce();
+      expect(calls.statusCode).toBe(404);
+    });
+
+    it("keys on the exact host — the apex keeps today's signed-out redirect", async () => {
+      // The branch must not leak onto the app's own hostnames, or the site's
+      // front door becomes public and the SPA boots signed-out.
+      const { res, calls } = resStub();
+      const branding = serveBrandingHit();
+      const handle = createRequestHandler(deps({ serveBranding: branding }));
+
+      await handle(reqStub("/", "GET", { host: "mytuums.com" }), res);
+
+      expect(branding).not.toHaveBeenCalled();
+      expect(calls.statusCode).toBe(302);
+      expect(calls.headers).toMatchObject({ Location: "/login?redirect=%2F" });
+    });
   });
 
   it("dispatches /api/auth* to the BetterAuth handler and returns without falling through", async () => {
