@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { renderWithProviders } from "@/test/render";
@@ -50,6 +50,27 @@ function stubFrameSize(width: number, height: number) {
     y: 0,
     toJSON: () => ({}),
   });
+}
+
+/** Gives pointer-move tests deterministic control over frame-rate coalescing. */
+function stubAnimationFrame() {
+  let nextId = 0;
+  const callbacks = new Map<number, FrameRequestCallback>();
+  vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((callback) => {
+    nextId += 1;
+    callbacks.set(nextId, callback);
+    return nextId;
+  });
+  vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation((id) => {
+    callbacks.delete(id);
+  });
+  return {
+    flush() {
+      const pending = [...callbacks.values()];
+      callbacks.clear();
+      for (const callback of pending) callback(performance.now());
+    },
+  };
 }
 
 beforeEach(() => {
@@ -121,7 +142,7 @@ describe("ImageCropDialog", () => {
         name: m.settings_image_crop_title({ label: m.settings_banner_label() }),
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText(m.settings_banner_crop_hint())).toBeInTheDocument();
+    expect(screen.getByText(m.settings_image_crop_hint())).toBeInTheDocument();
     await waitFor(() =>
       expect(container.ownerDocument.querySelector(".touch-none img")).toBeInTheDocument(),
     );
@@ -168,10 +189,7 @@ describe("ImageCropDialog", () => {
     expect(onApply).not.toHaveBeenCalled();
   });
 
-  it("moves the banner crop selection in the direction it is dragged", async () => {
-    // Zooming in makes the 3:1 selection smaller than the square source on
-    // both axes, so it can move right and down exactly as the visible outline
-    // does. The source itself stays fixed behind it.
+  it("keeps the banner crop frame fixed while the image moves beneath it", async () => {
     stubDecode(1000, 1000);
     stubFrameSize(1000, 1000);
     const onApply = vi.fn<(crop: Crop) => void>();
@@ -195,15 +213,71 @@ describe("ImageCropDialog", () => {
     await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
 
     const crop = onApply.mock.calls.at(-1)![0];
-    expect(crop.x).toBeCloseTo(0.525, 5);
-    expect(crop.y).toBeCloseTo(0.525, 5);
+    expect(crop.x).toBeCloseTo(0.4773, 4);
+    expect(crop.y).toBeCloseTo(0.4773, 4);
     expect(crop.scale).toBeCloseTo(1.1, 5);
     expect(frame?.querySelector("[aria-hidden='true']")).toHaveStyle({
-      width: "90.9%",
-      height: "30.3%",
-      left: "7.000000000000001%",
-      top: "37.3%",
+      width: "100%",
+      height: `${(333 / 1000) * 100}%`,
+      left: "0%",
+      top: `${(333 / 1000) * 100}%`,
     });
+    expect(frame?.querySelector("img")).not.toHaveStyle({ transform: "none" });
+  });
+
+  it.each(["avatar", "banner"] as const)(
+    "coalesces %s pointer moves to one update per animation frame",
+    async (kind) => {
+      const animationFrame = stubAnimationFrame();
+      stubDecode(1000, 1000);
+      stubFrameSize(1000, 1000);
+      const { container } = await renderWithProviders(
+        <ImageCropDialog kind={kind} file={file()} onApply={vi.fn()} onCancel={vi.fn()} />,
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: m.settings_image_crop_apply() })).toBeEnabled(),
+      );
+      const frame = container.ownerDocument.querySelector<HTMLElement>(".touch-none")!;
+      fireEvent.wheel(frame, { deltaY: -100 });
+      const image = frame.querySelector<HTMLElement>("img")!;
+      const outline = frame.querySelector<HTMLElement>("[aria-hidden='true']")!;
+      const imageStyleBeforeDrag = image.style.cssText;
+      const outlineStyleBeforeDrag = outline.style.cssText;
+
+      fireEvent.pointerDown(frame, { pointerId: 1, clientX: 500, clientY: 500 });
+      fireEvent.pointerMove(frame, { pointerId: 1, clientX: 510, clientY: 510 });
+      fireEvent.pointerMove(frame, { pointerId: 1, clientX: 520, clientY: 520 });
+
+      expect(image.style.cssText).toBe(imageStyleBeforeDrag);
+      expect(outline.style.cssText).toBe(outlineStyleBeforeDrag);
+      act(() => animationFrame.flush());
+      expect(image.style.cssText).not.toBe(imageStyleBeforeDrag);
+    },
+  );
+
+  it("moves immediately when an avatar drag reverses away from a clamped edge", async () => {
+    const animationFrame = stubAnimationFrame();
+    stubDecode(400, 800);
+    stubFrameSize(400, 400);
+    const onApply = vi.fn<(crop: Crop) => void>();
+    const { container } = await renderWithProviders(
+      <ImageCropDialog kind="avatar" file={file()} onApply={onApply} onCancel={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: m.settings_image_crop_apply() })).toBeEnabled(),
+    );
+    const frame = container.ownerDocument.querySelector<HTMLElement>(".touch-none")!;
+
+    fireEvent.pointerDown(frame, { pointerId: 1, clientX: 200, clientY: 200 });
+    fireEvent.pointerMove(frame, { pointerId: 1, clientX: 200, clientY: 600 });
+    act(() => animationFrame.flush());
+    fireEvent.pointerMove(frame, { pointerId: 1, clientX: 200, clientY: 590 });
+    act(() => animationFrame.flush());
+    fireEvent.pointerUp(frame, { pointerId: 1, clientX: 200, clientY: 590 });
+    await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
+
+    expect(onApply.mock.calls.at(-1)?.[0].y).toBeCloseTo(0.2625, 5);
   });
 
   it("pans a portrait avatar within its square composition", async () => {

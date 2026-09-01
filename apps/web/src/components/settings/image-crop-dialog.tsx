@@ -39,11 +39,10 @@ import { m } from "@/paraglide/messages.js";
  *
  * Neither slot zooms out past its default window: that window is the largest
  * aspect-true rectangle inside the source, already spanning its full width or
- * its full height (`minCropScale`). A banner shows the whole source with that
- * window outlined over it, so the outline is the crop the person moves and
- * resizes rather than a second safe-area guide that only looks selectable.
- * Avatars retain the compact viewport treatment and move the image beneath
- * their circular mask.
+ * its full height (`minCropScale`). The crop frame stays fixed for both slots;
+ * dragging and zooming move the source beneath it. A banner keeps the wider
+ * source context visible around its centered 3:1 frame, while an avatar keeps
+ * the compact circular viewport treatment.
  *
  * The image is decoded twice on purpose: `createImageBitmap` for the oriented
  * dimensions the math needs (the same primitive `lib/media.ts` uses, and the
@@ -98,7 +97,7 @@ export function ImageCropDialog({
   const [frame, setFrame] = useState<HTMLDivElement | null>(null);
   const frameRef = useCallback((node: HTMLDivElement | null) => setFrame(node), []);
 
-  /** Banners show the source; avatars keep the exact aspect that will be encoded. */
+  /** Banners show the source context; avatars use the exact encoded aspect. */
   const frameAspect = dims
     ? kind === "banner"
       ? dims.width / dims.height
@@ -109,11 +108,14 @@ export function ImageCropDialog({
     : IMAGE_LIMITS[kind].maxWidth / IMAGE_LIMITS[kind].maxHeight;
   const dragRef = useRef<{
     pointerId: number;
-    startX: number;
-    startY: number;
+    lastX: number;
+    lastY: number;
+    pendingX: number;
+    pendingY: number;
     crop: Crop;
-    frameWidth: number;
-    frameHeight: number;
+    cropFrameWidth: number;
+    cropFrameHeight: number;
+    animationFrameId: number | null;
   } | null>(null);
   /**
    * The crop every writer sees, mirroring the state. The wheel listener below
@@ -123,6 +125,55 @@ export function ImageCropDialog({
    * writes this ref too, so the two can never disagree.
    */
   const cropRef = useRef(crop);
+
+  /** Applies only the latest pointer position and rebases at every rendered frame. */
+  const applyPendingDrag = useCallback(() => {
+    const drag = dragRef.current;
+    if (!drag || !dims) return;
+    drag.animationFrameId = null;
+
+    const dx = drag.pendingX - drag.lastX;
+    const dy = drag.pendingY - drag.lastY;
+    const rect = calculateCropRect(dims, kind, drag.crop);
+    const next = clampCrop(
+      {
+        x: drag.crop.x - (dx / drag.cropFrameWidth) * (rect.width / dims.width),
+        y: drag.crop.y - (dy / drag.cropFrameHeight) * (rect.height / dims.height),
+        scale: drag.crop.scale,
+      },
+      dims,
+      kind,
+    );
+
+    drag.lastX = drag.pendingX;
+    drag.lastY = drag.pendingY;
+    drag.crop = next;
+    const changed =
+      next.x !== cropRef.current.x ||
+      next.y !== cropRef.current.y ||
+      next.scale !== cropRef.current.scale;
+    cropRef.current = next;
+    if (changed) setCrop(next);
+  }, [dims, kind]);
+
+  const flushPendingDrag = useCallback(() => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    if (drag.animationFrameId !== null) {
+      cancelAnimationFrame(drag.animationFrameId);
+    }
+    applyPendingDrag();
+  }, [applyPendingDrag]);
+
+  useEffect(
+    () => () => {
+      const animationFrameId = dragRef.current?.animationFrameId;
+      if (animationFrameId !== null && animationFrameId !== undefined) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -156,6 +207,7 @@ export function ImageCropDialog({
     const onWheel = (event: WheelEvent) => {
       // The page must not scroll while the person is zooming the crop.
       event.preventDefault();
+      flushPendingDrag();
       const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
       // Zoom from the latest descriptor, not the one this listener attached
       // with: reading a captured `crop` would make every notch zoom from the
@@ -183,12 +235,11 @@ export function ImageCropDialog({
       // move delta must not count them twice.
       const drag = dragRef.current;
       if (drag) {
-        dragRef.current = {
-          ...drag,
-          startX: event.clientX,
-          startY: event.clientY,
-          crop: next,
-        };
+        drag.lastX = event.clientX;
+        drag.lastY = event.clientY;
+        drag.pendingX = event.clientX;
+        drag.pendingY = event.clientY;
+        drag.crop = next;
       }
     };
     // Not React's `onWheel`: React attaches wheel passively at the root, so a
@@ -196,51 +247,64 @@ export function ImageCropDialog({
     // behind the dialog while the person zooms.
     frame.addEventListener("wheel", onWheel, { passive: false });
     return () => frame.removeEventListener("wheel", onWheel);
-  }, [dims, frame, kind]);
+  }, [dims, flushPendingDrag, frame, kind]);
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (!dims || !frame) return;
-    const rect = frame.getBoundingClientRect();
+    const previewRect = frame.getBoundingClientRect();
+    const fixedCropRect = calculateCropRect(dims, kind, DEFAULT_CROP);
+    const cropFrameWidth =
+      kind === "banner"
+        ? previewRect.width * (fixedCropRect.width / dims.width)
+        : previewRect.width;
+    const cropFrameHeight =
+      kind === "banner"
+        ? previewRect.height * (fixedCropRect.height / dims.height)
+        : previewRect.height;
     // A frame with no laid-out size would turn every drag delta into a
     // division by zero; there is nothing to pan against, so ignore the press.
-    if (rect.width === 0 || rect.height === 0) return;
+    if (cropFrameWidth === 0 || cropFrameHeight === 0) return;
     dragRef.current = {
       pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      pendingX: event.clientX,
+      pendingY: event.clientY,
       // The ref rather than the rendered `crop`: a wheel notch in the same
       // frame as this press may not have re-rendered yet, and the drag must
       // start from the descriptor the person is actually looking at.
       crop: cropRef.current,
-      frameWidth: rect.width,
-      frameHeight: rect.height,
+      cropFrameWidth,
+      cropFrameHeight,
+      animationFrameId: null,
     };
     frame.setPointerCapture(event.pointerId);
   }
 
   function onPointerMove(event: PointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
-    if (!drag || !dims || event.pointerId !== drag.pointerId) return;
-    const dx = event.clientX - drag.startX;
-    const dy = event.clientY - drag.startY;
-    // The banner outline moves over a full-source preview, so its normalized
-    // center follows the pointer directly. Avatars still move the image under
-    // a fixed viewport, where the crop moves in the opposite direction and a
-    // frame-width gesture corresponds to one crop-rect width.
-    let x = drag.crop.x + dx / drag.frameWidth;
-    let y = drag.crop.y + dy / drag.frameHeight;
-    if (kind === "avatar") {
-      const rect = calculateCropRect(dims, kind, drag.crop);
-      x = drag.crop.x - (dx / drag.frameWidth) * (rect.width / dims.width);
-      y = drag.crop.y - (dy / drag.frameHeight) * (rect.height / dims.height);
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    drag.pendingX = event.clientX;
+    drag.pendingY = event.clientY;
+    if (drag.animationFrameId === null) {
+      drag.animationFrameId = requestAnimationFrame(applyPendingDrag);
     }
-    const next = clampCrop({ x, y, scale: drag.crop.scale }, dims, kind);
-    cropRef.current = next;
-    setCrop(next);
   }
 
   function onPointerEnd(event: PointerEvent<HTMLDivElement>) {
-    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    drag.pendingX = event.clientX;
+    drag.pendingY = event.clientY;
+    flushPendingDrag();
+    dragRef.current = null;
+  }
+
+  function onPointerCancel(event: PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (drag.animationFrameId !== null) cancelAnimationFrame(drag.animationFrameId);
+    dragRef.current = null;
   }
 
   const label = kind === "avatar" ? m.settings_avatar_label() : m.settings_banner_label();
@@ -259,9 +323,7 @@ export function ImageCropDialog({
       >
         <DialogHeader>
           <DialogTitle>{m.settings_image_crop_title({ label })}</DialogTitle>
-          <DialogDescription>
-            {kind === "banner" ? m.settings_banner_crop_hint() : m.settings_image_crop_hint()}
-          </DialogDescription>
+          <DialogDescription>{m.settings_image_crop_hint()}</DialogDescription>
         </DialogHeader>
 
         <div className="px-6 pb-2">
@@ -270,15 +332,12 @@ export function ImageCropDialog({
           ) : (
             <div
               ref={frameRef}
-              className={cn(
-                "bg-muted relative w-full touch-none overflow-hidden rounded-lg select-none",
-                kind === "banner" && "mx-auto cursor-move",
-              )}
+              className="bg-muted relative mx-auto w-full cursor-grab touch-none overflow-hidden rounded-lg select-none active:cursor-grabbing"
               style={frameStyle}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerEnd}
-              onPointerCancel={onPointerEnd}
+              onPointerCancel={onPointerCancel}
             >
               {source && (
                 <>
@@ -286,7 +345,7 @@ export function ImageCropDialog({
                     src={source.url}
                     alt=""
                     draggable={false}
-                    className="absolute max-w-none"
+                    className="absolute max-w-none will-change-transform"
                     style={imageStyle(source.dims, kind, crop)}
                   />
                   {kind === "avatar" ? (
@@ -303,7 +362,7 @@ export function ImageCropDialog({
                     <div
                       aria-hidden="true"
                       className="pointer-events-none absolute rounded-lg border border-white/90 shadow-[0_0_0_9999px_rgb(0_0_0/0.38)]"
-                      style={cropSelectionStyle(source.dims, crop)}
+                      style={fixedCropFrameStyle(source.dims)}
                     />
                   )}
                 </>
@@ -316,7 +375,7 @@ export function ImageCropDialog({
           <Button type="button" variant="outline" onClick={onCancel}>
             {m.common_cancel()}
           </Button>
-          <Button type="button" onClick={() => onApply(crop)} disabled={!dims}>
+          <Button type="button" onClick={() => onApply(cropRef.current)} disabled={!dims}>
             {m.settings_image_crop_apply()}
           </Button>
         </DialogFooter>
@@ -326,30 +385,38 @@ export function ImageCropDialog({
 }
 
 /**
- * Banners show the full source because their crop is a visible overlay.
- * Avatars still size and offset the image so their crop rect fills the compact
- * fixed viewport beneath the circular mask.
+ * Maps the selected source rectangle onto the fixed crop frame. Width and
+ * height describe the source only and stay unchanged while interacting;
+ * compositor-only transforms handle every pan and zoom frame.
  */
 function imageStyle(
   dims: { width: number; height: number },
   kind: ImageKind,
   crop: Crop,
 ): CSSProperties {
-  if (kind === "banner") {
-    return { width: "100%", height: "100%", left: "0%", top: "0%" };
-  }
-  const rect = calculateCropRect(dims, kind, crop);
+  const fixedCropRect = calculateCropRect(dims, kind, DEFAULT_CROP);
+  const cropRect = calculateCropRect(dims, kind, crop);
+  const previewRect =
+    kind === "banner" ? { x: 0, y: 0, width: dims.width, height: dims.height } : fixedCropRect;
+  const scaleX = fixedCropRect.width / cropRect.width;
+  const scaleY = fixedCropRect.height / cropRect.height;
+  const width = (dims.width / previewRect.width) * 100;
+  const height = (dims.height / previewRect.height) * 100;
+  const left = ((fixedCropRect.x - cropRect.x * scaleX - previewRect.x) / previewRect.width) * 100;
+  const top = ((fixedCropRect.y - cropRect.y * scaleY - previewRect.y) / previewRect.height) * 100;
   return {
-    width: `${(dims.width / rect.width) * 100}%`,
-    height: `${(dims.height / rect.height) * 100}%`,
-    left: `${(-rect.x / rect.width) * 100}%`,
-    top: `${(-rect.y / rect.height) * 100}%`,
+    width: `${width}%`,
+    height: `${height}%`,
+    left: "0%",
+    top: "0%",
+    transform: `translate3d(${(left / width) * 100}%, ${(top / height) * 100}%, 0) scale(${scaleX}, ${scaleY})`,
+    transformOrigin: "top left",
   };
 }
 
-/** Positions the visible banner selection over the full-source preview. */
-function cropSelectionStyle(dims: ImageSize, crop: Crop): CSSProperties {
-  const rect = calculateCropRect(dims, "banner", crop);
+/** Positions the fixed 3:1 crop frame over the full-source banner preview. */
+function fixedCropFrameStyle(dims: ImageSize): CSSProperties {
+  const rect = calculateCropRect(dims, "banner", DEFAULT_CROP);
   return {
     width: `${(rect.width / dims.width) * 100}%`,
     height: `${(rect.height / dims.height) * 100}%`,
