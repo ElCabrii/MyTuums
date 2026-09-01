@@ -9,12 +9,11 @@ would produce a broken one.
 
 ## Start here
 
-| File                            | Why                                                               |
-| ------------------------------- | ----------------------------------------------------------------- |
-| `workflows/ci.yml`              | Three jobs: `verify`, `e2e`, `image`, and why each exists.        |
-| `workflows/opencode.yml`        | The `/oc` / `/opencode` comment agent; on-demand, not part of CI. |
-| `workflows/opencode-review.yml` | Automatic opencode review of every PR; not part of CI.            |
-| `../docs/operations.md`         | What the pipeline is checking and why the environments are split. |
+| File                     | Why                                                               |
+| ------------------------ | ----------------------------------------------------------------- |
+| `workflows/ci.yml`       | Three jobs: `verify`, `e2e`, `image`, and why each exists.        |
+| `workflows/opencode.yml` | The `/oc` / `/opencode` comment agent; on-demand, not part of CI. |
+| `../docs/operations.md`  | What the pipeline is checking and why the environments are split. |
 
 ## Change map
 
@@ -131,10 +130,8 @@ would produce a broken one.
   interactive agent session does not belong on the owner's device) and takes
   `ZHIPU_API_KEY` for the model it runs. It is triggered by comments, not by
   pushes, so it never runs on a fork's or a contributor's behalf unprompted.
-- `opencode-review` shares that exception and fires on every `pull_request`
-  open/sync/reopen in `use_github_token` mode (the OpenCode GitHub App is not
-  consulted for it). It is not a required check and reviews nothing on forks,
-  where GitHub withholds `ZHIPU_API_KEY` and the run fails fast.
+  PR reviews (including on specific code lines) go through it too, via
+  `/oc review` — there is deliberately no per-push automatic review job.
 
 ## Verification
 
