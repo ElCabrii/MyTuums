@@ -13,12 +13,8 @@
          `display: standalone` everywhere that still matters. -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title data-app-fallback>MyTuums — Social Media for Gamers</title>
-    <meta
-      data-app-fallback
-      name="description"
-      content="MyTuums is the social media platform built for gamers."
-    />
+    <title data-app-fallback>MyTuums — The social media, for gamers</title>
+    <meta data-app-fallback name="description" content="The social media, for gamers." />
     <!-- Static unfurl metadata. This file is the only head a no-JS crawler ever
          sees (the server serves it for every URL), so these tags are what
          Slack/X/Discord previews render. They are fallbacks only: once React
@@ -32,23 +28,15 @@
          static one would claim every crawlable URL is a duplicate of the
          homepage. Each route's head() emits its own canonical instead
          (src/lib/document-head.ts). -->
-    <meta data-app-fallback property="og:title" content="MyTuums — Social Media for Gamers" />
-    <meta
-      data-app-fallback
-      property="og:description"
-      content="MyTuums is the social media platform built for gamers."
-    />
+    <meta data-app-fallback property="og:title" content="MyTuums — The social media, for gamers" />
+    <meta data-app-fallback property="og:description" content="The social media, for gamers." />
     <meta data-app-fallback property="og:type" content="website" />
     <meta data-app-fallback property="og:url" content="https://mytuums.com/" />
     <meta data-app-fallback property="og:site_name" content="MyTuums" />
     <meta data-app-fallback property="og:image" content="https://mytuums.com/mytuums-512.png" />
     <meta data-app-fallback name="twitter:card" content="summary" />
-    <meta data-app-fallback name="twitter:title" content="MyTuums — Social Media for Gamers" />
-    <meta
-      data-app-fallback
-      name="twitter:description"
-      content="MyTuums is the social media platform built for gamers."
-    />
+    <meta data-app-fallback name="twitter:title" content="MyTuums — The social media, for gamers" />
+    <meta data-app-fallback name="twitter:description" content="The social media, for gamers." />
     <meta data-app-fallback name="twitter:image" content="https://mytuums.com/mytuums-512.png" />
     <!-- Organization entity stacking (schema.org): tells search engines that
          this site and the profiles below are one brand entity. Only genuine,
@@ -59,6 +47,7 @@
         "@context": "https://schema.org",
         "@type": "Organization",
         "name": "MyTuums",
+        "description": "The social media, for gamers.",
         "url": "https://mytuums.com",
         "logo": "https://mytuums.com/mytuums-512.png",
         "sameAs": [
