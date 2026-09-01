@@ -1,5 +1,5 @@
 import { Bookmark, Heart, MessageCircle, MoreHorizontal, Quote, Repeat2 } from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
 import { getLocale } from "@/paraglide/runtime.js";
 import { m } from "@/paraglide/messages.js";
@@ -18,6 +18,14 @@ import { m } from "@/paraglide/messages.js";
  */
 const POST_AUTHOR_NAME = "ElCabri";
 const POST_AUTHOR_HANDLE = "elcabri";
+/**
+ * The author's GitHub profile picture, not a `/media/` URL: every `/media`
+ * key sits behind the session gate and would 401 for the signed-out visitors
+ * who make up a landing page's audience. The GitHub CDN copy is public and
+ * allowed by the app's CSP (`img-src ... https:`). `s=96` doubles the 40 px
+ * render box for sharp screens; the "E" fallback stays for load failures.
+ */
+const POST_AUTHOR_AVATAR = "https://avatars.githubusercontent.com/u/14412169?s=96";
 const POST_CONTENT =
   "What are your opinions on the new patchnote ? It seems very unbalanced, but im might be biased tbh";
 const POST_HASHTAG = "#leagueoflegends";
@@ -49,6 +57,7 @@ export function AppPreview() {
       <Card className="p-4 shadow-lg shadow-black/5 sm:p-5">
         <div className="flex gap-3">
           <Avatar className="bg-background h-10 w-10 shrink-0 rounded-full">
+            <AvatarImage src={POST_AUTHOR_AVATAR} alt={POST_AUTHOR_NAME} />
             <AvatarFallback className="bg-primary text-primary-foreground rounded-full text-xs font-bold">
               E
             </AvatarFallback>
