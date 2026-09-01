@@ -30,6 +30,14 @@ describe("post-feed key encode/decode", () => {
     { feed: "global", kind: "replies" },
     { feed: "global", kind: "both" },
     { feed: "following", authorId: "author-1", parentId: "parent-1", includeReplies: true },
+    { feed: "global", includeReposts: true },
+    { feed: "global", authorId: "author-1", kind: "posts", includeReposts: true },
+    {
+      feed: "global",
+      authorId: "author-1",
+      includeReplies: true,
+      includeReposts: true,
+    },
   ];
 
   it.each(cases)("round-trips %o", (params) => {
@@ -38,7 +46,7 @@ describe("post-feed key encode/decode", () => {
 
   // `authorId` is a database id, not a validated slug, so it could contain the
   // "|" delimiter itself. It's kept LAST in the encoding specifically so
-  // `decode` can consume just the three leading delimiters and hand back
+  // `decode` can consume just the four leading delimiters and hand back
   // everything else verbatim, instead of splitting on every "|" and
   // truncating the id at the first one.
   it("round-trips an authorId that itself contains the delimiter", () => {
@@ -51,8 +59,8 @@ describe("post-feed key encode/decode", () => {
     expect(Object.keys(decoded)).toEqual(["feed"]);
   });
 
-  it("keeps the legacy Both key stable for existing caches", () => {
-    expect(encode({ feed: "global", includeReplies: true })).toBe("global|r||");
+  it("pins the Both key — a tripwire against accidental key-layout drift", () => {
+    expect(encode({ feed: "global", includeReplies: true })).toBe("global|r|||");
   });
 });
 

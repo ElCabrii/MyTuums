@@ -124,11 +124,15 @@ both by the server's page gate and by the client.
   repost is an event, not a post: it has no text or images of its own, and the
   home feeds render the original post attributed to the reposter at the
   repost's timestamp. Reposting your own post is allowed; "reposting a repost"
-  has no target — every repost action names an original post. Profile feeds
-  stay the author's own activity and carry no repost events. Only top-level
-  posts are offered the repost control: no feed shows a repost of a reply, so
-  the action would never render anywhere (the row remains legal — the API
-  accepts it — it is the surfaces that have nowhere to put it).
+  has no target — every repost action names an original post. A profile feed
+  carries the author's own reposts interleaved with their posts at the
+  repost's timestamp (the profile's All and Posts tabs; the Replies tab does
+  not, and neither does the original author's profile — a profile shows the
+  events its owner caused, never other people's amplifications of the owner's
+  posts). Only top-level posts are offered the repost control: no surface the
+  app ships creates a repost of a reply, so the action would never render
+  anywhere (the row remains legal — the API accepts it — it is the surfaces
+  that have nowhere to put it).
 - A quote is a normal post — every text and image rule applies — plus a
   reference to the quoted post, which renders embedded inside it in every
   context: feed, permalink, thread, search results and the moderation case

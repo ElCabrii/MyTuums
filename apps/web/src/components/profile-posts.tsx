@@ -37,12 +37,16 @@ export function ProfilePosts() {
 
   const isOwnProfile = viewerId === profile.id;
   const handle = handleOf(profile) ?? username;
+  // Reposts interleave on the All and Posts tabs (issue #277) — the profile
+  // carries the events its owner caused, so the reposter's own amplifications
+  // render like X's profile does. The Replies tab stays replies-only, and no
+  // tab ever shows other people's reposts of this author's posts.
   const feedParams: PostFeedParams =
     filter === "posts"
-      ? { authorId: profile.id, feed: "global", kind: "posts" }
+      ? { authorId: profile.id, feed: "global", kind: "posts", includeReposts: true }
       : filter === "reply"
         ? { authorId: profile.id, feed: "global", kind: "replies" }
-        : { authorId: profile.id, feed: "global", includeReplies: true };
+        : { authorId: profile.id, feed: "global", includeReplies: true, includeReposts: true };
   const emptyMessage =
     filter === "reply"
       ? isOwnProfile
