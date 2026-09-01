@@ -276,9 +276,12 @@ sides by CI. See [operations.md](operations.md).
   (`apps/web/src/lib/banner-frame.ts`): exact 3:1 wherever the measure holds,
   a 150px band on narrow phones, never taller than 320px past the 1500px
   measure — so extreme viewports trim bounded edges of the composition
-  instead of re-choosing the crop. In the editor the whole source stays
-  visible and the outlined rectangle is the actual region being encoded:
-  dragging moves it over the source and wheel zoom resizes it. The stored
+  instead of re-choosing the crop. In the editor the outlined rectangle is the
+  fixed, actual region being encoded: the source context starts visible around
+  it, dragging moves the image beneath it, and wheel zoom scales the image.
+  Pointer movement is coalesced to one compositor transform per animation
+  frame and rebased after each clamp, so large source previews do not trigger
+  layout per raw event or stick when a drag reverses from an edge. The stored
   variant can reach 3840x1280 for a sharp 2x sample on a 1920px display.
 - **The pre-decode guards run at file pick, not just at encode.**
   `validateImageFile` owns the type, byte-cap and header megapixel checks, and

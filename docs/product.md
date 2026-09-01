@@ -233,10 +233,11 @@ app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
   identifier. The original keeps whatever metadata it arrived with, so a
   picture can be refitted or re-cropped later without lost pixels; only
   signed-in viewers authorized for the profile can read it either way.
-- The banner crop editor keeps the whole source visible and outlines the
-  actual 3:1 region that will be stored. Dragging moves that selection and
-  scrolling resizes it; zoom-out stops when the selection reaches the source's
-  full width or height, so the stored banner never contains letterbox bars.
+- The banner crop editor centers a fixed outline around the actual 3:1 region
+  that will be stored, with the wider source context visible around it.
+  Dragging moves the image beneath that frame and scrolling zooms it; zoom-out
+  stops when the selected region reaches the source's full width or height, so
+  the stored banner never contains letterbox bars.
 - A post or reply can carry up to four images. Each is re-encoded in the
   browser before upload and no original is kept: the stored image is bounded
   in dimensions and bytes, and carries no camera/GPS (EXIF) metadata (issue
