@@ -1,6 +1,7 @@
 import { Bookmark, Heart, MessageCircle, MoreHorizontal, Quote, Repeat2 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
+import { getLocale } from "@/paraglide/runtime.js";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -20,6 +21,22 @@ const POST_AUTHOR_HANDLE = "elcabri";
 const POST_CONTENT =
   "What are your opinions on the new patchnote ? It seems very unbalanced, but im might be biased tbh";
 const POST_HASHTAG = "#leagueoflegends";
+
+/**
+ * The timestamp renders exactly the way `PostTimestamps` does in the app:
+ * `Intl.RelativeTimeFormat` with `numeric: "auto"` over a fixed instant two
+ * hours ago — "2 hours ago" / "il y a 2 heures" — with the exact time on
+ * hover. Computed at module scope: switching locale reloads the document
+ * (`setLocale`'s default), so a fresh import re-resolves the language.
+ */
+const POST_DATE = new Date(Date.now() - 2 * 60 * 60 * 1000);
+const POST_TIME_LABEL = new Intl.RelativeTimeFormat(getLocale(), {
+  numeric: "auto",
+}).format(-2, "hour");
+const POST_TIME_EXACT = new Intl.DateTimeFormat(getLocale(), {
+  dateStyle: "medium",
+  timeStyle: "short",
+}).format(POST_DATE);
 
 /** Plausible engagement for the fixture; the row is decorative (aria-hidden). */
 const POST_REPLIES = 24;
@@ -41,7 +58,10 @@ export function AppPreview() {
               <span className="text-foreground truncate text-sm font-bold">{POST_AUTHOR_NAME}</span>
               <span className="text-muted-foreground text-xs">@{POST_AUTHOR_HANDLE}</span>
               <span className="text-muted-foreground text-xs">
-                • <time dateTime="2026-09-01T14:00:00.000Z">{m.mock_post_time()}</time>
+                •{" "}
+                <time dateTime={POST_DATE.toISOString()} title={POST_TIME_EXACT}>
+                  {POST_TIME_LABEL}
+                </time>
               </span>
               <span
                 aria-hidden="true"
