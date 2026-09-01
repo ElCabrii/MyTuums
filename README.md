@@ -79,7 +79,7 @@ The rest of the Drizzle toolbox is package-level:
 | Path            | What lives there                                                                     |
 | --------------- | ------------------------------------------------------------------------------------ |
 | `apps/web`      | the SPA: file routes in `src/routes`, Jotai state in `src/atoms`, i18n in `messages` |
-| `apps/branding` | the public landing site served at `about.gabrieldebure.com`                          |
+| `apps/branding` | the public landing site served at `about.mytuums.com`                                |
 | `apps/server`   | the HTTP server: routing tree, env validation, static SPA, Dockerfile                |
 | `packages/api`  | oRPC procedures, business rules, moderation, media, rate limiting                    |
 | `packages/auth` | the single better-auth instance and its providers, email and hooks                   |

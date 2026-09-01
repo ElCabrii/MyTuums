@@ -4,4 +4,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://about.gabrieldebure.com/sitemap.xml
+Sitemap: https://about.mytuums.com/sitemap.xml

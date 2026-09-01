@@ -335,14 +335,14 @@ describe("createRequestHandler", () => {
     expect(serveStatic).toHaveBeenCalledOnce();
   });
 
-  // The branding host (issue #279): about.gabrieldebure.com serves the built
+  // The branding host (issue #279): about.mytuums.com serves the built
   // branding site (apps/branding, through BRANDING_DIST) instead of the app.
   // These pin the routing decision — the placement of the host branch
   // relative to every other gate — which is this file's job; the handler's
   // own file/compression behavior is owned by static-files.test.ts, and the
   // document content by the branding app it serves.
   describe("branding host", () => {
-    const BRANDING_HEADERS = { host: "about.gabrieldebure.com" };
+    const BRANDING_HEADERS = { host: "about.mytuums.com" };
 
     /** A stand-in for the branding static handler: serves one fixture page. */
     const serveBrandingHit = () =>
@@ -378,7 +378,7 @@ describe("createRequestHandler", () => {
       const branding = serveBrandingHit();
       const handle = createRequestHandler(deps({ serveBranding: branding }));
 
-      await handle(reqStub("/", "GET", { host: "ABOUT.gabrieldebure.com:3001" }), res);
+      await handle(reqStub("/", "GET", { host: "about.mytuums.com:3001" }), res);
 
       expect(branding).toHaveBeenCalledOnce();
       expect(calls.statusCode).toBe(200);

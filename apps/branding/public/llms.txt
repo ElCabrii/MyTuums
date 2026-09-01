@@ -17,7 +17,7 @@ in-app appeals.
 
 ## Notes
 
-- This landing site (https://about.gabrieldebure.com) is available in English and
+- This landing site (https://about.mytuums.com) is available in English and
   French; the language is chosen in the page header.
 - The product itself requires an account; the links above are the public
   entry points.

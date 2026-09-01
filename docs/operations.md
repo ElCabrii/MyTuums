@@ -74,7 +74,7 @@ server with a forged Host header:
 ```bash
 pnpm --filter @my-tuums/branding build
 BRANDING_DIST=$PWD/apps/branding/dist pnpm dev   # separate shell
-curl -H "Host: about.gabrieldebure.com" http://localhost:3001/
+curl -H "Host: about.mytuums.com" http://localhost:3001/
 ```
 
 ## Railway
@@ -122,11 +122,11 @@ CI never deploys. Railway builds its own image from `apps/server/Dockerfile`
 on push; the CI `image` job exists to fail a commit that would produce a
 broken one.
 
-**The branding site rides the app's deployment.** `about.gabrieldebure.com` is
+**The branding site rides the app's deployment.** `about.mytuums.com` is
 served by the same Railway service — host routing inside the server over the
 built `apps/branding/dist` (`BRANDING_DIST` in the image), no second
 service, no environment change. The one manual step is DNS: add
-`about.gabrieldebure.com` as a custom domain on the production service, then create
+`about.mytuums.com` as a custom domain on the production service, then create
 the records Railway shows at the registrar. Until that is done the site
 exists only under a forged Host header (see the curl in
 [Local development](#local-development)).

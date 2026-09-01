@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-The public landing site served at `about.gabrieldebure.com` ("The social media, for
+The public landing site served at `about.mytuums.com` ("The social media, for
 gamers"). A second, deliberately tiny Vite app — one page, no router, no
 state library, no API client — that shares the SPA's entire visual system
 (Tailwind v4, the shadcn preset in `components.json`, Inter Variable, the
@@ -45,7 +45,7 @@ hostname — see `apps/server/src/branding-host.ts`.
   Organization JSON-LD `sameAs` (`apps/web/index.html`); the JSON-LD in this
   app's own `index.html` mirrors the same list.
 - **`public/robots.txt`, `sitemap.xml` and `llms.txt` are the crawler- and
-  agent-facing surface** — absolute `https://about.gabrieldebure.com/` URLs only,
+  agent-facing surface** — absolute `https://about.mytuums.com/` URLs only,
   and `Allow: /` for every user agent, AI crawlers included.
 
 ## Generated files

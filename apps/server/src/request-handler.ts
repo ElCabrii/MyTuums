@@ -687,7 +687,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         return;
       }
 
-      // The branding host: `about.gabrieldebure.com` is the one hostname this server
+      // The branding host: `about.mytuums.com` is the one hostname this server
       // answers that is not the app. It gets the built branding site
       // (apps/branding, served through `serveBranding`) instead of the SPA —
       // the site needs none of the one-origin guarantees (no /rpc, no
