@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 
 import { renderWithProviders } from "@/test/render";
 import type { Crop } from "@/lib/media";
-import { BANNER_SAFE_AREA } from "@/lib/banner-frame";
 import { ImageCropDialog } from "@/components/settings/image-crop-dialog";
 import { m } from "@/paraglide/messages.js";
 
@@ -111,7 +110,7 @@ describe("ImageCropDialog", () => {
     );
   });
 
-  it("names the slot it is editing, and outlines the banner safe area", async () => {
+  it("shows the whole banner source and outlines the actual crop selection", async () => {
     stubDecode(2000, 1200);
     const { container } = await renderWithProviders(
       <ImageCropDialog kind="banner" file={file()} onApply={vi.fn()} onCancel={vi.fn()} />,
@@ -122,19 +121,30 @@ describe("ImageCropDialog", () => {
         name: m.settings_image_crop_title({ label: m.settings_banner_label() }),
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText(m.settings_image_crop_hint())).toBeInTheDocument();
-    expect(screen.getByText(m.settings_banner_crop_safe_area())).toBeInTheDocument();
+    expect(screen.getByText(m.settings_banner_crop_hint())).toBeInTheDocument();
     await waitFor(() =>
       expect(container.ownerDocument.querySelector(".touch-none img")).toBeInTheDocument(),
     );
-    // The outline marks what every profile frame still shows of the 3:1
-    // composition (lib/banner-frame.ts owns both the fractions and the frame).
+    const preview = container.ownerDocument.querySelector<HTMLElement>(".touch-none");
+    expect(preview).toHaveStyle({ aspectRatio: `${2000 / 1200}` });
+    expect(preview?.querySelector("img")).toHaveStyle({
+      width: "100%",
+      height: "100%",
+      left: "0%",
+      top: "0%",
+    });
+
+    // At the zoom-out floor, the actual 3:1 crop spans the source width and
+    // leaves only vertical slack. The outline is that crop, not a separate
+    // fixed safe-area guide that happens to look selectable.
     const outline = container.ownerDocument.querySelector<HTMLElement>(
       ".touch-none [aria-hidden='true']",
     );
     expect(outline).toHaveStyle({
-      width: `${BANNER_SAFE_AREA.width * 100}%`,
-      height: `${BANNER_SAFE_AREA.height * 100}%`,
+      width: "100%",
+      height: `${(667 / 1200) * 100}%`,
+      left: "0%",
+      top: `${(266 / 1200) * 100}%`,
     });
     expect(screen.getByRole("dialog")).toHaveClass(
       "max-h-[calc(100dvh-2rem)]",
@@ -158,12 +168,12 @@ describe("ImageCropDialog", () => {
     expect(onApply).not.toHaveBeenCalled();
   });
 
-  it("pans the crop center when the image is dragged", async () => {
-    // A 1000x1000 source in a banner slot: the encoder keeps a 1000x333 3:1
-    // region, so there is vertical slack to reposition — which is the whole
-    // point of the editor for a banner.
+  it("moves the banner crop selection in the direction it is dragged", async () => {
+    // Zooming in makes the 3:1 selection smaller than the square source on
+    // both axes, so it can move right and down exactly as the visible outline
+    // does. The source itself stays fixed behind it.
     stubDecode(1000, 1000);
-    stubFrameSize(1000, 333);
+    stubFrameSize(1000, 1000);
     const onApply = vi.fn<(crop: Crop) => void>();
     const { container } = await renderWithProviders(
       <ImageCropDialog kind="banner" file={file()} onApply={onApply} onCancel={vi.fn()} />,
@@ -175,22 +185,25 @@ describe("ImageCropDialog", () => {
 
     const frame = container.ownerDocument.querySelector<HTMLElement>(".touch-none");
     expect(frame).not.toBeNull();
-    // Dragging the image DOWN by 100px moves the visible region UP.
+    fireEvent.wheel(frame!, { deltaY: -100 });
     await user.pointer([
-      { target: frame!, coords: { clientX: 500, clientY: 200 }, keys: "[MouseLeft>]" },
-      { target: frame!, coords: { clientX: 500, clientY: 300 } },
+      { target: frame!, coords: { clientX: 500, clientY: 500 }, keys: "[MouseLeft>]" },
+      { target: frame!, coords: { clientX: 525, clientY: 525 } },
       { target: frame!, keys: "[/MouseLeft]" },
     ]);
 
     await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
 
     const crop = onApply.mock.calls.at(-1)![0];
-    // The frame and crop rect share the same 3:1 scale, so a 100px drag moves
-    // the center by one tenth of the 1000px source.
-    expect(crop.y).toBeCloseTo(0.4, 5);
-    // Nothing to pan horizontally: the rect already spans the full width.
-    expect(crop.x).toBe(0.5);
-    expect(crop.scale).toBe(1);
+    expect(crop.x).toBeCloseTo(0.525, 5);
+    expect(crop.y).toBeCloseTo(0.525, 5);
+    expect(crop.scale).toBeCloseTo(1.1, 5);
+    expect(frame?.querySelector("[aria-hidden='true']")).toHaveStyle({
+      width: "90.9%",
+      height: "30.3%",
+      left: "7.000000000000001%",
+      top: "37.3%",
+    });
   });
 
   it("pans a portrait avatar within its square composition", async () => {
@@ -305,14 +318,18 @@ describe("ImageCropDialog", () => {
     await user.click(screen.getByRole("button", { name: m.settings_image_crop_apply() }));
 
     expect(onApply.mock.calls.at(-1)![0]).toEqual({ x: 0.5, y: 0.5, scale: 1 });
-    // No letterbox: the window is the full-width 1000x500 band, so the image
-    // spans the frame's width exactly and overflows its height symmetrically
-    // (the centered band; the overflow is what the frame trims).
+    // The whole source remains visible behind the full-width crop outline.
     expect(container.ownerDocument.querySelector(".touch-none img")).toHaveStyle({
       width: "100%",
-      height: "200%",
+      height: "100%",
       left: "0%",
-      top: "-50%",
+      top: "0%",
+    });
+    expect(container.ownerDocument.querySelector(".touch-none [aria-hidden='true']")).toHaveStyle({
+      width: "100%",
+      height: "50%",
+      left: "0%",
+      top: "25%",
     });
   });
 
