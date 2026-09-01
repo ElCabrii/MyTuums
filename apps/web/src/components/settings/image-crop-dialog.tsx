@@ -16,7 +16,6 @@ import {
   type Crop,
   type ImageSize,
 } from "@/lib/media";
-import { BANNER_SAFE_AREA } from "@/lib/banner-frame";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -40,17 +39,17 @@ import { m } from "@/paraglide/messages.js";
  *
  * Neither slot zooms out past its default window: that window is the largest
  * aspect-true rectangle inside the source, already spanning its full width or
- * its full height (`minCropScale`), so the wheel only zooms in and a drag
- * slides the window within the source — an axis it already spans has no slack
- * and stays pinned to the source's edge. The window therefore never leaves
- * the image (issue #273), and the preview needs no letterbox: the image fills
- * the frame exactly at every zoom.
+ * its full height (`minCropScale`). A banner shows the whole source with that
+ * window outlined over it, so the outline is the crop the person moves and
+ * resizes rather than a second safe-area guide that only looks selectable.
+ * Avatars retain the compact viewport treatment and move the image beneath
+ * their circular mask.
  *
  * The image is decoded twice on purpose: `createImageBitmap` for the oriented
  * dimensions the math needs (the same primitive `lib/media.ts` uses, and the
  * one tests can stub), and an object URL for the `<img>` that actually shows
- * it. The frame's aspect is fixed, so the `<img>` is sized and offset in
- * percentages of the frame — no measurement of the rendered frame is needed.
+ * it. Every preview uses an aspect derived from decoded dimensions, so the
+ * image and crop can be positioned in percentages without measuring layout.
  */
 
 /** The most the editor will zoom in; beyond this a crop is a sub-pixel sliver. */
@@ -96,12 +95,14 @@ export function ImageCropDialog({
   const [frame, setFrame] = useState<HTMLDivElement | null>(null);
   const frameRef = useCallback((node: HTMLDivElement | null) => setFrame(node), []);
 
-  /** The preview box has the exact aspect that will be encoded. */
+  /** Banners show the source; avatars keep the exact aspect that will be encoded. */
   const frameAspect = dims
-    ? (() => {
-        const box = calculateCropFrame(dims, kind);
-        return box.width / box.height;
-      })()
+    ? kind === "banner"
+      ? dims.width / dims.height
+      : (() => {
+          const box = calculateCropFrame(dims, kind);
+          return box.width / box.height;
+        })()
     : IMAGE_LIMITS[kind].maxWidth / IMAGE_LIMITS[kind].maxHeight;
   const dragRef = useRef<{
     pointerId: number;
@@ -219,12 +220,19 @@ export function ImageCropDialog({
     if (!drag || !dims || event.pointerId !== drag.pointerId) return;
     const dx = event.clientX - drag.startX;
     const dy = event.clientY - drag.startY;
-    // Dragging the image by (dx, dy) moves the crop rect by (-dx, -dy) in
-    // frame space; one frame width is one crop-rect width, so the normalized
-    // center shifts by that fraction of the rect's normalized size.
+    // The banner outline moves over a full-source preview, so its normalized
+    // center follows the pointer directly. Avatars still move the image under
+    // a fixed viewport, where the crop moves in the opposite direction and a
+    // frame-width gesture corresponds to one crop-rect width.
     const rect = calculateCropRect(dims, kind, drag.crop);
-    const x = drag.crop.x - (dx / drag.frameWidth) * (rect.width / dims.width);
-    const y = drag.crop.y - (dy / drag.frameHeight) * (rect.height / dims.height);
+    const x =
+      kind === "banner"
+        ? drag.crop.x + dx / drag.frameWidth
+        : drag.crop.x - (dx / drag.frameWidth) * (rect.width / dims.width);
+    const y =
+      kind === "banner"
+        ? drag.crop.y + dy / drag.frameHeight
+        : drag.crop.y - (dy / drag.frameHeight) * (rect.height / dims.height);
     const next = clampCrop({ x, y, scale: drag.crop.scale }, dims, kind);
     cropRef.current = next;
     setCrop(next);
@@ -235,6 +243,8 @@ export function ImageCropDialog({
   }
 
   const label = kind === "avatar" ? m.settings_avatar_label() : m.settings_banner_label();
+  const frameStyle: CSSProperties = { aspectRatio: `${frameAspect}` };
+  if (kind === "banner" && dims) frameStyle.width = `min(100%, ${55 * frameAspect}dvh)`;
 
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
@@ -246,7 +256,9 @@ export function ImageCropDialog({
       >
         <DialogHeader>
           <DialogTitle>{m.settings_image_crop_title({ label })}</DialogTitle>
-          <DialogDescription>{m.settings_image_crop_hint()}</DialogDescription>
+          <DialogDescription>
+            {kind === "banner" ? m.settings_banner_crop_hint() : m.settings_image_crop_hint()}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="px-6 pb-2">
@@ -255,8 +267,11 @@ export function ImageCropDialog({
           ) : (
             <div
               ref={frameRef}
-              className="bg-muted relative w-full touch-none overflow-hidden rounded-lg select-none"
-              style={{ aspectRatio: `${frameAspect}` }}
+              className={cn(
+                "bg-muted relative w-full touch-none overflow-hidden rounded-lg select-none",
+                kind === "banner" && "mx-auto cursor-move",
+              )}
+              style={frameStyle}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerEnd}
@@ -284,22 +299,13 @@ export function ImageCropDialog({
                   ) : (
                     <div
                       aria-hidden="true"
-                      className="pointer-events-none absolute top-1/2 left-1/2 rounded-lg border border-white/90 shadow-[0_0_0_9999px_rgb(0_0_0/0.28)]"
-                      style={{
-                        width: `${BANNER_SAFE_AREA.width * 100}%`,
-                        height: `${BANNER_SAFE_AREA.height * 100}%`,
-                        transform: "translate(-50%, -50%)",
-                      }}
+                      className="pointer-events-none absolute rounded-lg border border-white/90 shadow-[0_0_0_9999px_rgb(0_0_0/0.38)]"
+                      style={cropSelectionStyle(source.dims, crop)}
                     />
                   )}
                 </>
               )}
             </div>
-          )}
-          {kind === "banner" && !failed && (
-            <p className="text-muted-foreground mt-2 text-xs">
-              {m.settings_banner_crop_safe_area()}
-            </p>
           )}
         </div>
 
@@ -317,23 +323,34 @@ export function ImageCropDialog({
 }
 
 /**
- * The `<img>`'s size and offset, as percentages of the frame, so the crop rect
- * fills the frame exactly. `rect` has the frame's aspect, so one scale factor
- * maps it to both axes; the negative offset slides the image so the rect's
- * top-left lands on the frame's top-left. The rect is inside the source, so
- * the image always covers the whole frame — zooming in only enlarges it past
- * the frame's edges, which `overflow-hidden` trims.
+ * Banners show the full source because their crop is a visible overlay.
+ * Avatars still size and offset the image so their crop rect fills the compact
+ * fixed viewport beneath the circular mask.
  */
 function imageStyle(
   dims: { width: number; height: number },
   kind: ImageKind,
   crop: Crop,
 ): CSSProperties {
+  if (kind === "banner") {
+    return { width: "100%", height: "100%", left: "0%", top: "0%" };
+  }
   const rect = calculateCropRect(dims, kind, crop);
   return {
     width: `${(dims.width / rect.width) * 100}%`,
     height: `${(dims.height / rect.height) * 100}%`,
     left: `${(-rect.x / rect.width) * 100}%`,
     top: `${(-rect.y / rect.height) * 100}%`,
+  };
+}
+
+/** Positions the visible banner selection over the full-source preview. */
+function cropSelectionStyle(dims: ImageSize, crop: Crop): CSSProperties {
+  const rect = calculateCropRect(dims, "banner", crop);
+  return {
+    width: `${(rect.width / dims.width) * 100}%`,
+    height: `${(rect.height / dims.height) * 100}%`,
+    left: `${(rect.x / dims.width) * 100}%`,
+    top: `${(rect.y / dims.height) * 100}%`,
   };
 }

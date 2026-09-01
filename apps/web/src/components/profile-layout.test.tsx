@@ -325,9 +325,7 @@ describe("ProfileLayout banner", () => {
     });
     // The frame is the canonical 3:1 with its height clamped by the constants
     // in lib/banner-frame.ts: exact 3:1 wherever the measure holds, a 150px
-    // band on narrow phones, never taller than 320px on wide monitors. The
-    // clamps are inline styles from those constants so this frame and the
-    // crop editor's safe area cannot drift apart.
+    // band on narrow phones, never taller than 320px on wide monitors.
     expect(banner.parentElement).toHaveStyle({
       aspectRatio: "3",
       maxWidth: "1500px",

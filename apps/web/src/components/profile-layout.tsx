@@ -158,9 +158,8 @@ export function ProfileLayout() {
       {/* The plain `bg-muted` plate is the fallback, not a placeholder: most
           profiles have no banner, and it is what the avatar's negative margin
           and the border below are laid out against either way. The frame is
-          the canonical 3:1 with its height clamped — the constants and the
-          tradeoffs live in `lib/banner-frame.ts`, next to the safe area the
-          crop editor draws from the same numbers. */}
+          the canonical 3:1 with its height clamped; the constants and their
+          responsive tradeoffs live in `lib/banner-frame.ts`. */}
       <div
         className="bg-muted border-border relative mx-auto w-full overflow-hidden border-b"
         style={{
