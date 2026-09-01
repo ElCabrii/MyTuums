@@ -19,13 +19,12 @@ import { m } from "@/paraglide/messages.js";
 const POST_AUTHOR_NAME = "ElCabri";
 const POST_AUTHOR_HANDLE = "elcabri";
 /**
- * The author's GitHub profile picture, not a `/media/` URL: every `/media`
- * key sits behind the session gate and would 401 for the signed-out visitors
- * who make up a landing page's audience. The GitHub CDN copy is public and
- * allowed by the app's CSP (`img-src ... https:`). `s=96` doubles the 40 px
- * render box for sharp screens; the "E" fallback stays for load failures.
+ * The author's avatar, shipped as a local asset: the `/media/` original sits
+ * behind the session gate and would 401 for the signed-out visitors who make
+ * up a landing page's audience. The 1024 px webp is plenty for the 40 px
+ * render box; the "E" fallback stays for load failures.
  */
-const POST_AUTHOR_AVATAR = "https://avatars.githubusercontent.com/u/14412169?s=96";
+const POST_AUTHOR_AVATAR = "/elcabri.webp";
 const POST_CONTENT =
   "What are your opinions on the new patchnote ? It seems very unbalanced, but im might be biased tbh";
 const POST_HASHTAG = "#leagueoflegends";
