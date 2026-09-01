@@ -9,10 +9,11 @@ would produce a broken one.
 
 ## Start here
 
-| File                    | Why                                                               |
-| ----------------------- | ----------------------------------------------------------------- |
-| `workflows/ci.yml`      | Three jobs: `verify`, `e2e`, `image`, and why each exists.        |
-| `../docs/operations.md` | What the pipeline is checking and why the environments are split. |
+| File                     | Why                                                               |
+| ------------------------ | ----------------------------------------------------------------- |
+| `workflows/ci.yml`       | Three jobs: `verify`, `e2e`, `image`, and why each exists.        |
+| `workflows/opencode.yml` | The `/oc` / `/opencode` comment agent; on-demand, not part of CI. |
+| `../docs/operations.md`  | What the pipeline is checking and why the environments are split. |
 
 ## Change map
 
@@ -125,6 +126,13 @@ would produce a broken one.
 - Secrets: only the `e2e` job takes any (the `S3_*` set for the `ci` bucket).
   `verify` and `image` take none. Fork pull requests get no secrets, and the
   upload specs skip themselves.
+- The `opencode` workflow is the one exception on both counts: it runs on a
+  GitHub-hosted runner (the self-hosted invariant covers CI jobs, and an
+  interactive agent session does not belong on the owner's device) and takes
+  `ZHIPU_API_KEY` for the model it runs. It is triggered by comments, not by
+  pushes, so it never runs on a fork's or a contributor's behalf unprompted.
+  PR reviews (including on specific code lines) go through it too, via
+  `/oc review` — there is deliberately no per-push automatic review job.
 
 ## Verification
 
