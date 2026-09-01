@@ -1,0 +1,10 @@
+# The app itself is private: every main-content route 302s a signed-out
+# crawler to /login before any HTML ships (see SIGNED_OUT_PATHS in
+# packages/api/src/constants.ts), so there is nothing to disallow — only the
+# public auth and legal pages are indexable. The landing site's sitemap is
+# advertised here too: the Sitemap directive may point across hosts.
+User-agent: *
+Allow: /
+
+Sitemap: https://mytuums.com/sitemap.xml
+Sitemap: https://home.mytuums.com/sitemap.xml

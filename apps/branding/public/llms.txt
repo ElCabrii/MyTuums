@@ -1,0 +1,23 @@
+# MyTuums
+
+> The social media, for gamers.
+
+MyTuums is a gaming-first social network: posts and threads, reposts and
+quotes, likes and bookmarks, follows, and human-reviewed moderation with
+in-app appeals. The home feed is chronological — no algorithmic timeline.
+
+- App: https://mytuums.com
+- Create an account: https://mytuums.com/register
+- Sign in: https://mytuums.com/login
+- X (Twitter): https://x.com/mytuums
+- Instagram: https://www.instagram.com/mytuums/
+- TikTok: https://www.tiktok.com/@mytuums
+- YouTube: https://www.youtube.com/@MyTuums
+- GitHub: https://github.com/MyTuums
+
+## Notes
+
+- This landing site (https://home.mytuums.com) is available in English and
+  French; the language is chosen in the page header.
+- The product itself requires an account; the links above are the public
+  entry points.

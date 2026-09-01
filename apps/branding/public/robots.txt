@@ -1,0 +1,7 @@
+# The landing site is a single public page: everything is crawlable, by
+# classic search engines and AI agents alike. The Sitemap directive may point
+# across hosts, so this one file also advertises the app's sitemap.
+User-agent: *
+Allow: /
+
+Sitemap: https://home.mytuums.com/sitemap.xml

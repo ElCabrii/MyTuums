@@ -9,22 +9,66 @@
     <meta name="theme-color" content="#171719" media="(prefers-color-scheme: dark)" />
     <title>MyTuums — The social media, for gamers</title>
     <meta name="description" content="The social media, for gamers." />
-    <!-- Static unfurl metadata for the branding host. Unlike apps/web, this
-         page IS the document a crawler sees (one URL, no client routes), so
-         these are not fallbacks behind a JS-rendered head — keep the tagline
-         in step with apps/web/messages (issue #280) and the copy in
-         messages/. English-only, like the app's index.html: Paraglide lives
-         in the bundle and cannot reach this markup. -->
+    <link rel="canonical" href="https://home.mytuums.com/" />
+    <!-- The full SEO surface for a one-page site. Unlike apps/web, this page
+         IS the document a crawler sees, so these are not fallbacks behind a
+         JS-rendered head — keep the tagline in step with apps/web/messages
+         (issue #280) and the copy in messages/. English-only, like the app's
+         index.html: Paraglide lives in the bundle and cannot reach this
+         markup; the language is cookie-chosen on this single URL, so per-URL
+         hreflang pairs cannot exist — og:locale carries the alternates
+         instead. -->
     <meta property="og:title" content="MyTuums — The social media, for gamers" />
     <meta property="og:description" content="The social media, for gamers." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://home.mytuums.com/" />
     <meta property="og:site_name" content="MyTuums" />
     <meta property="og:image" content="https://home.mytuums.com/mytuums-512.png" />
+    <meta property="og:image:alt" content="The MyTuums logo" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="fr_FR" />
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="MyTuums — The social media, for gamers" />
     <meta name="twitter:description" content="The social media, for gamers." />
     <meta name="twitter:image" content="https://home.mytuums.com/mytuums-512.png" />
+    <meta name="twitter:image:alt" content="The MyTuums logo" />
+    <!-- Structured data (schema.org, one @graph): the Organization entity
+         mirrors the app's Organization JSON-LD on the apex (apps/web/
+         index.html) — name, logo and sameAs must stay in step with it — and
+         the WebSite entity describes this landing page itself. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://home.mytuums.com/#organization",
+            "name": "MyTuums",
+            "description": "The social media, for gamers.",
+            "url": "https://mytuums.com",
+            "logo": "https://home.mytuums.com/mytuums-512.png",
+            "sameAs": [
+              "https://x.com/mytuums",
+              "https://www.instagram.com/mytuums/",
+              "https://www.tiktok.com/@mytuums",
+              "https://www.youtube.com/@MyTuums",
+              "https://github.com/MyTuums"
+            ]
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://home.mytuums.com/#website",
+            "url": "https://home.mytuums.com/",
+            "name": "MyTuums",
+            "description": "The social media, for gamers.",
+            "inLanguage": ["en", "fr"],
+            "publisher": { "@id": "https://home.mytuums.com/#organization" }
+          }
+        ]
+      }
+    </script>
     <style>
       /* First-paint background only. The theme class is applied by the
          bundle, but a white flash on a dark-mode load reads as broken —

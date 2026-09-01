@@ -1,8 +1,9 @@
 import { LocaleMenu } from "@/components/locale-menu";
+import { SocialLinks } from "@/components/social-links";
 import { m } from "@/paraglide/messages.js";
 import { signInUrl, signUpUrl } from "@/lib/site";
 
-/** The footer: wordmark and tagline, the app links, the locale menu. */
+/** The footer: wordmark and tagline, the app links, the socials, the locale menu. */
 export function SiteFooter() {
   return (
     <footer className="border-border/60 border-t">
@@ -24,8 +25,10 @@ export function SiteFooter() {
           >
             {m.hero_cta_secondary()}
           </a>
+          <SocialLinks className="hidden sm:flex" />
           <LocaleMenu />
         </nav>
+        <SocialLinks className="sm:hidden" />
       </div>
     </footer>
   );

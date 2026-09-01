@@ -40,6 +40,13 @@ hostname — see `apps/server/src/branding-host.ts`.
 - **The CTA links are absolute to the apex** (`src/lib/site.ts`): a relative
   link would strand a visitor on a host where the app is never served and
   session cookies do not exist.
+- **The social URLs exist in exactly two places that must agree**: the
+  footer's `SOCIAL_LINKS` (`src/components/social-links.tsx`) and the app's
+  Organization JSON-LD `sameAs` (`apps/web/index.html`); the JSON-LD in this
+  app's own `index.html` mirrors the same list.
+- **`public/robots.txt`, `sitemap.xml` and `llms.txt` are the crawler- and
+  agent-facing surface** — absolute `https://home.mytuums.com/` URLs only,
+  and `Allow: /` for every user agent, AI crawlers included.
 
 ## Generated files
 
