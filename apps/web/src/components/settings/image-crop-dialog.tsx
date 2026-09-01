@@ -58,6 +58,9 @@ const MAX_CROP_SCALE = 8;
 /** Wheel zoom step: one notch in or out. */
 const ZOOM_STEP = 1.1;
 
+/** Leaves room for the dialog header and actions without shrinking the source preview arbitrarily. */
+const BANNER_PREVIEW_MAX_HEIGHT_DVH = 55;
+
 export function ImageCropDialog({
   kind,
   file,
@@ -224,15 +227,13 @@ export function ImageCropDialog({
     // center follows the pointer directly. Avatars still move the image under
     // a fixed viewport, where the crop moves in the opposite direction and a
     // frame-width gesture corresponds to one crop-rect width.
-    const rect = calculateCropRect(dims, kind, drag.crop);
-    const x =
-      kind === "banner"
-        ? drag.crop.x + dx / drag.frameWidth
-        : drag.crop.x - (dx / drag.frameWidth) * (rect.width / dims.width);
-    const y =
-      kind === "banner"
-        ? drag.crop.y + dy / drag.frameHeight
-        : drag.crop.y - (dy / drag.frameHeight) * (rect.height / dims.height);
+    let x = drag.crop.x + dx / drag.frameWidth;
+    let y = drag.crop.y + dy / drag.frameHeight;
+    if (kind === "avatar") {
+      const rect = calculateCropRect(dims, kind, drag.crop);
+      x = drag.crop.x - (dx / drag.frameWidth) * (rect.width / dims.width);
+      y = drag.crop.y - (dy / drag.frameHeight) * (rect.height / dims.height);
+    }
     const next = clampCrop({ x, y, scale: drag.crop.scale }, dims, kind);
     cropRef.current = next;
     setCrop(next);
@@ -244,7 +245,9 @@ export function ImageCropDialog({
 
   const label = kind === "avatar" ? m.settings_avatar_label() : m.settings_banner_label();
   const frameStyle: CSSProperties = { aspectRatio: `${frameAspect}` };
-  if (kind === "banner" && dims) frameStyle.width = `min(100%, ${55 * frameAspect}dvh)`;
+  if (kind === "banner" && dims) {
+    frameStyle.width = `min(100%, ${BANNER_PREVIEW_MAX_HEIGHT_DVH * frameAspect}dvh)`;
+  }
 
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>

@@ -152,8 +152,8 @@ function readFirstBytes(file: File, max: number): Promise<Uint8Array | null> {
  * photographs, and is supported by every browser this app targets. Banners are
  * always encoded 3:1 (see `calculateDisplayLayout`); how that composition is
  * framed on a profile — and how much of it survives at the widest and
- * narrowest viewports — is owned by `lib/banner-frame.ts`, which the crop
- * editor's safe-area overlay and the profile banner both read.
+ * narrowest viewports — is owned by `lib/banner-frame.ts`. The crop editor
+ * separately outlines the source region this function will encode.
  *
  * With a `crop` — what the editor in
  * `components/settings/image-crop-dialog.tsx` produces — the chosen region
@@ -269,8 +269,8 @@ export async function createDisplayVariantImpl(
  * the default window already spans the source's full width or full height
  * (issue #273). The profile banner displays that one composition with its
  * height clamped (see `lib/banner-frame.ts`), so extreme viewports trim edges
- * of it rather than re-choosing the crop; the editor's safe-area overlay marks
- * what every viewport keeps.
+ * of it rather than re-choosing the crop. The editor shows the whole source and
+ * outlines this actual 3:1 crop before it is encoded.
  *
  * The math itself lives in `lib/media-layout.ts` — re-exported above — because
  * `lib/gif-variant-worker.ts` needs the identical `calculateDisplayLayout` a
