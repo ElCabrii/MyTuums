@@ -1,13 +1,14 @@
 import type { MouseEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Bookmark, Heart, MessageCircle, MoreHorizontal, Quote, Repeat2 } from "lucide-react";
+import { Bookmark, Heart, MessageCircle, MoreHorizontal, Repeat2 } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileLink } from "@/components/profile-link";
 import { firstLinkUrl, LinkedText } from "@/components/linked-text";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { PostTimestamps } from "@/components/post-timestamps";
 import { PostLinkCard } from "@/components/post-link-card";
+import { QuotePostIcon } from "@/components/icons/quote-post-icon";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { toggleRepostAtomFamily } from "@/atoms/repost";
 import { quoteDialogAtom } from "@/atoms/quote-composer";
@@ -545,7 +546,7 @@ export function PostCard({
                 title={m.post_quote()}
                 className="hover:text-primary flex items-center gap-1.5 transition-colors"
               >
-                <Quote className="h-4 w-4" />
+                <QuotePostIcon className="h-4 w-4" />
               </button>
 
               <button
