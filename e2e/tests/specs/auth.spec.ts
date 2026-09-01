@@ -75,6 +75,9 @@ test.describe("logout", () => {
     await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
     await expect(page).toHaveURL(new RegExp(`/@${ALICE.username}$`));
 
+    // The profile page no longer carries its own sign-out button (issue
+    // #282); the settings page does, one navigation away.
+    await page.goto("/settings/account");
     await page.getByRole("button", { name: "Sign out" }).click();
 
     // This URL assertion is the regression test for a race that used to make
@@ -96,7 +99,7 @@ test.describe("logout", () => {
     //
     // The trailing `(?redirect=...)?` is the signed-in gate (use-require-
     // signed-in.ts) racing the app's own navigate: both end up at /login, but
-    // the gate preserves the profile URL it was standing on — which is the
+    // the gate preserves the page URL it was standing on — which is the
     // intended behaviour, not a bug.
     await expect(page).toHaveURL(/\/login(\?redirect=.*)?$/);
 

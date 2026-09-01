@@ -274,6 +274,7 @@
   "settings_blocked_empty": "You haven't blocked anyone.",
   "settings_blocked_unblock": "Unblock",
   "settings_blocked_error": "Couldn't load blocked users.",
+  "settings_sign_out_description": "Sign out of MyTuums on this device.",
   "feed_title": "Home",
   "feed_label": "Feed",
   "feed_for_you": "For you",

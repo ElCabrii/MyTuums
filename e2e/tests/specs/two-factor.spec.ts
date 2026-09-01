@@ -101,15 +101,12 @@ async function enableTwoFactor(
   return { totpURI: body.totpURI };
 }
 
-/** Signs out from the account's own profile and lands on /login. */
-async function signOut(
-  page: import("@playwright/test").Page,
-  account: ReturnType<typeof uniqueUser>,
-) {
-  // Sign-out no longer has a section on /settings/account (issue #217); it
-  // lives in the navbar account menu and on the own-profile action row. The
-  // profile page's button is the one-click affordance, so sign out from there.
-  await page.goto(`/@${account.username}`);
+/** Signs out from the account settings and lands on /login. */
+async function signOut(page: import("@playwright/test").Page) {
+  // Sign-out lives in the navbar account menu and on /settings/account (issue
+  // #282 restored the section); the profile page no longer has its own button.
+  // The settings page is one navigation away from anywhere, so sign out there.
+  await page.goto("/settings/account");
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/login/);
 }
@@ -130,7 +127,7 @@ test.describe("the sign-in challenge", () => {
   }) => {
     const account = await signUpFresh(page, "twofachal");
     const { totpURI } = await enableTwoFactor(page, account);
-    await signOut(page, account);
+    await signOut(page);
 
     // Signed out, a protected page bounces to /login with the destination in
     // the query string — the gate's redirect, which must survive the challenge.
@@ -171,7 +168,7 @@ test.describe("passkeys", () => {
     await page.getByRole("button", { name: "Add" }).click();
     await expect(page.getByText("E2E key")).toBeVisible();
 
-    await signOut(page, account);
+    await signOut(page);
 
     await page.getByRole("button", { name: "Continue with a passkey" }).click();
     await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));

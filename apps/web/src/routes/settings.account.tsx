@@ -15,6 +15,7 @@ import { TwoFactorSection } from "@/components/settings/two-factor-section";
 import { PasskeySection } from "@/components/settings/passkey-section";
 import { LinkedAccountsSection } from "@/components/settings/linked-accounts-section";
 import { BlockedUsersSection } from "@/components/settings/blocked-users-section";
+import { SignOutSection } from "@/components/settings/sign-out-section";
 import { m } from "@/paraglide/messages.js";
 import { pageHead } from "@/lib/document-head";
 
@@ -37,12 +38,13 @@ export const Route = createFileRoute("/settings/account")({
  * single error banner every section writes to through `authErrorAtom`, and
  * the grouping and order the sections appear in — two groups, Profile (the
  * picture, banner, name, bio and handle other people see) and Account
- * (password, preferences, two-factor, passkeys, linked accounts and blocked
- * users). Sign-out is not a section here: the navbar account menu
- * (`header.tsx`) is the always-visible sign-out affordance, so a duplicate
- * on the page was redundant (issue #217). (The signed-in gate lives at the
- * root — `__root.tsx` renders nothing until the session settles — so the
- * page needs no guard of its own.)
+ * (password, preferences, two-factor, passkeys, linked accounts, blocked
+ * users, and sign-out last). Sign-out closes the page as a section (issue
+ * #282 partially reverts #217): the navbar account menu (`header.tsx`)
+ * remains the always-visible affordance, and the profile page no longer
+ * carries its own button. (The signed-in gate lives at the root —
+ * `__root.tsx` renders nothing until the session settles — so the page
+ * needs no guard of its own.)
  */
 export function AccountSettingsPage() {
   const viewer = useAtomValue(viewerAtom);
@@ -75,9 +77,9 @@ export function AccountSettingsPage() {
       {/* Two groups: what other people see, then everything that governs the
           account itself. The group `<h2>`s are the page's section landmarks;
           each card's own title is an `<h3>` (see `components/settings/section.tsx`)
-          so the heading hierarchy reads page → group → card. Sign-out is
-          deliberately absent — it lives in the navbar account menu
-          (`header.tsx`), the always-visible affordance (issue #217). */}
+          so the heading hierarchy reads page → group → card. Sign-out closes
+          the Account group — the deliberate end-of-review exit (issue #282);
+          the navbar account menu (`header.tsx`) is the always-visible one. */}
       <section className="space-y-4">
         <h2 className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
           {m.settings_group_profile()}
@@ -96,6 +98,7 @@ export function AccountSettingsPage() {
         <PasskeySection />
         <LinkedAccountsSection />
         <BlockedUsersSection />
+        <SignOutSection />
       </section>
     </div>
   );
