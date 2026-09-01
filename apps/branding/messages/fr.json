@@ -4,10 +4,9 @@
   "hero_badge": "Alpha ouverte",
   "hero_title_a": "Le réseau social",
   "hero_title_b": "des gamers.",
-  "hero_subtitle": "Publiez vos clips, annoncez les plays et discutez dans les réponses — un fil d'accueil chronologique pour les gens avec qui vous jouez vraiment.",
+  "hero_subtitle": "Publiez vos clips, annoncez les plays et discutez dans les réponses — un seul endroit pour les gens avec qui vous jouez vraiment.",
   "hero_cta_primary": "Créer votre compte",
   "hero_cta_secondary": "Se connecter",
-  "preview_label": "Aperçu d'une publication dans l'app MyTuums",
   "mock_post_text": "Clutch en 1v4 à la balle de match. Le clip complet est en réponses.",
   "features_kicker": "Fonctionnalités",
   "features_title": "Tout ce qu'il faut à un gamer",
@@ -19,7 +18,7 @@
   "feature_reposts_title": "Reposts et citations",
   "feature_reposts_text": "Relayez une publication ou ajoutez votre avis par-dessus, sans perdre l'originale.",
   "feature_follows_title": "Pensé pour votre équipe",
-  "feature_follows_text": "Suivez ceux avec qui vous jouez. Un fil d'accueil chronologique — sans algorithme qui décide à votre place.",
+  "feature_follows_text": "Suivez ceux avec qui vous jouez et ne manquez aucun de leurs posts.",
   "feature_moderation_title": "Modération avec recours",
   "feature_moderation_text": "Les signalements sont examinés par des humains, et chaque action peut faire l'objet d'un recours dans l'app.",
   "feature_identity_title": "Une identité de gamer",
@@ -32,5 +31,8 @@
   "locale_label": "Langue",
   "locale_english": "Anglais",
   "locale_french": "Français",
-  "theme_toggle": "Changer de thème"
+  "theme_toggle": "Changer de thème",
+  "shot_quote_alt": "Une publication MyTuums qui en cite une autre, avec un historique de matchs League of Legends en pièce jointe",
+  "shot_feed_alt": "Le fil d'accueil MyTuums — le composeur en haut, une publication repartagée en dessous",
+  "shot_thread_alt": "Une conversation en fil sur MyTuums — un composeur de réponse et deux réponses imbriquées"
 }

@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { AppPreview } from "@/components/app-preview";
 import { m } from "@/paraglide/messages.js";
 import { signInUrl, signUpUrl } from "@/lib/site";
 
@@ -32,7 +31,15 @@ export function Hero() {
             {m.hero_cta_secondary()}
           </Button>
         </div>
-        <AppPreview />
+        {/* A real screen of the app — a post quoting another post. The
+            intrinsic size keeps the layout stable while the image loads. */}
+        <img
+          src="/shots/quote.webp"
+          alt={m.shot_quote_alt()}
+          width={719}
+          height={808}
+          className="border-border/60 mx-auto mt-16 w-full max-w-lg rounded-xl border shadow-2xl shadow-black/20"
+        />
       </div>
     </section>
   );

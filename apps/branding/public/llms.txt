@@ -4,7 +4,7 @@
 
 MyTuums is a gaming-first social network: posts and threads, reposts and
 quotes, likes and bookmarks, follows, and human-reviewed moderation with
-in-app appeals. The home feed is chronological — no algorithmic timeline.
+in-app appeals.
 
 - App: https://mytuums.com
 - Create an account: https://mytuums.com/register

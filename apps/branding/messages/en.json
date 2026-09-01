@@ -4,10 +4,9 @@
   "hero_badge": "Open alpha",
   "hero_title_a": "The social media,",
   "hero_title_b": "for gamers.",
-  "hero_subtitle": "Post your clips, call the plays and talk in the replies — a chronological home for the people you actually play with.",
+  "hero_subtitle": "Post your clips, call the plays and talk in the replies — one home for the people you actually play with.",
   "hero_cta_primary": "Create your account",
   "hero_cta_secondary": "Sign in",
-  "preview_label": "Preview of a post in the MyTuums app",
   "mock_post_text": "Pulled a 1v4 clutch on match point. Full clip in the replies.",
   "features_kicker": "Features",
   "features_title": "Everything a gamer needs",
@@ -19,7 +18,7 @@
   "feature_reposts_title": "Reposts and quotes",
   "feature_reposts_text": "Amplify a post or add your take on top of it, without losing the original.",
   "feature_follows_title": "Built around your crew",
-  "feature_follows_text": "Follow the people you play with. A chronological home feed — no algorithm deciding for you.",
+  "feature_follows_text": "Follow the people you play with and keep up with every game they post.",
   "feature_moderation_title": "Moderation with appeals",
   "feature_moderation_text": "Reports are reviewed by humans, and every action can be appealed in the app.",
   "feature_identity_title": "One gaming identity",
@@ -32,5 +31,8 @@
   "locale_label": "Language",
   "locale_english": "English",
   "locale_french": "Français",
-  "theme_toggle": "Toggle theme"
+  "theme_toggle": "Toggle theme",
+  "shot_quote_alt": "A MyTuums post quoting another post, with a League of Legends match history attached",
+  "shot_feed_alt": "The MyTuums home feed — the composer on top, a reposted post below",
+  "shot_thread_alt": "A threaded conversation on MyTuums — a reply composer and two nested replies"
 }
