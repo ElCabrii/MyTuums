@@ -8,7 +8,7 @@ import type { IncomingMessage } from "node:http";
  */
 
 /** The hostname the branding site answers on. */
-export const BRANDING_HOST = "home.mytuums.com";
+export const BRANDING_HOST = "about.gabrieldebure.com";
 
 /**
  * Whether this request is addressed to the branding host.

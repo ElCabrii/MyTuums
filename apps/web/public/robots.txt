@@ -7,4 +7,4 @@ User-agent: *
 Allow: /
 
 Sitemap: https://mytuums.com/sitemap.xml
-Sitemap: https://home.mytuums.com/sitemap.xml
+Sitemap: https://about.gabrieldebure.com/sitemap.xml

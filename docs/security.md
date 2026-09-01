@@ -23,14 +23,14 @@ There are four, and only the first two carry untrusted input:
 `apps/server/src/request-handler.ts` and
 `packages/api/src/constants.ts`):
 
-| Surface                       | Notes                                                           |
-| ----------------------------- | --------------------------------------------------------------- |
-| `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`               |
-| `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`          |
-| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`    |
-| The branding page             | `home.mytuums.com` — one script-free HTML document, host-routed |
-| Static assets                 | anything with a file extension — the SPA cannot boot otherwise  |
-| `moderation.appealOpen` (RPC) | the one anonymous RPC — see below                               |
+| Surface                       | Notes                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`                      |
+| `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`                 |
+| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`           |
+| The branding page             | `about.gabrieldebure.com` — one script-free HTML document, host-routed |
+| Static assets                 | anything with a file extension — the SPA cannot boot otherwise         |
+| `moderation.appealOpen` (RPC) | the one anonymous RPC — see below                                      |
 
 **`/api/auth/admin/*` returns 404 before the auth handler sees it.** The
 better-auth admin plugin gates on its own `adminRoles` option, which cannot

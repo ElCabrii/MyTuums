@@ -87,7 +87,7 @@ resolves `/rpc` against `window.location.origin`, and uploaded images are
 stored as relative `/media/<key>` paths. Split the two across origins and RPC
 and every image break together.
 
-One hostname is deliberately outside that origin: `home.mytuums.com` serves
+One hostname is deliberately outside that origin: `about.gabrieldebure.com` serves
 the branding site (`apps/branding`, a second small Vite build), which uses
 none of `/rpc`, `/media` or the SPA and links into the app with absolute
 URLs. The same process serves it — host routing in `request-handler.ts` over
@@ -103,17 +103,17 @@ Every request is given an `x-request-id` **before** any branch runs — that is
 what puts it on responses written by the injected handlers too. Then, in
 order:
 
-| #   | Match                     | Gate                                            |
-| --- | ------------------------- | ----------------------------------------------- |
-| 1   | `GET /health` (exact)     | none — probes skip session and RPC matching     |
-| 2   | `/api/auth/admin/*`       | always 404 — see below                          |
-| 3   | `/api/auth*`              | better-auth's own handler                       |
-| 4   | `/rpc*`                   | Content-Length cap, then oRPC                   |
-| 5   | `/media/*`                | GET/HEAD only, then **session**, then key       |
-| 6   | Host `home.mytuums.com`   | the branding page — public, ahead of the gate   |
-| 7   | extension-less GET/HEAD   | page gate: session unless on `SIGNED_OUT_PATHS` |
-| 8   | static files              | `apps/server/src/static-files.ts`               |
-| 9   | 404, then a catch-all 500 | logged with the request id                      |
+| #   | Match                          | Gate                                            |
+| --- | ------------------------------ | ----------------------------------------------- |
+| 1   | `GET /health` (exact)          | none — probes skip session and RPC matching     |
+| 2   | `/api/auth/admin/*`            | always 404 — see below                          |
+| 3   | `/api/auth*`                   | better-auth's own handler                       |
+| 4   | `/rpc*`                        | Content-Length cap, then oRPC                   |
+| 5   | `/media/*`                     | GET/HEAD only, then **session**, then key       |
+| 6   | Host `about.gabrieldebure.com` | the branding page — public, ahead of the gate   |
+| 7   | extension-less GET/HEAD        | page gate: session unless on `SIGNED_OUT_PATHS` |
+| 8   | static files                   | `apps/server/src/static-files.ts`               |
+| 9   | 404, then a catch-all 500      | logged with the request id                      |
 
 Ordering facts that are load-bearing:
 
@@ -131,7 +131,7 @@ Ordering facts that are load-bearing:
   differ. The rejection carries `Cache-Control: no-store` so a cached 401
   cannot keep an image broken after sign-in.
 - **The branding-host branch sits after every API prefix and before the page
-  gate.** `home.mytuums.com` gets the built branding site (`apps/branding`,
+  gate.** `about.gabrieldebure.com` gets the built branding site (`apps/branding`,
   served from `BRANDING_DIST` through the same static-file handler as the
   SPA) instead of the app: the gate never sees a branding-host document, so
   the site is public without touching `SIGNED_OUT_PATHS`, and the app shell

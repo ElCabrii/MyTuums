@@ -75,7 +75,7 @@ ARG VITE_GOOGLE_CLIENT_ID
 # empty string and gets Node's ordinary container-aware default.
 ARG WEB_BUILD_NODE_OPTIONS="--max-old-space-size=640 --max-semi-space-size=4"
 RUN NODE_OPTIONS="$WEB_BUILD_NODE_OPTIONS" pnpm --filter @my-tuums/web run build
-# The branding site (home.mytuums.com): a second, much smaller Vite build with
+# The branding site (about.gabrieldebure.com): a second, much smaller Vite build with
 # no VITE_* reads, so it needs no ARGs of its own. Same NODE_OPTIONS scope for
 # consistency, even though its bundle is a fraction of the SPA's.
 RUN NODE_OPTIONS="$WEB_BUILD_NODE_OPTIONS" pnpm --filter @my-tuums/branding run build

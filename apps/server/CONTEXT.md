@@ -108,7 +108,7 @@ by the Playwright `api` project.
 - **The page gate must recognise the `__Secure-` cookie prefix.** A mismatch
   redirects every signed-in visitor on every page in production.
 - **The branding host serves the branding site, never the app.** Requests whose
-  Host is `home.mytuums.com` are answered from the built `apps/branding` dist
+  Host is `about.gabrieldebure.com` are answered from the built `apps/branding` dist
   (`BRANDING_DIST`, served through the same static-file handler as the SPA),
   branched after every API prefix and before the page gate — the gate never
   sees a branding-host document, so the site is public with zero changes to
