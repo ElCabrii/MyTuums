@@ -7,7 +7,6 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
-import { Card } from "@/components/ui/card";
 import { m } from "@/paraglide/messages.js";
 
 interface Feature {
@@ -25,7 +24,11 @@ const FEATURES: readonly Feature[] = [
   { icon: Gamepad2, title: m.feature_identity_title, text: m.feature_identity_text },
 ];
 
-/** The six-card feature grid — one lucide icon, one title, one sentence each. */
+/**
+ * The feature list — a spec sheet, not a card grid. One row per feature,
+ * divided by hairlines, with the icon column and the title column at fixed
+ * widths so the eye can scan either column independently.
+ */
 export function Features() {
   return (
     <section id="features" className="border-border/60 scroll-mt-14 border-t">
@@ -35,17 +38,19 @@ export function Features() {
           {m.features_title()}
         </h2>
         <p className="text-muted-foreground mt-3 max-w-2xl text-pretty">{m.features_subtitle()}</p>
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="divide-border/60 border-border/60 mt-10 divide-y border-y">
           {FEATURES.map(({ icon: Icon, title, text }) => (
-            <Card key={title()} className="p-6">
-              <div className="bg-primary/10 text-primary flex size-10 items-center justify-center rounded-lg">
-                <Icon className="size-5" />
+            <li key={title()} className="flex gap-4 py-5 sm:gap-6 sm:py-6">
+              <Icon aria-hidden="true" className="text-primary mt-0.5 size-5 shrink-0" />
+              <div className="min-w-0 sm:flex sm:w-full sm:items-baseline sm:gap-6">
+                <h3 className="shrink-0 font-semibold sm:w-64">{title()}</h3>
+                <p className="text-muted-foreground mt-1 text-sm leading-relaxed sm:mt-0">
+                  {text()}
+                </p>
               </div>
-              <h3 className="mt-4 font-semibold">{title()}</h3>
-              <p className="text-muted-foreground mt-1.5 text-sm leading-relaxed">{text()}</p>
-            </Card>
+            </li>
           ))}
-        </div>
+        </ul>
       </div>
     </section>
   );
