@@ -119,6 +119,18 @@ function QuotedPostCard({ quoted }: { quoted: NonNullable<Post["quoted"]> }) {
 }
 
 /**
+ * One box for every control in the action bar (issue #275): the kebab's
+ * `h-8` (32 px) hit area, so the bar stops being a row of ~16 px targets.
+ * The counted controls (reply, repost, like) become `px-2` pills; the
+ * count-less ones (quote, bookmark) the same `h-8 w-8` circle the kebab
+ * uses. Every glyph therefore leads with the same 8 px of box before its
+ * ink, which is what holds the five on one optical line.
+ */
+const actionControlClass = "flex h-8 items-center gap-1.5 rounded-full px-2 transition-colors";
+const actionIconButtonClass =
+  "flex h-8 w-8 items-center justify-center rounded-full transition-colors";
+
+/**
  * One post rendered as a card — author link, timestamp, content, and the
  * like/reply actions — in the `feed`, `ancestor` or `focused` variants (see
  * `PostCardVariant`).
@@ -184,7 +196,7 @@ export function PostCard({
     void navigate({ to: "/post/$postId", params: { postId: post.id } });
   };
 
-  const likeButtonClass = `flex items-center gap-1.5 transition-colors ${
+  const likeButtonClass = `${actionControlClass} ${
     post.viewerHasLiked ? "text-destructive font-bold" : "hover:text-destructive"
   }`;
   const likeContent = (
@@ -197,14 +209,14 @@ export function PostCard({
   // A bookmark is private state, so the control carries no count — only its
   // own pressed state. The optimistic flip in `atoms/bookmark.ts` is the
   // feedback, same as the like control.
-  const bookmarkButtonClass = `flex items-center gap-1.5 transition-colors ${
+  const bookmarkButtonClass = `${actionIconButtonClass} ${
     post.viewerHasBookmarked ? "text-primary font-bold" : "hover:text-primary"
   }`;
   const bookmarkContent = (
     <Bookmark className={`h-4 w-4 ${post.viewerHasBookmarked ? "fill-primary" : ""}`} />
   );
 
-  const replyLinkClass = "flex items-center gap-1.5 transition-colors hover:text-primary";
+  const replyLinkClass = `${actionControlClass} hover:text-primary`;
   const replyContent = (
     <>
       <MessageCircle className="h-4 w-4" />
@@ -212,12 +224,17 @@ export function PostCard({
     </>
   );
 
-  const repostButtonClass = `flex items-center gap-1.5 transition-colors ${
+  const repostButtonClass = `${actionControlClass} ${
     post.viewerHasReposted ? "text-primary font-bold" : "hover:text-primary"
   }`;
   const repostContent = (
     <>
-      <Repeat2 className={`h-4 w-4 ${post.viewerHasReposted ? "stroke-[2.5]" : ""}`} />
+      {/* One optical-size class per glyph (issue #275): Repeat2's ink fills
+          only ~12 of its 24 viewBox units where its neighbours fill ~17–20,
+          so it takes one box step up to match their ink height. The active
+          state is the same colour + bold count every other control uses —
+          no per-icon stroke override. */}
+      <Repeat2 className="h-5 w-5" />
       <span>{post.repostCount}</span>
     </>
   );
@@ -491,13 +508,17 @@ export function PostCard({
           )}
 
           {!isGone && (
-            <div className="text-muted-foreground flex max-w-md items-center gap-6 text-xs">
+            // `justify-between` rather than a fixed gap (issue #275): the
+            // five actions spread across the existing `max-w-md` instead of
+            // left-packing with dead space, and the spacing flexes down
+            // gracefully on narrow columns instead of overflowing.
+            <div className="text-muted-foreground flex max-w-md items-center justify-between text-xs">
               {/* Replying is a navigation, not a mutation — the composer lives
-                  on the thread page — so this is a link, and the focused post
-                  (whose composer is directly below) degrades it to plain text
-                  rather than linking to the page you are on. */}
+                   on the thread page — so this is a link, and the focused post
+                   (whose composer is directly below) degrades it to plain text
+                   rather than linking to the page you are on. */}
               {isFocused ? (
-                <span className="flex items-center gap-1.5">{replyContent}</span>
+                <span className={actionControlClass}>{replyContent}</span>
               ) : (
                 <Link
                   to="/post/$postId"
@@ -543,7 +564,7 @@ export function PostCard({
                 }}
                 aria-label={m.post_quote()}
                 title={m.post_quote()}
-                className="hover:text-primary flex items-center gap-1.5 transition-colors"
+                className={`${actionIconButtonClass} hover:text-primary`}
               >
                 <Quote className="h-4 w-4" />
               </button>
