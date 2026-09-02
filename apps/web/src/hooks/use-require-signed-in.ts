@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
 import { isSignedInAtom, sessionErrorAtom, sessionPendingAtom } from "@/atoms/session";
-import { sanitizeRedirect } from "@/lib/redirect";
+import { sanitizeDestination } from "@/lib/redirect";
 
 /**
  * How long the gate waits before bouncing a signed-out-looking visitor to
@@ -58,7 +58,7 @@ export function useRequireSignedIn(): void {
     const timeout = setTimeout(() => {
       void navigate({
         to: "/login",
-        search: { redirect: sanitizeRedirect(href) ?? undefined },
+        search: { redirect: sanitizeDestination(href) ?? undefined },
         replace: true,
       });
     }, GATE_CONFIRM_MS);

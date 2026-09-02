@@ -11,7 +11,7 @@ import { m } from "@/paraglide/messages.js";
  * wiring — that their atom's data reaches their row renderer — and restate
  * none of these branches (see the comments on their trimmed test files).
  */
-const query = (overrides: Partial<PaginatedStateQuery> = {}): PaginatedStateQuery => ({
+const queryState = (overrides: Partial<PaginatedStateQuery> = {}): PaginatedStateQuery => ({
   isPending: false,
   isError: false,
   error: null,
@@ -33,7 +33,7 @@ const ui = (query: PaginatedStateQuery) => (
 
 describe("PaginatedState", () => {
   it("shows a spinner while the query is pending", () => {
-    const { container } = render(ui(query({ isPending: true })));
+    const { container } = render(ui(queryState({ isPending: true })));
 
     expect(container.querySelector("svg.animate-spin")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -42,7 +42,7 @@ describe("PaginatedState", () => {
   it("shows the caller's skeleton instead of the spinner when one is passed", () => {
     render(
       <PaginatedState
-        query={query({ isPending: true })}
+        query={queryState({ isPending: true })}
         errorMessage="fallback"
         emptyIcon={MessageSquare}
         emptyMessage="empty"
@@ -60,7 +60,7 @@ describe("PaginatedState", () => {
   it("shows a retryable alert carrying the error's own message, and refetches on Try again", async () => {
     const user = userEvent.setup();
     const refetch = vi.fn();
-    render(ui(query({ isError: true, error: { message: "Could not load posts." }, refetch })));
+    render(ui(queryState({ isError: true, error: { message: "Could not load posts." }, refetch })));
 
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("Could not load posts.");
@@ -69,7 +69,7 @@ describe("PaginatedState", () => {
   });
 
   it("falls back to the caller's message when the error carries none", () => {
-    render(ui(query({ isError: true, error: null })));
+    render(ui(queryState({ isError: true, error: null })));
 
     expect(screen.getByRole("alert")).toHaveTextContent("fallback message");
   });
@@ -77,7 +77,7 @@ describe("PaginatedState", () => {
   it("shows the dashed empty state with the caller's message and action instead of rows", () => {
     render(
       <PaginatedState
-        query={query()}
+        query={queryState()}
         errorMessage="fallback"
         emptyIcon={MessageSquare}
         emptyMessage="Nothing here yet."
@@ -94,7 +94,7 @@ describe("PaginatedState", () => {
   });
 
   it("renders the loaded children", () => {
-    render(ui(query()));
+    render(ui(queryState()));
 
     expect(screen.getByText("row one")).toBeInTheDocument();
   });
@@ -104,7 +104,7 @@ describe("PaginatedState", () => {
     const fetchNextPage = vi.fn();
     const { rerender } = render(
       <PaginatedState
-        query={query({ hasNextPage: true, fetchNextPage })}
+        query={queryState({ hasNextPage: true, fetchNextPage })}
         errorMessage="fallback"
         emptyIcon={MessageSquare}
         emptyMessage="empty"
@@ -121,7 +121,7 @@ describe("PaginatedState", () => {
 
     rerender(
       <PaginatedState
-        query={query({ hasNextPage: true, isFetchingNextPage: true, fetchNextPage })}
+        query={queryState({ hasNextPage: true, isFetchingNextPage: true, fetchNextPage })}
         errorMessage="fallback"
         emptyIcon={MessageSquare}
         emptyMessage="empty"
@@ -134,7 +134,7 @@ describe("PaginatedState", () => {
 
     rerender(
       <PaginatedState
-        query={query({ hasNextPage: false, fetchNextPage })}
+        query={queryState({ hasNextPage: false, fetchNextPage })}
         errorMessage="fallback"
         emptyIcon={MessageSquare}
         emptyMessage="empty"

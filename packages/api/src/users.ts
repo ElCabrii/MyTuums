@@ -461,7 +461,7 @@ export const userRouter = {
         createdAtField: "followedAt",
         id: follow.followerId,
         idField: "id",
-        query: (cursorFilter) =>
+        fetchPage: (cursorFilter) =>
           context.db
             .select(selection)
             .from(follow)
@@ -519,7 +519,7 @@ export const userRouter = {
         // misbehaves when two rows share a timestamp.
         id: follow.followingId,
         idField: "id",
-        query: (cursorFilter) =>
+        fetchPage: (cursorFilter) =>
           context.db
             .select(selection)
             .from(follow)

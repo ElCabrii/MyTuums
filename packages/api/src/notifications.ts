@@ -265,7 +265,7 @@ export const notificationRouter = {
         createdAtField: "createdAt",
         id: notification.id,
         idField: "id",
-        query: (cursorFilter) =>
+        fetchPage: (cursorFilter) =>
           context.db
             .select(selection)
             .from(notification)

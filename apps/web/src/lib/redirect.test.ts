@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeRedirect } from "@/lib/redirect";
+import { sanitizeDestination } from "@/lib/redirect";
 
 /**
  * The `?redirect=` param round-trips through `window.location` and through
@@ -14,12 +14,12 @@ import { sanitizeRedirect } from "@/lib/redirect";
 function expectRedirects(
   cases: readonly (readonly [string | null | undefined, string | null])[],
 ): void {
-  expect(cases.map(([input]) => [input, sanitizeRedirect(input)])).toEqual(
+  expect(cases.map(([input]) => [input, sanitizeDestination(input)])).toEqual(
     cases.map(([input, expected]) => [input, expected]),
   );
 }
 
-describe("sanitizeRedirect", () => {
+describe("sanitizeDestination", () => {
   it("accepts a same-origin path, preserving search and hash", () => {
     expectRedirects([
       ["/post/abc", "/post/abc"],

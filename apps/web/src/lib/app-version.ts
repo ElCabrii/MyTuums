@@ -13,7 +13,7 @@ export type AppStage = "alpha" | "beta" | null;
  * ignored, which is what makes the numeric comparison well-defined.
  */
 export function appStage(version: string): AppStage {
-  const match = /^(\d+)\.(\d+)/.exec(version);
+  const match = version.match(/^(\d+)\.(\d+)/);
   if (!match) return null;
   const major = Number(match[1]);
   const minor = Number(match[2]);

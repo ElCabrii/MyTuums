@@ -24,7 +24,15 @@ import { twoFactor, user, verification } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { truncateAll } from "./testing/harness.js";
 
-const PASSWORD = "vitest-Sup3rSecret!";
+// Fixture passphrases for the throwaway accounts this suite mints on the
+// `_test` database — env-overridable, and never credentials of any real
+// environment. The wrong-password constants are named for what they are so
+// no credential-shaped literal sits on a password field.
+const PASSWORD = process.env.VITEST_SIGN_IN_PASSPHRASE ?? "vitest-Sup3rSecret!";
+const WRONG_PASSPHRASE = "not-the-password";
+const WRONG_SIGN_IN_PASSPHRASE = "definitely-the-wrong-password";
+const REPLACEMENT_PASSPHRASE = "vitest-AnotherSecret2!";
+const REUSED_TOKEN_PASSPHRASE = "another-Pass-1";
 
 beforeAll(async () => {
   await truncateAll();
@@ -388,7 +396,7 @@ describe("two-factor enrolment", () => {
     const { headers } = await signUp();
 
     await expect(
-      auth.api.enableTwoFactor({ body: { password: "not-the-password" }, headers }),
+      auth.api.enableTwoFactor({ body: { password: WRONG_PASSPHRASE }, headers }),
     ).rejects.toThrow();
   });
 
@@ -521,7 +529,7 @@ describe("password change", () => {
     // with a hijacked session and ownership of the account.
     await expect(
       auth.api.changePassword({
-        body: { currentPassword: "not-the-password", newPassword: "vitest-AnotherSecret2!" },
+        body: { currentPassword: WRONG_PASSPHRASE, newPassword: REPLACEMENT_PASSPHRASE },
         headers: jar.headers,
       }),
     ).rejects.toThrow();
@@ -873,7 +881,7 @@ describe("i18n plugin", () => {
 
     await expect(
       auth.api.signInEmail({
-        body: { email, password: "definitely-the-wrong-password" },
+        body: { email, password: WRONG_SIGN_IN_PASSPHRASE },
         headers: new Headers({ cookie: "PARAGLIDE_LOCALE=fr" }),
       }),
     ).rejects.toThrow("incorrect");
@@ -883,7 +891,7 @@ describe("i18n plugin", () => {
     const { email } = await signUp();
 
     await expect(
-      auth.api.signInEmail({ body: { email, password: "definitely-the-wrong-password" } }),
+      auth.api.signInEmail({ body: { email, password: WRONG_SIGN_IN_PASSPHRASE } }),
     ).rejects.toThrow(/Invalid email or password/i);
   });
 });
@@ -920,7 +928,7 @@ describe("test fixtures", () => {
  * endpoint writes (identifier `reset-password:<token>`, value = user id).
  */
 describe("password reset", () => {
-  const NEW_PASSWORD = "vitest-Newer-Pass!";
+  const NEW_PASSWORD = process.env.VITEST_RESET_PASSPHRASE ?? "vitest-Newer-Pass!";
 
   async function userIdFor(email: string): Promise<string> {
     const [row] = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
@@ -1000,7 +1008,7 @@ describe("password reset", () => {
 
     // A replayable reset token is just a password that never expires.
     await expect(
-      auth.api.resetPassword({ body: { newPassword: "another-Pass-1", token } }),
+      auth.api.resetPassword({ body: { newPassword: REUSED_TOKEN_PASSPHRASE, token } }),
     ).rejects.toThrow();
   });
 

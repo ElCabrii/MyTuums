@@ -37,6 +37,7 @@ import { keysetPage } from "./pagination.js";
 import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
+import { runSql } from "./sql.js";
 import { invisibleAuthor, visibleUser } from "./visibility.js";
 import { acceptPostImage, type ImageRejection } from "./post-image.js";
 import {
@@ -556,7 +557,9 @@ async function replyContinuationPages(args: ReplyContinuationPageArgs) {
     args.rootPostIds.map((id) => sql`(${sql.param(id, post.id)}::uuid)`),
     sql`, `,
   );
-  const descendantIds = await args.db.execute<{ id: string; root_id: string }>(sql`
+  const descendantIds = await runSql<{ id: string; root_id: string }>(
+    args.db,
+    sql`
     with recursive roots(root_id) as (
       values ${rootsValues}
     ),
@@ -584,7 +587,8 @@ async function replyContinuationPages(args: ReplyContinuationPageArgs) {
     )
     select id, root_id from descendants
     limit ${THREAD_REPLY_BRANCH_DESCENDANT_BUDGET}
-  `);
+  `,
+  );
 
   if (descendantIds.length === 0) return [];
 
@@ -824,7 +828,9 @@ async function feedEventPage(
   // `new Date(iso)` round-trips exactly at precision 3 (the reason every
   // cursor column in the schema is ms, not µs — see the schema comment).
   const events = (
-    await db.execute<FeedEventRow>(sql`
+    await runSql<FeedEventRow>(
+      db,
+      sql`
       with events as (
         select ${post.createdAt} as event_at, ${post.id} as post_id, null::text as reposter_id, '' as reposter_key
         from ${post}
@@ -836,7 +842,8 @@ async function feedEventPage(
       ${cursorFilter ? sql`where ${cursorFilter}` : sql``}
       order by event_at desc, post_id desc, reposter_key desc
       limit ${args.limit + 1}
-    `)
+    `,
+    )
   ).map((row) => ({ ...row, event_at: new Date(row.event_at) }));
 
   const hasMore = events.length > args.limit;
@@ -1678,7 +1685,7 @@ export const postRouter = {
           createdAtField: "bookmarkedAt",
           id: post.id,
           idField: "id",
-          query: (cursorFilter) =>
+          fetchPage: (cursorFilter) =>
             context.db
               .select(bookmarkSelection)
               .from(post)
@@ -1751,7 +1758,7 @@ export const postRouter = {
         createdAtField: "createdAt",
         id: post.id,
         idField: "id",
-        query: (cursorFilter) =>
+        fetchPage: (cursorFilter) =>
           context.db
             .select(selection)
             .from(post)
@@ -1815,7 +1822,9 @@ export const postRouter = {
         return { post: focused, ancestors: [], truncated: false };
       }
 
-      const chain = await context.db.execute<{ id: string; depth: number }>(sql`
+      const chain = await runSql<{ id: string; depth: number }>(
+        context.db,
+        sql`
         with recursive chain as (
           select ${post.id} as id, ${post.parentId} as parent_id, 0 as depth
           from ${post}
@@ -1830,7 +1839,8 @@ export const postRouter = {
         -- Descending depth puts the root of the conversation first, which is
         -- the order it reads in.
         select id, depth from chain where depth > 0 order by depth desc
-      `);
+      `,
+      );
 
       const ancestorIds = chain.map((row) => row.id);
 

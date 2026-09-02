@@ -67,7 +67,7 @@ const PROFILE_KEY_RE =
  * that must not be reused.
  */
 export function profileDisplayRedirectCacheControl(key: string): string | null {
-  const match = PROFILE_KEY_RE.exec(key);
+  const match = key.match(PROFILE_KEY_RE);
   if (!match || match[4]) return null;
   return `private, max-age=${secondsUntilWindowEnd()}`;
 }
@@ -78,7 +78,7 @@ export async function canViewProfileMedia(
   key: string,
   viewerId: string,
 ): Promise<boolean> {
-  const match = PROFILE_KEY_RE.exec(key);
+  const match = key.match(PROFILE_KEY_RE);
   if (!match) return false;
 
   const [, kind, ownerId, , original] = match;

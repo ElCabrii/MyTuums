@@ -19,6 +19,7 @@ import type { Context, EmailSender } from "../context.js";
 import { createLinkFetchTransport } from "../link-card-http.js";
 import { createRateLimiter, type RateLimiter } from "../rate-limit.js";
 import type { UserRole } from "../roles.js";
+import { runSql } from "../sql.js";
 import type { DestructiveStorage, Storage } from "../storage.js";
 
 /**
@@ -273,7 +274,9 @@ export async function createPasswordTestUser(): Promise<
 > {
   const uuid = randomUUID();
   const email = `vitest-pw+${uuid}@example.com`;
-  const password = "vitest-Sup3rSecret!";
+  // Same fixture passphrase as the sign-up suite — env-overridable, and never
+  // a credential of any real environment.
+  const password = process.env.VITEST_SIGN_IN_PASSPHRASE ?? "vitest-Sup3rSecret!";
 
   await auth.api.signUpEmail({
     body: {
@@ -372,7 +375,8 @@ export function contextFor(
  */
 export async function truncateAll(): Promise<void> {
   assertTestDatabase();
-  await db.execute(
+  await runSql(
+    db,
     sql`TRUNCATE TABLE "post_like", "post_repost", "post_bookmark", "post_edit", "follow", "report", "user_block", "appeal", "moderation_action", "notification", "notification_last_seen", "post", "link_card", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
   );
 }

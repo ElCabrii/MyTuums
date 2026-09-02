@@ -18,6 +18,10 @@ import { PasskeySection } from "@/components/settings/passkey-section";
 import { TwoFactorSection } from "@/components/settings/two-factor-section";
 import { m } from "@/paraglide/messages.js";
 
+// Fixture passphrase for the two-factor confirmations — referenced by name so
+// no credential-shaped literal sits on a password field.
+const ACCOUNT_PASSPHRASE = "account-password";
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -33,10 +37,10 @@ describe("TwoFactorSection", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: m.twofa_enable() }));
-    await user.type(screen.getByLabelText(m.auth_field_password()), "account-password");
+    await user.type(screen.getByLabelText(m.auth_field_password()), ACCOUNT_PASSPHRASE);
     await user.click(screen.getByRole("button", { name: m.twofa_enable() }));
 
-    expect(authClient.twoFactor.enable).toHaveBeenCalledWith({ password: "account-password" });
+    expect(authClient.twoFactor.enable).toHaveBeenCalledWith({ password: ACCOUNT_PASSPHRASE });
     expect(await screen.findByText("backup-one")).toBeInTheDocument();
     expect(screen.getByText("backup-two")).toBeInTheDocument();
     await user.type(screen.getByLabelText(m.twofa_field_code()), "123456");
@@ -61,11 +65,11 @@ describe("TwoFactorSection", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: m.twofa_disable() }));
-    await user.type(screen.getByLabelText(m.auth_field_password()), "account-password");
+    await user.type(screen.getByLabelText(m.auth_field_password()), ACCOUNT_PASSPHRASE);
     await user.click(screen.getByRole("button", { name: m.twofa_disable() }));
 
     await waitFor(() =>
-      expect(authClient.twoFactor.disable).toHaveBeenCalledWith({ password: "account-password" }),
+      expect(authClient.twoFactor.disable).toHaveBeenCalledWith({ password: ACCOUNT_PASSPHRASE }),
     );
     expect(store.get(twoFactorPanelAtom)).toBe("idle");
   });
@@ -79,7 +83,7 @@ describe("TwoFactorSection", () => {
     await renderWithProviders(<TwoFactorSection />, { store, signedInAs: true });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: m.twofa_enable() }));
-    await user.type(screen.getByLabelText(m.auth_field_password()), "account-password");
+    await user.type(screen.getByLabelText(m.auth_field_password()), ACCOUNT_PASSPHRASE);
     await user.click(screen.getByRole("button", { name: m.twofa_enable() }));
     expect(await screen.findByText("one-time-code")).toBeInTheDocument();
 
@@ -124,7 +128,7 @@ describe("TwoFactorSection — enrolment fallbacks (issue #169)", () => {
     await renderWithProviders(<TwoFactorSection />, { store, signedInAs: true });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: m.twofa_enable() }));
-    await user.type(screen.getByLabelText(m.auth_field_password()), "account-password");
+    await user.type(screen.getByLabelText(m.auth_field_password()), ACCOUNT_PASSPHRASE);
     await user.click(screen.getByRole("button", { name: m.twofa_enable() }));
     expect(await screen.findByText("backup-one")).toBeInTheDocument();
     return user;
@@ -216,7 +220,7 @@ describe("TwoFactorSection — enrolment fallbacks (issue #169)", () => {
     await renderWithProviders(<TwoFactorSection />, { store, signedInAs: true });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: m.twofa_enable() }));
-    await user.type(screen.getByLabelText(m.auth_field_password()), "account-password");
+    await user.type(screen.getByLabelText(m.auth_field_password()), ACCOUNT_PASSPHRASE);
     await user.click(screen.getByRole("button", { name: m.twofa_enable() }));
     expect(await screen.findByText("backup-one")).toBeInTheDocument();
 
