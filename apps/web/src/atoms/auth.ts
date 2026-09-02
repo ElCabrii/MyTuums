@@ -5,7 +5,7 @@ import { authClient, type SocialProviderId } from "@/lib/auth-client";
 import { waitForSignedOut } from "@/lib/session-sync";
 import { dateOfBirthToIso } from "@/lib/auth-validation";
 import { LEGAL_VERSION, normalizeUsername } from "@my-tuums/auth/rules";
-import { sanitizeRedirect } from "@/lib/redirect";
+import { postSignInDestination, sanitizeDestination } from "@/lib/redirect";
 import { offerTwoFactorAtom } from "@/atoms/onboarding";
 import { m } from "@/paraglide/messages.js";
 
@@ -52,13 +52,13 @@ export const verifyEmailSentAtom = atom(false);
  * `/login` carries the param to `/two-factor`.
  *
  * Sanitized here rather than trusted: it reaches this function from a URL, and
- * an unsanitized value would be baked into an emailed link. `sanitizeRedirect`
+ * an unsanitized value would be baked into an emailed link. `sanitizeDestination`
  * rejects anything that is not a single-slash-relative path, so this cannot
  * become an open redirect.
  */
 function verifyEmailCallbackURL(redirect?: string | null): string {
   const base = `${window.location.origin}/verify-email`;
-  const safe = sanitizeRedirect(redirect);
+  const safe = sanitizeDestination(redirect);
   return safe ? `${base}?redirect=${encodeURIComponent(safe)}` : base;
 }
 
@@ -329,20 +329,18 @@ export const signInWithProviderAtom = atom(
     set(authErrorAtom, null);
     set(authPendingAtom, true);
     try {
-      // The `?redirect=` param set by the signed-in gate, read here rather
-      // than imported: an atom that imported the router would cycle through
-      // main.tsx, and `window.location.search` is exactly what the provider
-      // round trip will see. It travels as the callback target so the person
-      // lands where they were headed — and as part of `errorCallbackURL` so a
-      // refused consent comes back to the form with the destination intact.
-      const redirect = sanitizeRedirect(
-        new URLSearchParams(window.location.search).get("redirect"),
-      );
+      // The `?redirect=` param set by the signed-in gate, read through the
+      // shared gate in lib/redirect rather than the raw search param (an atom
+      // that imported the router would cycle through main.tsx). It travels as
+      // the callback target so the person lands where they were headed — and
+      // as part of `errorCallbackURL` so a refused consent comes back to the
+      // form with the destination intact.
+      const destination = postSignInDestination();
       const res = await authClient.signIn.social({
         provider,
-        callbackURL: `${window.location.origin}${redirect ?? "/"}`,
+        callbackURL: `${window.location.origin}${destination ?? "/"}`,
         errorCallbackURL: `${window.location.origin}/login${
-          redirect ? `?redirect=${encodeURIComponent(redirect)}` : ""
+          destination ? `?redirect=${encodeURIComponent(destination)}` : ""
         }`,
       });
       if (res.error) {

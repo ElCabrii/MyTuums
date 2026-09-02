@@ -23,6 +23,7 @@ import {
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
@@ -63,6 +64,19 @@ export interface Storage {
   remove(key: string): Promise<void>;
   /** A time-limited URL the browser can fetch the object from directly. */
   signedGetUrl(key: string, expiresInSeconds?: number): Promise<string>;
+  /**
+   * The object's stored metadata, or `null` when the key does not exist. How
+   * the media route decides whether a derived variant (`media-variants.ts`)
+   * already has an object behind it before spending a generation.
+   */
+  head(key: string): Promise<{ contentType: string } | null>;
+  /**
+   * The object's bytes and stored content type, or `null` when the key does
+   * not exist. The read side of on-demand variant generation — nothing else
+   * uses it; serving still goes through `signedGetUrl` so bytes never proxy
+   * through this process.
+   */
+  get(key: string): Promise<{ bytes: Uint8Array; contentType: string } | null>;
 }
 
 /**
@@ -205,6 +219,40 @@ function createStorageImpl(config: StorageConfig, now: () => number): Destructiv
 
     async remove(key) {
       await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+    },
+
+    async head(key) {
+      try {
+        const result = await client.send(
+          new HeadObjectCommand({ Bucket: config.bucket, Key: key }),
+        );
+        return { contentType: result.ContentType ?? "application/octet-stream" };
+      } catch (error) {
+        // A missing object is the answer this method exists to give, not a
+        // failure; anything else (credentials, network) surfaces as one —
+        // the variant generator treats every error as "no variant" and
+        // falls back to the base object rather than probing further. Both
+        // spellings because S3-compatible providers are not consistent
+        // between the Head and Get spellings of "absent".
+        if (error instanceof Error && (error.name === "NotFound" || error.name === "NoSuchKey"))
+          return null;
+        throw error;
+      }
+    },
+
+    async get(key) {
+      try {
+        const result = await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: key }));
+        if (!result.Body) return null;
+        return {
+          bytes: await result.Body.transformToByteArray(),
+          contentType: result.ContentType ?? "application/octet-stream",
+        };
+      } catch (error) {
+        if (error instanceof Error && (error.name === "NotFound" || error.name === "NoSuchKey"))
+          return null;
+        throw error;
+      }
     },
 
     async listByPrefix(prefix) {

@@ -2,6 +2,10 @@ import { createHmac } from "node:crypto";
 import { and, desc, eq, like, sql } from "drizzle-orm";
 import { assertTestDatabase, databaseNameOf, resolveTestDatabaseUrl } from "@my-tuums/db/testing";
 import type { UserRole } from "@my-tuums/api/roles";
+// Static on purpose: this module has no runtime imports, so evaluating it
+// cannot trip @my-tuums/db's module-scope DATABASE_URL check before the
+// fix-up below has run.
+import { runSql } from "@my-tuums/api/sql";
 import { normalizeUsername } from "@my-tuums/auth/rules";
 import { E2E } from "../playwright.config";
 import { legalConsentBody } from "./users";
@@ -360,6 +364,17 @@ export async function seedLike(postId: string, userId: string): Promise<void> {
 }
 
 /**
+ * Inserts a repost row directly — the composite PK makes it idempotent, the
+ * same way `seedFollow` and `seedLike` are. A spec that needs a repost event
+ * sitting in a feed should not pay for the UI walk to create it.
+ */
+export async function seedRepost(postId: string, userId: string): Promise<void> {
+  const db = await getDb();
+  const { postRepost } = await schemaModulePromise;
+  await db.insert(postRepost).values({ postId, userId }).onConflictDoNothing();
+}
+
+/**
  * Inserts a report row directly — the composite PK (reporter, target) makes
  * this idempotent, the same way `seedFollow` and `seedLike` are.
  *
@@ -424,12 +439,40 @@ export async function setUserRole(userId: string, role: UserRole): Promise<void>
 }
 
 /**
+ * Ages one actor's notification rows to one recipient past the burst damper's
+ * minute bucket (`unreadCount` in packages/api collapses same-type rows from
+ * one actor per bucket), so the actor's next like/reply/follow each tick the
+ * recipient's badge again.
+ *
+ * The notifications spec needs this for retries to mean anything: a retried
+ * attempt re-likes, re-replies and re-follows within a minute of the failed
+ * attempt's rows, and same-bucket rows collapse to one tick — the badge could
+ * never reach the asserted delta, no matter how healthy the stack is.
+ * Backdating on the database clock (not a JS Date) keeps the bucket
+ * comparison against the server's `now()` honest when the browser and
+ * database hosts drift.
+ */
+export async function expireNotificationDamperWindow(
+  actorId: string,
+  recipientId: string,
+): Promise<void> {
+  assertTestDatabase();
+  const db = await getDb();
+  const { notification } = await schemaModulePromise;
+
+  await db
+    .update(notification)
+    .set({ createdAt: sql`${notification.createdAt} - interval '61 seconds'` })
+    .where(and(eq(notification.actorId, actorId), eq(notification.recipientId, recipientId)));
+}
+
+/**
  * Empties every table and purges the suite's uploaded bucket objects.
  * `global-setup.ts` calls this once at the start of every run; a spec can
  * also call it directly for a guaranteed-clean slate of its own rather than
  * trusting no earlier spec left state behind (workers are pinned to 1, so
  * specs do share one database — see playwright.config.ts).
- * The list is explicit — the same fourteen tables the API harness truncates
+ * The list is explicit — the same tables the API harness truncates
  * (`packages/api/src/testing/harness.ts`) — and not a thinner `user`-only
  * `cascade` version. Most moderation tables would be reached through the
  * `user` foreign keys anyway, but `moderation_action.target_post_id` and
@@ -442,16 +485,20 @@ export async function truncateAll(): Promise<void> {
   const db = await getDb();
   const schema = await schemaModulePromise;
 
-  await db.execute(sql`
+  await runSql(
+    db,
+    sql`
     truncate table
       ${schema.postLike}, ${schema.follow}, ${schema.report},
       ${schema.userBlock}, ${schema.appeal}, ${schema.moderationAction},
-      ${schema.post},
+      ${schema.notification}, ${schema.notificationLastSeen},
+      ${schema.post}, ${schema.linkCard},
       ${schema.session}, ${schema.account}, ${schema.verification},
       ${schema.rateLimit}, ${schema.twoFactor}, ${schema.passkey},
       ${schema.user}
     cascade
-  `);
+  `,
+  );
 
   await purgeUploadedImages();
 }
@@ -494,6 +541,7 @@ async function purgeUploadedImages(): Promise<void> {
       storage.removeByPrefix("avatars/"),
       storage.removeByPrefix("banners/"),
       storage.removeByPrefix("posts/"),
+      storage.removeByPrefix("link-cards/"),
     ]);
   } catch (error) {
     console.warn("Could not purge uploaded test images from the bucket:", error);

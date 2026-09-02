@@ -101,7 +101,7 @@ export function SignInOptions() {
  */
 function LastUsedBadge() {
   return (
-    <span className="bg-primary/10 text-primary rounded-full px-2 py-0.5 text-[10px] font-medium">
+    <span className="bg-primary/10 text-primary dark:text-link rounded-full px-2 py-0.5 text-[10px] font-medium">
       {m.auth_last_used()}
     </span>
   );

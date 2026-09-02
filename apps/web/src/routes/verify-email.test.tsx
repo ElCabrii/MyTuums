@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { authErrorAtom, verifyEmailAtom, verifyEmailSentAtom } from "@/atoms/auth";
 import { authClient } from "@/lib/auth-client";
-import { VerifyEmailPage } from "@/routes/verify-email";
+import { VerifyEmailPage } from "@/components/verify-email-page";
 import { m } from "@/paraglide/messages.js";
 
 /**

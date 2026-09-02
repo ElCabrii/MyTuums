@@ -1,4 +1,3 @@
-import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { sslFor } from "./connection.js";
@@ -54,5 +53,7 @@ export async function closeDb(timeout = 5): Promise<void> {
  * real readiness signal instead of a hardcoded 200.
  */
 export async function pingDb(): Promise<void> {
-  await db.execute(sql`select 1`);
+  // Straight through the postgres.js client rather than the Drizzle handle: a
+  // liveness probe only needs the pool, not the query builder.
+  await client`select 1`;
 }

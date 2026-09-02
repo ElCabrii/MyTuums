@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Only URLs an anonymous crawler can actually fetch with a 200: the public
+     auth and legal pages (SIGNED_OUT_PATHS in packages/api/src/constants.ts).
+     Everything else on this host redirects to /login — listing a redirect in
+     a sitemap is a lint error, not a hint — and the utility screens
+     (/verify-email, /forgot-password, /reset-password, /two-factor, /welcome,
+     /appeal, /banned) are transient states with no search value. Keep this
+     list in step with that set.
+
+     Post permalinks (/post/<id>) are public and fetchable since 0.4.0, but
+     deliberately unlisted: there is no enumerable index of post ids to build
+     a sitemap from, and one would be a stale snapshot the moment it was
+     written. Crawlers reach permalinks the way people do — links off-site
+     and from the app itself. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://mytuums.com/login</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://mytuums.com/register</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://mytuums.com/privacy</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://mytuums.com/terms</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://mytuums.com/mentions-legales</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+</urlset>

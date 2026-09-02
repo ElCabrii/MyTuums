@@ -58,6 +58,9 @@ export type Post = PostListPage["items"][number];
 /** The `post.thread` payload: the focused post plus its ancestor chain. */
 export type Thread = Awaited<ReturnType<typeof client.post.thread>>;
 
+/** A resolved link preview card, as `post.linkCard` returns it. */
+export type LinkCard = NonNullable<Awaited<ReturnType<typeof client.post.linkCard>>["card"]>;
+
 /** One page of `user.followers`/`user.following`. */
 export type UserListPage = Awaited<ReturnType<typeof client.user.followers>>;
 /** A person as served in follower/following lists, with viewer-relative follow state. */
@@ -95,6 +98,13 @@ export type TeamMember = ModerationTeam["items"][number];
 export type BlockedUser = Awaited<
   ReturnType<typeof client.moderation.listBlocked>
 >["items"][number];
+
+/** One page of `notification.list` — a keyset-paginated slice of the viewer's notifications. */
+export type NotificationListPage = Awaited<ReturnType<typeof client.notification.list>>;
+/** One notification row: its type, read state, actor summary, and the post or moderation action it references. */
+export type NotificationItem = NotificationListPage["items"][number];
+/** The `notification.unreadCount` payload — what the header badge renders. */
+export type NotificationUnreadCount = Awaited<ReturnType<typeof client.notification.unreadCount>>;
 
 /**
  * A handle that doesn't exist won't start existing on the second attempt, and

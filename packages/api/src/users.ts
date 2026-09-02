@@ -11,6 +11,7 @@ import {
   IMAGE_KINDS,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
+import { insertNotification } from "./notifications.js";
 import { keysetPage } from "./pagination.js";
 import { acceptImage, type ImageRejection } from "./image.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
@@ -349,11 +350,24 @@ export const userRouter = {
         }
 
         // The (follower_id, following_id) primary key makes the duplicate
-        // impossible; this just declines to error on it.
-        await tx
+        // impossible; this just declines to error on it. `.returning()` is
+        // empty exactly when it swallowed a duplicate, so the notification
+        // below mints only on the follow that actually landed — a retried
+        // follow never double-notifies, and follow → unfollow → follow again
+        // is honestly three events, not one collapsed.
+        const inserted = await tx
           .insert(follow)
           .values({ followerId: context.user.id, followingId: input.userId })
-          .onConflictDoNothing();
+          .onConflictDoNothing()
+          .returning({ followerId: follow.followerId });
+
+        if (inserted.length > 0) {
+          await insertNotification(tx, {
+            recipientId: input.userId,
+            actorId: context.user.id,
+            type: "follow",
+          });
+        }
       });
 
       return {
@@ -447,7 +461,7 @@ export const userRouter = {
         createdAtField: "followedAt",
         id: follow.followerId,
         idField: "id",
-        query: (cursorFilter) =>
+        fetchPage: (cursorFilter) =>
           context.db
             .select(selection)
             .from(follow)
@@ -505,7 +519,7 @@ export const userRouter = {
         // misbehaves when two rows share a timestamp.
         id: follow.followingId,
         idField: "id",
-        query: (cursorFilter) =>
+        fetchPage: (cursorFilter) =>
           context.db
             .select(selection)
             .from(follow)

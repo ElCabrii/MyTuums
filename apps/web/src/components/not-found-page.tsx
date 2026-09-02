@@ -11,8 +11,9 @@ import { m } from "@/paraglide/messages.js";
  * `__root.tsx`) instead of the router's bare default.
  *
  * It is a signed-in surface in practice: a signed-out visitor on an unmatched
- * path is not on the `ALLOWED_SIGNED_OUT` list, so `useRequireSignedIn` sends
- * them to `/login?redirect=<path>` before this ever renders.
+ * path is outside the signed-out allowlist (`isSignedOutPath`), so
+ * `useRequireSignedIn` sends them to `/login?redirect=<path>` before this
+ * ever renders.
  */
 export function NotFoundPage() {
   useDocumentHead(m.notfound_title());

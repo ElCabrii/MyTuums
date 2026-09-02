@@ -31,13 +31,13 @@ export const baseProcedure = base;
 
 /** The session user, once a session is guaranteed to exist — what `protectedProcedure` adds to `context.user`. */
 type SessionUser = NonNullable<Context["session"]>["user"];
-
 /**
  * Throttles a procedure per signed-in caller, keyed on `user:<id>`.
  *
- * There is no anonymous surface left to fall back to an IP-keyed bucket for —
- * every procedure in this app requires a session (see `protectedProcedure`
- * below; issue #36). This is typed against a context that already carries
+ * The one anonymous surface (the public post permalink's reads, 0.4.0) does
+ * not fall back to an IP-keyed bucket here — it has its own sibling,
+ * `publicRateLimit`, because the two key on different things a caller may or
+ * may not have. This is typed against a context that already carries
  * `user`, not the bare `Context`, so a procedure that tried to rate-limit
  * without going through `protectedProcedure` first would fail to compile
  * rather than silently keying on `undefined`.
@@ -114,9 +114,9 @@ export function rateLimitCapability(
 
 /**
  * The base procedure plus a session requirement; handlers receive the session
- * user as `context.user`. Every procedure in this app is built from this —
- * there is no anonymous surface (issue #36; `publicProcedure` used to sit
- * here for the five/eight reads that stayed public, and is now gone).
+ * user as `context.user`. Everything except the public read surface
+ * (`publicReadProcedure` above, 0.4.0) and the capability-gated appeal
+ * intake is built from this (issue #36; the old `publicProcedure` is gone).
  */
 export const protectedProcedure = base
   .use(({ context, next }) => {
@@ -184,6 +184,67 @@ export const protectedProcedure = base
     }
     return next();
   });
+
+/**
+ * The one session-optional read surface: post permalinks (0.4.0).
+ *
+ * A signed-in caller gets exactly `protectedProcedure`'s treatment — session,
+ * legal consent, onboarding — so no existing reader's behaviour moves. A
+ * signed-out caller passes through with `context.user` undefined, and the
+ * procedures built on this are the ones whose handlers then decide, per mode,
+ * what an anonymous reader may see (`post.thread` everything it renders,
+ * `post.list` only its reply modes, `post.linkCard` the cached card). A
+ * handler that reads `context.user` off one of these MUST treat it as
+ * possibly-undefined; the viewers' SQL probes already do (a NULL viewer id
+ * matches no like/repost/bookmark row and no block edge).
+ *
+ * The set of procedures built from this is pinned by `router.int.test.ts`'s
+ * sessionless inventory — adding one is a deliberate, reviewed act, never an
+ * accident of reaching for the wrong base.
+ */
+export const publicReadProcedure = base.use(({ context, next }) => {
+  const user = context.session?.user;
+  if (user) {
+    if (!hasCurrentLegalConsent(user)) {
+      throw new ORPCError("FORBIDDEN", { message: LEGAL_CONSENT_REQUIRED_MESSAGE });
+    }
+    if (!hasCompletedOnboarding(user)) {
+      throw new ORPCError("FORBIDDEN", { message: ONBOARDING_REQUIRED_MESSAGE });
+    }
+  }
+  return next({ context: { ...context, user } });
+});
+
+/**
+ * The rate limiter for `publicReadProcedure`: keyed on the signed-in caller's
+ * id when there is one, and on the first `X-Forwarded-For` address when there
+ * is not (the proxy hop in front of every deployment — Cloudflare, Railway —
+ * writes it; a request without it shares one "unknown" bucket, which is a
+ * blunt fallback but never an unbounded one).
+ *
+ * IP-keyed is weaker than session-keyed — a determined caller rotates
+ * addresses — but the calls it gates are reads already bounded per response
+ * by pagination, and the alternative (no anonymous budget) would make the
+ * public thread pages a free firehose.
+ */
+export function publicRateLimit(policy: RateLimitPolicy) {
+  return os.$context<Context>().middleware(({ context, next }) => {
+    const forwarded = context.headers?.get("x-forwarded-for");
+    const address = forwarded?.split(",")[0]?.trim();
+    const key = context.session?.user
+      ? `user:${context.session.user.id}`
+      : `ip:${address && address.length > 0 ? address : "unknown"}`;
+
+    const result = context.rateLimiter.consume(`${policy.name}:${key}`, policy);
+    if (!result.allowed) {
+      throw new ORPCError("TOO_MANY_REQUESTS", {
+        message: "You're doing that too fast. Try again in a moment.",
+        data: { retryAfterSeconds: result.retryAfterSeconds },
+      });
+    }
+    return next();
+  });
+}
 
 /**
  * Denies with FORBIDDEN when the caller's role is below the minimum.

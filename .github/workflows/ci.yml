@@ -436,15 +436,16 @@ jobs:
           # stack sets this. It disables better-auth's own limiter only; the
           # oRPC rate limits (packages/api) are a separate mechanism and stay
           # on.
-          # A previous failed run can leave the container behind (the cleanup
-          # at the end of this step never ran), and `docker run --name` then
-          # fails on the name conflict. Remove any stale one first.
+          # A previous failed run can leave the container behind, and
+          # `docker run --name` then fails on the name conflict. Remove any
+          # stale one first, then guarantee cleanup if a probe fails.
           docker rm -f ci-smoke-server >/dev/null 2>&1 || true
+          trap 'docker rm -f ci-smoke-server >/dev/null 2>&1 || true' EXIT
 
           ci_database_url=${DATABASE_URL/localhost/ci-host}
           docker run -d --name ci-smoke-server \
             --add-host ci-host=host-gateway \
-            -p 127.0.0.1:3002:3002 \
+            -p 127.0.0.1::3002 \
             -e "DATABASE_URL=${ci_database_url}" \
             -e "BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}" \
             -e "WEB_ORIGIN=${WEB_ORIGIN}" \
@@ -461,7 +462,11 @@ jobs:
             echo "::error::docker run failed - the image could not be started";
             exit 1; }
 
-          smoke_origin=http://127.0.0.1:3002
+          smoke_port=$(docker port ci-smoke-server 3002/tcp | awk -F: 'NR == 1 { print $NF }')
+          [ -n "$smoke_port" ] || {
+            echo "::error::Docker did not publish the smoke server's port";
+            exit 1; }
+          smoke_origin=http://127.0.0.1:${smoke_port}
 
           for _ in $(seq 1 30); do
             curl -f --max-time 10 "$smoke_origin/health" > /tmp/health.json 2>/dev/null && break
@@ -533,5 +538,4 @@ jobs:
           grep -q 'PROVIDER_NOT_FOUND' /tmp/social-github.json || social_probe_failed "unregistered provider github did not report PROVIDER_NOT_FOUND"
           echo "Social providers agree: server registers google, discord, twitch; unregistered providers are refused."
 
-          docker rm -f ci-smoke-server >/dev/null || true
           echo "Image boots with its real CMD: health ok, SPA served, page gate redirects."

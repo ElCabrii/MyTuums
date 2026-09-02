@@ -63,14 +63,14 @@ export async function keysetPage<S, C extends DateColumn, T>(args: {
   createdAtField: ColumnKey<S, C> & keyof T;
   id: StringColumn;
   idField: StringKeys<T>;
-  query: (cursorFilter: SQL | undefined) => Promise<T[]>;
+  fetchPage: (cursorFilter: SQL | undefined) => Promise<T[]>;
 }): Promise<{ items: T[]; nextCursor: string | null }> {
   const decoded = args.cursor ? args.codec.decode(args.cursor) : undefined;
   const cursorFilter = decoded
     ? sql`(${args.createdAt}, ${args.id}) < (${sql.param(decoded.createdAt, args.createdAt)}, ${sql.param(decoded.id, args.id)})`
     : undefined;
 
-  const rows = await args.query(cursorFilter);
+  const rows = await args.fetchPage(cursorFilter);
 
   const hasMore = rows.length > args.limit;
   const items = hasMore ? rows.slice(0, args.limit) : rows;

@@ -1,0 +1,32 @@
+# MyTuums
+
+> The social media, for gamers.
+
+MyTuums is a gaming-first social network: posts and threads, reposts and
+quotes, likes and bookmarks, follows, and human-reviewed moderation with
+in-app appeals. Most of the app requires an account; the pages below are
+the public surface.
+
+- App: [https://mytuums.com](https://mytuums.com)
+- Create an account: [https://mytuums.com/register](https://mytuums.com/register)
+- Sign in: [https://mytuums.com/login](https://mytuums.com/login)
+- Privacy Policy: [https://mytuums.com/privacy](https://mytuums.com/privacy)
+- Terms of Service: [https://mytuums.com/terms](https://mytuums.com/terms)
+- Legal Notice: [https://mytuums.com/mentions-legales](https://mytuums.com/mentions-legales)
+- Branding site: [https://about.mytuums.com](https://about.mytuums.com)
+
+## Public post pages
+
+Since 0.4.0, individual post permalinks under
+`https://mytuums.com/post/<postId>` are publicly readable, including their
+images. There is no public index or listing of posts — discoverability is
+by link only. Everything else (feeds, profiles, search, notifications)
+requires signing in.
+
+## Notes
+
+- The landing site ([https://about.mytuums.com](https://about.mytuums.com))
+  is available in English and French; the language is chosen in the page
+  header.
+- AI and search crawlers are welcome on the public pages above under the
+  same [robots.txt](https://mytuums.com/robots.txt) rules as everyone else.

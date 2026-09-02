@@ -16,8 +16,10 @@ import { testHelpers } from "@my-tuums/auth/testing";
 import { post, user } from "@my-tuums/db/schema";
 import { LEGAL_VERSION } from "@my-tuums/auth/rules";
 import type { Context, EmailSender } from "../context.js";
+import { createLinkFetchTransport } from "../link-card-http.js";
 import { createRateLimiter, type RateLimiter } from "../rate-limit.js";
 import type { UserRole } from "../roles.js";
+import { runSql } from "../sql.js";
 import type { DestructiveStorage, Storage } from "../storage.js";
 
 /**
@@ -85,6 +87,13 @@ const forwardingRateLimiter: RateLimiter = {
   },
 };
 
+/**
+ * The real link-card transport, shared by every harness-built context: only
+ * `link-card.int.test.ts` overrides it (with a fake network), and that suite
+ * builds its contexts by hand for exactly that reason.
+ */
+const defaultTestLinkTransport = createLinkFetchTransport();
+
 /** Recording email adapter shared by integration-test contexts. */
 export const testEmailSender: EmailSender = {
   send: vi.fn(() => Promise.resolve()),
@@ -115,6 +124,16 @@ export const testStorage: DestructiveStorage = {
   remove(key) {
     testStorageObjects.delete(key);
     return Promise.resolve();
+  },
+  head(key) {
+    const object = testStorageObjects.get(key);
+    return Promise.resolve(object ? { contentType: object.contentType } : null);
+  },
+  get(key) {
+    const object = testStorageObjects.get(key);
+    return Promise.resolve(
+      object ? { bytes: object.bytes, contentType: object.contentType } : null,
+    );
   },
   listByPrefix(prefix) {
     return Promise.resolve([...testStorageObjects.keys()].filter((key) => key.startsWith(prefix)));
@@ -239,6 +258,7 @@ export async function createTestUser(overrides?: {
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
+      linkTransport: defaultTestLinkTransport,
       emailSender: testEmailSender,
     },
   };
@@ -264,7 +284,9 @@ export async function createPasswordTestUser(): Promise<
 > {
   const uuid = randomUUID();
   const email = `vitest-pw+${uuid}@example.com`;
-  const password = "vitest-Sup3rSecret!";
+  // Same fixture passphrase as the sign-up suite — env-overridable, and never
+  // a credential of any real environment.
+  const password = process.env.VITEST_SIGN_IN_PASSPHRASE ?? "vitest-Sup3rSecret!";
 
   await auth.api.signUpEmail({
     body: {
@@ -313,6 +335,7 @@ export async function createPasswordTestUser(): Promise<
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
+      linkTransport: defaultTestLinkTransport,
       emailSender: testEmailSender,
     },
   };
@@ -325,6 +348,7 @@ export const anonContext: Context = {
   requestId: "test-request-id",
   rateLimiter: forwardingRateLimiter,
   storage: testStorage,
+  linkTransport: defaultTestLinkTransport,
   emailSender: testEmailSender,
 };
 
@@ -346,6 +370,7 @@ export function contextFor(
     requestId: "test-request-id",
     rateLimiter,
     storage,
+    linkTransport: defaultTestLinkTransport,
     emailSender,
   };
 }
@@ -360,8 +385,9 @@ export function contextFor(
  */
 export async function truncateAll(): Promise<void> {
   assertTestDatabase();
-  await db.execute(
-    sql`TRUNCATE TABLE "post_like", "follow", "report", "user_block", "appeal", "moderation_action", "post", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
+  await runSql(
+    db,
+    sql`TRUNCATE TABLE "post_like", "post_repost", "post_bookmark", "post_edit", "follow", "report", "user_block", "appeal", "moderation_action", "notification", "notification_last_seen", "post", "link_card", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
   );
 }
 
@@ -399,7 +425,20 @@ export async function seedPosts(
     return row;
   });
 
-  return db.insert(post).values(rows).returning({ id: post.id, createdAt: post.createdAt });
+  const seeded = await db
+    .insert(post)
+    .values(rows)
+    .returning({ id: post.id, createdAt: post.createdAt });
+
+  // The contract every caller destructures against ("give me N posts, get N
+  // rows"), refused here rather than guarded at each call site — the e2e
+  // specs guard per site because their helper is a different implementation;
+  // here one refusal keeps a harness regression from surfacing three lines
+  // later as `Cannot read properties of undefined`.
+  if (seeded.length !== count) {
+    throw new Error(`seedPosts returned ${seeded.length} rows for count ${count}`);
+  }
+  return seeded;
 }
 
 /**
@@ -444,6 +483,7 @@ export async function freshSessionFor(testUser: TestUser): Promise<TestUser> {
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
+      linkTransport: defaultTestLinkTransport,
       emailSender: testEmailSender,
     },
   };

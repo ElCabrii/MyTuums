@@ -3,14 +3,11 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { ORPCError } from "@orpc/client";
-import { authErrorAtom } from "@/atoms/auth";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
-import { setTestSession } from "@/test/auth-fixture";
 import { createTestQueryClient, makeProfile } from "@/test/factories";
 import { queryFixtures } from "@/test/query-fixtures";
 import { renderWithProviders } from "@/test/render";
 import { ProfileLayout } from "@/components/profile-layout";
-import { authClient } from "@/lib/auth-client";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
@@ -144,7 +141,7 @@ describe("ProfileLayout role and ownership gates", () => {
     );
   });
 
-  it("shows settings and sign-out only on the viewer's own profile", async () => {
+  it("shows settings, and no sign-out, on the viewer's own profile", async () => {
     const own = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data("alex", own);
@@ -156,7 +153,11 @@ describe("ProfileLayout role and ownership gates", () => {
     });
 
     expect(screen.getByRole("button", { name: m.profile_settings() })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: m.auth_sign_out() })).toBeInTheDocument();
+    // Sign-out has no surface on the profile page (issue #282): the navbar
+    // account menu is the always-visible affordance, and /settings/account
+    // carries the card. The click paths themselves stay pinned in
+    // header.test.tsx and use-sign-out.test.tsx.
+    expect(screen.queryByRole("button", { name: m.auth_sign_out() })).not.toBeInTheDocument();
     // The profile header renders no email — not even the owner's own. The
     // address belongs to Settings, and showing it here read like leakage
     // (issue #208).
@@ -187,64 +188,6 @@ describe("ProfileLayout role and ownership gates", () => {
     await user.click(screen.getByLabelText(m.moderation_kebab()));
     await user.click(await screen.findByRole("menuitem", { name: m.moderation_kebab_block() }));
     expect(store.get(blockDialogAtom)).toEqual({ userId: other.id, handle: "other" });
-  });
-
-  it("signs out from the viewer's own profile and lands on /login", async () => {
-    const own = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
-    const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).profile.data("alex", own);
-
-    const { router } = await renderWithProviders(<ProfileLayout />, {
-      queryClient,
-      initialPath: "/@alex",
-      signedInAs: { id: own.id, username: "alex" },
-    });
-
-    // The real client resolves `/sign-out` before its own `/get-session`
-    // refetch empties the store; the mock mirrors that by flipping the
-    // session store from inside the call, which is what `signOutAtom`'s
-    // `waitForSignedOut()` is waiting for.
-    vi.mocked(authClient.signOut).mockImplementationOnce(() => {
-      setTestSession({
-        data: null,
-        isPending: false,
-        isRefetching: false,
-        error: null,
-        refetch: vi.fn(() => Promise.resolve()),
-      });
-      return Promise.resolve({ data: {}, error: null });
-    });
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: m.auth_sign_out() }));
-
-    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
-    expect(authClient.signOut).toHaveBeenCalled();
-  });
-
-  it("stays on the page and logs when sign-out fails", async () => {
-    const own = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
-    const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).profile.data("alex", own);
-
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.mocked(authClient.signOut).mockRejectedValueOnce(new Error("network down"));
-
-    const { router, store } = await renderWithProviders(<ProfileLayout />, {
-      queryClient,
-      initialPath: "/@alex",
-      signedInAs: { id: own.id, username: "alex" },
-    });
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: m.auth_sign_out() }));
-
-    await waitFor(() =>
-      expect(consoleError).toHaveBeenCalledWith("Failed to sign out", expect.anything()),
-    );
-    expect(router.state.location.pathname).toBe("/@alex");
-    expect(store.get(authErrorAtom)).toBe(m.common_something_went_wrong());
-    consoleError.mockRestore();
   });
 });
 
@@ -325,9 +268,7 @@ describe("ProfileLayout banner", () => {
     });
     // The frame is the canonical 3:1 with its height clamped by the constants
     // in lib/banner-frame.ts: exact 3:1 wherever the measure holds, a 150px
-    // band on narrow phones, never taller than 320px on wide monitors. The
-    // clamps are inline styles from those constants so this frame and the
-    // crop editor's safe area cannot drift apart.
+    // band on narrow phones, never taller than 320px on wide monitors.
     expect(banner.parentElement).toHaveStyle({
       aspectRatio: "3",
       maxWidth: "1500px",

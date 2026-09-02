@@ -190,14 +190,22 @@ export function objectKeyFromMediaPath(value: string | null | undefined): string
  * The uuid is the grouped form, matching `randomUUID()`'s output — the old
  * `[a-f0-9-]{36}` also matched 36 hyphens, which is not a shape this app
  * writes. The optional `.orig` infix is the original's key (see
- * `imageObjectKey`).
+ * `imageObjectKey`), and the bare-uuid shape is a stored link preview's lead
+ * image (see `link-card.ts`) — content this app mirrored, owned by no user.
+ *
+ * The optional `.w<N>.webp` suffix is a derived display variant (see
+ * `MEDIA_VARIANT_WIDTHS` in ./constants.ts — structural only here; whether a
+ * given width is one this app mints is `parseMediaVariantKey`'s to say).
  */
 export function isSafeObjectKey(key: string): boolean {
   return (
-    /^(?:avatars|banners)\/[A-Za-z0-9_-]+\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?:\.orig)?\.(webp|png|jpg|gif)$/.test(
+    /^(?:avatars|banners)\/[A-Za-z0-9_-]+\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?:\.orig)?\.(webp|png|jpg|gif)(?:\.w\d+\.webp)?$/.test(
       key,
     ) ||
-    /^posts\/[A-Za-z0-9_-]+\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(webp|png|jpg|gif)$/.test(
+    /^posts\/[A-Za-z0-9_-]+\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(webp|png|jpg|gif)(?:\.w\d+\.webp)?$/.test(
+      key,
+    ) ||
+    /^link-cards\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(webp|png|jpg|gif)(?:\.w\d+\.webp)?$/.test(
       key,
     )
   );

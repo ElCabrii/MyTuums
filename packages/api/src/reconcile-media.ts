@@ -8,8 +8,8 @@
  * command line.
  *
  * The maintenance command holds the shared post-media advisory transaction
- * lock while this pass runs, so attachment writes cannot land between the
- * object listing and the attachment-row read. LIST BEFORE READING THE ROWS,
+ * lock while this pass runs, so attachment and link-card writes cannot land
+ * between the object listing and the row reads. LIST BEFORE READING THE ROWS,
  * and delete only after both snapshots exist — the order remains load-bearing
  * for the existing profile-media lifecycle (issue #52). The delete set is
  * `listed \
@@ -35,6 +35,7 @@
  */
 import type { DestructiveStorage } from "./storage.js";
 import { objectKeyFromMediaPath } from "./image.js";
+import { mediaVariantKeys } from "./constants.js";
 
 /** The four profile image slots the reconcile script scans. */
 export interface MediaImageRow {
@@ -49,10 +50,16 @@ export interface MediaAttachmentRow {
   mediaPath: string | null;
 }
 
+/** One authoritative link preview row. A negative entry's path is null. */
+export interface MediaLinkCardRow {
+  imageMediaPath: string | null;
+}
+
 export interface ReconcileMediaDeps {
   storage: Pick<DestructiveStorage, "listByPrefix" | "removeMany">;
   readUserRows: () => Promise<MediaImageRow[]>;
   readPostAttachmentRows?: () => Promise<MediaAttachmentRow[]>;
+  readLinkCardRows?: () => Promise<MediaLinkCardRow[]>;
 }
 
 export interface ReconcileMediaResult {
@@ -62,12 +69,13 @@ export interface ReconcileMediaResult {
   deleted: number;
 }
 
-const PREFIXES = ["avatars/", "banners/", "posts/"] as const;
+const PREFIXES = ["avatars/", "banners/", "posts/", "link-cards/"] as const;
 
 export async function reconcileMedia({
   storage,
   readUserRows,
   readPostAttachmentRows = () => Promise.resolve([]),
+  readLinkCardRows = () => Promise.resolve([]),
 }: ReconcileMediaDeps): Promise<ReconcileMediaResult> {
   // Order matters: list the bucket BEFORE reading the rows. Anything not
   // listed here is not a deletion candidate, no matter what the rows say a
@@ -85,21 +93,36 @@ export async function reconcileMedia({
   // two deletes an object whose row points at it (issue #52).
   const rows = await readUserRows();
   const attachmentRows = await readPostAttachmentRows();
+  const linkCardRows = await readLinkCardRows();
 
   const referenced = new Set<string>();
+  const addReferenced = (key: string) => {
+    referenced.add(key);
+    // A derived variant (`…/uuid.png.w640.webp`, media-variants.ts) is referenced
+    // exactly when its base is: it is unreachable the moment the base goes,
+    // so it is reaped with it rather than orphaned by the row shape (only
+    // the base path is stored anywhere). The immediate cleanup paths delete
+    // variants alongside their base directly; this pairing rule is the
+    // eventual-consistency half for everything that slips past them.
+    for (const variantKey of mediaVariantKeys(key)) referenced.add(variantKey);
+  };
   for (const row of rows) {
     for (const value of [row.image, row.bannerImage, row.imageOriginal, row.bannerImageOriginal]) {
       const key = objectKeyFromMediaPath(value);
-      if (key) referenced.add(key);
+      if (key) addReferenced(key);
     }
   }
   for (const row of attachmentRows) {
     const key = objectKeyFromMediaPath(row.mediaPath);
-    if (key) referenced.add(key);
+    if (key) addReferenced(key);
+  }
+  for (const row of linkCardRows) {
+    const key = objectKeyFromMediaPath(row.imageMediaPath);
+    if (key) addReferenced(key);
   }
 
   console.log(
-    `scanning ${rows.length} user rows and ${attachmentRows.length} post attachments; ${referenced.size} referenced objects`,
+    `scanning ${rows.length} user rows, ${attachmentRows.length} post attachments and ${linkCardRows.length} link cards; ${referenced.size} referenced objects`,
   );
 
   let deleted = 0;

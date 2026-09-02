@@ -19,8 +19,8 @@ import {
 } from "./moderation-actions.js";
 import { noteInput } from "./moderation-inputs.js";
 import { lockModerationTarget } from "./moderation-target-lock.js";
+import { postAttachmentsSelection } from "./post-media.js";
 import { baseProcedure, moderatorProcedure, protectedProcedure, rateLimit } from "./procedures.js";
-import { postAttachmentsSelection } from "./posts.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 
 /**
@@ -363,6 +363,12 @@ export const appealsRouter = {
           targetUserId: action.targetUserId ?? undefined,
           note: input.note,
           details: { outcome: input.outcome },
+          // The appellant is the affected user — the in-app notification
+          // lands beside the resolution email below, whatever the outcome.
+          // An overturn additionally mints the inverse action's own
+          // notification through the effects `undoAction` ran above, which
+          // is honest: two things happened to them.
+          notifyUserId: row.appellantId,
         });
 
         return { result: undefined, pending };

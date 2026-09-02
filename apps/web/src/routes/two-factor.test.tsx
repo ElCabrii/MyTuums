@@ -11,7 +11,7 @@ import {
   twoFactorCodeAtom,
 } from "@/atoms/two-factor";
 import { authClient } from "@/lib/auth-client";
-import { TwoFactorPage } from "@/routes/two-factor";
+import { TwoFactorPage } from "@/components/two-factor-page";
 import { m } from "@/paraglide/messages.js";
 
 beforeEach(() => {

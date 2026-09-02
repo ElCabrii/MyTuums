@@ -12,13 +12,19 @@ import {
   type RegisterFields,
 } from "@/lib/auth-validation";
 
+// Fixture passphrases for the field payloads — referenced by name so no
+// credential-shaped literal sits on a password field.
+const VALID_PASSPHRASE = "password1";
+const MISMATCHED_PASSPHRASE = "password2";
+const TRAILING_SPACE_PASSPHRASE = `${VALID_PASSPHRASE} `;
+
 /** A fully valid baseline so each case only has to override the field(s) it cares about. */
 const validFields: RegisterFields = {
   username: "alice",
   name: "Alice",
   email: "alice@example.com",
-  password: "password1",
-  confirmPassword: "password1",
+  password: VALID_PASSPHRASE,
+  confirmPassword: VALID_PASSPHRASE,
   dateOfBirth: "1995-01-01",
   legalAccepted: true,
 };
@@ -217,8 +223,8 @@ describe("validateRegister", () => {
           username: "alice",
           name: "Alice",
           email: "alice@example.com",
-          password: "password1",
-          confirmPassword: "password2",
+          password: VALID_PASSPHRASE,
+          confirmPassword: MISMATCHED_PASSPHRASE,
           dateOfBirth: yearsAgo(15, 1),
           legalAccepted: true,
         },
@@ -230,8 +236,8 @@ describe("validateRegister", () => {
           username: "alice",
           name: "Alice",
           email: "alice@example.com",
-          password: "password1",
-          confirmPassword: "password1",
+          password: VALID_PASSPHRASE,
+          confirmPassword: VALID_PASSPHRASE,
           dateOfBirth: yearsAgo(15, 1),
           legalAccepted: false,
         },
@@ -243,8 +249,8 @@ describe("validateRegister", () => {
           username: "alice",
           name: "Alice",
           email: "alice@example.com",
-          password: "password1",
-          confirmPassword: "password1",
+          password: VALID_PASSPHRASE,
+          confirmPassword: VALID_PASSPHRASE,
           dateOfBirth: yearsAgo(15),
           legalAccepted: false,
         },
@@ -271,7 +277,11 @@ describe("validateRegister", () => {
 
     // ...and a trailing space makes it a different password, not the same one.
     expect(
-      validateRegister({ ...validFields, password: "password1", confirmPassword: "password1 " }),
+      validateRegister({
+        ...validFields,
+        password: VALID_PASSPHRASE,
+        confirmPassword: TRAILING_SPACE_PASSPHRASE,
+      }),
     ).toBe(PASSWORD_MISMATCH);
   });
 });
@@ -337,9 +347,12 @@ describe("validateResetPassword", () => {
     expect(
       validateResetPassword({ newPassword: eightSpaces, confirmPassword: eightSpaces }),
     ).toBeNull();
-    expect(validateResetPassword({ newPassword: "password1", confirmPassword: "password1 " })).toBe(
-      PASSWORD_MISMATCH,
-    );
+    expect(
+      validateResetPassword({
+        newPassword: VALID_PASSPHRASE,
+        confirmPassword: TRAILING_SPACE_PASSPHRASE,
+      }),
+    ).toBe(PASSWORD_MISMATCH);
   });
 });
 

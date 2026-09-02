@@ -153,6 +153,8 @@ function createTestRouteTree(ui: ReactNode) {
     // directly as `ui`.
     stubRoute("/moderation"),
     stubRoute("/appeal"),
+    // The notifications page (issue #259) — the header bell links here.
+    stubRoute("/notifications"),
     // The legal pages are signed-in-gate exemptions — tests for the gate
     // need them reachable without a redirect.
     stubRoute("/privacy"),
@@ -164,6 +166,9 @@ function createTestRouteTree(ui: ReactNode) {
     // and the handle-less avatar's /welcome link (header.test.tsx).
     stubRoute("/welcome"),
     stubRoute("/settings/account"),
+    // The bookmarks page (issue #262) — a header-test navigation target via
+    // the account menu's Bookmarks item.
+    stubRoute("/bookmarks"),
     // two-factor.test.tsx mounts the real challenge page as `ui` — the route
     // has to exist in the tree for `Route.useSearch()` to resolve, same as
     // `/search` and `/appeal` above.
