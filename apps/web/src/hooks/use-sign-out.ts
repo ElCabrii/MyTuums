@@ -10,10 +10,10 @@ import { m } from "@/paraglide/messages.js";
  * teardown sequence — the server sign-out, the wait for the session store to
  * empty, and `clearViewerState`'s cache/family sweep — and this hook owns what
  * happens after: the navigate and the single error path. Every entry point
- * (header menu, profile page, settings, the post-reset "log in" button) calls
- * this, so a rejected sign-out behaves the same from each: the error is
- * surfaced through `authErrorAtom` (and logged), and the visitor is left on
- * the page they were on.
+ * (header menu, settings, the post-reset "log in" button) calls this, so a
+ * rejected sign-out behaves the same from each: the error is surfaced
+ * through `authErrorAtom` (and logged), and the visitor is left on the
+ * page they were on.
  *
  * This hook is the sole owner of the post-sign-out destination. The signed-in
  * gate (`use-require-signed-in.ts`) is the fallback for any *other* way a

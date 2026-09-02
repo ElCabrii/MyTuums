@@ -8,7 +8,6 @@ import {
   BANNER_FRAME_MAX_WIDTH,
   BANNER_FRAME_MIN_HEIGHT,
 } from "@/lib/banner-frame";
-import { authPendingAtom } from "@/atoms/auth";
 import { viewerAtom, isStaffAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
 import { blockDialogAtom, reportDialogAtom, unbanUserAtom } from "@/atoms/moderation";
@@ -29,12 +28,10 @@ import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
 import { ProfileMessage } from "@/components/profile-message";
 import { LinkedText } from "@/components/linked-text";
-import { useSignOut } from "@/hooks/use-sign-out";
 import { useDocumentHead } from "@/hooks/use-document-head";
 import {
   UserX,
   Calendar,
-  LogOut,
   Loader2,
   AlertCircle,
   Settings,
@@ -57,8 +54,6 @@ const routeApi = getRouteApi("/@{$username}");
 export function ProfileLayout() {
   const { username } = routeApi.useParams();
   const viewer = useAtomValue(viewerAtom);
-  const isSigningOut = useAtomValue(authPendingAtom);
-  const handleSignOut = useSignOut();
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
   const isStaff = useAtomValue(isStaffAtom);
@@ -215,7 +210,9 @@ export function ProfileLayout() {
                   two-factor and passkeys live. The header's account menu
                   (header.tsx) is the other entry point; this one stays so the
                   destination is visible on the page itself, not only behind a
-                  menu. */}
+                  menu. Sign-out deliberately does not follow it here: the
+                  account menu is on every page, and /settings/account carries
+                  the card for it (issue #282). */}
               <Button
                 variant="outline"
                 size="sm"
@@ -225,20 +222,6 @@ export function ProfileLayout() {
               >
                 <Settings className="h-4 w-4" />
                 <span>{m.profile_settings()}</span>
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => void handleSignOut()}
-                disabled={isSigningOut}
-                className="gap-2 rounded-full"
-              >
-                {isSigningOut ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <LogOut className="h-4 w-4" />
-                )}
-                <span>{m.auth_sign_out()}</span>
               </Button>
             </div>
           ) : (

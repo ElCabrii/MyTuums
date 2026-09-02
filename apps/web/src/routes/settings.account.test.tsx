@@ -64,9 +64,11 @@ describe("AccountSettingsPage", () => {
     expect(
       screen.queryByRole("heading", { name: m.settings_linked_title() }),
     ).not.toBeInTheDocument();
-    // Sign-out is no longer a section on this page — it lives in the navbar
-    // account menu (header.tsx). See issue #217.
-    expect(screen.queryByRole("heading", { name: m.auth_sign_out() })).not.toBeInTheDocument();
+    // Sign-out is a section on this page again — issue #282 partially reverts
+    // #217: the navbar account menu (header.tsx) stays the always-visible
+    // affordance, and the profile page no longer carries its own button. The
+    // click path itself is pinned in use-sign-out.test.tsx, not restated here.
+    expect(screen.getByRole("heading", { level: 3, name: m.auth_sign_out() })).toBeInTheDocument();
 
     act(() => store.set(authErrorAtom, "One shared failure"));
     expect(screen.getAllByRole("alert")).toHaveLength(1);
