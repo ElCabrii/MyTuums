@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/mytuums.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#171719" media="(prefers-color-scheme: dark)" />
+    <title>MyTuums — The social media, for gamers</title>
+    <meta name="description" content="The social media, for gamers." />
+    <link rel="canonical" href="https://about.mytuums.com/" />
+    <!-- The full SEO surface for a one-page site. Unlike apps/web, this page
+         IS the document a crawler sees, so these are not fallbacks behind a
+         JS-rendered head — keep the tagline in step with apps/web/messages
+         (issue #280) and the copy in messages/. English-only, like the app's
+         index.html: Paraglide lives in the bundle and cannot reach this
+         markup; the language is cookie-chosen on this single URL, so per-URL
+         hreflang pairs cannot exist — og:locale carries the alternates
+         instead. -->
+    <meta property="og:title" content="MyTuums — The social media, for gamers" />
+    <meta property="og:description" content="The social media, for gamers." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://about.mytuums.com/" />
+    <meta property="og:site_name" content="MyTuums" />
+    <meta property="og:image" content="https://about.mytuums.com/mytuums-512.png" />
+    <meta property="og:image:alt" content="The MyTuums logo" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="fr_FR" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="MyTuums — The social media, for gamers" />
+    <meta name="twitter:description" content="The social media, for gamers." />
+    <meta name="twitter:image" content="https://about.mytuums.com/mytuums-512.png" />
+    <meta name="twitter:image:alt" content="The MyTuums logo" />
+    <!-- Structured data (schema.org, one @graph): the Organization entity
+         mirrors the app's Organization JSON-LD on the apex (apps/web/
+         index.html) — name, logo and sameAs must stay in step with it — and
+         the WebSite entity describes this landing page itself. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://about.mytuums.com/#organization",
+            "name": "MyTuums",
+            "description": "The social media, for gamers.",
+            "url": "https://mytuums.com",
+            "logo": "https://about.mytuums.com/mytuums-512.png",
+            "sameAs": [
+              "https://x.com/mytuums",
+              "https://www.instagram.com/mytuums/",
+              "https://www.tiktok.com/@mytuums",
+              "https://www.youtube.com/@MyTuums",
+              "https://github.com/MyTuums"
+            ]
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://about.mytuums.com/#website",
+            "url": "https://about.mytuums.com/",
+            "name": "MyTuums",
+            "description": "The social media, for gamers.",
+            "inLanguage": ["en", "fr"],
+            "publisher": { "@id": "https://about.mytuums.com/#organization" }
+          }
+        ]
+      }
+    </script>
+    <style>
+      /* First-paint background only. The theme class is applied by the
+         bundle, but a white flash on a dark-mode load reads as broken —
+         light-dark() follows the OS scheme, which is also the bundle's
+         default before any stored choice is read. No scripts inline: the
+         server's CSP allows same-origin module scripts only. */
+      html {
+        background: oklch(1 0 0);
+        background: light-dark(oklch(1 0 0), oklch(0.141 0.005 285.823));
+        color-scheme: light dark;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -149,6 +149,14 @@ const handleRequest = createRequestHandler({
     const staticHandler = env.WEB_DIST ? createStaticFileHandler(env.WEB_DIST) : noStaticFiles;
     return staticHandler(req, nodeResponse(res));
   },
+  // Same shape for the branding site (apps/branding), reached only when the
+  // Host is the branding hostname — see ./branding-host.ts.
+  serveBranding: async (req, res) => {
+    const brandingHandler = env.BRANDING_DIST
+      ? createStaticFileHandler(env.BRANDING_DIST)
+      : noStaticFiles;
+    return brandingHandler(req, nodeResponse(res));
+  },
   // Preserve an unavailable lookup as its own state. The routing boundary can
   // then fail open for the shell without mistaking a stale cookie for a
   // session or admitting any media — post or profile — without a viewer

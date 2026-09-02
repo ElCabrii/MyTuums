@@ -25,6 +25,7 @@ Thumbs.db
 
 # Paraglide (generated)
 apps/web/src/paraglide/
+apps/branding/src/paraglide/
 
 # TanStack Router (generated)
 apps/web/src/routeTree.gen.ts

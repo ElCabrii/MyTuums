@@ -10,20 +10,22 @@ MyTuums — a Twitter-style social app (posts, replies, likes, bookmarks,
 follows, profiles, moderation) with real authentication. pnpm 12 + Turborepo
 on Node 24, TypeScript strict everywhere.
 
-| Workspace       | Package            | Owns                                               |
-| --------------- | ------------------ | -------------------------------------------------- |
-| `apps/web`      | `@my-tuums/web`    | React 19 + Vite SPA, TanStack Router, Jotai        |
-| `apps/server`   | `@my-tuums/server` | `node:http` server, the only deployed process      |
-| `packages/api`  | `@my-tuums/api`    | oRPC procedures, business rules, media, moderation |
-| `packages/auth` | `@my-tuums/auth`   | the single better-auth instance                    |
-| `packages/db`   | `@my-tuums/db`     | Drizzle schema, migrations, test-database guards   |
-| `e2e`           | `@my-tuums/e2e`    | Playwright journeys over the real stack            |
+| Workspace       | Package              | Owns                                                |
+| --------------- | -------------------- | --------------------------------------------------- |
+| `apps/web`      | `@my-tuums/web`      | React 19 + Vite SPA, TanStack Router, Jotai         |
+| `apps/branding` | `@my-tuums/branding` | the public landing site served at about.mytuums.com |
+| `apps/server`   | `@my-tuums/server`   | `node:http` server, the only deployed process       |
+| `packages/api`  | `@my-tuums/api`      | oRPC procedures, business rules, media, moderation  |
+| `packages/auth` | `@my-tuums/auth`     | the single better-auth instance                     |
+| `packages/db`   | `@my-tuums/db`       | Drizzle schema, migrations, test-database guards    |
+| `e2e`           | `@my-tuums/e2e`      | Playwright journeys over the real stack             |
 
 ## Context routing
 
 | If the change is about                                    | Go to                                                |
 | --------------------------------------------------------- | ---------------------------------------------------- |
 | UI, routes, client state, i18n copy, theme                | [apps/web/CONTEXT.md](apps/web/CONTEXT.md)           |
+| The public landing site at `about.mytuums.com`            | [apps/branding/CONTEXT.md](apps/branding/CONTEXT.md) |
 | HTTP routing, env validation, headers, runtime, Docker    | [apps/server/CONTEXT.md](apps/server/CONTEXT.md)     |
 | Business rules, RPC procedures, moderation, media/storage | [packages/api/CONTEXT.md](packages/api/CONTEXT.md)   |
 | Sign-in, OAuth providers, sessions, auth email            | [packages/auth/CONTEXT.md](packages/auth/CONTEXT.md) |
@@ -90,12 +92,13 @@ to the owning context.
 These artifacts are generator-owned. Run the generator and commit its output
 (or nothing where the artifact is git-ignored).
 
-| Artefact                         | Produced by                                           |
-| -------------------------------- | ----------------------------------------------------- |
-| `apps/web/src/routeTree.gen.ts`  | the TanStack Router Vite plugin (git-ignored)         |
-| `apps/web/src/paraglide`         | `pnpm --filter @my-tuums/web paraglide` (git-ignored) |
-| `packages/db/src/schema/auth.ts` | `pnpm --filter @my-tuums/db db:generate:auth`         |
-| `packages/db/drizzle`            | `pnpm db:generate` (committed, shipped in the image)  |
+| Artefact                         | Produced by                                                |
+| -------------------------------- | ---------------------------------------------------------- |
+| `apps/web/src/routeTree.gen.ts`  | the TanStack Router Vite plugin (git-ignored)              |
+| `apps/web/src/paraglide`         | `pnpm --filter @my-tuums/web paraglide` (git-ignored)      |
+| `apps/branding/src/paraglide`    | `pnpm --filter @my-tuums/branding paraglide` (git-ignored) |
+| `packages/db/src/schema/auth.ts` | `pnpm --filter @my-tuums/db db:generate:auth`              |
+| `packages/db/drizzle`            | `pnpm db:generate` (committed, shipped in the image)       |
 
 The two git-ignored web artefacts are why `lint` and `typecheck` depend on
 `build` in `turbo.json`: `tsc` cannot resolve a route target or a message

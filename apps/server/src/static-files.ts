@@ -43,6 +43,10 @@ const CONTENT_TYPES = new Map<string, string>([
   [".txt", "text/plain; charset=utf-8"],
   [".webmanifest", "application/manifest+json"],
   [".map", "application/json; charset=utf-8"],
+  // For the crawlers reading public/robots.txt and public/sitemap.xml.
+  // Without an entry the allowlist's octet-stream fallback would download
+  // instead of render — harmless for a crawler, wrong for a human opening it.
+  [".xml", "application/xml; charset=utf-8"],
 ]);
 
 /**
@@ -58,6 +62,7 @@ const COMPRESSIBLE_EXTENSIONS = new Set([
   ".txt",
   ".webmanifest",
   ".map",
+  ".xml",
 ]);
 
 /**

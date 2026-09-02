@@ -55,13 +55,27 @@ service points at the `postgres` service name and overrides `HOST` to
 The Playwright stack runs on `:3101` and `:5273` on purpose, so it can run
 beside a live dev stack rather than asking you to stop working first.
 
-| Port   | Who                               |
-| ------ | --------------------------------- |
-| `5432` | Postgres (compose or local)       |
-| `3001` | API — `pnpm dev` or the container |
-| `5173` | Vite dev server                   |
-| `3101` | E2E server                        |
-| `5273` | E2E web                           |
+| Port   | Who                                 |
+| ------ | ----------------------------------- |
+| `5432` | Postgres (compose or local)         |
+| `3001` | API — `pnpm dev` or the container   |
+| `5173` | Vite dev server (the SPA)           |
+| `5174` | Vite dev server (the branding site) |
+| `3101` | E2E server                          |
+| `5273` | E2E web                             |
+
+The branding site has its own Vite dev server,
+`pnpm --filter @my-tuums/branding dev` on `:5174` — no Host-header games
+needed, because host routing only exists in the server, which serves the
+built `dist/` when `BRANDING_DIST` is set (the Docker image always does). To
+preview exactly what production serves, build the site and curl either
+server with a forged Host header:
+
+```bash
+pnpm --filter @my-tuums/branding build
+BRANDING_DIST=$PWD/apps/branding/dist pnpm dev   # separate shell
+curl -H "Host: about.mytuums.com" http://localhost:3001/
+```
 
 ## Railway
 
@@ -108,6 +122,15 @@ CI never deploys. Railway builds its own image from `apps/server/Dockerfile`
 on push; the CI `image` job exists to fail a commit that would produce a
 broken one.
 
+**The branding site rides the app's deployment.** `about.mytuums.com` is
+served by the same Railway service — host routing inside the server over the
+built `apps/branding/dist` (`BRANDING_DIST` in the image), no second
+service, no environment change. The one manual step is DNS: add
+`about.mytuums.com` as a custom domain on the production service, then create
+the records Railway shows at the registrar. Until that is done the site
+exists only under a forged Host header (see the curl in
+[Local development](#local-development)).
+
 ## Build-time and runtime configuration
 
 This split is the source of the most confusing production failure this app
@@ -143,12 +166,13 @@ report: `@my-tuums/db` evaluates it at module scope and throws before
 2. **builder** — full install, tsup-bundle the server, then `vite build` with
    the `VITE_*` args declared.
 3. **runner** — `pnpm install --prod` over the _server-only_ prune, then copy
-   in `apps/server/dist`, `apps/web/dist` and the migration SQL. The second
-   prune is why the web dependency tree cannot leak into the runtime image;
-   CI asserts `apps/web/node_modules` does not exist and that the server's own
-   production dependencies do.
+   in `apps/server/dist`, `apps/web/dist`, `apps/branding/dist` and the
+   migration SQL. The second prune is why neither web dependency tree can
+   leak into the runtime image; CI asserts `apps/web/node_modules` does not
+   exist and that the server's own production dependencies do.
 
-The image sets `WEB_DIST=/app/apps/web/dist`, runs as a non-root user, exposes
+The image sets `WEB_DIST=/app/apps/web/dist` and
+`BRANDING_DIST=/app/apps/branding/dist`, runs as a non-root user, exposes
 3001, and starts `node apps/server/dist/index.js` — the exact process Railway
 runs and the one CI boots and probes.
 

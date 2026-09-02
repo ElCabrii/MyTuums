@@ -23,13 +23,14 @@ There are four, and only the first two carry untrusted input:
 `apps/server/src/request-handler.ts` and
 `packages/api/src/constants.ts`):
 
-| Surface                       | Notes                                                          |
-| ----------------------------- | -------------------------------------------------------------- |
-| `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`              |
-| `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`         |
-| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`   |
-| Static assets                 | anything with a file extension — the SPA cannot boot otherwise |
-| `moderation.appealOpen` (RPC) | the one anonymous RPC — see below                              |
+| Surface                       | Notes                                                            |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`                |
+| `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`           |
+| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`     |
+| The branding page             | `about.mytuums.com` — one script-free HTML document, host-routed |
+| Static assets                 | anything with a file extension — the SPA cannot boot otherwise   |
+| `moderation.appealOpen` (RPC) | the one anonymous RPC — see below                                |
 
 **`/api/auth/admin/*` returns 404 before the auth handler sees it.** The
 better-auth admin plugin gates on its own `adminRoles` option, which cannot
@@ -40,6 +41,15 @@ the audit log stay the only enforcement surface.
 **Everything else requires a session.** Every other oRPC procedure is built
 from `protectedProcedure`, every non-allowlisted page is gated by the server
 before the bundle even downloads, and `/media` is gated too.
+
+The branding site (`apps/branding`) is the one deliberately public
+**document**: it is routed by Host header ahead of the page gate, so it opens
+no path on the app's own hostnames, and it reads nothing — no session, no
+database, no bucket. Its scripts are same-origin module scripts from its own
+build, already covered by the enforced CSP's `script-src 'self'` (which has
+no inline allowance), and HSTS `includeSubDomains` — sent by the apex all
+along — now
+does real work keeping the subdomain HTTPS-only, which is intended.
 
 ### The one anonymous RPC: `moderation.appealOpen`
 

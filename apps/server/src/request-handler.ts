@@ -12,6 +12,7 @@ import {
   RPC_SMALL_BODY_BYTES,
   SIGNED_OUT_PATHS,
 } from "@my-tuums/api/constants";
+import { isBrandingHostRequest } from "./branding-host.js";
 import { normalizeObservedError, type ErrorObserver } from "./error-observation.js";
 import { createRequestId, pathnameOf } from "./observability.js";
 
@@ -89,6 +90,14 @@ export interface RequestHandlerDeps {
    * itself keeps the 404 in one place.
    */
   serveStatic: (req: IncomingMessage, res: RequestResponse) => Promise<{ served: boolean }>;
+  /**
+   * Serves the built branding site (apps/branding), when this deployment
+   * bundles it — same shape and same injection reasons as `serveStatic`
+   * above, but reached only for requests whose Host is the branding hostname
+   * (see ./branding-host.ts). `noStaticFiles` in dev, where the branding app
+   * runs under its own Vite server like the SPA does.
+   */
+  serveBranding: (req: IncomingMessage, res: RequestResponse) => Promise<{ served: boolean }>;
   /**
    * Resolves both session validity and viewer identity through one
    * `auth.api.getSession` call. The cookie pre-check used by the page and
@@ -676,6 +685,31 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         });
         res.end();
         return;
+      }
+
+      // The branding host: `about.mytuums.com` is the one hostname this server
+      // answers that is not the app. It gets the built branding site
+      // (apps/branding, served through `serveBranding`) instead of the SPA —
+      // the site needs none of the one-origin guarantees (no /rpc, no
+      // /media, absolute CTA links to the apex), while the SPA booted on this
+      // host would be stranded: session cookies are host-only to the apex, so
+      // it would look signed out, and its canonical and Open Graph tags would
+      // lie about their origin. The site's scripts are same-origin module
+      // scripts, already covered by the CSP's `script-src 'self'`.
+      //
+      // Placement is the whole design. AFTER every API prefix, so /health,
+      // /api/auth, /rpc and /media keep their normal meaning on every host
+      // and this branch shadows nothing the server owns. BEFORE the page
+      // gate below, which is itself the bypass: the gate never sees a
+      // branding-host document request, so the landing page is public
+      // without a single change to SIGNED_OUT_PATHS — adding "/" to that set
+      // would open the apex homepage too, and its shared client gate would
+      // then bounce a signed-in visitor off it. Anything the handler declines
+      // — an asset-shaped path that misses on disk, a non-GET/HEAD verb —
+      // keeps falling through the tree exactly as on the apex.
+      if (isBrandingHostRequest(req)) {
+        const { served } = await deps.serveBranding(req, res);
+        if (served) return;
       }
 
       // The page gate: everything that reaches here is neither `/health`,
