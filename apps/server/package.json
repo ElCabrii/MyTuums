@@ -23,6 +23,7 @@
     "@orpc/server": "^1.5.0",
     "@sentry/node": "^10.69.0",
     "better-auth": "catalog:",
+    "sharp": "^0.35.4",
     "zod": "catalog:"
   },
   "devDependencies": {
