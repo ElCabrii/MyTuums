@@ -189,8 +189,9 @@ used to 429 every request from a fresh session.
 makes the server dial out (issue #260):
 
 - Only `http`/`https` targets are fetched — the same scheme rule the client's
-  linkifier applies — and only for a signed-in caller: the procedure is
-  session-gated and rate-limited under its own `linkCard` tier.
+  linkifier applies. The procedure is session-optional (the public permalink
+  renders the same cards a signed-in feed does), so the `linkCard` tier that
+  rates it is IP-keyed and must bound anonymous dial-outs, not just members'.
 - The hostname is resolved by the server and **every** resolved address must be
   global unicast before any request is made. Loopback, RFC 1918 private,
   link-local (including `169.254.169.254`), CGNAT, unique-local, NAT64 (both
@@ -218,8 +219,9 @@ makes the server dial out (issue #260):
   hostile or dead URL is asked about once, not per view.
 - A target's lead image is fetched through the same guard, validated from its
   bytes like an upload, and stored in this app's own bucket under
-  `link-cards/` — never hot-linked. `/media/link-cards/*` is served to any
-  signed-in viewer, decided only by the session the route already demands.
+  `link-cards/` — never hot-linked. `/media/link-cards/*` is readable without
+  a session by design: it mirrors already-public web content, and the
+  anonymous permalink needs it (see `canViewLinkCardMedia`).
 - A card is shared by every post carrying its URL, so a hostile unfurl is a
   viewer-wide object: `moderation.purgeLinkCard` (moderator gate, `moderate`
   tier) nulls the row, removes the stored image, and stops the URL from ever
