@@ -90,12 +90,13 @@ would produce a broken one.
   also runs the dev stack (`pnpm docker:up` binds 5432), so the CI service
   container would collide with it. `DATABASE_URL`/`DATABASE_URL_TEST` and the
   three service `ports:` mappings must stay in step.
-- **The `image` job's smoke server binds port 3002, not 3001.** The
-  self-hosted runner also runs the dev stack (`pnpm dev` holds 3001), so the
-  container would fail to bind and the probes would silently hit the dev
-  server. The boot step overrides `BETTER_AUTH_URL` to match. Its curls use
-  `127.0.0.1`, matching the published host port while `BETTER_AUTH_URL`
-  remains `http://localhost:3002` for application URL generation.
+- **The `image` job's smoke server listens on container port 3002, not 3001.**
+  The self-hosted runner also runs the dev stack (`pnpm dev` holds 3001), so
+  sharing that port would either fail to bind or make the probes hit the dev
+  server. Docker assigns a free loopback host port for the probes so any other
+  host process is also free to use 3002. The boot step keeps
+  `BETTER_AUTH_URL=http://localhost:3002` because 3002 is still the
+  application's internal port.
 - **The web build inside the `image` job's Docker build caps Node's heap.**
   The CI Docker VM is small, so `apps/server/Dockerfile` runs the Vite build
   under a measured `NODE_OPTIONS` via the `WEB_BUILD_NODE_OPTIONS` ARG — if a
