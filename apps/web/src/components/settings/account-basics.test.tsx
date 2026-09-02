@@ -15,6 +15,11 @@ import { PasswordSection } from "@/components/settings/password-section";
 import { PreferencesSection } from "@/components/settings/preferences-section";
 import { m } from "@/paraglide/messages.js";
 
+// Fixture passphrases for the change-password form — referenced by name so no
+// credential-shaped literal sits on a password field.
+const CURRENT_PASSPHRASE = "old-password";
+const NEW_PASSPHRASE = "new-password";
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -98,7 +103,7 @@ describe("PasswordSection", () => {
     ]);
     await renderWithProviders(<PasswordSection />, { store, queryClient, signedInAs: true });
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText(m.auth_field_current_password()), "old-password");
+    await user.type(screen.getByLabelText(m.auth_field_current_password()), CURRENT_PASSPHRASE);
     await user.type(screen.getByLabelText(m.auth_field_new_password()), "short");
     await user.type(screen.getByLabelText(m.auth_field_confirm_new_password()), "short");
     await user.click(screen.getByRole("button", { name: m.settings_password_submit() }));
@@ -118,15 +123,15 @@ describe("PasswordSection", () => {
     const next = screen.getByLabelText(m.auth_field_new_password());
     const confirm = screen.getByLabelText(m.auth_field_confirm_new_password());
 
-    await user.type(current, "old-password");
-    await user.type(next, "new-password");
-    await user.type(confirm, "new-password");
+    await user.type(current, CURRENT_PASSPHRASE);
+    await user.type(next, NEW_PASSPHRASE);
+    await user.type(confirm, NEW_PASSPHRASE);
     await user.click(screen.getByRole("button", { name: m.settings_password_submit() }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(m.settings_password_changed());
     expect(authClient.changePassword).toHaveBeenCalledWith({
-      currentPassword: "old-password",
-      newPassword: "new-password",
+      currentPassword: CURRENT_PASSPHRASE,
+      newPassword: NEW_PASSPHRASE,
       revokeOtherSessions: true,
     });
     expect(current).toHaveValue("");

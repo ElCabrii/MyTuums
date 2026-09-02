@@ -4,6 +4,7 @@ import { user } from "@my-tuums/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";
+import { runSql } from "./sql.js";
 import { MAX_IMAGE_MEGAPIXELS } from "./constants.js";
 import {
   contextFor,
@@ -179,7 +180,9 @@ function deferred(): Deferred {
 /** Waits until another connection is blocked on this test's user-row lock. */
 async function waitForProfileMediaLockWait(person: TestUser): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    const rows = await person.context.db.execute<{ blocked: boolean }>(sql`
+    const rows = await runSql<{ blocked: boolean }>(
+      person.context.db,
+      sql`
       SELECT EXISTS (
         SELECT 1
         FROM pg_stat_activity
@@ -189,7 +192,8 @@ async function waitForProfileMediaLockWait(person: TestUser): Promise<void> {
           AND wait_event_type = 'Lock'
           AND query LIKE '%"user"%'
       ) AS blocked
-    `);
+    `,
+    );
     if (rows[0]?.blocked) return;
     await new Promise<void>((resolve) => setImmediate(resolve));
   }

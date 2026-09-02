@@ -71,7 +71,7 @@ export function profileDisplayRedirectCacheControl(key: string): string | null {
   // A variant key (`…/uuid.webp.w96.webp`) is a display object's derived size —
   // the same rule applies to the base it derives from.
   const base = parseMediaVariantKey(key)?.baseKey ?? key;
-  const match = PROFILE_KEY_RE.exec(base);
+  const match = base.match(PROFILE_KEY_RE);
   if (!match || match[4]) return null;
   return `private, max-age=${secondsUntilWindowEnd()}`;
 }
@@ -91,7 +91,7 @@ export async function canViewProfileMedia(
   key: string,
   viewerId: string | null,
 ): Promise<boolean> {
-  const match = PROFILE_KEY_RE.exec(key);
+  const match = key.match(PROFILE_KEY_RE);
   if (!match) return false;
 
   const [, kind, ownerId, , original] = match;

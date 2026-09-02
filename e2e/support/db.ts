@@ -2,6 +2,10 @@ import { createHmac } from "node:crypto";
 import { and, desc, eq, like, sql } from "drizzle-orm";
 import { assertTestDatabase, databaseNameOf, resolveTestDatabaseUrl } from "@my-tuums/db/testing";
 import type { UserRole } from "@my-tuums/api/roles";
+// Static on purpose: this module has no runtime imports, so evaluating it
+// cannot trip @my-tuums/db's module-scope DATABASE_URL check before the
+// fix-up below has run.
+import { runSql } from "@my-tuums/api/sql";
 import { normalizeUsername } from "@my-tuums/auth/rules";
 import { E2E } from "../playwright.config";
 import { legalConsentBody } from "./users";
@@ -481,7 +485,9 @@ export async function truncateAll(): Promise<void> {
   const db = await getDb();
   const schema = await schemaModulePromise;
 
-  await db.execute(sql`
+  await runSql(
+    db,
+    sql`
     truncate table
       ${schema.postLike}, ${schema.follow}, ${schema.report},
       ${schema.userBlock}, ${schema.appeal}, ${schema.moderationAction},
@@ -491,7 +497,8 @@ export async function truncateAll(): Promise<void> {
       ${schema.rateLimit}, ${schema.twoFactor}, ${schema.passkey},
       ${schema.user}
     cascade
-  `);
+  `,
+  );
 
   await purgeUploadedImages();
 }

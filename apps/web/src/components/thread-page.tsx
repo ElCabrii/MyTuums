@@ -13,7 +13,7 @@ import { postFeedAtom } from "@/atoms/post-feed";
 import { threadAtomFamily } from "@/atoms/thread";
 import { useDocumentHead } from "@/hooks/use-document-head";
 import { postPageDescription, postPageName } from "@/lib/document-head";
-import { sanitizeRedirect } from "@/lib/redirect";
+import { sanitizeDestination } from "@/lib/redirect";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
@@ -129,7 +129,7 @@ export function ThreadPage() {
           <p className="text-muted-foreground border-border/60 rounded-lg border border-dashed p-4 text-sm">
             <Link
               to="/login"
-              search={{ redirect: sanitizeRedirect(href) ?? undefined }}
+              search={{ redirect: sanitizeDestination(href) ?? undefined }}
               className="text-link font-medium underline underline-offset-2"
             >
               {m.auth_login_link()}

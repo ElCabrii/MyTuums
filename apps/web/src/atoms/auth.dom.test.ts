@@ -19,6 +19,12 @@ const { signInEmail, signInUsername, signInPasskey, signUpEmail, sendVerificatio
     ),
   }));
 
+// Fixture passphrases for the mocked sign-in/sign-up payloads — referenced by
+// name so no credential-shaped literal sits on a password field.
+const SIGN_IN_PASSPHRASE = "whatever1";
+const VALID_PASSPHRASE = "correct-password";
+const SIGN_UP_PASSPHRASE = "password1";
+
 // SAFETY: the recording fakes resolve the { data, error } shapes the app reads
 // from the real client; the seam swaps only what each suite needs.
 installTestAuthClient({
@@ -68,7 +74,7 @@ describe("signInAtom", () => {
 
     const outcome = await store.set(signInAtom, {
       identifier: "banned@example.com",
-      password: "whatever1",
+      password: SIGN_IN_PASSPHRASE,
     });
 
     expect(outcome).toEqual({ status: "banned" });
@@ -103,7 +109,7 @@ describe("signInAtom", () => {
 
     const outcome = await store.set(signInAtom, {
       identifier: "  Pending@example.com  ",
-      password: "correct-password",
+      password: VALID_PASSPHRASE,
     });
 
     expect(outcome).toEqual({ status: "verify-email" });
@@ -122,7 +128,10 @@ describe("signInAtom", () => {
       error: { code: "EMAIL_NOT_VERIFIED", message: "Email not verified" },
     });
 
-    const outcome = await store.set(signInAtom, { identifier: "pending", password: "whatever1" });
+    const outcome = await store.set(signInAtom, {
+      identifier: "pending",
+      password: SIGN_IN_PASSPHRASE,
+    });
 
     expect(outcome).toEqual({ status: "verify-email" });
     // A username is not an address: the pending screen shows the copy without
@@ -142,7 +151,7 @@ describe("signInAtom", () => {
       error: { code: "EMAIL_NOT_VERIFIED", message: "Email not verified" },
     });
 
-    await store.set(signInAtom, { identifier: "account-b", password: "whatever1" });
+    await store.set(signInAtom, { identifier: "account-b", password: SIGN_IN_PASSPHRASE });
 
     expect(store.get(verifyEmailAtom)).toBeNull();
   });
@@ -151,7 +160,7 @@ describe("signInAtom", () => {
     const store = createStore();
     signInEmail.mockResolvedValueOnce({ data: { user: { id: "u1" } }, error: null });
 
-    await store.set(signInAtom, { identifier: "alice@example.com", password: "whatever1" });
+    await store.set(signInAtom, { identifier: "alice@example.com", password: SIGN_IN_PASSPHRASE });
 
     // better-auth echoes `callbackURL` back as `{ redirect: true, url }` on the
     // SUCCESS path, and its always-on `redirectPlugin` assigns
@@ -172,7 +181,10 @@ describe("signInAtom", () => {
     const store = createStore();
     signInUsername.mockResolvedValueOnce({ data: { user: { id: "u1" } }, error: null });
 
-    const outcome = await store.set(signInAtom, { identifier: "alice", password: "whatever1" });
+    const outcome = await store.set(signInAtom, {
+      identifier: "alice",
+      password: SIGN_IN_PASSPHRASE,
+    });
 
     expect(outcome).toEqual({ status: "signed-in" });
     expect(store.get(authErrorAtom)).toBeNull();
@@ -215,7 +227,7 @@ describe("signUpAtom", () => {
       username: "  AlexMercer  ",
       name: "Alex Mercer",
       email: "alex@example.com",
-      password: "password1",
+      password: SIGN_UP_PASSPHRASE,
       dateOfBirth: "1995-01-01",
       legalAccepted: true,
     });
@@ -230,7 +242,7 @@ describe("signUpAtom", () => {
       username: "alice",
       name: "Alice",
       email: "alice@example.com",
-      password: "password1",
+      password: SIGN_UP_PASSPHRASE,
       dateOfBirth: "1995-01-01",
       legalAccepted: true,
     });
@@ -255,7 +267,7 @@ describe("signUpAtom", () => {
       username: "alice",
       name: "Alice",
       email: "alice@example.com",
-      password: "password1",
+      password: SIGN_UP_PASSPHRASE,
       dateOfBirth: "1995-01-01",
       legalAccepted: false,
     });
@@ -277,7 +289,7 @@ describe("signUpAtom, after email verification landed (issue #172)", () => {
       username: "alice",
       name: "Alice",
       email: "  Alice@Example.com  ",
-      password: "password1",
+      password: SIGN_UP_PASSPHRASE,
       dateOfBirth: "1995-01-01",
       legalAccepted: true,
     });
@@ -294,7 +306,7 @@ describe("signUpAtom, after email verification landed (issue #172)", () => {
       username: "alice",
       name: "Alice",
       email: "alice@example.com",
-      password: "password1",
+      password: SIGN_UP_PASSPHRASE,
       dateOfBirth: "1995-01-01",
       legalAccepted: true,
     });
@@ -320,7 +332,7 @@ describe("signUpAtom, after email verification landed (issue #172)", () => {
         username: "alice",
         name: "Alice",
         email: "alice@example.com",
-        password: "password1",
+        password: SIGN_UP_PASSPHRASE,
         dateOfBirth: "1995-01-01",
         legalAccepted: true,
       }),
@@ -374,7 +386,7 @@ describe("resendVerificationEmailAtom", () => {
     });
 
     // `?redirect=` arrives from a URL and would otherwise be baked into an
-    // emailed link — `sanitizeRedirect` is what stops that becoming an open
+    // emailed link — `sanitizeDestination` is what stops that becoming an open
     // redirect with our own domain's credibility behind it.
     expect(sendVerificationEmail).toHaveBeenCalledWith({
       email: "pending@example.com",

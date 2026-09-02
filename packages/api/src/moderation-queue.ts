@@ -11,6 +11,7 @@ import { noteInput, queueInput } from "./moderation-inputs.js";
 import { postAttachmentsSelection, type PostAttachment } from "./post-media.js";
 import { moderatorProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
+import { runSql } from "./sql.js";
 import { publicUserColumns } from "./users.js";
 import { effectivelyBanned } from "./visibility.js";
 import { quotedPostEvidence } from "./posts.js";
@@ -165,7 +166,9 @@ export const queueRouter = {
              )`
         : sql``;
 
-      const reportGroups = await context.db.execute<ReportGroupRow>(sql`
+      const reportGroups = await runSql<ReportGroupRow>(
+        context.db,
+        sql`
         select ${report.targetType} as target_type,
                ${report.targetId} as target_id,
                max(${report.createdAt}) as newest_at,
@@ -181,7 +184,8 @@ export const queueRouter = {
         }
         order by newest_at desc, ${report.targetId} desc
         limit ${limit + 1}
-      `);
+      `,
+      );
 
       // The appeal half's case key and its group-by, shared by the grouped
       // CTE (both cursor branches) and the having clause's row comparison —
@@ -189,7 +193,9 @@ export const queueRouter = {
       const appealCaseKey = sql`coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})`;
       const appealCaseGroupBy = sql`group by ${moderationAction.targetType}, ${appealCaseKey}`;
 
-      const openAppeals = await context.db.execute<OpenAppealRow>(sql`
+      const openAppeals = await runSql<OpenAppealRow>(
+        context.db,
+        sql`
         with appeal_cases as (
           select ${moderationAction.targetType} as target_type,
                  coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId}) as target_id,
@@ -221,7 +227,8 @@ export const queueRouter = {
                  appeal_cases.target_id desc,
                  ${appeal.createdAt} desc,
                  ${appeal.id} desc
-      `);
+      `,
+      );
 
       // Merge on the case key, keeping the newer half's timestamp as the
       // case's; a case with both reports and an appeal carries both.

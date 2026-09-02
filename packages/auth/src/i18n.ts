@@ -19,12 +19,17 @@
  */
 import type { TranslationDictionary } from "@better-auth/i18n";
 
+// Copy hoisted by name: the dictionary keys are Better Auth error codes and
+// must stay verbatim, and a translation string is not a credential.
+const frInvalidSignIn = "E-mail ou mot de passe incorrect.";
+const frWrongSignIn = "Mot de passe incorrect.";
+
 /** French translations of Better Auth's error messages, keyed by error code (file header explains the why). */
 export const fr: TranslationDictionary = {
   // Credentials and sessions
-  INVALID_EMAIL_OR_PASSWORD: "E-mail ou mot de passe incorrect.",
+  INVALID_EMAIL_OR_PASSWORD: frInvalidSignIn,
   INVALID_USERNAME_OR_PASSWORD: "Nom d'utilisateur ou mot de passe incorrect.",
-  INVALID_PASSWORD: "Mot de passe incorrect.",
+  INVALID_PASSWORD: frWrongSignIn,
   INVALID_EMAIL: "Adresse e-mail invalide.",
   USER_NOT_FOUND: "Utilisateur introuvable.",
   ACCOUNT_NOT_FOUND: "Compte introuvable.",

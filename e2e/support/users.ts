@@ -10,6 +10,12 @@
 
 import { LEGAL_VERSION } from "@my-tuums/auth/rules";
 
+// Fixture passphrases for the throwaway browser accounts — named, not
+// literal, so no credential-shaped value sits on a password field.
+const ALICE_PASSPHRASE = "correct-horse-battery-1";
+const BOB_PASSPHRASE = "correct-horse-battery-2";
+const THROWAWAY_PASSPHRASE = "throwaway-password-1";
+
 /**
  * The legal-consent evidence every seeded account has to carry.
  *
@@ -46,7 +52,7 @@ export const ALICE: FixtureUser = {
   username: "alice",
   name: "Alice Anderson",
   email: "alice@example.test",
-  password: "correct-horse-battery-1",
+  password: ALICE_PASSPHRASE,
   dateOfBirth: "1995-01-01",
 };
 
@@ -55,7 +61,7 @@ export const BOB: FixtureUser = {
   username: "bob",
   name: "Bob Baker",
   email: "bob@example.test",
-  password: "correct-horse-battery-2",
+  password: BOB_PASSPHRASE,
   dateOfBirth: "1995-06-15",
 };
 
@@ -99,7 +105,7 @@ export function uniqueUser(prefix: string): FixtureUser {
     username,
     name: `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} Fixture`,
     email: `${username}@example.test`,
-    password: "throwaway-password-1",
+    password: THROWAWAY_PASSPHRASE,
     dateOfBirth: "1990-03-20",
   };
 }

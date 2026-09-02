@@ -31,6 +31,10 @@
     "./roles": {
       "types": "./src/roles.ts",
       "default": "./src/roles.ts"
+    },
+    "./sql": {
+      "types": "./src/sql.ts",
+      "default": "./src/sql.ts"
     }
   },
   "scripts": {

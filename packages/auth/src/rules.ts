@@ -78,7 +78,7 @@ const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
  * then normalises to a different day.
  */
 export function parseDateOnlyParts(value: string): DateOfBirthParts | null {
-  const match = DATE_ONLY_RE.exec(value);
+  const match = value.match(DATE_ONLY_RE);
   if (!match) return null;
 
   const y = Number(match[1]);

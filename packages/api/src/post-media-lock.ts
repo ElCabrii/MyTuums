@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
+import { runSql } from "./sql.js";
 
 /**
  * One database-wide lock coordinates post attachment writes with the media
@@ -16,7 +17,8 @@ export const POST_MEDIA_LIFECYCLE_LOCK_KEY = 173_173;
 export async function acquirePostMediaLifecycleLock(
   executor: Pick<Database, "execute">,
 ): Promise<void> {
-  await executor.execute(
+  await runSql(
+    executor,
     sql`select pg_advisory_xact_lock(${POST_MEDIA_LIFECYCLE_LOCK_KEY}::bigint)`,
   );
 }

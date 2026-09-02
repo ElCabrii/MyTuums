@@ -28,6 +28,7 @@ import type { Context } from "./context.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { acquireRelationshipLock } from "./relationship-lock.js";
 import { appRouter } from "./router.js";
+import { runSql } from "./sql.js";
 import {
   anonContext,
   contextFor,
@@ -74,7 +75,8 @@ async function moderatorUser(): Promise<TestUser> {
  */
 async function waitForAdvisoryLockWaiter(): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    const rows = await anonContext.db.execute<{ waiting: number }>(
+    const rows = await runSql<{ waiting: number }>(
+      anonContext.db,
       sql`select count(*)::int as waiting from pg_locks where locktype = 'advisory' and not granted`,
     );
     if (Number(rows[0]?.waiting ?? 0) > 0) return;
@@ -85,7 +87,9 @@ async function waitForAdvisoryLockWaiter(): Promise<void> {
 /** Waits until a moderation effect is blocked on the held post row. */
 async function waitForPostRowLockWaiter(): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    const rows = await anonContext.db.execute<{ blocked: boolean }>(sql`
+    const rows = await runSql<{ blocked: boolean }>(
+      anonContext.db,
+      sql`
       select exists (
         select 1
         from pg_stat_activity
@@ -96,7 +100,8 @@ async function waitForPostRowLockWaiter(): Promise<void> {
           and query ilike '%for update%'
           and query ilike '%post%'
       ) as blocked
-    `);
+    `,
+    );
     if (rows[0]?.blocked) return;
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
@@ -291,12 +296,15 @@ async function walkAllAuditPages(context: Context, limit?: number): Promise<stri
 
 /** The queue's expected content, computed straight from the DB: every unresolved report group's key. */
 async function openCaseKeysFromDb(): Promise<string[]> {
-  const rows = await anonContext.db.execute<{ target_type: string; target_id: string }>(sql`
+  const rows = await runSql<{ target_type: string; target_id: string }>(
+    anonContext.db,
+    sql`
     select ${report.targetType} as target_type, ${report.targetId} as target_id
     from ${report}
     where ${report.resolvedAt} is null
     group by ${report.targetType}, ${report.targetId}
-  `);
+  `,
+  );
   return rows.map((row) => `${row.target_type}:${row.target_id}`);
 }
 
@@ -949,13 +957,16 @@ describe("queue", () => {
 
     const walked = await walkAllQueuePages(contextFor(mod), 1);
     const expectedOrder = (
-      await anonContext.db.execute<{ target_id: string }>(sql`
+      await runSql<{ target_id: string }>(
+        anonContext.db,
+        sql`
         select ${report.targetId} as target_id
         from ${report}
         where ${report.resolvedAt} is null
         group by ${report.targetType}, ${report.targetId}
         order by max(${report.createdAt}) desc, ${report.targetId} desc
-      `)
+      `,
+      )
     ).map((row) => row.target_id);
     expect(walked.map((k) => k.targetId)).toEqual(expectedOrder);
 
@@ -3873,9 +3884,15 @@ function interpolatedSql(query: CapturedQuery): string {
 
 /** Runs EXPLAIN against captured SQL and returns the planner's text lines. */
 async function explainPlan(db: Database, query: CapturedQuery): Promise<string> {
-  const rows = await db.execute<{ "QUERY PLAN": string }>(
-    sql.raw(`explain ${interpolatedSql(query)}`),
-  );
+  // `unsafe` is EXPLAIN-only: the text is Drizzle's own captured query with
+  // its captured parameters re-interpolated by `interpolatedSql` (zod-
+  // validated, quote-escaped) — never caller-controlled input.
+  // SAFETY: an EXPLAIN answers with one `"QUERY PLAN": string` column per
+  // row; postgres.js types `unsafe` as unshaped rows, so the cast only names
+  // the shape Postgres documents for this statement.
+  const rows = (await db.$client.unsafe(`explain ${interpolatedSql(query)}`)) as {
+    "QUERY PLAN": string;
+  }[];
   return rows.map((row) => row["QUERY PLAN"]).join("\n");
 }
 
@@ -3896,7 +3913,9 @@ describe("moderation_action_target_idx reachability", () => {
     // the index over a seq scan — a handful of fixture rows would never
     // show the regression this test exists for.
     try {
-      await anonContext.db.execute(sql`
+      await runSql(
+        anonContext.db,
+        sql`
         insert into ${moderationAction}
           (action, target_type, target_post_id, target_user_id, reason, note, details, created_at)
         select 'post_removed', 'post',
@@ -3904,8 +3923,9 @@ describe("moderation_action_target_idx reachability", () => {
                null, 'fixture', 'index-plan-fixture', '{}',
                now() - (i || ' seconds')::interval
         from generate_series(1, 20000) as i
-      `);
-      await anonContext.db.execute(sql`analyze "moderation_action"`);
+      `,
+      );
+      await runSql(anonContext.db, sql`analyze "moderation_action"`);
 
       const captured: CapturedQuery[] = [];
       const capturedDb = capturingDb(anonContext.db, (query) => captured.push(query));
@@ -3951,7 +3971,7 @@ describe("moderation_action_target_idx reachability", () => {
         .update(moderationAction)
         .set({ createdAt: new Date(Date.now() - 30 * 86_400_000) })
         .where(eq(moderationAction.id, removal.id));
-      await anonContext.db.execute(sql`analyze "moderation_action"`);
+      await runSql(anonContext.db, sql`analyze "moderation_action"`);
 
       captured.length = 0;
       await call(

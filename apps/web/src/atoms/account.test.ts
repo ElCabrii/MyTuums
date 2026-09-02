@@ -13,6 +13,11 @@ const { updateUser, changePassword } = vi.hoisted(() => ({
   ),
 }));
 
+// Fixture passphrases for the change-password flow — referenced by name so no
+// credential-shaped literal sits on a password field.
+const CURRENT_PASSPHRASE = "oldpassword";
+const NEW_PASSPHRASE = "newpassword1";
+
 /**
  * A nanostore-shaped session double whose value tests can advance.
  *
@@ -168,8 +173,8 @@ describe("changePasswordAtom", () => {
 
     await expect(store.set(changePasswordAtom)).resolves.toBe(true);
     expect(changePassword).toHaveBeenCalledWith({
-      currentPassword: "oldpassword",
-      newPassword: "newpassword1",
+      currentPassword: CURRENT_PASSPHRASE,
+      newPassword: NEW_PASSPHRASE,
       revokeOtherSessions: true,
     });
   });

@@ -25,7 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Post } from "@/lib/orpc";
-import { sanitizeRedirect } from "@/lib/redirect";
+import { sanitizeDestination } from "@/lib/redirect";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
@@ -643,7 +643,7 @@ export function PostCard({
                 <span className={actionControlClass}>{likeContent}</span>
                 <Link
                   to="/login"
-                  search={{ redirect: sanitizeRedirect(href) ?? undefined }}
+                  search={{ redirect: sanitizeDestination(href) ?? undefined }}
                   onClick={(e) => e.stopPropagation()}
                   className="text-link font-medium underline underline-offset-2"
                 >
