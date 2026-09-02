@@ -20,7 +20,7 @@ import type { Context } from "./context.js";
 import { appRouter } from "./router.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { resolveLinkCard } from "./link-card.js";
-import type { LinkFetchTransport } from "./link-card-http.js";
+import { createLinkFetchTransport, type LinkFetchTransport } from "./link-card-http.js";
 import {
   anonContext,
   contextFor,
@@ -150,6 +150,49 @@ describe("post.linkCard", () => {
       .from(linkCard)
       .where(eq(linkCard.url, "http://192.168.1.10/admin"));
     expect(row?.title ?? null).toBeNull();
+  });
+
+  it("the transport's own fetch refuses a loopback connect — the rebinding backstop holds without the pre-flight", async () => {
+    // The pins above prove `guardedLinkFetch` refuses before fetching; this
+    // one proves the SECOND layer: the default transport's fetch rides a
+    // dispatcher whose connect-time lookup re-applies the range table, so
+    // even a resolver answer the pre-flight never saw cannot open a socket
+    // to loopback. A rebinding DNS server exploits exactly that gap — a
+    // public answer for the check, a private one for the connect — and this
+    // is the closest a test without a hostile resolver can get to it: call
+    // fetch directly, with no pre-flight, against a name that re-resolves
+    // to 127.0.0.1.
+    let requests = 0;
+    const server: Server = await new Promise((resolve) => {
+      const listener = createServer((req, res) => {
+        requests += 1;
+        res.writeHead(200, { "content-type": "text/html" });
+        res.end(OG_PAGE);
+      });
+      listener.listen(0, "127.0.0.1", () => resolve(listener));
+    });
+    // SAFETY: the listener is bound and listening by the time the listen
+    // callback runs, so `address()` is the non-null AddressInfo form.
+    const port = (server.address() as { port: number }).port;
+
+    try {
+      const transport = createLinkFetchTransport();
+      const settled = await transport
+        .fetch(new URL(`http://localhost:${port}/page`), {
+          signal: new AbortController().signal,
+        })
+        .then(
+          () => undefined,
+          (error: Error) => error,
+        );
+      expect(settled).toBeInstanceOf(Error);
+      const cause = settled instanceof Error ? settled.cause : undefined;
+      expect(cause).toBeInstanceOf(Error);
+      expect(cause instanceof Error ? cause.message : "").toContain("connect-time");
+      expect(requests).toBe(0);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("rejects a non-http(s) URL at the input schema", async () => {
