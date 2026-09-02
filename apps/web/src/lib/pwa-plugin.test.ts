@@ -49,7 +49,7 @@ function serviceWorkerHarness(initialShell: Response, shell: string[] = ["/"]) {
     },
   };
 
-  runInVmSandbox(serviceWorkerSource("mytuums-shell-test", shell), {
+  runInVmSandbox(serviceWorkerSource("mytuums-shell-test", "mytuums-runtime-test", shell), {
     Response,
     URL,
     caches,
@@ -135,7 +135,7 @@ describe("generated service worker navigation caching", () => {
 describe("generated service worker subresource handling", () => {
   const shell = ["/", "/mytuums.svg", "/assets/index-B5y7ISu1.js"];
 
-  it("serves the precached shell but leaves everything else to the browser", () => {
+  it("serves the precached shell; /media and /rpc stay with the browser", () => {
     const harness = serviceWorkerHarness(responseAt("/", "cached shell", "text/html"), shell);
 
     expect(harness.intercepts("/assets/index-B5y7ISu1.js")).toBe(true);
@@ -145,6 +145,14 @@ describe("generated service worker subresource handling", () => {
     // the worker turns an img-src load into a connect-src one the CSP blocks.
     expect(harness.intercepts("/media/posts/42/photo.webp")).toBe(false);
     expect(harness.intercepts("/rpc/posts.feed")).toBe(false);
-    expect(harness.intercepts("/assets/index-DifferentBuild.js")).toBe(false);
+  });
+
+  it("runtime-caches a non-precached hashed asset — the on-demand half of the 0.4.0 split", () => {
+    // Route chunks no longer precache at install (that precache undid the
+    // router's route splitting); a visited route's chunk is fetched once and
+    // remembered, so the second visit works offline.
+    const harness = serviceWorkerHarness(responseAt("/", "cached shell", "text/html"), shell);
+
+    expect(harness.intercepts("/assets/login-DifferentBuild.js")).toBe(true);
   });
 });

@@ -33,7 +33,7 @@ export function Features() {
   return (
     <section id="features" className="border-border/60 scroll-mt-14 border-t">
       <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6">
-        <p className="text-primary text-sm font-medium">{m.features_kicker()}</p>
+        <p className="text-primary dark:text-link text-sm font-medium">{m.features_kicker()}</p>
         <h2 className="mt-2 text-3xl font-bold tracking-tight text-balance sm:text-4xl">
           {m.features_title()}
         </h2>
@@ -41,7 +41,10 @@ export function Features() {
         <ul className="divide-border/60 border-border/60 mt-10 divide-y border-y">
           {FEATURES.map(({ icon: Icon, title, text }) => (
             <li key={title()} className="flex gap-4 py-5 sm:gap-6 sm:py-6">
-              <Icon aria-hidden="true" className="text-primary mt-0.5 size-5 shrink-0" />
+              <Icon
+                aria-hidden="true"
+                className="text-primary dark:text-link mt-0.5 size-5 shrink-0"
+              />
               <div className="min-w-0 sm:flex sm:w-full sm:items-baseline sm:gap-6">
                 <h3 className="shrink-0 font-semibold sm:w-64">{title()}</h3>
                 <p className="text-muted-foreground mt-1 text-sm leading-relaxed sm:mt-0">

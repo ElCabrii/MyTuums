@@ -159,10 +159,29 @@ describe("post.linkCard", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
-  it("refuses an unauthenticated caller — no anonymous outbound fetch", async () => {
-    await expect(
-      call(appRouter.post.linkCard, { url: url("/auth") }, { context: anonContext }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  it("serves an unauthenticated caller the card a public permalink renders (0.4.0)", async () => {
+    // linkCard became session-optional with the public post permalink: an
+    // anonymous reader resolves the same cached card a feed does, and the
+    // outbound fetch behind a miss stays bounded by the transport scripted
+    // below (in production: the SSRF guard, size/time caps and the IP-keyed
+    // rate limit) — and can only be spent on a URL off a readable post.
+    const transport = scriptedTransport({ html: () => OG_PAGE, image: () => PNG_BYTES });
+    const result = await call(
+      appRouter.post.linkCard,
+      { url: url("/auth") },
+      { context: { ...anonContext, linkTransport: transport } },
+    );
+
+    expect(result.card).not.toBeNull();
+    // The negative-cache and single-fetch-per-window rules apply to the
+    // anonymous caller exactly as to a signed-in one.
+    await call(
+      appRouter.post.linkCard,
+      { url: url("/auth") },
+      { context: { ...anonContext, linkTransport: transport } },
+    );
+    expect(transport.htmlRequests).toBe(1);
+    expect(transport.imageRequests).toBe(1);
   });
 
   it("returns the card, stores the lead image under /media/, and fetches the URL only once per window", async () => {

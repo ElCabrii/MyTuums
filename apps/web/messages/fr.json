@@ -312,6 +312,7 @@
   "post_bookmark": "Ajouter aux favoris",
   "post_unbookmark": "Retirer des favoris",
   "post_title": "Publication",
+  "thread_sign_in_prompt": "pour répondre, aimer, repartager ou enregistrer ce fil.",
   "post_not_found": "Publication introuvable",
   "post_not_found_hint": "Cette publication a peut-être été supprimée ou le lien est incorrect.",
   "post_load_error": "Impossible de charger cette publication",

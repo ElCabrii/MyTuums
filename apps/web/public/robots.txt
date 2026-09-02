@@ -1,7 +1,13 @@
-# The app itself is private: every main-content route 302s a signed-out
-# crawler to /login before any HTML ships (see SIGNED_OUT_PATHS in
-# packages/api/src/constants.ts), so there is nothing to disallow — only the
-# public auth and legal pages are indexable. The landing site's sitemap is
+# The app host's crawler/agent policy. The site is private EXCEPT its public
+# surface: the auth and legal pages below, and — since 0.4.0 — every post
+# permalink (/post/<id>) and the media those pages render, which the page and
+# media gates serve to signed-out fetchers too. Everything else still 302s a
+# signed-out crawler to /login before any HTML ships (see SIGNED_OUT_PATHS
+# and isSignedOutPath in packages/api/src/constants.ts), so there is nothing
+# to disallow — privacy is enforced by the gates, not by robots.
+#
+# AI crawlers are allowed on the same terms as search engines: they see
+# exactly the public pages and nothing else. The landing site's sitemap is
 # advertised here too: the Sitemap directive may point across hosts.
 User-agent: *
 Allow: /

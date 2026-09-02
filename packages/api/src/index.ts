@@ -7,6 +7,7 @@
 export { appRouter, type AppRouter } from "./router.js";
 export { createContext, defaultStorage } from "./context.js";
 export { createMediaResolver, type MediaAuthorizer, type MediaResolver } from "./media.js";
+export { ensureMediaVariant } from "./media-variants.js";
 export { canViewPostMedia } from "./post-media.js";
 export { canViewLinkCardMedia } from "./link-card.js";
 export {
@@ -14,4 +15,5 @@ export {
   profileDisplayRedirectCacheControl,
 } from "./profile-media-authorization.js";
 export { objectKeyFromMediaPath } from "./image.js";
+export { publicPostHead, type PublicPostHead } from "./public-post-head.js";
 export type { Storage } from "./storage.js";

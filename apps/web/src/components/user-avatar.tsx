@@ -1,4 +1,5 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { MEDIA_URL_PREFIX, MEDIA_VARIANT_WIDTHS, mediaVariantPath } from "@my-tuums/api/constants";
 import { initialsOf } from "@/lib/user";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,21 @@ interface UserAvatarProps {
 }
 
 /**
+ * The responsive sources for OUR avatars (`/media/avatars/…`): a 96 px
+ * variant for the feed chrome sizes and a 256 px one for the profile header,
+ * both at 2x DPR — generated on demand by the server (see `media-variants.ts`
+ * in `@my-tuums/api`). An OAuth provider's absolute avatar URL returns
+ * `undefined`, and the single `src` stands alone exactly as before — that is
+ * also the graceful path for any non-avatar media path.
+ */
+function avatarSrcSet(image: string | null | undefined): string | undefined {
+  if (!image?.startsWith(MEDIA_URL_PREFIX)) return undefined;
+  return MEDIA_VARIANT_WIDTHS.avatars
+    .map((width) => `${mediaVariantPath(image, width)} ${width}w`)
+    .join(", ");
+}
+
+/**
  * One avatar, rendered the same way everywhere.
  *
  * This existed as five hand-copied `Avatar`/`AvatarImage`/`AvatarFallback`
@@ -50,11 +66,18 @@ export function UserAvatar({
   onImageLoadingStatusChange,
 }: UserAvatarProps) {
   const displayName = user?.name ?? null;
+  // `sizes` is the srcset's other half: without it a browser assumes 100vw
+  // and over-downloads for what is usually a 40 px disc. The profile header
+  // is the largest avatar this app draws (~128 px), so every call site is
+  // covered by the 96/256 pair within it.
+  const src = user?.image || undefined;
 
   return (
     <Avatar className={className}>
       <AvatarImage
-        src={user?.image || undefined}
+        src={src}
+        srcSet={avatarSrcSet(user?.image)}
+        sizes="128px"
         alt={alt ?? displayName ?? ""}
         onLoadingStatusChange={onImageLoadingStatusChange}
       />

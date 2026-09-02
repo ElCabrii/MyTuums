@@ -312,6 +312,7 @@
   "post_bookmark": "Bookmark this post",
   "post_unbookmark": "Remove bookmark",
   "post_title": "Post",
+  "thread_sign_in_prompt": "to reply, like, repost or bookmark this thread.",
   "post_not_found": "Post not found",
   "post_not_found_hint": "This post may have been deleted, or the link may be wrong.",
   "post_load_error": "Could not load this post",

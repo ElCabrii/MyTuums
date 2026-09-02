@@ -7,8 +7,12 @@ behind any of it, see [architecture.md](architecture.md).
 
 MyTuums is a Twitter-style social app: short posts, replies, likes, a follow
 graph, profiles, search, and a moderation system with appeals. **The site is
-private** — every page except a small allowlist requires a session, enforced
-both by the server's page gate and by the client.
+private with one public surface** — everything except the auth/legal pages and
+the `/post/<id>` permalinks requires a session, enforced both by the server's
+page gate and by the client. A signed-out visitor on a permalink reads the
+thread (post, ancestors, replies) with interaction controls replaced by a
+sign-in link; post-level privacy beyond the existing visibility rules is a
+0.5.0 concern.
 
 ## Accounts and authentication
 

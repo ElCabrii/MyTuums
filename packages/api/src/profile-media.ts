@@ -21,7 +21,7 @@ import { ORPCError } from "@orpc/server";
 import type { Database } from "@my-tuums/db";
 import { eq } from "drizzle-orm";
 import { user } from "@my-tuums/db/schema";
-import type { AllowedImageType, ImageKind } from "./constants.js";
+import { mediaVariantKeys, type AllowedImageType, type ImageKind } from "./constants.js";
 import { imageObjectKey, mediaPathFor, objectKeyFromMediaPath } from "./image.js";
 import type { Storage } from "./storage.js";
 
@@ -117,10 +117,15 @@ async function discardPrevious(storage: Storage, previous: PreviousPair | null):
   for (const value of [previous.display, previous.original]) {
     const key = objectKeyFromMediaPath(value);
     if (!key) continue;
-    try {
-      await storage.remove(key);
-    } catch (error) {
-      console.error("Failed to delete replaced image object", key, error);
+    // Display variants go with the display object they derive from; the
+    // reconciler would pair-reap them eventually, but the keys are known
+    // right here, so this is the cheap complete cleanup.
+    for (const objectKey of [key, ...mediaVariantKeys(key)]) {
+      try {
+        await storage.remove(objectKey);
+      } catch (error) {
+        console.error("Failed to delete replaced image object", objectKey, error);
+      }
     }
   }
 }

@@ -1,8 +1,14 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import type { Readable } from "node:stream";
 import path from "node:path";
-import { createBrotliCompress, constants, createGzip } from "node:zlib";
+import {
+  brotliCompressSync,
+  constants,
+  createBrotliCompress,
+  createGzip,
+  gzipSync,
+} from "node:zlib";
 import type { BrotliCompress, Gzip } from "node:zlib";
 import type { IncomingMessage, OutgoingHttpHeaders } from "node:http";
 import { bestEncoding, type Compression } from "./compression.js";
@@ -101,13 +107,34 @@ export type StaticFileHandler = (
 export const noStaticFiles: StaticFileHandler = () => Promise.resolve({ served: false });
 
 /**
+ * Rewrites the SPA's `index.html` for one client route before it is served.
+ *
+ * The one production use is crawler-facing heads (0.4.0): the SPA emits
+ * per-route `<title>`/description/canonical/Open Graph tags only after it
+ * mounts, which a no-JS unfurler never sees, so the server substitutes the
+ * `[data-app-fallback]` head block per route — see `./public-heads.ts`. The
+ * replacement tags carry the same `data-app-fallback` attribute, so the SPA's
+ * own mount effect (`__root.tsx`) still removes them and the route's live
+ * head becomes the single owner.
+ *
+ * Only ever invoked with the request's pathname and the raw `index.html`
+ * contents, for the direct `/index.html` hit and the SPA fallback alike —
+ * the two must not diverge. An implementation that does not recognize the
+ * path returns the input unchanged.
+ */
+export type IndexHtmlTransform = (pathname: string, html: string) => Promise<string>;
+
+/**
  * Creates the static-file handler over a built SPA (`rootDir`): serves real
  * files with per-extension content types and compression, caches `assets/`
  * as immutable, and falls back to `index.html` for extension-less client
  * routes. The production half of the one-origin requirement — wired in
  * `index.ts` only when `WEB_DIST` is set (see the module header).
  */
-export function createStaticFileHandler(rootDir: string): StaticFileHandler {
+export function createStaticFileHandler(
+  rootDir: string,
+  options: { transformIndexHtml?: IndexHtmlTransform } = {},
+): StaticFileHandler {
   const root = path.resolve(rootDir);
   const indexPath = path.join(root, "index.html");
 
@@ -121,6 +148,11 @@ export function createStaticFileHandler(rootDir: string): StaticFileHandler {
     if (requested === null) return { served: false };
 
     const file = (await isFile(requested)) ? requested : null;
+
+    if (file === indexPath && options.transformIndexHtml) {
+      await serveTransformedIndex(req, res, options.transformIndexHtml, root, indexPath);
+      return { served: true };
+    }
 
     if (file) {
       await send(req, res, {
@@ -152,6 +184,14 @@ export function createStaticFileHandler(rootDir: string): StaticFileHandler {
     // deployed site look broken to anything that isn't a browser.
     if (path.extname(requested) !== "") return { served: false };
 
+    if (options.transformIndexHtml) {
+      // Through the same helper as a direct `/index.html` hit: the SPA fallback
+      // serves the identical bytes, so it must carry the identical no-transform
+      // guarantee.
+      await serveTransformedIndex(req, res, options.transformIndexHtml, root, indexPath);
+      return { served: true };
+    }
+
     await send(req, res, {
       headOnly: req.method === "HEAD",
       file: indexPath,
@@ -162,6 +202,34 @@ export function createStaticFileHandler(rootDir: string): StaticFileHandler {
     });
     return { served: true };
   };
+}
+
+/** The one path both index.html serving branches share: transform, then buffer-send. */
+async function serveTransformedIndex(
+  req: IncomingMessage,
+  res: StaticResponse,
+  transformIndexHtml: IndexHtmlTransform,
+  root: string,
+  indexPath: string,
+): Promise<void> {
+  const html = await transformIndexHtml(
+    pathnameOf(req.url ?? "/"),
+    await readFile(indexPath, "utf8"),
+  );
+  sendBuffer(req, res, {
+    headOnly: req.method === "HEAD",
+    body: Buffer.from(html),
+    cacheControl: cacheHeaderFor(root, indexPath),
+  });
+}
+
+/** The decoded pathname of a request, or "/" — what a head transform keys on. */
+function pathnameOf(rawUrl: string): string {
+  try {
+    return decodeURIComponent(new URL(rawUrl, URL_PARSE_BASE).pathname);
+  } catch {
+    return "/";
+  }
 }
 
 /**
@@ -314,4 +382,53 @@ function send(
     last.on("end", resolve);
     last.pipe(res);
   });
+}
+
+/**
+ * The in-memory sibling of `send`, for bodies the server itself produced by
+ * transforming `index.html` — same headers, same compression policy, same
+ * Brotli-quality pinning, just over a Buffer instead of a file stream.
+ *
+ * Synchronous compression on purpose: the transformed HTML is small (~tens of
+ * KiB) and per-request, and the streaming machinery above exists for
+ * multi-hundred-KiB asset files, not for this.
+ */
+function sendBuffer(
+  req: IncomingMessage,
+  res: StaticResponse,
+  options: { headOnly: boolean; body: Buffer; cacheControl: string },
+): void {
+  const { headOnly, body, cacheControl } = options;
+  const encoding = bestEncoding(req.headers["accept-encoding"]);
+
+  // The same named contract `send` above uses, minus the optional members
+  // this path never varies on.
+  interface BufferedHtmlHeaders {
+    [header: string]: string | undefined;
+    "Content-Type": string;
+    "Cache-Control": string;
+    "Content-Length": string;
+  }
+  const headers: BufferedHtmlHeaders = {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": cacheControl,
+    "Content-Length": "",
+  };
+
+  let payload = body;
+  if (encoding === "br") {
+    payload = brotliCompressSync(body, {
+      params: { [constants.BROTLI_PARAM_QUALITY]: 4 },
+    });
+    headers["Content-Encoding"] = "br";
+  } else if (encoding === "gzip") {
+    payload = gzipSync(body);
+    headers["Content-Encoding"] = "gzip";
+  }
+  if (encoding) headers["Vary"] = "Accept-Encoding";
+  headers["Content-Length"] = String(payload.length);
+
+  res.writeHead(200, headers);
+  if (headOnly) res.end();
+  else res.end(payload);
 }

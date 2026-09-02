@@ -70,7 +70,7 @@ export function ProfileLayout() {
   if (profileQuery.isPending) {
     return (
       <div className="flex h-[70vh] items-center justify-center">
-        <Loader2 className="text-primary h-8 w-8 animate-spin motion-reduce:animate-none" />
+        <Loader2 className="text-primary dark:text-link h-8 w-8 animate-spin motion-reduce:animate-none" />
       </div>
     );
   }

@@ -29,18 +29,18 @@ by the Playwright `api` project.
 
 ## Change map
 
-| Intent                                | Primary                                              | Also touch                                                                                                            |
-| ------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Add or reorder an HTTP route          | `src/request-handler.ts`                             | `src/request-handler.test.ts`, `../../e2e/tests/api`                                                                  |
-| Change the branding site              | `apps/branding` (a separate workspace)               | `src/branding-host.ts` only when the hostname itself changes; `src/request-handler.test.ts` pins the branch placement |
-| Change who may reach a page           | `packages/api/src/constants.ts` (`SIGNED_OUT_PATHS`) | never duplicate it — the client gate reads the same set                                                               |
-| Add an environment variable           | `src/env.ts`                                         | `../../.env.example`, `../../docker-compose.yml`, `Dockerfile` if it is a `VITE_*`                                    |
-| Change security or cache headers      | `src/response-decorators.ts`, `src/static-files.ts`  | `../../e2e/tests/api/headers.spec.ts`                                                                                 |
-| Change compression behaviour          | `src/compression.ts`                                 | both call sites: the decorator and static files                                                                       |
-| Change access logging or request ids  | `src/observability.ts`                               | `src/request-handler.ts`                                                                                              |
-| Change error classification/reporting | `src/error-observation.ts`, `src/sentry.ts`          | `src/index.ts`                                                                                                        |
-| Change what ships in the image        | `Dockerfile`                                         | `.github/workflows/ci.yml` (`docker` job asserts it)                                                                  |
-| Change the migration runner           | `src/migrate.ts`                                     | `../../docker-compose.yml`                                                                                            |
+| Intent                                | Primary                                                                  | Also touch                                                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Add or reorder an HTTP route          | `src/request-handler.ts`                                                 | `src/request-handler.test.ts`, `../../e2e/tests/api`                                                                  |
+| Change the branding site              | `apps/branding` (a separate workspace)                                   | `src/branding-host.ts` only when the hostname itself changes; `src/request-handler.test.ts` pins the branch placement |
+| Change who may reach a page           | `packages/api/src/constants.ts` (`SIGNED_OUT_PATHS` + `isSignedOutPath`) | never duplicate it — the client gate reads the same definition                                                        |
+| Add an environment variable           | `src/env.ts`                                                             | `../../.env.example`, `../../docker-compose.yml`, `Dockerfile` if it is a `VITE_*`                                    |
+| Change security or cache headers      | `src/response-decorators.ts`, `src/static-files.ts`                      | `../../e2e/tests/api/headers.spec.ts`                                                                                 |
+| Change compression behaviour          | `src/compression.ts`                                                     | both call sites: the decorator and static files                                                                       |
+| Change access logging or request ids  | `src/observability.ts`                                                   | `src/request-handler.ts`                                                                                              |
+| Change error classification/reporting | `src/error-observation.ts`, `src/sentry.ts`                              | `src/index.ts`                                                                                                        |
+| Change what ships in the image        | `Dockerfile`                                                             | `.github/workflows/ci.yml` (`docker` job asserts it)                                                                  |
+| Change the migration runner           | `src/migrate.ts`                                                         | `../../docker-compose.yml`                                                                                            |
 
 ## Invariants
 
@@ -92,10 +92,11 @@ by the Playwright `api` project.
   Declared bodies above `AUTH_MAX_BODY_BYTES` are rejected immediately;
   lengthless and chunked bodies use the bounded replay path so the adapter
   never becomes an unbounded or competing stream consumer.
-- **`/media` checks the session before parsing the key.** An anonymous caller
-  must not learn which keys are well-formed by watching the response differ.
-  The rejection sets `Cache-Control: no-store`, or a cached 401 keeps an image
-  broken after the visitor signs in.
+- **`/media` is session-optional with per-key authorization.** An anonymous
+  caller (the public post permalink, 0.4.0) proceeds with a null viewer and
+  is answered per key by the resolver's authorizers — owner-only rules stay
+  owner-only. A cookie whose session store cannot be read is a 503, fail
+  closed: authorization needs the database.
 - **The `/media` gate's session lookup stays uncached.** It is a real
   `auth.api.getSession` call because `@my-tuums/auth` runs no session cookie
   cache — a revoked session must stop authenticating immediately. This was
@@ -118,9 +119,10 @@ by the Playwright `api` project.
   are same-origin module scripts, covered by the CSP's `script-src 'self'` —
   but no _inline_ script is allowed anywhere, including its `index.html`.
   HSTS `includeSubDomains` already covers the subdomain, which is intended.
-- **The page gate reads `SIGNED_OUT_PATHS` from `@my-tuums/api/constants`.** A
+- **The page gate reads `isSignedOutPath` from `@my-tuums/api/constants`.** A
   local copy lets the server and client gates disagree and bounce a visitor
-  between them forever. `request-handler.test.ts` pins every member as exempt.
+  between them forever. `request-handler.test.ts` pins every member as exempt
+  and the `/post/` prefix as public.
 - **`path.extname` is checked against the pathname, never the raw URL.** A
   query string can contain a dot, and a crafted one would otherwise make a
   real page look like an asset and skip the gate.

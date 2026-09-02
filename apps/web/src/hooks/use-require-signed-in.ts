@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { SIGNED_OUT_PATHS } from "@my-tuums/api/constants";
+import { isSignedOutPath } from "@my-tuums/api/constants";
 import { isSignedInAtom, sessionErrorAtom, sessionPendingAtom } from "@/atoms/session";
 import { sanitizeDestination } from "@/lib/redirect";
 
@@ -15,7 +15,9 @@ import { sanitizeDestination } from "@/lib/redirect";
 const GATE_CONFIRM_MS = 150;
 
 /**
- * Holds the site behind a signed-in session.
+ * Holds the site behind a signed-in session — except its public surface
+ * (`isSignedOutPath`: the auth/legal pages and, since 0.4.0, the `/post/`
+ * permalinks, which render read-only for a signed-out visitor).
  *
  * Mounted once in `__root.tsx`, so it covers every route rather than the
  * handful that happen to remember to check — the same reasoning as
@@ -53,7 +55,7 @@ export function useRequireSignedIn(): void {
     // from the fetch catch path has no `.status`, so it is blocked too —
     // correct, that one is transient.
     if (sessionError && sessionError.status !== 401) return;
-    if (SIGNED_OUT_PATHS.has(pathname)) return;
+    if (isSignedOutPath(pathname)) return;
 
     const timeout = setTimeout(() => {
       void navigate({

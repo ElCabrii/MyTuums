@@ -39,14 +39,13 @@ export type DocumentHead = {
  * The description argument deliberately defaults to the app description: a
  * route gets its own title immediately, while data-dependent descriptions can
  * be supplied later by the page once its query atom resolves. The Open Graph /
- * Twitter Card mirrors reach only a signed-in, JS-rendering browser: they are
- * emitted by the SPA, while the audience that actually pastes links — search
- * engines and non-JS unfurlers (Slack, Discord, X, Facebook) — never runs it
- * and reads only the static fallback head in index.html. For the main content
- * routes even that is gated: they are absent from `SIGNED_OUT_PATHS`
- * (packages/api/src/constants.ts), so the server 302s every signed-out fetcher
- * to /login before any head could be served. Serving public unfurls would be a
- * product decision, not a head-tag change.
+ * Twitter Card mirrors reach a signed-in, JS-rendering browser directly; for
+ * the no-JS audience (search engines, unfurlers) the SERVER substitutes
+ * route-specific tags into index.html before it ships
+ * (apps/server/src/public-heads.ts) — same shapes, English-only, removed by
+ * the SPA on mount. The main-content routes other than `/post/*` stay gated
+ * to signed-in fetchers (`isSignedOutPath` in packages/api/src/constants.ts),
+ * so their unfurls are the generic fallback by design.
  */
 export function pageHead(
   pageName: string,

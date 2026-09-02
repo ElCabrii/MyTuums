@@ -58,7 +58,9 @@ describe("reconcileMedia", () => {
     expect(deleted).toEqual([ORPHAN_KEY]);
     expect(bucket.has(LIVE_KEY)).toBe(true);
     expect(bucket.has(ORPHAN_KEY)).toBe(false);
-    expect(result).toEqual({ rows: 1, referenced: 1, listed: 2, deleted: 1 });
+    // 1 base avatar + its 2 derivable variant keys — the pairing rule keeps
+    // a variant exactly as long as its base.
+    expect(result).toEqual({ rows: 1, referenced: 3, listed: 2, deleted: 1 });
   });
 
   it("keeps an object uploaded between the listing and the row read (issue #52)", async () => {
@@ -110,7 +112,33 @@ describe("reconcileMedia", () => {
     expect(deleted).toEqual([POST_ORPHAN_KEY]);
     expect(bucket.has(POST_LIVE_KEY)).toBe(true);
     expect(bucket.has(POST_ORPHAN_KEY)).toBe(false);
-    expect(result).toEqual({ rows: 0, referenced: 1, listed: 2, deleted: 1 });
+    // 1 base attachment + its 2 derivable variant keys.
+    expect(result).toEqual({ rows: 0, referenced: 3, listed: 2, deleted: 1 });
+  });
+
+  it("reaps a variant whose base is gone but keeps one whose base survives", async () => {
+    // 0.4.0 on-demand variants: nothing in a row points at a variant key, so
+    // the pairing rule in `addReferenced` is the only thing standing between
+    // a live variant and the orphan sweep.
+    const orphanedVariant = `${POST_LIVE_KEY}.w640.webp`;
+    const liveBaseWithVariant =
+      "posts/alice/aaaaaaaa-0a0a-4a0a-8a0a-aaaaaaaaaaaa/bbbbbbbb-0b0b-4b0b-8b0b-bbbbbbbbbbbb.webp";
+    const liveVariant = `${liveBaseWithVariant}.w1280.webp`;
+    const { bucket, deleted, storage } = fakeBucket([
+      orphanedVariant,
+      liveBaseWithVariant,
+      liveVariant,
+    ]);
+
+    await reconcileMedia({
+      storage,
+      readUserRows: () => Promise.resolve([]),
+      readPostAttachmentRows: () =>
+        Promise.resolve<MediaAttachmentRow[]>([{ mediaPath: `/media/${liveBaseWithVariant}` }]),
+    });
+
+    expect(deleted).toEqual([orphanedVariant]);
+    expect(bucket.has(liveVariant)).toBe(true);
   });
 
   it("reaps post objects after a hard account cascade removes their rows", async () => {

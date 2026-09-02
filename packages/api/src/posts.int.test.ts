@@ -1522,10 +1522,73 @@ describe("post.list", () => {
     expect(new Set(page.items.map((i) => i.id))).toEqual(new Set(postsA.map((p) => p.id)));
   });
 
-  it("rejects an anonymous caller — every mode of list requires a session now, not just 'following' (issue #36)", async () => {
+  it("rejects an anonymous caller on the feed modes — 'global' as much as 'following' (issue #36, kept 0.4.0)", async () => {
+    // The public surface is the post PERMALINK: only the reply modes
+    // (`parentId`/`continuationRootId`) admit an anonymous reader below.
+    // Every feed, profile, search and bookmarks mode still demands a session.
     await expect(call(appRouter.post.list, {}, { context: anonContext })).rejects.toMatchObject({
       code: "UNAUTHORIZED",
     });
+    await expect(
+      call(appRouter.post.list, { feed: "bookmarks" }, { context: anonContext }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(
+      call(appRouter.post.list, { feed: "following" }, { context: anonContext }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("serves an anonymous caller the direct replies of a public post — viewer state all false", async () => {
+    const author = await createTestUser();
+    const replier = await createTestUser();
+    const [root] = await seedPosts(author.id, 1);
+    await call(
+      appRouter.post.create,
+      { content: "public reply", parentId: root.id },
+      { context: contextFor(replier) },
+    );
+    await call(appRouter.post.like, { postId: root.id }, { context: contextFor(replier) });
+
+    const page = await call(appRouter.post.list, { parentId: root.id }, { context: anonContext });
+
+    expect(page.items.map((item) => item.content)).toContain("public reply");
+    // A null viewer has liked, reposted and bookmarked nothing.
+    for (const item of page.items) {
+      expect(item.viewerHasLiked).toBe(false);
+      expect(item.viewerHasReposted).toBe(false);
+      expect(item.viewerHasBookmarked).toBe(false);
+    }
+  });
+
+  it("serves an anonymous caller a public thread, tombstone and all — the signed-in stub treatment", async () => {
+    const author = await createTestUser();
+    const [post] = await seedPosts(author.id, 1);
+
+    const thread = await call(appRouter.post.thread, { postId: post.id }, { context: anonContext });
+    expect(thread.post.id).toBe(post.id);
+    expect(thread.post.viewerHasLiked).toBe(false);
+
+    // A removed post keeps its stub for every reader — an anonymous one sees
+    // exactly what a signed-in non-author sees: the flags, never the content
+    // or the reason.
+    await call(
+      appRouter.moderation.removePost,
+      { postId: post.id, reason: "spam" },
+      { context: contextFor(await moderatorUser()) },
+    );
+    const stub = await call(appRouter.post.thread, { postId: post.id }, { context: anonContext });
+    expect(stub.post.removed).toBe(true);
+    expect(stub.post.content).toBeNull();
+    expect(stub.post.removedReason).toBeNull();
+  });
+
+  it("hides a thread from an anonymous caller when the author is banned — the same visibility as a signed-in reader", async () => {
+    const author = await createTestUser();
+    const [post] = await seedPosts(author.id, 1);
+    await anonContext.db.update(user).set({ banned: true }).where(eq(user.id, author.id));
+
+    await expect(
+      call(appRouter.post.thread, { postId: post.id }, { context: anonContext }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("feed: 'following' returns posts from people you follow, plus your own unconditionally, excluding a stranger's", async () => {

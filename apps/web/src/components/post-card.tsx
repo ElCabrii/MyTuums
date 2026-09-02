@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Bookmark, Heart, MessageCircle, MoreHorizontal, Repeat2 } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Post } from "@/lib/orpc";
+import { sanitizeDestination } from "@/lib/redirect";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
@@ -75,7 +76,7 @@ function QuotedPostCard({ quoted }: { quoted: NonNullable<Post["quoted"]> }) {
             <Link
               to="/appeal"
               search={{ postId: quoted.id }}
-              className="text-primary mt-1 inline-block text-xs hover:underline"
+              className="text-link hover:text-link/80 mt-1 inline-block text-xs underline underline-offset-2"
               onClick={(e) => e.stopPropagation()}
             >
               {m.moderation_post_removed_appeal()}
@@ -126,10 +127,17 @@ function QuotedPostCard({ quoted }: { quoted: NonNullable<Post["quoted"]> }) {
  * count-less ones (quote, bookmark) the same `h-8 w-8` circle the kebab
  * uses. Every glyph therefore leads with the same 8 px of box before its
  * ink, which is what holds the five on one optical line.
+ *
+ * The `after:` pseudo-element widens each control's HIT area to the 44 px
+ * mobile-guidance target without growing its visible footprint: a 32 px box
+ * plus 6 px of transparent margin on each side. It needs the `relative` on
+ * the control to anchor against, and is why the bar's controls can sit
+ * optically close while still being easy to hit.
  */
-const actionControlClass = "flex h-8 items-center gap-1.5 rounded-full px-2 transition-colors";
+const actionControlClass =
+  "relative flex h-8 items-center gap-1.5 rounded-full px-2 transition-colors after:absolute after:-inset-x-1 after:-inset-y-1.5 after:content-['']";
 const actionIconButtonClass =
-  "flex h-8 w-8 items-center justify-center rounded-full transition-colors";
+  "relative flex h-8 w-8 items-center justify-center rounded-full transition-colors after:absolute after:-inset-1.5 after:content-['']";
 
 /**
  * One post rendered as a card — author link, timestamp, content, and the
@@ -140,13 +148,21 @@ export function PostCard({
   post,
   variant = "feed",
   showParentContext = true,
+  priorityImages = false,
 }: {
   post: Post;
   variant?: PostCardVariant;
   /** Whether to render the immediate-parent preview; feed lists choose their surface explicitly. */
   showParentContext?: boolean;
+  /**
+   * Load this card's images eagerly at display width — for the post a cold
+   * visitor's LCP actually lands on (the first feed card, a thread's focused
+   * post). Everything below stays `loading="lazy"`; see `PostAttachmentGrid`.
+   */
+  priorityImages?: boolean;
 }) {
   const navigate = useNavigate();
+  const { href } = useLocation();
   const isSignedIn = useAtomValue(isSignedInAtom);
   // `viewerIdAtom`, not `viewerAtom`: the card only needs "is this my post?",
   // and the full user object gets a new identity on every session refresh —
@@ -245,6 +261,13 @@ export function PostCard({
       ? `px-1 py-2 ${post.unavailable ? "" : "cursor-pointer"}`
       : `p-4 sm:p-5 rounded-xl border border-border bg-card shadow-sm transition-colors ${
           isFocused || post.unavailable ? "" : "hover:border-primary/30 cursor-pointer"
+        }${
+          // Long feeds keep every loaded page in the DOM (no windowing); the
+          // browser skips layout/paint for off-screen cards so scrolling a
+          // deep feed stops costing like a fresh render of everything above.
+          // `contain-intrinsic-size` reserves a representative box so the
+          // scrollbar does not jump as cards enter and leave the viewport.
+          variant === "feed" ? " [content-visibility:auto] [contain-intrinsic-size:auto_320px]" : ""
         }`;
 
   const authorAvatar = (
@@ -466,7 +489,7 @@ export function PostCard({
                 <Link
                   to="/appeal"
                   search={{ postId: post.id }}
-                  className="text-primary inline-block text-xs hover:underline"
+                  className="text-link hover:text-link/80 inline-block text-xs underline underline-offset-2"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {m.moderation_post_removed_appeal()}
@@ -501,7 +524,7 @@ export function PostCard({
                   `PostLinkCard`; for a URL with no card the post is exactly
                   what it was before. */}
               {post.content && linkPreviewUrl && <PostLinkCard url={linkPreviewUrl} />}
-              <PostAttachmentGrid attachments={post.attachments} />
+              <PostAttachmentGrid attachments={post.attachments} priority={priorityImages} />
               {/* The embedded quoted post — a reference, not a reply: rendered
                   inside the card, linked to its own permalink, and degraded by
                   the projection (stub or unavailable) rather than hidden. */}
@@ -516,99 +539,118 @@ export function PostCard({
             </>
           )}
 
-          {!isGone && (
-            // `justify-between` rather than a fixed gap (issue #275): the
-            // five actions spread across the existing `max-w-md` instead of
-            // left-packing with dead space, and the spacing flexes down
-            // gracefully on narrow columns instead of overflowing.
-            <div className="text-muted-foreground flex max-w-md items-center justify-between text-xs">
-              {/* Replying is a navigation, not a mutation — the composer lives
-                   on the thread page — so this is a link, and the focused post
-                   (whose composer is directly below) degrades it to plain text
-                   rather than linking to the page you are on. */}
-              {isFocused ? (
-                <span className={actionControlClass}>{replyContent}</span>
-              ) : (
-                <Link
-                  to="/post/$postId"
-                  params={{ postId: post.id }}
-                  title={m.reply_to_post({ count: String(post.replyCount) })}
-                  aria-label={m.reply_to_post({ count: String(post.replyCount) })}
-                  className={replyLinkClass}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {replyContent}
-                </Link>
-              )}
+          {!isGone &&
+            (isSignedIn ? (
+              // `justify-between` rather than a fixed gap (issue #275): the
+              // five actions spread across the existing `max-w-md` instead of
+              // left-packing with dead space, and the spacing flexes down
+              // gracefully on narrow columns instead of overflowing.
+              <div className="text-muted-foreground flex max-w-md items-center justify-between text-xs">
+                {/* Replying is a navigation, not a mutation — the composer lives
+                     on the thread page — so this is a link, and the focused post
+                     (whose composer is directly below) degrades it to plain text
+                     rather than linking to the page you are on. */}
+                {isFocused ? (
+                  <span className={actionControlClass}>{replyContent}</span>
+                ) : (
+                  <Link
+                    to="/post/$postId"
+                    params={{ postId: post.id }}
+                    title={m.reply_to_post({ count: String(post.replyCount) })}
+                    aria-label={m.reply_to_post({ count: String(post.replyCount) })}
+                    className={replyLinkClass}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {replyContent}
+                  </Link>
+                )}
 
-              {/* Offered only where its event can be shown — see `canRepost`
-                  above: a reply's repost would never render anywhere. */}
-              {canRepost && (
+                {/* Offered only where its event can be shown — see `canRepost`
+                     above: a reply's repost would never render anywhere. */}
+                {canRepost && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleRepost();
+                    }}
+                    aria-pressed={post.viewerHasReposted}
+                    aria-label={
+                      post.viewerHasReposted
+                        ? m.post_unrepost({ count: String(post.repostCount) })
+                        : m.post_repost({ count: String(post.repostCount) })
+                    }
+                    className={repostButtonClass}
+                  >
+                    {repostContent}
+                  </button>
+                )}
+
+                {/* Quoting opens the app-wide dialog (mounted at the root like
+                    the delete confirmation): a quote is composed from anywhere a
+                    card renders, not only from the thread page. */}
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    toggleRepost();
+                    setQuoteDialog(post);
                   }}
-                  aria-pressed={post.viewerHasReposted}
-                  aria-label={
-                    post.viewerHasReposted
-                      ? m.post_unrepost({ count: String(post.repostCount) })
-                      : m.post_repost({ count: String(post.repostCount) })
-                  }
-                  className={repostButtonClass}
+                  aria-label={m.post_quote()}
+                  title={m.post_quote()}
+                  className={`${actionIconButtonClass} hover:text-primary`}
                 >
-                  {repostContent}
+                  <QuotePostIcon className="h-4 w-4" />
                 </button>
-              )}
 
-              {/* Quoting opens the app-wide dialog (mounted at the root like
-                  the delete confirmation): a quote is composed from anywhere a
-                  card renders, not only from the thread page. */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setQuoteDialog(post);
-                }}
-                aria-label={m.post_quote()}
-                title={m.post_quote()}
-                className={`${actionIconButtonClass} hover:text-primary`}
-              >
-                <QuotePostIcon className="h-4 w-4" />
-              </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleLike();
+                  }}
+                  aria-pressed={post.viewerHasLiked}
+                  aria-label={
+                    post.viewerHasLiked
+                      ? m.post_unlike({ count: String(post.likeCount) })
+                      : m.post_like({ count: String(post.likeCount) })
+                  }
+                  className={likeButtonClass}
+                >
+                  {likeContent}
+                </button>
 
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleLike();
-                }}
-                aria-pressed={post.viewerHasLiked}
-                aria-label={
-                  post.viewerHasLiked
-                    ? m.post_unlike({ count: String(post.likeCount) })
-                    : m.post_like({ count: String(post.likeCount) })
-                }
-                className={likeButtonClass}
-              >
-                {likeContent}
-              </button>
-
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleBookmark();
-                }}
-                aria-pressed={post.viewerHasBookmarked}
-                aria-label={post.viewerHasBookmarked ? m.post_unbookmark() : m.post_bookmark()}
-                className={bookmarkButtonClass}
-              >
-                {bookmarkContent}
-              </button>
-            </div>
-          )}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleBookmark();
+                  }}
+                  aria-pressed={post.viewerHasBookmarked}
+                  aria-label={post.viewerHasBookmarked ? m.post_unbookmark() : m.post_bookmark()}
+                  className={bookmarkButtonClass}
+                >
+                  {bookmarkContent}
+                </button>
+              </div>
+            ) : (
+              // The public permalink's signed-out reader (0.4.0): every
+              // control in the bar is a mutation or a dialog this visitor
+              // cannot use yet, so the counts render as plain text and the
+              // one real affordance is the sign-in link. `stopPropagation`
+              // keeps the click on the card itself navigating to the thread.
+              <div className="text-muted-foreground flex max-w-md items-center gap-5 text-xs">
+                <span className={actionControlClass}>{replyContent}</span>
+                <span className={actionControlClass}>{likeContent}</span>
+                <Link
+                  to="/login"
+                  search={{ redirect: sanitizeDestination(href) ?? undefined }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-link font-medium underline underline-offset-2"
+                >
+                  {m.auth_login_link()}
+                </Link>
+              </div>
+            ))}
         </div>
       </div>
     </div>

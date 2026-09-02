@@ -23,14 +23,18 @@ There are four, and only the first two carry untrusted input:
 `apps/server/src/request-handler.ts` and
 `packages/api/src/constants.ts`):
 
-| Surface                       | Notes                                                            |
-| ----------------------------- | ---------------------------------------------------------------- |
-| `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`                |
-| `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`           |
-| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`     |
-| The branding page             | `about.mytuums.com` — one script-free HTML document, host-routed |
-| Static assets                 | anything with a file extension — the SPA cannot boot otherwise   |
-| `moderation.appealOpen` (RPC) | the one anonymous RPC — see below                                |
+| Surface                       | Notes                                                              |
+| ----------------------------- | ------------------------------------------------------------------ |
+| `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`                  |
+| `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`             |
+| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`       |
+| `/post/<id>` permalinks       | the app's public read surface (0.4.0) — see below                  |
+| `/media/*`                    | session-optional; every key is still authorized per viewer         |
+| The branding page             | `about.mytuums.com` — one script-free HTML document, host-routed   |
+| Static assets                 | anything with a file extension — the SPA cannot boot otherwise     |
+| `moderation.appealOpen` (RPC) | capability-gated, not session-gated — see below                    |
+| `post.thread`/`post.list`     | session-optional reads; `list` admits an anonymous caller only on  |
+| (reply modes)/`post.linkCard` | its `parentId`/`continuationRootId` modes — the permalink's halves |
 
 **`/api/auth/admin/*` returns 404 before the auth handler sees it.** The
 better-auth admin plugin gates on its own `adminRoles` option, which cannot
@@ -39,8 +43,14 @@ keeps `/rpc` the only route to a moderation action, so the rank hierarchy and
 the audit log stay the only enforcement surface.
 
 **Everything else requires a session.** Every other oRPC procedure is built
-from `protectedProcedure`, every non-allowlisted page is gated by the server
-before the bundle even downloads, and `/media` is gated too.
+from `protectedProcedure`, and every page outside `isSignedOutPath` is gated
+by the server before the bundle even downloads. The public permalink's own
+gates are the ones that replaced the blanket session demand: an anonymous
+caller of `post.list`'s feed modes is refused UNAUTHORIZED exactly as before,
+`/media` answers an anonymous caller per key through the same authorizers
+(a null viewer gets no owner exemptions and no moderator bypass), and the
+same visibility rules that hide a post from a signed-in reader hide it — and
+its head, and its media — from an anonymous one.
 
 The branding site (`apps/branding`) is the one deliberately public
 **document**: it is routed by Host header ahead of the page gate, so it opens
@@ -268,11 +278,14 @@ not the boundary:
 
 **Retrieval:**
 
-- `/media` requires GET or HEAD, then a **live session, checked before the key
-  is parsed**. An anonymous caller must not be able to learn which keys are
-  well-formed, let alone which objects exist, by watching the response differ.
-  The rejection carries `Cache-Control: no-store`, so a cached 401 cannot keep
-  an image broken after the visitor signs in.
+- `/media` requires GET or HEAD, then resolves the session if a cookie is
+  present. Session-optional since 0.4.0 (the public permalink renders media):
+  an anonymous caller proceeds with a **null viewer**, and whether they may
+  see a key is the per-key authorization below — never a blanket answer. A
+  cookie-bearing caller whose session store cannot be read gets 503, fail
+  closed: there is no viewer identity to authorize against. Keys are
+  unguessable uuids, so an anonymous probe of well-formed shapes learns
+  nothing about which objects exist.
 - The response is a 302 to a presigned URL, `private, no-store` by default:
   every redirect is a **viewer-authorized decision**, and reusing one after an
   account switch, block, ban or profile change would serve the old decision.

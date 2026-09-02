@@ -35,6 +35,7 @@
  */
 import type { DestructiveStorage } from "./storage.js";
 import { objectKeyFromMediaPath } from "./image.js";
+import { mediaVariantKeys } from "./constants.js";
 
 /** The four profile image slots the reconcile script scans. */
 export interface MediaImageRow {
@@ -95,19 +96,29 @@ export async function reconcileMedia({
   const linkCardRows = await readLinkCardRows();
 
   const referenced = new Set<string>();
+  const addReferenced = (key: string) => {
+    referenced.add(key);
+    // A derived variant (`…/uuid.png.w640.webp`, media-variants.ts) is referenced
+    // exactly when its base is: it is unreachable the moment the base goes,
+    // so it is reaped with it rather than orphaned by the row shape (only
+    // the base path is stored anywhere). The immediate cleanup paths delete
+    // variants alongside their base directly; this pairing rule is the
+    // eventual-consistency half for everything that slips past them.
+    for (const variantKey of mediaVariantKeys(key)) referenced.add(variantKey);
+  };
   for (const row of rows) {
     for (const value of [row.image, row.bannerImage, row.imageOriginal, row.bannerImageOriginal]) {
       const key = objectKeyFromMediaPath(value);
-      if (key) referenced.add(key);
+      if (key) addReferenced(key);
     }
   }
   for (const row of attachmentRows) {
     const key = objectKeyFromMediaPath(row.mediaPath);
-    if (key) referenced.add(key);
+    if (key) addReferenced(key);
   }
   for (const row of linkCardRows) {
     const key = objectKeyFromMediaPath(row.imageMediaPath);
-    if (key) referenced.add(key);
+    if (key) addReferenced(key);
   }
 
   console.log(

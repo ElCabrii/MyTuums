@@ -7,11 +7,7 @@ import {
 import type { Socket } from "node:net";
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
-import {
-  RPC_MAX_BODY_BYTES,
-  RPC_SMALL_BODY_BYTES,
-  SIGNED_OUT_PATHS,
-} from "@my-tuums/api/constants";
+import { RPC_MAX_BODY_BYTES, RPC_SMALL_BODY_BYTES, isSignedOutPath } from "@my-tuums/api/constants";
 import { isBrandingHostRequest } from "./branding-host.js";
 import { normalizeObservedError, type ErrorObserver } from "./error-observation.js";
 import { createRequestId, pathnameOf } from "./observability.js";
@@ -67,11 +63,11 @@ export interface RequestHandlerDeps {
   /**
    * Turns a `/media/<key>` object key into a redirect target, plus — when a
    * key's redirect may be stored — the Cache-Control to send it with, and
-   * `null` when it should 404. Only ever called for a request that already
-   * passed the session gate below, and always with the authenticated viewer's
-   * id: every key — post and profile alike — is authorized per viewer by the
-   * resolver (see `createMediaResolver` in `@my-tuums/api`), so there is no
-   * path where this module names an object without saying who is asking.
+   * `null` when it should 404. `viewerId` is `null` for the anonymous
+   * post-permalink reader (0.4.0): whether that reader may see a key is the
+   * resolver's per-key authorization decision (see `createMediaResolver` in
+   * `@my-tuums/api`), which keeps the owner-only rules (`.orig` originals,
+   * hidden authors) owner-only.
    *
    * Injected rather than imported for the same reason the three above are:
    * this module's job is the routing decision, and a unit test of it should
@@ -79,7 +75,7 @@ export interface RequestHandlerDeps {
    */
   resolveMediaUrl: (
     key: string,
-    viewerId: string,
+    viewerId: string | null,
   ) => Promise<{ url: string; cacheControl?: string } | null>;
   /**
    * Serves the built web app, when this deployment bundles it.
@@ -610,8 +606,8 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       if (req.url?.startsWith(MEDIA_PREFIX)) {
         // Reads only. These URLs sit in `<img src>` all over the app, and a
         // write verb reaching object storage through them is not something to
-        // leave to the bucket's own permissions to refuse. Checked before the
-        // session gate below: a wrong verb is refused regardless of who is
+        // leave to the bucket's own permissions to refuse. Checked before
+        // anything below: a wrong verb is refused regardless of who is
         // asking.
         if (req.method !== "GET" && req.method !== "HEAD") {
           res.writeHead(405, { "Content-Type": "text/plain", Allow: "GET, HEAD" });
@@ -619,39 +615,20 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           return;
         }
 
-        // Same session gate as the page gate below, and deliberately BEFORE
-        // the key is even parsed: an anonymous caller must not be able to
-        // learn which keys are well-formed, let alone which objects exist, by
-        // watching whether the response differs. `no-store` is load-bearing,
-        // not decoration — without it a cached 401 could keep showing a
-        // broken image after the browser signs in, a failure mode invisible
-        // enough to be worth spelling out explicitly rather than relying on a
-        // 401 being merely non-heuristically-cacheable by default.
-        //
-        // This closes the one remaining anonymous read of user content: a
-        // media key that leaked (a pasted link, browser history, a log line)
-        // used to work forever, for anyone. It still requires a session now,
-        // same as every oRPC procedure (issue #36) and every page (the page
-        // gate above). What this does NOT do is revoke a presigned URL
-        // already handed out — that is a bearer credential good for its own
-        // TTL regardless, since this server never sees it again once issued.
+        const key = mediaKeyOf(req.url);
+
+        // Session-optional since 0.4.0, when post permalinks (and the media
+        // they render) became the app's public surface. An anonymous caller
+        // proceeds with a null viewer and is answered per key by the
+        // resolver's authorization — the same decision a signed-in viewer
+        // gets, minus the relationships a null viewer cannot have. What stays
+        // fail-closed is an UNAVAILABLE session store: authorization needs
+        // the database, so a cookie-bearing caller gets 503 rather than a
+        // decision made against a store that could not be read.
         const session = hasSessionCookie(req.headers.cookie)
           ? await deps.resolveSession(req)
           : null;
-        if (!session || session.kind === "anonymous") {
-          res.writeHead(401, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
-          res.end("Unauthorized");
-          return;
-        }
-
-        const key = mediaKeyOf(req.url);
-
-        // An unavailable session store leaves a cookie but no viewer identity,
-        // and every key — post and profile alike — is authorized per viewer by
-        // the resolver. There is no anonymous or viewer-less path to an
-        // object, so fail closed for all of them: without a viewer there is no
-        // one to authorize the request against.
-        if (session.kind !== "authenticated") {
+        if (session?.kind === "unavailable") {
           res.writeHead(503, {
             "Content-Type": "text/plain",
             "Cache-Control": "no-store",
@@ -660,7 +637,8 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           return;
         }
 
-        const media = key ? await deps.resolveMediaUrl(key, session.userId) : null;
+        const viewerId = session?.kind === "authenticated" ? session.userId : null;
+        const media = key ? await deps.resolveMediaUrl(key, viewerId) : null;
 
         if (!media) {
           res.writeHead(404, { "Content-Type": "text/plain" });
@@ -719,9 +697,11 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       // hand-maintained copy of the routing decisions above it — `/` reaches
       // here exactly as it always did.
       //
-      // The site is private: `apps/web/src/hooks/use-require-signed-in.ts`
-      // bounces every path outside `SIGNED_OUT_PATHS` to `/login` client-side,
-      // but only after the bundle downloads, the splash clears and the first
+      // The site is private EXCEPT its public surface: `isSignedOutPath`
+      // (packages/api/src/constants.ts) holds the auth/legal pages and, since
+      // 0.4.0, the `/post/` permalinks. `apps/web/src/hooks/
+      // use-require-signed-in.ts` bounces every other path client-side, but
+      // only after the bundle downloads, the splash clears and the first
       // `/get-session` resolves — the app mounting and firing its own queries
       // in between. That round trip is wasted work (and, before this gate,
       // the only thing standing between an anonymous visitor and the shell)
@@ -742,7 +722,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       if (req.method === "GET" || req.method === "HEAD") {
         const pathname = pageGatePathname(req.url ?? "");
 
-        if (pathname !== null && path.extname(pathname) === "" && !SIGNED_OUT_PATHS.has(pathname)) {
+        if (pathname !== null && path.extname(pathname) === "" && !isSignedOutPath(pathname)) {
           // No cookie at all is the cheap, common case: redirect without
           // paying for a session lookup. A cookie that turns out to be stale
           // or forged still needs the real check below — that is the whole

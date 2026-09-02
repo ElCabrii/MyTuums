@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { LoginPage } from "@/routes/login";
+import { LoginPage } from "@/components/login-page";
 import { authClient } from "@/lib/auth-client";
 import { m } from "@/paraglide/messages.js";
 
@@ -44,7 +44,9 @@ describe("LoginPage — banned account routing (issue #74)", () => {
       },
     });
 
-    const { router } = await renderWithProviders(<LoginPage />);
+    const { router } = await renderWithProviders(<LoginPage />, {
+      initialPath: "/login",
+    });
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(m.auth_field_identifier()), "bannedguy");
@@ -69,7 +71,7 @@ describe("LoginPage — banned account routing (issue #74)", () => {
       },
     });
 
-    const { router } = await renderWithProviders(<LoginPage />);
+    const { router } = await renderWithProviders(<LoginPage />, { initialPath: "/login" });
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: m.auth_continue_with_passkey() }));

@@ -18,7 +18,7 @@ export function Hero() {
           {m.hero_badge()}
         </p>
         <h1 className="mx-auto max-w-3xl text-4xl font-bold tracking-tight text-balance sm:text-6xl">
-          {m.hero_title_a()} <span className="text-primary">{m.hero_title_b()}</span>
+          {m.hero_title_a()} <span className="text-primary dark:text-link">{m.hero_title_b()}</span>
         </h1>
         <p className="text-muted-foreground mx-auto mt-6 max-w-2xl text-base text-pretty sm:text-lg">
           {m.hero_subtitle()}

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import sharp from "sharp";
 import { createMediaResolver, type MediaAuthorizer } from "./media.js";
-import { createDestructiveStorage } from "./storage.js";
+import { createDestructiveStorage, type Storage } from "./storage.js";
 
 /**
  * The HIGH-finding regression: `createMediaResolver` used to authorize only
@@ -26,6 +27,41 @@ const PROFILE_KEY = "avatars/user-1/11111111-1111-4111-8111-111111111111.webp";
 const PROFILE_ORIGINAL_KEY = "avatars/user-1/11111111-1111-4111-8111-111111111111.orig.jpg";
 const POST_KEY =
   "posts/author-1/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.png";
+
+/** A tiny real PNG, so the variant generator's sharp half runs for real. */
+const PNG_BYTES = await sharp({
+  create: { width: 64, height: 48, channels: 3, background: "#d63384" },
+})
+  .png()
+  .toBuffer();
+
+/** One GIF magic byte pair — enough for the contentType branch; the generator never decodes it. */
+const GIF_BYTES = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+
+/**
+ * An in-memory Storage with the variant half's needs (`head`, `get`, `put`)
+ * — the real S3 client cannot be pointed at nothing from a unit test, and
+ * `createDestructiveStorage` would dial `storage.invalid` on `head`. The
+ * `put` mock is returned beside the storage (rather than read off it) so an
+ * assertion can name it without the unbound-method dance.
+ */
+function variantCapableStorage() {
+  const objects = new Map<string, { contentType: string; bytes: Uint8Array }>([
+    [POST_KEY, { contentType: "image/png", bytes: PNG_BYTES }],
+  ]);
+  const put = vi.fn((key: string, bytes: Uint8Array, contentType: string) => {
+    objects.set(key, { contentType, bytes });
+    return Promise.resolve();
+  });
+  const storage: Storage = {
+    put,
+    remove: () => Promise.resolve(),
+    head: (key: string) => Promise.resolve(objects.get(key) ?? null),
+    get: (key: string) => Promise.resolve(objects.get(key) ?? null),
+    signedGetUrl: (key: string) => Promise.resolve(`https://storage.test.invalid/${key}?signed=1`),
+  };
+  return { storage, objects, put };
+}
 
 describe("createMediaResolver", () => {
   it("denies a profile key when no authorizer is wired", async () => {
@@ -62,14 +98,57 @@ describe("createMediaResolver", () => {
     expect(authorize).toHaveBeenCalledWith(POST_KEY, "viewer-1");
   });
 
-  it("treats a missing viewer as a denial", async () => {
+  it("passes a null viewer — the anonymous post-permalink reader — to the authorizer", async () => {
     const authorize = vi.fn<MediaAuthorizer>().mockResolvedValue(true);
     const resolver = createMediaResolver(storage(), authorize);
 
-    // The viewer id is required by type; the runtime still fails closed if a
-    // future caller stops passing one — there is no authorized=undefined path.
-    expect(await resolver(PROFILE_KEY, "")).toBeNull();
-    expect(authorize).not.toHaveBeenCalled();
+    expect(await resolver(POST_KEY, null)).not.toBeNull();
+    expect(authorize).toHaveBeenCalledWith(POST_KEY, null);
+
+    authorize.mockResolvedValue(false);
+    expect(await resolver(POST_KEY, null)).toBeNull();
+  });
+
+  it("authorizes a variant key against its BASE and serves the variant once it exists", async () => {
+    // 0.4.0 responsive images: `…/uuid.w640.webp` derives from the base the
+    // rows actually store, so THAT is what authorization must judge — a
+    // variant can never be more visible than the object it derives from.
+    const { storage: fake, put } = variantCapableStorage();
+    const authorize = vi.fn<MediaAuthorizer>().mockResolvedValue(true);
+    const resolver = createMediaResolver(fake, authorize);
+
+    const variantKey =
+      "posts/author-1/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.png.w640.webp";
+    const result = await resolver(variantKey, null);
+
+    expect(authorize).toHaveBeenCalledWith(POST_KEY, null);
+    expect(result?.url).toContain(variantKey.slice("posts/".length));
+    expect(put).toHaveBeenCalledWith(variantKey, expect.any(Uint8Array), "image/webp");
+  });
+
+  it("serves the base object when a requested variant is not derivable — unknown width or GIF", async () => {
+    const { storage: fake, objects } = variantCapableStorage();
+    const authorize = vi.fn<MediaAuthorizer>().mockResolvedValue(true);
+    const resolver = createMediaResolver(fake, authorize);
+
+    // An arbitrary width is not in MEDIA_VARIANT_WIDTHS: parseMediaVariantKey
+    // refuses it, so the key is authorized (and served) AS IS — nothing in
+    // this app will have generated it, and the row comparison in the real
+    // authorizer 404s it.
+    const rogue =
+      "posts/author-1/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.png.w9999.webp";
+    await resolver(rogue, null);
+    expect(authorize).toHaveBeenCalledWith(rogue, null);
+
+    // An animated GIF's variant falls back to the original bytes.
+    objects.set(POST_KEY.replace(/png$/, "gif"), {
+      contentType: "image/gif",
+      bytes: GIF_BYTES,
+    });
+    const gifVariant =
+      "posts/author-1/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.gif.w640.webp";
+    const gifResult = await resolver(gifVariant, null);
+    expect(gifResult?.url).toContain("22222222-2222-4222-8222-222222222222.gif");
   });
 
   it("forwards the policy's verdict per key and lets a null mean no-store", async () => {

@@ -5,7 +5,8 @@ import { test, expect } from "@playwright/test";
 
 /**
  * The server-side page gate (`apps/server/src/request-handler.ts`): every
- * extension-less GET/HEAD path outside `SIGNED_OUT_PATHS` requires a live
+ * extension-less GET/HEAD path outside the signed-out allowlist
+ * (`isSignedOutPath` in packages/api/src/constants.ts) requires a live
  * session, checked with a real `auth.api.getSession` lookup — not just cookie
  * presence.
  *
@@ -28,31 +29,41 @@ test.describe("page gate", () => {
     expect(response.status()).toBe(302);
     expect(response.headers()["location"]).toBe("/login?redirect=%2F%40alice");
   });
+
+  test("a /post permalink is public — no redirect for a signed-out visitor (0.4.0)", async ({
+    request,
+  }) => {
+    // The id does not need to exist: the gate's decision is made before the
+    // SPA (or the head transform) ever looks the post up. In the dev stack
+    // the server serves no static files, so the non-redirect answer is a 404
+    // here and a 200 under a WEB_DIST deployment — what this spec can assert
+    // in every environment is that the gate let the request through.
+    const response = await request.get("/post/0d97ee29-7896-4c53-9161-c54fc1ca1b51", {
+      maxRedirects: 0,
+    });
+
+    expect(response.status()).not.toBe(302);
+    expect(response.headers()["location"]).toBeUndefined();
+  });
 });
 
 /**
- * `/media/<key>` (`apps/server/src/request-handler.ts`): the last anonymous
- * read of user content, closed the same way as the page gate — a real session
- * check, ahead of even parsing the key. Neither case here needs a configured
- * bucket: the gate runs before `resolveMediaUrl`, so an unconfigured one still
- * answers 404 for a signed-in caller, never masking the 401 a signed-out one
- * gets first.
+ * `/media/<key>` (`apps/server/src/request-handler.ts`): session-optional
+ * since 0.4.0 — the public post permalink renders media, so an anonymous
+ * caller is answered per key by the resolver's authorization (a null viewer:
+ * no owner exemptions, no moderator bypass) rather than by a blanket 401.
+ * Keys are unguessable uuids, and this spec needs no configured bucket: an
+ * unconfigured one answers 404 through the same path.
  */
 test.describe("media gate", () => {
-  test("an anonymous request for a well-formed key is refused with 401, not 404", async ({
+  test("an anonymous request for a well-formed unknown key is a plain 404, not an auth error", async ({
     request,
   }) => {
-    // Deliberately well-formed (see isSafeObjectKey in packages/api/src/
-    // image.ts) so a 401 here proves the session gate fired ahead of key
-    // validation — not that the key merely looked wrong. An anonymous caller
-    // must learn nothing about which keys are well-formed or which objects
-    // exist.
     const response = await request.get(
       "/media/avatars/11111111-2222-3333-4444-555555555555/11111111-2222-3333-4444-555555555555.webp",
       { maxRedirects: 0 },
     );
 
-    expect(response.status()).toBe(401);
-    expect(response.headers()["cache-control"]).toBe("no-store");
+    expect(response.status()).toBe(404);
   });
 });

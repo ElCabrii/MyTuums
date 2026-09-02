@@ -93,10 +93,11 @@ test.describe("quoting a post", () => {
     // The dialog previews the post being quoted exactly as it will embed.
     await expect(dialog.getByText(originalContent)).toBeVisible();
 
-    // The shared composer's textarea announces as a combobox (mention
-    // autocomplete), the same role the home composer's field carries.
+    // The shared composer's textarea is a plain textbox (a textarea cannot
+    // carry the combobox role), the same role the home composer's field
+    // carries; the mention autocomplete rides on aria-activedescendant.
     const quoteContent = `My quote on it ${Date.now().toString()}`;
-    await dialog.getByRole("combobox").fill(quoteContent);
+    await dialog.getByRole("textbox").fill(quoteContent);
     await dialog.getByRole("button", { name: "Quote", exact: true }).click();
 
     // Success closes the dialog and the invalidated feed carries the new

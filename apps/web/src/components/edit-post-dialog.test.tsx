@@ -43,8 +43,7 @@ describe("EditPostDialog", () => {
 
     // The session (and with it the composer chrome) settles asynchronously —
     // findByRole awaits the textarea instead of racing the first paint. The
-    // textarea is a mention combobox, so that is its accessible role.
-    const textarea = await screen.findByRole("combobox");
+    const textarea = await screen.findByRole<HTMLTextAreaElement>("textbox");
     expect(textarea).toHaveValue("fixed typoo");
 
     const user = userEvent.setup();
@@ -72,7 +71,7 @@ describe("EditPostDialog", () => {
     await renderWithProviders(<EditPostDialog />, { store, signedInAs: true });
 
     const user = userEvent.setup();
-    const textarea = await screen.findByRole("combobox");
+    const textarea = await screen.findByRole<HTMLTextAreaElement>("textbox");
     await user.clear(textarea);
 
     // The post's own images satisfy "text, images, or both" (issue #202), so
@@ -96,7 +95,7 @@ describe("EditPostDialog", () => {
     await renderWithProviders(<EditPostDialog />, { store, signedInAs: true });
 
     const user = userEvent.setup();
-    const textarea = await screen.findByRole("combobox");
+    const textarea = await screen.findByRole<HTMLTextAreaElement>("textbox");
     await user.clear(textarea);
 
     expect(screen.getByRole("button", { name: m.post_edit_submit() })).toBeDisabled();

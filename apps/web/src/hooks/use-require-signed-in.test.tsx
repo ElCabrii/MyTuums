@@ -52,6 +52,20 @@ describe("useRequireSignedIn", () => {
     expect(redirectParam(router.state.location.searchStr)).toBe("/discover?tab=following");
   });
 
+  it("leaves a signed-out visitor on a /post permalink — the public surface (0.4.0)", async () => {
+    // The server gate exempts the same prefix (isSignedOutPath in
+    // @my-tuums/api/constants, the ONE definition both gates read); this
+    // client half is what keeps the SPA from bouncing the visitor to
+    // /login after the shell loads.
+    const { router } = await renderWithProviders(<GateProbe />, {
+      initialPath: "/post/0d97ee29-7896-4c53-9161-c54fc1ca1b51",
+      signedInAs: false,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, PAST_CONFIRM_WINDOW_MS));
+    expect(router.state.location.pathname).toBe("/post/0d97ee29-7896-4c53-9161-c54fc1ca1b51");
+  });
+
   it("leaves a signed-in visitor alone", async () => {
     const { router } = await renderWithProviders(<GateProbe />, {
       initialPath: "/",
