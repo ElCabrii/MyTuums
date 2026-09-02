@@ -24,15 +24,16 @@
     "@sentry/node": "^10.69.0",
     "better-auth": "catalog:",
     "sharp": "^0.35.4",
+    "undici": "^7.29.0",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@my-tuums/tsconfig": "workspace:*",
     "@types/node": "catalog:",
+    "@typescript/native": "catalog:",
     "dotenv-cli": "^11.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",
-    "@typescript/native": "catalog:",
     "vitest": "^4.1.10"
   }
 }
