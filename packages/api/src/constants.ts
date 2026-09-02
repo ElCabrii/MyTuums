@@ -46,6 +46,18 @@ export const SEARCH_PAGE_SIZE_MAX = 50;
 export const MODERATION_PAGE_SIZE = 20;
 export const MODERATION_PAGE_SIZE_MAX = 50;
 
+/** Default and maximum page sizes for `notification.list`. */
+export const NOTIFICATION_PAGE_SIZE = 20;
+export const NOTIFICATION_PAGE_SIZE_MAX = 50;
+
+/**
+ * How many days of notifications exist for a recipient. The list and the
+ * unread badge stop at this horizon, and `scripts/prune-notifications.ts`
+ * deletes past it — one shared boundary, so the badge and the page can never
+ * disagree about what still exists.
+ */
+export const NOTIFICATION_RETENTION_DAYS = 90;
+
 /** Maximum encoded length accepted for every opaque keyset cursor. */
 export const CURSOR_MAX_ENCODED_LENGTH = 512;
 
@@ -54,6 +66,18 @@ export const CURSOR_ID_MAX_LENGTH = 128;
 
 /** Maximum length of a moderator's stated reason or note, in characters, after trimming. */
 export const MODERATION_NOTE_MAX_LENGTH = 1000;
+
+/**
+ * How many superseded versions of a post's text `moderation.case` returns,
+ * newest first. The cap keeps one author's edit spree from turning the case
+ * dialog into an unbounded list; the report snapshots (`report.snapshot_content`)
+ * carry the evidence beyond it, so cutting there loses no load-bearing fact.
+ *
+ * Lives here, in the dependency-free constants module, because the case view's
+ * truncation copy states this number — parameterized from this constant, so
+ * the sentence can never fall out of step with the cap it describes.
+ */
+export const EDIT_HISTORY_CASE_LIMIT = 50;
 
 /**
  * The nine stable moderation action codes — the `moderation_action.action`
@@ -284,6 +308,41 @@ export const GIF_MAX_TOTAL_DURATION_MS = 200_000;
 export const GIF_MAX_CUMULATIVE_PIXELS = 50_000_000;
 
 /**
+ * Link preview cards (issue #260): bounds for unfurling the first URL of a
+ * post server-side. Every one of these is a defence line on an outbound fetch
+ * an author's text triggered, so they live beside the other caps rather than
+ * inside the fetch module — the client reads them too, for its URL input
+ * bound.
+ */
+/** Longest absolute URL accepted as a card target, in characters. */
+export const LINK_CARD_URL_MAX_LENGTH = 2048;
+/** Most HTML bytes read from a target before it is declared oversized. */
+export const LINK_CARD_HTML_MAX_BYTES = 512 * 1024;
+/** Most image bytes read from a target's lead image. */
+export const LINK_CARD_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+/** Wall-clock ceiling on one outbound request, redirects included. */
+export const LINK_CARD_FETCH_TIMEOUT_MS = 5000;
+/** Most redirects followed, each hop re-checked against the address guard. */
+export const LINK_CARD_MAX_REDIRECTS = 4;
+/**
+ * How long a stored card (positive or negative) is served before the next
+ * request refetches it. A fetched-once-per-window budget: shorter refreshes
+ * cost outbound fetches, longer ones serve stale titles.
+ */
+export const LINK_CARD_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+/** Longest card title stored, in characters; longer ones are truncated. */
+export const LINK_CARD_TITLE_MAX_LENGTH = 300;
+/** Longest card description stored, in characters; longer ones are truncated. */
+export const LINK_CARD_DESCRIPTION_MAX_LENGTH = 500;
+/**
+ * Longest card domain stored, in characters; longer ones are truncated. The
+ * value is the target's `og:site_name` or, absent that, its hostname — both
+ * are page-controlled text shipped to every viewer of every post carrying
+ * the URL, so the cap bounds them like the title and description.
+ */
+export const LINK_CARD_SITE_NAME_MAX_LENGTH = 300;
+
+/**
  * The largest request body the RPC endpoint will accept.
  *
  * Derived from the image caps rather than written as a literal, so raising a
@@ -347,8 +406,8 @@ export const MEDIA_URL_PREFIX = "/media/";
 
 /**
  * Where a signed-out visitor is allowed to be. Everything else redirects to
- * `/login` — the site is private, like a social media app where nothing
- * renders until you're signed in.
+ * `/login` — the site is private, like a social media app where almost
+ * nothing renders until you're signed in.
  *
  * The auth pages speak for themselves. `/welcome` is here because it is the
  * completion page for a *signed-in* session that lacks a handle or a date of
@@ -365,7 +424,7 @@ export const MEDIA_URL_PREFIX = "/media/";
  * the server and `/login`. One list is what makes that impossible rather than
  * merely unlikely.
  */
-export const SIGNED_OUT_PATHS = new Set([
+export const SIGNED_OUT_PATHS = new Set<string>([
   "/login",
   "/register",
   // The check-your-email screen a password sign-up lands on before its email
@@ -397,6 +456,115 @@ export const SIGNED_OUT_PATHS = new Set([
   // exempt for the same reason /appeal is.
   "/banned",
 ]);
+
+/**
+ * The prefix-shaped half of the signed-out allowlist: paths a signed-out
+ * visitor may occupy that a `Set` of exact strings cannot express.
+ *
+ * `/post/` is here because post permalinks are the app's public surface
+ * (0.4.0): a thread page renders for a signed-out visitor — the focused post,
+ * its ancestors and its replies through the anonymous read modes of
+ * `post.thread`/`post.list` — with interaction controls hidden until they
+ * sign in. Post-level privacy beyond the existing visibility rules is
+ * deliberately out of scope until 0.5.0; the same visibility that hides a
+ * post from a signed-in viewer (tombstones, bans, blocks) hides it from an
+ * anonymous one.
+ *
+ * Reads through the same `isSignedOutPath` predicate as `SIGNED_OUT_PATHS`
+ * so the two gates (server and client) still share ONE definition — the
+ * redirect-loop guarantee below depends on it, and a prefix rule that only
+ * one gate knew about would be exactly that bug.
+ */
+const SIGNED_OUT_PATH_PREFIXES = ["/post/"];
+
+/** Whether a pathname (not percent-decoded — see the gates) is open to a signed-out visitor. */
+export function isSignedOutPath(pathname: string): boolean {
+  return (
+    SIGNED_OUT_PATHS.has(pathname) ||
+    SIGNED_OUT_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  );
+}
+
+/**
+ * The widths (in CSS pixels) the server will derive a WebP variant of a media
+ * object at, by key prefix. One shared definition so the browser's `srcset`
+ * and the server's on-demand generation can never name a width the other
+ * does not know (see `media-variants.ts` in this package for the server
+ * half; the client half is `apps/web`'s `mediaVariantPath` usage).
+ *
+ * Posts: 640 covers the feed's single-image column and a 2x grid cell,
+ * 1280 the fullscreen viewer and 2x feeds. Avatars: 96 covers every feed
+ * chrome size at 2x, 256 the profile header at 2x. Banners render at most
+ * full-width; 1280 bounds the common desktop case. Link-card lead images
+ * render inside a card, never full-bleed.
+ */
+export const MEDIA_VARIANT_WIDTHS = {
+  posts: [640, 1280],
+  avatars: [96, 256],
+  banners: [1280],
+  "link-cards": [640],
+} as const;
+
+/**
+ * The variant marker appended to a base key: `…/uuid.png.w640.webp`. Appended
+ * after the full base key — extension included — so parsing the marker back
+ * off reconstructs the base exactly, whatever extension the base carried.
+ */
+export function mediaVariantKey(key: string, width: number): string {
+  return `${key}.w${width}.webp`;
+}
+
+/** The `/media/…` path of a variant of a stored media path (or URL-less key). */
+export function mediaVariantPath(path: string, width: number): string {
+  return path.startsWith(MEDIA_URL_PREFIX)
+    ? `${MEDIA_URL_PREFIX}${mediaVariantKey(path.slice(MEDIA_URL_PREFIX.length), width)}`
+    : mediaVariantKey(path, width);
+}
+
+/**
+ * The widths derivable for a key's prefix, or `undefined` for a prefix this
+ * app derives nothing for. A switch rather than an index so an unknown
+ * prefix is a type error here, not a runtime `undefined` to chase.
+ */
+function variantWidthsFor(key: string): readonly number[] | undefined {
+  switch (key.split("/", 1)[0]) {
+    case "posts":
+      return MEDIA_VARIANT_WIDTHS.posts;
+    case "avatars":
+      return MEDIA_VARIANT_WIDTHS.avatars;
+    case "banners":
+      return MEDIA_VARIANT_WIDTHS.banners;
+    case "link-cards":
+      return MEDIA_VARIANT_WIDTHS["link-cards"];
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Splits a key that may carry a variant marker into its base key and width.
+ * `null` when the key is a plain base — or when the width is not one this
+ * app derives for that prefix, so an arbitrary `.w<N>.webp` spelling never
+ * becomes a generation request.
+ */
+export function parseMediaVariantKey(key: string): { baseKey: string; width: number } | null {
+  const match = /^(.*)\.w(\d+)\.webp$/.exec(key);
+  if (!match) return null;
+  const width = Number(match[2]);
+  if (!variantWidthsFor(key)?.includes(width)) return null;
+  return { baseKey: match[1], width };
+}
+
+/**
+ * Every variant key this app would derive for a base key — the pairing rule
+ * the reconciler and the object-cleanup paths use so a variant is reaped
+ * exactly when its base is (or, for cleanup, removed alongside it).
+ */
+export function mediaVariantKeys(key: string): string[] {
+  const widths = variantWidthsFor(key);
+  if (!widths) return [];
+  return widths.map((width) => mediaVariantKey(key, width));
+}
 
 /**
  * The exact inline `onload` handler body the built `index.html`'s deferred

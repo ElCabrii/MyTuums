@@ -19,18 +19,20 @@ app's build from the same origin.
 
 ## Change map
 
-| Intent                        | Primary                                                                 | Also touch                                                                                                                                                                                                 |
-| ----------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Add a page                    | `src/routes/<name>.tsx` (thin wrapper)                                  | the page body in `src/components/`; `SIGNED_OUT_PATHS` if it must work signed out; a stub in `src/test/route-tree.tsx` (checked by the canonical inventory test in `route-tree.test.ts`)                   |
-| Add client state              | `src/atoms/<concern>.ts`                                                | its `.test.ts` sibling                                                                                                                                                                                     |
-| Read server data              | a new `atomWithQuery` / `atomWithInfiniteQuery` in `src/atoms/`         | `src/lib/query-definitions.ts`; `src/lib/orpc.ts` for response types                                                                                                                                       |
-| Add a mutation with optimism  | `src/atoms/<concern>.ts`                                                | use `beginFollowPatch` / `beginPostPatch` in `src/lib/follow-cache.ts` / `post-cache.ts` — they own their cache inventory, cancellation and snapshot; roll back via `restoreFollowCaches` / `restorePosts` |
-| Add a UI component            | `pnpm --filter @my-tuums/web exec shadcn add <component>`               | never hand-write into `src/components/ui`                                                                                                                                                                  |
-| Add or change copy            | `messages/en.json`, `messages/fr.json`                                  | recompile; never touch `src/paraglide`                                                                                                                                                                     |
-| Router-touching behaviour     | `src/hooks/`                                                            | never an atom — see the invariants                                                                                                                                                                         |
-| Change an auth flow page      | `src/routes/` + `src/atoms/auth.ts`                                     | `src/lib/auth-validation.ts` (form policy only — the rules live in `@my-tuums/auth/rules`)                                                                                                                 |
-| Change the legal consent gate | `src/atoms/legal-consent.ts`, `src/components/legal-consent-dialog.tsx` | `LEGAL_VERSION` in `@my-tuums/auth/rules`; `e2e/support/users.ts` seeds consent for every fixture                                                                                                          |
-| Add a moderation surface      | `src/atoms/moderation.ts`, `src/components/moderation/`                 | `src/hooks/use-require-role.ts`                                                                                                                                                                            |
+| Intent                               | Primary                                                                               | Also touch                                                                                                                                                                                                         |
+| ------------------------------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Add a page                           | `src/routes/<name>.tsx` (thin wrapper)                                                | the page body in `src/components/`; the signed-out allowlist (`isSignedOutPath`) if it must work signed out; a stub in `src/test/route-tree.tsx` (checked by the canonical inventory test in `route-tree.test.ts`) |
+| Add client state                     | `src/atoms/<concern>.ts`                                                              | its `.test.ts` sibling                                                                                                                                                                                             |
+| Read server data                     | a new `atomWithQuery` / `atomWithInfiniteQuery` in `src/atoms/`                       | `src/lib/query-definitions.ts`; `src/lib/orpc.ts` for response types                                                                                                                                               |
+| Add a mutation with optimism         | `src/atoms/<concern>.ts`                                                              | use `beginFollowPatch` / `beginPostPatch` in `src/lib/follow-cache.ts` / `post-cache.ts` — they own their cache inventory, cancellation and snapshot; roll back via `restoreFollowCaches` / `restorePosts`         |
+| Add a UI component                   | `pnpm --filter @my-tuums/web exec shadcn add <component>`                             | never hand-write into `src/components/ui`                                                                                                                                                                          |
+| Add or change copy                   | `messages/en.json`, `messages/fr.json`                                                | recompile; never touch `src/paraglide`                                                                                                                                                                             |
+| Router-touching behaviour            | `src/hooks/`                                                                          | never an atom — see the invariants                                                                                                                                                                                 |
+| Change an auth flow page             | `src/routes/` + `src/atoms/auth.ts`                                                   | `src/lib/auth-validation.ts` (form policy only — the rules live in `@my-tuums/auth/rules`)                                                                                                                         |
+| Change the legal consent gate        | `src/atoms/legal-consent.ts`, `src/components/legal-consent-dialog.tsx`               | `LEGAL_VERSION` in `@my-tuums/auth/rules`; `e2e/support/users.ts` seeds consent for every fixture                                                                                                                  |
+| Add a moderation surface             | `src/atoms/moderation.ts`, `src/components/moderation/`                               | `src/hooks/use-require-role.ts`                                                                                                                                                                                    |
+| Change a public route's crawler head | `apps/server/src/public-heads.ts` (server half), this app's `index.html` marker block | keep the title/description copy in step with `src/lib/document-head.ts` and `messages/en.json`                                                                                                                     |
+| Change the notifications surface     | `src/atoms/notifications.ts`, `src/components/notifications-page.tsx`                 | the unread badge on the header bell (`src/components/header.tsx`); the per-type copy in `messages/`                                                                                                                |
 
 ## Invariants
 
@@ -54,16 +56,21 @@ app's build from the same origin.
   the optimistic sweeps match on exactly those prefixes. "Cleaning them up"
   forks every cache entry silently.
 - **Sign-out clears the QueryClient and sweeps every family.** Cached rows
-  carry viewer-relative fields (`viewerHasLiked`, `viewerIsFollowing`) under
-  viewer-less keys. `src/atoms/session-teardown.ts` owns that whole inventory
-  behind one call; a new viewer-owned family is added there, not in
-  `signOutAtom`. Its lightweight coordinator clears the QueryClient
+  carry viewer-relative fields (`viewerHasLiked`, `viewerHasBookmarked`,
+  `viewerIsFollowing`) under viewer-less keys. `src/atoms/session-teardown.ts`
+  owns that whole inventory behind one call; a new viewer-owned family is
+  added there, not in `signOutAtom`. Its lightweight coordinator clears the QueryClient
   synchronously, then dynamically imports each family for an independent,
   best-effort sweep so chunk loading cannot block sign-out.
 - **Like and follow serialise per entity.** One `scope` id per entity,
   per-entity intent atoms drop superseded responses, and rollback rides on
   mutation-level `onError` — per-call callbacks never fire for write-only
-  atoms read with `useSetAtom`.
+  atoms read with `useSetAtom`. `src/atoms/repost.ts` is the same contract again
+  (the file points back at `src/atoms/like.ts` for the reasoning), with one
+  addition: success in either direction invalidates the `post.list` queries,
+  because a repost is a feed _event_ whose position is server-ordered — a new
+  one lands at the top of the home feeds, and an unrepost removes one from
+  them.
 - **Persisted atoms read `localStorage` as `unknown`, sanitise on read, and
   set `getOnInit: true`** — without it the first render flashes the default.
 - **Exactly one effect owns each redirect.** Auth pages call
@@ -98,22 +105,36 @@ app's build from the same origin.
   Data-dependent titles/descriptions go through
   `setDocumentHead`/`useDocumentHead`, which also update the Open Graph and
   Twitter mirrors.
-- **`SIGNED_OUT_PATHS` decides whether any of this is externally visible.**
-  The route heads are client-rendered, so only a signed-in, JS-rendering
-  browser sees them; every main content route (`/`, `/discover`, `/search`,
-  `/@{username}`, `/post/$postId`, `/moderation`, `/settings/account`) is
-  absent from `SIGNED_OUT_PATHS`, so the server 302s every signed-out fetcher
-  — search engines and non-JS unfurlers included — to `/login` before any of
-  it could be served. The externally visible head today is the static
-  fallback in `index.html` plus its Organization JSON-LD; what the per-route
-  tags deliver is tab titles/descriptions (and mirrors) for signed-in users,
-  not public unfurls.
+- **`isSignedOutPath` decides whether any of this is externally visible.**
+  The route heads are client-rendered, so only a JS-rendering browser sees
+  them live; every main content route except `/post/$postId` (`/`,
+  `/discover`, `/search`, `/@{username}`, `/moderation`, `/settings/account`)
+  is outside the signed-out allowlist, so the server 302s every signed-out
+  fetcher — search engines and non-JS unfurlers included — to `/login before
+any of it could be served. Post permalinks are the public exception
+(0.4.0): the shell reaches an anonymous fetcher with a server-injected
+head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block inside the`app-head-fallback-start/end`markers), and the thread renders through the anonymous read modes of`post.thread`/`post.list` with the action bar replaced by a sign-in link.
 - **`src/index.css` owns scrollbars globally.** Its Firefox properties and
   WebKit pseudo-elements style the viewport and every nested overflow surface
   from the existing theme variables, so components should not introduce their
   own scrollbar colors or dimensions.
 - **Feed and list parameterisation lives in atoms.** `PostFeed` takes a
   `feedAtom` prop and never knows its own scope or author.
+- **A link preview card belongs to its URL, not to the viewer (issue #260).**
+  `PostCard` asks `firstLinkUrl` (exported by `linked-text.tsx`, the same
+  scanner that renders the inline links) for the first URL only, and
+  `linkCardAtom` (`src/atoms/link-card.ts`) queries `post.linkCard` per URL —
+  deliberately absent from the sign-out sweep, because no field in a card is
+  viewer-relative. `PostLinkCard` renders nothing for a pending, failed or
+  card-less URL: the plain inline link is the whole fallback. A redacted post
+  never asks: the card is derived from `content`, and a tombstoned or
+  unavailable post reads null content.
+- **The quote composer is one root-mounted dialog, not a page.** Any card's
+  Quote button sets `quoteDialogAtom` (the full post row — the dialog previews
+  the embedded card from it), and `QuoteDialog` in `__root.tsx` is the only
+  mounted instance, the same identity-atom shape as the delete confirmation.
+  Its draft is in-memory: one dialog, bounded lifetime, nothing to evict from
+  `localStorage`.
 - **Permalink reply grouping reads the continuation embedded in each direct
   `post.list({ parentId })` page.** `ThreadReplyFeed` renders the flat direct
   page and its connected branch without recursive indentation;

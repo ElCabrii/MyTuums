@@ -152,8 +152,8 @@ function readFirstBytes(file: File, max: number): Promise<Uint8Array | null> {
  * photographs, and is supported by every browser this app targets. Banners are
  * always encoded 3:1 (see `calculateDisplayLayout`); how that composition is
  * framed on a profile — and how much of it survives at the widest and
- * narrowest viewports — is owned by `lib/banner-frame.ts`, which the crop
- * editor's safe-area overlay and the profile banner both read.
+ * narrowest viewports — is owned by `lib/banner-frame.ts`. The crop editor
+ * fixes that source-region outline in place and moves the image beneath it.
  *
  * With a `crop` — what the editor in
  * `components/settings/image-crop-dialog.tsx` produces — the chosen region
@@ -195,20 +195,13 @@ export async function createDisplayVariantImpl(
     if (!context) throw new ImageError("decode");
     let blob: Blob;
     while (true) {
-      // Assigning canvas dimensions clears the canvas, so the letterbox fill
-      // and the draw precede every encode attempt — including the retries
-      // below. The fill matters only for a banner zoomed out past its cover
-      // crop, whose window overhangs the bitmap; the overhang then stays the
-      // black the editor previewed instead of the transparency a cleared
-      // canvas would encode (and avatars cannot letterbox — their zoom floor
-      // is the cover crop).
-      if (crop && kind === "banner") {
-        context.fillStyle = "#000";
-        context.fillRect(0, 0, canvas.width, canvas.height);
-      }
-      // The retry loop below halves the canvas; the destination rectangle
-      // scales with it so a retried encode is the same composition, smaller —
-      // not the original composition clipped to a corner.
+      // Assigning canvas dimensions clears the canvas, so the draw precedes
+      // every encode attempt — including the retries below.
+      // The retry loop below halves the canvas; the destination size scales
+      // with it so a retried encode is the same composition, smaller — not the
+      // original composition clipped to a corner. The destination origin is
+      // always the canvas origin: the crop window is a region of the source
+      // with nothing around it, so there is no offset to scale.
       const shrinkX = canvas.width / layout.width;
       const shrinkY = canvas.height / layout.height;
       context.drawImage(
@@ -217,8 +210,8 @@ export async function createDisplayVariantImpl(
         layout.sourceY,
         layout.sourceWidth,
         layout.sourceHeight,
-        layout.destinationX * shrinkX,
-        layout.destinationY * shrinkY,
+        0,
+        0,
         layout.destinationWidth * shrinkX,
         layout.destinationHeight * shrinkY,
       );
@@ -271,12 +264,13 @@ export async function createDisplayVariantImpl(
  * editor and the rendered result on the same composition. The untouched
  * original remains available for a future refit.
  *
- * Banners are always 3:1. The crop window may be zoomed out past the cover
- * crop until the whole source fits — the overhang encodes as black letterbox
- * bars, exactly what the editor previewed. The profile banner then displays
- * that one composition with its height clamped (see `lib/banner-frame.ts`), so
- * extreme viewports trim edges of it rather than re-choosing the crop; the
- * editor's safe-area overlay marks what every viewport keeps.
+ * Banners are always 3:1. The crop window is a region of the source: it can
+ * zoom in from, and pan within, the default composition, but never leave it —
+ * the default window already spans the source's full width or full height
+ * (issue #273). The profile banner displays that one composition with its
+ * height clamped (see `lib/banner-frame.ts`), so extreme viewports trim edges
+ * of it rather than re-choosing the crop. The editor shows the source around a
+ * fixed outline of this actual 3:1 crop before it is encoded.
  *
  * The math itself lives in `lib/media-layout.ts` — re-exported above — because
  * `lib/gif-variant-worker.ts` needs the identical `calculateDisplayLayout` a

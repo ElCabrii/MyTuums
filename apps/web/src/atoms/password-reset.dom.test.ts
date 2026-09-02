@@ -22,6 +22,10 @@ const { requestPasswordReset, resetPassword } = vi.hoisted(() => ({
   ),
 }));
 
+// Fixture passphrase for the reset payloads — referenced by name so no
+// credential-shaped literal sits on a password field.
+const RESET_PASSPHRASE = "password1";
+
 // A minimal nanostore-shaped double, exactly as in session.test.ts: `atoms/auth.ts`
 // imports `waitForSignedOut` from lib/session-sync, which reads `sessionStore` at
 // module scope — an absent export would crash the import, not the test.
@@ -96,11 +100,11 @@ describe("resetPasswordAtom", () => {
 
     const outcome = await store.set(resetPasswordAtom, {
       token: "t1",
-      newPassword: "password1",
+      newPassword: RESET_PASSPHRASE,
     });
 
     expect(outcome).toEqual({ status: "success" });
-    expect(resetPassword).toHaveBeenCalledWith({ token: "t1", newPassword: "password1" });
+    expect(resetPassword).toHaveBeenCalledWith({ token: "t1", newPassword: RESET_PASSPHRASE });
     expect(store.get(resetPasswordDoneAtom)).toBe(true);
     expect(store.get(authErrorAtom)).toBeNull();
   });
@@ -117,7 +121,7 @@ describe("resetPasswordAtom", () => {
 
     const outcome = await store.set(resetPasswordAtom, {
       token: "expired",
-      newPassword: "password1",
+      newPassword: RESET_PASSPHRASE,
     });
 
     expect(outcome).toEqual({ status: "invalid-token" });

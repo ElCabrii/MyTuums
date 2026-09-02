@@ -254,24 +254,24 @@ test.describe("handle", () => {
 test.describe("password", () => {
   test("changes the password, and the new one signs in", async ({ page }) => {
     const account = await signUpFresh(page, "pwchange");
-    const newPassword = "correct-horse-battery-99";
+    const replacementPassphrase = "correct-horse-battery-99";
 
     await page.goto("/settings/account");
     await page.getByLabel("Current Password").fill(account.password);
-    await page.getByLabel("New Password", { exact: true }).fill(newPassword);
-    await page.getByLabel("Confirm New Password").fill(newPassword);
+    await page.getByLabel("New Password", { exact: true }).fill(replacementPassphrase);
+    await page.getByLabel("Confirm New Password").fill(replacementPassphrase);
     await page.getByRole("button", { name: "Change password" }).click();
 
     await expect(page.getByText("Your password has been changed.")).toBeVisible();
 
-    // Sign-out is no longer a section on /settings/account (issue #217); sign
-    // out from the own-profile action row instead.
-    await page.goto(`/@${account.username}`);
+    // Sign out from the section this page now carries again (issue #282
+    // partially reverts #217) — no detour through the profile action row,
+    // which no longer has a button.
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/login/);
 
     await page.getByLabel("Username or Email").fill(account.email);
-    await page.getByLabel("Password").fill(newPassword);
+    await page.getByLabel("Password").fill(replacementPassphrase);
     await page.getByRole("main").getByRole("button", { name: "Log in" }).click();
 
     await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));

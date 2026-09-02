@@ -20,7 +20,7 @@ function ShowMoreButton({ pending = false, onClick }: { pending?: boolean; onCli
         size="sm"
         onClick={onClick}
         disabled={pending}
-        className="text-primary gap-2 rounded-full"
+        className="text-primary dark:text-link gap-2 rounded-full"
       >
         {pending && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />}
         <span>{m.thread_show_more_replies()}</span>

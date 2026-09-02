@@ -1,0 +1,1 @@
+CREATE INDEX "post_repost_user_created_idx" ON "post_repost" USING btree ("user_id","created_at" DESC NULLS LAST,"post_id" DESC NULLS LAST);

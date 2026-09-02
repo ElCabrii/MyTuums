@@ -127,7 +127,7 @@ describe("ComposerForm", () => {
   it("disables the textarea and swaps the send icon for a spinner while pending", async () => {
     const { container } = await renderComposer({ value: "hello", isPending: true });
 
-    expect(screen.getByRole("combobox")).toBeDisabled();
+    expect(screen.getByRole("textbox")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Post" })).toBeDisabled();
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     // The spinner and the send icon are both unlabelled lucide svgs; the
@@ -149,7 +149,7 @@ describe("ComposerForm", () => {
     await renderComposer({ header: <p>Replying to @alexmercer</p> });
 
     const header = screen.getByText("Replying to @alexmercer");
-    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
 
     expect(
       header.compareDocumentPosition(textarea) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -190,7 +190,7 @@ describe("ComposerForm", () => {
     ).queryClient;
     queryClient.setQueryData(orpc.search.typeahead.queryKey({ input: { q: "al" } }), payload);
 
-    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
     fireEvent.change(textarea, {
       target: { value: "@al", selectionStart: 3, selectionEnd: 3 },
     });
@@ -241,7 +241,7 @@ describe("ComposerForm", () => {
       payload,
     );
 
-    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
     fireEvent.change(textarea, {
       target: { value: "before @alworld after", selectionStart: 10, selectionEnd: 10 },
     });
@@ -279,7 +279,7 @@ describe("ComposerForm", () => {
       payload,
     );
 
-    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
     fireEvent.change(textarea, { target: { value: "@al", selectionStart: 3, selectionEnd: 3 } });
     textarea.setSelectionRange(3, 3);
     fireEvent.select(textarea);
@@ -302,7 +302,7 @@ describe("ComposerForm", () => {
       posts: [],
     });
 
-    const textarea = screen.getByRole<HTMLTextAreaElement>("combobox");
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
     fireEvent.change(textarea, {
       target: { value: "@zz", selectionStart: 3, selectionEnd: 3 },
     });

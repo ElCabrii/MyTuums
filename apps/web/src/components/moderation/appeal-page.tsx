@@ -121,7 +121,10 @@ function AppealCard({ token, postId }: { token?: string; postId?: string }) {
             !isSignedIn ? (
               <>
                 {m.appeal_sign_in()}{" "}
-                <Link to="/login" className="text-primary hover:underline">
+                <Link
+                  to="/login"
+                  className="text-link hover:text-link/80 underline underline-offset-2"
+                >
                   {m.auth_log_in()}
                 </Link>
               </>

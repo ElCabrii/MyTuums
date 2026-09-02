@@ -270,10 +270,20 @@ export function MentionTextarea({
 
   return (
     <div className={wrapperClass}>
+      {/* No `role="combobox"` here, deliberately: the implicit `textbox`
+          role of a `<textarea>` does not allow it (axe's aria-allowed-role,
+          flagged on the live audit), and the combobox role expects a
+          single-line control. The suggestion popup keeps its full ARIA
+          wiring through attributes `textbox` DOES support —
+          `aria-autocomplete`, `aria-controls` and `aria-activedescendant`
+          below — which is the same shape the search box's true `<input>`
+          combobox uses, minus the role a textarea cannot carry.
+          `aria-expanded` is dropped with it: it is not supported on
+          `textbox` either, and the listbox's appearance plus the
+          activedescendant pair already carry the open state. */}
       <Textarea
         ref={textareaRef}
         id={id}
-        role="combobox"
         rows={rows}
         placeholder={placeholder}
         value={value}
@@ -306,7 +316,6 @@ export function MentionTextarea({
         }
         onKeyDown={handleMentionKeyDown}
         aria-autocomplete="list"
-        aria-expanded={showMentionSuggestions}
         aria-controls={showMentionSuggestions ? listboxId : undefined}
         aria-activedescendant={
           showMentionSuggestions && mentionState.highlight >= 0

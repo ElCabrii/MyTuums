@@ -1,0 +1,25 @@
+{
+  "extends": "@my-tuums/tsconfig/react.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"],
+
+    // Vite-specific module handling the shared base cannot assume: the bundler
+    // resolves `.ts` specifiers itself, strips types per-file (so every type
+    // import must say so), and treats every file as a module.
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    // Stricter than the shared base on purpose — Vite builds the app, so `tsc`
+    // is free to be a pure linter here. Do not "align" these away.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

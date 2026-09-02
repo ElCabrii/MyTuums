@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { IncomingMessage, OutgoingHttpHeaders } from "node:http";
 import { PassThrough } from "node:stream";
-import { brotliCompressSync, constants, gunzipSync } from "node:zlib";
+import { brotliCompressSync, brotliDecompressSync, constants, gunzipSync } from "node:zlib";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createStaticFileHandler, noStaticFiles, type StaticResponse } from "./static-files.js";
 
@@ -89,6 +89,42 @@ describe("createStaticFileHandler", () => {
     expect(calls.statusCode).toBe(200);
     expect(calls.headers["Content-Type"]).toBe("image/svg+xml");
     expect(body()).toBe("<svg/>");
+  });
+
+  it("applies the index transform on the SPA fallback and on a direct /index.html hit alike", async () => {
+    // 0.4.0: the server substitutes route-specific crawler heads into
+    // index.html (./public-heads.ts). Both serving paths must run it — a
+    // transform that only one ran would give /login and /index.html
+    // different heads for the same document.
+    const transform = (pathname: string, html: string) =>
+      Promise.resolve(`<!-- ${pathname} -->${html}`);
+    const serve = createStaticFileHandler(root, { transformIndexHtml: transform });
+
+    const fallback = resStub();
+    await serve(req("/login"), fallback.res);
+    expect(fallback.calls.statusCode).toBe(200);
+    expect(fallback.body()).toBe("<!-- /login --><!doctype html><div id=root></div>");
+    expect(fallback.calls.headers["Cache-Control"]).toBe("no-cache, no-transform");
+
+    const direct = resStub();
+    await serve(req("/index.html"), direct.res);
+    expect(direct.body()).toBe("<!-- /index.html --><!doctype html><div id=root></div>");
+  });
+
+  it("compresses a transformed index.html and declares the encoding", async () => {
+    const serve = createStaticFileHandler(root, {
+      transformIndexHtml: (_pathname, html) => Promise.resolve(html),
+    });
+
+    const { res, calls, bodyBuffer } = resStub();
+    await serve(req("/login", "GET", "text/html", { "accept-encoding": "br" }), res);
+
+    expect(calls.headers["Content-Encoding"]).toBe("br");
+    // The compressed body decodes back to the exact document — the buffer
+    // path must produce the same bytes the streaming path would.
+    expect(brotliDecompressSync(bodyBuffer()).toString()).toBe(
+      "<!doctype html><div id=root></div>",
+    );
   });
 
   it("caches fingerprinted assets forever and index.html never", async () => {

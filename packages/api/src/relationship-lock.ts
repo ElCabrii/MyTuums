@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
+import { runSql } from "./sql.js";
 
 /**
  * The advisory-lock class that serializes writes to the relationship between
@@ -61,7 +62,8 @@ export async function acquireRelationshipLock(
   a: string,
   b: string,
 ): Promise<void> {
-  await executor.execute(
+  await runSql(
+    executor,
     sql`select pg_advisory_xact_lock(${RELATIONSHIP_LOCK_CLASS}::int4, ${relationshipLockKey(a, b)}::int4)`,
   );
 }

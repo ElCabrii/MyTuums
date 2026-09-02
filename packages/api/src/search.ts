@@ -196,7 +196,7 @@ export const searchRouter = {
         createdAtField: "createdAt",
         id: user.id,
         idField: "id",
-        query: (cursorFilter) =>
+        fetchPage: (cursorFilter) =>
           context.db
             .select(selection)
             .from(user)
@@ -252,7 +252,7 @@ export const searchRouter = {
         createdAtField: "createdAt",
         id: post.id,
         idField: "id",
-        query: (cursorFilter) =>
+        fetchPage: (cursorFilter) =>
           context.db
             .select(selection)
             .from(post)

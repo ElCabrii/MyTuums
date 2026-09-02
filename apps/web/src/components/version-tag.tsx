@@ -10,7 +10,7 @@ import { APP_STAGE } from "@/lib/app-version";
 export function VersionTag() {
   if (APP_STAGE === null) return null;
   return (
-    <span className="bg-primary/10 text-primary shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium whitespace-nowrap">
+    <span className="bg-primary/10 text-primary dark:text-link shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium whitespace-nowrap">
       {APP_STAGE}
     </span>
   );

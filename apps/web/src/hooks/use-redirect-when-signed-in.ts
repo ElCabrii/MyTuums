@@ -3,7 +3,7 @@ import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { isSignedInAtom, needsDobAtom, viewerHandleAtom } from "@/atoms/session";
 import { offerTwoFactorAtom } from "@/atoms/onboarding";
-import { sanitizeRedirect } from "@/lib/redirect";
+import { sanitizeDestination } from "@/lib/redirect";
 
 /**
  * Shared by /login and /register: someone who already has a session has no
@@ -83,7 +83,7 @@ export function useRedirectWhenSignedIn(redirectFromSearch?: string | null): voi
       return;
     }
 
-    const redirect = sanitizeRedirect(redirectFromSearch);
+    const redirect = sanitizeDestination(redirectFromSearch);
     if (redirect && handle && !needsDob) {
       void navigate({ href: redirect, replace: true });
       return;

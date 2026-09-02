@@ -32,7 +32,11 @@ export function SearchPage() {
 
   if (!query) {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-8">
+      <div className="mx-auto max-w-2xl space-y-4 px-4 py-8">
+        {/* A real h1 on every page state — the prompt state included, which
+            Lighthouse's heading audit sees before any query is typed. The
+            input's aria label is the page's own name for "Search". */}
+        <h1 className="text-lg font-bold tracking-tight">{m.search_input_aria()}</h1>
         <div className="border-border bg-card/40 rounded-xl border border-dashed p-10 text-center">
           <Search className="text-muted-foreground/60 mx-auto mb-3 h-8 w-8" />
           <p className="text-muted-foreground text-sm">{m.search_empty_query()}</p>

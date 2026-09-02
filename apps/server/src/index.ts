@@ -1,6 +1,7 @@
 import { parseEnv } from "./env.js";
 import { createRequestHandler, type RequestResponse } from "./request-handler.js";
 import { createStaticFileHandler, noStaticFiles } from "./static-files.js";
+import { createPublicHeadTransform } from "./public-heads.js";
 import { decorateResponse } from "./response-decorators.js";
 import { IncomingMessage, createServer } from "node:http";
 import { BodyLimitPlugin, RPCHandler } from "@orpc/server/node";
@@ -8,6 +9,7 @@ import { CORSPlugin, SimpleCsrfProtectionHandlerPlugin } from "@orpc/server/plug
 import { ORPCError, onError } from "@orpc/server";
 import {
   appRouter,
+  canViewLinkCardMedia,
   canViewPostMedia,
   canViewProfileMedia,
   createContext,
@@ -96,6 +98,23 @@ const handler = new RPCHandler(appRouter, {
   ],
 });
 
+// Only when this deployment bundles the built web app. Unset in dev, where
+// Vite serves it and proxies /rpc, /api/auth and /media back here — see
+// ./static-files.ts for why one origin is a requirement rather than a
+// preference. Built once here rather than per request (it was): the handler
+// is stateless across requests and the public-head transform rides along,
+// substituting route-specific crawler heads into index.html (see
+// ./public-heads.ts).
+const webStaticHandler = env.WEB_DIST
+  ? createStaticFileHandler(env.WEB_DIST, { transformIndexHtml: createPublicHeadTransform(db) })
+  : noStaticFiles;
+// Same shape for the branding site (apps/branding), reached only when the
+// Host is the branding hostname — see ./branding-host.ts. No head transform:
+// the site is one page whose head is already complete.
+const brandingStaticHandler = env.BRANDING_DIST
+  ? createStaticFileHandler(env.BRANDING_DIST)
+  : noStaticFiles;
+
 // The routing decision tree itself lives in request-handler.ts, unit-tested
 // there against stand-ins for these six dependencies. This is the only
 // place they become real: a live DB ping, BetterAuth's actual node handler,
@@ -123,27 +142,28 @@ const handleRequest = createRequestHandler({
 
     return handler.handle(req, nodeResponse(res), { prefix: "/rpc", context });
   },
-  // One resolver, two authorizers: post attachments follow the post's
+  // One resolver, three authorizers: post attachments follow the post's
   // visibility (moderation tombstones, author blocks), profile images follow
-  // the owner's visibility and the owner-only rule for `.orig` originals.
-  // Display-object redirects are the one class whose caching is worth its
-  // staleness budget — window-bounded, private, per-viewer on every miss.
+  // the owner's visibility and the owner-only rule for `.orig` originals, and
+  // a stored link preview image is public web content this app mirrored.
+  // A null viewer — the anonymous post-permalink reader — is answered by the
+  // same authorizers, which keep the owner-only rules owner-only. Display-
+  // object redirects are the one class whose caching is worth its staleness
+  // budget — window-bounded, private, per-viewer on every miss.
   resolveMediaUrl: createMediaResolver(
     defaultStorage,
     (key, viewerId) =>
       key.startsWith("posts/")
         ? canViewPostMedia(db, key, viewerId)
-        : canViewProfileMedia(db, key, viewerId),
+        : key.startsWith("link-cards/")
+          ? canViewLinkCardMedia()
+          : canViewProfileMedia(db, key, viewerId),
     profileDisplayRedirectCacheControl,
   ),
-  // Only when this deployment bundles the built web app. Unset in dev, where
-  // Vite serves it and proxies /rpc, /api/auth and /media back here — see
-  // ./static-files.ts for why one origin is a requirement rather than a
-  // preference.
-  serveStatic: async (req, res) => {
-    const staticHandler = env.WEB_DIST ? createStaticFileHandler(env.WEB_DIST) : noStaticFiles;
-    return staticHandler(req, nodeResponse(res));
-  },
+  // Only when this deployment bundles the built web app — see the
+  // `webStaticHandler` note above.
+  serveStatic: async (req, res) => webStaticHandler(req, nodeResponse(res)),
+  serveBranding: async (req, res) => brandingStaticHandler(req, nodeResponse(res)),
   // Preserve an unavailable lookup as its own state. The routing boundary can
   // then fail open for the shell without mistaking a stale cookie for a
   // session or admitting any media — post or profile — without a viewer

@@ -87,6 +87,14 @@ resolves `/rpc` against `window.location.origin`, and uploaded images are
 stored as relative `/media/<key>` paths. Split the two across origins and RPC
 and every image break together.
 
+One hostname is deliberately outside that origin: `about.mytuums.com` serves
+the branding site (`apps/branding`, a second small Vite build), which uses
+none of `/rpc`, `/media` or the SPA and links into the app with absolute
+URLs. The same process serves it — host routing in `request-handler.ts` over
+`BRANDING_DIST`, not a second deployment — so the one-origin guarantees for
+the app are untouched and no new surface is operated. Its DNS record is
+provisioned on Railway (see [operations.md](operations.md)).
+
 ## HTTP route order and access gates
 
 **Source of truth:** `apps/server/src/request-handler.ts`
@@ -101,10 +109,11 @@ order:
 | 2   | `/api/auth/admin/*`       | always 404 — see below                          |
 | 3   | `/api/auth*`              | better-auth's own handler                       |
 | 4   | `/rpc*`                   | Content-Length cap, then oRPC                   |
-| 5   | `/media/*`                | GET/HEAD only, then **session**, then key       |
-| 6   | extension-less GET/HEAD   | page gate: session unless on `SIGNED_OUT_PATHS` |
-| 7   | static files              | `apps/server/src/static-files.ts`               |
-| 8   | 404, then a catch-all 500 | logged with the request id                      |
+| 5   | `/media/*`                | GET/HEAD only; session optional, key authorized |
+| 6   | Host `about.mytuums.com`  | the branding page — public, ahead of the gate   |
+| 7   | extension-less GET/HEAD   | page gate: session unless on `isSignedOutPath`  |
+| 8   | static files              | `apps/server/src/static-files.ts`               |
+| 9   | 404, then a catch-all 500 | logged with the request id                      |
 
 Ordering facts that are load-bearing:
 
@@ -117,14 +126,32 @@ Ordering facts that are load-bearing:
   body while routing, which is before auth, rate limiting or any payload
   check. Chunked bodies carry no Content-Length and are bounded at the same
   ceiling by oRPC's `BodyLimitPlugin`, wired in `apps/server/src/index.ts`.
-- **`/media`'s session check runs before the key is parsed.** An anonymous
-  caller must not learn which keys are well-formed by watching the response
-  differ. The rejection carries `Cache-Control: no-store` so a cached 401
-  cannot keep an image broken after sign-in.
+- **`/media` is session-optional with per-key authorization.** Since 0.4.0
+  (public post permalinks) an anonymous caller proceeds with a null viewer and
+  every key — post, profile, link-card — is answered by its authorizer
+  (`canViewPostMedia`/`canViewProfileMedia`/`canViewLinkCardMedia`), which
+  keep owner-only rules owner-only. A cookie whose session store cannot be
+  read is a 503, fail closed.
+- **The branding-host branch sits after every API prefix and before the page
+  gate.** `about.mytuums.com` gets the built branding site (`apps/branding`,
+  served from `BRANDING_DIST` through the same static-file handler as the
+  SPA) instead of the app: the gate never sees a branding-host document, so
+  the site is public without touching `SIGNED_OUT_PATHS`, and the app shell
+  never boots on a host whose cookies, canonicals and RP ID all belong to
+  the apex.
 - **The page gate sits after every API prefix**, so it needs no copy of the
-  routing decisions above it. It reads `SIGNED_OUT_PATHS` from
-  `packages/api/src/constants.ts` — the same set the client gate reads. Two
-  copies would let the gates disagree and loop a visitor forever.
+  routing decisions above it. It reads `isSignedOutPath` (the
+  `SIGNED_OUT_PATHS` set plus the `/post/` prefix) from
+  `packages/api/src/constants.ts` — the same definition the client gate
+  reads. Two copies would let the gates disagree and loop a visitor forever.
+- **The SPA's `index.html` gets a per-route head before it ships.** When
+  `WEB_DIST` is set, the static handler runs `createPublicHeadTransform`
+  (`apps/server/src/public-heads.ts`): the auth/legal routes get their static
+  title/description/canonical/og tags, a `/post/<id>` gets its excerpt and
+  lead image from `publicPostHead`, and everything else keeps the generic
+  fallback. The substituted tags carry `data-app-fallback`, so the SPA's
+  mount effect still removes them and the live route head is the single
+  owner.
 - **`hasValidSession` fails open.** A database blip degrades to "the client
   gate decides" and "images keep loading", never to a mass sign-out.
 
@@ -146,6 +173,7 @@ The router's top-level groups:
 - `post` — `create`, `delete`, `list`, `thread`, `like`, `unlike`
 - `user` — `byUsername`, `uploadImage`, `removeImage`, `follow`, `unfollow`, `followers`, `following`
 - `search` — `typeahead`, `users`, `posts`
+- `notification` — `list`, `unreadCount`, `markRead`
 - `moderation` — reports, blocks, the queue, the staff actions, the audit log, appeals
 
 There is deliberately no RPC-level health check; liveness is plain HTTP at
@@ -267,16 +295,20 @@ sides by CI. See [operations.md](operations.md).
   a new upload re-evaluates from scratch (issue #246).
 - **Banners have one canonical 3:1 composition.** At zoom 1 the editor
   rectangle is exactly the region the encoder stores (`calculateCropFrame`),
-  so applying without adjusting anything is a no-op. The editor can also zoom
-  out past cover down to _contain_ (`minCropScale`) — the whole source
-  visible, the parts of the 3:1 window it cannot reach encoded as black
-  letterbox bars by both the canvas path and the GIF pipeline. The profile
-  frame displays that one composition with its height clamped
+  so applying without adjusting anything is a no-op. That rectangle is also
+  the peak of the zoom range: it already spans the source's full width or
+  full height — the largest 3:1 window that fits — so the window never leaves
+  the source; zoom only goes in, and drag pans within it (issue #273). The
+  profile frame displays that one composition with its height clamped
   (`apps/web/src/lib/banner-frame.ts`): exact 3:1 wherever the measure holds,
   a 150px band on narrow phones, never taller than 320px past the 1500px
   measure — so extreme viewports trim bounded edges of the composition
-  instead of re-choosing the crop, and the editor's safe-area outline (derived
-  from the same constants) marks what every viewport keeps. The stored
+  instead of re-choosing the crop. In the editor the outlined rectangle is the
+  fixed, actual region being encoded: the source context starts visible around
+  it, dragging moves the image beneath it, and wheel zoom scales the image.
+  Pointer movement is coalesced to one compositor transform per animation
+  frame and rebased after each clamp, so large source previews do not trigger
+  layout per raw event or stick when a drag reverses from an edge. The stored
   variant can reach 3840x1280 for a sharp 2x sample on a 1920px display.
 - **The pre-decode guards run at file pick, not just at encode.**
   `validateImageFile` owns the type, byte-cap and header megapixel checks, and
@@ -316,10 +348,16 @@ sides by CI. See [operations.md](operations.md).
   uuid, distinguished by an `.orig` infix. The row is written **before** the
   old object is deleted.
 - **Retrieval.** The stored value is a relative `/media/<key>` path. The
-  server requires a session, then `createMediaResolver` returns a presigned
-  URL and — when a key's redirect may be stored — its Cache-Control; the
-  response is a 302 that is `private, no-store` by default, because every
-  redirect is a viewer-authorized decision. Profile **display** objects are
+  server authorizes the key (a null viewer for the anonymous permalink
+  reader), then `createMediaResolver` returns a presigned URL and — when a
+  key's redirect may be stored — its Cache-Control; the response is a 302
+  that is `private, no-store` by default, because every redirect is a
+  viewer-authorized decision. A key carrying a variant marker
+  (`…/uuid.png.w640.webp`) is authorized against its BASE — the path the rows
+  store — and served from the variant object `media-variants.ts` generates on
+  first request (sharp resize to a fixed width, WebP, written back under the
+  bucket's immutable caching); the browser reaches it through the `srcset`
+  the shared `MEDIA_VARIANT_WIDTHS` builds. Profile **display** objects are
   the one exemption: their redirect is cached
   `private, max-age=<secondsUntilWindowEnd()>`, bounded so it can never
   outlive the signature it points at. Presigned URLs remain **windowed**
@@ -328,7 +366,11 @@ sides by CI. See [operations.md](operations.md).
 - **Reconciliation.** `pnpm --filter @my-tuums/api reconcile:media` deletes
   objects no row points at. It lists the bucket **before** reading the `user`
   rows — the reverse order would treat an upload that landed between the two
-  steps as an orphan and delete an object whose row points at it.
+  steps as an orphan and delete an object whose row points at it. A derived
+  variant is referenced exactly while its base is: the pairing rule adds
+  every derivable variant key of each referenced base, so on-demand
+  generation never orphans a survivor and a dead base's variants are reaped
+  with it.
 
 ## Moderation — report, action, audit, appeal
 

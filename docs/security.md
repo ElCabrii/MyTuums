@@ -23,13 +23,18 @@ There are four, and only the first two carry untrusted input:
 `apps/server/src/request-handler.ts` and
 `packages/api/src/constants.ts`):
 
-| Surface                       | Notes                                                          |
-| ----------------------------- | -------------------------------------------------------------- |
-| `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`              |
-| `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`         |
-| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`   |
-| Static assets                 | anything with a file extension — the SPA cannot boot otherwise |
-| `moderation.appealOpen` (RPC) | the one anonymous RPC — see below                              |
+| Surface                       | Notes                                                              |
+| ----------------------------- | ------------------------------------------------------------------ |
+| `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`                  |
+| `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`             |
+| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`       |
+| `/post/<id>` permalinks       | the app's public read surface (0.4.0) — see below                  |
+| `/media/*`                    | session-optional; every key is still authorized per viewer         |
+| The branding page             | `about.mytuums.com` — one script-free HTML document, host-routed   |
+| Static assets                 | anything with a file extension — the SPA cannot boot otherwise     |
+| `moderation.appealOpen` (RPC) | capability-gated, not session-gated — see below                    |
+| `post.thread`/`post.list`     | session-optional reads; `list` admits an anonymous caller only on  |
+| (reply modes)/`post.linkCard` | its `parentId`/`continuationRootId` modes — the permalink's halves |
 
 **`/api/auth/admin/*` returns 404 before the auth handler sees it.** The
 better-auth admin plugin gates on its own `adminRoles` option, which cannot
@@ -38,8 +43,23 @@ keeps `/rpc` the only route to a moderation action, so the rank hierarchy and
 the audit log stay the only enforcement surface.
 
 **Everything else requires a session.** Every other oRPC procedure is built
-from `protectedProcedure`, every non-allowlisted page is gated by the server
-before the bundle even downloads, and `/media` is gated too.
+from `protectedProcedure`, and every page outside `isSignedOutPath` is gated
+by the server before the bundle even downloads. The public permalink's own
+gates are the ones that replaced the blanket session demand: an anonymous
+caller of `post.list`'s feed modes is refused UNAUTHORIZED exactly as before,
+`/media` answers an anonymous caller per key through the same authorizers
+(a null viewer gets no owner exemptions and no moderator bypass), and the
+same visibility rules that hide a post from a signed-in reader hide it — and
+its head, and its media — from an anonymous one.
+
+The branding site (`apps/branding`) is the one deliberately public
+**document**: it is routed by Host header ahead of the page gate, so it opens
+no path on the app's own hostnames, and it reads nothing — no session, no
+database, no bucket. Its scripts are same-origin module scripts from its own
+build, already covered by the enforced CSP's `script-src 'self'` (which has
+no inline allowance), and HSTS `includeSubDomains` — sent by the apex all
+along — now
+does real work keeping the subdomain HTTPS-only, which is intended.
 
 ### The one anonymous RPC: `moderation.appealOpen`
 
@@ -150,15 +170,62 @@ lookup), so deriving it earlier would mean doing that work twice. It is never
 keyed on an IP, so the "no anonymous IP-keyed bucket" property holds there
 too.
 
-The nine policies in `packages/api/src/rate-limit.ts` are per-minute:
-read 300, like 120, follow 60, write 15, upload 10, search 120, report 20,
-block 30, moderate 60.
+The twelve policies in `packages/api/src/rate-limit.ts` are per-minute:
+read 300, like 120, bookmark 120, follow 60, repost 60, write 15, upload 10,
+search 120, report 20, block 30, moderate 60, linkCard 300. The `linkCard`
+tier is sized like `read` because its middleware charges every call —
+cache-served cards included — and a feed asks for one card per post.
 
 The limiter is **fixed-window and in-memory**: it resets on deploy and
 multiplies per replica. That is right for bounding one client and wrong for
 anything billed. `maxKeys` is a leak alarm, not an admission gate — at
 capacity a brand-new key is let through, never refused, because refusing there
 used to 429 every request from a fresh session.
+
+## Outbound fetches
+
+**Link preview cards** (`packages/api/src/link-card-http.ts`,
+`packages/api/src/link-card.ts`) are the one surface where author-chosen text
+makes the server dial out (issue #260):
+
+- Only `http`/`https` targets are fetched — the same scheme rule the client's
+  linkifier applies. The procedure is session-optional (the public permalink
+  renders the same cards a signed-in feed does), so the `linkCard` tier that
+  rates it is IP-keyed and must bound anonymous dial-outs, not just members'.
+- The hostname is resolved by the server and **every** resolved address must be
+  global unicast before any request is made. Loopback, RFC 1918 private,
+  link-local (including `169.254.169.254`), CGNAT, unique-local, NAT64 (both
+  the well-known and local-use blocks), Teredo, benchmarking, multicast and
+  the reserved/documentation ranges of both families are refused, as is
+  anything unparseable — fail closed. IPv4-mapped IPv6 is refused outright in
+  **both** spellings: the URL parser canonicalizes `[::ffff:127.0.0.1]` to
+  the hex form `[::ffff:7f00:1]`, so judging only the dotted spelling judged
+  nothing a request can actually carry. The same table is re-applied at
+  connect time, inside the HTTP client's own resolution
+  (`createConnectValidatedLookup` in `packages/api/src/link-card-http.ts`):
+  a rebinding DNS server that answers the pre-flight check with a public
+  address and the actual connection with a private one still finds no socket
+  to open — the address the client connects to, not the one it once resolved
+  to, is what the range table must pass.
+- Only the scheme's own port is dialled — 80 for `http`, 443 for `https`,
+  explicit or default. A host's non-web ports (databases, internal status
+  endpoints) are not card targets, first hop or redirect hop.
+- Redirects are followed manually, at most four, and every hop re-runs the
+  scheme, port and address checks — a public first hop cannot launder a
+  redirect to a private one.
+- One wall-clock deadline covers every hop, the body is cut off at a byte cap,
+  and an HTML content type is required before parsing. Every refusal — plus a
+  missing Open Graph payload — is cached as "no card" for the window, so a
+  hostile or dead URL is asked about once, not per view.
+- A target's lead image is fetched through the same guard, validated from its
+  bytes like an upload, and stored in this app's own bucket under
+  `link-cards/` — never hot-linked. `/media/link-cards/*` is readable without
+  a session by design: it mirrors already-public web content, and the
+  anonymous permalink needs it (see `canViewLinkCardMedia`).
+- A card is shared by every post carrying its URL, so a hostile unfurl is a
+  viewer-wide object: `moderation.purgeLinkCard` (moderator gate, `moderate`
+  tier) nulls the row, removes the stored image, and stops the URL from ever
+  unfurling again — the purge's actor and reason are recorded on the row.
 
 ## Media
 
@@ -219,11 +286,14 @@ not the boundary:
 
 **Retrieval:**
 
-- `/media` requires GET or HEAD, then a **live session, checked before the key
-  is parsed**. An anonymous caller must not be able to learn which keys are
-  well-formed, let alone which objects exist, by watching the response differ.
-  The rejection carries `Cache-Control: no-store`, so a cached 401 cannot keep
-  an image broken after the visitor signs in.
+- `/media` requires GET or HEAD, then resolves the session if a cookie is
+  present. Session-optional since 0.4.0 (the public permalink renders media):
+  an anonymous caller proceeds with a **null viewer**, and whether they may
+  see a key is the per-key authorization below — never a blanket answer. A
+  cookie-bearing caller whose session store cannot be read gets 503, fail
+  closed: there is no viewer identity to authorize against. Keys are
+  unguessable uuids, so an anonymous probe of well-formed shapes learns
+  nothing about which objects exist.
 - The response is a 302 to a presigned URL, `private, no-store` by default:
   every redirect is a **viewer-authorized decision**, and reusing one after an
   account switch, block, ban or profile change would serve the old decision.

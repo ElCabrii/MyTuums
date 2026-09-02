@@ -53,6 +53,19 @@ export const Route = createFileRoute("/welcome")({
  * account has not done. `useRequireHandle` (mounted in `__root.tsx`) sends any
  * incomplete session here and keeps it here; this is the page that lets it
  * leave. Each field renders only when that half of the session is missing.
+ *
+ * Exported (rather than file-private like the other split routes) ON PURPOSE.
+ * Moving this component to `src/components/` — the pattern that lets the
+ * router code-split the route — changed the dev-bundle module execution order
+ * enough to re-open a controlled-input race the welcome E2E spec drives:
+ * Playwright's `fill` sets the DOM value and dispatches `input` in two steps,
+ * and a re-render landing between them (here: the header badge query's 403
+ * settling) resets the field to the draft atom's still-empty value, so the
+ * form never submits and the claim never fires (chased for a full afternoon;
+ * the spec failed deterministically in suite context, passed under tracing,
+ * and stopped the moment the component moved back). The chunk this route
+ * costs the entry bundle is the price of that determinism; re-splitting it
+ * needs the fill race understood first.
  */
 export function WelcomePage() {
   const navigate = useNavigate();

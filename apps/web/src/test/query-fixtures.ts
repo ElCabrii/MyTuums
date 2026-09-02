@@ -3,6 +3,7 @@ import type {
   AuditLogPage,
   ModerationCaseDetail,
   ModerationQueuePage,
+  NotificationListPage,
   PostListPage,
   Profile,
   SearchPostsPage,
@@ -17,6 +18,7 @@ import {
   type FollowDirection,
   moderationCaseQueryOptions,
   moderationQueueQueryOptions,
+  notificationsQueryOptions,
   postListQueryOptions,
   type PostFeedParams,
   profileQueryOptions,
@@ -25,6 +27,7 @@ import {
   teamQueryOptions,
   teamSearchQueryOptions,
   threadQueryOptions,
+  unreadCountQueryOptions,
   userListQueryOptions,
 } from "@/lib/query-definitions";
 
@@ -121,6 +124,14 @@ export function queryFixtures(queryClient: QueryClient) {
       },
       teamSearch(q: string, items: TeamMember[]): void {
         queryClient.setQueryData(teamSearchQueryOptions(q).queryKey, { items });
+      },
+    },
+    notifications: {
+      data(pages: NotificationListPage[]): void {
+        seedPages(queryClient, notificationsQueryOptions().queryKey, pages);
+      },
+      unreadCount(count: number): void {
+        queryClient.setQueryData(unreadCountQueryOptions().queryKey, { unreadCount: count });
       },
     },
     query: {

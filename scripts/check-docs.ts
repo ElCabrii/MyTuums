@@ -326,7 +326,7 @@ function anchorsFromMarkdown(body: string): Set<string> {
   let fence: string | null = null;
 
   for (const line of body.split("\n")) {
-    const marker = /^\s*(`{3,}|~{3,})/.exec(line);
+    const marker = line.match(/^\s*(`{3,}|~{3,})/);
     if (marker) {
       const char = marker[1][0];
       if (fence === null) fence = char;
@@ -335,7 +335,7 @@ function anchorsFromMarkdown(body: string): Set<string> {
     }
     if (fence !== null) continue;
 
-    const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+    const heading = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
     if (!heading) continue;
 
     const slug = slugify(headingText(heading[2]));
@@ -627,7 +627,7 @@ function markedList(doc: string, name: string): string[] | null {
   const rest = body.slice(start + marker.length);
   const items: string[] = [];
   for (const line of rest.split("\n")) {
-    const bullet = /^[-*]\s+`([^`]+)`/.exec(line.trim());
+    const bullet = line.trim().match(/^[-*]\s+`([^`]+)`/);
     if (bullet) {
       items.push(bullet[1]);
       continue;
@@ -639,7 +639,7 @@ function markedList(doc: string, name: string): string[] | null {
 }
 
 const routerSource = read("packages/api/src/router.ts");
-const routerBody = /export const appRouter = \{([\s\S]*?)\n\};/.exec(routerSource);
+const routerBody = routerSource.match(/export const appRouter = \{([\s\S]*?)\n\};/);
 if (!routerBody) {
   fail(
     "packages/api/src/router.ts",

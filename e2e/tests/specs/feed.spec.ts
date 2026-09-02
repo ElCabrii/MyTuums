@@ -1,5 +1,6 @@
 import { test, expect } from "../../support/fixtures";
 import { uniqueUser } from "../../support/users";
+import { postCardWithText } from "../../support/post-card";
 
 test.describe("home feed scope", () => {
   test("Global <-> Following changes the feed, persists across reload, and the URL stays /", async ({
@@ -83,5 +84,64 @@ test.describe("home feed pagination", () => {
     for (const post of seeded) {
       await expect(page.getByText(post.content, { exact: true })).toHaveCount(1);
     }
+  });
+});
+
+test.describe("post card header on a narrow viewport", () => {
+  // Issue #278: on a phone-width screen the display name, handle, timestamp
+  // and kebab must share ONE row — the name ellipsizes, nothing folds onto a
+  // second line. jsdom computes no layout, so the component suite cannot see
+  // wrapping; a real viewport is the cheapest layer that can.
+  test("a long display name truncates instead of wrapping the header onto two lines", async ({
+    page,
+    db,
+  }) => {
+    // The throwaway author's handle is irrelevant to the assertion; it is the
+    // display name that has to be long enough that name + handle + timestamp
+    // + kebab cannot fit side by side at 390px without the name yielding.
+    const author = await db.createUser({
+      ...uniqueUser("longname"),
+      name: "Longdisplayname Fixture With More Characters Than One Row",
+    });
+    const marker = `Header row probe ${Date.now().toString()}`;
+    const [seeded] = await db.seedPosts(author.id, 1, { content: () => marker });
+    if (!seeded) throw new Error("seedPosts returned no row");
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    // This author's profile feed, not the global one: `authorId` scopes it
+    // server-side, so nothing any other spec has seeded can interfere.
+    await page.goto(`/@${author.username}`);
+
+    // The deepest div holding the content text is the card's content column,
+    // which also holds the header row — the avatar link stays outside it, so
+    // the only link named after the author inside is the name+handle anchor.
+    const card = postCardWithText(page, marker);
+    const nameLink = card.getByRole("link", { name: /Longdisplayname Fixture/ });
+    const timestamp = card.locator("time").first();
+    const kebab = card.getByRole("button", { name: "More", exact: true });
+
+    const [nameBox, timeBox, kebabBox] = await Promise.all([
+      nameLink.boundingBox(),
+      timestamp.boundingBox(),
+      kebab.boundingBox(),
+    ]);
+    if (!nameBox || !timeBox || !kebabBox) {
+      throw new Error("expected the name, timestamp and kebab to have layout boxes");
+    }
+
+    // `items-center` puts every element of one row at the same vertical
+    // center; a header that wrapped onto two lines separates them by a full
+    // line height, which dwarfs this tolerance at these font sizes.
+    for (const box of [nameBox, timeBox, kebabBox]) {
+      const center = box.y + box.height / 2;
+      const nameCenter = nameBox.y + nameBox.height / 2;
+      expect(Math.abs(center - nameCenter)).toBeLessThan(4);
+    }
+
+    // The row compresses its contents; the page must not grow a horizontal
+    // scrollbar because the timestamp refuses to fold.
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
   });
 });

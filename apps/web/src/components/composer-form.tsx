@@ -65,6 +65,7 @@ export function ComposerForm({
   mentionScope = "composer",
   attachments = [],
   onAttachmentsChange,
+  existingAttachmentCount = 0,
 }: {
   author: { name: string; image?: string | null };
   value: string;
@@ -84,6 +85,13 @@ export function ComposerForm({
   /** Optional image state; omitted only by callers that intentionally disable attachments. */
   attachments?: ComposerAttachment[];
   onAttachmentsChange?: (next: ComposerAttachment[]) => void;
+  /**
+   * Images the submission rides on that this form cannot show or change —
+   * the edit dialog's post already carries them. Their existence satisfies
+   * the "text, images, or both" rule, so the caller may legally save an
+   * empty text; zero (the default) keeps every other caller unchanged.
+   */
+  existingAttachmentCount?: number;
 }) {
   const attachmentSelectionRef = useRef(0);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -92,10 +100,12 @@ export function ComposerForm({
   const remaining = POST_MAX_LENGTH - value.length;
   const isTooLong = remaining < 0;
   // The same cross-field rule `post.create` enforces (issue #202): text,
-  // images, or both — never neither. Attachment validation/pending state
-  // still blocks until the selected files are known-good.
+  // images, or both — never neither. "Images" counts the ones this form is
+  // choosing plus the ones the target already carries
+  // (`existingAttachmentCount`). Attachment validation/pending state still
+  // blocks until the selected files are known-good.
   const canSubmit =
-    (trimmed.length > 0 || attachments.length > 0) &&
+    (trimmed.length > 0 || attachments.length > 0 || existingAttachmentCount > 0) &&
     !isTooLong &&
     !isPending &&
     !attachmentsAreValidating;

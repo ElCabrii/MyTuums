@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { EDIT_HISTORY_CASE_LIMIT } from "@my-tuums/api/constants";
 import {
   createTestQueryClient,
+  makeAuthor,
   makeModerationCaseDetail,
   makeModerationReport,
   makeUserModerationCaseDetail,
@@ -11,6 +13,8 @@ import { queryFixtures } from "@/test/query-fixtures";
 import { renderWithProviders } from "@/test/render";
 import { CaseDialog } from "@/components/moderation/case-dialog";
 import { DEFAULT_SUSPENSION_SECONDS, type CaseRef } from "@/atoms/moderation";
+import { formatDateTime, formatRelativeTime } from "@/lib/format";
+import { getLocale } from "@/paraglide/runtime.js";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
@@ -609,5 +613,202 @@ describe("CaseDialog — two open appeals on one case", () => {
     await waitFor(() =>
       expect(screen.getAllByText(m.moderation_case_appeal_done())).toHaveLength(1),
     );
+  });
+});
+
+describe("CaseDialog — edit history", () => {
+  it("lists every superseded version newest-first when the post was edited, and the header carries the edited marker", async () => {
+    const created = new Date(Date.now() - 3 * 60_000);
+    const older = new Date(Date.now() - 2 * 60_000);
+    const newer = new Date(Date.now() - 60_000);
+    const target: CaseRef = { targetType: "post", targetId: "post-1" };
+    await renderCase(
+      target,
+      makeModerationCaseDetail({
+        id: "post-1",
+        content: "current text",
+        createdAt: created,
+        editedAt: newer,
+        editHistory: [
+          { content: "second version", createdAt: newer },
+          { content: "original wording", createdAt: older },
+        ],
+      }),
+    );
+
+    // The section exists and the server's order is preserved: the version
+    // replaced last reads first, the original below it.
+    expect(screen.getByText(m.moderation_case_edit_history_title())).toBeInTheDocument();
+    const second = screen.getByText("second version");
+    const original = screen.getByText("original wording");
+    expect(second.compareDocumentPosition(original)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    // Each version says when it was replaced, the same relative-time + title
+    // pairing the reports section uses.
+    const replaced = screen.getByText(
+      m.moderation_case_edit_history_replaced({
+        time: formatRelativeTime(older, getLocale(), m.post_just_now()),
+      }),
+    );
+    expect(replaced).toHaveAttribute("title", formatDateTime(older, getLocale()));
+
+    // The header timestamps keep the hover-exact instant this view had before
+    // its timestamps moved into `PostTimestamps`: a relative label still
+    // reveals the full date and time on hover, on the creation time and the
+    // edited marker both.
+    const createdLabel = screen.getByText(
+      formatRelativeTime(created, getLocale(), m.post_just_now()),
+    );
+    expect(createdLabel).toHaveAttribute("title", formatDateTime(created, getLocale()));
+    const editedMarker = screen.getByText(
+      m.post_edited({ time: formatRelativeTime(newer, getLocale(), m.post_just_now()) }),
+    );
+    expect(editedMarker).toHaveAttribute("title", formatDateTime(newer, getLocale()));
+  });
+
+  it("renders no history section for a never-edited post", async () => {
+    const target: CaseRef = { targetType: "post", targetId: "post-2" };
+    await renderCase(target, makeModerationCaseDetail({ id: "post-2" }));
+
+    expect(screen.queryByText(m.moderation_case_edit_history_title())).not.toBeInTheDocument();
+  });
+
+  // The quoted original of a quote target can be rewritten by its author
+  // after being quoted. The report snapshots cover the quoter's text only,
+  // so the original's own history is the one record of the wording that was
+  // amplified — the case view must render it inside the quoted box.
+  it("lists the quoted original's superseded versions inside the quoted box, beside its current text", async () => {
+    const replacedAt = new Date(Date.now() - 60_000);
+    const target: CaseRef = { targetType: "post", targetId: "post-1" };
+    await renderCase(
+      target,
+      makeModerationCaseDetail({
+        id: "post-1",
+        content: "look what they said",
+        quotedPostId: "post-original",
+        quoted: {
+          id: "post-original",
+          content: "softened wording",
+          removed: false,
+          deleted: false,
+          removedReason: null,
+          attachments: [],
+          author: makeAuthor({ id: "author-original", name: "Original Author" }),
+          editHistory: [{ content: "the wording that was quoted", createdAt: replacedAt }],
+          editHistoryTruncated: false,
+        },
+      }),
+    );
+
+    // Both halves of the evidence render: the live (edited) text the original
+    // now carries, and the pre-edit wording the quoter amplified.
+    expect(screen.getByText(m.moderation_case_quoted_label())).toBeInTheDocument();
+    expect(screen.getByText("softened wording")).toBeInTheDocument();
+    expect(screen.getByText("the wording that was quoted")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        m.moderation_case_edit_history_replaced({
+          time: formatRelativeTime(replacedAt, getLocale(), m.post_just_now()),
+        }),
+      ),
+    ).toBeInTheDocument();
+    // The quoted history section lives inside the quoted box, after the
+    // quoted content — the same reading order the target's own history keeps.
+    const quotedBox = screen.getByText(m.moderation_case_quoted_label()).parentElement;
+    expect(quotedBox).toContainElement(screen.getByText("the wording that was quoted"));
+    expect(
+      screen
+        .getByText("softened wording")
+        .compareDocumentPosition(screen.getByText("the wording that was quoted")),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("renders no history inside the quoted box when the quoted original was never edited", async () => {
+    const target: CaseRef = { targetType: "post", targetId: "post-1" };
+    await renderCase(
+      target,
+      makeModerationCaseDetail({
+        id: "post-1",
+        quotedPostId: "post-original",
+        quoted: {
+          id: "post-original",
+          content: "stable wording",
+          removed: false,
+          deleted: false,
+          removedReason: null,
+          attachments: [],
+          author: makeAuthor(),
+          editHistory: [],
+          editHistoryTruncated: false,
+        },
+      }),
+    );
+
+    expect(screen.getByText("stable wording")).toBeInTheDocument();
+    expect(screen.queryByText(m.moderation_case_edit_history_title())).not.toBeInTheDocument();
+  });
+});
+
+describe("CaseDialog — report snapshots", () => {
+  const target: CaseRef = { targetType: "post", targetId: "post-1" };
+
+  // A report raised against wording the author has since rewritten: the
+  // snapshot is the reporter's evidence, and the badge says the rewrite
+  // landed after the report — together they are why editing under review
+  // cannot hide what was judged.
+  it("quotes the reported text beside an edited-after-report badge when the post was rewritten", async () => {
+    const reportedAt = new Date(Date.now() - 5 * 60_000);
+    await renderCase(
+      target,
+      makeModerationCaseDetail(
+        { id: "post-1", content: "innocuous rewrite", editedAt: new Date() },
+        {
+          reports: [
+            makeModerationReport({
+              snapshotContent: "the offending wording",
+              createdAt: reportedAt,
+            }),
+          ],
+        },
+      ),
+    );
+
+    expect(
+      screen.getByText(m.moderation_case_report_snapshot_title()).nextElementSibling,
+    ).toHaveTextContent("the offending wording");
+    expect(screen.getByText(m.moderation_case_edited_after_report())).toBeInTheDocument();
+  });
+
+  // An unedited post needs no quote — the content card above already says
+  // exactly what was reported, and a matching snapshot would say it twice.
+  it("renders neither the quote nor the badge when the report matches the live text", async () => {
+    await renderCase(
+      target,
+      makeModerationCaseDetail(
+        { id: "post-1", content: "what it says" },
+        { reports: [makeModerationReport({ snapshotContent: "what it says" })] },
+      ),
+    );
+
+    expect(screen.queryByText(m.moderation_case_report_snapshot_title())).not.toBeInTheDocument();
+    expect(screen.queryByText(m.moderation_case_edited_after_report())).not.toBeInTheDocument();
+  });
+
+  it("says when the history is truncated to the newest versions", async () => {
+    await renderCase(
+      target,
+      makeModerationCaseDetail({
+        id: "post-1",
+        editedAt: new Date(),
+        editHistory: [{ content: "one visible version", createdAt: new Date() }],
+        editHistoryTruncated: true,
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        m.moderation_case_edit_history_truncated({ count: EDIT_HISTORY_CASE_LIMIT }),
+      ),
+    ).toBeInTheDocument();
   });
 });

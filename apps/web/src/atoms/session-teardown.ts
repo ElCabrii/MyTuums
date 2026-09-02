@@ -134,6 +134,30 @@ export function clearViewerState(queryClient: QueryClient): void {
       clearLikeFamilies();
     },
   );
+  // Repost toggles are per-post intent, same reasoning as likes.
+  sweepFamily(
+    "repost",
+    () => import("@/atoms/repost"),
+    ({ clearRepostFamilies }) => {
+      clearRepostFamilies();
+    },
+  );
+  // The quote dialog's draft belongs to whoever opened it, and its target is
+  // a cached post row from the signed-out session.
+  sweepFamily(
+    "quote composer",
+    () => import("@/atoms/quote-composer"),
+    ({ clearQuoteComposerState }) => {
+      clearQuoteComposerState();
+    },
+  );
+  sweepFamily(
+    "bookmark",
+    () => import("@/atoms/bookmark"),
+    ({ clearBookmarkFamilies }) => {
+      clearBookmarkFamilies();
+    },
+  );
   sweepFamily(
     "follow",
     () => import("@/atoms/follow"),
@@ -146,6 +170,15 @@ export function clearViewerState(queryClient: QueryClient): void {
     () => import("@/atoms/moderation"),
     ({ clearModerationFamilies }) => {
       clearModerationFamilies();
+    },
+  );
+  // The notifications feed and the read state its rows carry belong to the
+  // person who earned them; the count dies with the QueryClient clear above.
+  sweepFamily(
+    "notifications",
+    () => import("@/atoms/notifications"),
+    ({ clearNotificationsFamily }) => {
+      clearNotificationsFamily();
     },
   );
   // Results keyed on the previous session's queries shouldn't outlive it. The

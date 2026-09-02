@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { RegisterPage } from "@/routes/register";
+import { RegisterPage } from "@/components/register-page";
 import { authClient, type AuthClientAction } from "@/lib/auth-client";
 import { m } from "@/paraglide/messages.js";
 import { LEGAL_VERSION } from "@my-tuums/auth/rules";
