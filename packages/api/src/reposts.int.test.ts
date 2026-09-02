@@ -333,7 +333,7 @@ describe("reposts in feeds", () => {
     expect(event?.viewerHasReposted).toBe(false);
   });
 
-  it("profile feeds stay the author's own activity: an authorId feed carries no repost events", async () => {
+  it("an authorId feed without includeReposts stays the author's own activity — the compatibility default every existing client relies on", async () => {
     const author = await createTestUser();
     const reposter = await createTestUser();
     const [original] = await seedPosts(author.id, 1);
@@ -352,6 +352,63 @@ describe("reposts in feeds", () => {
 
     expect(authorFeed.items.every((i) => i.repostedBy === null)).toBe(true);
     expect(reposterFeed.items).toHaveLength(0);
+  });
+
+  it("with includeReposts, the reposter's profile interleaves their own repost events at the repost's timestamp — and the original author's profile carries no one else's amplification (issue #277)", async () => {
+    const author = await createTestUser();
+    const reposter = await createTestUser();
+    const viewer = await createTestUser();
+    // Explicit instants: the ordering property under test needs the repost
+    // NEWER than the reposter's own authored post, so the event sits above
+    // it even though the original is the OLDEST row in the story.
+    const base = Date.UTC(2026, 0, 2, 9, 0, 0);
+    const [original] = await seedPosts(author.id, 1, { createdAt: new Date(base) });
+    const [own] = await seedPosts(reposter.id, 1, { createdAt: new Date(base + 10_000) });
+    const repostedAt = new Date(base + 20_000);
+    await seedRepost(original.id, reposter.id, repostedAt);
+
+    const reposterFeed = await call(
+      appRouter.post.list,
+      { authorId: reposter.id, includeReposts: true },
+      { context: contextFor(viewer) },
+    );
+
+    // The profile feed is scoped to the reposter, so it holds exactly their
+    // two events: the repost above their own authored post.
+    expect(reposterFeed.items).toHaveLength(2);
+    expect(reposterFeed.items[0]).toMatchObject({ id: original.id });
+    expect(reposterFeed.items[0].repostedBy).toMatchObject({ id: reposter.id });
+    expect(reposterFeed.items[0].repostedBy?.repostedAt.getTime()).toBe(repostedAt.getTime());
+    // The embedded post is the ORIGINAL — its own author, not the reposter.
+    expect(reposterFeed.items[0].author.id).toBe(author.id);
+    expect(reposterFeed.items[1]).toMatchObject({ id: own.id, repostedBy: null });
+
+    // The ORIGINAL author's profile shows the post once as their own event —
+    // a profile carries the events its owner caused, never other people's
+    // amplifications of the owner's posts.
+    const authorFeed = await call(
+      appRouter.post.list,
+      { authorId: author.id, includeReposts: true },
+      { context: contextFor(viewer) },
+    );
+    const theirs = authorFeed.items.filter((i) => i.id === original.id);
+    expect(theirs).toHaveLength(1);
+    expect(theirs.every((i) => i.repostedBy === null)).toBe(true);
+  });
+
+  it("kind: replies wins over includeReposts — the Replies tab carries no repost events", async () => {
+    const author = await createTestUser();
+    const reposter = await createTestUser();
+    const [original] = await seedPosts(author.id, 1);
+    await seedRepost(original.id, reposter.id, new Date());
+
+    const feed = await call(
+      appRouter.post.list,
+      { authorId: reposter.id, kind: "replies", includeReposts: true },
+      { context: contextFor(reposter) },
+    );
+
+    expect(feed.items).toHaveLength(0);
   });
 });
 

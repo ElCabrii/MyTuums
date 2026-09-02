@@ -274,10 +274,16 @@ export const postRepost = pgTable(
     // original post.
     primaryKey({ columns: [t.postId, t.userId] }),
     // The PK already covers (post_id, user_id) lookups — the derived repost
-    // count and the viewer's has-reposted check. This one covers the merged
-    // home-feed walk: every repost event, newest first, ordered on exactly the
-    // (created_at, post_id, user_id) comparison the event cursor makes.
+    // count and the viewer's has-reposted check. `post_repost_created_idx`
+    // covers the merged home-feed walk: every repost event, newest first,
+    // ordered on exactly the (created_at, post_id, user_id) comparison the
+    // event cursor makes. This one covers the per-profile walk (issue #277):
+    // one author's repost events, newest first — once `user_id` is bound by
+    // the profile feed's author filter, (created_at, post_id) is the rest of
+    // the same event-cursor comparison. A created_at-leading index cannot
+    // serve it: every entry would be read and filtered on user_id.
     index("post_repost_created_idx").on(t.createdAt.desc(), t.postId.desc(), t.userId.desc()),
+    index("post_repost_user_created_idx").on(t.userId, t.createdAt.desc(), t.postId.desc()),
   ],
 );
 

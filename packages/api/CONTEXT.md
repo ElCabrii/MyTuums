@@ -289,14 +289,17 @@ over HTTP and imports only its browser-safe subpaths.
   deduplication: one post can be two events. The event cursor is a three-part
   key (`createEventCursorCodec` in `src/cursor.ts`): `(event_at, post_id,
 reposter_key)`, where the reposter half is absent for post events and binds
-  as `''` in SQL so the row-value comparison stays a total order. Profile
-  feeds (`authorId`) and reply lists run no repost arm: a profile is the
-  author's own activity, and the reply list is direct replies by their own
-  event time. The same rule excludes reposts _of_ replies under
-  `kind: "posts"` — no shipped feed can show such an event, so the web hides
-  the repost control on replies rather than offer an action whose result
-  never renders anywhere. The repost arm applies the block/ban filter to the
-  reposter
+  as `''` in SQL so the row-value comparison stays a total order. Reply lists
+  (`parentId`) run no repost arm: they are direct replies by their own event
+  time. A profile feed (`authorId`) runs the arm only when the caller opts in
+  through `includeReposts`, scoped to the profile's own `post_repost.user_id`
+  rows (issue #277) — a profile carries the events its owner caused, never
+  other people's amplifications of the owner's posts — and `post_repost_user_created_idx`
+  mirrors that walk. The same rule excludes reposts _of_ replies under
+  `kind: "posts"` — the Posts tab is top-level only, like the home timelines —
+  and the web hides the repost control on replies rather than offer an
+  action no shipped surface creates. The repost arm applies the block/ban
+  filter to the reposter
   (`aliasVisibleTo` — `invisibleAuthor` is bound to the un-aliased table), but
   deliberately keeps a visible reposter's event when only the original author
   is hidden; the projection phase re-evaluates that original and emits the

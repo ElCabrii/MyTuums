@@ -190,6 +190,13 @@
       "when": 1788207621958,
       "tag": "0026_vengeful_quasar",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1788276739627,
+      "tag": "0027_sloppy_marauders",
+      "breakpoints": true
     }
   ]
 }

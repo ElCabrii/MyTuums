@@ -22,14 +22,14 @@ export type { PostFeedParams } from "@/lib/query-definitions";
  *
  * `authorId` is a database id, not a validated slug, so it could in
  * principle contain "|". It is therefore kept LAST and `decode` consumes only
- * the three leading delimiters, treating everything after them as the id —
- * so the round trip stays total instead of silently truncating one. The three
- * fields ahead of it are all constrained (an enum, a mode flag, a uuid) and cannot
- * contain a delimiter.
+ * the four leading delimiters, treating everything after them as the id —
+ * so the round trip stays total instead of silently truncating one. The four
+ * fields ahead of it are all constrained (an enum, two mode flags, a uuid)
+ * and cannot contain a delimiter.
  */
 /** Encodes feed params into the family key string — layout described above. */
 export const encode = (p: PostFeedParams): string =>
-  `${p.feed}|${encodeKind(p)}|${p.parentId ?? ""}|${p.authorId ?? ""}`;
+  `${p.feed}|${encodeKind(p)}|${p.includeReposts ? "t" : ""}|${p.parentId ?? ""}|${p.authorId ?? ""}`;
 
 function encodeKind(p: PostFeedParams): string {
   if (p.kind === "posts") return "p";
@@ -40,9 +40,9 @@ function encodeKind(p: PostFeedParams): string {
 
 /** Decodes a family key string back into feed params — the inverse of {@link encode}. */
 export const decode = (key: string): PostFeedParams => {
-  const [feed = "", replies = "", parentId = ""] = key.split("|", 3);
-  // Everything past the third delimiter, however many more it contains.
-  const authorId = key.slice(feed.length + replies.length + parentId.length + 3);
+  const [feed = "", replies = "", reposts = "", parentId = ""] = key.split("|", 4);
+  // Everything past the fourth delimiter, however many more it contains.
+  const authorId = key.slice(feed.length + replies.length + reposts.length + parentId.length + 4);
 
   const params: PostFeedParams = {
     // SAFETY: encode only ever writes one of the three literal list scopes —
@@ -52,6 +52,7 @@ export const decode = (key: string): PostFeedParams => {
   if (authorId) params.authorId = authorId;
   if (parentId) params.parentId = parentId;
   if (replies === "r") params.includeReplies = true;
+  if (reposts === "t") params.includeReposts = true;
   if (replies === "p") params.kind = "posts";
   if (replies === "q") params.kind = "replies";
   if (replies === "a") params.kind = "both";

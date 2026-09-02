@@ -26,6 +26,7 @@ describe("ProfilePosts", () => {
       authorId: profile.id,
       feed: "global",
       includeReplies: true,
+      includeReposts: true,
     });
 
     await renderWithProviders(<ProfilePosts />, {
@@ -47,6 +48,7 @@ describe("ProfilePosts", () => {
       authorId: profile.id,
       feed: "global",
       includeReplies: true,
+      includeReposts: true,
     });
 
     await renderWithProviders(<ProfilePosts />, {

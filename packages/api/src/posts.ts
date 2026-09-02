@@ -773,13 +773,17 @@ type FeedEventRow = {
  * - A repost whose original author is banned or blocked — either direction —
  *   keeps the reposter's event but redacts the original to the unavailable
  *   treatment: no identity, content, media, counts or viewer interactions.
- * - The repost arm runs only for the home feeds. A profile feed
- *   (`authorId`) is the author's own activity, and the `kind: "replies"`
- *   axis selects reply rows, not amplification events. Under
- *   `kind: "posts"` the arm also excludes reposts of replies (the
- *   original's `parentId` must be null): no shipped feed can show such an
- *   event, so the web does not offer the repost control on replies rather
- *   than sell an action whose result never renders anywhere.
+ * - The repost arm runs for the home feeds, and for a profile feed
+ *   (`authorId`) that opts in through `includeReposts` — scoped there to
+ *   the profile's own amplifications (`post_repost.user_id`), mirroring the
+ *   authored arm's author filter: a profile carries the events its owner
+ *   caused, never other people's reposts of the owner's posts. The
+ *   `kind: "replies"` axis runs no arm at all: it selects reply rows, not
+ *   amplification events. Under `kind: "posts"` the arm also excludes
+ *   reposts of replies (the original's `parentId` must be null): the tab is
+ *   top-level only, the same rule the home feeds follow, and the web does
+ *   not offer the repost control on replies rather than sell an action
+ *   whose result never renders anywhere.
  */
 async function feedEventPage(
   db: Database,
@@ -790,6 +794,7 @@ async function feedEventPage(
     authorId?: string;
     feed: "global" | "following";
     kind: "posts" | "replies" | "all";
+    includeReposts: boolean;
   },
 ) {
   const decoded = args.cursor ? postFeedCursor.decode(args.cursor) : undefined;
@@ -838,6 +843,10 @@ async function feedEventPage(
     // the reposter's event and is redacted to the unavailable treatment below,
     // which is the same "the author is gone" result blocked profiles use.
     aliasVisibleTo(args.viewerId, feedReposter),
+    // The profile feed's mirror of the authored arm's author filter: a
+    // profile that opts into repost events carries the ones its owner
+    // caused, never other people's amplifications of the owner's posts.
+    args.authorId ? eq(postRepost.userId, args.authorId) : undefined,
     args.kind === "posts" ? isNull(feedOriginal.parentId) : undefined,
     args.feed === "following"
       ? sql`(${postRepost.userId} = ${args.viewerId} or exists (
@@ -847,8 +856,11 @@ async function feedEventPage(
       : undefined,
   ];
 
+  // The arm drops for the reply axis (an amplification is not a reply) and
+  // for a profile feed that has not opted in — every existing `authorId`
+  // caller keeps the pre-#277 feed exactly.
   const repostArm =
-    args.authorId || args.kind === "replies"
+    args.kind === "replies" || (args.authorId && !args.includeReposts)
       ? undefined
       : sql`
     select ${postRepost.createdAt} as event_at, ${postRepost.postId} as post_id, ${postRepost.userId} as reposter_id, ${postRepost.userId} as reposter_key
@@ -1602,6 +1614,17 @@ export const postRouter = {
            */
           includeReplies: z.boolean().default(false),
           /**
+           * Reposts stay out of a profile feed unless this is set — the same
+           * opt-in shape `includeReplies` uses, so the two activity axes stay
+           * independent and existing `authorId` callers keep their feed. The
+           * home feeds carry repost events unconditionally (a home timeline IS
+           * the merged event stream), so the flag is a no-op without
+           * `authorId`. Under `kind: "replies"` the arm never runs — an
+           * amplification is not a reply — the same precedence `kind` already
+           * holds over `includeReplies`.
+           */
+          includeReposts: z.boolean().default(false),
+          /**
            * The profile feed's three-way activity filter. `includeReplies` is
            * retained for existing clients and means `all` when true; `kind`
            * takes precedence when both are supplied. Keeping the legacy field
@@ -1616,6 +1639,7 @@ export const postRouter = {
               input.authorId ||
               input.feed === "following" ||
               input.includeReplies ||
+              input.includeReposts ||
               input.kind)
           ) {
             refinement.addIssue({
@@ -1629,6 +1653,7 @@ export const postRouter = {
               input.authorId ||
               input.continuationRootId ||
               input.includeReplies ||
+              input.includeReposts ||
               input.kind)
           ) {
             refinement.addIssue({
@@ -1732,10 +1757,11 @@ export const postRouter = {
       const kind = input.kind ?? (input.includeReplies ? "all" : "posts");
 
       // The home and profile feeds walk the merged event timeline
-      // (`feedEventPage` above): authored posts, plus repost events on the
-      // home feeds. A reply list under one post stays a plain post query —
-      // it lists the parent's direct replies by their own event time, and an
-      // amplification is not a reply.
+      // (`feedEventPage` above): authored posts, plus repost events — always
+      // on the home feeds, and on a profile feed that opts in through
+      // `includeReposts`. A reply list under one post stays a plain post
+      // query — it lists the parent's direct replies by their own event time,
+      // and an amplification is not a reply.
       if (!input.parentId) {
         return feedEventPage(context.db, {
           viewerId,
@@ -1744,6 +1770,7 @@ export const postRouter = {
           authorId: input.authorId,
           feed: input.feed,
           kind,
+          includeReposts: input.includeReposts,
         });
       }
 

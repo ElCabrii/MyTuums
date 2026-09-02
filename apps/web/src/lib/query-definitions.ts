@@ -14,6 +14,7 @@ interface PostListInput {
   parentId?: string;
   continuationRootId?: string;
   includeReplies?: boolean;
+  includeReposts?: boolean;
   kind?: "posts" | "replies" | "all";
   feed?: FeedScope | "bookmarks";
   cursor?: string;
@@ -61,6 +62,8 @@ export type PostFeedParams = {
   parentId?: string;
   /** Replies are excluded unless this is set; a profile feed opts in. */
   includeReplies?: boolean;
+  /** The author's own repost events join the profile feed when this is set. */
+  includeReposts?: boolean;
   /** Profile-only three-way filter; `both` is encoded as legacy includeReplies. */
   kind?: PostFeedKind;
 };
@@ -71,6 +74,7 @@ export function postListQueryOptions({
   feed: scope,
   parentId,
   includeReplies,
+  includeReposts,
   kind,
 }: PostFeedParams) {
   return orpc.post.list.infiniteOptions({
@@ -80,6 +84,9 @@ export function postListQueryOptions({
       if (parentId) input.parentId = parentId;
       if (kind === "replies") input.kind = "replies";
       else if (kind === "both" || includeReplies) input.includeReplies = true;
+      // Same conditional-spread rule as the fields above: only a profile
+      // feed sets this, so every other feed's key stays exactly as it was.
+      if (includeReposts) input.includeReposts = true;
       // The global feed keeps a bare key (see the note on the conditional
       // spreads above); the two scoped feeds carry their discriminator.
       if (scope === "following" || scope === "bookmarks") input.feed = scope;
