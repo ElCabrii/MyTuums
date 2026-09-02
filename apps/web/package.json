@@ -1,7 +1,7 @@
 {
   "name": "@my-tuums/web",
   "private": true,
-  "version": "0.3.5",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

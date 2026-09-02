@@ -35,6 +35,7 @@
 import { and, eq } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import { user } from "@my-tuums/db/schema";
+import { parseMediaVariantKey } from "./constants.js";
 import { mediaPathFor } from "./image.js";
 import { secondsUntilWindowEnd } from "./storage.js";
 import { visibleUser } from "./visibility.js";
@@ -67,16 +68,28 @@ const PROFILE_KEY_RE =
  * that must not be reused.
  */
 export function profileDisplayRedirectCacheControl(key: string): string | null {
-  const match = PROFILE_KEY_RE.exec(key);
+  // A variant key (`…/uuid.webp.w96.webp`) is a display object's derived size —
+  // the same rule applies to the base it derives from.
+  const base = parseMediaVariantKey(key)?.baseKey ?? key;
+  const match = PROFILE_KEY_RE.exec(base);
   if (!match || match[4]) return null;
   return `private, max-age=${secondsUntilWindowEnd()}`;
 }
 
-/** Whether the viewer may fetch this profile-media key. */
+/**
+ * Whether the viewer may fetch this profile-media key.
+ *
+ * `viewerId` may be `null` — the anonymous post-permalink reader (0.4.0),
+ * whose page renders author avatars and therefore needs the display objects.
+ * The two rules degrade naturally: a display object is visible to a viewer
+ * who can see the owner, and an anonymous viewer's visibility is the same
+ * predicate with no block edges (only an active ban hides the owner); an
+ * original stays owner-only, and a null viewer is nobody's owner.
+ */
 export async function canViewProfileMedia(
   db: Database,
   key: string,
-  viewerId: string,
+  viewerId: string | null,
 ): Promise<boolean> {
   const match = PROFILE_KEY_RE.exec(key);
   if (!match) return false;
@@ -98,5 +111,5 @@ export async function canViewProfileMedia(
   if (!original) {
     return row.display === path && (ownerId === viewerId || row.visibleToViewer);
   }
-  return ownerId === viewerId && row.original === path;
+  return viewerId !== null && ownerId === viewerId && row.original === path;
 }

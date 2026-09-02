@@ -36,9 +36,14 @@ export const effectivelyBanned = sql<boolean>`(
  * True when the author of the `post` row an outer query is over must be
  * hidden from the viewer: banned, blocked by the viewer, or blocking the
  * viewer. Remove this from a query and the row becomes visible to people
- * it must not be.
+ * it must not.
+ *
+ * `viewerId` may be `null` — the anonymous post-permalink reader (0.4.0). A
+ * NULL viewer id compares equal to no block row, so an anonymous reader is
+ * hidden from exactly the same banned authors a fresh signed-in reader is,
+ * and from no blocks at all (blocks are relationships between two accounts).
  */
-export function invisibleAuthor(viewerId: string) {
+export function invisibleAuthor(viewerId: string | null) {
   return sql<boolean>`(
     ${effectivelyBanned}
     or exists (
@@ -56,9 +61,10 @@ export function invisibleAuthor(viewerId: string) {
  * True when the `user` row an outer query is over is blocked by the viewer
  * or blocks the viewer — the block half of visibility, without the ban.
  * `users.byUsername` filters on this alone so a banned (but not blocked)
- * profile still resolves to its stub.
+ * profile still resolves to its stub. `viewerId` may be `null` for the
+ * anonymous reader, who has no block relationships by definition.
  */
-export function invisibleUser(viewerId: string) {
+export function invisibleUser(viewerId: string | null) {
   return sql<boolean>`(
     exists (
       select 1 from ${userBlock}
@@ -74,8 +80,9 @@ export function invisibleUser(viewerId: string) {
 /**
  * The full user-list filter: an active ban hides, a block in either
  * direction hides. One entry in every user list's filters array (search,
- * typeahead, follower lists).
+ * typeahead, follower lists). `viewerId` may be `null` — see
+ * `invisibleUser` for what that means.
  */
-export function visibleUser(viewerId: string) {
+export function visibleUser(viewerId: string | null) {
   return sql<boolean>`(not ${effectivelyBanned} and not ${invisibleUser(viewerId)})`;
 }

@@ -406,8 +406,8 @@ export const MEDIA_URL_PREFIX = "/media/";
 
 /**
  * Where a signed-out visitor is allowed to be. Everything else redirects to
- * `/login` — the site is private, like a social media app where nothing
- * renders until you're signed in.
+ * `/login` — the site is private, like a social media app where almost
+ * nothing renders until you're signed in.
  *
  * The auth pages speak for themselves. `/welcome` is here because it is the
  * completion page for a *signed-in* session that lacks a handle or a date of
@@ -424,7 +424,7 @@ export const MEDIA_URL_PREFIX = "/media/";
  * the server and `/login`. One list is what makes that impossible rather than
  * merely unlikely.
  */
-export const SIGNED_OUT_PATHS = new Set([
+export const SIGNED_OUT_PATHS = new Set<string>([
   "/login",
   "/register",
   // The check-your-email screen a password sign-up lands on before its email
@@ -456,6 +456,115 @@ export const SIGNED_OUT_PATHS = new Set([
   // exempt for the same reason /appeal is.
   "/banned",
 ]);
+
+/**
+ * The prefix-shaped half of the signed-out allowlist: paths a signed-out
+ * visitor may occupy that a `Set` of exact strings cannot express.
+ *
+ * `/post/` is here because post permalinks are the app's public surface
+ * (0.4.0): a thread page renders for a signed-out visitor — the focused post,
+ * its ancestors and its replies through the anonymous read modes of
+ * `post.thread`/`post.list` — with interaction controls hidden until they
+ * sign in. Post-level privacy beyond the existing visibility rules is
+ * deliberately out of scope until 0.5.0; the same visibility that hides a
+ * post from a signed-in viewer (tombstones, bans, blocks) hides it from an
+ * anonymous one.
+ *
+ * Reads through the same `isSignedOutPath` predicate as `SIGNED_OUT_PATHS`
+ * so the two gates (server and client) still share ONE definition — the
+ * redirect-loop guarantee below depends on it, and a prefix rule that only
+ * one gate knew about would be exactly that bug.
+ */
+const SIGNED_OUT_PATH_PREFIXES = ["/post/"];
+
+/** Whether a pathname (not percent-decoded — see the gates) is open to a signed-out visitor. */
+export function isSignedOutPath(pathname: string): boolean {
+  return (
+    SIGNED_OUT_PATHS.has(pathname) ||
+    SIGNED_OUT_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  );
+}
+
+/**
+ * The widths (in CSS pixels) the server will derive a WebP variant of a media
+ * object at, by key prefix. One shared definition so the browser's `srcset`
+ * and the server's on-demand generation can never name a width the other
+ * does not know (see `media-variants.ts` in this package for the server
+ * half; the client half is `apps/web`'s `mediaVariantPath` usage).
+ *
+ * Posts: 640 covers the feed's single-image column and a 2x grid cell,
+ * 1280 the fullscreen viewer and 2x feeds. Avatars: 96 covers every feed
+ * chrome size at 2x, 256 the profile header at 2x. Banners render at most
+ * full-width; 1280 bounds the common desktop case. Link-card lead images
+ * render inside a card, never full-bleed.
+ */
+export const MEDIA_VARIANT_WIDTHS = {
+  posts: [640, 1280],
+  avatars: [96, 256],
+  banners: [1280],
+  "link-cards": [640],
+} as const;
+
+/**
+ * The variant marker appended to a base key: `…/uuid.png.w640.webp`. Appended
+ * after the full base key — extension included — so parsing the marker back
+ * off reconstructs the base exactly, whatever extension the base carried.
+ */
+export function mediaVariantKey(key: string, width: number): string {
+  return `${key}.w${width}.webp`;
+}
+
+/** The `/media/…` path of a variant of a stored media path (or URL-less key). */
+export function mediaVariantPath(path: string, width: number): string {
+  return path.startsWith(MEDIA_URL_PREFIX)
+    ? `${MEDIA_URL_PREFIX}${mediaVariantKey(path.slice(MEDIA_URL_PREFIX.length), width)}`
+    : mediaVariantKey(path, width);
+}
+
+/**
+ * The widths derivable for a key's prefix, or `undefined` for a prefix this
+ * app derives nothing for. A switch rather than an index so an unknown
+ * prefix is a type error here, not a runtime `undefined` to chase.
+ */
+function variantWidthsFor(key: string): readonly number[] | undefined {
+  switch (key.split("/", 1)[0]) {
+    case "posts":
+      return MEDIA_VARIANT_WIDTHS.posts;
+    case "avatars":
+      return MEDIA_VARIANT_WIDTHS.avatars;
+    case "banners":
+      return MEDIA_VARIANT_WIDTHS.banners;
+    case "link-cards":
+      return MEDIA_VARIANT_WIDTHS["link-cards"];
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Splits a key that may carry a variant marker into its base key and width.
+ * `null` when the key is a plain base — or when the width is not one this
+ * app derives for that prefix, so an arbitrary `.w<N>.webp` spelling never
+ * becomes a generation request.
+ */
+export function parseMediaVariantKey(key: string): { baseKey: string; width: number } | null {
+  const match = /^(.*)\.w(\d+)\.webp$/.exec(key);
+  if (!match) return null;
+  const width = Number(match[2]);
+  if (!variantWidthsFor(key)?.includes(width)) return null;
+  return { baseKey: match[1], width };
+}
+
+/**
+ * Every variant key this app would derive for a base key — the pairing rule
+ * the reconciler and the object-cleanup paths use so a variant is reaped
+ * exactly when its base is (or, for cleanup, removed alongside it).
+ */
+export function mediaVariantKeys(key: string): string[] {
+  const widths = variantWidthsFor(key);
+  if (!widths) return [];
+  return widths.map((width) => mediaVariantKey(key, width));
+}
 
 /**
  * The exact inline `onload` handler body the built `index.html`'s deferred

@@ -335,7 +335,10 @@ function renderSegment(segment: Segment): ReactNode {
   switch (segment.kind) {
     case "mention":
       return (
-        <ProfileLink username={segment.username} className="text-primary hover:underline">
+        <ProfileLink
+          username={segment.username}
+          className="text-link hover:text-link/80 underline underline-offset-2"
+        >
           {segment.label}
         </ProfileLink>
       );
@@ -350,7 +353,7 @@ function renderSegment(segment: Segment): ReactNode {
           href={segment.href}
           target="_blank"
           rel="noopener noreferrer nofollow ugc"
-          className="text-primary hover:underline"
+          className="text-link hover:text-link/80 underline underline-offset-2"
         >
           {segment.label}
         </a>
@@ -367,7 +370,7 @@ function renderSegment(segment: Segment): ReactNode {
         <Link
           to="/search"
           search={{ q: `#${segment.tag}` }}
-          className="text-primary hover:underline"
+          className="text-link hover:text-link/80 underline underline-offset-2"
         >
           {segment.label}
         </Link>

@@ -35,7 +35,12 @@ import { resolveLinkCard } from "./link-card.js";
 import { insertNotification } from "./notifications.js";
 import { keysetPage } from "./pagination.js";
 import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";
-import { protectedProcedure, rateLimit } from "./procedures.js";
+import {
+  protectedProcedure,
+  publicRateLimit,
+  publicReadProcedure,
+  rateLimit,
+} from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { invisibleAuthor, visibleUser } from "./visibility.js";
 import { acceptPostImage, type ImageRejection } from "./post-image.js";
@@ -204,7 +209,7 @@ async function readPostAttachments(files: readonly File[]): Promise<PostAttachme
  * stubs, while author-deleted parents disappear like every other fresh feed
  * rendering.
  */
-function parentPreview(viewerId: string) {
+function parentPreview(viewerId: string | null) {
   return sql<ParentPreview | null>`(
     select jsonb_build_object(
       'id', ${parentPost.id},
@@ -250,7 +255,7 @@ function parentPreview(viewerId: string) {
 }
 
 /** Whether the viewer has liked this post — an EXISTS subquery. */
-function viewerHasLiked(viewerId: string) {
+function viewerHasLiked(viewerId: string | null) {
   return sql<boolean>`exists (
     select 1 from ${postLike}
     where ${postLike.postId} = ${post.id} and ${postLike.userId} = ${viewerId}
@@ -258,7 +263,7 @@ function viewerHasLiked(viewerId: string) {
 }
 
 /** Whether the viewer has reposted this post — the same shape as `viewerHasLiked`. */
-function viewerHasReposted(viewerId: string) {
+function viewerHasReposted(viewerId: string | null) {
   return sql<boolean>`exists (
     select 1 from ${postRepost}
     where ${postRepost.postId} = ${post.id} and ${postRepost.userId} = ${viewerId}
@@ -302,7 +307,7 @@ export type QuotedPostPreview = {
  *   post's `postAttachments` (a removed original keeps its rows for restore,
  *   but they must not render).
  */
-function quotedPreview(viewerId: string) {
+function quotedPreview(viewerId: string | null) {
   return sql<QuotedPostPreview | null>`(
     select jsonb_build_object(
       'id', ${quotedPostTable.id},
@@ -431,7 +436,7 @@ export function quotedPostEvidence() {
  * derived from `post_bookmark`, no other reader exists, and this probe answers
  * for the caller alone.
  */
-function viewerHasBookmarked(viewerId: string) {
+function viewerHasBookmarked(viewerId: string | null) {
   return sql<boolean>`exists (
     select 1 from ${postBookmark}
     where ${postBookmark.postId} = ${post.id} and ${postBookmark.userId} = ${viewerId}
@@ -442,7 +447,7 @@ function viewerHasBookmarked(viewerId: string) {
  * The one projection every feed and thread reads posts through, so no view of
  * a post can drift from another's (an int test asserts the equality).
  */
-export const postSelection = (viewerId: string) => ({
+export const postSelection = (viewerId: string | null) => ({
   id: post.id,
   // The tombstone projection (issue #38, widened by #148): a post that was
   // removed by a moderator OR deleted by its author keeps its row — neither
@@ -514,7 +519,7 @@ type ReplyDescendant = ReplyBranchNode & { rootPostId: string };
 
 interface ReplyContinuationPageArgs {
   db: Database;
-  viewerId: string;
+  viewerId: string | null;
   focusedAuthorId: string;
   rootPostIds: readonly string[];
   limit: number;
@@ -523,7 +528,7 @@ interface ReplyContinuationPageArgs {
 
 async function visiblePostAuthorId(
   db: Database,
-  viewerId: string,
+  viewerId: string | null,
   postId: string,
 ): Promise<string | undefined> {
   const [visiblePost] = await db
@@ -677,7 +682,7 @@ type UserVisibilityColumns = { id: PgColumn; banned: PgColumn; banExpires: PgCol
  * feed has two of them (the reposter and the original's author) and the
  * shared helper is bound to the un-aliased table. Must stay in step with it.
  */
-function aliasVisibleTo(viewerId: string, u: UserVisibilityColumns) {
+function aliasVisibleTo(viewerId: string | null, u: UserVisibilityColumns) {
   return sql<boolean>`not (
     (${u.banned} and (${u.banExpires} is null or ${u.banExpires} > now()))
     or exists (
@@ -738,7 +743,7 @@ type FeedEventRow = {
 async function feedEventPage(
   db: Database,
   args: {
-    viewerId: string;
+    viewerId: string | null;
     cursor: string | undefined;
     limit: number;
     authorId?: string;
@@ -1507,11 +1512,17 @@ export const postRouter = {
   /**
    * Lists posts, keyset-paginated: the global feed, one author's posts, the
    * following feed, the caller's bookmarks, one post's direct replies, or a
-   * selected inline reply continuation. Requires a session, like every
-   * procedure in this app (issue #36).
+   * selected inline reply continuation.
+   *
+   * Session-optional since 0.4.0, for the public post permalink ONLY: an
+   * anonymous caller may use the two reply modes (`parentId`,
+   * `continuationRootId`) — the halves of a public thread page — and nothing
+   * else. Every feed, profile, search or bookmarks mode still demands a
+   * session exactly as before, enforced in the handler where the mode is
+   * known rather than in middleware where it is not.
    */
-  list: protectedProcedure
-    .use(rateLimit(RATE_LIMITS.read))
+  list: publicReadProcedure
+    .use(publicRateLimit(RATE_LIMITS.read))
     .input(
       z
         .object({
@@ -1614,7 +1625,14 @@ export const postRouter = {
         }),
     )
     .handler(async ({ input, context }) => {
-      const viewerId = context.user.id;
+      // The anonymous boundary: reply modes are the public thread page, every
+      // other mode is a signed-in surface. Checked before any query runs so
+      // the refusal costs nothing and reveals nothing.
+      const anonymous = !context.user;
+      if (anonymous && !input.parentId && !input.continuationRootId) {
+        throw new ORPCError("UNAUTHORIZED");
+      }
+      const viewerId = context.user?.id ?? null;
 
       if (input.continuationRootId) {
         const [rootReply] = await context.db
@@ -1664,6 +1682,10 @@ export const postRouter = {
       // selection therefore carries `bookmarkedAt`, so the cursor encodes the
       // row-side of the same pair the SQL compares.
       if (input.feed === "bookmarks") {
+        // The caller's private saved list: unreachable for the anonymous
+        // reader (the mode guard above refused them), restated here so the
+        // keyset below binds a string, not a string | null.
+        if (!viewerId) throw new ORPCError("UNAUTHORIZED");
         const bookmarkSelection = {
           ...postSelection(viewerId),
           bookmarkedAt: postBookmark.createdAt,
@@ -1791,12 +1813,18 @@ export const postRouter = {
    * `post.list({ parentId })` already serves them. Returning a first page of
    * replies here too would give the same rows two cache homes with no way to
    * keep them in step.
+   *
+   * Session-optional since 0.4.0: this is the procedure a public post
+   * permalink renders through. An anonymous reader gets the same rows a
+   * signed-in one does — the projection's viewer-relative probes all read
+   * false for a null viewer, and the visibility filter hides the same
+   * banned/blocked authors it always has.
    */
-  thread: protectedProcedure
-    .use(rateLimit(RATE_LIMITS.read))
+  thread: publicReadProcedure
+    .use(publicRateLimit(RATE_LIMITS.read))
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
-      const viewerId = context.user.id;
+      const viewerId = context.user?.id ?? null;
 
       const [focused] = await context.db
         .select(postSelection(viewerId))
@@ -1861,16 +1889,19 @@ export const postRouter = {
   /**
    * Resolves the link preview card for one absolute http(s) URL — the first
    * URL of a post, as recognized by the client's own linkifier (issue #260).
-   * Requires a session; no anonymous caller can spend an outbound fetch.
+   * Session-optional since 0.4.0: a public post permalink renders the same
+   * cards a feed does, so an anonymous caller may resolve one. The outbound
+   * fetch behind a cache miss stays bounded by the SSRF guard, the size and
+   * time caps in `./link-card-http.ts`, and the IP-keyed rate limit — and it
+   * can only ever be spent on a URL the caller already read off a post they
+   * can see.
    *
-   * The fetch happens here, server-side, behind the SSRF guard and the
-   * size/time caps in `./link-card-http.ts`, at most once per URL per
-   * revalidation window. Every failure mode — refused address, dead target,
-   * timeout, no Open Graph payload — answers `{ card: null }` so the post
-   * degrades to the plain link it always rendered.
+   * Every failure mode — refused address, dead target, timeout, no Open
+   * Graph payload — answers `{ card: null }` so the post degrades to the
+   * plain link it always rendered.
    */
-  linkCard: protectedProcedure
-    .use(rateLimit(RATE_LIMITS.linkCard))
+  linkCard: publicReadProcedure
+    .use(publicRateLimit(RATE_LIMITS.linkCard))
     .input(
       z.object({
         // The same scheme rule the client's linkifier applies, stated here so

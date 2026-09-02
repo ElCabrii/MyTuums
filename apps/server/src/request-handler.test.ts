@@ -311,6 +311,47 @@ describe("createRequestHandler", () => {
     expect(SIGNED_OUT_PATHS).toContain("/appeal");
   });
 
+  it("does not gate a /post/ permalink for a signed-out visitor — the public surface", async () => {
+    // 0.4.0: post permalinks are the app's public pages, exactly like the
+    // auth and legal routes above. The SPA shell must reach an anonymous
+    // crawler for the server-injected head (./public-heads.ts) to matter.
+    const { res, calls } = resStub();
+    const serveStatic = vi.fn().mockResolvedValue({ served: true });
+    const handle = createRequestHandler(deps({ serveStatic }));
+
+    await handle(reqStub("/post/0d97ee29-7896-4c53-9161-c54fc1ca1b51"), res);
+
+    expect(serveStatic).toHaveBeenCalledOnce();
+    expect(calls.statusCode).not.toBe(302);
+  });
+
+  it("still gates an encoded /post spelling — the prefix rule fails closed like the exact matches", async () => {
+    // `/%70ost/...` decodes to /post/... but is not the literal prefix
+    // string; it must redirect, never serve, exactly like `/%6Cogin`.
+    const { res, calls } = resStub();
+    const serveStatic = vi.fn().mockResolvedValue({ served: true });
+    const handle = createRequestHandler(deps({ serveStatic }));
+
+    await handle(reqStub("/%70ost/0d97ee29-7896-4c53-9161-c54fc1ca1b51"), res);
+
+    expect(serveStatic).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(302);
+    expect(calls.headers).toMatchObject({
+      Location: "/login?redirect=%2F%2570ost%2F0d97ee29-7896-4c53-9161-c54fc1ca1b51",
+    });
+  });
+
+  it("still gates the bare /post path — only the /post/ prefix is public", async () => {
+    const { res, calls } = resStub();
+    const serveStatic = vi.fn().mockResolvedValue({ served: true });
+    const handle = createRequestHandler(deps({ serveStatic }));
+
+    await handle(reqStub("/post"), res);
+
+    expect(serveStatic).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(302);
+  });
+
   it("does not gate a static asset, even signed out — /login needs its own JS and CSS to render", async () => {
     // A gated asset would turn the redirect into a blank page: the browser
     // would land on /login with none of the bundle it needs to draw it.
@@ -1068,26 +1109,28 @@ describe("createRequestHandler", () => {
     expect(calls.body).toBe("Not found");
   });
 
-  it("refuses an anonymous GET with 401, before the key is even parsed", async () => {
-    // Deliberately a well-formed key: a 401 here (rather than a 404) is what
-    // proves the session gate fired ahead of key validation, not that the key
-    // happened to look wrong. An anonymous caller must not be able to learn
-    // anything about which keys exist by watching how the response differs.
+  it("resolves an anonymous GET with a null viewer — the public permalink's media", async () => {
+    // 0.4.0: post permalinks are public, and the media they render with
+    // them. An anonymous caller no longer gets a blanket 401 — the resolver
+    // makes the per-key decision, with a null viewer meaning "no
+    // relationships, no exemptions", so an owner-only `.orig` key is still
+    // refused and a public post's attachment is not.
     const { res, calls } = resStub();
-    const resolveMediaUrl = vi.fn();
+    const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
     const handle = createRequestHandler(deps({ resolveMediaUrl }));
 
     await handle(reqStub("/media/avatars/user-1/abc.webp"), res);
 
-    expect(resolveMediaUrl).not.toHaveBeenCalled();
-    expect(calls.statusCode).toBe(401);
-    expect(calls.headers).toMatchObject({ "Cache-Control": "no-store" });
+    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/user-1/abc.webp", null);
+    expect(calls.statusCode).toBe(302);
+    expect(calls.headers).toMatchObject({ Location: MEDIA_HIT.url });
   });
 
-  it("refuses a GET whose cookie names a session that is not actually valid", async () => {
-    const { res, calls } = resStub();
+  it("resolves a GET whose cookie names a session that is not actually valid as anonymous too", async () => {
+    const { res } = resStub();
+    const resolveMediaUrl = vi.fn().mockResolvedValue(null);
     const resolveSession = vi.fn().mockResolvedValue({ kind: "anonymous" });
-    const handle = createRequestHandler(deps({ resolveSession }));
+    const handle = createRequestHandler(deps({ resolveMediaUrl, resolveSession }));
 
     await handle(
       reqStub("/media/avatars/user-1/abc.webp", "GET", {
@@ -1097,7 +1140,8 @@ describe("createRequestHandler", () => {
     );
 
     expect(resolveSession).toHaveBeenCalledOnce();
-    expect(calls.statusCode).toBe(401);
+    // A stale cookie is exactly an anonymous caller wearing a costume.
+    expect(resolveMediaUrl).toHaveBeenCalledWith("avatars/user-1/abc.webp", null);
   });
 
   it("fails profile media closed when the session store cannot establish a viewer", async () => {

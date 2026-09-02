@@ -109,9 +109,9 @@ order:
 | 2   | `/api/auth/admin/*`       | always 404 — see below                          |
 | 3   | `/api/auth*`              | better-auth's own handler                       |
 | 4   | `/rpc*`                   | Content-Length cap, then oRPC                   |
-| 5   | `/media/*`                | GET/HEAD only, then **session**, then key       |
+| 5   | `/media/*`                | GET/HEAD only; session optional, key authorized |
 | 6   | Host `about.mytuums.com`  | the branding page — public, ahead of the gate   |
-| 7   | extension-less GET/HEAD   | page gate: session unless on `SIGNED_OUT_PATHS` |
+| 7   | extension-less GET/HEAD   | page gate: session unless on `isSignedOutPath`  |
 | 8   | static files              | `apps/server/src/static-files.ts`               |
 | 9   | 404, then a catch-all 500 | logged with the request id                      |
 
@@ -126,10 +126,12 @@ Ordering facts that are load-bearing:
   body while routing, which is before auth, rate limiting or any payload
   check. Chunked bodies carry no Content-Length and are bounded at the same
   ceiling by oRPC's `BodyLimitPlugin`, wired in `apps/server/src/index.ts`.
-- **`/media`'s session check runs before the key is parsed.** An anonymous
-  caller must not learn which keys are well-formed by watching the response
-  differ. The rejection carries `Cache-Control: no-store` so a cached 401
-  cannot keep an image broken after sign-in.
+- **`/media` is session-optional with per-key authorization.** Since 0.4.0
+  (public post permalinks) an anonymous caller proceeds with a null viewer and
+  every key — post, profile, link-card — is answered by its authorizer
+  (`canViewPostMedia`/`canViewProfileMedia`/`canViewLinkCardMedia`), which
+  keep owner-only rules owner-only. A cookie whose session store cannot be
+  read is a 503, fail closed.
 - **The branding-host branch sits after every API prefix and before the page
   gate.** `about.mytuums.com` gets the built branding site (`apps/branding`,
   served from `BRANDING_DIST` through the same static-file handler as the
@@ -138,9 +140,18 @@ Ordering facts that are load-bearing:
   never boots on a host whose cookies, canonicals and RP ID all belong to
   the apex.
 - **The page gate sits after every API prefix**, so it needs no copy of the
-  routing decisions above it. It reads `SIGNED_OUT_PATHS` from
-  `packages/api/src/constants.ts` — the same set the client gate reads. Two
-  copies would let the gates disagree and loop a visitor forever.
+  routing decisions above it. It reads `isSignedOutPath` (the
+  `SIGNED_OUT_PATHS` set plus the `/post/` prefix) from
+  `packages/api/src/constants.ts` — the same definition the client gate
+  reads. Two copies would let the gates disagree and loop a visitor forever.
+- **The SPA's `index.html` gets a per-route head before it ships.** When
+  `WEB_DIST` is set, the static handler runs `createPublicHeadTransform`
+  (`apps/server/src/public-heads.ts`): the auth/legal routes get their static
+  title/description/canonical/og tags, a `/post/<id>` gets its excerpt and
+  lead image from `publicPostHead`, and everything else keeps the generic
+  fallback. The substituted tags carry `data-app-fallback`, so the SPA's
+  mount effect still removes them and the live route head is the single
+  owner.
 - **`hasValidSession` fails open.** A database blip degrades to "the client
   gate decides" and "images keep loading", never to a mass sign-out.
 
@@ -337,10 +348,16 @@ sides by CI. See [operations.md](operations.md).
   uuid, distinguished by an `.orig` infix. The row is written **before** the
   old object is deleted.
 - **Retrieval.** The stored value is a relative `/media/<key>` path. The
-  server requires a session, then `createMediaResolver` returns a presigned
-  URL and — when a key's redirect may be stored — its Cache-Control; the
-  response is a 302 that is `private, no-store` by default, because every
-  redirect is a viewer-authorized decision. Profile **display** objects are
+  server authorizes the key (a null viewer for the anonymous permalink
+  reader), then `createMediaResolver` returns a presigned URL and — when a
+  key's redirect may be stored — its Cache-Control; the response is a 302
+  that is `private, no-store` by default, because every redirect is a
+  viewer-authorized decision. A key carrying a variant marker
+  (`…/uuid.png.w640.webp`) is authorized against its BASE — the path the rows
+  store — and served from the variant object `media-variants.ts` generates on
+  first request (sharp resize to a fixed width, WebP, written back under the
+  bucket's immutable caching); the browser reaches it through the `srcset`
+  the shared `MEDIA_VARIANT_WIDTHS` builds. Profile **display** objects are
   the one exemption: their redirect is cached
   `private, max-age=<secondsUntilWindowEnd()>`, bounded so it can never
   outlive the signature it points at. Presigned URLs remain **windowed**
@@ -349,7 +366,11 @@ sides by CI. See [operations.md](operations.md).
 - **Reconciliation.** `pnpm --filter @my-tuums/api reconcile:media` deletes
   objects no row points at. It lists the bucket **before** reading the `user`
   rows — the reverse order would treat an upload that landed between the two
-  steps as an orphan and delete an object whose row points at it.
+  steps as an orphan and delete an object whose row points at it. A derived
+  variant is referenced exactly while its base is: the pairing rule adds
+  every derivable variant key of each referenced base, so on-demand
+  generation never orphans a survivor and a dead base's variants are reaped
+  with it.
 
 ## Moderation — report, action, audit, appeal
 

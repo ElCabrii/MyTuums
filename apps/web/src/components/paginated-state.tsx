@@ -55,8 +55,11 @@ export function PaginatedState({
   /**
    * Replaces the centred spinner while the first page loads. Sites whose rows
    * have a fixed shape (the moderation desk) pass a skeleton of that shape so
-   * the list does not jump when the data lands; everywhere else the spinner
-   * stays, because a skeleton of a variable-height post would be a lie.
+   * the list does not jump when the data lands. The feeds pass an
+   * approximate, fixed-height skeleton for the same reason at a coarser
+   * grain: the spinner-to-feed jump was the largest layout shift on the cold
+   * authenticated load (0.4.0), and reserving roughly a page beats measuring
+   * exactly.
    */
   loadingFallback?: ReactNode;
   /** The loaded rows, rendered between the wrapper and the "Load more" button. */
@@ -66,7 +69,7 @@ export function PaginatedState({
     return (
       loadingFallback ?? (
         <div className="flex justify-center py-12">
-          <Loader2 className="text-primary h-6 w-6 animate-spin motion-reduce:animate-none" />
+          <Loader2 className="text-primary dark:text-link h-6 w-6 animate-spin motion-reduce:animate-none" />
         </div>
       )
     );

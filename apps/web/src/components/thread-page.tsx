@@ -1,4 +1,4 @@
-import { getRouteApi, Link } from "@tanstack/react-router";
+import { getRouteApi, Link, useLocation } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { ORPCError } from "@orpc/client";
 import { AlertCircle, ArrowLeft, FileQuestion, Loader2, MoreHorizontal } from "lucide-react";
@@ -8,10 +8,12 @@ import { PostCard } from "@/components/post-card";
 import { ThreadReplyFeed } from "@/components/thread-reply-feed";
 import { ProfileMessage } from "@/components/profile-message";
 import { ReplyComposer } from "@/components/reply-composer";
+import { isSignedInAtom } from "@/atoms/session";
 import { postFeedAtom } from "@/atoms/post-feed";
 import { threadAtomFamily } from "@/atoms/thread";
 import { useDocumentHead } from "@/hooks/use-document-head";
 import { postPageDescription, postPageName } from "@/lib/document-head";
+import { sanitizeRedirect } from "@/lib/redirect";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
@@ -19,12 +21,16 @@ const routeApi = getRouteApi("/post/$postId");
 
 /**
  * The `/post/$postId` page: the ancestor chain above the focused post, the
- * post itself, the reply composer, and the reply feed. Signed-out visitors
- * never get here — the route is gated — so the composer renders for everyone
- * who can see the page.
+ * post itself, the reply composer, and the reply feed. Since 0.4.0 this is
+ * the app's PUBLIC page — a signed-out visitor reads the thread (the
+ * anonymous read modes of `post.thread`/`post.list`), sees the reply and
+ * like counts as plain text, and is offered the sign-in link instead of the
+ * composer (which self-gates to null without a session anyway).
  */
 export function ThreadPage() {
   const { postId } = routeApi.useParams();
+  const { href } = useLocation();
+  const signedIn = useAtomValue(isSignedInAtom);
   const threadQuery = useAtomValue(threadAtomFamily(postId));
   const focusedPost = threadQuery.data?.post;
   useDocumentHead(postPageName(focusedPost?.content), postPageDescription(focusedPost?.content));
@@ -32,7 +38,7 @@ export function ThreadPage() {
   if (threadQuery.isPending) {
     return (
       <div className="flex h-[70vh] items-center justify-center">
-        <Loader2 className="text-primary h-8 w-8 animate-spin motion-reduce:animate-none" />
+        <Loader2 className="text-primary dark:text-link h-8 w-8 animate-spin motion-reduce:animate-none" />
       </div>
     );
   }
@@ -102,7 +108,7 @@ export function ThreadPage() {
         </div>
       )}
 
-      <PostCard post={post} variant="focused" />
+      <PostCard post={post} variant="focused" priorityImages />
 
       {/* Twitter-style reply section header & composer */}
       <div className="border-border/60 space-y-4 border-t pt-4">
@@ -114,7 +120,23 @@ export function ThreadPage() {
           </h2>
         </div>
 
-        <ReplyComposer parentId={post.id} replyingTo={authorHandle} />
+        {/* The composer self-gates to null for a signed-out visitor; the
+            prompt in its place is the one thing this public page asks of a
+            reader who cannot interact yet. */}
+        {signedIn ? (
+          <ReplyComposer parentId={post.id} replyingTo={authorHandle} />
+        ) : (
+          <p className="text-muted-foreground border-border/60 rounded-lg border border-dashed p-4 text-sm">
+            <Link
+              to="/login"
+              search={{ redirect: sanitizeRedirect(href) ?? undefined }}
+              className="text-link font-medium underline underline-offset-2"
+            >
+              {m.auth_login_link()}
+            </Link>{" "}
+            {m.thread_sign_in_prompt()}
+          </p>
+        )}
 
         {/* Reply feed container */}
         <div className="divide-border/50 divide-y pt-2">

@@ -6,6 +6,9 @@ import { createStorage, type Storage } from "./storage.js";
 
 type Session = Awaited<ReturnType<typeof auth.api.getSession>>;
 
+/** The session user row, shared by the procedure middlewares that set `Context.user`. */
+export type SessionUser = NonNullable<Session>["user"];
+
 /** The delivery seam moderation procedures use after their transactions commit. */
 export interface EmailSender {
   send: (email: OutgoingEmail) => Promise<void>;
@@ -20,6 +23,16 @@ const defaultEmailSender: EmailSender = { send: sendEmail };
 export interface Context {
   db: Database;
   session: Session;
+  /**
+   * The session's user, set by `protectedProcedure`/`publicReadProcedure`
+   * (`./procedures.ts`) — not by `createContext`, which only resolves the
+   * session. Optional because `publicReadProcedure`'s anonymous branch
+   * passes it through as `undefined` (the public post permalink, 0.4.0):
+   * a handler on that procedure must read it as possibly-absent, while a
+   * handler on `protectedProcedure` still gets it non-optional from that
+   * middleware's own context narrowing.
+   */
+  user?: SessionUser;
   /**
    * The request identity from the server's `x-request-id` header
    * (`apps/server/src/request-handler.ts` generates it at the top of every

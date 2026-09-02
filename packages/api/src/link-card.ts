@@ -57,14 +57,12 @@ export function linkCardImageObjectKey(id: string, type: AllowedImageType): stri
 }
 
 /**
- * `/media/link-cards/*` authorization: any signed-in viewer.
+ * `/media/link-cards/*` authorization: any viewer, signed in or not.
  *
  * The image is public web content this app mirrored into its private bucket
  * precisely so it is never hot-linked from the target; there is no per-viewer
- * decision to make. The session requirement itself is not made here — the
- * `/media` route demands one before the key is even parsed (see
- * `apps/server/src/request-handler.ts`), the same arrangement the post and
- * profile authorizers run under.
+ * decision to make. Anonymous callers reach it through the public post
+ * permalink (0.4.0), which renders the same cards a signed-in feed does.
  */
 export function canViewLinkCardMedia(): Promise<boolean> {
   return Promise.resolve(true);

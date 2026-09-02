@@ -124,6 +124,16 @@ export const testStorage: DestructiveStorage = {
     testStorageObjects.delete(key);
     return Promise.resolve();
   },
+  head(key) {
+    const object = testStorageObjects.get(key);
+    return Promise.resolve(object ? { contentType: object.contentType } : null);
+  },
+  get(key) {
+    const object = testStorageObjects.get(key);
+    return Promise.resolve(
+      object ? { bytes: object.bytes, contentType: object.contentType } : null,
+    );
+  },
   listByPrefix(prefix) {
     return Promise.resolve([...testStorageObjects.keys()].filter((key) => key.startsWith(prefix)));
   },

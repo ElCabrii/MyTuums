@@ -18,7 +18,7 @@ import {
   twoFactorSetupAtom,
 } from "@/atoms/two-factor";
 import { orpc } from "@/lib/orpc";
-import { AccountSettingsPage } from "@/routes/settings.account";
+import { AccountSettingsPage } from "@/components/account-settings-page";
 import { m } from "@/paraglide/messages.js";
 
 function seededSettingsClient() {

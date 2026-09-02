@@ -52,10 +52,11 @@ to the owning context.
   `apps/web/src/lib/orpc.ts` resolves `/rpc` against `window.location.origin`
   and uploaded images are stored as relative `/media/` paths. Split them
   across origins and RPC and every image break together.
-- **`SIGNED_OUT_PATHS` has exactly one definition.** `packages/api/src/constants.ts`
-  owns it; the server's page gate and the client's `useRequireSignedIn` both
-  read it. Duplicating it lets the two gates disagree and bounce a visitor
-  between them forever.
+- **The signed-out allowlist has exactly one definition.**
+  `packages/api/src/constants.ts` owns `SIGNED_OUT_PATHS` (exact paths) and
+  the `/post/` prefix rule behind `isSignedOutPath`; the server's page gate
+  and the client's `useRequireSignedIn` both read that. Duplicating it lets
+  the two gates disagree and bounce a visitor between them forever.
 - **The browser-safe subpaths stay dependency-free.**
   `@my-tuums/api/constants`, `@my-tuums/api/dimensions`,
   `@my-tuums/api/post-image`, `@my-tuums/api/roles`

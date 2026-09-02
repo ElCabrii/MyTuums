@@ -11,7 +11,7 @@ export function CtaBand() {
           <h2 className="text-3xl font-bold tracking-tight text-balance sm:text-4xl">
             {m.cta_title()}
           </h2>
-          <p className="text-primary-foreground/80 mt-3 text-pretty">{m.cta_text()}</p>
+          <p className="text-primary-foreground mt-3 text-pretty">{m.cta_text()}</p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Button
               size="lg"

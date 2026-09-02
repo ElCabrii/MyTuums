@@ -5,7 +5,13 @@
      a sitemap is a lint error, not a hint — and the utility screens
      (/verify-email, /forgot-password, /reset-password, /two-factor, /welcome,
      /appeal, /banned) are transient states with no search value. Keep this
-     list in step with that set. -->
+     list in step with that set.
+
+     Post permalinks (/post/<id>) are public and fetchable since 0.4.0, but
+     deliberately unlisted: there is no enumerable index of post ids to build
+     a sitemap from, and one would be a stale snapshot the moment it was
+     written. Crawlers reach permalinks the way people do — links off-site
+     and from the app itself. -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://mytuums.com/login</loc>
