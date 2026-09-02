@@ -1,6 +1,7 @@
 import { call } from "@orpc/server";
+import { randomUUID } from "node:crypto";
 import { closeDb } from "@my-tuums/db";
-import { notification, notificationLastSeen, user } from "@my-tuums/db/schema";
+import { notification, notificationLastSeen, postAttachment, user } from "@my-tuums/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";
@@ -62,7 +63,10 @@ describe("notification writes (issue #259)", () => {
       postId: target.id,
       read: false,
       actor: { id: liker.id },
+      postAttachments: [],
     });
+    // The preview (issue #281): the liked post's own words.
+    expect(page.items[0].postContent).toMatch(/^seed post 0 /);
     expect(
       await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
     ).toEqual({
@@ -104,11 +108,14 @@ describe("notification writes (issue #259)", () => {
     const page = await listFor(author);
     expect(page.items).toHaveLength(1);
     // The notification points at the reply itself — the thing to click
-    // through to, and the thing whose deletion tombstones it below.
+    // through to, and the thing whose deletion tombstones it below — and
+    // previews the reply's own words, not the parent's.
     expect(page.items[0]).toMatchObject({
       type: "reply",
       postId: reply.id,
       actor: { id: replier.id },
+      postContent: "a reply",
+      postAttachments: [],
     });
 
     // The self-reply created no row at all: the author's count is 1 (the
@@ -133,13 +140,15 @@ describe("notification writes (issue #259)", () => {
     const page = await listFor(author);
     expect(page.items).toHaveLength(1);
     // The notice points at the reposted post — the recipient's own — on the
-    // same rule the like row follows.
+    // same rule the like row follows, and previews it the same way.
     expect(page.items[0]).toMatchObject({
       type: "repost",
       postId: target.id,
       read: false,
       actor: { id: reposter.id },
+      postAttachments: [],
     });
+    expect(page.items[0].postContent).toMatch(/^seed post 0 /);
     expect(
       await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
     ).toEqual({
@@ -199,12 +208,14 @@ describe("notification writes (issue #259)", () => {
     const page = await listFor(author);
     expect(page.items).toHaveLength(1);
     // The notice points at the quote itself — what the quoter said is the
-    // thing to click through to, the reply's shape exactly.
+    // thing to click through to, the reply's shape exactly, preview included.
     expect(page.items[0]).toMatchObject({
       type: "quote",
       postId: quote.id,
       read: false,
       actor: { id: quoter.id },
+      postContent: "a quote",
+      postAttachments: [],
     });
     // The self-quote created no row: one notice, not two.
     expect(
@@ -307,6 +318,10 @@ describe("notification writes (issue #259)", () => {
       // moderator's identity is audit-log material, not recipient-facing.
       actor: null,
       action: { code: "post_removed", reason: "rule break", targetPostId: target.id },
+      // A moderation row carries no post preview: its `post_id` is null, the
+      // action speaks for itself.
+      postContent: null,
+      postAttachments: [],
     });
   });
 
@@ -455,6 +470,67 @@ describe("notification reads (issue #259)", () => {
     const actorIds = new Set(all.items.map((item) => item.actor?.id));
     expect(actorIds.size).toBe(6);
     for (const liker of likers) expect(actorIds.has(liker.id)).toBe(true);
+  });
+
+  it("previews the post's content and attachments on the row (issue #281)", async () => {
+    const author = await createTestUser();
+    const liker = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    // A seeded attachment row: the read side must correlate the aggregate on
+    // the row's own (un-aliased) post join — the failure mode is a silent
+    // empty list, not an error, so only a real row pins the wiring.
+    const attachmentId = randomUUID();
+    await author.context.db.insert(postAttachment).values({
+      id: attachmentId,
+      postId: target.id,
+      position: 0,
+      mediaPath: "/media/posts/preview.png",
+      contentType: "image/png",
+      byteSize: 2048,
+      width: 640,
+      height: 480,
+    });
+
+    await call(appRouter.post.like, { postId: target.id }, { context: contextFor(liker) });
+
+    const page = await listFor(author);
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0].postContent).toMatch(/^seed post 0 /);
+    expect(page.items[0].postAttachments).toEqual([
+      {
+        id: attachmentId,
+        url: "/media/posts/preview.png",
+        position: 0,
+        contentType: "image/png",
+        byteSize: 2048,
+        width: 640,
+        height: 480,
+      },
+    ]);
+  });
+
+  it("a like on a moderator-removed post previews nothing — the tombstone rule follows the row", async () => {
+    const author = await createTestUser();
+    const liker = await createTestUser();
+    const moderator = await moderatorUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await call(appRouter.post.like, { postId: target.id }, { context: contextFor(liker) });
+    await call(
+      appRouter.moderation.removePost,
+      { postId: target.id, reason: "rule break" },
+      { context: contextFor(moderator) },
+    );
+
+    // The removal notice joins the like row on the page; the like row itself
+    // still surfaces (removal is not deletion) but its preview reads empty —
+    // removed content stays behind the tombstone on this surface like on
+    // every other one, including for the post's own author.
+    const page = await listFor(author);
+    expect(page.items).toHaveLength(2);
+    const likeRow = page.items.find((item) => item.type === "like");
+    expect(likeRow).toMatchObject({ postContent: null, postAttachments: [] });
   });
 
   it("markRead stamps every unread row once and takes the badge to zero", async () => {

@@ -182,6 +182,11 @@ three events, not one collapsed one.
   lists them newest first, keyset-paginated like the feeds, with no grouping
   or ranking. The bell carries an unread count; opening the page is what
   marks everything read.
+- A row about a post previews it (issue #281): the liked post's text — with
+  thumbnails of its images — or the reply itself for a reply, as one
+  truncated line under the sentence. A moderator-removed post previews
+  nothing, the same tombstone rule every post surface follows; an
+  author-deleted post takes its whole row away.
 - A rapid burst of one kind of event from one person — like → unlike → like
   cycling — moves the badge at most once a minute: every event still appears
   on the page, still unread, but the badge counts the burst as one tick.

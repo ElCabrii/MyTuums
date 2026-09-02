@@ -73,6 +73,69 @@ describe("NotificationsPage", () => {
     expect(screen.getAllByText(m.notifications_unread_label())).toHaveLength(5);
   });
 
+  it("previews the post's text and thumbnails under the sentence (issue #281)", async () => {
+    const like = makeNotification({
+      type: "like",
+      postId: "liked-post",
+      postContent: "the liked post's words",
+      postAttachments: [
+        {
+          id: "attachment-1",
+          url: "/media/posts/liked.png",
+          position: 0,
+          contentType: "image/png",
+          byteSize: 1024,
+          width: 600,
+          height: 400,
+        },
+      ],
+    });
+    // An image-only reply: thumbnails render with no text line to pair with.
+    const reply = makeNotification({
+      type: "reply",
+      postId: "the-reply",
+      postContent: null,
+      postAttachments: [
+        {
+          id: "attachment-2",
+          url: "/media/posts/reply-1.png",
+          position: 0,
+          contentType: "image/png",
+          byteSize: 1024,
+          width: 400,
+          height: 600,
+        },
+        {
+          id: "attachment-3",
+          url: "/media/posts/reply-2.png",
+          position: 1,
+          contentType: "image/png",
+          byteSize: 1024,
+          width: 400,
+          height: 400,
+        },
+      ],
+    });
+
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).notifications.data([{ items: [reply, like], nextCursor: null }]);
+
+    await renderWithProviders(<NotificationsPage />, {
+      queryClient,
+      initialPath: "/notifications",
+      signedInAs: true,
+    });
+
+    expect(screen.getByText("the liked post's words")).toBeInTheDocument();
+    // One first-position thumbnail per row with attachments, and the reply's
+    // second in line — nothing beyond exactly these three images renders.
+    expect(screen.getAllByAltText(m.post_attachment_alt({ position: "1" }))).toHaveLength(2);
+    expect(screen.getByAltText(m.post_attachment_alt({ position: "2" }))).toHaveAttribute(
+      "src",
+      "/media/posts/reply-2.png",
+    );
+  });
+
   it("links each row to where the event can be re-joined", async () => {
     const like = makeNotification({ type: "like", postId: "liked-post" });
     // A quote leads to the quote itself — what the quoter said — not the

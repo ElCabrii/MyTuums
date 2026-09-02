@@ -19,8 +19,8 @@ import {
 } from "./moderation-actions.js";
 import { noteInput } from "./moderation-inputs.js";
 import { lockModerationTarget } from "./moderation-target-lock.js";
+import { postAttachmentsSelection } from "./post-media.js";
 import { baseProcedure, moderatorProcedure, protectedProcedure, rateLimit } from "./procedures.js";
-import { postAttachmentsSelection } from "./posts.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 
 /**

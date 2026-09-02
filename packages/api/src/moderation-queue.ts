@@ -8,11 +8,12 @@ import { EDIT_HISTORY_CASE_LIMIT } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { applyModerationEffect, logAction, stampReports } from "./moderation-actions.js";
 import { noteInput, queueInput } from "./moderation-inputs.js";
+import { postAttachmentsSelection, type PostAttachment } from "./post-media.js";
 import { moderatorProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { publicUserColumns } from "./users.js";
 import { effectivelyBanned } from "./visibility.js";
-import { postAttachmentsSelection, quotedPostEvidence, type PostAttachment } from "./posts.js";
+import { quotedPostEvidence } from "./posts.js";
 
 /**
  * The moderator triage procedures: the merged queue, the case view, and

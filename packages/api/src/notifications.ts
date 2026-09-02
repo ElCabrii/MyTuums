@@ -17,6 +17,7 @@ import {
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { keysetPage } from "./pagination.js";
+import { postAttachmentsSelection } from "./post-media.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { effectivelyBanned, invisibleUser } from "./visibility.js";
@@ -190,8 +191,9 @@ export const notificationRouter = {
    * No grouping, ranking or "while you were away" — newest first is the whole
    * order, keyset-paginated on the same skeleton as the feeds. Each row
    * carries its actor's public summary (null for moderation), the post it is
-   * about when it is a like or reply, and the mirrored moderation action when
-   * it is one, so the page renders without a second round trip per row.
+   * about when it is a like or reply — content and attachments included, so
+   * the page can preview it — and the mirrored moderation action when it is
+   * one, so the page renders without a second round trip per row.
    */
   list: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
@@ -217,6 +219,20 @@ export const notificationRouter = {
         read: sql<boolean>`${notificationLastSeen.seenAt} is not null and ${notification.createdAt} <= ${notificationLastSeen.seenAt}`,
         createdAt: notification.createdAt,
         postId: notification.postId,
+        // The post's own words and images, previewed under the row's sentence
+        // (issue #281). `postId` already points at the right row per type —
+        // the reply itself for a reply, the liked post for a like — so the
+        // existing join is all the preview needs. Content follows
+        // `postSelection`'s tombstone rule: a moderator-removed post previews
+        // nothing (and its attachments fall away with it), while an
+        // author-deleted post never reaches the page at all — the visibility
+        // predicate above tombstones the row. Null/empty on follow and
+        // moderation rows, whose `post_id` is null.
+        postContent: sql<string | null>`case
+          when ${post.removedAt} is not null or ${post.deletedAt} is not null then null
+          else ${post.content}
+        end`,
+        postAttachments: postAttachmentsSelection(),
         actor: {
           id: user.id,
           name: user.name,
