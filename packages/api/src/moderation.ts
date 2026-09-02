@@ -539,7 +539,7 @@ export const moderationRouter = {
         createdAtField: "createdAt",
         id: moderationAction.id,
         idField: "id",
-        query: (cursorFilter) =>
+        fetchPage: (cursorFilter) =>
           context.db
             .select(selection)
             .from(moderationAction)

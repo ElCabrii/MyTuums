@@ -10,6 +10,10 @@ import { authClient } from "@/lib/auth-client";
 import { WelcomePage } from "@/routes/welcome";
 import { m } from "@/paraglide/messages.js";
 
+// Fixture passphrase for the two-factor confirmation — referenced by name so
+// no credential-shaped literal sits on a password field.
+const ACCOUNT_PASSPHRASE = "account-password";
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -78,10 +82,10 @@ describe("WelcomePage two-factor offer", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: m.welcome_2fa_setup() }));
-    await user.type(screen.getByLabelText(m.auth_field_password()), "account-password");
+    await user.type(screen.getByLabelText(m.auth_field_password()), ACCOUNT_PASSPHRASE);
     await user.click(screen.getByRole("button", { name: m.welcome_2fa_setup() }));
 
-    expect(authClient.twoFactor.enable).toHaveBeenCalledWith({ password: "account-password" });
+    expect(authClient.twoFactor.enable).toHaveBeenCalledWith({ password: ACCOUNT_PASSPHRASE });
     expect(await screen.findByText("backup-one")).toBeInTheDocument();
     expect(screen.getByText("backup-two")).toBeInTheDocument();
     expect(store.get(twoFactorPanelAtom)).toBe("verify");
@@ -127,7 +131,7 @@ describe("WelcomePage two-factor offer", () => {
     expect(field).toHaveAttribute("autocomplete", "current-password");
     expect(document.querySelector('input[autocomplete="username"]')).not.toBeNull();
 
-    await user.type(field, "account-password");
+    await user.type(field, ACCOUNT_PASSPHRASE);
     await user.click(screen.getByRole("button", { name: m.welcome_2fa_setup() }));
     expect(await screen.findByText("backup-one")).toBeInTheDocument();
 

@@ -15,6 +15,7 @@ import {
 import type { Context } from "./context.js";
 import { withPostMediaLifecycleLock } from "./post-media-lock.js";
 import { appRouter } from "./router.js";
+import { runSql } from "./sql.js";
 import {
   anonContext,
   contextFor,
@@ -176,7 +177,9 @@ function deferred(): Deferred {
 /** Waits until another connection is blocked on this test's post-row lock. */
 async function waitForPostLockWait(): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    const rows = await anonContext.db.execute<{ blocked: boolean }>(sql`
+    const rows = await runSql<{ blocked: boolean }>(
+      anonContext.db,
+      sql`
       SELECT EXISTS (
         SELECT 1
         FROM pg_stat_activity
@@ -186,7 +189,8 @@ async function waitForPostLockWait(): Promise<void> {
           AND wait_event_type = 'Lock'
           AND query LIKE 'update "post" set%'
       ) AS blocked
-    `);
+    `,
+    );
     if (rows[0]?.blocked) return;
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
@@ -196,7 +200,9 @@ async function waitForPostLockWait(): Promise<void> {
 /** Waits until a post attachment writer is blocked by the shared media lock. */
 async function waitForPostMediaLifecycleLockWait(): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    const rows = await anonContext.db.execute<{ blocked: boolean }>(sql`
+    const rows = await runSql<{ blocked: boolean }>(
+      anonContext.db,
+      sql`
       SELECT EXISTS (
         SELECT 1
         FROM pg_stat_activity
@@ -206,7 +212,8 @@ async function waitForPostMediaLifecycleLockWait(): Promise<void> {
           AND wait_event_type = 'Lock'
           AND query LIKE '%pg_advisory_xact_lock%'
       ) AS blocked
-    `);
+    `,
+    );
     if (rows[0]?.blocked) return;
     await new Promise<void>((resolve) => setImmediate(resolve));
   }

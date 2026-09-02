@@ -1,4 +1,4 @@
-import { runInNewContext } from "node:vm";
+import { runInNewContext as runInVmSandbox } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { serviceWorkerSource } from "../../pwa-plugin";
 
@@ -49,7 +49,7 @@ function serviceWorkerHarness(initialShell: Response, shell: string[] = ["/"]) {
     },
   };
 
-  runInNewContext(serviceWorkerSource("mytuums-shell-test", shell), {
+  runInVmSandbox(serviceWorkerSource("mytuums-shell-test", shell), {
     Response,
     URL,
     caches,

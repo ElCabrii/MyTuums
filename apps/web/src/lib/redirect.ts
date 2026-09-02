@@ -19,7 +19,7 @@ const REDIRECT_GATE_PAGES = new Set(["/login", "/register", "/two-factor"]);
  * the auth pages themselves — comes back null so the caller falls back to
  * its default destination.
  */
-export function sanitizeRedirect(raw: string | null | undefined): string | null {
+export function sanitizeDestination(raw: string | null | undefined): string | null {
   if (!raw) return null;
   if (raw.length > 2048) return null;
   if (/\s/.test(raw)) return null;
@@ -32,4 +32,14 @@ export function sanitizeRedirect(raw: string | null | undefined): string | null 
   const pathname = raw.split(/[?#]/, 1)[0];
   if (REDIRECT_GATE_PAGES.has(pathname)) return null;
   return raw;
+}
+
+/**
+ * The sanitized `?redirect=` target from the address bar — the one read every
+ * sign-in handoff needs, whether it lands there from the URL bar, an OAuth
+ * round trip or One Tap. The read lives here, beside the rule, so no caller
+ * can reach for the raw param without going through the gate.
+ */
+export function postSignInDestination(): string | null {
+  return sanitizeDestination(new URLSearchParams(window.location.search).get("redirect"));
 }
