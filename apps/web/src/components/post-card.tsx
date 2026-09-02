@@ -103,7 +103,7 @@ function QuotedPostCard({ quoted }: { quoted: NonNullable<Post["quoted"]> }) {
       <Link
         to="/post/$postId"
         params={{ postId: quoted.id }}
-        className="mb-1 flex flex-wrap items-center gap-1.5 hover:underline"
+        className="mb-1 flex items-center gap-1.5 hover:underline"
         onClick={(e) => e.stopPropagation()}
       >
         <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
@@ -316,15 +316,23 @@ export function PostCard({
           ))}
         <div className="min-w-0 flex-1">
           {!post.unavailable && (
-            <div className="mb-1 flex flex-wrap items-center gap-1.5">
+            /* One row, always (issue #278): the row itself never wraps and
+               the timestamp and kebab never fold, so the name is what gives.
+               `min-w-0` lets the anchor shrink inside the row, and `flex-1`
+               makes the display name ellipsize first — the handle only cuts
+               once the name is exhausted. The quoted post's author row below
+               keeps the same no-wrap shape. */
+            <div className="mb-1 flex items-center gap-1.5">
               {authorHandle ? (
                 <ProfileLink
                   username={authorHandle}
-                  className="flex items-center gap-1.5 hover:underline"
+                  className="flex min-w-0 items-center gap-1.5 hover:underline"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
-                  <span className="text-muted-foreground text-xs">@{authorHandle}</span>
+                  <span className="text-foreground flex-1 truncate text-sm font-bold">
+                    {authorName}
+                  </span>
+                  <span className="text-muted-foreground truncate text-xs">@{authorHandle}</span>
                 </ProfileLink>
               ) : (
                 <span className="text-foreground truncate text-sm font-bold">{authorName}</span>
