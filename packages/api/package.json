@@ -54,6 +54,7 @@
     "@orpc/server": "^1.5.0",
     "drizzle-orm": "^0.45.2",
     "sharp": "^0.35.4",
+    "undici": "^7.29.0",
     "zod": "catalog:"
   },
   "devDependencies": {

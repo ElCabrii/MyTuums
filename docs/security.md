@@ -199,7 +199,13 @@ makes the server dial out (issue #260):
   anything unparseable — fail closed. IPv4-mapped IPv6 is refused outright in
   **both** spellings: the URL parser canonicalizes `[::ffff:127.0.0.1]` to
   the hex form `[::ffff:7f00:1]`, so judging only the dotted spelling judged
-  nothing a request can actually carry.
+  nothing a request can actually carry. The same table is re-applied at
+  connect time, inside the HTTP client's own resolution
+  (`createConnectValidatedLookup` in `packages/api/src/link-card-http.ts`):
+  a rebinding DNS server that answers the pre-flight check with a public
+  address and the actual connection with a private one still finds no socket
+  to open — the address the client connects to, not the one it once resolved
+  to, is what the range table must pass.
 - Only the scheme's own port is dialled — 80 for `http`, 443 for `https`,
   explicit or default. A host's non-web ports (databases, internal status
   endpoints) are not card targets, first hop or redirect hop.

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { LookupAddress } from "node:dns";
 import {
+  createConnectValidatedLookup,
   createLinkFetchTransport,
   guardedLinkFetch,
   isGlobalUnicastAddress,
@@ -157,6 +159,60 @@ function scriptableTransport(options: {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// createConnectValidatedLookup — the rebinding backstop on the real wire
+// ---------------------------------------------------------------------------
+
+describe("createConnectValidatedLookup", () => {
+  // The pre-flight `transport.lookup` check and this lookup see two
+  // DIFFERENT resolver answers in a rebinding attack; only the second runs
+  // on the address the socket actually opens. Pinning that second answer
+  // against the real resolver would be network I/O, so the resolver is
+  // injected — the range table it applies is the same one pinned above.
+
+  const resolverFor = (addresses: string[]) => {
+    const records: LookupAddress[] = addresses.map((address) => ({
+      address,
+      family: address.includes(":") ? 6 : 4,
+    }));
+    return () => Promise.resolve(records);
+  };
+
+  const invoke = (lookup: ReturnType<typeof createConnectValidatedLookup>) =>
+    new Promise<{ err: NodeJS.ErrnoException | null; result: string | LookupAddress[] }>(
+      (resolve) => {
+        lookup("example.com", { all: true }, (err, address) => resolve({ err, result: address }));
+      },
+    );
+
+  it("passes the addresses through when every one is global unicast", async () => {
+    const lookup = createConnectValidatedLookup(resolverFor(["93.184.216.34"]));
+    const { err, result } = await invoke(lookup);
+    expect(err).toBeNull();
+    expect(result).toEqual([{ address: "93.184.216.34", family: 4 }]);
+  });
+
+  it("refuses the rebinding answer: a private address among the candidates fails the connect", async () => {
+    const lookup = createConnectValidatedLookup(resolverFor(["93.184.216.34", "169.254.169.254"]));
+    const { err } = await invoke(lookup);
+    expect(err).toBeInstanceOf(Error);
+    expect(err?.message).toContain("connect-time refusal");
+  });
+
+  it("refuses when the re-resolution is entirely private — loopback cannot be reached by name either", async () => {
+    const lookup = createConnectValidatedLookup(resolverFor(["127.0.0.1"]));
+    const { err } = await invoke(lookup);
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  it("a resolver failure is an error the connect treats as dead, never a silent pass", async () => {
+    const lookup = createConnectValidatedLookup(() => Promise.reject(new Error("NXDOMAIN")));
+    const { err } = await invoke(lookup);
+    expect(err).toBeInstanceOf(Error);
+    expect(err?.message).toContain("connect-time resolution failed");
+  });
+});
 
 const GLOBAL = ["93.184.216.34"];
 

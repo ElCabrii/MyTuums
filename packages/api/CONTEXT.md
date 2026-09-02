@@ -370,6 +370,12 @@ reposter_key)`, where the reposter half is absent for post events and binds
   spelling, which is the form the URL parser actually produces from
   `[::ffff:127.0.0.1]` — redirects are followed manually with each hop
   re-checked, and size, time and content-type caps bound the response.
+  The pre-flight resolution is a fast refusal, not the boundary: the default
+  transport's fetches ride a dispatcher whose connect-time lookup
+  (`createConnectValidatedLookup`) re-applies the same range table to the
+  address the socket is about to open, so a rebinding resolver cannot pass
+  the check with a public answer and connect with a private one (IP literals
+  skip lookups — `net` connects directly — and a literal cannot rebind).
   Bracketed IPv6 literals are unwrapped in the transport's lookup
   short-circuit; that unwrap is safe only while `::ffff:0:0/96` stays in the
   refused table. The guard is unit-pinned with a fake transport and
