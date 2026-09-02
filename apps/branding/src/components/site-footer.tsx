@@ -1,9 +1,9 @@
 import { LocaleMenu } from "@/components/locale-menu";
 import { SocialLinks } from "@/components/social-links";
 import { m } from "@/paraglide/messages.js";
-import { signInUrl, signUpUrl } from "@/lib/site";
+import { privacyUrl, signInUrl, signUpUrl, termsUrl } from "@/lib/site";
 
-/** The footer: wordmark and tagline, the app links, the socials, the locale menu. */
+/** The footer: wordmark and tagline, the app links, the legal links, the socials, the locale menu. */
 export function SiteFooter() {
   return (
     <footer className="border-border/60 border-t">
@@ -12,7 +12,10 @@ export function SiteFooter() {
           <img src="/mytuums.svg" alt="" className="h-6 w-auto" />
           <span className="text-muted-foreground text-sm">{m.footer_tagline()}</span>
         </div>
-        <nav aria-label={m.nav_open_app()} className="flex items-center gap-4 text-sm sm:ml-auto">
+        <nav
+          aria-label={m.nav_open_app()}
+          className="flex flex-wrap items-center justify-center gap-4 text-sm sm:ml-auto"
+        >
           <a
             href={signUpUrl}
             className="text-muted-foreground hover:text-foreground transition-colors"
@@ -24,6 +27,18 @@ export function SiteFooter() {
             className="text-muted-foreground hover:text-foreground transition-colors"
           >
             {m.hero_cta_secondary()}
+          </a>
+          <a
+            href={termsUrl}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {m.footer_terms()}
+          </a>
+          <a
+            href={privacyUrl}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {m.footer_privacy()}
           </a>
           <SocialLinks className="hidden sm:flex" />
           <LocaleMenu />

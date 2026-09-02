@@ -11,3 +11,7 @@ export const APP_ORIGIN = "https://mytuums.com";
 
 export const signInUrl = `${APP_ORIGIN}/login`;
 export const signUpUrl = `${APP_ORIGIN}/register`;
+
+/** The app's public legal pages — SIGNED_OUT_PATHS members, no session needed. */
+export const termsUrl = `${APP_ORIGIN}/terms`;
+export const privacyUrl = `${APP_ORIGIN}/privacy`;
