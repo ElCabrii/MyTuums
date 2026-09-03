@@ -24,7 +24,11 @@ test.describe("reposts", () => {
     const repostButton = page.getByRole("button", { name: "Repost this post" });
     await expect(repostButton).toHaveAttribute("aria-pressed", "false");
 
+    // The pill is a menu trigger (repost and quote stack on one control):
+    // the trigger's pressed state still tells which face is live, but the
+    // menu item is what performs the toggle.
     await repostButton.click();
+    await page.getByRole("menuitem", { name: "Repost", exact: true }).click();
     const unrepostButton = page.getByRole("button", { name: "Remove your repost" });
     await expect(unrepostButton).toHaveAttribute("aria-pressed", "true");
     await expect(unrepostButton).toContainText("1");
@@ -39,6 +43,7 @@ test.describe("reposts", () => {
 
     // And back again: the pair is a stated end state, not a toggle accident.
     await page.getByRole("button", { name: "Remove your repost" }).click();
+    await page.getByRole("menuitem", { name: "Remove repost" }).click();
     await expect(page.getByRole("button", { name: "Repost this post" })).toHaveAttribute(
       "aria-pressed",
       "false",
@@ -87,7 +92,10 @@ test.describe("quoting a post", () => {
     if (!seeded) throw new Error("seedPosts returned no row");
 
     await page.goto(`/post/${seeded.id}`);
-    await page.getByRole("button", { name: "Quote this post" }).click();
+    // Quote lives behind the repost menu on a top-level post (only a reply
+    // keeps a standalone quote button).
+    await page.getByRole("button", { name: "Repost this post" }).click();
+    await page.getByRole("menuitem", { name: "Quote", exact: true }).click();
 
     const dialog = page.getByRole("dialog");
     // The dialog previews the post being quoted exactly as it will embed.

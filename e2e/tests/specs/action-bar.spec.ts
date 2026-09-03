@@ -8,7 +8,10 @@ import { bookmarkButtonFor, likeButtonFor, postCardWithText } from "../../suppor
  * 32 px target from a 16 px one — and the bar shipped as five ~16 px
  * targets next to the kebab's 32 px circle, which is what made it easy to
  * mis-tap. This pins that every control is a padded, uniform-height target;
- * the per-glyph optical sizing is a judgment call and stays unpinned.
+ * the per-glyph optical sizing is a judgment call and stays unpinned. The
+ * quote action is absent from the list on purpose: on a top-level post it
+ * lives inside the repost menu (its menu item, not a bar control), and the
+ * bar itself is four targets.
  */
 test.describe("the post action bar", () => {
   test("renders every action as a uniform target of at least 32 px", async ({ page, db }) => {
@@ -23,7 +26,6 @@ test.describe("the post action bar", () => {
     const controls = [
       card.getByRole("link", { name: /^Reply to this post/ }),
       card.getByRole("button", { name: /^(Repost this post|Remove your repost)/ }),
-      card.getByRole("button", { name: "Quote this post" }),
       likeButtonFor(page, seeded.content),
       bookmarkButtonFor(page, seeded.content),
     ];

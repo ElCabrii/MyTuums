@@ -302,6 +302,12 @@
   "post_repost": "Repost this post ({count})",
   "post_unrepost": "Remove your repost ({count})",
   "post_reposted_by": "{name} reposted",
+
+  "post_repost_menu_repost": "Repost",
+
+  "post_repost_menu_unrepost": "Remove repost",
+
+  "post_repost_menu_quote": "Quote",
   "post_quote": "Quote this post",
   "post_quoted_unavailable": "This post is unavailable.",
   "quote_dialog_title": "Quote post",

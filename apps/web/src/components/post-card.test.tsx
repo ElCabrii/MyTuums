@@ -569,7 +569,7 @@ describe("PostCard", () => {
       expect(screen.getByText(m.post_reposted_by({ name: "Reposter Name" }))).toBeInTheDocument();
     });
 
-    it("renders the repost control as a pressed toggle and invokes the toggle on click", async () => {
+    it("renders the repost pill as a pressed menu trigger and toggles through its menu item", async () => {
       const post = makePost({ viewerHasReposted: true, repostCount: 5 });
       const queryClient = new QueryClient();
       seedPostCache(queryClient, post);
@@ -580,6 +580,9 @@ describe("PostCard", () => {
 
       const user = userEvent.setup();
       await user.click(repostButton);
+      await user.click(
+        await screen.findByRole("menuitem", { name: m.post_repost_menu_unrepost() }),
+      );
 
       await waitFor(() =>
         expect(fakeClient.post.unrepost).toHaveBeenCalledWith(
@@ -608,6 +611,9 @@ describe("PostCard", () => {
       expect(
         screen.getByRole("button", { name: m.post_like({ count: String(post.likeCount) }) }),
       ).toBeInTheDocument();
+      // The reply keeps a standalone quote button: with no repost arm to put
+      // behind a menu, quoting a reply stays a one-click action.
+      expect(screen.getByRole("button", { name: m.post_quote() })).toBeInTheDocument();
     });
 
     it("embeds the quoted post with its own author and a dedicated permalink header", async () => {
@@ -714,13 +720,16 @@ describe("PostCard", () => {
       expect(screen.getByText(m.post_quoted_unavailable())).toBeInTheDocument();
     });
 
-    it("opens the quote dialog with the post as its target", async () => {
+    it("opens the quote dialog from the repost menu's quote item", async () => {
       const store = createStore();
       const post = makePost();
       await renderWithProviders(<PostCard post={post} />, { store, signedInAs: true });
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button", { name: m.post_quote() }));
+      await user.click(
+        screen.getByRole("button", { name: m.post_repost({ count: String(post.repostCount) }) }),
+      );
+      await user.click(await screen.findByRole("menuitem", { name: m.post_repost_menu_quote() }));
 
       expect(store.get(quoteDialogAtom)?.id).toBe(post.id);
     });

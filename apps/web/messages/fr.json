@@ -302,6 +302,12 @@
   "post_repost": "Republier cette publication ({count})",
   "post_unrepost": "Annuler votre republication ({count})",
   "post_reposted_by": "{name} a republié",
+
+  "post_repost_menu_repost": "Republier",
+
+  "post_repost_menu_unrepost": "Annuler la republication",
+
+  "post_repost_menu_quote": "Citer",
   "post_quote": "Citer cette publication",
   "post_quoted_unavailable": "Cette publication est indisponible.",
   "quote_dialog_title": "Citer une publication",
