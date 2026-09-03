@@ -1,6 +1,6 @@
 /**
- * Grants the Founder badge to one account, then exits — the production
- * equivalent of `pnpm db:grant:founder` (issue #308).
+ * Grants the Founder badge to one of the three founder accounts, then exits —
+ * the production equivalent of `pnpm db:grant:founder` (issue #308).
  *
  * Run from the Railway console against the production database:
  *
@@ -16,8 +16,9 @@
  *
  * The actual work is `grantFounderBadge` in
  * `@my-tuums/db/grant-founder-badge` — the same function the local script
- * calls, so the two paths cannot drift apart. It refuses once ANY account
- * carries the badge: one badge, one account, ever.
+ * calls, so the two paths cannot drift apart. It refuses an account that
+ * already carries the badge and refuses once three accounts do: one badge,
+ * three accounts, ever.
  */
 import { grantFounderBadge } from "@my-tuums/db/grant-founder-badge";
 

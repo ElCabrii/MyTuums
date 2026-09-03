@@ -44,7 +44,11 @@ databases. It serves data only — no HTTP, no business logic.
 - **Composite primary keys are the idempotency mechanism.** Uniqueness for
   likes, reposts, follows, reports, blocks and stamped badges lives in the
   PK, so handlers use `onConflictDoNothing` instead of a read-then-write
-  race. The `user_badge.badge` check constraint repeats the badge catalog
+  race. Badge stamps additionally upgrade in place — one row per tiered
+  family, the crossing that earns a higher tier deleting the lower one
+  (packages/api/src/badge-stamping.ts) — and the join badges are stamped
+  exclusively (the higher of the tiers the rank earned). The
+  `user_badge.badge` check constraint repeats the badge catalog
   (`BADGE_IDS` in `@my-tuums/api/badges`) as a SQL literal, and
   `src/stamp-join-badges.ts` repeats the join family's ranks and ids — the
   dependency points one way, so keep the copies in step.

@@ -19,24 +19,30 @@
 
 /** The thirteen badge ids — the wire vocabulary of `badges: BadgeId[]`. */
 export type BadgeId =
-  // Follower tiers — stamped by the follow that first passes the threshold,
-  // kept even if followers unfollow and the count recedes.
+  // Follower tiers — one upgrading badge: stamped by the follow that first
+  // passes the threshold, raised to the next tier by the follow that passes
+  // it, kept even if followers unfollow and the count recedes.
   | "popular"
   | "rising_star"
   | "star"
   | "superstar"
   | "supernova"
-  // Post-like tiers — stamped when one of an author's posts first passes a
-  // threshold, kept even if likes recede.
+  // Post-like tiers — one upgrading badge per account, measured by the
+  // author's most-liked post: stamped when a post first passes a threshold
+  // and raised by whichever post passes the next one, kept even if likes
+  // recede.
   | "noticed"
   | "trendy"
   | "big"
   | "exploding"
   | "giant"
-  // Granted manually to exactly one account, out of band (no API, no UI).
+  // Granted manually to the three founder accounts, out of band (no API,
+  // no UI).
   | "founder"
-  // Join badges — stamped at account creation from the creation rank
-  // (packages/db/src/stamp-join-badges.ts), which nothing later can change.
+  // Join badges — tiers of one family, stamped exclusively at account
+  // creation from the creation rank (packages/db/src/stamp-join-badges.ts):
+  // the first 50 accounts carry super-early alone, the 51st through 999th
+  // carry early alone, and nothing later can change it.
   | "super_early_access"
   | "early_access";
 
@@ -52,9 +58,10 @@ export interface BadgeTier {
 /**
  * Follower tiers, ascending. "More than X people follow you" is read
  * literally — a tier is earned strictly above its threshold, and stamped by
- * the `user.follow` whose insert first put the count there. `unfollow` never
- * unstamps: the tier was genuinely reached, and whether the count still
- * stands is not part of what the badge claims.
+ * the `user.follow` whose insert first put the count there; whichever follow
+ * later puts the count past the next threshold raises the badge to that
+ * tier. `unfollow` never unstamps: the tier was genuinely reached, and
+ * whether the count still stands is not part of what the badge claims.
  */
 export const FOLLOWER_BADGE_TIERS: readonly BadgeTier[] = [
   { id: "popular", threshold: 1_000 },
@@ -65,8 +72,10 @@ export const FOLLOWER_BADGE_TIERS: readonly BadgeTier[] = [
 ];
 
 /**
- * Post-like tiers, ascending. Stamped when one of an author's posts first
- * passes a threshold — an achievement, kept even if the post's likes recede.
+ * Post-like tiers, ascending, measured by the author's most-liked post.
+ * Stamped when one of the author's posts first passes a threshold, and
+ * raised by whichever post first passes the next one — kept even if likes
+ * recede.
  */
 export const POST_LIKE_BADGE_TIERS: readonly BadgeTier[] = [
   { id: "noticed", threshold: 10_000 },
@@ -117,9 +126,13 @@ export function badgeFamilyOf(id: BadgeId): BadgeFamily {
  * The display set a profile renders, in canonical order: follower tier, like
  * tier, founder, super-early, early.
  *
- * The input is raw `user_badge` ids: every crossed tier of a tiered family
- * has its own row, but only the family's highest tier displays. Unknown ids
- * (a row written before a catalog change) are ignored rather than surfaced.
+ * The input is raw `user_badge` ids. Tiered badges upgrade rather than
+ * accumulate (one row per family, raised by the crossing that earns the next
+ * tier — see ./badge-stamping.ts), so selecting the family's highest stamped
+ * tier is normally choosing among one; it stays the authority anyway,
+ * because a rare upgrade race can transiently leave a superseded row
+ * beside its replacement. Unknown ids (a row written before a catalog
+ * change) are ignored rather than surfaced.
  */
 export function displayProfileBadges(input: { stampedBadgeIds: readonly string[] }): BadgeId[] {
   const stamped = new Set(input.stampedBadgeIds);

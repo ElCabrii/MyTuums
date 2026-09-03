@@ -23,7 +23,7 @@ import { ne, sql } from "drizzle-orm";
 import { db } from "./index.js";
 import { user, userBadge } from "./schema/index.js";
 
-/** Among the first 50 accounts: `super_early_access` (and `early_access`). */
+/** Among the first 50 accounts: `super_early_access`. */
 const SUPER_EARLY_ACCESS_RANK = 50;
 /** Among the first 1,000 accounts: `early_access`. */
 const EARLY_ACCESS_RANK = 1_000;
@@ -32,7 +32,7 @@ const SUPER_EARLY_ACCESS_BADGE = "super_early_access";
 const EARLY_ACCESS_BADGE = "early_access";
 
 /**
- * Stamps the join badges `userId`'s creation rank earns, if any.
+ * Stamps the join badge `userId`'s creation rank earns, if any.
  *
  * The rank is how many accounts already existed when this one was created —
  * at creation time every existing row precedes the new one, so no
@@ -41,6 +41,12 @@ const EARLY_ACCESS_BADGE = "early_access";
  * nothing, so counting past 1,000 can never change the verdict, and the
  * cap is what keeps the check O(1) forever instead of growing with the
  * user table.
+ *
+ * The two join badges are tiers of one family and never combine: the first
+ * 50 accounts carry `super_early_access` alone, the 51st through 999th
+ * carry `early_access` alone — an account cannot be "super early" and
+ * merely "early" at once, the same upgrade-not-stack rule the tiered
+ * families stamp through (packages/api/src/badge-stamping.ts).
  *
  * Rides the shared pool (./index.ts), not a private connection like
  * ./grant-founder-badge.ts: it runs inside a request, beside the adapter
@@ -61,13 +67,13 @@ export async function stampJoinBadges(userId: string): Promise<void> {
     .as("preceding");
   const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(preceding);
 
-  const badges: string[] = [];
-  if (row.count < SUPER_EARLY_ACCESS_RANK) badges.push(SUPER_EARLY_ACCESS_BADGE);
-  if (row.count < EARLY_ACCESS_RANK) badges.push(EARLY_ACCESS_BADGE);
-  if (badges.length === 0) return;
+  const badge =
+    row.count < SUPER_EARLY_ACCESS_RANK
+      ? SUPER_EARLY_ACCESS_BADGE
+      : row.count < EARLY_ACCESS_RANK
+        ? EARLY_ACCESS_BADGE
+        : null;
+  if (badge === null) return;
 
-  await db
-    .insert(userBadge)
-    .values(badges.map((badge) => ({ userId, badge })))
-    .onConflictDoNothing();
+  await db.insert(userBadge).values({ userId, badge }).onConflictDoNothing();
 }

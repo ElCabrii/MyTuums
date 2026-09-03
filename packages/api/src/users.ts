@@ -4,7 +4,8 @@ import type { Database } from "@my-tuums/db";
 import { follow, user, userBadge, userBlock } from "@my-tuums/db/schema";
 import { normalizeUsername, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "@my-tuums/auth/rules";
 import { z } from "zod";
-import { displayProfileBadges, followerBadgeTierFor } from "./badges.js";
+import { displayProfileBadges, FOLLOWER_BADGE_TIERS, followerBadgeTierFor } from "./badges.js";
+import { stampBadgeTier } from "./badge-stamping.js";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
   FOLLOW_PAGE_SIZE,
@@ -407,17 +408,12 @@ export const userRouter = {
           // the cost is one index-only count per new follow and nothing
           // anywhere else — a retried follow never reaches this branch. The
           // count read and the stamp ride the follow's own transaction, so
-          // a rollback leaves neither half; `onConflictDoNothing` against
-          // the (user, badge) primary key keeps a threshold re-crossed
-          // after a recede (followers unfollowing and the count climbing
-          // back) at exactly one row. `unfollow` never unstamps: the tier
-          // was genuinely reached.
+          // a rollback leaves neither half; the tier upgrades in place (see
+          // ./badge-stamping.ts — one row per family, kept on a recede,
+          // `unfollow` never unstamps: the tier was genuinely reached).
           const badge = followerBadgeTierFor(await countFollowers(tx, input.userId));
           if (badge) {
-            await tx
-              .insert(userBadge)
-              .values({ userId: input.userId, badge })
-              .onConflictDoNothing();
+            await stampBadgeTier(tx, input.userId, FOLLOWER_BADGE_TIERS, badge);
           }
         }
       });
