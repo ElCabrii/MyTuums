@@ -42,8 +42,12 @@ databases. It serves data only — no HTTP, no business logic.
   and then `scripts/patch-auth-schema.ts`. That script's header explains what
   it patches and why.
 - **Composite primary keys are the idempotency mechanism.** Uniqueness for
-  likes, reposts, follows, reports and blocks lives in the PK, so handlers use
-  `onConflictDoNothing` instead of a read-then-write race.
+  likes, reposts, follows, reports, blocks and stamped badges lives in the
+  PK, so handlers use `onConflictDoNothing` instead of a read-then-write
+  race. The `user_badge.badge` check constraint repeats the badge catalog
+  (`BADGE_IDS` in `@my-tuums/api/badges`) as a SQL literal, and
+  `src/stamp-join-badges.ts` repeats the join family's ranks and ids — the
+  dependency points one way, so keep the copies in step.
 - **A quote reference is deliberately FK-less.** `post.quoted_post_id` names
   another post, but a hard delete of that row (today, through its author's
   account cascade) must not delete the quoting author's own post. Readers
@@ -73,15 +77,17 @@ databases. It serves data only — no HTTP, no business logic.
 
 ## Dependencies and boundaries
 
-Five subpath exports, all source `.ts` — consumers compile or inline them:
+Seven subpath exports, all source `.ts` — consumers compile or inline them:
 
-| Subpath     | Exports                                    | Consumers                                               |
-| ----------- | ------------------------------------------ | ------------------------------------------------------- |
-| `.`         | `db`, `Database`, `closeDb`, `pingDb`      | `packages/api`, `packages/auth`, `apps/server`          |
-| `./schema`  | tables and relations                       | `packages/api`, `e2e`                                   |
-| `./testing` | test-URL helpers and the destructive guard | vitest configs, `e2e`                                   |
-| `./migrate` | `runMigrations`                            | `apps/server/src/migrate.ts`                            |
-| `./promote` | `promoteUser`                              | `scripts/promote-user.ts`, `apps/server/src/promote.ts` |
+| Subpath                 | Exports                                    | Consumers                                                                  |
+| ----------------------- | ------------------------------------------ | -------------------------------------------------------------------------- |
+| `.`                     | `db`, `Database`, `closeDb`, `pingDb`      | `packages/api`, `packages/auth`, `apps/server`                             |
+| `./schema`              | tables and relations                       | `packages/api`, `e2e`                                                      |
+| `./testing`             | test-URL helpers and the destructive guard | vitest configs, `e2e`                                                      |
+| `./migrate`             | `runMigrations`                            | `apps/server/src/migrate.ts`                                               |
+| `./promote`             | `promoteUser`                              | `scripts/promote-user.ts`, `apps/server/src/promote.ts`                    |
+| `./grant-founder-badge` | `grantFounderBadge`                        | `scripts/grant-founder-badge.ts`, `apps/server/src/grant-founder-badge.ts` |
+| `./stamp-join-badges`   | `stampJoinBadges`                          | `packages/auth` (the user-create hook)                                     |
 
 This package must not import `packages/api` or `packages/auth` — the
 dependency direction is one way.

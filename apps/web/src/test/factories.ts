@@ -137,6 +137,7 @@ export function makeProfile(overrides: Partial<Profile> = {}): Profile {
     followingCount: 0,
     viewerIsFollowing: false,
     suspended: false,
+    badges: [],
     ...overrides,
   };
 }

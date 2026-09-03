@@ -5,6 +5,7 @@ import { admin, lastLoginMethod, oneTap, twoFactor, username } from "better-auth
 import { passkey } from "@better-auth/passkey";
 import { i18n } from "@better-auth/i18n";
 import { db } from "@my-tuums/db";
+import { stampJoinBadges } from "@my-tuums/db/stamp-join-badges";
 import { authRateLimitEnabled, passkeyRpId, webOrigin } from "./env.js";
 import { validateDateOfBirthHook } from "./dob.js";
 import { validateProfileFieldsHook } from "./profile.js";
@@ -229,7 +230,21 @@ export const auth = betterAuth({
       // sign-up that supplies none of those fields passes through untouched;
       // legal acceptance is the exception and is required, on `/sign-up/email`
       // only (see ./legal.ts and validateUserCreate above).
-      create: { before: validateUserCreate },
+      create: {
+        before: validateUserCreate,
+        // Join badges are stamped the moment the account exists (issue #308):
+        // creation rank is fixed at that instant and no later event can earn
+        // or change it (see @my-tuums/db/stamp-join-badges). A failure here
+        // fails the sign-up loudly on purpose — pre-deploy migrations
+        // guarantee `user_badge` exists before this code takes traffic, so
+        // anything thrown is a deployment error, not a cosmetic badge worth
+        // swallowing while accounts silently earn nothing. The test instance
+        // (./testing.ts) deliberately carries no hooks at all, so fixtures
+        // never carry join badges.
+        after: async (created) => {
+          await stampJoinBadges(created.id);
+        },
+      },
       // updateUser is how the /welcome claim and every settings edit arrive;
       // the same field rules, and this is the only place they actually hold —
       // the columns are bare `text` and the client's checks are skippable.

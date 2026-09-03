@@ -63,6 +63,8 @@ function makeProfile(overrides: Partial<Profile> & { id: string; username: strin
     viewerIsFollowing: false,
     // The suspension flag (issue #38): never suspended by default.
     suspended: false,
+    // Earned badges (issue #308): none by default.
+    badges: [],
     ...overrides,
   };
 }

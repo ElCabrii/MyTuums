@@ -12,6 +12,10 @@
       "types": "./src/constants.ts",
       "default": "./src/constants.ts"
     },
+    "./badges": {
+      "types": "./src/badges.ts",
+      "default": "./src/badges.ts"
+    },
     "./storage": {
       "types": "./src/storage.ts",
       "default": "./src/storage.ts"

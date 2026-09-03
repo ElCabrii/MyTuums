@@ -197,6 +197,13 @@
       "when": 1788276739627,
       "tag": "0027_sloppy_marauders",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1788408752250,
+      "tag": "0028_chief_pyro",
+      "breakpoints": true
     }
   ]
 }

@@ -226,14 +226,47 @@ three events, not one collapsed one.
 ## Profiles and search
 
 - A profile carries a display name, lowercase handle, bio (160 characters),
-  avatar, banner, join date, and follower/following counts. Bios use the same
-  safe linkification as posts and replies.
+  avatar, banner, join date, follower/following counts, and earned badges. Bios
+  use the same safe linkification as posts and replies.
 - Profiles are addressed by handle. A profile hidden by a block reads as "no
   such user"; a banned profile resolves to a suspended stub instead, without
-  its authored profile fields or relationship counts.
+  its authored profile fields, relationship counts or badges.
 - Search has three surfaces: a profile-only header typeahead (up to five
   users), a full user search, and a full post search. User results rank
   handle-prefix matches ahead of substring matches.
+
+### Badges
+
+A profile displays a small, fixed catalog of automatically-earned badges plus
+one manually-granted Founder badge, at most one tier per family, in a canonical
+order (follower tier, like tier, founder, super-early, early). Badges are
+public profile data, like follower counts; display names come from the
+locale's message catalogue, never the API. Every badge is a permanent
+achievement — a stamped `user_badge` row written the moment it is earned and
+never withdrawn, so a count receding below its threshold takes no badge with
+it. The catalog and its thresholds live in one dependency-free module shared
+by server and browser (`@my-tuums/api/badges`).
+
+- **Follower tiers** (`popular` >1k, `rising_star` >10k, `star` >100k,
+  `superstar` >1M, `supernova` >10M followers): stamped inside `user.follow`'s
+  transaction by the follow that first passes the threshold, and kept even if
+  followers unfollow and the count recedes.
+- **Post-like tiers** (`noticed` >10k, `trendy` >100k, `big` >1M, `exploding`
+  > 10M, `giant` >100M likes on one post): stamped inside `post.like`'s
+  > transaction the first time a post passes a threshold and kept even if likes
+  > recede.
+- **Join badges**: `super_early_access` for the first 50 accounts,
+  `early_access` for the first 1,000, by creation order — stamped at account
+  creation (the rank is fixed the moment the account exists, and the count is
+  capped so the check costs the same forever after), with migration 0028
+  backfilling accounts that predate the stamping hook.
+- **Founder** (`founder`): granted out of band to exactly one account by the
+  committed one-off script (`pnpm db:grant:founder` locally,
+  `node apps/server/dist/grant-founder-badge.js` in production); no API, no
+  UI, and the mechanism refuses once any account holds it.
+
+Out of scope for 0.5.0: badges on post cards, staff-granted badges, and any
+notification when a badge is earned.
 
 ## Media
 
