@@ -54,6 +54,11 @@ describe("user.byUsername", () => {
         // derived at query time, so a real widening of that boundary still
         // fails this test.
         "suspended",
+        // Public profile data like the counts (issue #308): the badge display
+        // set in canonical order, derived at query time from stamped rows,
+        // the live follower count and the creation rank. Computed for the
+        // same reason as `suspended` — not a stored column.
+        "badges",
       ].sort(),
     );
     expect(result).not.toHaveProperty("email");
@@ -253,6 +258,11 @@ describe("user.followers / user.following target visibility", () => {
     );
     expect(profile.suspended).toBe(true);
     expect(profile.followerCount).toBe(0);
+    // Authored-field redaction applies to badges like everything else
+    // (issue #308): the stub carries none. (The seeded graph gives the hub
+    // one follower, under every tier — an unstamped profile has no badge to
+    // redact, so this pins the field's presence on the stub, not a tier.)
+    expect(profile.badges).toEqual([]);
 
     const followers = await call(
       appRouter.user.followers,

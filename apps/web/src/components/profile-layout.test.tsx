@@ -94,6 +94,54 @@ describe("ProfileLayout query states", () => {
 });
 
 describe("ProfileLayout role and ownership gates", () => {
+  it("renders the profile's badges beside the display name", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data(
+      "badged",
+      makeProfile({
+        username: "badged",
+        displayUsername: "Badged",
+        name: "Badged Person",
+        badges: ["popular", "founder"],
+      }),
+    );
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@badged",
+      signedInAs: true,
+    });
+
+    expect(screen.getByRole("heading", { name: "Badged Person" })).toBeInTheDocument();
+    expect(screen.getByTitle(m.badge_popular())).toBeInTheDocument();
+    expect(screen.getByTitle(m.badge_founder())).toBeInTheDocument();
+  });
+
+  it("renders no badges on the suspended stub", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data(
+      "suspbadged",
+      makeProfile({
+        username: "suspbadged",
+        displayUsername: "SuspBadged",
+        suspended: true,
+        badges: ["founder"],
+      }),
+    );
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@suspbadged",
+      signedInAs: true,
+    });
+
+    // Authored-field redaction applies to badges like everything else
+    // (issue #308) — and the stub page never renders the header row at all.
+    expect(screen.getByText(m.profile_suspended_body())).toBeInTheDocument();
+    expect(screen.queryByTitle(m.badge_founder())).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: m.profile_badges_label() })).not.toBeInTheDocument();
+  });
+
   it("shows a suspended stub but no unban action to a plain user", async () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data(

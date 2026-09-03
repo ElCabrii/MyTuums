@@ -58,11 +58,12 @@ to the owning context.
   and the client's `useRequireSignedIn` both read that. Duplicating it lets
   the two gates disagree and bounce a visitor between them forever.
 - **The browser-safe subpaths stay dependency-free.**
-  `@my-tuums/api/constants`, `@my-tuums/api/dimensions`,
-  `@my-tuums/api/post-image`, `@my-tuums/api/roles`
-  and `@my-tuums/auth/rules` must never import `@my-tuums/db`; the web app
-  imports them, and a database import throws at module load in a browser.
-  Those five are the _only_ workspace modules in the SPA bundle, and they are
+  `@my-tuums/api/constants`, `@my-tuums/api/badges`,
+  `@my-tuums/api/dimensions`, `@my-tuums/api/post-image`,
+  `@my-tuums/api/roles` and `@my-tuums/auth/rules` must never import
+  `@my-tuums/db`; the web app imports them, and a database import throws at
+  module load in a browser.
+  Those six are the _only_ workspace modules in the SPA bundle, and they are
   the only ones `apps/web` may import from either package.
 - **Auth-owned user fields are written through the auth client only.**
   `packages/auth`'s database hooks enforce their user-field rules; an oRPC

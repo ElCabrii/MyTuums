@@ -460,6 +460,52 @@ export const report = pgTable(
 );
 
 /**
+ * A stamped profile badge (issue #308) — one row per (user, badge), written
+ * the moment the badge is earned.
+ *
+ * Only achievements live here: the post-like tiers (stamped inside
+ * `post.like`'s transaction when the post's like count first passes a
+ * threshold — kept even if likes recede) and `founder` (granted once, out of
+ * band, by the committed bootstrap script in the `promote.js` spirit — see
+ * packages/db/src/grant-founder-badge.ts). The follower tiers and the two
+ * join badges are derived at profile read time from live state (follower
+ * count, creation rank) and deliberately have no rows: a follower tier is
+ * live state, not an achievement, so it must appear and disappear with the
+ * count rather than be stamped and stuck.
+ *
+ * The `badge` check constraint's list is STAMPED_BADGE_IDS from
+ * `@my-tuums/api/badges` (packages/api/src/badges.ts), duplicated here as a
+ * SQL literal because this package cannot import from the API (the dependency
+ * points the other way). Keep the two in step — badges.ts's unit test pins
+ * its half.
+ */
+export const userBadge = pgTable(
+  "user_badge",
+  {
+    // `user.id` is text (BetterAuth's own id format), so the FK must be too.
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    badge: text("badge").notNull(),
+    // `timestamaptz` and `precision: 3` for the same reasons as
+    // post.created_at above.
+    earnedAt: timestamp("earned_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    // This composite primary key *is* the "a badge is stamped at most once per
+    // account" rule, the same idempotency mechanism post_like uses: the
+    // stamping insert says `onConflictDoNothing`, so a threshold re-crossed
+    // after a recede (likes falling below a tier and climbing back over it)
+    // mints no second row and no writer can race one.
+    primaryKey({ columns: [t.userId, t.badge] }),
+    check(
+      "user_badge_badge",
+      sql`${t.badge} in ('noticed', 'trendy', 'big', 'exploding', 'giant', 'founder')`,
+    ),
+  ],
+);
+
+/**
  * A directed block edge from `blockerId` to `blockedId` (issue #38).
  *
  * Blocking is mutual in the design: a blocked user cannot see the blocker
@@ -886,6 +932,11 @@ export const reportRelations = relations(report, ({ one }) => ({
     references: [user.id],
     relationName: "resolvedBy",
   }),
+}));
+
+/** Drizzle relations for `userBadge` — the account whose profile displays it. */
+export const userBadgeRelations = relations(userBadge, ({ one }) => ({
+  user: one(user, { fields: [userBadge.userId], references: [user.id] }),
 }));
 
 /** Drizzle relations for `userBlock` — the `user` rows on both sides of the edge. */

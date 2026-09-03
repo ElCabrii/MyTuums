@@ -1,9 +1,10 @@
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq, not, or, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
-import { follow, user, userBlock } from "@my-tuums/db/schema";
+import { follow, user, userBadge, userBlock } from "@my-tuums/db/schema";
 import { normalizeUsername, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "@my-tuums/auth/rules";
 import { z } from "zod";
+import { displayProfileBadges } from "./badges.js";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
   FOLLOW_PAGE_SIZE,
@@ -72,6 +73,34 @@ const followerCount = sql<number>`(
 
 const followingCount = sql<number>`(
   select count(*)::int from ${follow} where ${follow.followerId} = ${user.id}
+)`;
+
+/**
+ * The stamped badges an account carries (`user_badge` rows — post-like tiers
+ * and founder; see packages/api/src/badges.ts for why the other families are
+ * derived instead). The composite primary key makes this an index scan; an
+ * account has at most a handful of rows.
+ */
+const stampedBadges = sql<string[]>`coalesce((
+  select array_agg(${userBadge.badge}) from ${userBadge} where ${userBadge.userId} = ${user.id}
+), '{}'::text[])`;
+
+/**
+ * How many accounts were created strictly before this one — the join badges'
+ * measure (issue #308). Derived at read time rather than backfilled: the
+ * `user_created_at_idx` migration index makes the correlated count cheap, and
+ * a derived rank can never disagree with the table it counts.
+ *
+ * The right-hand reference is hand-qualified rather than interpolated
+ * (`${user.createdAt}`): drizzle strips table prefixes in a single-table
+ * select's fields, and the inner alias would then capture the bare
+ * `"created_at"` — comparing the subquery's own rows to themselves (always
+ * false, rank 0 for every account). Unlike `followerCount` above, whose bare
+ * `"id"` falls through to the outer scope only because `follow` has no such
+ * column, this fragment cannot lean on name resolution.
+ */
+const creationRank = sql<number>`(
+  select count(*)::int from ${user} as "ranked" where "ranked"."created_at" < "user"."created_at"
 )`;
 
 export function viewerIsFollowing(viewerId: string) {
@@ -170,7 +199,14 @@ const IMAGE_REJECTIONS = {
 export const userRouter = {
   /**
    * Returns one user's public profile by handle. Requires a session; the
-   * shape is `publicUserColumns`, never the whole row.
+   * shape is `publicUserColumns` plus computed fields, never the whole row.
+   *
+   * `badges` (issue #308) crosses the `publicUserColumns` privacy boundary
+   * deliberately: badges are public profile data, like follower counts — an
+   * earned distinction displayed to every visitor. It is computed at read
+   * time from the stamped `user_badge` rows, the live follower count and the
+   * creation rank (see ./badges.ts), never a stored column, so widening that
+   * boundary by a column still fails the shape pin in users.int.test.ts.
    */
   byUsername: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
@@ -188,6 +224,8 @@ export const userRouter = {
           followingCount,
           viewerIsFollowing: viewerIsFollowing(context.user.id),
           suspended: effectivelyBanned,
+          stampedBadges,
+          creationRank,
         })
         .from(user)
         .where(
@@ -202,18 +240,38 @@ export const userRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
-      return found.suspended
-        ? {
-            ...found,
-            name: found.username ?? "",
-            image: null,
-            bio: null,
-            bannerImage: null,
-            followerCount: 0,
-            followingCount: 0,
-            viewerIsFollowing: false,
-          }
-        : found;
+      // The raw derivation inputs never cross the boundary — `badges` is the
+      // public shape: the display set in canonical order (follower tier, like
+      // tier, founder, super-early, early), computed by the one catalog
+      // definition the browser shares (./badges.ts).
+      const { stampedBadges: stamped, creationRank: rank, ...profile } = found;
+
+      if (profile.suspended) {
+        return {
+          ...profile,
+          name: profile.username ?? "",
+          image: null,
+          bio: null,
+          bannerImage: null,
+          followerCount: 0,
+          followingCount: 0,
+          viewerIsFollowing: false,
+          // Authored-field redaction applies to badges like everything else
+          // (issue #308): a suspended profile displays none, stamped or
+          // derived — the derived families are already gone with the zeroed
+          // follower count, and this drops the stamped ones too.
+          badges: [],
+        };
+      }
+
+      return {
+        ...profile,
+        badges: displayProfileBadges({
+          stampedBadgeIds: stamped,
+          followerCount: profile.followerCount,
+          creationRank: rank,
+        }),
+      };
     }),
 
   /**

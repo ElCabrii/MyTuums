@@ -33,6 +33,7 @@ app's build from the same origin.
 | Add a moderation surface             | `src/atoms/moderation.ts`, `src/components/moderation/`                               | `src/hooks/use-require-role.ts`                                                                                                                                                                                    |
 | Change a public route's crawler head | `apps/server/src/public-heads.ts` (server half), this app's `index.html` marker block | keep the title/description copy in step with `src/lib/document-head.ts` and `messages/en.json`                                                                                                                     |
 | Change the notifications surface     | `src/atoms/notifications.ts`, `src/components/notifications-page.tsx`                 | the unread badge on the header bell (`src/components/header.tsx`); the per-type copy in `messages/`                                                                                                                |
+| Change the badge surfaces            | `src/components/profile-badges.tsx`                                                   | the catalog ids/tiers come from `@my-tuums/api/badges` (never restated); the localized names in `messages/` are keyed by badge id                                                                                  |
 
 ## Invariants
 
@@ -144,12 +145,12 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
 
 ## Dependencies and boundaries
 
-- Import exactly five workspace modules and no others:
-  `@my-tuums/api/constants`, `@my-tuums/api/dimensions`,
-  `@my-tuums/api/post-image`, `@my-tuums/api/roles`
-  and `@my-tuums/auth/rules`. All five must stay free of `@my-tuums/db`, which
+- Import exactly six workspace modules and no others:
+  `@my-tuums/api/constants`, `@my-tuums/api/badges`,
+  `@my-tuums/api/dimensions`, `@my-tuums/api/post-image`, `@my-tuums/api/roles`
+  and `@my-tuums/auth/rules`. All six must stay free of `@my-tuums/db`, which
   throws at module load in a browser. The production bundle contains those
-  five and nothing else from the packages — check a sourcemap's `sources` if
+  six and nothing else from the packages — check a sourcemap's `sources` if
   you need to confirm it after a change.
 - **`src/lib/auth-validation.ts` is a form adapter, not a rule book.** The
   handle bounds and charset, the date-of-birth parse and age comparison, the
