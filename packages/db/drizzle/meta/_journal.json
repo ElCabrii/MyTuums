@@ -204,6 +204,13 @@
       "when": 1788408752250,
       "tag": "0028_chief_pyro",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788449267892,
+      "tag": "0029_repair-join-badge-tiers",
+      "breakpoints": true
     }
   ]
 }
