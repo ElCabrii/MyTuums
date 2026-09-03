@@ -28,9 +28,9 @@ export function postCardWithText(page: Page, text: string): Locator {
  * The like control within one card, signed in: a real `<button>` whose
  * `aria-label` flips between "Like this post" and "Unlike this post"
  * (post-card.tsx). Matches either state — and only the like control: the card
- * also carries Repost, Quote and Bookmark controls whose labels end in
- * "this post" (issues #261, #262), so the pattern is anchored rather than a
- * bare substring.
+ * also carries Repost and Bookmark controls whose labels end in "this post"
+ * (issues #261, #262), so the pattern is anchored rather than a bare
+ * substring.
  */
 export function likeButtonFor(page: Page, text: string): Locator {
   return postCardWithText(page, text).getByRole("button", { name: /^(Unlike|Like) this post/ });

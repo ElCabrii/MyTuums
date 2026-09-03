@@ -124,9 +124,11 @@ function QuotedPostCard({ quoted }: { quoted: NonNullable<Post["quoted"]> }) {
  * One box for every control in the action bar (issue #275): the kebab's
  * `h-8` (32 px) hit area, so the bar stops being a row of ~16 px targets.
  * The counted controls (like, reply, repost) become `px-2` pills; the
- * count-less ones (quote, bookmark) the same `h-8 w-8` circle the kebab
- * uses. Every glyph therefore leads with the same 8 px of box before its
- * ink, which is what holds the five on one optical line.
+ * count-less ones the same `h-8 w-8` circle the kebab uses — the bookmark
+ * always, and the quote button on a reply, where it renders standalone
+ * (on a top-level post the quote action lives inside the repost menu).
+ * Every glyph therefore leads with the same 8 px of box before its ink,
+ * which is what holds the controls on one optical line.
  *
  * The `after:` pseudo-element widens each control's HIT area to the 44 px
  * mobile-guidance target without growing its visible footprint: a 32 px box
@@ -542,7 +544,7 @@ export function PostCard({
           {!isGone &&
             (isSignedIn ? (
               // `justify-between` rather than a fixed gap (issue #275): the
-              // five actions spread across the existing `max-w-md` instead of
+              // four actions spread across the existing `max-w-md` instead of
               // left-packing with dead space, and the spacing flexes down
               // gracefully on narrow columns instead of overflowing.
               <div className="text-muted-foreground flex max-w-md items-center justify-between text-xs">
@@ -582,42 +584,65 @@ export function PostCard({
                   </Link>
                 )}
 
-                {/* Offered only where its event can be shown — see `canRepost`
-                     above: a reply's repost would never render anywhere. */}
-                {canRepost && (
+                {/* Repost and quote stack onto one control: the repost pill
+                     opens a menu offering either amplification, so the pill's
+                     count and pressed state stay while the two actions share a
+                     hit area. Offered only where the repost event can be shown
+                     — see `canRepost` above — because a reply's repost would
+                     never render anywhere; a reply degrades to the standalone
+                     quote button instead, since quoting a reply is still
+                     offered. */}
+                {canRepost ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      aria-pressed={post.viewerHasReposted}
+                      aria-label={
+                        post.viewerHasReposted
+                          ? m.post_unrepost({ count: String(post.repostCount) })
+                          : m.post_repost({ count: String(post.repostCount) })
+                      }
+                      onClick={(e) => e.stopPropagation()}
+                      className={repostButtonClass}
+                    >
+                      {repostContent}
+                    </DropdownMenuTrigger>
+                    {/* Same portal-bubbling guard as the kebab above: the
+                        popup is portaled to <body> but React events still
+                        bubble through this card's clickable shell. */}
+                    <DropdownMenuContent onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenuItem className="cursor-pointer" onClick={() => toggleRepost()}>
+                        <Repeat2 className="h-4 w-4" />
+                        {post.viewerHasReposted
+                          ? m.post_repost_menu_unrepost()
+                          : m.post_repost_menu_repost()}
+                      </DropdownMenuItem>
+                      {/* Quoting opens the app-wide dialog (mounted at the
+                          root like the delete confirmation): a quote is
+                          composed from anywhere a card renders, not only from
+                          the thread page. */}
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        onClick={() => setQuoteDialog(post)}
+                      >
+                        <QuotePostIcon className="h-4 w-4" />
+                        {m.post_repost_menu_quote()}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      toggleRepost();
+                      setQuoteDialog(post);
                     }}
-                    aria-pressed={post.viewerHasReposted}
-                    aria-label={
-                      post.viewerHasReposted
-                        ? m.post_unrepost({ count: String(post.repostCount) })
-                        : m.post_repost({ count: String(post.repostCount) })
-                    }
-                    className={repostButtonClass}
+                    aria-label={m.post_quote()}
+                    title={m.post_quote()}
+                    className={`${actionIconButtonClass} hover:text-primary`}
                   >
-                    {repostContent}
+                    <QuotePostIcon className="h-4 w-4" />
                   </button>
                 )}
-
-                {/* Quoting opens the app-wide dialog (mounted at the root like
-                    the delete confirmation): a quote is composed from anywhere a
-                    card renders, not only from the thread page. */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setQuoteDialog(post);
-                  }}
-                  aria-label={m.post_quote()}
-                  title={m.post_quote()}
-                  className={`${actionIconButtonClass} hover:text-primary`}
-                >
-                  <QuotePostIcon className="h-4 w-4" />
-                </button>
 
                 <button
                   type="button"

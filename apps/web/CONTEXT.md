@@ -130,7 +130,8 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   never asks: the card is derived from `content`, and a tombstoned or
   unavailable post reads null content.
 - **The quote composer is one root-mounted dialog, not a page.** Any card's
-  Quote button sets `quoteDialogAtom` (the full post row — the dialog previews
+  quote action (a repost-menu item on a top-level post, a standalone button
+  on a reply) sets `quoteDialogAtom` (the full post row — the dialog previews
   the embedded card from it), and `QuoteDialog` in `__root.tsx` is the only
   mounted instance, the same identity-atom shape as the delete confirmation.
   Its draft is in-memory: one dialog, bounded lifetime, nothing to evict from

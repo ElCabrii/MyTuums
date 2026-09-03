@@ -136,7 +136,9 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   posts). Only top-level posts are offered the repost control: no surface the
   app ships creates a repost of a reply, so the action would never render
   anywhere (the row remains legal — the API accepts it — it is the surfaces
-  that have nowhere to put it).
+  that have nowhere to put it). On a card, the control is one pill that opens
+  a menu offering repost or quote; on a reply — where the repost arm is not
+  offered — the quote action renders as its own button instead.
 - A quote is a normal post — every text and image rule applies — plus a
   reference to the quoted post, which renders embedded inside it in every
   context: feed, permalink, thread, search results and the moderation case
