@@ -24,7 +24,7 @@
 import postgres from "postgres";
 import { sslFor } from "./connection.js";
 
-// "founder" is STAMPED_BADGE_IDS's member from packages/api/src/badges.ts,
+// "founder" is BADGE_IDS's member from packages/api/src/badges.ts,
 // duplicated here because this package cannot import from @my-tuums/api (the
 // dependency would point the wrong way). The user_badge check constraint
 // carries the same list. Keep the three in step.

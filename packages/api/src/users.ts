@@ -4,7 +4,7 @@ import type { Database } from "@my-tuums/db";
 import { follow, user, userBadge, userBlock } from "@my-tuums/db/schema";
 import { normalizeUsername, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "@my-tuums/auth/rules";
 import { z } from "zod";
-import { displayProfileBadges } from "./badges.js";
+import { displayProfileBadges, followerBadgeTierFor } from "./badges.js";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
   FOLLOW_PAGE_SIZE,
@@ -76,32 +76,14 @@ const followingCount = sql<number>`(
 )`;
 
 /**
- * The stamped badges an account carries (`user_badge` rows — post-like tiers
- * and founder; see packages/api/src/badges.ts for why the other families are
- * derived instead). The composite primary key makes this an index scan; an
- * account has at most a handful of rows.
+ * The stamped badges an account carries — its `user_badge` rows, every family
+ * included (see packages/api/src/badges.ts for who stamps what). The composite
+ * primary key makes this an index scan; an account has at most a handful of
+ * rows.
  */
 const stampedBadges = sql<string[]>`coalesce((
   select array_agg(${userBadge.badge}) from ${userBadge} where ${userBadge.userId} = ${user.id}
 ), '{}'::text[])`;
-
-/**
- * How many accounts were created strictly before this one — the join badges'
- * measure (issue #308). Derived at read time rather than backfilled: the
- * `user_created_at_idx` migration index makes the correlated count cheap, and
- * a derived rank can never disagree with the table it counts.
- *
- * The right-hand reference is hand-qualified rather than interpolated
- * (`${user.createdAt}`): drizzle strips table prefixes in a single-table
- * select's fields, and the inner alias would then capture the bare
- * `"created_at"` — comparing the subquery's own rows to themselves (always
- * false, rank 0 for every account). Unlike `followerCount` above, whose bare
- * `"id"` falls through to the outer scope only because `follow` has no such
- * column, this fragment cannot lean on name resolution.
- */
-const creationRank = sql<number>`(
-  select count(*)::int from ${user} as "ranked" where "ranked"."created_at" < "user"."created_at"
-)`;
 
 export function viewerIsFollowing(viewerId: string) {
   return sql<boolean>`exists (
@@ -126,7 +108,7 @@ const followCursor = createCursorCodec(z.string().min(1));
  */
 const usernameInput = z.string().trim().min(USERNAME_MIN_LENGTH).max(USERNAME_MAX_LENGTH);
 
-async function countFollowers(db: Database, userId: string): Promise<number> {
+async function countFollowers(db: Pick<Database, "select">, userId: string): Promise<number> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(follow)
@@ -203,10 +185,10 @@ export const userRouter = {
    *
    * `badges` (issue #308) crosses the `publicUserColumns` privacy boundary
    * deliberately: badges are public profile data, like follower counts — an
-   * earned distinction displayed to every visitor. It is computed at read
-   * time from the stamped `user_badge` rows, the live follower count and the
-   * creation rank (see ./badges.ts), never a stored column, so widening that
-   * boundary by a column still fails the shape pin in users.int.test.ts.
+   * earned distinction displayed to every visitor. It is selected at read
+   * time from the stamped `user_badge` rows (see ./badges.ts for who stamps
+   * what), never a stored profile column, so widening that boundary by a
+   * column still fails the shape pin in users.int.test.ts.
    */
   byUsername: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
@@ -225,7 +207,6 @@ export const userRouter = {
           viewerIsFollowing: viewerIsFollowing(context.user.id),
           suspended: effectivelyBanned,
           stampedBadges,
-          creationRank,
         })
         .from(user)
         .where(
@@ -240,11 +221,11 @@ export const userRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
-      // The raw derivation inputs never cross the boundary — `badges` is the
-      // public shape: the display set in canonical order (follower tier, like
+      // The raw rows never cross the boundary — `badges` is the public
+      // shape: the display set in canonical order (follower tier, like
       // tier, founder, super-early, early), computed by the one catalog
       // definition the browser shares (./badges.ts).
-      const { stampedBadges: stamped, creationRank: rank, ...profile } = found;
+      const { stampedBadges: stamped, ...profile } = found;
 
       if (profile.suspended) {
         return {
@@ -257,20 +238,14 @@ export const userRouter = {
           followingCount: 0,
           viewerIsFollowing: false,
           // Authored-field redaction applies to badges like everything else
-          // (issue #308): a suspended profile displays none, stamped or
-          // derived — the derived families are already gone with the zeroed
-          // follower count, and this drops the stamped ones too.
+          // (issue #308): a suspended profile displays none of them.
           badges: [],
         };
       }
 
       return {
         ...profile,
-        badges: displayProfileBadges({
-          stampedBadgeIds: stamped,
-          followerCount: profile.followerCount,
-          creationRank: rank,
-        }),
+        badges: displayProfileBadges({ stampedBadgeIds: stamped }),
       };
     }),
 
@@ -425,6 +400,25 @@ export const userRouter = {
             actorId: context.user.id,
             type: "follow",
           });
+
+          // Follower-tier badge stamping (issue #308), the exact shape of
+          // the like-tier stamping in ./posts.ts. A follow that actually
+          // landed is the only moment a threshold can first be passed, so
+          // the cost is one index-only count per new follow and nothing
+          // anywhere else — a retried follow never reaches this branch. The
+          // count read and the stamp ride the follow's own transaction, so
+          // a rollback leaves neither half; `onConflictDoNothing` against
+          // the (user, badge) primary key keeps a threshold re-crossed
+          // after a recede (followers unfollowing and the count climbing
+          // back) at exactly one row. `unfollow` never unstamps: the tier
+          // was genuinely reached.
+          const badge = followerBadgeTierFor(await countFollowers(tx, input.userId));
+          if (badge) {
+            await tx
+              .insert(userBadge)
+              .values({ userId: input.userId, badge })
+              .onConflictDoNothing();
+          }
         }
       });
 

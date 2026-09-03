@@ -27,6 +27,10 @@
     "./grant-founder-badge": {
       "types": "./src/grant-founder-badge.ts",
       "default": "./src/grant-founder-badge.ts"
+    },
+    "./stamp-join-badges": {
+      "types": "./src/stamp-join-badges.ts",
+      "default": "./src/stamp-join-badges.ts"
     }
   },
   "scripts": {

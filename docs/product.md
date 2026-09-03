@@ -241,21 +241,25 @@ A profile displays a small, fixed catalog of automatically-earned badges plus
 one manually-granted Founder badge, at most one tier per family, in a canonical
 order (follower tier, like tier, founder, super-early, early). Badges are
 public profile data, like follower counts; display names come from the
-locale's message catalogue, never the API. The catalog and its thresholds live
-in one dependency-free module shared by server and browser
-(`@my-tuums/api/badges`).
+locale's message catalogue, never the API. Every badge is a permanent
+achievement — a stamped `user_badge` row written the moment it is earned and
+never withdrawn, so a count receding below its threshold takes no badge with
+it. The catalog and its thresholds live in one dependency-free module shared
+by server and browser (`@my-tuums/api/badges`).
 
 - **Follower tiers** (`popular` >1k, `rising_star` >10k, `star` >100k,
-  `superstar` >1M, `supernova` >10M followers): live state, derived from the
-  current follower count at profile read time — a count dropping below the
-  threshold takes the badge with it.
+  `superstar` >1M, `supernova` >10M followers): stamped inside `user.follow`'s
+  transaction by the follow that first passes the threshold, and kept even if
+  followers unfollow and the count recedes.
 - **Post-like tiers** (`noticed` >10k, `trendy` >100k, `big` >1M, `exploding`
-  > 10M, `giant` >100M likes on one post): achievements, stamped inside
-  > `post.like`'s transaction the first time a post passes a threshold and kept
-  > even if likes recede.
+  > 10M, `giant` >100M likes on one post): stamped inside `post.like`'s
+  > transaction the first time a post passes a threshold and kept even if likes
+  > recede.
 - **Join badges**: `super_early_access` for the first 50 accounts,
-  `early_access` for the first 1,000, by creation order — derived at read
-  time, never stamped.
+  `early_access` for the first 1,000, by creation order — stamped at account
+  creation (the rank is fixed the moment the account exists, and the count is
+  capped so the check costs the same forever after), with migration 0028
+  backfilling accounts that predate the stamping hook.
 - **Founder** (`founder`): granted out of band to exactly one account by the
   committed one-off script (`pnpm db:grant:founder` locally,
   `node apps/server/dist/grant-founder-badge.js` in production); no API, no

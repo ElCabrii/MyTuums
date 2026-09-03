@@ -1,5 +1,5 @@
 {
-  "id": "372e9fc0-5209-410c-b077-d32dabf8ca53",
+  "id": "ec539ca4-88dc-4a74-a7b9-8d6a5d0409bb",
   "prevId": "7ecd60f3-3189-48d5-b807-87a79572f3d9",
   "version": "7",
   "dialect": "postgresql",
@@ -2443,7 +2443,7 @@
       "checkConstraints": {
         "user_badge_badge": {
           "name": "user_badge_badge",
-          "value": "\"user_badge\".\"badge\" in ('noticed', 'trendy', 'big', 'exploding', 'giant', 'founder')"
+          "value": "\"user_badge\".\"badge\" in ('popular', 'rising_star', 'star', 'superstar', 'supernova', 'noticed', 'trendy', 'big', 'exploding', 'giant', 'founder', 'super_early_access', 'early_access')"
         }
       },
       "isRLSEnabled": false

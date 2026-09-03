@@ -1,24 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   BADGE_IDS,
-  EARLY_ACCESS_RANK,
   FOLLOWER_BADGE_TIERS,
   POST_LIKE_BADGE_TIERS,
-  STAMPED_BADGE_IDS,
-  SUPER_EARLY_ACCESS_RANK,
   badgeFamilyOf,
   displayProfileBadges,
   followerBadgeTierFor,
-  joinBadgeIdsFor,
   postLikeBadgeTierFor,
 } from "./badges.js";
 
 /**
- * The catalog IS the contract (issue #308): these thresholds are shared by the
- * server's derivation/stamping and the browser's rendering, and the
- * `user_badge.badge` check constraint repeats the stamped subset — so a
- * threshold or id that drifts silently changes what profiles display. Pinned
- * here, in the dependency-free module's own unit test, with no database.
+ * The catalog IS the contract (issue #308): these thresholds are shared by
+ * the server's stamping sites and the browser's rendering, and the
+ * `user_badge.badge` check constraint repeats the id list — so a threshold
+ * or id that drifts silently changes what profiles display. Pinned here,
+ * in the dependency-free module's own unit test, with no database. (The
+ * join family's ranks live beside its one writer,
+ * packages/db/src/stamp-join-badges.ts, and are pinned by the sign-up
+ * integration tests instead.)
  */
 describe("badge catalog", () => {
   it("is the thirteen decided badges with the decided thresholds", () => {
@@ -36,19 +35,23 @@ describe("badge catalog", () => {
       { id: "exploding", threshold: 10_000_000 },
       { id: "giant", threshold: 100_000_000 },
     ]);
-    expect(SUPER_EARLY_ACCESS_RANK).toBe(50);
-    expect(EARLY_ACCESS_RANK).toBe(1_000);
-    expect(BADGE_IDS).toHaveLength(13);
   });
 
-  it("leaves only the post-like tiers and founder stamped — follower tiers and join badges are derived", () => {
-    expect(STAMPED_BADGE_IDS).toEqual([
+  it("lists every id in canonical display order — the check constraint's copy keeps in step", () => {
+    expect(BADGE_IDS).toEqual([
+      "popular",
+      "rising_star",
+      "star",
+      "superstar",
+      "supernova",
       "noticed",
       "trendy",
       "big",
       "exploding",
       "giant",
       "founder",
+      "super_early_access",
+      "early_access",
     ]);
   });
 });
@@ -64,10 +67,6 @@ describe("followerBadgeTierFor", () => {
     expect(followerBadgeTierFor(10_001)).toBe("rising_star");
     expect(followerBadgeTierFor(10_000_001)).toBe("supernova");
   });
-
-  it("drops back below a tier — live state, not an achievement", () => {
-    expect(followerBadgeTierFor(1_000)).toBeNull();
-  });
 });
 
 describe("postLikeBadgeTierFor", () => {
@@ -75,16 +74,6 @@ describe("postLikeBadgeTierFor", () => {
     expect(postLikeBadgeTierFor(10_000)).toBeNull();
     expect(postLikeBadgeTierFor(10_001)).toBe("noticed");
     expect(postLikeBadgeTierFor(100_000_001)).toBe("giant");
-  });
-});
-
-describe("joinBadgeIdsFor", () => {
-  it("ranks the first 50 as super-early (and early), the first 1,000 as early, nothing after", () => {
-    expect(joinBadgeIdsFor(0)).toEqual(["super_early_access", "early_access"]);
-    expect(joinBadgeIdsFor(49)).toEqual(["super_early_access", "early_access"]);
-    expect(joinBadgeIdsFor(50)).toEqual(["early_access"]);
-    expect(joinBadgeIdsFor(999)).toEqual(["early_access"]);
-    expect(joinBadgeIdsFor(1_000)).toEqual([]);
   });
 });
 
@@ -104,39 +93,22 @@ describe("displayProfileBadges", () => {
   it("orders the display set canonically: follower tier, like tier, founder, super-early, early", () => {
     expect(
       displayProfileBadges({
-        stampedBadgeIds: ["giant", "noticed", "trendy", "founder"],
-        followerCount: 10_000_001,
-        creationRank: 3,
+        stampedBadgeIds: ["early_access", "super_early_access", "founder", "giant", "supernova"],
       }),
     ).toEqual(["supernova", "giant", "founder", "super_early_access", "early_access"]);
   });
 
-  it("displays only the highest stamped like tier, even when lower ones are also stamped", () => {
+  it("displays only the highest stamped tier per family, even when lower ones are also stamped", () => {
     expect(
-      displayProfileBadges({
-        stampedBadgeIds: ["noticed", "trendy"],
-        followerCount: 0,
-        creationRank: 1_000,
-      }),
-    ).toEqual(["trendy"]);
+      displayProfileBadges({ stampedBadgeIds: ["noticed", "trendy", "popular", "star"] }),
+    ).toEqual(["star", "trendy"]);
   });
 
-  it("keeps stamped like tiers when the live follower count has no tier, and vice versa", () => {
-    expect(
-      displayProfileBadges({ stampedBadgeIds: ["noticed"], followerCount: 0, creationRank: 2_000 }),
-    ).toEqual(["noticed"]);
-    expect(
-      displayProfileBadges({ stampedBadgeIds: [], followerCount: 1_001, creationRank: 2_000 }),
-    ).toEqual(["popular"]);
+  it("ignores ids that are not badges — a stray user_badge row surfaces nowhere", () => {
+    expect(displayProfileBadges({ stampedBadgeIds: ["not-a-badge"] })).toEqual([]);
   });
 
-  it("ignores ids that are never stamped — a derived id in a user_badge row surfaces nowhere", () => {
-    expect(
-      displayProfileBadges({
-        stampedBadgeIds: ["popular", "early_access", "not-a-badge"],
-        followerCount: 0,
-        creationRank: 2_000,
-      }),
-    ).toEqual([]);
+  it("renders an empty set for an account with no rows", () => {
+    expect(displayProfileBadges({ stampedBadgeIds: [] })).toEqual([]);
   });
 });

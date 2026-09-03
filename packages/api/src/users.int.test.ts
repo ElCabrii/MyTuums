@@ -55,9 +55,9 @@ describe("user.byUsername", () => {
         // fails this test.
         "suspended",
         // Public profile data like the counts (issue #308): the badge display
-        // set in canonical order, derived at query time from stamped rows,
-        // the live follower count and the creation rank. Computed for the
-        // same reason as `suspended` — not a stored column.
+        // set in canonical order, selected at query time from the stamped
+        // `user_badge` rows. Computed for the same reason as `suspended` —
+        // not a stored column.
         "badges",
       ].sort(),
     );

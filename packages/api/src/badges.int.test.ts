@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { auth } from "@my-tuums/auth";
+import { LEGAL_VERSION } from "@my-tuums/auth/rules";
 import { closeDb, db } from "@my-tuums/db";
 import { grantFounderBadge } from "@my-tuums/db/grant-founder-badge";
 import { follow, postLike, user, userBadge } from "@my-tuums/db/schema";
@@ -15,21 +17,25 @@ import {
 } from "./testing/harness.js";
 
 /**
- * The badge system's integration pins (issue #308), over the two surfaces
- * that own the behavior: `user.byUsername` (derivation + display set + the
- * suspended stub's redaction) and `post.like` (threshold stamping). The
- * catalog itself — ids, thresholds, tier selection, canonical order — is
- * unit-pinned in badges.test.ts; these tests pin the database behavior around
- * it.
+ * The badge system's integration pins (issue #308), over the three surfaces
+ * that own the behavior: the auth sign-up path (join-badge stamping),
+ * `user.follow` (follower-tier stamping) and `user.byUsername` (display set
+ * + the suspended stub's redaction); `post.like` threshold stamping beside
+ * them. The catalog itself — ids, thresholds, tier selection, canonical
+ * order — is unit-pinned in badges.test.ts; these tests pin the database
+ * behavior around it.
  *
  * Every fixture that needs more than a couple of accounts is bulk-inserted as
  * bare `user` rows rather than BetterAuth sign-ups: a threshold is 1,000+ or
  * 10,000+ accounts, and minting that many real sessions is minutes of scrypt
- * for no extra assertion. The badge derivation only reads the rows. Subjects
- * whose badges are asserted get a controlled `created_at` (backdated below
- * every wall-clock row), so their creation rank is exactly what the test
- * staged — the file truncates in beforeAll, runs in declaration order, and
- * the ranks below never depend on how many users earlier tests created.
+ * for no extra assertion. Bare rows carry no badges — only the real creation
+ * path stamps the join badges — which is also what keeps every non-join
+ * assertion below free of badges its subject never earned.
+ *
+ * The join tests run FIRST and top the user count up to exact targets,
+ * because the sign-up hook ranks a new account by how many rows already
+ * exist; the count only grows within the file, and the later suites seed
+ * past every rank that could matter.
  */
 beforeAll(async () => {
   await truncateAll();
@@ -49,17 +55,12 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
 type BareUser = typeof user.$inferInsert;
 
 /** Bare `user` rows in bulk — no session, no credential; presence is all a badge reads. */
-async function seedBareUsers(count: number, createdAt?: Date): Promise<string[]> {
+async function seedBareUsers(count: number): Promise<string[]> {
   const rows: BareUser[] = Array.from({ length: count }, () => ({
     id: randomUUID(),
     name: "Badge Fixture",
     email: `badges+${randomUUID()}@example.com`,
   }));
-  // The column is omitted when not given (not passed as `undefined`) so the
-  // column's own `defaultNow()` applies — the same convention as seedPosts.
-  if (createdAt) {
-    for (const row of rows) row.createdAt = createdAt;
-  }
   const ids: string[] = [];
   for (const part of chunk(rows, 4000)) {
     const inserted = await db.insert(user).values(part).returning({ id: user.id });
@@ -68,19 +69,44 @@ async function seedBareUsers(count: number, createdAt?: Date): Promise<string[]>
   return ids;
 }
 
-/** A profile-read subject with a controlled handle and creation instant. */
-async function seedSubjectUser(opts: { username: string; createdAt: Date }): Promise<string> {
+/** Seeds bare rows until exactly `target` accounts exist — the next sign-up's rank. */
+async function topUpUsersTo(target: number): Promise<void> {
+  const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(user);
+  if (row.count < target) await seedBareUsers(target - row.count);
+}
+
+/** A profile-read subject with a controlled handle (a bare row — no badges). */
+async function seedSubjectUser(username: string): Promise<string> {
   const [row] = await db
     .insert(user)
     .values({
       id: randomUUID(),
-      name: opts.username,
+      name: username,
       email: `badges+${randomUUID()}@example.com`,
-      username: opts.username,
-      displayUsername: opts.username,
-      createdAt: opts.createdAt,
+      username,
+      displayUsername: username,
     })
     .returning({ id: user.id });
+  return row.id;
+}
+
+/** Signs up through the production auth instance — the only path that stamps join badges. */
+async function signUpFresh(username: string): Promise<string> {
+  await auth.api.signUpEmail({
+    body: {
+      email: `badges+${randomUUID()}@example.com`,
+      password: "vitest-Sup3rSecret!",
+      name: "Badge Fixture",
+      username,
+      legalAcceptedAt: new Date(),
+      legalVersion: LEGAL_VERSION,
+    },
+  });
+  const [row] = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(user.username, username))
+    .limit(1);
   return row.id;
 }
 
@@ -104,89 +130,87 @@ function stampedRows(userId: string) {
   return db.select({ badge: userBadge.badge }).from(userBadge).where(eq(userBadge.userId, userId));
 }
 
-describe("user.byUsername badge derivation (issue #308)", () => {
-  it("ranks the very first account as super-early — and early, in canonical order", async () => {
+describe("join-badge stamping at sign-up (issue #308)", () => {
+  it("stamps both join badges for an account created in the first 50, in canonical display order", async () => {
+    await topUpUsersTo(30);
+    const username = `dayzero${randomUUID().slice(0, 8)}`;
+    const subject = await signUpFresh(username);
+
+    expect(await stampedRows(subject)).toEqual([
+      { badge: "super_early_access" },
+      { badge: "early_access" },
+    ]);
+
     const viewer = await createTestUser();
-    const subject = await seedSubjectUser({
-      username: `dayzero${randomUUID().slice(0, 8)}`,
-      createdAt: new Date("2020-01-01T00:00:00.000Z"),
-    });
-    const created = await db
-      .select({ username: user.username })
-      .from(user)
-      .where(eq(user.id, subject));
     const profile = await call(
       appRouter.user.byUsername,
-      { username: created[0].username! },
+      { username },
       { context: contextFor(viewer) },
     );
-
     expect(profile.badges).toEqual(["super_early_access", "early_access"]);
   });
 
-  it("carries no join badge once 1,000 accounts were created first — and nothing else either", async () => {
-    const viewer = await createTestUser();
-    // Backdated above the day-zero subject but below every wall-clock row, so
-    // exactly these 1,000 precede the subject regardless of test order.
-    await seedBareUsers(1_000, new Date("2021-01-01T00:00:00.000Z"));
-    const subject = await seedSubjectUser({
-      username: `rankedout${randomUUID().slice(0, 8)}`,
-      createdAt: new Date(),
-    });
-    const created = await db
-      .select({ username: user.username })
-      .from(user)
-      .where(eq(user.id, subject));
-    const profile = await call(
-      appRouter.user.byUsername,
-      { username: created[0].username! },
-      { context: contextFor(viewer) },
-    );
+  it("stamps only early_access for the 999th account — the 1,000th earns nothing", async () => {
+    await topUpUsersTo(999);
+    const subject = await signUpFresh(`ranknine${randomUUID().slice(0, 8)}`);
+    expect(await stampedRows(subject)).toEqual([{ badge: "early_access" }]);
 
-    expect(profile.badges).toEqual([]);
+    await topUpUsersTo(1_000);
+    const latecomer = await signUpFresh(`rankout${randomUUID().slice(0, 8)}`);
+    expect(await stampedRows(latecomer)).toEqual([]);
   });
+});
 
-  it("derives the follower tier live: >1,000 followers earns popular, dropping below loses it", async () => {
-    const viewer = await createTestUser();
-    const subject = await seedSubjectUser({
-      username: `hummingbird${randomUUID().slice(0, 8)}`,
-      createdAt: new Date("2020-02-01T00:00:00.000Z"),
-    });
-    const followers = await seedBareUsers(1_001);
+describe("user.follow badge stamping (issue #308)", () => {
+  it("stamps the tier when a follow first passes 1,000; unfollows never take it back", async () => {
+    const username = `keepsake${randomUUID().slice(0, 8)}`;
+    const subject = await seedSubjectUser(username);
+    const followers = await seedBareUsers(1_000);
     await seedFollows(followers, subject);
-    const created = await db
-      .select({ username: user.username })
-      .from(user)
-      .where(eq(user.id, subject));
 
-    const read = () =>
-      call(
-        appRouter.user.byUsername,
-        { username: created[0].username! },
-        { context: contextFor(viewer) },
-      );
+    // 1,000 followers is exactly at the threshold — nothing earned yet,
+    // proving the stamp waits for "passed", not "reached".
+    expect(await stampedRows(subject)).toEqual([]);
 
-    // Only the day-zero subject precedes this one (the 1,000 rank fixtures
-    // are backdated to 2021), so the join badges are deterministic here.
-    expect((await read()).badges).toEqual(["popular", "super_early_access", "early_access"]);
+    const first = await createTestUser();
+    await call(appRouter.user.follow, { userId: subject }, { context: contextFor(first) });
+    expect(await stampedRows(subject)).toEqual([{ badge: "popular" }]);
 
-    // Live state, not an achievement: two unfollows take the count to 999 —
-    // strictly below the threshold — and the tier goes with it.
+    // The retried follow: idempotent for the follow, so it must be for the badge.
+    await call(appRouter.user.follow, { userId: subject }, { context: contextFor(first) });
+    expect(await stampedRows(subject)).toEqual([{ badge: "popular" }]);
+
+    // Followers recede strictly below the threshold. An achievement once
+    // earned is kept — the row stays, and the profile keeps displaying the
+    // tier even though the live count no longer reaches it.
     await db
       .delete(follow)
       .where(
         and(eq(follow.followingId, subject), inArray(follow.followerId, followers.slice(0, 2))),
       );
-    expect((await read()).badges).toEqual(["super_early_access", "early_access"]);
+
+    const viewer = await createTestUser();
+    const profile = await call(
+      appRouter.user.byUsername,
+      { username },
+      { context: contextFor(viewer) },
+    );
+    expect(profile.followerCount).toBe(999);
+    expect(profile.badges).toEqual(["popular"]);
+
+    // Climbing back over the threshold is not a second achievement: the
+    // composite primary key's conflict does nothing, exactly like a re-like.
+    const second = await createTestUser();
+    const third = await createTestUser();
+    await call(appRouter.user.follow, { userId: subject }, { context: contextFor(second) });
+    await call(appRouter.user.follow, { userId: subject }, { context: contextFor(third) });
+    expect(await stampedRows(subject)).toEqual([{ badge: "popular" }]);
   });
 });
 
 describe("post.like badge stamping (issue #308)", () => {
   it("stamps the tier exactly once when a like first passes 10,000; a retried like mints nothing", async () => {
-    const author = await seedSubjectUser({
-      username: `overnight${randomUUID().slice(0, 8)}`,
-      createdAt: new Date("2020-03-01T00:00:00.000Z"),
-    });
+    const author = await seedSubjectUser(`overnight${randomUUID().slice(0, 8)}`);
     const [target] = await seedPosts(author, 1);
     const likers = await seedBareUsers(10_000);
     await seedLikes(target.id, likers);
@@ -205,10 +229,7 @@ describe("post.like badge stamping (issue #308)", () => {
   });
 
   it("keeps a stamped tier when likes recede, and a re-crossing adds no second row", async () => {
-    const author = await seedSubjectUser({
-      username: `flashfame${randomUUID().slice(0, 8)}`,
-      createdAt: new Date("2020-03-02T00:00:00.000Z"),
-    });
+    const author = await seedSubjectUser(`flashfame${randomUUID().slice(0, 8)}`);
     const [target] = await seedPosts(author, 1);
     const likers = await seedBareUsers(10_000);
     await seedLikes(target.id, likers);
@@ -244,10 +265,7 @@ describe("post.like badge stamping (issue #308)", () => {
 
 describe("founder badge grant (issue #308)", () => {
   it("grants exactly one account out of band, displays founder, and never grants again", async () => {
-    const founder = await seedSubjectUser({
-      username: `thefounder${randomUUID().slice(0, 8)}`,
-      createdAt: new Date(),
-    });
+    const founder = await seedSubjectUser(`thefounder${randomUUID().slice(0, 8)}`);
     const handle = await db
       .select({ username: user.username })
       .from(user)
@@ -263,17 +281,13 @@ describe("founder badge grant (issue #308)", () => {
       { username },
       { context: contextFor(viewer) },
     );
-    // This file's fixtures put every living subject past the 1,000th account,
-    // so founder is the entire display set.
+    // A bare fixture carries no other badge, so founder is the whole display set.
     expect(profile.badges).toEqual(["founder"]);
 
     // One badge, one account, ever: a repeat for the same account and a grant
     // to any other account are both refused.
     await expect(grantFounderBadge(username)).rejects.toThrow(/already/);
-    const other = await seedSubjectUser({
-      username: `notthefounder${randomUUID().slice(0, 8)}`,
-      createdAt: new Date(),
-    });
+    const other = await seedSubjectUser(`notthefounder${randomUUID().slice(0, 8)}`);
     const otherHandle = await db
       .select({ username: user.username })
       .from(user)

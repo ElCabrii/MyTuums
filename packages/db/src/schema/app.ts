@@ -461,19 +461,20 @@ export const report = pgTable(
 
 /**
  * A stamped profile badge (issue #308) — one row per (user, badge), written
- * the moment the badge is earned.
+ * the moment the badge is earned. Every badge is an achievement: once the
+ * row exists it is never withdrawn, so an earned distinction survives the
+ * count that earned it receding (followers unfollowing, likes unliking).
  *
- * Only achievements live here: the post-like tiers (stamped inside
- * `post.like`'s transaction when the post's like count first passes a
- * threshold — kept even if likes recede) and `founder` (granted once, out of
- * band, by the committed bootstrap script in the `promote.js` spirit — see
- * packages/db/src/grant-founder-badge.ts). The follower tiers and the two
- * join badges are derived at profile read time from live state (follower
- * count, creation rank) and deliberately have no rows: a follower tier is
- * live state, not an achievement, so it must appear and disappear with the
- * count rather than be stamped and stuck.
+ * The writers, one per family: the post-like tiers stamp inside
+ * `post.like`'s transaction when a post's like count first passes a
+ * threshold; the follower tiers stamp inside `user.follow`'s transaction
+ * the same way; the join badges stamp at account creation
+ * (packages/db/src/stamp-join-badges.ts, called by the auth instance's
+ * create hook, with migration 0028's backfill covering accounts that
+ * predate it); and `founder` is granted once, out of band, by the
+ * committed bootstrap script (packages/db/src/grant-founder-badge.ts).
  *
- * The `badge` check constraint's list is STAMPED_BADGE_IDS from
+ * The `badge` check constraint's list is BADGE_IDS from
  * `@my-tuums/api/badges` (packages/api/src/badges.ts), duplicated here as a
  * SQL literal because this package cannot import from the API (the dependency
  * points the other way). Keep the two in step — badges.ts's unit test pins
@@ -487,7 +488,7 @@ export const userBadge = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     badge: text("badge").notNull(),
-    // `timestamaptz` and `precision: 3` for the same reasons as
+    // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above.
     earnedAt: timestamp("earned_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
   },
@@ -500,7 +501,7 @@ export const userBadge = pgTable(
     primaryKey({ columns: [t.userId, t.badge] }),
     check(
       "user_badge_badge",
-      sql`${t.badge} in ('noticed', 'trendy', 'big', 'exploding', 'giant', 'founder')`,
+      sql`${t.badge} in ('popular', 'rising_star', 'star', 'superstar', 'supernova', 'noticed', 'trendy', 'big', 'exploding', 'giant', 'founder', 'super_early_access', 'early_access')`,
     ),
   ],
 );

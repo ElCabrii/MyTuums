@@ -1,9 +1,17 @@
 // The profile badge catalog (issue #308): ids, families and thresholds as one
-// dependency-free definition, shared by the server (derivation and stamping)
-// and the browser (rendering). Exposed under its own package subpath
-// (`@my-tuums/api/badges`) for the same reason `./constants` is: importing
-// from the package root would drag ./router.js -> @my-tuums/db into the
-// browser bundle, where that module's `DATABASE_URL` check throws on import.
+// dependency-free definition, shared by the server (stamping and display
+// selection) and the browser (rendering). Exposed under its own package
+// subpath (`@my-tuums/api/badges`) for the same reason `./constants` is:
+// importing from the package root would drag ./router.js -> @my-tuums/db into
+// the browser bundle, where that module's `DATABASE_URL` check throws on
+// import.
+//
+// Every badge is a stamped achievement: a `user_badge` row written the moment
+// the badge is earned and never withdrawn. Losing one is not an outcome the
+// model has — a count that recedes below its threshold takes no badge with
+// it, so nothing is ever re-derived from live state on a profile read. The
+// display set is selected from the stamped rows alone: the highest tier per
+// tiered family, plus the flat badges, in canonical order.
 //
 // Display names are NOT here — they live in the web app's Paraglide messages
 // keyed by badge id (`badge_<id>`), because the API never speaks them and a
@@ -11,14 +19,15 @@
 
 /** The thirteen badge ids — the wire vocabulary of `badges: BadgeId[]`. */
 export type BadgeId =
-  // Follower tiers — live state, derived from the current follower count.
+  // Follower tiers — stamped by the follow that first passes the threshold,
+  // kept even if followers unfollow and the count recedes.
   | "popular"
   | "rising_star"
   | "star"
   | "superstar"
   | "supernova"
-  // Post-like tiers — achievements, stamped when a post's like count first
-  // passes the threshold and kept even if likes recede.
+  // Post-like tiers — stamped when one of an author's posts first passes a
+  // threshold, kept even if likes recede.
   | "noticed"
   | "trendy"
   | "big"
@@ -26,7 +35,8 @@ export type BadgeId =
   | "giant"
   // Granted manually to exactly one account, out of band (no API, no UI).
   | "founder"
-  // Join badges — static, derived from the account's creation rank.
+  // Join badges — stamped at account creation from the creation rank
+  // (packages/db/src/stamp-join-badges.ts), which nothing later can change.
   | "super_early_access"
   | "early_access";
 
@@ -41,9 +51,10 @@ export interface BadgeTier {
 
 /**
  * Follower tiers, ascending. "More than X people follow you" is read
- * literally — a tier is earned strictly above its threshold, and because the
- * tier is derived from the live count at profile read time, a count that
- * drops back below the threshold takes the badge with it.
+ * literally — a tier is earned strictly above its threshold, and stamped by
+ * the `user.follow` whose insert first put the count there. `unfollow` never
+ * unstamps: the tier was genuinely reached, and whether the count still
+ * stands is not part of what the badge claims.
  */
 export const FOLLOWER_BADGE_TIERS: readonly BadgeTier[] = [
   { id: "popular", threshold: 1_000 },
@@ -63,24 +74,6 @@ export const POST_LIKE_BADGE_TIERS: readonly BadgeTier[] = [
   { id: "big", threshold: 1_000_000 },
   { id: "exploding", threshold: 10_000_000 },
   { id: "giant", threshold: 100_000_000 },
-];
-
-/**
- * Join-badge ranks: among the first 50 / first 1,000 accounts by creation
- * order. A rank is how many accounts were created strictly before this one,
- * so "among the first 50" is `rank < 50`.
- */
-export const SUPER_EARLY_ACCESS_RANK = 50;
-export const EARLY_ACCESS_RANK = 1_000;
-
-/**
- * The ids that live in `user_badge` rows. Follower tiers and join badges are
- * derived at read time and never stamped; this is also the `user_badge.badge`
- * check constraint's list (packages/db/src/schema/app.ts — keep in step).
- */
-export const STAMPED_BADGE_IDS: readonly BadgeId[] = [
-  ...POST_LIKE_BADGE_TIERS.map((tier) => tier.id),
-  "founder",
 ];
 
 /** Every id in the catalog, in canonical display order. */
@@ -109,14 +102,6 @@ function highestTierAt(count: number, tiers: readonly BadgeTier[]): BadgeId | nu
   return null;
 }
 
-/** Both join badges a creation rank earns — the first 50 earn both. */
-export function joinBadgeIdsFor(creationRank: number): BadgeId[] {
-  const badges: BadgeId[] = [];
-  if (creationRank < SUPER_EARLY_ACCESS_RANK) badges.push("super_early_access");
-  if (creationRank < EARLY_ACCESS_RANK) badges.push("early_access");
-  return badges;
-}
-
 const FOLLOWER_IDS = new Set<string>(FOLLOWER_BADGE_TIERS.map((tier) => tier.id));
 const POST_LIKE_IDS = new Set<string>(POST_LIKE_BADGE_TIERS.map((tier) => tier.id));
 
@@ -132,31 +117,26 @@ export function badgeFamilyOf(id: BadgeId): BadgeFamily {
  * The display set a profile renders, in canonical order: follower tier, like
  * tier, founder, super-early, early.
  *
- * The stamped input is raw `user_badge` ids: every crossed like tier has its
- * own row, but only the family's highest tier displays — same rule as the
- * derived families. Unknown ids (a row written before a catalog change, or a
- * derived id that somehow landed in the table) are ignored rather than
- * surfaced.
+ * The input is raw `user_badge` ids: every crossed tier of a tiered family
+ * has its own row, but only the family's highest tier displays. Unknown ids
+ * (a row written before a catalog change) are ignored rather than surfaced.
  */
-export function displayProfileBadges(input: {
-  stampedBadgeIds: readonly string[];
-  followerCount: number;
-  creationRank: number;
-}): BadgeId[] {
+export function displayProfileBadges(input: { stampedBadgeIds: readonly string[] }): BadgeId[] {
   const stamped = new Set(input.stampedBadgeIds);
-  let likeTier: BadgeId | null = null;
-  for (const tier of [...POST_LIKE_BADGE_TIERS].reverse()) {
-    if (stamped.has(tier.id)) {
-      likeTier = tier.id;
-      break;
-    }
-  }
 
-  const badges = [
-    followerBadgeTierFor(input.followerCount),
-    likeTier,
+  const badges: (BadgeId | null)[] = [
+    highestStampedTier(stamped, FOLLOWER_BADGE_TIERS),
+    highestStampedTier(stamped, POST_LIKE_BADGE_TIERS),
     stamped.has("founder") ? ("founder" as const) : null,
-    ...joinBadgeIdsFor(input.creationRank),
+    stamped.has("super_early_access") ? ("super_early_access" as const) : null,
+    stamped.has("early_access") ? ("early_access" as const) : null,
   ];
   return badges.filter((badge): badge is BadgeId => badge !== null);
+}
+
+function highestStampedTier(stamped: Set<string>, tiers: readonly BadgeTier[]): BadgeId | null {
+  for (const tier of [...tiers].reverse()) {
+    if (stamped.has(tier.id)) return tier.id;
+  }
+  return null;
 }
