@@ -132,19 +132,23 @@ over HTTP and imports only its browser-safe subpaths.
   ids, families and thresholds that the server stamps and selects from and
   the browser renders from; display names are Paraglide messages keyed by
   badge id, never API data. Nothing is derived from live state on a profile
-  read — a count receding below its threshold takes no badge with it. The
+  read — a count receding below its threshold takes no badge with it. Tiered
+  badges upgrade rather than combine: `src/badge-stamping.ts` is the single
+  mint point both tiered families write through, deleting the family's lower
+  tiers so an account holds one row per family that only moves up. The
   writers, one per family: follower tiers stamp inside `user.follow`'s
-  transaction (one index-only count per successful follow,
-  `onConflictDoNothing` on the `user_badge` primary key, `unfollow` never
+  transaction (one index-only count per successful follow, `unfollow` never
   unstamps) and post-like tiers inside `post.like`'s the same way; join
   badges stamp at account creation (`@my-tuums/db/stamp-join-badges`, wired
-  to the auth create hook — this package never touches them); Founder is
-  granted by the one-off committed script
-  (`@my-tuums/db/grant-founder-badge`), which refuses once any account
-  holds it. `user.byUsername` selects the display set from the stamped rows
-  alone — highest tier per family, canonical order — and the suspended stub
-  redacts it to `[]` like every authored field;
-  `src/badges.int.test.ts` pins all of it.
+  to the auth create hook, granting only the higher of the tiers the rank
+  earned — this package never touches them); Founder is granted by the
+  one-off committed script (`@my-tuums/db/grant-founder-badge`), which
+  refuses a re-grant and refuses once the three founder accounts hold it.
+  `user.byUsername` selects the display set from the stamped rows alone —
+  highest tier per family, canonical order, the authority even where a rare
+  upgrade race leaves a superseded row — and the suspended stub redacts it
+  to `[]` like every authored field; `src/badges.int.test.ts` pins all of
+  it.
 - **`publicUserColumns` is a privacy boundary.** Never add `email`,
   `twoFactorEnabled`, `lastLoginMethod`, `role` or a preference column; sign-in
   method is reconnaissance, not profile data. `src/users.int.test.ts` pins the

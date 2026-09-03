@@ -12,11 +12,11 @@ import {
   postLike,
   postRepost,
   user,
-  userBadge,
   userBlock,
 } from "@my-tuums/db/schema";
 import { z } from "zod";
-import { postLikeBadgeTierFor } from "./badges.js";
+import { postLikeBadgeTierFor, POST_LIKE_BADGE_TIERS } from "./badges.js";
+import { stampBadgeTier } from "./badge-stamping.js";
 import {
   POST_MAX_LENGTH,
   POST_ATTACHMENT_MAX_BYTES,
@@ -1978,16 +1978,11 @@ export const postRouter = {
           // is one index-only count per new like and nothing anywhere else —
           // a retried like never reaches this branch. The count read and the
           // stamp ride the like's own transaction, so a rollback leaves
-          // neither half; `onConflictDoNothing` against the (user, badge)
-          // primary key keeps a threshold re-crossed after a recede
-          // (likes falling below the tier and climbing back) at exactly one
-          // row. An achievement once earned: `unlike` never unstamps.
+          // neither half; the tier upgrades in place (see ./badge-stamping.ts
+          // — one row per family, kept on a recede, `unlike` never unstamps).
           const badge = postLikeBadgeTierFor(await countLikes(tx, input.postId));
           if (badge) {
-            await tx
-              .insert(userBadge)
-              .values({ userId: target.authorId, badge })
-              .onConflictDoNothing();
+            await stampBadgeTier(tx, target.authorId, POST_LIKE_BADGE_TIERS, badge);
           }
         }
       });

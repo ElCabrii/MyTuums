@@ -12,11 +12,14 @@ ALTER TABLE "user_badge" ADD CONSTRAINT "user_badge_user_id_user_id_fk" FOREIGN 
 -- creation from now on (packages/db/src/stamp-join-badges.ts, wired into the
 -- auth create hook), but accounts that already exist will never sign up
 -- again — this is their only chance to earn what their creation rank owes
--- them. `rank() - 1` over `created_at` counts the accounts created strictly
--- before each row (accounts sharing an instant share a rank, the same tie
--- tolerance the stamping hook has), and the composite primary key makes the
--- insert idempotent against anything the hook may have written. One-time
--- cost on a pre-launch-sized user table.
+-- them. The two join badges are tiers of one family and never combine, so
+-- each account gets its highest tier only: super-early for the first 50,
+-- early for the 51st through 999th. `rank() - 1` over `created_at` counts
+-- the accounts created strictly before each row (accounts sharing an
+-- instant share a rank, the same tie tolerance the stamping hook has), and
+-- the composite primary key makes the insert idempotent against anything
+-- the hook may have written. One-time cost on a pre-launch-sized user
+-- table.
 INSERT INTO "user_badge" ("user_id", "badge")
 SELECT "id", 'super_early_access'
 FROM (
@@ -30,5 +33,5 @@ SELECT "id", 'early_access'
 FROM (
 	SELECT "id", rank() OVER (ORDER BY "created_at") - 1 AS "preceding" FROM "user"
 ) "ranked"
-WHERE "preceding" < 1000
+WHERE "preceding" >= 50 AND "preceding" < 1000
 ON CONFLICT DO NOTHING;

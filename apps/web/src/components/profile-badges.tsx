@@ -12,24 +12,16 @@ import { m } from "@/paraglide/messages.js";
  * the array as given. Display names are Paraglide messages keyed by badge
  * id, never API data: the API never speaks them.
  *
- * Visual language: the two tiered families (followers, post-likes) share one
- * tier ramp — bronze, silver, gold, platinum, diamond — with a distinct
- * silhouette per family; the join badges share an emerald tone; founder is
- * deliberately unlike everything else (filled crown in the brand color, no
- * tier).
+ * Visual language: every badge is drawn in the brand color (`text-primary`,
+ * the theme's main color) and families are distinguished by silhouette alone
+ * — an audience for follower tiers, a heart for post-like tiers, a clock and
+ * a rocket for the join tiers, a crown for founder. Tier is the tooltip's
+ * to say; the icons themselves stay one color so the row reads as a single
+ * MyTuums distinction rather than a palette.
  */
 
-/** The shared tier ramp for the tiered families, lowest to highest. */
-const TIER_STYLE = [
-  "text-amber-700 dark:text-amber-500", // bronze
-  "text-slate-500 dark:text-slate-300", // silver
-  "text-amber-500 dark:text-amber-400", // gold
-  "text-cyan-600 dark:text-cyan-300", // platinum
-  "text-fuchsia-500 dark:text-fuchsia-400", // diamond
-] as const;
-
-const JOIN_STYLE = "text-emerald-600 dark:text-emerald-400";
-const FOUNDER_STYLE = "text-primary dark:text-primary";
+/** Every badge icon's color: the brand color, light and dark themes alike. */
+const BADGE_COLOR = "text-primary";
 
 /** The follower tiers' silhouette: an audience gathered around one person. */
 const FOLLOWERS_MARK = (
@@ -81,27 +73,22 @@ const FOUNDER_MARK = (
   </svg>
 );
 
-interface BadgeVisual {
-  svg: ReactNode;
-  className: string;
-}
-
-/** One SVG per badge, sharing the family's silhouette and the tier ramp. */
+/** One SVG per badge, sharing the family's silhouette; the span carries the color. */
 const BADGE_VISUALS = {
-  popular: { svg: FOLLOWERS_MARK, className: TIER_STYLE[0] },
-  rising_star: { svg: FOLLOWERS_MARK, className: TIER_STYLE[1] },
-  star: { svg: FOLLOWERS_MARK, className: TIER_STYLE[2] },
-  superstar: { svg: FOLLOWERS_MARK, className: TIER_STYLE[3] },
-  supernova: { svg: FOLLOWERS_MARK, className: TIER_STYLE[4] },
-  noticed: { svg: HEART_MARK, className: TIER_STYLE[0] },
-  trendy: { svg: HEART_MARK, className: TIER_STYLE[1] },
-  big: { svg: HEART_MARK, className: TIER_STYLE[2] },
-  exploding: { svg: HEART_MARK, className: TIER_STYLE[3] },
-  giant: { svg: HEART_MARK, className: TIER_STYLE[4] },
-  founder: { svg: FOUNDER_MARK, className: FOUNDER_STYLE },
-  super_early_access: { svg: ROCKET_MARK, className: JOIN_STYLE },
-  early_access: { svg: CLOCK_MARK, className: JOIN_STYLE },
-} satisfies Record<BadgeId, BadgeVisual>;
+  popular: FOLLOWERS_MARK,
+  rising_star: FOLLOWERS_MARK,
+  star: FOLLOWERS_MARK,
+  superstar: FOLLOWERS_MARK,
+  supernova: FOLLOWERS_MARK,
+  noticed: HEART_MARK,
+  trendy: HEART_MARK,
+  big: HEART_MARK,
+  exploding: HEART_MARK,
+  giant: HEART_MARK,
+  founder: FOUNDER_MARK,
+  super_early_access: ROCKET_MARK,
+  early_access: CLOCK_MARK,
+} satisfies Record<BadgeId, ReactNode>;
 
 /** The localized display name of one badge — the messages are keyed by id. */
 const BADGE_NAMES = {
@@ -146,9 +133,9 @@ export function ProfileBadges({ badges, iconClassName = "size-4", className }: P
               role="img"
               aria-label={name}
               title={name}
-              className={cn("block", iconClassName, BADGE_VISUALS[badge].className)}
+              className={cn("block", iconClassName, BADGE_COLOR)}
             >
-              {BADGE_VISUALS[badge].svg}
+              {BADGE_VISUALS[badge]}
             </span>
           </li>
         );

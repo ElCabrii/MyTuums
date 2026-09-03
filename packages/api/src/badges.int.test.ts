@@ -19,11 +19,12 @@ import {
 /**
  * The badge system's integration pins (issue #308), over the three surfaces
  * that own the behavior: the auth sign-up path (join-badge stamping),
- * `user.follow` (follower-tier stamping) and `user.byUsername` (display set
- * + the suspended stub's redaction); `post.like` threshold stamping beside
- * them. The catalog itself — ids, thresholds, tier selection, canonical
- * order — is unit-pinned in badges.test.ts; these tests pin the database
- * behavior around it.
+ * `user.follow` and `post.like` (tiered stamping, which upgrades — one row
+ * per family, raised to the next tier by the crossing that earns it), and
+ * `user.byUsername` (display set + the suspended stub's redaction). The
+ * catalog itself — ids, thresholds, tier selection, canonical order — is
+ * unit-pinned in badges.test.ts; these tests pin the database behavior
+ * around it.
  *
  * Every fixture that needs more than a couple of accounts is bulk-inserted as
  * bare `user` rows rather than BetterAuth sign-ups: a threshold is 1,000+ or
@@ -131,15 +132,14 @@ function stampedRows(userId: string) {
 }
 
 describe("join-badge stamping at sign-up (issue #308)", () => {
-  it("stamps both join badges for an account created in the first 50, in canonical display order", async () => {
+  it("stamps only super_early_access for an account created in the first 50 — never both tiers", async () => {
     await topUpUsersTo(30);
     const username = `dayzero${randomUUID().slice(0, 8)}`;
     const subject = await signUpFresh(username);
 
-    expect(await stampedRows(subject)).toEqual([
-      { badge: "super_early_access" },
-      { badge: "early_access" },
-    ]);
+    // The two join badges are tiers of one family: the first 50 carry
+    // super-early alone, not super-early beside early.
+    expect(await stampedRows(subject)).toEqual([{ badge: "super_early_access" }]);
 
     const viewer = await createTestUser();
     const profile = await call(
@@ -147,10 +147,10 @@ describe("join-badge stamping at sign-up (issue #308)", () => {
       { username },
       { context: contextFor(viewer) },
     );
-    expect(profile.badges).toEqual(["super_early_access", "early_access"]);
+    expect(profile.badges).toEqual(["super_early_access"]);
   });
 
-  it("stamps only early_access for the 999th account — the 1,000th earns nothing", async () => {
+  it("stamps early_access for the 999th account — the 1,000th earns nothing", async () => {
     await topUpUsersTo(999);
     const subject = await signUpFresh(`ranknine${randomUUID().slice(0, 8)}`);
     expect(await stampedRows(subject)).toEqual([{ badge: "early_access" }]);
@@ -162,7 +162,7 @@ describe("join-badge stamping at sign-up (issue #308)", () => {
 });
 
 describe("user.follow badge stamping (issue #308)", () => {
-  it("stamps the tier when a follow first passes 1,000; unfollows never take it back", async () => {
+  it("upgrades the tier as thresholds are passed; unfollows and recedes never take it back", async () => {
     const username = `keepsake${randomUUID().slice(0, 8)}`;
     const subject = await seedSubjectUser(username);
     const followers = await seedBareUsers(1_000);
@@ -190,21 +190,39 @@ describe("user.follow badge stamping (issue #308)", () => {
       );
 
     const viewer = await createTestUser();
-    const profile = await call(
-      appRouter.user.byUsername,
-      { username },
-      { context: contextFor(viewer) },
-    );
-    expect(profile.followerCount).toBe(999);
-    expect(profile.badges).toEqual(["popular"]);
+    const profile = () =>
+      call(appRouter.user.byUsername, { username }, { context: contextFor(viewer) });
+    expect((await profile()).followerCount).toBe(999);
+    expect((await profile()).badges).toEqual(["popular"]);
 
     // Climbing back over the threshold is not a second achievement: the
-    // composite primary key's conflict does nothing, exactly like a re-like.
+    // insert conflicts, and the row count stays at one.
     const second = await createTestUser();
     const third = await createTestUser();
     await call(appRouter.user.follow, { userId: subject }, { context: contextFor(second) });
     await call(appRouter.user.follow, { userId: subject }, { context: contextFor(third) });
     expect(await stampedRows(subject)).toEqual([{ badge: "popular" }]);
+
+    // The next threshold upgrades in place: "popular" becomes "rising_star",
+    // it does not stack beside it.
+    const surge = await seedBareUsers(9_001);
+    await seedFollows(surge, subject);
+    const fourth = await createTestUser();
+    await call(appRouter.user.follow, { userId: subject }, { context: contextFor(fourth) });
+    expect(await stampedRows(subject)).toEqual([{ badge: "rising_star" }]);
+    expect((await profile()).badges).toEqual(["rising_star"]);
+
+    // Receding below the LOWER tier again stamps nothing: the family's
+    // higher tier was already earned and is never withdrawn, so a count
+    // that re-crosses 1,000 has nothing new to say.
+    await db
+      .delete(follow)
+      .where(
+        and(eq(follow.followingId, subject), inArray(follow.followerId, surge.slice(0, 8_994))),
+      );
+    const fifth = await createTestUser();
+    await call(appRouter.user.follow, { userId: subject }, { context: contextFor(fifth) });
+    expect(await stampedRows(subject)).toEqual([{ badge: "rising_star" }]);
   });
 });
 
@@ -228,20 +246,23 @@ describe("post.like badge stamping (issue #308)", () => {
     expect(await stampedRows(author)).toEqual([{ badge: "noticed" }]);
   });
 
-  it("keeps a stamped tier when likes recede, and a re-crossing adds no second row", async () => {
+  it("upgrades noticed to trendy when a post passes the next threshold; recedes never take it back", async () => {
     const author = await seedSubjectUser(`flashfame${randomUUID().slice(0, 8)}`);
-    const [target] = await seedPosts(author, 1);
-    const likers = await seedBareUsers(10_000);
-    await seedLikes(target.id, likers);
+    const [firstPost, secondPost] = await seedPosts(author, 2);
+    const likers = await seedBareUsers(100_000);
+    await seedLikes(firstPost.id, likers.slice(0, 10_000));
+    await seedLikes(secondPost.id, likers);
+
     const first = await createTestUser();
-    await call(appRouter.post.like, { postId: target.id }, { context: contextFor(first) });
+    await call(appRouter.post.like, { postId: firstPost.id }, { context: contextFor(first) });
     expect(await stampedRows(author)).toEqual([{ badge: "noticed" }]);
 
-    // Likes recede below the threshold. An achievement once earned is kept —
-    // the row stays, and the profile keeps displaying it.
-    await db
-      .delete(postLike)
-      .where(and(eq(postLike.postId, target.id), inArray(postLike.userId, likers.slice(0, 100))));
+    // A different post passing the NEXT threshold upgrades the family's row:
+    // the badge is measured by the author's most-liked post, and "noticed"
+    // becomes "trendy" rather than stacking beside it.
+    const second = await createTestUser();
+    await call(appRouter.post.like, { postId: secondPost.id }, { context: contextFor(second) });
+    expect(await stampedRows(author)).toEqual([{ badge: "trendy" }]);
 
     const viewer = await createTestUser();
     const authorHandle = await db
@@ -253,18 +274,29 @@ describe("post.like badge stamping (issue #308)", () => {
       { username: authorHandle[0].username! },
       { context: contextFor(viewer) },
     );
-    expect(profile.badges).toContain("noticed");
+    expect(profile.badges).toEqual(["trendy"]);
 
-    // Climbing back over the threshold is not a second achievement: the
-    // composite primary key's conflict does nothing, exactly like a re-like.
-    const second = await createTestUser();
-    await call(appRouter.post.like, { postId: target.id }, { context: contextFor(second) });
-    expect(await stampedRows(author)).toEqual([{ badge: "noticed" }]);
-  });
+    // Likes receding below the trendy threshold keep the upgrade — an
+    // achievement once earned is never withdrawn.
+    await db
+      .delete(postLike)
+      .where(
+        and(eq(postLike.postId, secondPost.id), inArray(postLike.userId, likers.slice(0, 100))),
+      );
+    expect(await stampedRows(author)).toEqual([{ badge: "trendy" }]);
+
+    // And a like that re-crosses only the LOWER threshold stamps nothing:
+    // the family already holds trendy, and there is nothing below it to say.
+    const third = await createTestUser();
+    await call(appRouter.post.like, { postId: firstPost.id }, { context: contextFor(third) });
+    expect(await stampedRows(author)).toEqual([{ badge: "trendy" }]);
+    // The trendy threshold is 100,001 likes from 100,001 distinct accounts:
+    // seeding them is the bulk of this test's runtime, not the assertions.
+  }, 120_000);
 });
 
 describe("founder badge grant (issue #308)", () => {
-  it("grants exactly one account out of band, displays founder, and never grants again", async () => {
+  it("grants up to the three founder accounts, never a re-grant, never a fourth", async () => {
     const founder = await seedSubjectUser(`thefounder${randomUUID().slice(0, 8)}`);
     const handle = await db
       .select({ username: user.username })
@@ -284,24 +316,39 @@ describe("founder badge grant (issue #308)", () => {
     // A bare fixture carries no other badge, so founder is the whole display set.
     expect(profile.badges).toEqual(["founder"]);
 
-    // One badge, one account, ever: a repeat for the same account and a grant
-    // to any other account are both refused.
-    await expect(grantFounderBadge(username)).rejects.toThrow(/already/);
-    const other = await seedSubjectUser(`notthefounder${randomUUID().slice(0, 8)}`);
-    const otherHandle = await db
+    // Once per account: a repeat for the same account is refused.
+    await expect(grantFounderBadge(username)).rejects.toThrow(/already carries/);
+
+    // The two remaining partners are granted, then the budget is spent.
+    // (The prefixes stay short of the 20-char handle bound with the uuid
+    // suffix appended — `user.byUsername` validates its input.)
+    const partnerTwo = await seedSubjectUser(`foundertwo${randomUUID().slice(0, 8)}`);
+    const partnerThree = await seedSubjectUser(`founderthree${randomUUID().slice(0, 7)}`);
+    for (const partner of [partnerTwo, partnerThree]) {
+      const partnerHandle = await db
+        .select({ username: user.username })
+        .from(user)
+        .where(eq(user.id, partner));
+      await expect(grantFounderBadge(partnerHandle[0].username!)).resolves.toContain("Founder");
+    }
+
+    const latecomer = await seedSubjectUser(`founderfour${randomUUID().slice(0, 8)}`);
+    const latecomerHandle = await db
       .select({ username: user.username })
       .from(user)
-      .where(eq(user.id, other));
-    await expect(grantFounderBadge(otherHandle[0].username!)).rejects.toThrow(
-      /already been granted/,
-    );
+      .where(eq(user.id, latecomer));
+    await expect(grantFounderBadge(latecomerHandle[0].username!)).rejects.toThrow(/spent/);
   });
 
   it("redacts the founder badge on the suspended stub, like every authored field", async () => {
+    // The earliest-granted holder, deterministically — the grant order is
+    // pinned by the test above, not by whichever row the query returns first.
     const founder = await db
       .select({ userId: userBadge.userId })
       .from(userBadge)
-      .where(eq(userBadge.badge, "founder"));
+      .where(eq(userBadge.badge, "founder"))
+      .orderBy(userBadge.earnedAt)
+      .limit(1);
     const handle = await db
       .select({ username: user.username })
       .from(user)

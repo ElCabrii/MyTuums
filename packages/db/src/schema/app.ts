@@ -464,14 +464,17 @@ export const report = pgTable(
  * the moment the badge is earned. Every badge is an achievement: once the
  * row exists it is never withdrawn, so an earned distinction survives the
  * count that earned it receding (followers unfollowing, likes unliking).
+ * Tiered families hold one row per account that only moves up: crossing the
+ * next threshold upgrades the row (packages/api/src/badge-stamping.ts).
  *
  * The writers, one per family: the post-like tiers stamp inside
  * `post.like`'s transaction when a post's like count first passes a
  * threshold; the follower tiers stamp inside `user.follow`'s transaction
  * the same way; the join badges stamp at account creation
- * (packages/db/src/stamp-join-badges.ts, called by the auth instance's
- * create hook, with migration 0028's backfill covering accounts that
- * predate it); and `founder` is granted once, out of band, by the
+ * (packages/db/src/stamp-join-badges.ts — the higher of whatever tiers the
+ * creation rank earns, called by the auth instance's create hook, with
+ * migration 0028's backfill covering accounts that predate it); and
+ * `founder` is granted out of band to the three founder accounts by the
  * committed bootstrap script (packages/db/src/grant-founder-badge.ts).
  *
  * The `badge` check constraint's list is BADGE_IDS from
