@@ -123,7 +123,7 @@ function QuotedPostCard({ quoted }: { quoted: NonNullable<Post["quoted"]> }) {
 /**
  * One box for every control in the action bar (issue #275): the kebab's
  * `h-8` (32 px) hit area, so the bar stops being a row of ~16 px targets.
- * The counted controls (reply, repost, like) become `px-2` pills; the
+ * The counted controls (like, reply, repost) become `px-2` pills; the
  * count-less ones (quote, bookmark) the same `h-8 w-8` circle the kebab
  * uses. Every glyph therefore leads with the same 8 px of box before its
  * ink, which is what holds the five on one optical line.
@@ -546,6 +546,23 @@ export function PostCard({
               // left-packing with dead space, and the spacing flexes down
               // gracefully on narrow columns instead of overflowing.
               <div className="text-muted-foreground flex max-w-md items-center justify-between text-xs">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleLike();
+                  }}
+                  aria-pressed={post.viewerHasLiked}
+                  aria-label={
+                    post.viewerHasLiked
+                      ? m.post_unlike({ count: String(post.likeCount) })
+                      : m.post_like({ count: String(post.likeCount) })
+                  }
+                  className={likeButtonClass}
+                >
+                  {likeContent}
+                </button>
+
                 {/* Replying is a navigation, not a mutation — the composer lives
                      on the thread page — so this is a link, and the focused post
                      (whose composer is directly below) degrades it to plain text
@@ -606,23 +623,6 @@ export function PostCard({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    toggleLike();
-                  }}
-                  aria-pressed={post.viewerHasLiked}
-                  aria-label={
-                    post.viewerHasLiked
-                      ? m.post_unlike({ count: String(post.likeCount) })
-                      : m.post_like({ count: String(post.likeCount) })
-                  }
-                  className={likeButtonClass}
-                >
-                  {likeContent}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
                     toggleBookmark();
                   }}
                   aria-pressed={post.viewerHasBookmarked}
@@ -639,8 +639,8 @@ export function PostCard({
               // one real affordance is the sign-in link. `stopPropagation`
               // keeps the click on the card itself navigating to the thread.
               <div className="text-muted-foreground flex max-w-md items-center gap-5 text-xs">
-                <span className={actionControlClass}>{replyContent}</span>
                 <span className={actionControlClass}>{likeContent}</span>
+                <span className={actionControlClass}>{replyContent}</span>
                 <Link
                   to="/login"
                   search={{ redirect: sanitizeDestination(href) ?? undefined }}
