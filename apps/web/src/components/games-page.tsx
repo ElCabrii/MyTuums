@@ -13,7 +13,7 @@ import { m } from "@/paraglide/messages.js";
 const routeApi = getRouteApi("/games/");
 
 /** The sort names, in the control's display order — also the URL param's enum. */
-const SORTS = ["popularity", "name", "year"] as const;
+const SORTS = ["popularity", "name", "year", "favorites"] as const;
 
 /**
  * How long a keystroke may sit before the listing refilters, matching the
@@ -24,7 +24,7 @@ const FILTER_DEBOUNCE_MS = 300;
 
 /**
  * The `/games` directory index (issue #314, Q18): every game the catalog has
- * ever tracked, as a cover grid with a filter bar and three sorts.
+ * ever tracked, as a cover grid with a filter bar and four sorts.
  *
  * The sort lives in the URL (`?sort=`) so a view is shareable and the back
  * button restores it; the filter query stays component state — it is a
@@ -125,5 +125,7 @@ function sortLabel(sort: (typeof SORTS)[number]): string {
       return m.games_sort_name();
     case "year":
       return m.games_sort_year();
+    case "favorites":
+      return m.games_sort_favorites();
   }
 }

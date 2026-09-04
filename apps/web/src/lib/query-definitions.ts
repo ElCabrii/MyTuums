@@ -129,12 +129,12 @@ export function profileQueryOptions(username: string) {
 
 /** The `/games` index's list parameters — `q` is the page's filter bar. */
 export interface GameListParams {
-  sort: "popularity" | "name" | "year";
+  sort: "popularity" | "name" | "year" | "favorites";
   q?: string;
 }
 
 interface PagedGameListInput {
-  sort: "popularity" | "name" | "year";
+  sort: "popularity" | "name" | "year" | "favorites";
   limit: number;
   q?: string;
   cursor?: string;
@@ -148,6 +148,18 @@ interface PagedGameListInput {
 export function gameQueryOptions(slug: string) {
   return {
     ...orpc.game.bySlug.queryOptions({ input: { slug } }),
+    retry: retryUnlessClientError,
+  };
+}
+
+/**
+ * One profile's favorites rail (issue Q25): the games a user has favorited,
+ * newest first, capped server-side. Fresh on every profile view — a
+ * showcase, not a feed to keep warm.
+ */
+export function gameFavoritesQueryOptions(username: string) {
+  return {
+    ...orpc.game.favorites.queryOptions({ input: { username } }),
     retry: retryUnlessClientError,
   };
 }

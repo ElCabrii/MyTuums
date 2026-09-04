@@ -1,20 +1,24 @@
-import { useAtomValue } from "jotai";
-import { Calendar, Gamepad2, Loader2 } from "lucide-react";
+import { useAtomValue, useSetAtom } from "jotai";
+import { Link } from "@tanstack/react-router";
+import { Calendar, Gamepad2, Loader2, Star } from "lucide-react";
 import { GameCover } from "@/components/game-cover";
-import { gamePageAtomFamily } from "@/atoms/games";
+import { Button } from "@/components/ui/button";
+import { gamePageAtomFamily, toggleFavoriteAtomFamily } from "@/atoms/games";
+import { viewerAtom } from "@/atoms/session";
 import { useDocumentHead } from "@/hooks/use-document-head";
 import type { GamePageData } from "@/lib/orpc";
+import { sanitizeDestination } from "@/lib/redirect";
 import { m } from "@/paraglide/messages.js";
 
 /**
  * One game's public page (`/games/$slug`, issue #314, Q22): strictly game
  * data — cover, name, summary, release year, genres, platforms, favorites
- * count. No post feed (Q14/Q19: that was explored and deliberately
- * rejected), no reviews yet.
+ * count and the favorite button. No post feed (Q14/Q19: that was explored
+ * and deliberately rejected), no reviews yet.
  *
- * The favorite button arrives in stage 3; the count renders now because it
- * is public data (Q26's showcase). The page is public for anonymous readers
- * too (Q6): nothing here needs a session.
+ * The page is public for anonymous readers too (Q6): the favorite button is
+ * the one affordance that needs a session, so it degrades to the sign-in
+ * link the public permalink's action bar established.
  */
 export function GamePage({ slug }: { slug: string }) {
   const game = useAtomValue(gamePageAtomFamily(slug));
@@ -42,13 +46,16 @@ export function GamePage({ slug }: { slug: string }) {
     );
   }
 
-  return <GameDetail game={game.data} />;
+  return <GameDetail game={game.data} slug={slug} />;
 }
 
-function GameDetail({ game }: { game: GamePageData }) {
+function GameDetail({ game, slug }: { game: GamePageData; slug: string }) {
+  const viewer = useAtomValue(viewerAtom);
+  const toggleFavorite = useSetAtom(toggleFavoriteAtomFamily(slug));
   // The tab title follows the data (the crawler head mirrors this text
   // server-side — see publicGameHead's bounds).
   useDocumentHead(game.name);
+  const href = `/games/${slug}`;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
@@ -70,6 +77,39 @@ function GameDetail({ game }: { game: GamePageData }) {
           <p className="text-muted-foreground mt-2 text-sm">
             {m.game_favorite_count({ count: game.favoriteCount })}
           </p>
+
+          <div className="mt-3">
+            {viewer ? (
+              <Button
+                variant={game.viewerHasFavoritedGame ? "secondary" : "default"}
+                aria-pressed={game.viewerHasFavoritedGame}
+                onClick={() => toggleFavorite()}
+                className="mt-1"
+              >
+                <Star
+                  className="h-4 w-4"
+                  aria-hidden
+                  // The filled star is the state, not decoration — a solid
+                  // glyph reads at a glance where a variant swap does not.
+                  fill={game.viewerHasFavoritedGame ? "currentColor" : "none"}
+                />
+                {game.viewerHasFavoritedGame
+                  ? m.game_unfavorite_action()
+                  : m.game_favorite_action()}
+              </Button>
+            ) : (
+              // The anonymous reader's one affordance: the count above is
+              // public, the button is not — sign in, then favorite.
+              <Link
+                to="/login"
+                search={{ redirect: sanitizeDestination(href) ?? undefined }}
+                className="text-link mt-1 inline-flex items-center gap-1.5 text-sm font-medium underline underline-offset-2"
+              >
+                <Star className="h-4 w-4" aria-hidden />
+                {m.game_favorite_signed_out()}
+              </Link>
+            )}
+          </div>
         </div>
       </div>
 

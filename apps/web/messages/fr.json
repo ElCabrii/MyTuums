@@ -813,5 +813,10 @@
   "game_genres": "Genres",
   "game_platforms": "Plateformes",
   "search_section_games": "Jeux",
-  "search_no_games": "Aucun jeu trouvé pour « {query} »."
+  "search_no_games": "Aucun jeu trouvé pour « {query} ».",
+  "games_sort_favorites": "Les plus favoris",
+  "game_favorite_action": "Favori",
+  "game_unfavorite_action": "Retirer des favoris",
+  "game_favorite_signed_out": "Connectez-vous pour ajouter des jeux en favoris.",
+  "profile_favorite_games": "Jeux favoris"
 }

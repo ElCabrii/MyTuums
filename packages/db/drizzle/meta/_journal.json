@@ -225,6 +225,13 @@
       "when": 1788556450031,
       "tag": "0031_games-list-indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788561230763,
+      "tag": "0032_game-favorite-count",
+      "breakpoints": true
     }
   ]
 }

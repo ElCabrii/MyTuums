@@ -902,22 +902,31 @@ export const game = pgTable(
     // only for rows that have never been ranked (fixture-only games before
     // the first real sync).
     popularityRank: integer("popularity_rank"),
+    // Denormalized count of `game_favorite` rows — the showcase divergence
+    // (Q26): unlike `post_bookmark`'s no-count rule, a game's favorite count
+    // is public data. Maintained transactionally by the favorite/unfavorite
+    // procedures only; the sync's upsert deliberately omits it from its set
+    // clause so a catalog refresh can never zero anyone's counts.
+    favoriteCount: integer("favorite_count").notNull().default(0),
     // Advanced for every row on every successful sync — including dropouts
     // re-staged from their existing row when IGDB no longer hydrates them.
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, precision: 3 }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
   },
-  // The three `/games` index cursors (issue Q23), one index per sort, each
+  // The `/games` index cursors (issue Q23), one index per sort, each
   // mirroring the exact expression the query in packages/api/src/games.ts
   // orders and cursor-compares by. The `coalesce` is not cosmetic: it pins
   // null keys to the deterministic end of each order AND keeps the row-value
   // cursor comparison total (a bare NULL key would make the comparison NULL
-  // and silently strand every row past it). All ASC — the year sort's DESC
-  // DESC order reads these backwards, which a btree serves natively.
+  // and silently strand every row past it). All ASC — the DESC orders read
+  // these backwards, which a btree serves natively. The favorites sort's
+  // key is never null (the column defaults to 0), so its index needs no
+  // coalesce.
   (t) => [
     index("game_name_idx").on(t.name, t.igdbId),
     index("game_popularity_idx").on(sql`coalesce(${t.popularityRank}, 2147483647)`, t.igdbId),
     index("game_year_idx").on(sql`coalesce(${t.firstReleaseYear}, 0)`, t.igdbId),
+    index("game_favorite_count_idx").on(t.favoriteCount, t.igdbId),
   ],
 );
 
