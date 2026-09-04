@@ -15,6 +15,8 @@ import {
   userBlock,
 } from "@my-tuums/db/schema";
 import { z } from "zod";
+import { postLikeBadgeTierFor, POST_LIKE_BADGE_TIERS } from "./badges.js";
+import { stampBadgeTier } from "./badge-stamping.js";
 import {
   POST_MAX_LENGTH,
   POST_ATTACHMENT_MAX_BYTES,
@@ -955,7 +957,7 @@ async function feedEventPage(
   };
 }
 
-async function countLikes(db: Database, postId: string): Promise<number> {
+async function countLikes(db: Pick<Database, "select">, postId: string): Promise<number> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(postLike)
@@ -1970,6 +1972,18 @@ export const postRouter = {
             type: "like",
             postId: input.postId,
           });
+
+          // Like-tier badge stamping (issue #308). A successful like is the
+          // only moment a threshold can first be passed, so the stamping cost
+          // is one index-only count per new like and nothing anywhere else —
+          // a retried like never reaches this branch. The count read and the
+          // stamp ride the like's own transaction, so a rollback leaves
+          // neither half; the tier upgrades in place (see ./badge-stamping.ts
+          // — one row per family, kept on a recede, `unlike` never unstamps).
+          const badge = postLikeBadgeTierFor(await countLikes(tx, input.postId));
+          if (badge) {
+            await stampBadgeTier(tx, target.authorId, POST_LIKE_BADGE_TIERS, badge);
+          }
         }
       });
 

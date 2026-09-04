@@ -1,11 +1,12 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  // Three entry points: the server, the pre-deploy migration runner (see
-  // src/migrate.ts), and the promote-user CLI (see src/promote.ts). All are
+  // Four entry points: the server, the pre-deploy migration runner (see
+  // src/migrate.ts), the promote-user CLI (see src/promote.ts) and the
+  // one-off Founder-badge grant (see src/grant-founder-badge.ts). All are
   // bundled the same way so the runtime image needs no dev dependencies to
-  // migrate or to appoint the first moderators.
-  entry: ["src/index.ts", "src/migrate.ts", "src/promote.ts"],
+  // migrate, appoint the first moderators or grant the Founder badge.
+  entry: ["src/index.ts", "src/migrate.ts", "src/promote.ts", "src/grant-founder-badge.ts"],
   format: ["esm"],
   platform: "node",
   target: "node24",

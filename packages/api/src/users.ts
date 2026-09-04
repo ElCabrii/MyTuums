@@ -1,9 +1,11 @@
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq, not, or, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
-import { follow, user, userBlock } from "@my-tuums/db/schema";
+import { follow, user, userBadge, userBlock } from "@my-tuums/db/schema";
 import { normalizeUsername, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "@my-tuums/auth/rules";
 import { z } from "zod";
+import { displayProfileBadges, FOLLOWER_BADGE_TIERS, followerBadgeTierFor } from "./badges.js";
+import { stampBadgeTier } from "./badge-stamping.js";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
   FOLLOW_PAGE_SIZE,
@@ -74,6 +76,16 @@ const followingCount = sql<number>`(
   select count(*)::int from ${follow} where ${follow.followerId} = ${user.id}
 )`;
 
+/**
+ * The stamped badges an account carries — its `user_badge` rows, every family
+ * included (see packages/api/src/badges.ts for who stamps what). The composite
+ * primary key makes this an index scan; an account has at most a handful of
+ * rows.
+ */
+const stampedBadges = sql<string[]>`coalesce((
+  select array_agg(${userBadge.badge}) from ${userBadge} where ${userBadge.userId} = ${user.id}
+), '{}'::text[])`;
+
 export function viewerIsFollowing(viewerId: string) {
   return sql<boolean>`exists (
     select 1 from ${follow}
@@ -97,7 +109,7 @@ const followCursor = createCursorCodec(z.string().min(1));
  */
 const usernameInput = z.string().trim().min(USERNAME_MIN_LENGTH).max(USERNAME_MAX_LENGTH);
 
-async function countFollowers(db: Database, userId: string): Promise<number> {
+async function countFollowers(db: Pick<Database, "select">, userId: string): Promise<number> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(follow)
@@ -170,7 +182,14 @@ const IMAGE_REJECTIONS = {
 export const userRouter = {
   /**
    * Returns one user's public profile by handle. Requires a session; the
-   * shape is `publicUserColumns`, never the whole row.
+   * shape is `publicUserColumns` plus computed fields, never the whole row.
+   *
+   * `badges` (issue #308) crosses the `publicUserColumns` privacy boundary
+   * deliberately: badges are public profile data, like follower counts — an
+   * earned distinction displayed to every visitor. It is selected at read
+   * time from the stamped `user_badge` rows (see ./badges.ts for who stamps
+   * what), never a stored profile column, so widening that boundary by a
+   * column still fails the shape pin in users.int.test.ts.
    */
   byUsername: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
@@ -188,6 +207,7 @@ export const userRouter = {
           followingCount,
           viewerIsFollowing: viewerIsFollowing(context.user.id),
           suspended: effectivelyBanned,
+          stampedBadges,
         })
         .from(user)
         .where(
@@ -202,18 +222,32 @@ export const userRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
-      return found.suspended
-        ? {
-            ...found,
-            name: found.username ?? "",
-            image: null,
-            bio: null,
-            bannerImage: null,
-            followerCount: 0,
-            followingCount: 0,
-            viewerIsFollowing: false,
-          }
-        : found;
+      // The raw rows never cross the boundary — `badges` is the public
+      // shape: the display set in canonical order (follower tier, like
+      // tier, founder, super-early, early), computed by the one catalog
+      // definition the browser shares (./badges.ts).
+      const { stampedBadges: stamped, ...profile } = found;
+
+      if (profile.suspended) {
+        return {
+          ...profile,
+          name: profile.username ?? "",
+          image: null,
+          bio: null,
+          bannerImage: null,
+          followerCount: 0,
+          followingCount: 0,
+          viewerIsFollowing: false,
+          // Authored-field redaction applies to badges like everything else
+          // (issue #308): a suspended profile displays none of them.
+          badges: [],
+        };
+      }
+
+      return {
+        ...profile,
+        badges: displayProfileBadges({ stampedBadgeIds: stamped }),
+      };
     }),
 
   /**
@@ -367,6 +401,20 @@ export const userRouter = {
             actorId: context.user.id,
             type: "follow",
           });
+
+          // Follower-tier badge stamping (issue #308), the exact shape of
+          // the like-tier stamping in ./posts.ts. A follow that actually
+          // landed is the only moment a threshold can first be passed, so
+          // the cost is one index-only count per new follow and nothing
+          // anywhere else — a retried follow never reaches this branch. The
+          // count read and the stamp ride the follow's own transaction, so
+          // a rollback leaves neither half; the tier upgrades in place (see
+          // ./badge-stamping.ts — one row per family, kept on a recede,
+          // `unfollow` never unstamps: the tier was genuinely reached).
+          const badge = followerBadgeTierFor(await countFollowers(tx, input.userId));
+          if (badge) {
+            await stampBadgeTier(tx, input.userId, FOLLOWER_BADGE_TIERS, badge);
+          }
         }
       });
 

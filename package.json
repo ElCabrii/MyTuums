@@ -29,6 +29,7 @@
     "db:push": "turbo run db:push",
     "db:test:setup": "pnpm --filter @my-tuums/db db:test:setup",
     "db:promote": "pnpm --filter @my-tuums/db db:promote",
+    "db:grant:founder": "pnpm --filter @my-tuums/db db:grant:founder",
     "lighthouse": "lighthouse http://localhost:3001/ --output=json --output-path=lighthouse-reports/mobile.json --chrome-flags=\"--headless=new\" --quiet",
     "lighthouse:desktop": "lighthouse http://localhost:3001/ --preset=desktop --output=json --output-path=lighthouse-reports/desktop.json --chrome-flags=\"--headless=new\" --quiet"
   },

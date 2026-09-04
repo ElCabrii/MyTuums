@@ -23,6 +23,14 @@
     "./promote": {
       "types": "./src/promote.ts",
       "default": "./src/promote.ts"
+    },
+    "./grant-founder-badge": {
+      "types": "./src/grant-founder-badge.ts",
+      "default": "./src/grant-founder-badge.ts"
+    },
+    "./stamp-join-badges": {
+      "types": "./src/stamp-join-badges.ts",
+      "default": "./src/stamp-join-badges.ts"
     }
   },
   "scripts": {
@@ -34,6 +42,7 @@
     "db:studio": "dotenv -e ../../.env -- drizzle-kit studio",
     "db:test:setup": "dotenv -e ../../.env -- tsx scripts/setup-test-db.ts",
     "db:promote": "dotenv -e ../../.env -- tsx scripts/promote-user.ts",
+    "db:grant:founder": "dotenv -e ../../.env -- tsx scripts/grant-founder-badge.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
