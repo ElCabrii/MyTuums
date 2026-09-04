@@ -18,14 +18,15 @@ databases. It serves data only — no HTTP, no business logic.
 
 ## Change map
 
-| Intent                            | Primary                      | Also touch                                                                |
-| --------------------------------- | ---------------------------- | ------------------------------------------------------------------------- |
-| Add or change an app table        | `src/schema/app.ts`          | `pnpm db:generate`, then commit `drizzle/`; an index if a cursor reads it |
-| Change an auth table              | `packages/auth/src/index.ts` | `pnpm --filter @my-tuums/db db:generate:auth`, then `pnpm db:generate`    |
-| Add an index for a new list       | `src/schema/app.ts`          | the `keysetPage` call in `packages/api` it must mirror                    |
-| Change how migrations are applied | `src/migrate.ts`             | `apps/server/src/migrate.ts`, `docker-compose.yml`                        |
-| Change test-database handling     | `src/testing.ts`             | `scripts/setup-test-db.ts`, `e2e/global-setup.ts`                         |
-| Add a maintenance script          | `scripts/`                   | the `scripts` entry in `package.json`                                     |
+| Intent                            | Primary                      | Also touch                                                                                                                                       |
+| --------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Add or change an app table        | `src/schema/app.ts`          | `pnpm db:generate`, then commit `drizzle/`; an index if a cursor reads it                                                                        |
+| Change an auth table              | `packages/auth/src/index.ts` | `pnpm --filter @my-tuums/db db:generate:auth`, then `pnpm db:generate`                                                                           |
+| Add an index for a new list       | `src/schema/app.ts`          | the `keysetPage` call in `packages/api` it must mirror                                                                                           |
+| Change how migrations are applied | `src/migrate.ts`             | `apps/server/src/migrate.ts`, `docker-compose.yml`                                                                                               |
+| Change test-database handling     | `src/testing.ts`             | `scripts/setup-test-db.ts`, `e2e/global-setup.ts`                                                                                                |
+| Add a maintenance script          | `scripts/`                   | the `scripts` entry in `package.json`                                                                                                            |
+| Edit the games fixture            | `fixtures/games.json`        | hand-authored seed data (never generated); `packages/api`'s `games-fixture.test.ts` pins its contract, and its seeder uploads `fixtures/covers/` |
 
 ## Invariants
 

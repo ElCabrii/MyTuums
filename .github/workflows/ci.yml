@@ -384,6 +384,7 @@ jobs:
             test -f apps/server/dist/migrate.js          || { echo "migrate.js missing from the image"; exit 1; }
             test -f packages/db/drizzle/meta/_journal.json || { echo "packages/db/drizzle missing from the image"; exit 1; }
             test -f apps/server/dist/promote.js          || { echo "promote.js missing - is it in tsup.config.ts entry list?"; exit 1; }
+            test -f apps/server/dist/games-sync.js       || { echo "games-sync.js missing - is it in tsup.config.ts entry list?"; exit 1; }
             test ! -d apps/web/node_modules              || { echo "apps/web dependencies were installed into the runner - prune the runner to @my-tuums/server alone"; exit 1; }
             test -d apps/server/node_modules/better-auth || { echo "the server production dependencies are missing from the runner"; exit 1; }
             test -d apps/server/node_modules/@sentry/node || { echo "@sentry/node is missing from the runner"; exit 1; }

@@ -10,6 +10,7 @@ export { createMediaResolver, type MediaAuthorizer, type MediaResolver } from ".
 export { ensureMediaVariant } from "./media-variants.js";
 export { canViewPostMedia } from "./post-media.js";
 export { canViewLinkCardMedia } from "./link-card.js";
+export { canViewGameCoverMedia, gameCoverRedirectCacheControl } from "./game-media.js";
 export {
   canViewProfileMedia,
   profileDisplayRedirectCacheControl,

@@ -343,6 +343,67 @@ export const LINK_CARD_DESCRIPTION_MAX_LENGTH = 500;
 export const LINK_CARD_SITE_NAME_MAX_LENGTH = 300;
 
 /**
+ * The IGDB half of the game catalog (issue #314). IGDB's API is Twitch's:
+ * a client-credentials token from the Twitch developer portal, then Apicalypse
+ * POST bodies against `api.igdb.com`. The budget IGDB documents is roughly
+ * four requests a second, so the client paces itself under that by
+ * construction (see `igdb.ts`) rather than reacting to 429s it could have
+ * avoided.
+ *
+ * `IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET` are a SEPARATE pair from the
+ * `TWITCH_*` sign-in credentials — same portal, different purpose — and are
+ * only ever read by the sync entrypoint, never by the serving app.
+ */
+/** Origin of the IGDB API (Apicalypse POST endpoints under `/v4/`). */
+export const IGDB_API_ORIGIN = "https://api.igdb.com";
+/** Twitch's client-credentials token endpoint. */
+export const IGDB_TOKEN_URL = "https://id.twitch.tv/oauth2/token";
+/** Base of IGDB's CDN image URLs; `<size>/<imageId>.jpg` completes it. */
+export const IGDB_IMAGE_BASE_URL = "https://images.igdb.com/igdb/image/upload";
+/**
+ * The `popularity_types` name the catalog ranks by: IGDB's PopScore derived
+ * from Twitch hours watched (issue Q2) — "24hr Hours Watched" in IGDB's own
+ * spelling, verified live. Resolved BY NAME at sync time — the numeric id is
+ * not stable across IGDB environments and the docs only enumerate a few, and
+ * a renamed type fails the sync loudly with the received names in the
+ * message rather than ranking by the wrong thing.
+ */
+export const IGDB_POPULARITY_TYPE_NAME = "24hr Hours Watched";
+/** Wall-clock ceiling on one API query, token request included. */
+export const IGDB_QUERY_TIMEOUT_MS = 15_000;
+/** Wall-clock ceiling on one cover download, body included. */
+export const IGDB_COVER_TIMEOUT_MS = 30_000;
+/** Most cover bytes read before the image is declared oversized. */
+export const IGDB_MAX_COVER_BYTES = 2 * 1024 * 1024;
+/** Minimum spacing between two outbound IGDB requests (under 4 req/s). */
+export const IGDB_MIN_REQUEST_INTERVAL_MS = 250;
+/** Backoff before the one retry a transient failure earns. */
+export const IGDB_RETRY_BACKOFF_MS = 1_000;
+/** Ceiling on a 429's `Retry-After` — beyond this the run fails instead. */
+export const IGDB_RETRY_BACKOFF_MAX_MS = 30_000;
+/**
+ * How much sooner than `expires_in` a token is considered expired, so a
+ * cached token is never used in the seconds it is about to die.
+ */
+export const IGDB_TOKEN_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
+/**
+ * How many games the popularity scan reads, and therefore the catalog's
+ * steady-state size (issue Q2: "~top 1000, tune after seeing data" — the
+ * constant is the tuning point). Rows already known are never deleted when
+ * they fall out of it (Q29).
+ */
+export const GAMES_CATALOG_SIZE = 1000;
+/** Ids per `/games` hydration query — IGDB's documented page limit. */
+export const GAMES_HYDRATION_BATCH = 500;
+/** Longest game summary stored; IGDB's can run to thousands of characters. */
+export const GAME_SUMMARY_MAX_LENGTH = 1000;
+/** Longest single genre/platform label stored. */
+export const GAME_LABEL_MAX_LENGTH = 40;
+/** Most genre labels kept per game, then most platform labels. */
+export const GAME_GENRES_MAX = 6;
+export const GAME_PLATFORMS_MAX = 10;
+
+/**
  * The largest request body the RPC endpoint will accept.
  *
  * Derived from the image caps rather than written as a literal, so raising a
@@ -496,13 +557,16 @@ export function isSignedOutPath(pathname: string): boolean {
  * 1280 the fullscreen viewer and 2x feeds. Avatars: 96 covers every feed
  * chrome size at 2x, 256 the profile header at 2x. Banners render at most
  * full-width; 1280 bounds the common desktop case. Link-card lead images
- * render inside a card, never full-bleed.
+ * render inside a card, never full-bleed. Game covers are portrait (2:3):
+ * 320 covers the `/games` grid cell and the profile rail at 2x, 640 the
+ * game page header at 2x.
  */
 export const MEDIA_VARIANT_WIDTHS = {
   posts: [640, 1280],
   avatars: [96, 256],
   banners: [1280],
   "link-cards": [640],
+  games: [320, 640],
 } as const;
 
 /**
@@ -536,6 +600,8 @@ function variantWidthsFor(key: string): readonly number[] | undefined {
       return MEDIA_VARIANT_WIDTHS.banners;
     case "link-cards":
       return MEDIA_VARIANT_WIDTHS["link-cards"];
+    case "games":
+      return MEDIA_VARIANT_WIDTHS.games;
     default:
       return undefined;
   }

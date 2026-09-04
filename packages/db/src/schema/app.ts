@@ -851,6 +851,106 @@ export const linkCard = pgTable(
   ],
 );
 
+/**
+ * A game in the catalog the IGDB sync maintains (issue #314): our row, our
+ * media, IGDB touched only during sync. Keyed by IGDB's own id — the catalog
+ * has no life outside IGDB, so a surrogate uuid would only add a join.
+ *
+ * Two identifiers by design (issue Q7): `slug` is IGDB's hyphenated slug and
+ * the URL-facing key of `/games/{slug}`; `hashtagKey` is the lowercase name
+ * with every `[^a-z0-9]` stripped, and the key post hashtags resolve against.
+ * `hashtagKey` is assigned once and never rewritten — the sync's upsert
+ * omits it from its `set` clause, so an existing assignment is an input to
+ * collision resolution, never an output (issue Q29's "collision assignments
+ * stay permanently stable").
+ *
+ * Covers are re-hosted in the media bucket under `games/<igdbId>-<imageId>.<ext>`
+ * (issue Q9), never hot-linked from IGDB; `coverImageId` doubles as the
+ * incremental-download compare key so repeat syncs only fetch changed covers.
+ *
+ * Rows are never deleted and never frozen (issue Q29): a game that drops out
+ * of the popularity scan keeps its row, is re-hydrated from IGDB on every
+ * sync alongside the current top set, and keeps its last-known
+ * `popularityRank` so the `/games` index can order dropouts by where they
+ * last placed.
+ */
+export const game = pgTable(
+  "game",
+  {
+    igdbId: integer("igdb_id").primaryKey(),
+    slug: text("slug").notNull().unique(),
+    hashtagKey: text("hashtag_key").notNull().unique(),
+    name: text("name").notNull(),
+    summary: text("summary"),
+    // A stored `/media/games/...` path, like `link_card.image_media_path`.
+    coverMediaPath: text("cover_media_path"),
+    coverImageId: text("cover_image_id"),
+    firstReleaseYear: integer("first_release_year"),
+    // Display labels, replaced wholesale by each sync. A flat `text[]` rather
+    // than jsonb or FK catalog tables: no read ever queries by genre or
+    // platform (the page renders them as labels), so normalization would add
+    // join and sync-ordering cost for zero reads.
+    genres: text("genres")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    platforms: text("platforms")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    // Rank in the most recent popularity scan that included this game. Null
+    // only for rows that have never been ranked (fixture-only games before
+    // the first real sync).
+    popularityRank: integer("popularity_rank"),
+    // Advanced for every row on every successful sync — including dropouts
+    // re-staged from their existing row when IGDB no longer hydrates them.
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, precision: 3 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  // No list indexes yet, deliberately: "indexes mirror the cursors", and the
+  // first cursor-shaped reader (the `/games` index page) arrives with the
+  // public-surfaces stage of #314, in the same migration as its queries.
+  () => [],
+);
+
+/**
+ * A game favorite — a user's public stamp on a game (issue #314). Mirrors
+ * `post_bookmark` exactly in shape, and diverges from it exactly once, on
+ * purpose: a bookmark is private state (no count, no other reader), while a
+ * favorite is a *showcase* — the count is public on the game page and the
+ * profile rail is visible to every signed-in viewer (issue Q26). That
+ * divergence lives in the read model of packages/api, not in this table:
+ * the composite primary key is still the "one favorite per user per game"
+ * rule, `onConflictDoNothing` still makes favorite idempotent under a
+ * double-click, and the index below still mirrors the profile rail's
+ * newest-first walk.
+ */
+export const gameFavorite = pgTable(
+  "game_favorite",
+  {
+    gameId: integer("game_id")
+      .notNull()
+      .references(() => game.igdbId, { onDelete: "cascade" }),
+    // `text` because `user.id` is BetterAuth's own id format, like every
+    // other user reference in this file.
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // `timestamptz` + `precision: 3` for the same reasons as
+    // post_bookmark.created_at — the profile rail keyset-paginates on
+    // (created_at, game_id), so the precision is load-bearing here too.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.gameId, t.userId] }),
+    // The profile rail: a user's favorited games newest-first, `game_id`
+    // breaking ties between favorites sharing a timestamp. The primary key
+    // already covers the other direction — "has the viewer favorited this
+    // game".
+    index("game_favorite_user_created_idx").on(t.userId, t.createdAt.desc(), t.gameId.desc()),
+  ],
+);
+
 /** Drizzle relations for `post` — the joins `with` queries can reach: author, likes, bookmarks, parent, and replies. */
 export const postRelations = relations(post, ({ one, many }) => ({
   author: one(user, { fields: [post.authorId], references: [user.id] }),
@@ -1013,4 +1113,15 @@ export const notificationRelations = relations(notification, ({ one }) => ({
     fields: [notification.actionId],
     references: [moderationAction.id],
   }),
+}));
+
+/** Drizzle relations for `game` — the favorites users have stamped on it. */
+export const gameRelations = relations(game, ({ many }) => ({
+  favorites: many(gameFavorite),
+}));
+
+/** Drizzle relations for `gameFavorite` — the `game` and `user` a favorite references. */
+export const gameFavoriteRelations = relations(gameFavorite, ({ one }) => ({
+  game: one(game, { fields: [gameFavorite.gameId], references: [game.igdbId] }),
+  user: one(user, { fields: [gameFavorite.userId], references: [user.id] }),
 }));

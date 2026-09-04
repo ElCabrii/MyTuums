@@ -27,6 +27,14 @@ const envSchema = z
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
 
+    // The game-catalog sync's IGDB credentials (issue #314). Same Twitch
+    // developer portal as the TWITCH_* sign-in pair above, but a DIFFERENT
+    // pair with a different purpose — one must never satisfy the other's
+    // check. Only the sync entrypoint (`src/games-sync.ts`) reads them; the
+    // serving app never does, so unset is the normal serving state.
+    IGDB_CLIENT_ID: z.string().optional(),
+    IGDB_CLIENT_SECRET: z.string().optional(),
+
     // Sentry error tracking (apps/server/src/sentry.ts). Optional: without it
     // the server runs with no error-tracking client — the dev/CI state. The
     // SDK's capture calls are no-ops then, so nothing gates on this.
@@ -117,6 +125,21 @@ const envSchema = z
           } set — image uploads need the whole S3_* group or none of it`,
         });
       }
+    }
+
+    // The IGDB pair, same all-or-nothing rule as a provider: a sync run with
+    // only one half would spend its token request on credentials that can
+    // never authenticate.
+    const igdbBothOrNeither = !env.IGDB_CLIENT_ID === !env.IGDB_CLIENT_SECRET;
+    if (!igdbBothOrNeither) {
+      const missing = env.IGDB_CLIENT_ID ? "IGDB_CLIENT_SECRET" : "IGDB_CLIENT_ID";
+      ctx.addIssue({
+        code: "custom",
+        path: [missing],
+        message: `is required because ${
+          env.IGDB_CLIENT_ID ? "IGDB_CLIENT_ID" : "IGDB_CLIENT_SECRET"
+        } is set — the game-catalog sync needs both or neither`,
+      });
     }
   });
 

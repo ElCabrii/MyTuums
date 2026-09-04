@@ -37,6 +37,32 @@ describe("parseEnv", () => {
   });
 
   /**
+   * The game-catalog sync's IGDB pair (issue #314) follows the provider rule
+   * without being one: same portal as TWITCH_*, but a different pair with a
+   * different consumer, so an id without a secret must be refused on its own
+   * message — not silently accepted and not conflated with the sign-in pair.
+   */
+  describe("half-configured IGDB pair", () => {
+    it("rejects an id without a secret, naming the missing half", () => {
+      expect(() => parseEnv({ ...required, IGDB_CLIENT_ID: "id" })).toThrow(/IGDB_CLIENT_SECRET/);
+    });
+
+    it("rejects a secret without an id", () => {
+      expect(() => parseEnv({ ...required, IGDB_CLIENT_SECRET: "secret" })).toThrow(
+        /IGDB_CLIENT_ID/,
+      );
+    });
+
+    it("accepts the whole pair, and none of it", () => {
+      expect(
+        parseEnv({ ...required, IGDB_CLIENT_ID: "id", IGDB_CLIENT_SECRET: "secret" })
+          .IGDB_CLIENT_ID,
+      ).toBe("id");
+      expect(parseEnv({ ...required }).IGDB_CLIENT_ID).toBeUndefined();
+    });
+  });
+
+  /**
    * The failure this check exists for: `packages/auth/src/social.ts` registers
    * a provider only when it has both halves, so an id without a secret does
    * not error anywhere — the provider is simply absent, its button never

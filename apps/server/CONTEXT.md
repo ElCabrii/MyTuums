@@ -41,6 +41,7 @@ by the Playwright `api` project.
 | Change error classification/reporting | `src/error-observation.ts`, `src/sentry.ts`                              | `src/index.ts`                                                                                                        |
 | Change what ships in the image        | `Dockerfile`                                                             | `.github/workflows/ci.yml` (`docker` job asserts it)                                                                  |
 | Change the migration runner           | `src/migrate.ts`                                                         | `../../docker-compose.yml`                                                                                            |
+| Add or change a one-shot entrypoint   | `src/<name>.ts` (e.g. `src/games-sync.ts`, the catalog-sync cron)        | `tsup.config.ts` entry list, `../../.github/workflows/ci.yml` image asserts, `../../docs/operations.md` Maintenance   |
 
 ## Invariants
 

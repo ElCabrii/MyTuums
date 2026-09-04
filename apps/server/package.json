@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "games:sync": "dotenv -e ../../.env -- tsx src/games-sync.ts"
   },
   "dependencies": {
     "@my-tuums/api": "workspace:*",

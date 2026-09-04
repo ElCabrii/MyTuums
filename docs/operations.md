@@ -293,6 +293,37 @@ repo, `DATABASE_URL` referencing the production Postgres) fires the command
 above every Monday at 04:00 UTC. The manual command remains for other
 environments, dry-run reports, and out-of-band prunes.
 
+**Game catalog sync.** The `game` table's ~top-1000-by-Twitch-hours catalog
+(issue #314) is refreshed from IGDB by:
+
+```bash
+pnpm games:sync
+```
+
+Fail-closed by construction: the run stages and validates everything, then
+commits in a single transaction, so any failure (bad credentials, an IGDB
+outage that survives its one retry, a validation violation) leaves the
+previous catalog byte-identical and exits non-zero. Rows are never deleted —
+games that drop out of the popularity scan keep their row and last-known
+rank. Covers are re-hosted into the environment's bucket under `games/`,
+content-addressed, so repeat runs upload only what changed. Needs
+`IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET` (a pair, see `.env.example`) plus
+`DATABASE_URL` and, for covers, the `S3_*` group. Production runs it
+automatically: the `mytuums-games-sync` Railway cron service (the production
+Docker image, start command `node apps/server/dist/games-sync.js`, weekly
+Sunday 05:00 UTC) reads the production Postgres, bucket and IGDB pair.
+
+Dev, CI and e2e never need IGDB credentials — they seed the committed
+fixture instead:
+
+```bash
+pnpm games:seed --database <target-db-name>
+```
+
+The `--database` retype is deliberate (the `reconcile:media` `--bucket`
+instinct): nothing in the environment distinguishes a dev database from
+production, so the target must be named explicitly.
+
 It lists the bucket before reading the `user` rows, so an upload landing
 between the two steps is never mistaken for an orphan. Point it at the same
 bucket as the environment whose rows you are reading, never across

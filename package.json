@@ -28,6 +28,8 @@
     "db:generate": "turbo run db:generate",
     "db:push": "turbo run db:push",
     "db:test:setup": "pnpm --filter @my-tuums/db db:test:setup",
+    "games:seed": "pnpm --filter @my-tuums/api games:seed",
+    "games:sync": "pnpm --filter @my-tuums/server games:sync",
     "db:promote": "pnpm --filter @my-tuums/db db:promote",
     "db:grant:founder": "pnpm --filter @my-tuums/db db:grant:founder",
     "lighthouse": "lighthouse http://localhost:3001/ --output=json --output-path=lighthouse-reports/mobile.json --chrome-flags=\"--headless=new\" --quiet",

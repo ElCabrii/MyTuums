@@ -1,12 +1,20 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  // Four entry points: the server, the pre-deploy migration runner (see
-  // src/migrate.ts), the promote-user CLI (see src/promote.ts) and the
-  // one-off Founder-badge grant (see src/grant-founder-badge.ts). All are
-  // bundled the same way so the runtime image needs no dev dependencies to
-  // migrate, appoint the first moderators or grant the Founder badge.
-  entry: ["src/index.ts", "src/migrate.ts", "src/promote.ts", "src/grant-founder-badge.ts"],
+  // Five entry points: the server, the pre-deploy migration runner (see
+  // src/migrate.ts), the promote-user CLI (see src/promote.ts), the one-off
+  // Founder-badge grant (see src/grant-founder-badge.ts), and the game-catalog
+  // sync the Railway cron service runs weekly (see src/games-sync.ts). All
+  // are bundled the same way so the runtime image needs no dev dependencies
+  // to migrate, appoint the first moderators, grant the Founder badge, or
+  // refresh the game catalog.
+  entry: [
+    "src/index.ts",
+    "src/migrate.ts",
+    "src/promote.ts",
+    "src/grant-founder-badge.ts",
+    "src/games-sync.ts",
+  ],
   format: ["esm"],
   platform: "node",
   target: "node24",
