@@ -43,21 +43,21 @@ COPY . .
 #
 # turbo is resolved to the exact version the lockfile pins for the root
 # devDependency, never floated (`npx -y turbo@^2` could silently run a
-# different turbo than every local `pnpm build`), and the npm cache mount
-# makes the registry download happen once per runner instead of once per
-# build — `COPY . .` invalidates this layer on every source change, so
-# without it a slow registry route sits on the critical path of every
-# image build (the prune step grew 1m48s → 8m33s across three consecutive
-# CI builds when the runner's registry route degraded). The `test` guard
-# fails the build rather than letting a lockfile-format change collapse
-# the pin into a bare `npx -y turbo@` — which would fetch latest.
-# The `id` is spelled out even though BuildKit defaults it to the target
-# path: Railway's Metal builder refuses a cache mount without an explicit
-# id ("flag --mount=type=cache,target=... is missing an id argument"), and
-# keeping the default's value means CI's existing warm cache namespace is
-# preserved rather than forking a second one.
-RUN --mount=type=cache,id=/root/.npm,target=/root/.npm \
-    TURBO_VERSION="$(sed -n 's/^  turbo@\([0-9.]*\):$/\1/p' pnpm-lock.yaml | head -n 1)" && \
+# different turbo than every local `pnpm build`). The `test` guard fails
+# the build rather than letting a lockfile-format change collapse the pin
+# into a bare `npx -y turbo@` — which would fetch latest.
+#
+# No BuildKit cache mount here, on purpose. Standard BuildKit (CI, local
+# Docker) would cache /root/.npm across builds, but Railway's builder only
+# accepts cache mounts whose id embeds the deploying service's own UUID
+# (`id=s/<service id>-<target>` — see docs.railway.com/builds/dockerfiles),
+# and this one Dockerfile builds two different Railway services (preview
+# and production), so no single id can be valid for both. The pin keeps
+# the correctness half of the fix; the per-build registry download of
+# turbo (~90s on a healthy route) is the accepted cost. If it hurts again,
+# the fix belongs on the runner (a registry mirror) or in per-service
+# Dockerfiles — not in a mount id this file cannot own.
+RUN TURBO_VERSION="$(sed -n 's/^  turbo@\([0-9.]*\):$/\1/p' pnpm-lock.yaml | head -n 1)" && \
     test -n "$TURBO_VERSION" && \
     npx -y "turbo@${TURBO_VERSION}" prune @my-tuums/server @my-tuums/web @my-tuums/branding --docker && \
     npx -y "turbo@${TURBO_VERSION}" prune @my-tuums/server --docker --out-dir out-runner
