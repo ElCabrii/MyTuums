@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
@@ -732,6 +732,59 @@ describe("PostCard", () => {
       await user.click(await screen.findByRole("menuitem", { name: m.post_repost_menu_quote() }));
 
       expect(store.get(quoteDialogAtom)?.id).toBe(post.id);
+    });
+  });
+
+  // Issue #307: the share control hands the post's permalink out of the app.
+  // The branching itself (sheet vs clipboard vs toast copy) is owned by
+  // `lib/share.ts`'s own suite; these pin the card's wiring — the control's
+  // presence and accessible name, that a click routes this exact post into
+  // the helper's system-sheet branch, and that the signed-out permalink bar
+  // keeps its existing treatment.
+  describe("the share control", () => {
+    /**
+     * jsdom ships no `navigator.share`, and the property cannot be assigned
+     * to — `defineProperty` is the only way in (the same substitution the
+     * security-sections suite uses for the clipboard). The afterEach
+     * restores absence so nothing after this describe is silently
+     * "share-capable".
+     */
+    function stubShare() {
+      const share = vi.fn(() => Promise.resolve());
+      Object.defineProperty(navigator, "share", {
+        value: share,
+        configurable: true,
+        writable: true,
+      });
+      return share;
+    }
+
+    afterEach(() => {
+      Object.defineProperty(navigator, "share", {
+        value: undefined,
+        configurable: true,
+        writable: true,
+      });
+    });
+
+    it("hands the post's absolute permalink to the system share sheet", async () => {
+      const share = stubShare();
+      const post = makePost();
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: m.post_share() }));
+
+      await waitFor(() =>
+        expect(share).toHaveBeenCalledWith({ url: `https://mytuums.com/post/${post.id}` }),
+      );
+    });
+
+    it("keeps the signed-out permalink bar as it was: counts and the sign-in link, no share control", async () => {
+      await renderWithProviders(<PostCard post={makePost()} />);
+
+      expect(screen.queryByRole("button", { name: m.post_share() })).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: m.auth_login_link() })).toBeInTheDocument();
     });
   });
 });

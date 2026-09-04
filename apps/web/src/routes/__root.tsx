@@ -5,7 +5,8 @@ import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { NotFoundPage } from "@/components/not-found-page";
 import { LegalConsentDialog } from "@/components/legal-consent-dialog";
-import { themeClassEffect } from "@/atoms/theme";
+import { Toaster } from "@/components/ui/sonner";
+import { resolvedThemeAtom, themeClassEffect } from "@/atoms/theme";
 import { localeDocumentEffect, localePreferenceEffect } from "@/atoms/locale";
 import { isSignedInAtom, sessionSettledAtom, sessionSettledEffect } from "@/atoms/session";
 import { useRequireHandle } from "@/hooks/use-require-handle";
@@ -84,6 +85,7 @@ function RootLayout() {
   // splash unmounts.
   const settled = useAtomValue(sessionSettledAtom);
   const signedIn = useAtomValue(isSignedInAtom);
+  const resolvedTheme = useAtomValue(resolvedThemeAtom);
 
   // While the first /get-session is in flight this renders nothing: the
   // splash is static markup in index.html (`#app-splash`), already painted
@@ -123,6 +125,12 @@ function RootLayout() {
             documents itself. Duplicating half of that here would let the two
             drift. */}
         <LegalConsentDialog />
+        {/* The app's toast surface (issue #307), mounted once like the root
+            dialogs above. The generated wrapper reads next-themes for its
+            theme default — an app this one doesn't use — so the theme the
+            app actually enforces is passed as a prop; the wrapper spreads
+            its props last, which is what makes that win. */}
+        <Toaster theme={resolvedTheme} position="bottom-center" />
       </div>
     </>
   );
