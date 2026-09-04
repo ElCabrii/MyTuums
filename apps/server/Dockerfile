@@ -40,8 +40,22 @@ COPY . .
 # any of it — Vite already bundled both sites into their dist/ at build time.
 # Pruning to @my-tuums/server alone keeps the web trees out of the runtime
 # image structurally, not by install-time luck.
-RUN npx -y turbo@^2 prune @my-tuums/server @my-tuums/web @my-tuums/branding --docker && \
-    npx -y turbo@^2 prune @my-tuums/server --docker --out-dir out-runner
+#
+# turbo is resolved to the exact version the lockfile pins for the root
+# devDependency, never floated (`npx -y turbo@^2` could silently run a
+# different turbo than every local `pnpm build`), and the npm cache mount
+# makes the registry download happen once per runner instead of once per
+# build — `COPY . .` invalidates this layer on every source change, so
+# without it a slow registry route sits on the critical path of every
+# image build (the prune step grew 1m48s → 8m33s across three consecutive
+# CI builds when the runner's registry route degraded). The `test` guard
+# fails the build rather than letting a lockfile-format change collapse
+# the pin into a bare `npx -y turbo@` — which would fetch latest.
+RUN --mount=type=cache,target=/root/.npm \
+    TURBO_VERSION="$(sed -n 's/^  turbo@\([0-9.]*\):$/\1/p' pnpm-lock.yaml | head -n 1)" && \
+    test -n "$TURBO_VERSION" && \
+    npx -y "turbo@${TURBO_VERSION}" prune @my-tuums/server @my-tuums/web @my-tuums/branding --docker && \
+    npx -y "turbo@${TURBO_VERSION}" prune @my-tuums/server --docker --out-dir out-runner
 
 # ---- Install full (dev+prod) deps and build the pruned subset ----
 FROM base AS builder

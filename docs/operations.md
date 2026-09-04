@@ -162,7 +162,11 @@ report: `@my-tuums/db` evaluates it at module scope and throws before
 `apps/server/Dockerfile` is a four-stage build from the monorepo root:
 
 1. **pruner** — `turbo prune` twice: once for server _and_ web (what gets
-   built), once for the server alone (what the runner installs).
+   built), once for the server alone (what the runner installs). turbo is
+   run at the exact version the lockfile pins for the root devDependency
+   (extracted at build time, so the two cannot drift), through an npm cache
+   mount so its registry download happens once per runner rather than once
+   per build.
 2. **builder** — full install, tsup-bundle the server, then `vite build` with
    the `VITE_*` args declared.
 3. **runner** — `pnpm install --prod` over the _server-only_ prune, then copy
