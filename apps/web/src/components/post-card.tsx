@@ -1,7 +1,7 @@
 import type { MouseEvent } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Bookmark, Heart, MessageCircle, MoreHorizontal, Repeat2 } from "lucide-react";
+import { Bookmark, Heart, MessageCircle, MoreHorizontal, Repeat2, Share } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileLink } from "@/components/profile-link";
 import { firstLinkUrl, LinkedText } from "@/components/linked-text";
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Post } from "@/lib/orpc";
 import { sanitizeDestination } from "@/lib/redirect";
+import { sharePost } from "@/lib/share";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
@@ -655,6 +656,26 @@ export function PostCard({
                   className={bookmarkButtonClass}
                 >
                   {bookmarkContent}
+                </button>
+
+                {/* Sharing out (issue #307): the system sheet where the
+                    platform offers one, clipboard + toast otherwise — see
+                    `lib/share.ts`. Like the bookmark, a count-less circle
+                    control: the confirmation is the toast (or the sheet
+                    itself), not a number on the bar. The permalink it hands
+                    out is the one public URL surface, so it renders on every
+                    card including this post's own focused variant. */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void sharePost(post.id);
+                  }}
+                  aria-label={m.post_share()}
+                  title={m.post_share()}
+                  className={`${actionIconButtonClass} hover:text-primary`}
+                >
+                  <Share className="h-4 w-4" />
                 </button>
               </div>
             ) : (
