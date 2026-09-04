@@ -12,6 +12,7 @@ import { QuotePostIcon } from "@/components/icons/quote-post-icon";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { toggleRepostAtomFamily } from "@/atoms/repost";
 import { quoteDialogAtom } from "@/atoms/quote-composer";
+import { shareDialogAtom } from "@/atoms/share-dialog";
 import { toggleBookmarkAtomFamily } from "@/atoms/bookmark";
 import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
 import { deletePostDialogAtom } from "@/atoms/post-delete";
@@ -26,7 +27,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Post } from "@/lib/orpc";
 import { sanitizeDestination } from "@/lib/redirect";
-import { sharePost } from "@/lib/share";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
@@ -174,6 +174,7 @@ export function PostCard({
   const toggleLike = useSetAtom(toggleLikeAtomFamily(post.id));
   const toggleRepost = useSetAtom(toggleRepostAtomFamily(post.id));
   const setQuoteDialog = useSetAtom(quoteDialogAtom);
+  const setShareDialog = useSetAtom(shareDialogAtom);
   const toggleBookmark = useSetAtom(toggleBookmarkAtomFamily(post.id));
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
@@ -658,18 +659,17 @@ export function PostCard({
                   {bookmarkContent}
                 </button>
 
-                {/* Sharing out (issue #307): the system sheet where the
-                    platform offers one, clipboard + toast otherwise — see
-                    `lib/share.ts`. Like the bookmark, a count-less circle
-                    control: the confirmation is the toast (or the sheet
-                    itself), not a number on the bar. The permalink it hands
-                    out is the one public URL surface, so it renders on every
-                    card including this post's own focused variant. */}
+                {/* Sharing out (issue #307): opens the root-mounted share
+                    dialog — the post previewed, its canonical permalink
+                    offered for copy (see `components/share-dialog.tsx`).
+                    Like the bookmark, a count-less circle control. Offered
+                    wherever the action bar renders, including the post's own
+                    focused variant on the permalink page. */}
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    void sharePost(post.id);
+                    setShareDialog(post);
                   }}
                   aria-label={m.post_share()}
                   title={m.post_share()}

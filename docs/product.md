@@ -167,13 +167,14 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   is unbookmarking a post whose author has since blocked the saver or been
   banned: the row is the saver's own, so a saved post can always be removed
   even once it no longer renders.
-- Sharing takes a post out of the app: the share control on a post card hands
-  the canonical permalink — the public `/post/<id>` URL — to the system share
-  sheet where the platform offers one, and to the clipboard with a "Link
-  copied" toast everywhere else. Client-side only: no procedure, no stored
-  state. A dismissed sheet does nothing; a clipboard that refuses says so
-  instead of posing as success. Signed-out permalink viewers keep the
-  sign-in-link treatment — the control is signed-in only.
+- Sharing takes a post out of the app: the share control on a post card opens
+  a dialog that previews the post and offers its canonical permalink — the
+  public `/post/<id>` URL — as a one-click copy (the URL row itself is also
+  fully selectable for hand-copying). Copied is confirmed by a toast; a
+  clipboard that refuses says so instead of posing as success, and the dialog
+  stays open either way. Client-side only: no procedure, no stored state.
+  Signed-out permalink viewers keep the sign-in-link treatment — the control
+  is signed-in only.
 - Follows are the same shape: `follow` / `unfollow`, with follower and
   following lists.
 - Feeds come in two scopes — everyone, and the people you follow — and are
@@ -445,9 +446,9 @@ added text or images. An event about the original, not a post of its own: the
 feed renders the original attributed to the reposter. Idempotent as a pair
 (`repost` / `unrepost`). _Avoid:_ retweet, boost, share.
 
-**Share** — the post-card control that hands the canonical permalink to the
-operating system: the system share sheet where one exists, the clipboard with
-a toast elsewhere. Not an in-app redistribution, not an event, nothing stored
+**Share** — the post-card control that opens the share dialog: the post
+previewed, its canonical permalink offered for copy, the copy confirmed by a
+toast. Not an in-app redistribution, not an event, nothing stored
 server-side. "Share" in the interface always means this; a repost is a Repost.
 
 **Quote post** — a normal post that references another post, which renders
