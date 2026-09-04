@@ -279,7 +279,7 @@
   "feed_for_you": "For you",
   "feed_following": "Following",
   "feed_find_people": "Find people to follow",
-  "discover_coming_soon": "Discover is coming soon — hang tight.",
+  "discover_empty": "Nothing to discover yet — no one has posted.",
   "feed_empty_following": "Nothing here yet — you're not following anyone who's posted.",
   "feed_empty": "No posts yet. Be the first to post something.",
   "feed_load_error": "Could not load posts.",
