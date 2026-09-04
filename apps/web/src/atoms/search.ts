@@ -55,7 +55,7 @@ export function typeaheadQueryOptions(q: string) {
     // TanStack Query has a chance to honour `enabled: false`.
     return {
       queryKey: ["search.typeahead", "disabled"],
-      queryFn: (): Promise<SearchTypeahead> => Promise.resolve({ users: [], posts: [] }),
+      queryFn: (): Promise<SearchTypeahead> => Promise.resolve({ users: [], games: [], posts: [] }),
       enabled: false,
       retry: false,
     };

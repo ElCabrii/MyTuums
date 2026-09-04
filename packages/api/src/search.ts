@@ -1,5 +1,5 @@
-import { and, desc, eq, ilike, isNull, like, not, or, type SQL, sql } from "drizzle-orm";
-import { post, user } from "@my-tuums/db/schema";
+import { and, asc, desc, eq, ilike, isNull, like, not, or, type SQL, sql } from "drizzle-orm";
+import { game, post, user } from "@my-tuums/db/schema";
 import { z } from "zod";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
@@ -8,6 +8,7 @@ import {
   SEARCH_QUERY_MAX_LENGTH,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
+import { matchesGameQuery } from "./games.js";
 import { keysetPage } from "./pagination.js";
 import { postSelection } from "./posts.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
@@ -16,7 +17,8 @@ import { publicUserColumns, viewerIsFollowing } from "./users.js";
 import { invisibleAuthor, visibleUser } from "./visibility.js";
 
 /**
- * Search over users and posts.
+ * Search over users and posts, plus the games half of the typeahead (the
+ * full games listing lives in `game.list`, public — issue #314).
  *
  * Matching is deliberately cheap rather than clever: a left-anchored `like`
  * on the already-normalised `username` (which can use its unique btree index
@@ -24,11 +26,12 @@ import { invisibleAuthor, visibleUser } from "./visibility.js";
  * and post content — a seq scan, fine at this scale. User input is escaped
  * (`escapeLikePattern`) so `%`, `_` and `\` are treated as literals, never as
  * pattern wildcards. Replies are excluded everywhere, mirroring the global
- * feed. pg_trgm GIN indexes are the documented future upgrade; none of this
- * changes if they land.
+ * feed. Games match on name or hashtag key (issue #314, Q24 — the catalog
+ * is ~1000 rows, the cheapest scan in the app). pg_trgm GIN indexes are the
+ * documented future upgrade; none of this changes if they land.
  *
- * All three procedures require a session, like every procedure in this app
- * (issue #36).
+ * All procedures require a session, like every procedure in this app except
+ * the reviewed public-read set (issue #36).
  */
 
 /**
@@ -117,15 +120,23 @@ export function userQueryRank(q: string): SQL<number> {
 }
 
 /**
+ * Whether a game row matches a free-text query — see `matchesGameQuery` in
+ * ./games.ts, the one definition (imported there from here would be a
+ * cycle; the typeahead below and `game.list`'s `q` both read it).
+ */
+
+/**
  * The `search` procedure group: typeahead, users, posts.
  */
 export const searchRouter = {
   /**
-   * The header dropdown: up to 5 matching profiles for a query, no cursor.
+   * The header dropdown: up to 5 matching profiles and 3 matching games for
+   * a query, no cursor.
    *
    * Users rank an exact username first, then other username prefixes, then
-   * substring-only matches. The full results page goes through `users` and
-   * `posts` below; typing only suggests profiles.
+   * substring-only matches. Games rank by the catalog's popularity order.
+   * The full results page goes through `users` and `posts` below, and its
+   * Games section through the public `game.list`; typing only suggests.
    */
   typeahead: protectedProcedure
     .use(rateLimit(RATE_LIMITS.search))
@@ -151,11 +162,26 @@ export const searchRouter = {
         )
         .limit(5);
 
+      // The catalog is public content with no viewer-relative field, so the
+      // games half needs no visibility filter — just the matcher. A tighter
+      // cap than users: covers are louder than handles in a dropdown.
+      const games = await context.db
+        .select({
+          slug: game.slug,
+          name: game.name,
+          coverMediaPath: game.coverMediaPath,
+          firstReleaseYear: game.firstReleaseYear,
+        })
+        .from(game)
+        .where(matchesGameQuery(input.q))
+        .orderBy(sql`coalesce(${game.popularityRank}, 2147483647) asc`, asc(game.igdbId))
+        .limit(3);
+
       // Keep the legacy field until older, already-open SPAs can no longer be
       // served by a rolling deployment. Those clients still read and map
       // `posts`; an empty collection preserves that response contract without
       // putting posts back into the profile-only dropdown.
-      return { users, posts: [] };
+      return { users, games, posts: [] };
     }),
 
   /**

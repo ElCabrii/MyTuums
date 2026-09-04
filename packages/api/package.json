@@ -24,6 +24,10 @@
       "types": "./src/public-post-head.ts",
       "default": "./src/public-post-head.ts"
     },
+    "./public-game-head": {
+      "types": "./src/public-game-head.ts",
+      "default": "./src/public-game-head.ts"
+    },
     "./dimensions": {
       "types": "./src/dimensions.ts",
       "default": "./src/dimensions.ts"

@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
-import { closeDb } from "@my-tuums/db";
+import { closeDb, db } from "@my-tuums/db";
 import { post, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SEARCH_PAGE_SIZE, SEARCH_QUERY_MAX_LENGTH } from "./constants.js";
 import type { Context } from "./context.js";
 import { RATE_LIMITS } from "./rate-limit.js";
+import { upsertGames } from "./games-sync.js";
 import { appRouter } from "./router.js";
 import {
   anonContext,
@@ -234,8 +235,9 @@ describe("search.typeahead", () => {
     // alpha/albert tie on the timestamp, so the id is the whole tie-break.
     const prefixUsers = [seeded[0], seeded[1]].sort((a, b) => b.id.localeCompare(a.id));
     // `posts` is retained as an empty compatibility field so an older SPA
-    // remains safe while the server rolls forward independently.
-    expect(Object.keys(result)).toEqual(["users", "posts"]);
+    // remains safe while the server rolls forward independently; `games` is
+    // the issue-#314 widening.
+    expect(Object.keys(result)).toEqual(["users", "games", "posts"]);
     expect(result.posts).toEqual([]);
     expect(result.users.map((u) => u.id)).toEqual([...prefixUsers.map((u) => u.id), seeded[2].id]);
   }, 20_000);
@@ -594,4 +596,91 @@ describe("search rate limiting", () => {
     const list = await call(appRouter.post.list, {}, { context: contextFor(viewer) });
     expect(list.items).toBeDefined();
   }, 20_000);
+});
+
+describe("search.games", () => {
+  // Four games seeded for these tests: two matching "world" via NAME, one
+  // matching only via its HASHTAG KEY (the resolution half of the matcher),
+  // one not matching at all. Ranks chosen so the popularity order differs
+  // from the seed order.
+  const SEEDED = [
+    {
+      igdbId: 910_001,
+      slug: "world-at-war",
+      hashtagKey: "worldatwar",
+      name: "World at War",
+      popularityRank: 2,
+      firstReleaseYear: 2008,
+    },
+    {
+      igdbId: 910_002,
+      slug: "other-world",
+      hashtagKey: "otherworld",
+      name: "Other World",
+      popularityRank: 1,
+      firstReleaseYear: 2019,
+    },
+    {
+      igdbId: 910_003,
+      slug: "wow-classic",
+      hashtagKey: "worldofwarcraft",
+      name: "Unrelated Title",
+      popularityRank: 3,
+      firstReleaseYear: 2019,
+    },
+    {
+      igdbId: 910_004,
+      slug: "hades",
+      hashtagKey: "hades",
+      name: "Hades",
+      popularityRank: 4,
+      firstReleaseYear: 2020,
+    },
+  ];
+
+  beforeAll(async () => {
+    await upsertGames(
+      db,
+      SEEDED.map(({ igdbId, slug, hashtagKey, name, popularityRank, firstReleaseYear }) => ({
+        igdbId,
+        slug,
+        hashtagKey,
+        name,
+        summary: null,
+        coverMediaPath: null,
+        coverImageId: null,
+        firstReleaseYear,
+        genres: [],
+        platforms: [],
+        popularityRank,
+      })),
+      new Date(),
+    );
+  });
+
+  it("typeahead offers games by name and by hashtag key, popularity-first, capped at 3", async () => {
+    const viewer = await createTestUser();
+    const result = await call(
+      appRouter.search.typeahead,
+      { q: "world" },
+      { context: contextFor(viewer) },
+    );
+
+    // Other World (rank 1) leads World at War (rank 2); the hashtag-key-only
+    // match joins them; Hades matches nothing.
+    expect(result.games.map((game) => game.slug)).toEqual([
+      "other-world",
+      "world-at-war",
+      "wow-classic",
+    ]);
+
+    // The exact hashtag key matches too — the composer's `#worldofwarcraft`
+    // recommendation path (issue Q4) is this same matcher.
+    const byKey = await call(
+      appRouter.search.typeahead,
+      { q: "worldofwarcraft" },
+      { context: contextFor(viewer) },
+    );
+    expect(byKey.games.map((game) => game.slug)).toEqual(["wow-classic"]);
+  });
 });

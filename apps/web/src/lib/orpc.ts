@@ -80,6 +80,13 @@ export type SearchUser = SearchUsersPage["items"][number];
 /** One page of `search.posts` — a keyset-paginated slice of post matches. */
 export type SearchPostsPage = Awaited<ReturnType<typeof client.search.posts>>;
 
+/** One game's public page — `game.bySlug`'s payload. */
+export type GamePageData = Awaited<ReturnType<typeof client.game.bySlug>>;
+/** One cover card in the game directory — `game.list`'s row. */
+export type GameCard = Awaited<ReturnType<typeof client.game.list>>["items"][number];
+/** A game as the search dropdown suggests it. */
+export type TypeaheadGame = SearchTypeahead["games"][number];
+
 /** One page of `moderation.queue` — unresolved report groups merged with open appeals. */
 export type ModerationQueuePage = Awaited<ReturnType<typeof client.moderation.queue>>;
 /** One case in the queue: reports and/or an open appeal against one target. */

@@ -341,6 +341,33 @@ describe("createRequestHandler", () => {
     });
   });
 
+  it("does not gate /games or a /games/<slug> page for a signed-out visitor — the public directory", async () => {
+    // Issue #314 (Q6): the game directory is the app's second public page
+    // family. The hub is an exact member of SIGNED_OUT_PATHS; the slugs ride
+    // the /games/ prefix exactly like post permalinks ride /post/.
+    const serveStatic = vi.fn().mockResolvedValue({ served: true });
+    const handle = createRequestHandler(deps({ serveStatic }));
+
+    for (const pathname of ["/games", "/games/doom-2016"]) {
+      const { res, calls } = resStub();
+      await handle(reqStub(pathname), res);
+      expect(serveStatic, pathname).toHaveBeenCalled();
+      expect(calls.statusCode, pathname).not.toBe(302);
+    }
+  });
+
+  it("still gates an encoded /games spelling — the prefix rule fails closed", async () => {
+    // `/%67ames/...` decodes to /games/... but is not the literal prefix.
+    const { res, calls } = resStub();
+    const serveStatic = vi.fn().mockResolvedValue({ served: true });
+    const handle = createRequestHandler(deps({ serveStatic }));
+
+    await handle(reqStub("/%67ames/doom-2016"), res);
+
+    expect(serveStatic).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(302);
+  });
+
   it("still gates the bare /post path — only the /post/ prefix is public", async () => {
     const { res, calls } = resStub();
     const serveStatic = vi.fn().mockResolvedValue({ served: true });

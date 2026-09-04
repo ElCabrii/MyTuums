@@ -218,6 +218,13 @@
       "when": 1788552161768,
       "tag": "0030_games-catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1788556450031,
+      "tag": "0031_games-list-indexes",
+      "breakpoints": true
     }
   ]
 }

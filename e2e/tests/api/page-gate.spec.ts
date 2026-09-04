@@ -45,6 +45,18 @@ test.describe("page gate", () => {
     expect(response.status()).not.toBe(302);
     expect(response.headers()["location"]).toBeUndefined();
   });
+
+  test("the game directory is public — the hub and every /games/ slug pass the gate (issue #314)", async ({
+    request,
+  }) => {
+    // Same reasoning as the permalink above: the gate's decision precedes
+    // any lookup, so an arbitrary slug proves the rule.
+    for (const pathname of ["/games", "/games/doom"]) {
+      const response = await request.get(pathname, { maxRedirects: 0 });
+      expect(response.status(), pathname).not.toBe(302);
+      expect(response.headers()["location"], pathname).toBeUndefined();
+    }
+  });
 });
 
 /**

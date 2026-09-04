@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
-import { getRouteApi } from "@tanstack/react-router";
+import { Link, getRouteApi } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { MessageSquare, Search, Users } from "lucide-react";
+import { Gamepad2, MessageSquare, Search, Users } from "lucide-react";
+import { GameCover } from "@/components/game-cover";
 import { PostCard } from "@/components/post-card";
 import { PaginatedState, type PaginatedStateQuery } from "@/components/paginated-state";
 import { UserRow } from "@/components/user-list";
+import { gameListAtom } from "@/atoms/games";
 import { searchPostsAtom, searchUsersAtom } from "@/atoms/search";
 import { m } from "@/paraglide/messages.js";
 
@@ -55,6 +57,7 @@ export function SearchPage() {
  */
 function SearchResultsBody({ q }: { q: string }) {
   const usersFeed = useAtomValue(searchUsersAtom(q));
+  const gamesFeed = useAtomValue(gameListAtom({ sort: "popularity", q }));
   const postsFeed = useAtomValue(searchPostsAtom(q));
 
   return (
@@ -71,6 +74,23 @@ function SearchResultsBody({ q }: { q: string }) {
         renderItem={(user) => <UserRow key={user.id} user={user} />}
       />
       <SearchResultsSection
+        feed={gamesFeed}
+        headingId="search-games-heading"
+        headingLabel={m.search_section_games()}
+        emptyIcon={Gamepad2}
+        emptyMessage={m.search_no_games({ query: q })}
+        listClassName="space-y-3"
+        renderItem={(game) => (
+          <GameResultRow
+            key={game.igdbId}
+            slug={game.slug}
+            name={game.name}
+            cover={game.coverMediaPath}
+            year={game.firstReleaseYear}
+          />
+        )}
+      />
+      <SearchResultsSection
         feed={postsFeed}
         headingId="search-posts-heading"
         headingLabel={m.search_section_posts()}
@@ -80,6 +100,35 @@ function SearchResultsBody({ q }: { q: string }) {
         renderItem={(post) => <PostCard key={post.id} post={post} />}
       />
     </div>
+  );
+}
+
+/** One game hit: cover thumb, name, year — the directory's card, row-shaped. */
+function GameResultRow({
+  slug,
+  name,
+  cover,
+  year,
+}: {
+  slug: string;
+  name: string;
+  cover: string | null;
+  year: number | null;
+}) {
+  return (
+    <Link
+      to="/games/$slug"
+      params={{ slug }}
+      className="focus-visible:ring-ring flex items-center gap-3 rounded-lg px-2 py-1.5 focus-visible:ring-2 focus-visible:outline-none"
+    >
+      <div className="bg-muted h-14 w-10 shrink-0 overflow-hidden rounded-md">
+        <GameCover cover={cover} name={name} sizes="56px" />
+      </div>
+      <span className="min-w-0">
+        <span className="text-foreground block truncate text-sm font-medium">{name}</span>
+        {year !== null && <span className="text-muted-foreground block text-xs">{year}</span>}
+      </span>
+    </Link>
   );
 }
 

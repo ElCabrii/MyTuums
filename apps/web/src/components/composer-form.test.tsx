@@ -177,6 +177,7 @@ describe("ComposerForm", () => {
           displayUsername: "Alice",
         }),
       ],
+      games: [],
       posts: [],
     };
     fakeClient.search.typeahead.mockResolvedValue(payload);
@@ -227,6 +228,7 @@ describe("ComposerForm", () => {
           displayUsername: "Albert",
         }),
       ],
+      games: [],
       posts: [],
     };
     fakeClient.search.typeahead.mockResolvedValue(payload);
@@ -270,6 +272,7 @@ describe("ComposerForm", () => {
           displayUsername: "Alice",
         }),
       ],
+      games: [],
       posts: [],
     };
     fakeClient.search.typeahead.mockResolvedValue(payload);
@@ -290,7 +293,7 @@ describe("ComposerForm", () => {
   });
 
   it("does not render an empty mention popup when no account matches", async () => {
-    fakeClient.search.typeahead.mockResolvedValue({ users: [], posts: [] });
+    fakeClient.search.typeahead.mockResolvedValue({ users: [], games: [], posts: [] });
     const queryClient = (
       await renderComposer({
         value: "@zz",
@@ -299,6 +302,7 @@ describe("ComposerForm", () => {
     ).queryClient;
     queryClient.setQueryData(orpc.search.typeahead.queryKey({ input: { q: "zz" } }), {
       users: [],
+      games: [],
       posts: [],
     });
 

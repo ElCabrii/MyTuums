@@ -40,6 +40,7 @@ describe("SearchBox suggestions", () => {
   it("renders profile and see-all rows from the typeahead cache", async () => {
     await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
 
@@ -53,6 +54,7 @@ describe("SearchBox suggestions", () => {
   it("navigates to the profile on a user-row click and dismisses the list", async () => {
     const { router, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
     const input = screen.getByRole("combobox");
@@ -75,6 +77,7 @@ describe("SearchBox suggestions", () => {
   it("dismisses the list when the user clicks outside", async () => {
     const { user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
 
@@ -84,7 +87,7 @@ describe("SearchBox suggestions", () => {
   });
 
   it("shows the no-results line instead of a lone see-all row for an empty payload", async () => {
-    const { router } = await openSuggestions("hello", { users: [], posts: [] });
+    const { router } = await openSuggestions("hello", { users: [], games: [], posts: [] });
 
     expect(screen.getByRole("option", { name: "No results for “hello”." })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "See all results" })).not.toBeInTheDocument();
@@ -94,6 +97,7 @@ describe("SearchBox suggestions", () => {
   it("see-all row appears with results and carries the query into /search", async () => {
     const { router, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
 
@@ -106,6 +110,7 @@ describe("SearchBox suggestions", () => {
   it("clear empties the input and hands the caret back", async () => {
     const { store, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
     const input = screen.getByRole("combobox");
@@ -138,6 +143,7 @@ describe("SearchBox debounce and keyboard contract", () => {
     const queryClient = createTestQueryClient();
     queryClient.setQueryData(orpc.search.typeahead.queryKey({ input: { q: "ab" } }), {
       users: [makeUserSummary({ name: "Able User", username: "able" })],
+      games: [],
       posts: [],
     });
     await renderWithProviders(<SearchBox />, { store, queryClient });
@@ -171,6 +177,7 @@ describe("SearchBox debounce and keyboard contract", () => {
   it("wraps the shared highlight and exposes it through combobox ARIA state", async () => {
     const { store } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
     const press = (key: "ArrowDown" | "ArrowUp") => {
@@ -212,6 +219,7 @@ describe("SearchBox debounce and keyboard contract", () => {
   ])("Enter follows the highlighted $label row", async ({ arrows, pathname }) => {
     const { router, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
 
@@ -230,6 +238,7 @@ describe("SearchBox debounce and keyboard contract", () => {
   it("Enter without a highlight opens the full search page", async () => {
     const { router, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
 
@@ -243,6 +252,7 @@ describe("SearchBox debounce and keyboard contract", () => {
   it("reopens suggestions on the first real focus after Enter navigation", async () => {
     const { user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
     const input = screen.getByRole("combobox");
@@ -258,6 +268,7 @@ describe("SearchBox debounce and keyboard contract", () => {
   it("Escape preserves the query, clears the highlight, and stays dismissed through focus return", async () => {
     const { store, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
     const input = screen.getByRole("combobox");

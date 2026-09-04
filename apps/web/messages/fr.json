@@ -39,7 +39,7 @@
   "nav_notifications_unread_one": "Notifications, {count} non lue",
   "nav_notifications_unread_many": "Notifications, {count} non lues",
   "nav_profile": "Profil",
-  "nav_search_placeholder": "Rechercher des personnes et des posts",
+  "nav_search_placeholder": "Rechercher des personnes, des publications et des jeux",
   "search_clear": "Effacer la recherche",
   "search_input_aria": "Rechercher",
   "search_results_for": "Résultats pour « {query} »",
@@ -246,7 +246,6 @@
   "avatar_upgrade_action": "Recadrer la photo",
   "avatar_upgrade_dismiss": "Ignorer",
   "avatar_upgrade_failed": "Impossible de charger la photo d'origine. Réessayez, ou envoyez-en une nouvelle depuis les paramètres.",
-
   "settings_handle_title": "Pseudo",
   "settings_handle_description": "Le @pseudo par lequel on vous trouve.",
   "settings_handle_warning": "Le modifier casse tous les liens existants vers votre profil et libère votre ancien pseudo pour quelqu’un d’autre.",
@@ -302,11 +301,8 @@
   "post_repost": "Republier cette publication ({count})",
   "post_unrepost": "Annuler votre republication ({count})",
   "post_reposted_by": "{name} a republié",
-
   "post_repost_menu_repost": "Republier",
-
   "post_repost_menu_unrepost": "Annuler la republication",
-
   "post_repost_menu_quote": "Citer",
   "post_quote": "Citer cette publication",
   "post_quoted_unavailable": "Cette publication est indisponible.",
@@ -798,5 +794,24 @@
   "legal_notice_s6_p3_strong": "PHAROS",
   "legal_notice_s6_p3_after": " — ",
   "legal_notice_s7_title": "7. Droit applicable",
-  "legal_notice_s7_p1": "Les présentes mentions légales sont soumises au droit français."
+  "legal_notice_s7_p1": "Les présentes mentions légales sont soumises au droit français.",
+  "games_document_description": "Parcourez l'annuaire des jeux MyTuums — tous les jeux dont la communauté parle.",
+  "game_document_description": "Fiches de jeux MyTuums — genres, plateformes et années de sortie.",
+  "nav_games": "Jeux",
+  "games_title": "Jeux",
+  "games_empty": "Aucun jeu dans l'annuaire pour l'instant.",
+  "games_filter_aria": "Filtrer les jeux",
+  "games_filter_placeholder": "Filtrer par nom ou hashtag",
+  "games_filter_empty": "Aucun jeu ne correspond à « {query} ».",
+  "games_sort_label": "Trier les jeux",
+  "games_sort_popularity": "Popularité",
+  "games_sort_name": "A à Z",
+  "games_sort_year": "Année de sortie",
+  "game_not_found": "Jeu introuvable.",
+  "game_released_in": "Sorti en {year}",
+  "game_favorite_count": "Favoris : {count}",
+  "game_genres": "Genres",
+  "game_platforms": "Plateformes",
+  "search_section_games": "Jeux",
+  "search_no_games": "Aucun jeu trouvé pour « {query} »."
 }

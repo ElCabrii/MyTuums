@@ -172,6 +172,7 @@ The router's top-level groups:
 - `me` — the caller's own session user
 - `post` — `create`, `delete`, `list`, `thread`, `like`, `unlike`
 - `user` — `byUsername`, `uploadImage`, `removeImage`, `follow`, `unfollow`, `followers`, `following`
+- `game` — `bySlug`, `list` (public: the `/games` directory, issue #314)
 - `search` — `typeahead`, `users`, `posts`
 - `notification` — `list`, `unreadCount`, `markRead`
 - `moderation` — reports, blocks, the queue, the staff actions, the audit log, appeals

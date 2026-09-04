@@ -907,10 +907,18 @@ export const game = pgTable(
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, precision: 3 }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
   },
-  // No list indexes yet, deliberately: "indexes mirror the cursors", and the
-  // first cursor-shaped reader (the `/games` index page) arrives with the
-  // public-surfaces stage of #314, in the same migration as its queries.
-  () => [],
+  // The three `/games` index cursors (issue Q23), one index per sort, each
+  // mirroring the exact expression the query in packages/api/src/games.ts
+  // orders and cursor-compares by. The `coalesce` is not cosmetic: it pins
+  // null keys to the deterministic end of each order AND keeps the row-value
+  // cursor comparison total (a bare NULL key would make the comparison NULL
+  // and silently strand every row past it). All ASC — the year sort's DESC
+  // DESC order reads these backwards, which a btree serves natively.
+  (t) => [
+    index("game_name_idx").on(t.name, t.igdbId),
+    index("game_popularity_idx").on(sql`coalesce(${t.popularityRank}, 2147483647)`, t.igdbId),
+    index("game_year_idx").on(sql`coalesce(${t.firstReleaseYear}, 0)`, t.igdbId),
+  ],
 );
 
 /**

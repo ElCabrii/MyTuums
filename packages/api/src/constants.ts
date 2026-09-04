@@ -46,6 +46,16 @@ export const SEARCH_PAGE_SIZE_MAX = 50;
 export const MODERATION_PAGE_SIZE = 20;
 export const MODERATION_PAGE_SIZE_MAX = 50;
 
+/**
+ * Default and maximum page sizes for `game.list` and `search.games`
+ * (issue Q23: 20 games per page on the public index).
+ */
+export const GAMES_PAGE_SIZE = 20;
+export const GAMES_PAGE_SIZE_MAX = 50;
+
+/** Ceiling on a `/games/{slug}` lookup's slug input, in characters. */
+export const GAME_SLUG_MAX_LENGTH = 120;
+
 /** Default and maximum page sizes for `notification.list`. */
 export const NOTIFICATION_PAGE_SIZE = 20;
 export const NOTIFICATION_PAGE_SIZE_MAX = 50;
@@ -516,6 +526,10 @@ export const SIGNED_OUT_PATHS = new Set<string>([
   // produces a session, so whoever lands here is signed out by definition —
   // exempt for the same reason /appeal is.
   "/banned",
+  // The game directory's hub (issue #314, Q6): public like the game pages
+  // under the `/games/` prefix below, while `/discover` itself stays
+  // session-gated — the games URL space is public, the feeds are not.
+  "/games",
 ]);
 
 /**
@@ -531,12 +545,17 @@ export const SIGNED_OUT_PATHS = new Set<string>([
  * post from a signed-in viewer (tombstones, bans, blocks) hides it from an
  * anonymous one.
  *
+ * `/games/` is the game pages' half of the public game directory (issue
+ * #314, Q6): a game page renders for a signed-out visitor — strictly game
+ * data through the public `game.bySlug`/`game.list` reads — with the
+ * favorite button hidden until they sign in.
+ *
  * Reads through the same `isSignedOutPath` predicate as `SIGNED_OUT_PATHS`
  * so the two gates (server and client) still share ONE definition — the
  * redirect-loop guarantee below depends on it, and a prefix rule that only
  * one gate knew about would be exactly that bug.
  */
-const SIGNED_OUT_PATH_PREFIXES = ["/post/"];
+const SIGNED_OUT_PATH_PREFIXES = ["/post/", "/games/"];
 
 /** Whether a pathname (not percent-decoded — see the gates) is open to a signed-out visitor. */
 export function isSignedOutPath(pathname: string): boolean {

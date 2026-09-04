@@ -1,5 +1,6 @@
 import {
   FOLLOW_PAGE_SIZE,
+  GAMES_PAGE_SIZE,
   MODERATION_PAGE_SIZE,
   NOTIFICATION_PAGE_SIZE,
   POST_PAGE_SIZE,
@@ -124,6 +125,53 @@ export function profileQueryOptions(username: string) {
     // long enough that moving between links does not refetch the same person.
     staleTime: 60_000,
   };
+}
+
+/** The `/games` index's list parameters — `q` is the page's filter bar. */
+export interface GameListParams {
+  sort: "popularity" | "name" | "year";
+  q?: string;
+}
+
+interface PagedGameListInput {
+  sort: "popularity" | "name" | "year";
+  limit: number;
+  q?: string;
+  cursor?: string;
+}
+
+/**
+ * One game's public page. `retryUnlessClientError` because a NOT_FOUND slug
+ * is a client error — retrying it would just ask again for a game that is
+ * not there.
+ */
+export function gameQueryOptions(slug: string) {
+  return {
+    ...orpc.game.bySlug.queryOptions({ input: { slug } }),
+    retry: retryUnlessClientError,
+  };
+}
+
+/**
+ * The game directory's list, keyset-paginated per sort. The conditional `q`
+ * spread follows the same rule as `postListQueryOptions`' fields: a bare
+ * key for the unfiltered listing, a discriminated one the moment a filter
+ * exists, so the two never share a cache entry.
+ */
+export function gameListQueryOptions({ sort, q }: GameListParams) {
+  const normalized = q?.trim();
+  return orpc.game.list.infiniteOptions({
+    input: (cursor: string | undefined) => {
+      const input: PagedGameListInput = { sort, limit: GAMES_PAGE_SIZE };
+      if (normalized) input.q = normalized;
+      if (cursor) input.cursor = cursor;
+      return input;
+    },
+    initialPageParam:
+      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+      undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  });
 }
 
 export function threadQueryOptions(postId: string) {
