@@ -51,7 +51,12 @@ COPY . .
 # CI builds when the runner's registry route degraded). The `test` guard
 # fails the build rather than letting a lockfile-format change collapse
 # the pin into a bare `npx -y turbo@` — which would fetch latest.
-RUN --mount=type=cache,target=/root/.npm \
+# The `id` is spelled out even though BuildKit defaults it to the target
+# path: Railway's Metal builder refuses a cache mount without an explicit
+# id ("flag --mount=type=cache,target=... is missing an id argument"), and
+# keeping the default's value means CI's existing warm cache namespace is
+# preserved rather than forking a second one.
+RUN --mount=type=cache,id=/root/.npm,target=/root/.npm \
     TURBO_VERSION="$(sed -n 's/^  turbo@\([0-9.]*\):$/\1/p' pnpm-lock.yaml | head -n 1)" && \
     test -n "$TURBO_VERSION" && \
     npx -y "turbo@${TURBO_VERSION}" prune @my-tuums/server @my-tuums/web @my-tuums/branding --docker && \
