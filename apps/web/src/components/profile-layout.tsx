@@ -26,6 +26,7 @@ import { ImageViewer } from "@/components/image-viewer";
 import { AvatarUpgradePrompt } from "@/components/avatar-upgrade-prompt";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
+import { ProfileBadges } from "@/components/profile-badges";
 import { ProfileMessage } from "@/components/profile-message";
 import { LinkedText } from "@/components/linked-text";
 import { useDocumentHead } from "@/hooks/use-document-head";
@@ -272,6 +273,10 @@ export function ProfileLayout() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{displayName}</h1>
+              {/* Earned badges (issue #308) — the API's display set, already
+                  in canonical order; nothing renders for a badge-less
+                  profile. */}
+              <ProfileBadges badges={profile.badges} iconClassName="size-5" />
             </div>
             <p className="text-muted-foreground text-sm font-medium">@{handle}</p>
           </div>

@@ -460,6 +460,56 @@ export const report = pgTable(
 );
 
 /**
+ * A stamped profile badge (issue #308) — one row per (user, badge), written
+ * the moment the badge is earned. Every badge is an achievement: once the
+ * row exists it is never withdrawn, so an earned distinction survives the
+ * count that earned it receding (followers unfollowing, likes unliking).
+ * Tiered families hold one row per account that only moves up: crossing the
+ * next threshold upgrades the row (packages/api/src/badge-stamping.ts).
+ *
+ * The writers, one per family: the post-like tiers stamp inside
+ * `post.like`'s transaction when a post's like count first passes a
+ * threshold; the follower tiers stamp inside `user.follow`'s transaction
+ * the same way; the join badges stamp at account creation
+ * (packages/db/src/stamp-join-badges.ts — the higher of whatever tiers the
+ * creation rank earns, called by the auth instance's create hook, with
+ * migration 0028's backfill covering accounts that predate it); and
+ * `founder` is granted out of band to the three founder accounts by the
+ * committed bootstrap script (packages/db/src/grant-founder-badge.ts).
+ *
+ * The `badge` check constraint's list is BADGE_IDS from
+ * `@my-tuums/api/badges` (packages/api/src/badges.ts), duplicated here as a
+ * SQL literal because this package cannot import from the API (the dependency
+ * points the other way). Keep the two in step — badges.ts's unit test pins
+ * its half.
+ */
+export const userBadge = pgTable(
+  "user_badge",
+  {
+    // `user.id` is text (BetterAuth's own id format), so the FK must be too.
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    badge: text("badge").notNull(),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above.
+    earnedAt: timestamp("earned_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    // This composite primary key *is* the "a badge is stamped at most once per
+    // account" rule, the same idempotency mechanism post_like uses: the
+    // stamping insert says `onConflictDoNothing`, so a threshold re-crossed
+    // after a recede (likes falling below a tier and climbing back over it)
+    // mints no second row and no writer can race one.
+    primaryKey({ columns: [t.userId, t.badge] }),
+    check(
+      "user_badge_badge",
+      sql`${t.badge} in ('popular', 'rising_star', 'star', 'superstar', 'supernova', 'noticed', 'trendy', 'big', 'exploding', 'giant', 'founder', 'super_early_access', 'early_access')`,
+    ),
+  ],
+);
+
+/**
  * A directed block edge from `blockerId` to `blockedId` (issue #38).
  *
  * Blocking is mutual in the design: a blocked user cannot see the blocker
@@ -886,6 +936,11 @@ export const reportRelations = relations(report, ({ one }) => ({
     references: [user.id],
     relationName: "resolvedBy",
   }),
+}));
+
+/** Drizzle relations for `userBadge` — the account whose profile displays it. */
+export const userBadgeRelations = relations(userBadge, ({ one }) => ({
+  user: one(user, { fields: [userBadge.userId], references: [user.id] }),
 }));
 
 /** Drizzle relations for `userBlock` — the `user` rows on both sides of the edge. */

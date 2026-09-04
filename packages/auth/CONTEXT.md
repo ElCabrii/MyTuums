@@ -111,6 +111,17 @@ Each of these is a deliberate, non-default setting. The inline comment in
 - **The validation hooks are not applied in the test instance.** Fixtures may
   need to mint rows the rules would reject; the rules themselves are pure and
   tested separately.
+- **`user.create.after` stamps the join badges (issue #308).** Every creation
+  path — email/password and OAuth — runs it, calling
+  `stampJoinBadges` from `@my-tuums/db/stamp-join-badges`: creation rank is
+  fixed the moment the account exists, and the stamp is the only moment it
+  can be earned (accounts that predate the hook were backfilled by migration
+  0028). A hook failure fails the sign-up loudly on purpose — pre-deploy
+  migrations guarantee `user_badge` exists, so anything thrown is a
+  deployment error, not a cosmetic badge worth swallowing. The test instance
+  carries no hooks at all, so fixtures never carry join badges; the stamping
+  itself is pinned through this production instance in
+  `packages/api/src/badges.int.test.ts`.
 - **`src/rules.ts` has no imports, and must never gain one.** It is exposed as
   `@my-tuums/auth/rules` and `apps/web` imports it — it is the only part of
   this package the browser may reach. One `@my-tuums/db` import there throws at
