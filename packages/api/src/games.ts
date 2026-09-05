@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import type { Database } from "@my-tuums/db";
 import { game, gameFavorite, user } from "@my-tuums/db/schema";
@@ -188,6 +188,59 @@ export type GameCardRow = {
   popularityRank: number | null;
   favoriteCount: number;
 };
+
+/**
+ * The hashtag tokens the client's linkifier can produce, as one regex — the
+ * server-side mirror of `matchHashtag`'s word charset (`[a-zA-Z0-9_]`, apps/
+ * web `linked-text.tsx`). Extracting a SUPERSET of what the client will
+ * actually linkify is harmless (extra map keys are never read); a subset
+ * would silently drop resolutions.
+ */
+const HASHTAG_TOKEN = /#([a-zA-Z0-9_]{1,99})/g;
+
+/**
+ * Every distinct hashtag key a batch of texts contains, lowercased and
+ * hash-stripped — the client's canonical tag shape. Underscored tokens stay
+ * (the client links them; no game key contains one, so they simply match
+ * nothing), and the set is capped so a pathological batch cannot build an
+ * unbounded IN list.
+ */
+export function extractHashtagKeys(
+  texts: Iterable<string | null | undefined>,
+  maxKeys = 200,
+): string[] {
+  const keys = new Set<string>();
+  for (const text of texts) {
+    if (!text) continue;
+    for (const match of text.matchAll(HASHTAG_TOKEN)) {
+      keys.add(match[1].toLowerCase());
+      if (keys.size >= maxKeys) return [...keys];
+    }
+  }
+  return [...keys];
+}
+
+/**
+ * The per-batch hashtag→game map (issue #314, Q16/Q21): one keyed lookup
+ * alongside the posts query, returned on the response so the renderer can
+ * link resolved tags to `/games/{slug}` while unresolved tags keep their
+ * search link. A superset of the client's tokens is fine; a miss is simply
+ * an absent key.
+ */
+export async function gameMentionsFor(
+  db: GameReader,
+  texts: Iterable<string | null | undefined>,
+): Promise<Record<string, string>> {
+  const keys = extractHashtagKeys(texts);
+  if (keys.length === 0) return {};
+
+  const rows = await db
+    .select({ hashtagKey: game.hashtagKey, slug: game.slug })
+    .from(game)
+    .where(inArray(game.hashtagKey, keys));
+
+  return Object.fromEntries(rows.map((row) => [row.hashtagKey, row.slug]));
+}
 
 /**
  * The games list's keyset walker — the shared skeleton's discipline (+1

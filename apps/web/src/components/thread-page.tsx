@@ -102,13 +102,23 @@ export function ThreadPage() {
           {/* Twitter style connecting line for ancestors */}
           <div className="border-border/80 divide-border/40 my-1 ml-6 space-y-0 divide-y border-l-2 pl-4">
             {ancestors.map((ancestor) => (
-              <PostCard key={ancestor.id} post={ancestor} variant="ancestor" />
+              <PostCard
+                key={ancestor.id}
+                post={ancestor}
+                variant="ancestor"
+                gameMentions={threadQuery.data?.gameMentions}
+              />
             ))}
           </div>
         </div>
       )}
 
-      <PostCard post={post} variant="focused" priorityImages />
+      <PostCard
+        post={post}
+        variant="focused"
+        priorityImages
+        gameMentions={threadQuery.data?.gameMentions}
+      />
 
       {/* Twitter-style reply section header & composer */}
       <div className="border-border/60 space-y-4 border-t pt-4">

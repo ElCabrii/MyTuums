@@ -60,7 +60,13 @@ describe("suggestionRows", () => {
   // are enough to keep the dropdown (and its see-all) alive.
   it("places game rows between the profiles and the see-all row", () => {
     const alice = makeUser({ id: "u-alice" });
-    const hades = { slug: "hades", name: "Hades", coverMediaPath: null, firstReleaseYear: 2020 };
+    const hades = {
+      slug: "hades",
+      hashtagKey: "hades",
+      name: "Hades",
+      coverMediaPath: null,
+      firstReleaseYear: 2020,
+    };
 
     expect(suggestionRows(typeahead([alice], [hades]))).toEqual([
       { kind: "user", user: alice },

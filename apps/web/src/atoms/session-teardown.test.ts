@@ -38,7 +38,9 @@ describe("clearViewerState", () => {
     // Viewer-relative rows behind viewer-less query keys: the exact reason the
     // cache is cleared wholesale rather than invalidated.
     fixtures.profile.data("alexmercer", makeProfile({ viewerIsFollowing: true }));
-    fixtures.postList.data([{ items: [makePost({ viewerHasLiked: true })], nextCursor: null }]);
+    fixtures.postList.data([
+      { items: [makePost({ viewerHasLiked: true })], nextCursor: null, gameMentions: {} },
+    ]);
     fixtures.thread.data("post-1", makeThread());
     fixtures.userList.data("alexmercer", "followers", [
       { items: [makeUserSummary({ viewerIsFollowing: true })], nextCursor: null },

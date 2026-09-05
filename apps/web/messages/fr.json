@@ -818,5 +818,6 @@
   "game_favorite_action": "Favori",
   "game_unfavorite_action": "Retirer des favoris",
   "game_favorite_signed_out": "Connectez-vous pour ajouter des jeux en favoris.",
-  "profile_favorite_games": "Jeux favoris"
+  "profile_favorite_games": "Jeux favoris",
+  "composer_game_suggestions_aria": "Jeux suggérés"
 }

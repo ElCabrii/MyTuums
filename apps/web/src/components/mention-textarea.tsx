@@ -3,16 +3,30 @@ import { useEffect, useLayoutEffect, useRef, type CSSProperties, type KeyboardEv
 import { Loader2 } from "lucide-react";
 import { composerMentionAtomFamily } from "@/atoms/composer-mentions";
 import { typeaheadQueryAtomFamily } from "@/atoms/search";
+import { GameCover } from "@/components/game-cover";
 import { Textarea } from "@/components/ui/textarea";
 import { UserAvatar } from "@/components/user-avatar";
-import { insertMention, mentionAtCaret } from "@/lib/composer-mentions";
+import {
+  hashtagAtCaret,
+  insertHashtag,
+  insertMention,
+  mentionAtCaret,
+} from "@/lib/composer-mentions";
 import { nextHighlight, suggestionRows, type SuggestionRow } from "@/lib/search-suggestions";
-import { type SearchUser } from "@/lib/orpc";
+import { type SearchUser, type TypeaheadGame } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
 /** A user the mention dropdown can accept: a profile with a resolvable handle. */
 type MentionableUser = { user: SearchUser; handle: string };
+
+/** A game the tag dropdown can accept, paired with its canonical hashtag key. */
+type SuggestableGame = { game: TypeaheadGame; hashtagKey: string };
+
+/** The games a tag dropdown can accept: the typeahead payload's games as-is. */
+function suggestionGames(games: TypeaheadGame[] | undefined): SuggestableGame[] {
+  return (games ?? []).map((game) => ({ game, hashtagKey: game.hashtagKey }));
+}
 
 /**
  * The user rows a mention dropdown can accept: profiles with a resolvable
@@ -33,6 +47,58 @@ function mentionUsers(rows: SuggestionRow[]): MentionableUser[] {
 /** Frame classes shared by the populated list and the loading spinner. */
 const panelClass =
   "border-border bg-popover text-popover-foreground absolute top-[calc(100%+0.5rem)] right-0 left-0 z-50 rounded-xl border shadow-lg";
+
+function GameSuggestions({
+  rows,
+  highlight,
+  onHighlight,
+  onAccept,
+  listboxId,
+  optionId,
+}: {
+  rows: SuggestableGame[];
+  highlight: number;
+  onHighlight: (index: number) => void;
+  onAccept: (index: number) => void;
+  listboxId: string;
+  optionId: (index: number) => string;
+}) {
+  return (
+    <div
+      id={listboxId}
+      role="listbox"
+      aria-label={m.composer_game_suggestions_aria()}
+      className={`${panelClass} max-h-60 overflow-y-auto p-1.5`}
+    >
+      {rows.map((row, index) => (
+        <button
+          key={row.game.slug}
+          type="button"
+          role="option"
+          aria-selected={index === highlight}
+          id={optionId(index)}
+          onMouseDown={(event) => event.preventDefault()}
+          onMouseEnter={() => onHighlight(index)}
+          onClick={() => onAccept(index)}
+          className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left ${
+            index === highlight ? "bg-muted/60" : ""
+          }`}
+        >
+          <div className="bg-muted h-8 w-6 shrink-0 overflow-hidden rounded-sm">
+            <GameCover cover={row.game.coverMediaPath} name={row.game.name} sizes="32px" />
+          </div>
+          <span className="min-w-0">
+            <span className="text-foreground block truncate text-sm font-medium">
+              {row.game.name}
+            </span>
+            {/* The key is the contract: accepting writes exactly this tag. */}
+            <span className="text-muted-foreground block truncate text-xs">#{row.hashtagKey}</span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function MentionSuggestions({
   rows,
@@ -123,6 +189,7 @@ export function MentionTextarea({
   id,
   style,
   disabled = false,
+  enableGameSuggestions = false,
 }: {
   value: string;
   onValueChange: (next: string) => void;
@@ -144,6 +211,13 @@ export function MentionTextarea({
    */
   style?: CSSProperties;
   disabled?: boolean;
+  /**
+   * Whether `#tag` completion offers games (issue #314, Q4). The post, reply
+   * and quote composers say yes; the bio editor says no — a bio's hashtags
+   * render through the same linkifier but the bio has no batch map, so
+   * suggesting a resolvable tag there would promise a link it cannot keep.
+   */
+  enableGameSuggestions?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingCaretRef = useRef<number | null>(null);
@@ -151,11 +225,16 @@ export function MentionTextarea({
   const [mentionState, setMentionState] = useAtom(composerMentionAtomFamily(mentionScope));
   const mentionQuery = mentionState.token?.query ?? "";
   const typeahead = useAtomValue(typeaheadQueryAtomFamily(mentionQuery));
-  const rowsForQuery = mentionUsers(suggestionRows(typeahead.data));
+  // Which kind of token is active is a property of the marker the state's
+  // token was found under — one token, one kind, never both.
+  const completingHashtag = mentionState.token !== null && value[mentionState.token.start] === "#";
+  const userRows = completingHashtag ? [] : mentionUsers(suggestionRows(typeahead.data));
+  const gameRows = completingHashtag ? suggestionGames(typeahead.data?.games) : [];
+  const activeRowCount = completingHashtag ? gameRows.length : userRows.length;
   // Suggestions suppress while the field is disabled — a disabled textarea
   // cannot be typed into, so an open list has no source gesture to keep it up.
   const showMentionSuggestions =
-    !disabled && mentionState.open && (typeahead.isPending || rowsForQuery.length > 0);
+    !disabled && mentionState.open && (typeahead.isPending || activeRowCount > 0);
 
   // Namespaced once so the listbox/option ids and the ARIA wiring all agree,
   // and so two editors on the same page never collide on a duplicate id.
@@ -189,7 +268,11 @@ export function MentionTextarea({
 
   const updateMentionState = (nextValue: string, start: number | null, end: number | null) => {
     if (suppressSelectionRef.current) return;
-    const token = mentionAtCaret(nextValue, start, end);
+    // The caret sits in at most one token kind; `@` wins when both parsers
+    // could claim it (they cannot — a token's marker differs).
+    const token =
+      mentionAtCaret(nextValue, start, end) ??
+      (enableGameSuggestions ? hashtagAtCaret(nextValue, start, end) : null);
     setMentionState((previous) => {
       const tokenIsUnchanged =
         token !== null &&
@@ -208,11 +291,15 @@ export function MentionTextarea({
   };
 
   const acceptMention = (index: number) => {
-    const row = rowsForQuery[index];
     const token = mentionState.token;
-    if (!token || !row) return;
+    if (!token) return;
+    // The active kind's row at the highlighted index — an out-of-range index
+    // (no rows for this query) simply accepts nothing.
+    const insertion = completingHashtag
+      ? gameRows[index] && insertHashtag(value, token, gameRows[index].hashtagKey)
+      : userRows[index] && insertMention(value, token, userRows[index].handle);
+    if (!insertion) return;
 
-    const insertion = insertMention(value, token, row.handle);
     // Both branches arm the selection guard and leave it armed: restoring the
     // caret queues a synthetic `select` that must not re-open the list. See
     // the layout effect above and the onChange/onClick handlers.
@@ -242,14 +329,14 @@ export function MentionTextarea({
         event.preventDefault();
         setMentionState((previous) => ({
           ...previous,
-          highlight: nextHighlight(previous.highlight, 1, rowsForQuery.length),
+          highlight: nextHighlight(previous.highlight, 1, activeRowCount),
         }));
         break;
       case "ArrowUp":
         event.preventDefault();
         setMentionState((previous) => ({
           ...previous,
-          highlight: nextHighlight(previous.highlight, -1, rowsForQuery.length),
+          highlight: nextHighlight(previous.highlight, -1, activeRowCount),
         }));
         break;
       case "Enter":
@@ -327,7 +414,18 @@ export function MentionTextarea({
         style={style}
       />
       {showMentionSuggestions &&
-        (typeahead.isPending ? (
+        (completingHashtag ? (
+          <GameSuggestions
+            rows={gameRows}
+            highlight={mentionState.highlight}
+            onHighlight={(index) =>
+              setMentionState((previous) => ({ ...previous, highlight: index }))
+            }
+            onAccept={acceptMention}
+            listboxId={listboxId}
+            optionId={optionId}
+          />
+        ) : typeahead.isPending ? (
           <div
             id={listboxId}
             role="listbox"
@@ -338,7 +436,7 @@ export function MentionTextarea({
           </div>
         ) : (
           <MentionSuggestions
-            rows={rowsForQuery}
+            rows={userRows}
             highlight={mentionState.highlight}
             onHighlight={(index) =>
               setMentionState((previous) => ({ ...previous, highlight: index }))

@@ -298,6 +298,12 @@ notification when a badge is earned.
 - Games surface in search alongside people and posts: the header typeahead
   offers up to three games (name or hashtag-key match, popularity order),
   and `/search` carries a Games section.
+- A hashtag that matches a game's hashtag key links to that game's page —
+  everywhere post text renders (feeds, threads, search). The link is decided
+  by a per-batch map the server computes beside each page of posts; a tag
+  the catalog does not answer keeps its original post-search link. While
+  writing, the composer suggests the catalog's full key for a partial or
+  abbreviated tag (`#wow` → accept `#worldofwarcraft`).
 - A signed-in user can favorite a game from its page — a public stamp, not a
   private save: the count on the game page is public, and the user's profile
   carries a favorites rail (a cover strip on mobile, a column beside the
@@ -476,7 +482,9 @@ strictly game data — no post feed. _Avoid:_ games list, IGDB database.
 non-alphanumeric character stripped (`Baldur's Gate 3` → `baldursgate3`).
 Assigned once and never rewritten — when two games collide, the later one
 takes a release-year suffix (`doom2016`). Distinct from the slug, which is
-the URL shape (`baldurs-gate-3`). _Avoid:_ tag id, game handle.
+the URL shape (`baldurs-gate-3`). A post hashtag equal to a key resolves to
+that game's page; anything else stays a post-search link. _Avoid:_ tag id,
+game handle.
 
 **Game favorite** — a user's public stamp on a game: the count is public on
 the game's page, and the user's profile shows their favorited games to every

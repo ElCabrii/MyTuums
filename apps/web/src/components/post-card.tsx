@@ -59,7 +59,14 @@ function quotedAuthorName(quoted: NonNullable<Post["quoted"]>): string {
  * hidden from the viewer. Kept non-interactive apart from its link so it
  * cannot nest action rows inside the outer card's shell.
  */
-function QuotedPostCard({ quoted }: { quoted: NonNullable<Post["quoted"]> }) {
+function QuotedPostCard({
+  quoted,
+  gameMentions,
+}: {
+  quoted: NonNullable<Post["quoted"]>;
+  /** The outer card's batch map — the quoted text linkifies with the same answers. */
+  gameMentions?: Record<string, string>;
+}) {
   const quotedHandle = handleOf(quoted.author);
   const authorName = quotedAuthorName(quoted);
 
@@ -113,7 +120,7 @@ function QuotedPostCard({ quoted }: { quoted: NonNullable<Post["quoted"]> }) {
       </Link>
       {quoted.content && (
         <p className="text-foreground/90 text-sm leading-relaxed break-words whitespace-pre-line">
-          <LinkedText text={quoted.content} />
+          <LinkedText text={quoted.content} gameMentions={gameMentions} />
         </p>
       )}
       <PostAttachmentGrid attachments={quoted.attachments} />
@@ -152,11 +159,20 @@ export function PostCard({
   variant = "feed",
   showParentContext = true,
   priorityImages = false,
+  gameMentions,
 }: {
   post: Post;
   variant?: PostCardVariant;
   /** Whether to render the immediate-parent preview; feed lists choose their surface explicitly. */
   showParentContext?: boolean;
+  /**
+   * The batch's hashtag→slug map the server computed beside this post's
+   * page: resolved tags render as links to their game pages, unresolved
+   * ones keep their search links. Optional because surfaces without a
+   * batch (none today render post text, but the type stays honest) still
+   * render every tag the original way.
+   */
+  gameMentions?: Record<string, string>;
   /**
    * Load this card's images eagerly at display width — for the post a cold
    * visitor's LCP actually lands on (the first feed card, a thread's focused
@@ -518,7 +534,7 @@ export function PostCard({
                     isFocused ? "text-base" : "text-sm"
                   }`}
                 >
-                  <LinkedText text={post.content} />
+                  <LinkedText text={post.content} gameMentions={gameMentions} />
                 </p>
               )}
               {/* The card belongs to the first URL of the text (issue #260),
@@ -534,7 +550,7 @@ export function PostCard({
                   the projection (stub or unavailable) rather than hidden. */}
               {post.quotedPostId &&
                 (post.quoted ? (
-                  <QuotedPostCard quoted={post.quoted} />
+                  <QuotedPostCard quoted={post.quoted} gameMentions={gameMentions} />
                 ) : (
                   <div className="border-border/60 bg-muted/30 mb-3 rounded-lg border p-3">
                     <p className="text-muted-foreground text-sm">{m.post_quoted_unavailable()}</p>

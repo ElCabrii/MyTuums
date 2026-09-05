@@ -6,6 +6,7 @@ import { GameCover } from "@/components/game-cover";
 import { PostCard } from "@/components/post-card";
 import { PaginatedState, type PaginatedStateQuery } from "@/components/paginated-state";
 import { UserRow } from "@/components/user-list";
+import { mergedGameMentions } from "@/lib/game-mentions";
 import { gameListAtom } from "@/atoms/games";
 import { searchPostsAtom, searchUsersAtom } from "@/atoms/search";
 import { m } from "@/paraglide/messages.js";
@@ -59,6 +60,7 @@ function SearchResultsBody({ q }: { q: string }) {
   const usersFeed = useAtomValue(searchUsersAtom(q));
   const gamesFeed = useAtomValue(gameListAtom({ sort: "popularity", q }));
   const postsFeed = useAtomValue(searchPostsAtom(q));
+  const gameMentions = mergedGameMentions(postsFeed.data?.pages ?? []);
 
   return (
     <div className="mx-auto max-w-2xl space-y-8 px-4 py-8">
@@ -97,7 +99,7 @@ function SearchResultsBody({ q }: { q: string }) {
         emptyIcon={MessageSquare}
         emptyMessage={m.search_no_posts({ query: q })}
         listClassName="space-y-4"
-        renderItem={(post) => <PostCard key={post.id} post={post} />}
+        renderItem={(post) => <PostCard key={post.id} post={post} gameMentions={gameMentions} />}
       />
     </div>
   );

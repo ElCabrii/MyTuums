@@ -22,7 +22,7 @@ describe("ProfilePosts", () => {
     const profile = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data("alex", profile);
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }], {
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
       authorId: profile.id,
       feed: "global",
       includeReplies: true,
@@ -44,7 +44,7 @@ describe("ProfilePosts", () => {
     const profile = makeProfile({ id: "other-1", username: "other", displayUsername: "Other" });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data("other", profile);
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }], {
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
       authorId: profile.id,
       feed: "global",
       includeReplies: true,
@@ -66,7 +66,7 @@ describe("ProfilePosts", () => {
     const profile = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data("alex", profile);
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }], {
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
       authorId: profile.id,
       feed: "global",
       kind: "replies",

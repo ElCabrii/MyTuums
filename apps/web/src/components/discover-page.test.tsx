@@ -16,7 +16,11 @@ describe("DiscoverPage", () => {
   it("renders the global feed's posts with a Load-more control while a next page exists", async () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).postList.data([
-      { items: [makePost({ content: "A community post" })], nextCursor: "cursor-1" },
+      {
+        items: [makePost({ content: "A community post" })],
+        nextCursor: "cursor-1",
+        gameMentions: {},
+      },
     ]);
 
     await renderWithProviders(<DiscoverPage />, { queryClient, signedInAs: true });
@@ -27,7 +31,7 @@ describe("DiscoverPage", () => {
 
   it("renders Discover's empty state when the feed has no posts", async () => {
     const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }]);
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }]);
 
     await renderWithProviders(<DiscoverPage />, { queryClient, signedInAs: true });
 
@@ -38,7 +42,7 @@ describe("DiscoverPage", () => {
 
   it("is a reading surface — no composer, no scope tabs", async () => {
     const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }]);
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }]);
 
     await renderWithProviders(<DiscoverPage />, { queryClient, signedInAs: true });
 

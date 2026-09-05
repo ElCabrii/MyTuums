@@ -33,7 +33,7 @@ describe("HomePage", () => {
     const store = createStore();
     store.set(feedScopeAtom, "global");
     const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }]);
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }]);
 
     await renderWithProviders(<HomePage />, { store, queryClient, signedInAs: true });
 
@@ -49,8 +49,8 @@ describe("HomePage", () => {
     const store = createStore();
     store.set(feedScopeAtom, "global");
     const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }]);
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }], {
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }]);
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
       feed: "following",
     });
     const { router } = await renderWithProviders(<HomePage />, {
@@ -76,7 +76,7 @@ describe("HomePage", () => {
     const store = createStore();
     store.set(feedScopeAtom, "following");
     const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null }], {
+    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
       feed: "following",
     });
 
