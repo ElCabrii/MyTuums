@@ -84,6 +84,8 @@ export const igdbGameRowSchema = z.object({
   summary: z.string().nullable().optional(),
   /** Unix seconds. */
   first_release_date: z.number().nullable().optional(),
+  /** The pre-release "want" count — what the upcoming sort orders by. */
+  hypes: z.number().nullable().optional(),
   cover: z.object({ image_id: z.string().nullable().optional() }).nullable().optional(),
   genres: z
     .array(z.object({ name: z.string().nullable().optional() }))

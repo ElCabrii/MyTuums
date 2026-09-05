@@ -31,6 +31,8 @@ function makeGame(overrides: Partial<GamePageData> & { slug: string }): GamePage
     summary: null,
     coverMediaPath: null,
     firstReleaseYear: 2020,
+    firstReleaseDate: 1577836800,
+    hypeCount: 0,
     genres: [],
     platforms: [],
     favoriteCount: 0,

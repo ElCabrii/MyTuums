@@ -37,4 +37,12 @@ test.describe("game directory", () => {
     await expect(page).toHaveURL(/\/games\/hades$/);
     await expect(page.getByRole("heading", { name: "Hades", exact: true })).toBeVisible();
   });
+
+  test("the upcoming sort lists unreleased games most-wanted first", async ({ page }) => {
+    await page.goto("/games?sort=upcoming");
+
+    // The fixture's upcoming shelf: The Elder Scrolls VI (5120 wants) leads.
+    await expect(page.getByText("The Elder Scrolls VI")).toBeVisible();
+    await expect(page.getByText("5120 wants")).toBeVisible();
+  });
 });

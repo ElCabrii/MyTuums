@@ -398,6 +398,14 @@ export const TWITCH_TOP_GAMES_PAGE_SIZE = 100;
  * they fall out of it (Q29).
  */
 export const GAMES_CATALOG_SIZE = 1000;
+/**
+ * How many unreleased games the sync pulls by IGDB hypes (the pre-release
+ * "want" count) for the `/games` upcoming sort. A second scan beside the
+ * Twitch popularity snapshot: Twitch ranks what people watch now, hypes rank
+ * what they want next. Unioned with the snapshot and every known id — the
+ * never-delete rule (Q29) covers upcoming rows the same way.
+ */
+export const GAMES_UPCOMING_SIZE = 100;
 /** Wall-clock ceiling on one API query, token request included. */
 export const IGDB_QUERY_TIMEOUT_MS = 15_000;
 /** Wall-clock ceiling on one cover download, body included. */

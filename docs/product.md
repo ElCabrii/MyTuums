@@ -182,6 +182,13 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   timeline is strictly reverse-chronological by event time — a post at its own
   creation, a repost at the repost's — with no ranking and no deduplication:
   the same post can appear once authored and once reposted.
+- Discover (`/discover`) is the global feed as a reading surface — no
+  composer, no scope tabs — with a search box and a game filter on top. Both
+  narrow the same chronological timeline and compose as AND: free text
+  matches post text, the game filter matches `#hashtagKey` in post text
+  (resolved server-side from the game's slug), and the view is URL-persisted
+  (`?q=`, `?game=`) so it is shareable and the back button restores it. A
+  game hashtag click lands here filtered on that game.
 
 ## Notifications
 
@@ -289,22 +296,29 @@ notification when a badge is earned.
 - The game directory is the app's public catalog of games, ranked by a
   current Twitch popularity snapshot and hydrated from IGDB by a weekly job,
   and seeded from a committed fixture in dev, CI and e2e. It
-  lives at `/games` (the hub, a cover grid with a filter bar and three
-  sorts: popularity, A→Z, release year) and `/games/{slug}` (one game's
-  page: cover, name, summary, release year, genres, platforms, and a public
-  favorites count). Both are open to signed-out visitors.
+  lives at `/games` (the hub, a cover grid with a filter bar and five
+  sorts: popularity, upcoming, A→Z, release year, most favorited) and
+  `/games/{slug}` (one game's page: cover, name, summary, release year,
+  genres, platforms, and a public favorites count). Both are open to
+  signed-out visitors.
+- The upcoming sort lists unreleased games only (TBA or future release),
+  most-wanted first by IGDB hypes — the pre-release "want" count. The weekly
+  job pulls the top hypes beside the Twitch snapshot, so the shelf stays
+  current without a second catalog.
 - Every game the catalog has ever tracked stays listed — a game that drops
   out of the popularity scan keeps its row and its last-known rank, so a
   page that once resolved always resolves.
 - Games surface in search alongside people and posts: the header typeahead
   offers up to three games (name or hashtag-key match, popularity order),
   and `/search` carries a Games section.
-- A hashtag that matches a game's hashtag key links to that game's page —
-  everywhere post text renders (feeds, threads, search). The link is decided
-  by a per-batch map the server computes beside each page of posts; a tag
-  the catalog does not answer keeps its original post-search link. While
-  writing, the composer suggests the catalog's full key for a partial or
-  abbreviated tag (`#wow` → accept `#worldofwarcraft`).
+- A hashtag that matches a game's hashtag key shows the game's card on hover
+  (cover, name, year, favorites count, link to the game page) and links to
+  Discover filtered on that game (`/discover?game=slug`) — everywhere post
+  text renders (feeds, threads, search). The link is decided by a per-batch
+  map the server computes beside each page of posts; a tag the catalog does
+  not answer keeps its original post-search link. While writing, the composer
+  suggests the catalog's full key for a partial or abbreviated tag (`#wow` →
+  accept `#worldofwarcraft`).
 - A signed-in user can favorite a game from its page — a public stamp, not a
   private save: the count on the game page is public, and the user's profile
   carries a favorites rail (a cover strip on mobile, a column beside the

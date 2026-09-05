@@ -15,5 +15,8 @@ export const Route = createFileRoute("/games/")({
 const gamesSearchSchema = z.object({
   // `.catch()` degrades a hand-edited or stale `?sort=` to the default view
   // instead of erroring the route — the same stance as the profile filter.
-  sort: z.enum(["popularity", "name", "year", "favorites"]).optional().catch("popularity"),
+  sort: z
+    .enum(["popularity", "name", "year", "favorites", "upcoming"])
+    .optional()
+    .catch("popularity"),
 });

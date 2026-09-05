@@ -12,6 +12,7 @@ import {
 // LinkedText for the bio. See profile-link.tsx for why the cycle is
 // intentional and runtime-safe (hover-card content renders lazily on hover).
 import { ProfileLink } from "@/components/profile-link";
+import { GameHashtagLink } from "@/components/game-hashtag-link";
 
 type TextSegment = {
   kind: "text";
@@ -359,27 +360,22 @@ function renderSegment(segment: Segment, gameMentions?: Record<string, string>):
         </a>
       );
     case "hashtag": {
-      // A RESOLVED tag is a link to its game's page (issue #314, Q3): the
-      // server's per-batch map answers the canonical tag with the catalog's
-      // slug, and that answer is the whole mechanism — nothing is guessed
-      // client-side. Everything else keeps the original meaning: a link into
-      // post search filtered to itself, the query carrying the `#` so it
-      // matches hash-marked occurrences rather than the bare word. Post
-      // search is a substring scan, so a longer tag (`#tag_expo`), a glued
-      // word (`word#tag`) or a URL fragment still matches. The label stays
-      // as typed while the link carries the canonical target, the same split
-      // as a mention's label versus its `/@handle` href.
+      // A RESOLVED tag is a game hashtag (issue #314, Q3, as revised by the
+      // Discover feedback): hovering shows the game's card and clicking lands
+      // on Discover filtered to that game (`/discover?game=slug`), where the
+      // conversation about it lives. The server's per-batch map answers the
+      // canonical tag with the catalog's slug, and that answer is the whole
+      // mechanism — nothing is guessed client-side. Everything else keeps the
+      // original meaning: a link into post search filtered to itself, the
+      // query carrying the `#` so it matches hash-marked occurrences rather
+      // than the bare word. Post search is a substring scan, so a longer tag
+      // (`#tag_expo`), a glued word (`word#tag`) or a URL fragment still
+      // matches. The label stays as typed while the link carries the
+      // canonical target, the same split as a mention's label versus its
+      // `/@handle` href.
       const gameSlug = gameMentions?.[segment.tag];
       if (gameSlug !== undefined) {
-        return (
-          <Link
-            to="/games/$slug"
-            params={{ slug: gameSlug }}
-            className="text-link hover:text-link/80 underline underline-offset-2"
-          >
-            {segment.label}
-          </Link>
-        );
+        return <GameHashtagLink label={segment.label} slug={gameSlug} />;
       }
       return (
         <Link
@@ -399,13 +395,15 @@ function renderSegment(segment: Segment, gameMentions?: Record<string, string>):
 /**
  * Renders the three link shapes MyTuums recognizes inside otherwise plain,
  * author-written text: syntactically valid `@handles` as profile links,
- * absolute http(s) URLs as external anchors, and `#tags` as links into post
- * search filtered to the tag. Unknown handles deliberately link to the
- * canonical profile route, whose existing not-found state is the fallback;
- * malformed handles, malformed tags and every other scheme stay untouched
- * text. A tag has no minimum length, unlike a handle (`USERNAME_MIN_LENGTH`):
- * one character after the `#` is a complete tag, a deliberate asymmetry with
- * mentions. React text children keep the entire surface HTML-safe.
+ * absolute http(s) URLs as external anchors, and `#tags` as game hashtags
+ * (hover card + Discover filtered view) when the batch map resolves them, or
+ * as links into post search filtered to the tag otherwise. Unknown handles
+ * deliberately link to the canonical profile route, whose existing not-found
+ * state is the fallback; malformed handles, malformed tags and every other
+ * scheme stay untouched text. A tag has no minimum length, unlike a handle
+ * (`USERNAME_MIN_LENGTH`): one character after the `#` is a complete tag, a
+ * deliberate asymmetry with mentions. React text children keep the entire
+ * surface HTML-safe.
  *
  * Nothing here stops a click from bubbling: the surrounding surfaces that
  * navigate on click (`PostCard`) already ignore clicks landing inside an

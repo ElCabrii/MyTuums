@@ -20,16 +20,22 @@ export type { PostFeedParams } from "@/lib/query-definitions";
  * feed/author combinations is 15,000 comparator calls per render instead of
  * one hash lookup.
  *
- * `authorId` is a database id, not a validated slug, so it could in
- * principle contain "|". It is therefore kept LAST and `decode` consumes only
- * the four leading delimiters, treating everything after them as the id —
- * so the round trip stays total instead of silently truncating one. The four
- * fields ahead of it are all constrained (an enum, two mode flags, a uuid)
- * and cannot contain a delimiter.
+ * Free-text fields ride `encodeURIComponent` so a `|` inside a Discover query
+ * or an id never splits the key: the four leading fields are constrained
+ * (an enum, two mode flags, a uuid) and the trailing three are encoded, so
+ * `decode` can split on every delimiter and decode each part back verbatim.
+ * `q` stays LAST — it is the only unbounded field — and `gameSlug` ahead of
+ * it is slug-charset by construction but encoded anyway, so the layout never
+ * depends on that assumption.
  */
 /** Encodes feed params into the family key string — layout described above. */
-export const encode = (p: PostFeedParams): string =>
-  `${p.feed}|${encodeKind(p)}|${p.includeReposts ? "t" : ""}|${p.parentId ?? ""}|${p.authorId ?? ""}`;
+export const encode = (p: PostFeedParams): string => {
+  const q = p.q?.trim() ? encodeURIComponent(p.q.trim()) : "";
+  const gameSlug = p.gameSlug?.trim() ? encodeURIComponent(p.gameSlug.trim()) : "";
+  const authorId = p.authorId ? encodeURIComponent(p.authorId) : "";
+  const parentId = p.parentId ? encodeURIComponent(p.parentId ?? "") : "";
+  return `${p.feed}|${encodeKind(p)}|${p.includeReposts ? "t" : ""}|${parentId}|${authorId}|${gameSlug}|${q}`;
+};
 
 function encodeKind(p: PostFeedParams): string {
   if (p.kind === "posts") return "p";
@@ -40,17 +46,29 @@ function encodeKind(p: PostFeedParams): string {
 
 /** Decodes a family key string back into feed params — the inverse of {@link encode}. */
 export const decode = (key: string): PostFeedParams => {
-  const [feed = "", replies = "", reposts = "", parentId = ""] = key.split("|", 4);
-  // Everything past the fourth delimiter, however many more it contains.
-  const authorId = key.slice(feed.length + replies.length + reposts.length + parentId.length + 4);
+  const [
+    feed = "",
+    replies = "",
+    reposts = "",
+    parentId = "",
+    authorId = "",
+    gameSlug = "",
+    q = "",
+  ] = key.split("|");
 
   const params: PostFeedParams = {
     // SAFETY: encode only ever writes one of the three literal list scopes —
     // the two home feeds and the bookmarks page.
     feed: feed as PostListScope,
   };
-  if (authorId) params.authorId = authorId;
-  if (parentId) params.parentId = parentId;
+  const decodedAuthor = authorId ? decodeURIComponent(authorId) : "";
+  const decodedParent = parentId ? decodeURIComponent(parentId) : "";
+  const decodedGame = gameSlug ? decodeURIComponent(gameSlug) : "";
+  const decodedQ = q ? decodeURIComponent(q) : "";
+  if (decodedAuthor) params.authorId = decodedAuthor;
+  if (decodedParent) params.parentId = decodedParent;
+  if (decodedGame) params.gameSlug = decodedGame;
+  if (decodedQ) params.q = decodedQ;
   if (replies === "r") params.includeReplies = true;
   if (reposts === "t") params.includeReposts = true;
   if (replies === "p") params.kind = "posts";

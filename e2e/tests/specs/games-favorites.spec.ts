@@ -35,26 +35,35 @@ test.describe("game favorites", () => {
 });
 
 test.describe("hashtag resolution", () => {
-  test("a post's resolved tag links to its game page, an unresolved one to search", async ({
+  test("a post's resolved tag links to Discover filtered on its game, an unresolved one to search", async ({
     page,
   }) => {
     // The fixture catalog answers `doom`; nothing answers `nothattag`.
+    // `.first()`: specs share one database truncated once per run, so a
+    // retried attempt posts twice — the newest post's links are first in the
+    // feed, and the assertion targets those.
     await page.goto("/");
     const composer = page.getByRole("textbox");
     await composer.fill("Fresh from the #doom vault, not #nothattag");
     await page.getByRole("button", { name: "Post", exact: true }).click();
 
-    const resolved = page.getByRole("link", { name: "#doom", exact: true });
-    await expect(resolved).toHaveAttribute("href", "/games/doom");
-    await expect(page.getByRole("link", { name: "#nothattag", exact: true })).toHaveAttribute(
-      "href",
-      "/search?q=%23nothattag",
-    );
+    const resolved = page.getByRole("link", { name: "#doom", exact: true }).first();
+    await expect(resolved).toHaveAttribute("href", "/discover?game=doom");
+    await expect(
+      page.getByRole("link", { name: "#nothattag", exact: true }).first(),
+    ).toHaveAttribute("href", "/search?q=%23nothattag");
 
-    // The resolved link lands on the game's page.
+    // Hovering the resolved tag previews the game card, with links to the
+    // game's page inside it (cover + text share the destination).
+    await resolved.hover();
+    await expect(page.getByText("Favorites: 0").first()).toBeVisible();
+    const viewGame = page.getByRole("link", { name: "View game page" }).first();
+    await expect(viewGame).toHaveAttribute("href", "/games/doom");
+
+    // The resolved link lands on Discover filtered to that game.
     await resolved.click();
-    await expect(page).toHaveURL(/\/games\/doom$/);
-    await expect(page.getByRole("heading", { name: "DOOM", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/discover\?game=doom/);
+    await expect(page.getByText("Posts about DOOM")).toBeVisible();
   });
 
   test("the composer's tag popover completes a partial tag with the catalog's key", async ({

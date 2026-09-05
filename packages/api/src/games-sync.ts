@@ -10,12 +10,13 @@
  * the cron run FAILED.
  *
  * Never delete, never freeze (Q29): the scan reads the current Twitch
- * popularity snapshot, but the ids hydrated are the union of that set with
- * EVERY id the `game` table already holds — dropouts are re-staged from
- * their existing row (IGDB-side removal tolerated), keep their last-known
- * `popularityRank`, and a dropout IGDB no longer returns at all survives
- * verbatim. That is also why the upsert never rewrites `hashtagKey` or
- * `createdAt` (see `./games-hashtag.ts` for the stickiness reasoning).
+ * popularity snapshot plus the most-wanted unreleased games by IGDB hypes,
+ * but the ids hydrated are the union of those sets with EVERY id the `game`
+ * table already holds — dropouts are re-staged from their existing row
+ * (IGDB-side removal tolerated), keep their last-known `popularityRank`, and
+ * a dropout IGDB no longer returns at all survives verbatim. That is also
+ * why the upsert never rewrites `hashtagKey` or `createdAt` (see
+ * `./games-hashtag.ts` for the stickiness reasoning).
  *
  * Covers are the one thing that cannot be transactional — they are bucket
  * writes. They happen BEFORE the transaction under content-addressed keys
@@ -40,6 +41,7 @@ import {
   GAME_SUMMARY_MAX_LENGTH,
   GAMES_CATALOG_SIZE,
   GAMES_HYDRATION_BATCH,
+  GAMES_UPCOMING_SIZE,
 } from "./constants.js";
 import { gameCoverObjectKey } from "./game-media.js";
 import { assignHashtagKeys, type HashtagCandidate } from "./games-hashtag.js";
@@ -69,6 +71,10 @@ export interface StagedGameRow {
   coverMediaPath: string | null;
   coverImageId: string | null;
   firstReleaseYear: number | null;
+  /** IGDB `first_release_date` as unix seconds — null means TBA. */
+  firstReleaseDate: number | null;
+  /** IGDB `hypes` — the pre-release want count the upcoming sort orders by. */
+  hypeCount: number;
   genres: string[];
   platforms: string[];
   popularityRank: number | null;
@@ -93,6 +99,8 @@ export class CatalogValidationError extends Error {
 export interface SyncGamesResult {
   /** Games the popularity scan ranked this run. */
   scanned: number;
+  /** Unreleased games the hypes scan returned this run. */
+  upcoming: number;
   /** Games the table already held before this run. */
   knownIds: number;
   /** Games receiving their first row this run. */
@@ -202,6 +210,8 @@ export async function upsertGames(
           coverMediaPath: sql`excluded.cover_media_path`,
           coverImageId: sql`excluded.cover_image_id`,
           firstReleaseYear: sql`excluded.first_release_year`,
+          firstReleaseDate: sql`excluded.first_release_date`,
+          hypeCount: sql`excluded.hype_count`,
           genres: sql`excluded.genres`,
           platforms: sql`excluded.platforms`,
           popularityRank: sql`excluded.popularity_rank`,
@@ -248,6 +258,12 @@ function validateStaged(rows: readonly StagedGameRow[], maxYear: number): void {
         `igdb ${row.igdbId} has rank ${row.popularityRank} outside 1..${GAMES_CATALOG_SIZE}`,
       );
     }
+    if (!Number.isInteger(row.hypeCount) || row.hypeCount < 0) {
+      violations.push(`igdb ${row.igdbId} has an invalid hype count ${row.hypeCount}`);
+    }
+    if (row.firstReleaseDate !== null && !Number.isInteger(row.firstReleaseDate)) {
+      violations.push(`igdb ${row.igdbId} has an invalid release date ${row.firstReleaseDate}`);
+    }
   }
 
   if (violations.length > 0) throw new CatalogValidationError(violations);
@@ -282,6 +298,8 @@ export const stagedGameFixtureSchema = z.object({
   summary: z.string().nullable(),
   coverImageId: z.string().nullable(),
   firstReleaseYear: z.number().nullable(),
+  firstReleaseDate: z.number().nullable().optional(),
+  hypeCount: z.number().optional(),
   genres: z.array(z.string()),
   platforms: z.array(z.string()),
   popularityRank: z.number().nullable(),
@@ -300,7 +318,14 @@ function readGamesFixture(): StagedGameRow[] {
         .join(", ")}`,
     );
   }
-  return parsed.data.map((row) => ({ ...row, coverMediaPath: null }));
+  // Older fixture rows predate the hype fields — default them so a hand-edit
+  // adding only the catalog columns keeps seeding. New rows carry both.
+  return parsed.data.map((row) => ({
+    ...row,
+    firstReleaseDate: row.firstReleaseDate ?? null,
+    hypeCount: row.hypeCount ?? 0,
+    coverMediaPath: null,
+  }));
 }
 
 /**
@@ -394,12 +419,33 @@ export async function syncGamesCatalog(deps: {
     );
   }
 
-  // 2. Every id this run must leave better than it found it: the snapshot's
-  //    set UNION every id the table already holds (Q29's "every sync
-  //    refreshes ALL known games").
+  // 2. The upcoming scan: unreleased games by most-wanted first — IGDB
+  //    `hypes` DESC, TBA or future release only. Twitch ranks what people
+  //    watch now; this ranks what they want next, and feeds the `/games`
+  //    upcoming sort. Fail-closed like the snapshot: an empty answer refuses
+  //    the run rather than wiping the upcoming shelf.
+  const upcomingIds: number[] = [];
+  {
+    const nowSeconds = Math.floor(now.getTime() / 1000);
+    const upcomingRows = parsePage(
+      z.object({ id: z.number() }),
+      "games",
+      await client.query(
+        "games",
+        `fields id; where hypes > 0 & (first_release_date > ${nowSeconds} | first_release_date = null); sort hypes desc; limit ${GAMES_UPCOMING_SIZE};`,
+      ),
+    );
+    for (const row of upcomingRows) {
+      if (!upcomingIds.includes(row.id)) upcomingIds.push(row.id);
+    }
+  }
+
+  // 3. Every id this run must leave better than it found it: the snapshot's
+  //    set UNION the upcoming set UNION every id the table already holds
+  //    (Q29's "every sync refreshes ALL known games").
   const knownRows = await deps.db.select().from(game);
   const known = new Map(knownRows.map((row) => [row.igdbId, row]));
-  const allIds = new Set<number>([...ranks.keys(), ...known.keys()]);
+  const allIds = new Set<number>([...ranks.keys(), ...upcomingIds, ...known.keys()]);
 
   // 3. Hydration, id-batched, one request per batch (sub-expansion inline —
   //    three separate /covers /genres /platforms calls would triple the
@@ -411,7 +457,7 @@ export async function syncGamesCatalog(deps: {
       "games",
       await client.query(
         "games",
-        `fields name,slug,summary,first_release_date,cover.image_id,genres.name,platforms.abbreviation,platforms.name; where id = (${batch.join(",")}); limit ${GAMES_HYDRATION_BATCH};`,
+        `fields name,slug,summary,first_release_date,hypes,cover.image_id,genres.name,platforms.abbreviation,platforms.name; where id = (${batch.join(",")}); limit ${GAMES_HYDRATION_BATCH};`,
       ),
     );
     for (const row of rows) hydrated.set(row.id, row);
@@ -439,6 +485,8 @@ export async function syncGamesCatalog(deps: {
         coverMediaPath: existing.coverMediaPath,
         coverImageId: existing.coverImageId,
         firstReleaseYear: existing.firstReleaseYear,
+        firstReleaseDate: existing.firstReleaseDate,
+        hypeCount: existing.hypeCount,
         genres: [...existing.genres],
         platforms: [...existing.platforms],
         popularityRank: existing.popularityRank,
@@ -468,6 +516,8 @@ export async function syncGamesCatalog(deps: {
       coverMediaPath: existing?.coverMediaPath ?? null,
       coverImageId: source.cover?.image_id ?? null,
       firstReleaseYear: year,
+      firstReleaseDate: source.first_release_date ?? null,
+      hypeCount: source.hypes ?? 0,
       genres: normalizeLabels(source.genres, GAME_GENRES_MAX),
       platforms: normalizeLabels(
         (source.platforms ?? []).map((platform) => ({
@@ -504,6 +554,7 @@ export async function syncGamesCatalog(deps: {
   //    "optional-field gaps null out".
   const result: SyncGamesResult = {
     scanned: ranks.size,
+    upcoming: upcomingIds.length,
     knownIds: knownRows.length,
     newGames: assignments.size,
     coversUploaded: 0,

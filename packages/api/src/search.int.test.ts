@@ -653,6 +653,8 @@ describe("search.games", () => {
         coverMediaPath: null,
         coverImageId: null,
         firstReleaseYear,
+        firstReleaseDate: null,
+        hypeCount: 0,
         genres: [],
         platforms: [],
         popularityRank,

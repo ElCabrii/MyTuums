@@ -294,7 +294,7 @@ above every Monday at 04:00 UTC. The manual command remains for other
 environments, dry-run reports, and out-of-band prunes.
 
 **Game catalog sync.** The `game` table's catalog of the current Twitch top
-1000 (issue #314) is refreshed from a current Twitch popularity snapshot by:
+1000 plus the most-wanted unreleased games (issue #314) is refreshed by:
 
 ```bash
 pnpm games:sync
@@ -306,18 +306,20 @@ IGDB outage that survives its one retry, a validation violation, a snapshot
 short of 1000 unique games) leaves the previous catalog byte-identical and
 exits non-zero. Rows are never deleted — games that drop out of the snapshot
 keep their row and last-known rank. Ranking comes from Twitch Helix
-`games/top` (ordered by current viewer count); hydration and covers still
-come from IGDB, and only the `igdb_id` is ever stored — never Twitch's
-category id or box art. Covers are re-hosted into the environment's bucket
-under `games`, content-addressed, so repeat runs upload only what changed.
-Needs `IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET` (a pair, see `.env.example`) plus
-`DATABASE_URL` and, for covers, the `S3_*` group. Production runs it
-automatically: the `mytuums-games-sync` Railway cron service (the production
-Docker image, start command `node apps/server/dist/games-sync.js`, weekly
-Sunday 05:00 UTC) reads the production Postgres, bucket and IGDB pair. A
-weekly cron means a weekly snapshot: the ranks capture Twitch's order at run
-time, not a rolling window, so a catalog closer to real-time would need a
-more frequent schedule.
+`games/top` (ordered by current viewer count); the upcoming shelf comes from
+IGDB's `hypes` (the pre-release want count, TBA or future release only, top
+100); hydration and covers still come from IGDB, and only the `igdb_id` is
+ever stored — never Twitch's category id or box art. Covers are re-hosted
+into the environment's bucket under `games`, content-addressed, so repeat
+runs upload only what changed. Needs `IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET`
+(a pair, see `.env.example`) plus `DATABASE_URL` and, for covers, the `S3_*`
+group. Production runs it automatically: the `mytuums-games-sync` Railway
+cron service (the production Docker image, start command
+`node apps/server/dist/games-sync.js`, weekly Sunday 05:00 UTC) reads the
+production Postgres, bucket and IGDB pair. A weekly cron means a weekly
+snapshot: the ranks capture Twitch's order at run time, not a rolling
+window, so a catalog closer to real-time would need a more frequent
+schedule.
 
 Dev, CI and e2e never need IGDB credentials — they seed the committed
 fixture instead:

@@ -9,7 +9,9 @@
     "firstReleaseYear": 2009,
     "genres": ["MOBA", "Real-time strategy"],
     "platforms": ["PC"],
-    "popularityRank": 1
+    "popularityRank": 1,
+    "firstReleaseDate": 1230768000,
+    "hypeCount": 0
   },
   {
     "igdbId": 900002,
@@ -21,7 +23,9 @@
     "firstReleaseYear": 2020,
     "genres": ["Shooter", "Tactical"],
     "platforms": ["PC"],
-    "popularityRank": 2
+    "popularityRank": 2,
+    "firstReleaseDate": 1577836800,
+    "hypeCount": 0
   },
   {
     "igdbId": 900003,
@@ -33,7 +37,9 @@
     "firstReleaseYear": 2023,
     "genres": ["Shooter", "Tactical"],
     "platforms": ["PC", "Linux", "macOS"],
-    "popularityRank": 3
+    "popularityRank": 3,
+    "firstReleaseDate": 1672531200,
+    "hypeCount": 0
   },
   {
     "igdbId": 900004,
@@ -45,7 +51,9 @@
     "firstReleaseYear": 2017,
     "genres": ["Battle Royale", "Shooter"],
     "platforms": ["PC", "PS5", "Xbox Series", "Switch"],
-    "popularityRank": 4
+    "popularityRank": 4,
+    "firstReleaseDate": 1483228800,
+    "hypeCount": 0
   },
   {
     "igdbId": 900005,
@@ -57,7 +65,9 @@
     "firstReleaseYear": 2011,
     "genres": ["Sandbox", "Survival"],
     "platforms": ["PC", "PS5", "Xbox Series", "Switch", "Android"],
-    "popularityRank": 5
+    "popularityRank": 5,
+    "firstReleaseDate": 1293840000,
+    "hypeCount": 0
   },
   {
     "igdbId": 900006,
@@ -69,7 +79,9 @@
     "firstReleaseYear": 2013,
     "genres": ["Open world", "Action-adventure"],
     "platforms": ["PC", "PS5", "Xbox Series"],
-    "popularityRank": 6
+    "popularityRank": 6,
+    "firstReleaseDate": 1356998400,
+    "hypeCount": 0
   },
   {
     "igdbId": 900007,
@@ -81,7 +93,9 @@
     "firstReleaseYear": 2023,
     "genres": ["RPG", "Turn-based strategy"],
     "platforms": ["PC", "PS5", "Xbox Series"],
-    "popularityRank": 7
+    "popularityRank": 7,
+    "firstReleaseDate": 1672531200,
+    "hypeCount": 0
   },
   {
     "igdbId": 900008,
@@ -93,7 +107,9 @@
     "firstReleaseYear": 2022,
     "genres": ["Action RPG", "Open world"],
     "platforms": ["PC", "PS5", "Xbox Series"],
-    "popularityRank": 8
+    "popularityRank": 8,
+    "firstReleaseDate": 1640995200,
+    "hypeCount": 0
   },
   {
     "igdbId": 900009,
@@ -105,7 +121,9 @@
     "firstReleaseYear": 2004,
     "genres": ["MMO", "RPG"],
     "platforms": ["PC", "macOS"],
-    "popularityRank": 9
+    "popularityRank": 9,
+    "firstReleaseDate": 1072915200,
+    "hypeCount": 0
   },
   {
     "igdbId": 900010,
@@ -117,7 +135,9 @@
     "firstReleaseYear": 1993,
     "genres": ["Shooter"],
     "platforms": ["DOS", "SNES"],
-    "popularityRank": 10
+    "popularityRank": 10,
+    "firstReleaseDate": 725846400,
+    "hypeCount": 0
   },
   {
     "igdbId": 900011,
@@ -129,7 +149,9 @@
     "firstReleaseYear": 2016,
     "genres": ["Shooter"],
     "platforms": ["PC", "PS4", "Switch"],
-    "popularityRank": 11
+    "popularityRank": 11,
+    "firstReleaseDate": 1451606400,
+    "hypeCount": 0
   },
   {
     "igdbId": 900012,
@@ -141,7 +163,9 @@
     "firstReleaseYear": 1997,
     "genres": ["RPG", "JRPG"],
     "platforms": ["PS1", "PC"],
-    "popularityRank": 12
+    "popularityRank": 12,
+    "firstReleaseDate": 852076800,
+    "hypeCount": 0
   },
   {
     "igdbId": 900013,
@@ -153,7 +177,9 @@
     "firstReleaseYear": 2020,
     "genres": ["RPG", "JRPG"],
     "platforms": ["PS5", "PC"],
-    "popularityRank": 13
+    "popularityRank": 13,
+    "firstReleaseDate": 1577836800,
+    "hypeCount": 0
   },
   {
     "igdbId": 900014,
@@ -165,7 +191,9 @@
     "firstReleaseYear": 2017,
     "genres": ["Adventure", "Open world"],
     "platforms": ["Switch", "Wii U"],
-    "popularityRank": 14
+    "popularityRank": 14,
+    "firstReleaseDate": 1483228800,
+    "hypeCount": 0
   },
   {
     "igdbId": 900015,
@@ -177,7 +205,9 @@
     "firstReleaseYear": 2011,
     "genres": ["RPG", "Open world"],
     "platforms": ["PC", "PS5", "Xbox Series", "Switch"],
-    "popularityRank": 15
+    "popularityRank": 15,
+    "firstReleaseDate": 1293840000,
+    "hypeCount": 0
   },
   {
     "igdbId": 900016,
@@ -189,7 +219,9 @@
     "firstReleaseYear": 2017,
     "genres": ["Battle Royale", "Shooter"],
     "platforms": ["PC", "PS5", "Xbox Series"],
-    "popularityRank": 16
+    "popularityRank": 16,
+    "firstReleaseDate": 1483228800,
+    "hypeCount": 0
   },
   {
     "igdbId": 900017,
@@ -201,7 +233,9 @@
     "firstReleaseYear": 2020,
     "genres": ["Roguelike", "Action RPG"],
     "platforms": ["PC", "PS5", "Switch"],
-    "popularityRank": 17
+    "popularityRank": 17,
+    "firstReleaseDate": 1577836800,
+    "hypeCount": 0
   },
   {
     "igdbId": 900018,
@@ -213,7 +247,9 @@
     "firstReleaseYear": 2016,
     "genres": ["Simulation", "Farming sim"],
     "platforms": ["PC", "PS5", "Switch", "Android"],
-    "popularityRank": 18
+    "popularityRank": 18,
+    "firstReleaseDate": 1451606400,
+    "hypeCount": 0
   },
   {
     "igdbId": 900019,
@@ -225,7 +261,9 @@
     "firstReleaseYear": 2025,
     "genres": ["Metroidvania", "Platform"],
     "platforms": ["PC", "PS5", "Xbox Series", "Switch"],
-    "popularityRank": 19
+    "popularityRank": 19,
+    "firstReleaseDate": 1735689600,
+    "hypeCount": 0
   },
   {
     "igdbId": 900020,
@@ -237,7 +275,9 @@
     "firstReleaseYear": 2020,
     "genres": ["Open world", "Action RPG"],
     "platforms": ["PC", "PS5", "Xbox Series"],
-    "popularityRank": 20
+    "popularityRank": 20,
+    "firstReleaseDate": 1577836800,
+    "hypeCount": 0
   },
   {
     "igdbId": 900021,
@@ -249,7 +289,9 @@
     "firstReleaseYear": 2015,
     "genres": ["Open world", "Action RPG"],
     "platforms": ["PC", "PS5", "Xbox Series", "Switch"],
-    "popularityRank": 21
+    "popularityRank": 21,
+    "firstReleaseDate": 1420070400,
+    "hypeCount": 0
   },
   {
     "igdbId": 900022,
@@ -261,7 +303,9 @@
     "firstReleaseYear": 2015,
     "genres": ["Sports", "Racing"],
     "platforms": ["PC", "PS5", "Xbox Series", "Switch"],
-    "popularityRank": 22
+    "popularityRank": 22,
+    "firstReleaseDate": 1420070400,
+    "hypeCount": 0
   },
   {
     "igdbId": 900023,
@@ -273,7 +317,9 @@
     "firstReleaseYear": 2019,
     "genres": ["Battle Royale", "Shooter"],
     "platforms": ["PC", "PS5", "Xbox Series", "Switch"],
-    "popularityRank": 23
+    "popularityRank": 23,
+    "firstReleaseDate": 1546300800,
+    "hypeCount": 0
   },
   {
     "igdbId": 900024,
@@ -285,7 +331,9 @@
     "firstReleaseYear": 2011,
     "genres": ["Sandbox", "Survival"],
     "platforms": ["PC", "PS5", "Switch", "Android"],
-    "popularityRank": 24
+    "popularityRank": 24,
+    "firstReleaseDate": 1293840000,
+    "hypeCount": 0
   },
   {
     "igdbId": 900025,
@@ -297,6 +345,50 @@
     "firstReleaseYear": 2019,
     "genres": ["Sports", "Party"],
     "platforms": ["Switch"],
-    "popularityRank": 25
+    "popularityRank": 25,
+    "firstReleaseDate": 1546300800,
+    "hypeCount": 0
+  },
+  {
+    "igdbId": 900026,
+    "slug": "the-elder-scrolls-vi",
+    "hashtagKey": "theelderscrollsvi",
+    "name": "The Elder Scrolls VI",
+    "summary": "The next chapter of the Elder Scrolls saga, announced but not yet dated.",
+    "coverImageId": "corpg",
+    "firstReleaseYear": 2028,
+    "firstReleaseDate": 1830297600,
+    "hypeCount": 5120,
+    "genres": ["RPG", "Open world"],
+    "platforms": ["PC", "PS5", "Xbox Series"],
+    "popularityRank": null
+  },
+  {
+    "igdbId": 900027,
+    "slug": "silksong-successor",
+    "hashtagKey": "hollowknight3",
+    "name": "Hollow Knight 3",
+    "summary": null,
+    "coverImageId": null,
+    "firstReleaseYear": null,
+    "firstReleaseDate": null,
+    "hypeCount": 890,
+    "genres": ["Metroidvania"],
+    "platforms": ["PC", "Switch"],
+    "popularityRank": null
+  },
+  {
+    "igdbId": 900028,
+    "slug": "half-life-3",
+    "hashtagKey": "halflife3",
+    "name": "Half-Life 3",
+    "summary": "The game that never ships, still wanted.",
+    "coverImageId": "cosport",
+    "firstReleaseYear": 2027,
+    "firstReleaseDate": 1811808000,
+    "hypeCount": 340,
+    "genres": ["Shooter"],
+    "platforms": ["PC"],
+    "popularityRank": null
   }
 ]
