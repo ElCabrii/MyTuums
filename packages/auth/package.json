@@ -28,11 +28,16 @@
     "@better-auth/passkey": "catalog:",
     "@my-tuums/db": "workspace:*",
     "better-auth": "catalog:",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-email": "^6.9.3",
     "resend": "^6.18.1"
   },
   "devDependencies": {
     "@my-tuums/tsconfig": "workspace:*",
     "@types/node": "catalog:",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "@typescript/native": "catalog:",
     "vitest": "^4.1.10"
   }

@@ -221,7 +221,7 @@ export async function stampReports(
  */
 export type PendingEmail = {
   userId: string;
-  build: (locale: EmailLocale) => Omit<OutgoingEmail, "to">;
+  build: (locale: EmailLocale) => Promise<Omit<OutgoingEmail, "to">>;
 };
 
 /**
@@ -305,7 +305,7 @@ export function roleNotice(args: { userId: string; role: string; reason?: string
 export async function sendModerationEmail(
   context: EffectContext,
   userId: string,
-  build: (locale: EmailLocale) => Omit<OutgoingEmail, "to">,
+  build: (locale: EmailLocale) => Promise<Omit<OutgoingEmail, "to">>,
 ): Promise<void> {
   const [target] = await context.db
     .select({ email: user.email, localePreference: user.localePreference })
@@ -322,7 +322,7 @@ export async function sendModerationEmail(
     : localeFromRequest(context.headers);
 
   try {
-    await context.emailSender.send({ to: target.email, ...build(locale) });
+    await context.emailSender.send({ to: target.email, ...(await build(locale)) });
   } catch (error) {
     console.error("Moderation email failed to send", { to: target.email, userId }, error);
   }
