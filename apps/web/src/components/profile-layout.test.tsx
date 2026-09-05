@@ -19,6 +19,9 @@ const fakeClient = {
     unfollow: vi.fn(),
   },
   moderation: { unbanUser: vi.fn() },
+  // The favorites rail the layout now renders reads through this group; an
+  // empty answer keeps the rail hidden in every profile test here.
+  game: { favorites: vi.fn().mockResolvedValue({ items: [] }) },
 };
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));

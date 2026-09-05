@@ -84,6 +84,8 @@ export type SearchPostsPage = Awaited<ReturnType<typeof client.search.posts>>;
 export type GamePageData = Awaited<ReturnType<typeof client.game.bySlug>>;
 /** One cover card in the game directory — `game.list`'s row. */
 export type GameCard = Awaited<ReturnType<typeof client.game.list>>["items"][number];
+/** One game in a profile's favorites rail — `game.favorites`'s row. */
+export type FavoriteRailItem = Awaited<ReturnType<typeof client.game.favorites>>["items"][number];
 /** A game as the search dropdown suggests it. */
 export type TypeaheadGame = SearchTypeahead["games"][number];
 

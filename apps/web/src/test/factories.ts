@@ -385,6 +385,7 @@ export function makeGameCard(overrides: Partial<GameCard> = {}): GameCard {
     coverMediaPath: null,
     firstReleaseYear: 2020,
     popularityRank: 1,
+    favoriteCount: 0,
     ...overrides,
   };
 }

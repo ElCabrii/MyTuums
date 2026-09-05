@@ -1,34 +1,45 @@
-import { and, asc, desc, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import type { Database } from "@my-tuums/db";
-import { game, gameFavorite } from "@my-tuums/db/schema";
+import { game, gameFavorite, user } from "@my-tuums/db/schema";
+import { USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH, normalizeUsername } from "@my-tuums/auth/rules";
 import { z } from "zod";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
+  GAME_RAIL_LIMIT,
   GAME_SLUG_MAX_LENGTH,
   GAMES_PAGE_SIZE,
   GAMES_PAGE_SIZE_MAX,
   SEARCH_QUERY_MAX_LENGTH,
 } from "./constants.js";
 import { createGameCursorCodec, type GameSort } from "./cursor.js";
-import { publicRateLimit, publicReadProcedure } from "./procedures.js";
+import {
+  protectedProcedure,
+  publicRateLimit,
+  publicReadProcedure,
+  rateLimit,
+} from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
+import { visibleUser } from "./visibility.js";
 
 /**
- * The public game directory (issue #314, stage 2): the catalog reads behind
- * `/games` and `/games/{slug}`.
+ * The public game directory and its favorites (issue #314, stages 2–3): the
+ * reads behind `/games` and `/games/{slug}`, and the favorite pair that
+ * stamps them.
  *
- * Both procedures build from `publicReadProcedure` — the session-optional
- * surface the anonymous post permalink opened (0.4.0), and deliberately the
- * same reviewed boundary: `/games` is the app's second public page family
- * (issue Q6), so the crawler shell, the anonymous reader and the signed-in
- * one all land here. `viewerHasFavoritedGame` treats a missing viewer the
- * way every viewer probe does — a NULL user id matches no favorite row.
+ * The reads build from `publicReadProcedure` — the session-optional surface
+ * the anonymous post permalink opened (0.4.0), and deliberately the same
+ * reviewed boundary: `/games` is the app's second public page family (issue
+ * Q6), so the crawler shell, the anonymous reader and the signed-in one all
+ * land here. `viewerHasFavoritedGame` treats a missing viewer the way every
+ * viewer probe does — a NULL user id matches no favorite row.
  *
- * The favorites themselves are written by the stage-3 procedures; until
- * then `favoriteCount` counts the table directly (the count is public by
- * design, issue Q26 — the deliberate divergence from bookmarks' no-count
- * rule) and the probe answers `false` for everyone.
+ * The favorite pair mirrors the bookmark pair exactly (separate idempotent
+ * procedures, composite-PK insert with `onConflictDoNothing`, no
+ * notification) and diverges on one deliberate point: the count is PUBLIC
+ * (Q26's showcase — the rail is visible to every signed-in viewer), so it
+ * is denormalized on `game.favorite_count` and maintained in the same
+ * transaction as the pair's own write.
  */
 
 /**
@@ -52,13 +63,11 @@ const gamePageSelection = (viewerId: string | null) => ({
   firstReleaseYear: game.firstReleaseYear,
   genres: game.genres,
   platforms: game.platforms,
-  favoriteCount: sql<number>`(
-    select count(*)::int from ${gameFavorite} where ${gameFavorite.gameId} = ${game.igdbId}
-  )`,
+  favoriteCount: game.favoriteCount,
   viewerHasFavoritedGame: viewerHasFavoritedGame(viewerId),
 });
 
-/** The grid row: what a cover card renders, plus the cursor's id half. */
+/** The grid row: what a cover card renders, plus the cursor halves. */
 const gameCardSelection = {
   igdbId: game.igdbId,
   slug: game.slug,
@@ -66,6 +75,7 @@ const gameCardSelection = {
   coverMediaPath: game.coverMediaPath,
   firstReleaseYear: game.firstReleaseYear,
   popularityRank: game.popularityRank,
+  favoriteCount: game.favoriteCount,
 };
 
 const gameCursor = createGameCursorCodec();
@@ -93,6 +103,7 @@ interface GameSortEntry {
     popularityRank: number | null;
     name: string;
     firstReleaseYear: number | null;
+    favoriteCount: number;
   }) => number | string | null;
 }
 
@@ -113,6 +124,17 @@ const GAME_SORTS = {
     cursorFilter: ({ key, igdbId }) =>
       sql`(coalesce(${game.firstReleaseYear}, 0), ${game.igdbId}) < (${coalesceYearParam(key)}, ${igdbId})`,
     keyOf: (row) => row.firstReleaseYear,
+  },
+  favorites: {
+    // (count DESC, id DESC) — most-favorited first (issue Q23). No coalesce:
+    // `favorite_count` is NOT NULL by default, so the keyset stays total
+    // without one. The order is live: counts move while someone scrolls, and
+    // the cursor guarantees no repeats of what it has already seen, not a
+    // frozen snapshot — the accepted posture for any ranked list.
+    orderBy: [desc(game.favoriteCount), desc(game.igdbId)],
+    cursorFilter: ({ key, igdbId }) =>
+      sql`(${game.favoriteCount}, ${game.igdbId}) < (${sql.param(key, game.favoriteCount)}, ${igdbId})`,
+    keyOf: (row) => row.favoriteCount,
   },
 } satisfies Record<GameSort, GameSortEntry>;
 
@@ -164,6 +186,7 @@ export type GameCardRow = {
   coverMediaPath: string | null;
   firstReleaseYear: number | null;
   popularityRank: number | null;
+  favoriteCount: number;
 };
 
 /**
@@ -242,7 +265,7 @@ export const gameRouter = {
     .use(publicRateLimit(RATE_LIMITS.read))
     .input(
       z.object({
-        sort: z.enum(["popularity", "name", "year"]).default("popularity"),
+        sort: z.enum(["popularity", "name", "year", "favorites"]).default("popularity"),
         q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH).optional(),
         cursor: z.string().max(CURSOR_MAX_ENCODED_LENGTH).optional(),
         limit: z.number().int().min(1).max(GAMES_PAGE_SIZE_MAX).default(GAMES_PAGE_SIZE),
@@ -257,4 +280,139 @@ export const gameRouter = {
         filters: input.q ? matchesGameQuery(input.q) : undefined,
       }),
     ),
+
+  /**
+   * Favorites a game — the `post.bookmark` pair's mirror with one public
+   * consequence: the denormalized `favorite_count` moves in the SAME
+   * transaction, and only when the insert actually inserted. Idempotent by
+   * the composite primary key (`onConflictDoNothing`), so a double-click can
+   * neither double the count nor error; a re-favorite after unfavorite
+   * re-inserts a fresh row, moving the game back to the top of the rail.
+   *
+   * No notification, no relationship lock — a favorite stamps a game, not a
+   * person (Q17).
+   */
+  favorite: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.favoriteGame))
+    .input(z.object({ slug: z.string().trim().min(1).max(GAME_SLUG_MAX_LENGTH) }))
+    .handler(async ({ input, context }) => {
+      const [target] = await context.db
+        .select({ igdbId: game.igdbId })
+        .from(game)
+        .where(eq(game.slug, input.slug))
+        .limit(1);
+      if (!target) throw new ORPCError("NOT_FOUND", { message: "No such game." });
+
+      const favoriteCount = await context.db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(gameFavorite)
+          .values({ gameId: target.igdbId, userId: context.user.id })
+          .onConflictDoNothing()
+          .returning({ gameId: gameFavorite.gameId });
+        if (inserted.length > 0) {
+          await tx
+            .update(game)
+            .set({ favoriteCount: sql`${game.favoriteCount} + 1` })
+            .where(eq(game.igdbId, target.igdbId));
+        }
+        const [row] = await tx
+          .select({ favoriteCount: game.favoriteCount })
+          .from(game)
+          .where(eq(game.igdbId, target.igdbId))
+          .limit(1);
+        return row.favoriteCount;
+      });
+
+      return { slug: input.slug, favoriteCount, viewerHasFavoritedGame: true };
+    }),
+
+  /**
+   * Unfavorites a game. Idempotent; the count decrements only when a row
+   * was actually deleted, in the same transaction. Like `post.unbookmark`,
+   * deliberately no visibility check on the target: the only row this can
+   * delete is the caller's own, and a favorite must never become stuck.
+   * The catalog never delists (Q29), so a slug lookup that fails means
+   * there is nothing to unfavorite — NOT_FOUND is honest, not a leak.
+   */
+  unfavorite: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.favoriteGame))
+    .input(z.object({ slug: z.string().trim().min(1).max(GAME_SLUG_MAX_LENGTH) }))
+    .handler(async ({ input, context }) => {
+      const [target] = await context.db
+        .select({ igdbId: game.igdbId })
+        .from(game)
+        .where(eq(game.slug, input.slug))
+        .limit(1);
+      if (!target) throw new ORPCError("NOT_FOUND", { message: "No such game." });
+
+      const favoriteCount = await context.db.transaction(async (tx) => {
+        const removed = await tx
+          .delete(gameFavorite)
+          .where(
+            and(eq(gameFavorite.gameId, target.igdbId), eq(gameFavorite.userId, context.user.id)),
+          )
+          .returning({ gameId: gameFavorite.gameId });
+        if (removed.length > 0) {
+          await tx
+            .update(game)
+            .set({ favoriteCount: sql`${game.favoriteCount} - 1` })
+            .where(eq(game.igdbId, target.igdbId));
+        }
+        const [row] = await tx
+          .select({ favoriteCount: game.favoriteCount })
+          .from(game)
+          .where(eq(game.igdbId, target.igdbId))
+          .limit(1);
+        return row.favoriteCount;
+      });
+
+      return { slug: input.slug, favoriteCount, viewerHasFavoritedGame: false };
+    }),
+
+  /**
+   * One profile's favorites rail (Q11/Q25): the games a user has favorited,
+   * newest first, capped — a showcase strip, not a list page. Session-gated
+   * like every profile surface, and read through `visibleUser` so a banned
+   * owner (or a blocked pair) answers NOT_FOUND exactly like their profile
+   * does — the rail never outlives the page that carries it.
+   */
+  favorites: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.read))
+    .input(
+      z.object({ username: z.string().trim().min(USERNAME_MIN_LENGTH).max(USERNAME_MAX_LENGTH) }),
+    )
+    .handler(async ({ input, context }) => {
+      // The owner resolves first, through the same predicate their profile
+      // reads — a missing or hidden owner is NOT_FOUND, never an empty rail
+      // that would outlive the page carrying it. An owner with no favorites
+      // IS an empty rail; the two must stay distinguishable.
+      const [owner] = await context.db
+        .select({ id: user.id })
+        .from(user)
+        .where(
+          and(
+            // `normalizeUsername` — the same one-definition matching every
+            // profile lookup applies.
+            eq(user.username, normalizeUsername(input.username)),
+            visibleUser(context.user.id),
+          ),
+        )
+        .limit(1);
+      if (!owner) throw new ORPCError("NOT_FOUND", { message: "No such user." });
+
+      const rows = await context.db
+        .select({
+          slug: game.slug,
+          name: game.name,
+          coverMediaPath: game.coverMediaPath,
+          firstReleaseYear: game.firstReleaseYear,
+        })
+        .from(gameFavorite)
+        .innerJoin(game, eq(game.igdbId, gameFavorite.gameId))
+        .where(eq(gameFavorite.userId, owner.id))
+        .orderBy(desc(gameFavorite.createdAt), desc(gameFavorite.gameId))
+        .limit(GAME_RAIL_LIMIT);
+
+      return { items: rows };
+    }),
 };

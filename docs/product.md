@@ -298,6 +298,11 @@ notification when a badge is earned.
 - Games surface in search alongside people and posts: the header typeahead
   offers up to three games (name or hashtag-key match, popularity order),
   and `/search` carries a Games section.
+- A signed-in user can favorite a game from its page — a public stamp, not a
+  private save: the count on the game page is public, and the user's profile
+  carries a favorites rail (a cover strip on mobile, a column beside the
+  feed on desktop) visible to every signed-in viewer. The directory's fourth
+  sort orders games by that count.
 
 ## Media
 
@@ -472,6 +477,12 @@ non-alphanumeric character stripped (`Baldur's Gate 3` → `baldursgate3`).
 Assigned once and never rewritten — when two games collide, the later one
 takes a release-year suffix (`doom2016`). Distinct from the slug, which is
 the URL shape (`baldurs-gate-3`). _Avoid:_ tag id, game handle.
+
+**Game favorite** — a user's public stamp on a game: the count is public on
+the game's page, and the user's profile shows their favorited games to every
+signed-in viewer. Idempotent as a pair (`favorite` / `unfavorite`), newest
+stamp wins the rail's order. The deliberate opposite of a bookmark's
+privacy. _Avoid:_ like, save, wishlist.
 
 **Share** — the post-card control that opens the share dialog: the post
 previewed, its canonical permalink offered for copy, the copy confirmed by a

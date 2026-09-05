@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { getRouteApi, Link, Outlet } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
+import { ProfileGameRail } from "@/components/profile-game-rail";
 import { ORPCError } from "@orpc/client";
 import { BANNER_ASPECT_RATIO } from "@my-tuums/api/constants";
 import {
@@ -315,7 +316,23 @@ export function ProfileLayout() {
           </div>
         </div>
 
-        <Outlet />
+        {/* The favorites rail's mobile half (issue #314, Q25): a horizontal
+            cover strip between the profile header and the feed. Renders
+            nothing when the profile has no favorites — the rail decides, not
+            the layout. The desktop half is the aside below. */}
+        <div className="mb-6 lg:hidden">
+          <ProfileGameRail username={username} />
+        </div>
+
+        {/* Desktop: the feed and the rail's column half share one grid —
+            the feed keeps the left, the rail sits beside it (Q11's "a column
+            parallel to the feed on its right side"). */}
+        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-8">
+          <Outlet />
+          <aside className="hidden lg:block">
+            <ProfileGameRail username={username} />
+          </aside>
+        </div>
       </div>
     </div>
   );

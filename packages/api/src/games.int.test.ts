@@ -1,6 +1,5 @@
 import { call } from "@orpc/server";
 import { closeDb, db } from "@my-tuums/db";
-import { gameFavorite } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { upsertGames, type StagedGameRow } from "./games-sync.js";
 import { appRouter } from "./router.js";
@@ -106,7 +105,9 @@ describe("game.bySlug", () => {
 
   it("answers the favorite read model per viewer, with a public count", async () => {
     const [favoriter, other] = await Promise.all([createTestUser(), createTestUser()]);
-    await db.insert(gameFavorite).values({ gameId: 2, userId: favoriter.id }).onConflictDoNothing();
+    // Write through the procedure: the count is denormalized on the row, so
+    // a direct insert would not move it.
+    await call(appRouter.game.favorite, { slug: "game-2" }, { context: contextFor(favoriter) });
 
     const asFavoriter = await call(
       appRouter.game.bySlug,

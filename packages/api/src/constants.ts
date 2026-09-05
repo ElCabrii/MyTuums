@@ -56,6 +56,13 @@ export const GAMES_PAGE_SIZE_MAX = 50;
 /** Ceiling on a `/games/{slug}` lookup's slug input, in characters. */
 export const GAME_SLUG_MAX_LENGTH = 120;
 
+/**
+ * How many games the profile favorites rail shows (issue Q11/Q25) — a
+ * showcase strip, not a list page; everything past it is reachable through
+ * the directory.
+ */
+export const GAME_RAIL_LIMIT = 12;
+
 /** Default and maximum page sizes for `notification.list`. */
 export const NOTIFICATION_PAGE_SIZE = 20;
 export const NOTIFICATION_PAGE_SIZE_MAX = 50;

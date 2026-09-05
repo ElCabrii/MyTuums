@@ -133,7 +133,7 @@ export function createEventCursorCodec(firstSchema: z.ZodType<string>) {
 }
 
 /** The sort keys `game.list` orders its catalog by (see ./games.ts). */
-export type GameSort = "popularity" | "name" | "year";
+export type GameSort = "popularity" | "name" | "year" | "favorites";
 
 /**
  * A decoded `game.list` cursor: the sort it was minted under, that sort's key
@@ -166,6 +166,12 @@ const gameCursorPayload = z.discriminatedUnion("sort", [
     year: z.number().int().nullable(),
     igdbId: z.number().int(),
   }),
+  // The favorites sort's key is never null — `favorite_count` defaults 0.
+  z.object({
+    sort: z.literal("favorites"),
+    count: z.number().int().min(0),
+    igdbId: z.number().int(),
+  }),
 ]);
 
 /**
@@ -184,7 +190,9 @@ export function createGameCursorCodec() {
           ? { sort, rank: key as number | null, igdbId }
           : sort === "name"
             ? { sort, name: key as string, igdbId }
-            : { sort, year: key as number | null, igdbId };
+            : sort === "favorites"
+              ? { sort, count: key as number, igdbId }
+              : { sort, year: key as number | null, igdbId };
       return Buffer.from(JSON.stringify(payload)).toString("base64url");
     },
 
@@ -195,7 +203,14 @@ export function createGameCursorCodec() {
       }
       return {
         sort,
-        key: data.sort === "name" ? data.name : data.sort === "popularity" ? data.rank : data.year,
+        key:
+          data.sort === "name"
+            ? data.name
+            : data.sort === "popularity"
+              ? data.rank
+              : data.sort === "favorites"
+                ? data.count
+                : data.year,
         igdbId: data.igdbId,
       };
     },
