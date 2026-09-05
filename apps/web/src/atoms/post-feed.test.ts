@@ -38,6 +38,9 @@ describe("post-feed key encode/decode", () => {
       includeReplies: true,
       includeReposts: true,
     },
+    { feed: "global", q: "zelda" },
+    { feed: "global", gameSlug: "hades" },
+    { feed: "global", q: "co-op | speedrun", gameSlug: "elden-ring" },
   ];
 
   it.each(cases)("round-trips %o", (params) => {
@@ -45,12 +48,11 @@ describe("post-feed key encode/decode", () => {
   });
 
   // `authorId` is a database id, not a validated slug, so it could contain the
-  // "|" delimiter itself. It's kept LAST in the encoding specifically so
-  // `decode` can consume just the four leading delimiters and hand back
-  // everything else verbatim, instead of splitting on every "|" and
-  // truncating the id at the first one.
-  it("round-trips an authorId that itself contains the delimiter", () => {
-    const params: PostFeedParams = { feed: "global", authorId: "abc|def|ghi" };
+  // "|" delimiter itself — and so can a Discover `q`. Both ride
+  // `encodeURIComponent`, so `decode` can split on every delimiter and decode
+  // each part back verbatim instead of truncating at the first one.
+  it("round-trips an authorId and a query that themselves contain the delimiter", () => {
+    const params: PostFeedParams = { feed: "global", authorId: "abc|def|ghi", q: "a|b|c" };
     expect(decode(encode(params))).toEqual(params);
   });
 
@@ -60,7 +62,7 @@ describe("post-feed key encode/decode", () => {
   });
 
   it("pins the Both key — a tripwire against accidental key-layout drift", () => {
-    expect(encode({ feed: "global", includeReplies: true })).toBe("global|r|||");
+    expect(encode({ feed: "global", includeReplies: true })).toBe("global|r|||||");
   });
 });
 

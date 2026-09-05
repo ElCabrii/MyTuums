@@ -26,6 +26,8 @@ interface FakeTwitchOptions {
   covers: Map<string, Uint8Array>;
   /** When set, Helix answers 500 — the run must fail. */
   failHelix?: boolean;
+  /** IDs the upcoming (`sort hypes desc`) scan returns, in order. */
+  upcomingIds?: number[];
 }
 
 let categorySeq = 0;
@@ -101,11 +103,13 @@ function fakeTwitch(options: FakeTwitchOptions): FakeTwitch {
       });
     }
     if (url.endsWith("/v4/games")) {
-      const requested =
-        /where id = \(([\d,]+)\)/
-          .exec(init.body ?? "")?.[1]
-          ?.split(",")
-          .map(Number) ?? [];
+      const body = init.body ?? "";
+      // The upcoming scan (`sort hypes desc`) asks for ids only — answer
+      // from the upcoming list, not the hydration map.
+      if (body.includes("sort hypes desc")) {
+        return json((options.upcomingIds ?? []).map((id) => ({ id })));
+      }
+      const requested = /where id = \(([\d,]+)\)/.exec(body)?.[1]?.split(",").map(Number) ?? [];
       requestedIds.push(requested);
       const rows = requested
         .map((id) => options.games.get(id))
@@ -229,6 +233,8 @@ function stagedRow(overrides: Partial<StagedGameRow> & { igdbId: number }): Stag
     coverMediaPath: null,
     coverImageId: null,
     firstReleaseYear: 2020,
+    firstReleaseDate: null,
+    hypeCount: 0,
     genres: [],
     platforms: [],
     popularityRank: null,
@@ -493,5 +499,46 @@ describe("syncGamesCatalog", () => {
 
     const survivor = (await db.select().from(game)).find((row) => row.igdbId === 10);
     expect(survivor).toMatchObject({ hashtagKey: "doom", popularityRank: 2, slug: "doom" });
+  });
+
+  it("stages the upcoming scan's hypes and release dates alongside the Twitch ranks", async () => {
+    const future = Date.UTC(2028, 0, 1) / 1000;
+    const base = doomCatalog();
+    const options: FakeTwitchOptions = {
+      ...base,
+      upcomingIds: [70, 71],
+      games: new Map([
+        ...base.games,
+        [
+          70,
+          {
+            id: 70,
+            name: "Future Epic",
+            slug: "future-epic",
+            hypes: 4200,
+            first_release_date: future,
+          },
+        ],
+        [
+          71,
+          {
+            id: 71,
+            name: "TBA Mystery",
+            slug: "tba-mystery",
+            hypes: 900,
+            first_release_date: null,
+          },
+        ],
+      ]),
+    };
+    const result = await runSync(options);
+
+    expect(result.upcoming).toBe(2);
+    const rows = await db.select().from(game);
+    const byId = new Map(rows.map((row) => [row.igdbId, row]));
+    expect(byId.get(70)).toMatchObject({ hypeCount: 4200, firstReleaseDate: future });
+    expect(byId.get(71)).toMatchObject({ hypeCount: 900, firstReleaseDate: null });
+    // Upcoming ids outside the Twitch snapshot carry no popularity rank.
+    expect(byId.get(70)?.popularityRank).toBeNull();
   });
 });

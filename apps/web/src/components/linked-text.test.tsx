@@ -195,11 +195,12 @@ describe("LinkedText", () => {
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
-  // The issue-#314 resolution (Q3): a tag the server's batch map answers
-  // links to its game's page; every other tag — absent from the map, or a
-  // render with no map at all — keeps the original search link. The label
-  // stays as typed in both cases.
-  it("links a resolved tag to its game page while unresolved tags keep their search links", async () => {
+  // The issue-#314 resolution (Q3), as revised by the Discover feedback: a tag
+  // the server's batch map answers renders as the game hashtag link — hover
+  // card plus a click to Discover filtered on that game. Every other tag —
+  // absent from the map, or a render with no map at all — keeps the original
+  // search link. The label stays as typed in both cases.
+  it("links a resolved tag to Discover filtered on its game while unresolved tags keep their search links", async () => {
     const text = "Playing #doom and #unknownthing";
     await renderWithProviders(
       <article aria-label="Published content">
@@ -207,7 +208,10 @@ describe("LinkedText", () => {
       </article>,
     );
 
-    expect(screen.getByRole("link", { name: "#doom" })).toHaveAttribute("href", "/games/doom");
+    expect(screen.getByRole("link", { name: "#doom" })).toHaveAttribute(
+      "href",
+      "/discover?game=doom",
+    );
     expect(screen.getByRole("link", { name: "#unknownthing" })).toHaveAttribute(
       "href",
       "/search?q=%23unknownthing",

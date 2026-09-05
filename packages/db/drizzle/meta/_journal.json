@@ -232,6 +232,13 @@
       "when": 1788561230763,
       "tag": "0032_game-favorite-count",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1788581172551,
+      "tag": "0033_fresh_killraven",
+      "breakpoints": true
     }
   ]
 }

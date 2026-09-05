@@ -28,6 +28,8 @@ function seedRow(overrides: Partial<StagedGameRow> & { igdbId: number }): Staged
     coverMediaPath: null,
     coverImageId: null,
     firstReleaseYear: 2010,
+    firstReleaseDate: null,
+    hypeCount: 0,
     genres: [],
     platforms: [],
     popularityRank: null,

@@ -31,6 +31,8 @@ function seedRow(overrides: Partial<StagedGameRow> & { igdbId: number }): Staged
     coverMediaPath: null,
     coverImageId: null,
     firstReleaseYear: 2010,
+    firstReleaseDate: null,
+    hypeCount: 0,
     genres: [],
     platforms: [],
     popularityRank: null,
@@ -59,7 +61,9 @@ afterAll(async () => {
 });
 
 /** Walks a sort's whole list two rows at a time, returning the seen order. */
-async function walkAll(sort: "popularity" | "name" | "year"): Promise<number[]> {
+async function walkAll(
+  sort: "popularity" | "name" | "year" | "favorites" | "upcoming",
+): Promise<number[]> {
   const seen: number[] = [];
   let cursor: string | undefined;
   let pages = 0;
@@ -85,8 +89,10 @@ describe("game.bySlug", () => {
       [
         "coverMediaPath",
         "favoriteCount",
+        "firstReleaseDate",
         "firstReleaseYear",
         "genres",
+        "hypeCount",
         "name",
         "platforms",
         "slug",
@@ -150,6 +156,75 @@ describe("game.list", () => {
     expect(await walkAll("year")).toEqual([6, 5, 1, 4, 7, 2, 3]);
   });
 
+  it("lists unreleased games only, most-wanted first — released games never surface no matter their hypes", async () => {
+    const future = Math.floor(new Date("2028-01-01T00:00:00Z").getTime() / 1000);
+    const past = Math.floor(new Date("2020-01-01T00:00:00Z").getTime() / 1000);
+    await upsertGames(
+      db,
+      [
+        {
+          igdbId: 11,
+          slug: "upcoming-high",
+          hashtagKey: "upcominghigh",
+          name: "Upcoming High",
+          summary: null,
+          coverMediaPath: null,
+          coverImageId: null,
+          firstReleaseYear: 2028,
+          firstReleaseDate: future,
+          hypeCount: 500,
+          genres: [],
+          platforms: [],
+          popularityRank: null,
+        },
+        {
+          igdbId: 12,
+          slug: "upcoming-tba",
+          hashtagKey: "upcomingtba",
+          name: "Upcoming TBA",
+          summary: null,
+          coverMediaPath: null,
+          coverImageId: null,
+          firstReleaseYear: null,
+          firstReleaseDate: null,
+          hypeCount: 900,
+          genres: [],
+          platforms: [],
+          popularityRank: null,
+        },
+        {
+          igdbId: 13,
+          slug: "released-hot",
+          hashtagKey: "releasedhot",
+          name: "Released Hot",
+          summary: null,
+          coverMediaPath: null,
+          coverImageId: null,
+          firstReleaseYear: 2020,
+          firstReleaseDate: past,
+          hypeCount: 9999,
+          genres: [],
+          platforms: [],
+          popularityRank: null,
+        },
+      ],
+      now,
+    );
+
+    const page = await call(
+      appRouter.game.list,
+      { sort: "upcoming", limit: 50 },
+      { context: anonContext },
+    );
+    const slugs = page.items.map((item) => item.slug);
+    // TBA (900 hypes) leads dated-future (500); the released row's 9999
+    // hypes buy it nothing — unreleased-only means unreleased-only.
+    expect(slugs.slice(0, 2)).toEqual(["upcoming-tba", "upcoming-high"]);
+    expect(slugs).not.toContain("released-hot");
+    // Keyset walk terminates over the filtered set.
+    expect(await walkAll("upcoming")).toEqual(page.items.map((item) => item.igdbId));
+  });
+
   it("refuses a cursor minted under a different sort as malformed", async () => {
     const firstPage = await call(
       appRouter.game.list,
@@ -202,6 +277,8 @@ describe("game.list", () => {
         coverMediaPath: null,
         coverImageId: null,
         firstReleaseYear: 2020,
+        firstReleaseDate: null,
+        hypeCount: 0,
         genres: [],
         platforms: [],
         popularityRank: rank,

@@ -61,6 +61,8 @@ const gamePageSelection = (viewerId: string | null) => ({
   summary: game.summary,
   coverMediaPath: game.coverMediaPath,
   firstReleaseYear: game.firstReleaseYear,
+  firstReleaseDate: game.firstReleaseDate,
+  hypeCount: game.hypeCount,
   genres: game.genres,
   platforms: game.platforms,
   favoriteCount: game.favoriteCount,
@@ -74,6 +76,8 @@ const gameCardSelection = {
   name: game.name,
   coverMediaPath: game.coverMediaPath,
   firstReleaseYear: game.firstReleaseYear,
+  firstReleaseDate: game.firstReleaseDate,
+  hypeCount: game.hypeCount,
   popularityRank: game.popularityRank,
   favoriteCount: game.favoriteCount,
 };
@@ -104,26 +108,39 @@ interface GameSortEntry {
     name: string;
     firstReleaseYear: number | null;
     favoriteCount: number;
+    hypeCount: number;
   }) => number | string | null;
+  /** An inherent WHERE the sort always carries — the upcoming sort's unreleased filter. */
+  baseFilter?: SQL | undefined;
+}
+
+/**
+ * Whether a game row counts as unreleased for the upcoming sort: TBA (null
+ * date) or a first-release instant in the future. Compared in SQL against
+ * the database clock so the boundary never skews with the app server's.
+ */
+function unreleasedFilter(): SQL {
+  return sql`(${game.firstReleaseDate} is null or to_timestamp(${game.firstReleaseDate}) > now())`;
 }
 
 const GAME_SORTS = {
   popularity: {
     orderBy: [sql`coalesce(${game.popularityRank}, 2147483647) asc`, asc(game.igdbId)],
-    cursorFilter: ({ key, igdbId }) =>
+    cursorFilter: ({ key, igdbId }: { key: number | string | null; igdbId: number }) =>
       sql`(coalesce(${game.popularityRank}, 2147483647), ${game.igdbId}) > (${coalesceRankParam(key)}, ${igdbId})`,
-    keyOf: (row) => row.popularityRank,
+    keyOf: (row: { popularityRank: number | null }) => row.popularityRank,
   },
   name: {
     orderBy: [asc(game.name), asc(game.igdbId)],
-    cursorFilter: ({ key, igdbId }) => sql`(${game.name}, ${game.igdbId}) > (${key}, ${igdbId})`,
-    keyOf: (row) => row.name,
+    cursorFilter: ({ key, igdbId }: { key: number | string | null; igdbId: number }) =>
+      sql`(${game.name}, ${game.igdbId}) > (${key}, ${igdbId})`,
+    keyOf: (row: { name: string }) => row.name,
   },
   year: {
     orderBy: [sql`coalesce(${game.firstReleaseYear}, 0) desc`, desc(game.igdbId)],
-    cursorFilter: ({ key, igdbId }) =>
+    cursorFilter: ({ key, igdbId }: { key: number | string | null; igdbId: number }) =>
       sql`(coalesce(${game.firstReleaseYear}, 0), ${game.igdbId}) < (${coalesceYearParam(key)}, ${igdbId})`,
-    keyOf: (row) => row.firstReleaseYear,
+    keyOf: (row: { firstReleaseYear: number | null }) => row.firstReleaseYear,
   },
   favorites: {
     // (count DESC, id DESC) — most-favorited first (issue Q23). No coalesce:
@@ -132,9 +149,20 @@ const GAME_SORTS = {
     // the cursor guarantees no repeats of what it has already seen, not a
     // frozen snapshot — the accepted posture for any ranked list.
     orderBy: [desc(game.favoriteCount), desc(game.igdbId)],
-    cursorFilter: ({ key, igdbId }) =>
+    cursorFilter: ({ key, igdbId }: { key: number | string | null; igdbId: number }) =>
       sql`(${game.favoriteCount}, ${game.igdbId}) < (${sql.param(key, game.favoriteCount)}, ${igdbId})`,
-    keyOf: (row) => row.favoriteCount,
+    keyOf: (row: { favoriteCount: number }) => row.favoriteCount,
+  },
+  upcoming: {
+    // Unreleased games by most-wanted first: IGDB `hypes` DESC. The
+    // unreleased predicate lives in `baseFilter` so it ANDs with both the
+    // cursor comparison and the caller's `q` — one definition of "upcoming",
+    // not two that could drift. No coalesce: `hype_count` defaults 0.
+    orderBy: [desc(game.hypeCount), desc(game.igdbId)],
+    cursorFilter: ({ key, igdbId }: { key: number | string | null; igdbId: number }) =>
+      sql`(${game.hypeCount}, ${game.igdbId}) < (${sql.param(key, game.hypeCount)}, ${igdbId})`,
+    keyOf: (row: { hypeCount: number }) => row.hypeCount,
+    baseFilter: unreleasedFilter(),
   },
 } satisfies Record<GameSort, GameSortEntry>;
 
@@ -185,6 +213,8 @@ export type GameCardRow = {
   name: string;
   coverMediaPath: string | null;
   firstReleaseYear: number | null;
+  firstReleaseDate: number | null;
+  hypeCount: number;
   popularityRank: number | null;
   favoriteCount: number;
 };
@@ -263,15 +293,19 @@ export async function gameKeysetPage(args: {
   limit: number;
   filters?: SQL | undefined;
 }): Promise<{ items: GameCardRow[]; nextCursor: string | null }> {
-  const { orderBy, cursorFilter, keyOf } = GAME_SORTS[args.sort];
+  const entry = GAME_SORTS[args.sort];
   const decoded = args.cursor ? gameCursor.decode(args.cursor, args.sort) : undefined;
-  const where = decoded ? and(cursorFilter(decoded), args.filters) : args.filters;
+  // Only the upcoming sort carries an inherent WHERE (the unreleased
+  // predicate); the `in` guard keeps the union's members without it from
+  // needing the property.
+  const baseFilter = "baseFilter" in entry ? entry.baseFilter : undefined;
+  const where = and(baseFilter, decoded ? entry.cursorFilter(decoded) : undefined, args.filters);
 
   const rows: GameCardRow[] = await args.db
     .select(gameCardSelection)
     .from(game)
     .where(where)
-    .orderBy(...orderBy)
+    .orderBy(...entry.orderBy)
     .limit(args.limit + 1);
 
   const hasMore = rows.length > args.limit;
@@ -279,7 +313,7 @@ export async function gameKeysetPage(args: {
   const last = items.at(-1);
 
   if (!hasMore || !last) return { items, nextCursor: null };
-  return { items, nextCursor: gameCursor.encode(args.sort, keyOf(last), last.igdbId) };
+  return { items, nextCursor: gameCursor.encode(args.sort, entry.keyOf(last), last.igdbId) };
 }
 
 /**
@@ -313,12 +347,14 @@ export const gameRouter = {
    * bar and the `/search` results' Games section are this one procedure,
    * which is why it stays public rather than riding the session-gated
    * search group: an anonymous visitor's directory search must work (Q6).
+   * The `upcoming` sort lists unreleased games only (TBA or future release),
+   * most-wanted first by IGDB hypes.
    */
   list: publicReadProcedure
     .use(publicRateLimit(RATE_LIMITS.read))
     .input(
       z.object({
-        sort: z.enum(["popularity", "name", "year", "favorites"]).default("popularity"),
+        sort: z.enum(["popularity", "name", "year", "favorites", "upcoming"]).default("popularity"),
         q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH).optional(),
         cursor: z.string().max(CURSOR_MAX_ENCODED_LENGTH).optional(),
         limit: z.number().int().min(1).max(GAMES_PAGE_SIZE_MAX).default(GAMES_PAGE_SIZE),

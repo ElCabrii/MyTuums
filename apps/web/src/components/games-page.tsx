@@ -13,7 +13,7 @@ import { m } from "@/paraglide/messages.js";
 const routeApi = getRouteApi("/games/");
 
 /** The sort names, in the control's display order — also the URL param's enum. */
-const SORTS = ["popularity", "name", "year", "favorites"] as const;
+const SORTS = ["popularity", "upcoming", "name", "year", "favorites"] as const;
 
 /**
  * How long a keystroke may sit before the listing refilters, matching the
@@ -24,7 +24,7 @@ const FILTER_DEBOUNCE_MS = 300;
 
 /**
  * The `/games` directory index (issue #314, Q18): every game the catalog has
- * ever tracked, as a cover grid with a filter bar and four sorts.
+ * ever tracked, as a cover grid with a filter bar and five sorts.
  *
  * The sort lives in the URL (`?sort=`) so a view is shareable and the back
  * button restores it; the filter query stays component state — it is a
@@ -32,6 +32,10 @@ const FILTER_DEBOUNCE_MS = 300;
  * atom's key keeps one cache entry per settled query instead of per
  * keystroke. Public: the whole page renders signed out exactly as signed in
  * (Q6) — nothing here mutates until favorites land (stage 3).
+ *
+ * The `upcoming` sort lists unreleased games only (TBA or future release),
+ * most-wanted first by IGDB hypes — the "want" count behind the feedback
+ * asking for unreleased games up front.
  */
 export function GamesPage() {
   // The URL param is optional; the default lives here rather than in the
@@ -107,8 +111,17 @@ export function GamesPage() {
               />
             </div>
             <p className="text-foreground mt-1.5 truncate text-sm font-medium">{game.name}</p>
-            {game.firstReleaseYear !== null && (
-              <p className="text-muted-foreground text-xs">{game.firstReleaseYear}</p>
+            {sort === "upcoming" ? (
+              <p className="text-muted-foreground text-xs">
+                {game.hypeCount === 1
+                  ? m.game_hype_count_one({ count: game.hypeCount })
+                  : m.game_hype_count_many({ count: game.hypeCount })}
+                {game.firstReleaseYear !== null ? ` · ${game.firstReleaseYear}` : ""}
+              </p>
+            ) : (
+              game.firstReleaseYear !== null && (
+                <p className="text-muted-foreground text-xs">{game.firstReleaseYear}</p>
+              )
             )}
           </Link>
         ))}
@@ -121,6 +134,8 @@ function sortLabel(sort: (typeof SORTS)[number]): string {
   switch (sort) {
     case "popularity":
       return m.games_sort_popularity();
+    case "upcoming":
+      return m.games_sort_upcoming();
     case "name":
       return m.games_sort_name();
     case "year":

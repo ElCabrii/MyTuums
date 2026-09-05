@@ -908,6 +908,17 @@ export const game = pgTable(
     // procedures only; the sync's upsert deliberately omits it from its set
     // clause so a catalog refresh can never zero anyone's counts.
     favoriteCount: integer("favorite_count").notNull().default(0),
+    // IGDB `hypes` — the "want" count before release. Hydrated on every sync
+    // alongside the release date below; the `/games` upcoming sort orders
+    // unreleased games by this, most-wanted first. NOT NULL with a 0 default
+    // so its keyset stays total without a coalesce, like `favorite_count`.
+    hypeCount: integer("hype_count").notNull().default(0),
+    // IGDB `first_release_date` as unix seconds, the full instant behind
+    // `firstReleaseYear`. Null means TBA — treated as unreleased for the
+    // upcoming sort, alongside dates in the future. Kept beside the year
+    // (rather than replacing it) so the existing year sort and its index
+    // keep their shape.
+    firstReleaseDate: integer("first_release_date"),
     // Advanced for every row on every successful sync — including dropouts
     // re-staged from their existing row when IGDB no longer hydrates them.
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, precision: 3 }).notNull(),
@@ -927,6 +938,7 @@ export const game = pgTable(
     index("game_popularity_idx").on(sql`coalesce(${t.popularityRank}, 2147483647)`, t.igdbId),
     index("game_year_idx").on(sql`coalesce(${t.firstReleaseYear}, 0)`, t.igdbId),
     index("game_favorite_count_idx").on(t.favoriteCount, t.igdbId),
+    index("game_hype_idx").on(t.hypeCount, t.igdbId),
   ],
 );
 

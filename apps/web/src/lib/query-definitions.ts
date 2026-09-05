@@ -18,6 +18,8 @@ interface PostListInput {
   includeReposts?: boolean;
   kind?: "posts" | "replies" | "all";
   feed?: FeedScope | "bookmarks";
+  q?: string;
+  gameSlug?: string;
   cursor?: string;
 }
 interface PagedSearchInput {
@@ -67,6 +69,10 @@ export type PostFeedParams = {
   includeReposts?: boolean;
   /** Profile-only three-way filter; `both` is encoded as legacy includeReplies. */
   kind?: PostFeedKind;
+  /** Discover-only free-text filter on post text. */
+  q?: string;
+  /** Discover-only game filter — a catalog slug, matched as `#hashtagKey`. */
+  gameSlug?: string;
 };
 
 /** Authoritative query definitions shared by production atoms and test fixtures. */
@@ -77,6 +83,8 @@ export function postListQueryOptions({
   includeReplies,
   includeReposts,
   kind,
+  q,
+  gameSlug,
 }: PostFeedParams) {
   return orpc.post.list.infiniteOptions({
     input: (cursor: string | undefined) => {
@@ -88,6 +96,12 @@ export function postListQueryOptions({
       // Same conditional-spread rule as the fields above: only a profile
       // feed sets this, so every other feed's key stays exactly as it was.
       if (includeReposts) input.includeReposts = true;
+      // Discover filters ride the same rule: absent means no key entry, so
+      // the unfiltered global feed keeps its bare key and its cache entry.
+      const trimmedQ = q?.trim();
+      if (trimmedQ) input.q = trimmedQ;
+      const trimmedGame = gameSlug?.trim();
+      if (trimmedGame) input.gameSlug = trimmedGame;
       // The global feed keeps a bare key (see the note on the conditional
       // spreads above); the two scoped feeds carry their discriminator.
       if (scope === "following" || scope === "bookmarks") input.feed = scope;
@@ -129,12 +143,12 @@ export function profileQueryOptions(username: string) {
 
 /** The `/games` index's list parameters — `q` is the page's filter bar. */
 export interface GameListParams {
-  sort: "popularity" | "name" | "year" | "favorites";
+  sort: "popularity" | "name" | "year" | "favorites" | "upcoming";
   q?: string;
 }
 
 interface PagedGameListInput {
-  sort: "popularity" | "name" | "year" | "favorites";
+  sort: "popularity" | "name" | "year" | "favorites" | "upcoming";
   limit: number;
   q?: string;
   cursor?: string;

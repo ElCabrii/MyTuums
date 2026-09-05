@@ -20,20 +20,30 @@ const FIXTURE = stagedGameFixtureSchema
   .parse(JSON.parse(readFileSync(join(FIXTURE_DIR, "games.json"), "utf8")));
 
 describe("packages/db/fixtures/games.json", () => {
-  it("is the size the issue asked for, with unique ids, unique keys and dense ranks", () => {
+  it("is the size the issue asked for, with unique ids, unique keys and dense ranks for the released set", () => {
     expect(FIXTURE.length).toBeGreaterThanOrEqual(20);
     expect(new Set(FIXTURE.map((game) => game.igdbId)).size).toBe(FIXTURE.length);
     expect(new Set(FIXTURE.map((game) => game.hashtagKey)).size).toBe(FIXTURE.length);
-    const ranks = FIXTURE.map((game) => game.popularityRank).filter(
-      (rank): rank is number => rank !== null,
-    );
-    expect(ranks).toHaveLength(FIXTURE.length); // every game ranked, densely
+    // The released set carries the Twitch ranks, densely 1..N; the upcoming
+    // shelf (TBA or future release, ordered by hypes) is unranked by design —
+    // it never appears in the Twitch snapshot.
+    const ranked = FIXTURE.filter((game) => game.popularityRank !== null);
+    const unranked = FIXTURE.filter((game) => game.popularityRank === null);
+    expect(unranked.length).toBeGreaterThanOrEqual(3);
+    for (const game of unranked) {
+      expect(game.hypeCount).toBeGreaterThan(0);
+    }
+    const ranks = ranked.map((game) => {
+      // SAFETY: `ranked` holds exactly the rows whose rank is non-null, so
+      // the assertion below checks the cast it just filtered for.
+      return game.popularityRank as number;
+    });
     expect([...ranks].sort((a, b) => a - b)).toEqual(
-      Array.from({ length: FIXTURE.length }, (_, index) => index + 1),
+      Array.from({ length: ranked.length }, (_, index) => index + 1),
     );
   });
 
-  it("carries the documented edge cases: the DOOM collision pair, punctuation, a very long name, and exactly one game each missing a cover and a summary", () => {
+  it("carries the documented edge cases: the DOOM collision pair, punctuation, a very long name, and the missing-cover/summary rows", () => {
     for (const game of FIXTURE) {
       expect(game.hashtagKey).toMatch(/^[a-z0-9]+$/);
     }
@@ -58,8 +68,20 @@ describe("packages/db/fixtures/games.json", () => {
       ),
     ).toBe(true);
 
-    expect(FIXTURE.filter((game) => game.coverImageId === null)).toHaveLength(1);
-    expect(FIXTURE.filter((game) => game.summary === null)).toHaveLength(1);
+    // The upcoming shelf adds a second cover-less and summary-less row (the
+    // TBA game) beside the released set's one each.
+    expect(FIXTURE.filter((game) => game.coverImageId === null)).toHaveLength(2);
+    expect(FIXTURE.filter((game) => game.summary === null)).toHaveLength(2);
+  });
+
+  it("pins the upcoming shelf: unreleased games with hypes, most-wanted first", () => {
+    const upcoming = [...FIXTURE]
+      .filter((game) => game.firstReleaseDate === null || (game.firstReleaseYear ?? 0) > 2026)
+      .sort((a, b) => (b.hypeCount ?? 0) - (a.hypeCount ?? 0));
+    expect(upcoming.length).toBeGreaterThanOrEqual(3);
+    expect(upcoming[0]?.hypeCount).toBeGreaterThan(upcoming[1]?.hypeCount ?? 0);
+    // TBA is unreleased by definition (null date), whatever its year.
+    expect(upcoming.some((game) => game.firstReleaseDate === null)).toBe(true);
   });
 
   it("keys are the stripped lowercase names, except the one deliberate collision suffix", () => {

@@ -1,10 +1,11 @@
 import { ORPCError } from "@orpc/server";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, isNull, not, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, not, sql } from "drizzle-orm";
 import { alias, type PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "@my-tuums/db";
 import {
   follow,
+  game,
   post,
   postAttachment,
   postBookmark,
@@ -31,6 +32,8 @@ import {
   THREAD_REPLY_BRANCH_CHILD_FANOUT,
   THREAD_REPLY_BRANCH_DESCENDANT_BUDGET,
   LINK_CARD_URL_MAX_LENGTH,
+  SEARCH_QUERY_MAX_LENGTH,
+  GAME_SLUG_MAX_LENGTH,
 } from "./constants.js";
 import { createCursorCodec, createEventCursorCodec } from "./cursor.js";
 import { gameMentionsFor } from "./games.js";
@@ -773,6 +776,15 @@ function pageTextsForMentions(page: {
   return texts;
 }
 
+/**
+ * Escapes LIKE metacharacters so a caller's `%`, `_` and `\` match literally.
+ * Local to this module (search.ts and games.ts carry their own three-line
+ * copy) because importing either would cycle through `postSelection`.
+ */
+function escapeFeedLikePattern(pattern: string): string {
+  return pattern.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
 async function feedEventPage(
   db: Database,
   args: {
@@ -783,6 +795,10 @@ async function feedEventPage(
     feed: "global" | "following";
     kind: "posts" | "replies" | "all";
     includeReposts: boolean;
+    /** Free-text substring on the post's own text (the Discover search box). */
+    q?: string;
+    /** A game's hashtag key, resolved from `gameSlug` — the Discover game filter. */
+    gameHashtagKey?: string;
   },
 ) {
   const decoded = args.cursor ? postFeedCursor.decode(args.cursor) : undefined;
@@ -804,6 +820,17 @@ async function feedEventPage(
   const authoredArmFilters = [
     // Author-deleted posts drop from a fresh feed read, as before the merge.
     isNull(post.deletedAt),
+    // A text-filtered feed matches the raw content column, which no
+    // projection touches — the same leak search.posts closes by excluding
+    // both tombstones outright. Without this, a filtered Discover could
+    // surface a removed post's hidden text via its query. The game filter
+    // keeps the feed's normal stub rules (removed stays as a stub); only `q`
+    // needs the exclusion.
+    args.q ? isNull(post.removedAt) : undefined,
+    args.q ? ilike(post.content, `%${escapeFeedLikePattern(args.q)}%`) : undefined,
+    args.gameHashtagKey
+      ? ilike(post.content, `%#${escapeFeedLikePattern(args.gameHashtagKey)}%`)
+      : undefined,
     args.authorId ? eq(post.authorId, args.authorId) : undefined,
     args.kind === "posts"
       ? isNull(post.parentId)
@@ -831,6 +858,17 @@ async function feedEventPage(
     // the reposter's event and is redacted to the unavailable treatment below,
     // which is the same "the author is gone" result blocked profiles use.
     aliasVisibleTo(args.viewerId, feedReposter),
+    // The text and game filters read the ORIGINAL's text on the repost arm —
+    // a repost amplifies the original, so a filtered feed matches what the
+    // event is about, not who amplified it. The `q` tombstone exclusion
+    // mirrors the authored arm: the original's hidden text must not be
+    // probeable through the filter.
+    args.q ? isNull(feedOriginal.deletedAt) : undefined,
+    args.q ? isNull(feedOriginal.removedAt) : undefined,
+    args.q ? ilike(feedOriginal.content, `%${escapeFeedLikePattern(args.q)}%`) : undefined,
+    args.gameHashtagKey
+      ? ilike(feedOriginal.content, `%#${escapeFeedLikePattern(args.gameHashtagKey)}%`)
+      : undefined,
     // The profile feed's mirror of the authored arm's author filter: a
     // profile that opts into repost events carries the ones its owner
     // caused, never other people's amplifications of the owner's posts.
@@ -1628,6 +1666,22 @@ export const postRouter = {
            * avoids changing existing query-key/input shapes during rollout.
            */
           kind: z.enum(["posts", "replies", "all"]).optional(),
+          /**
+           * Free-text substring on the post's own text — the Discover search
+           * box. Composes with `gameSlug` as AND. Top-level feeds only; the
+           * refine below refuses it beside reply, profile and bookmarks modes
+           * so a filtered Discover stays one surface with one ordering.
+           */
+          q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH).optional(),
+          /**
+           * A game's URL slug — the Discover game filter and the hashtag's
+           * click target (`/discover?game=slug`). Resolved server-side to the
+           * catalog's hashtag key, then matched as `#key` against post text,
+           * the same substring rule the `#tag` search link uses. Unknown slugs
+           * answer an empty page, never NOT_FOUND, so a stale shared URL
+           * renders Discover's empty state instead of an error card.
+           */
+          gameSlug: z.string().trim().min(1).max(GAME_SLUG_MAX_LENGTH).optional(),
         })
         .superRefine((input, refinement) => {
           if (
@@ -1642,6 +1696,21 @@ export const postRouter = {
             refinement.addIssue({
               code: "custom",
               message: "A continuation cannot be combined with feed filters.",
+            });
+          }
+          if (
+            (input.q || input.gameSlug) &&
+            (input.parentId ||
+              input.continuationRootId ||
+              input.authorId ||
+              input.feed === "bookmarks" ||
+              input.includeReplies ||
+              input.includeReposts ||
+              input.kind)
+          ) {
+            refinement.addIssue({
+              code: "custom",
+              message: "Discover filters apply to the top-level feeds only.",
             });
           }
           if (
@@ -1780,6 +1849,16 @@ export const postRouter = {
       // query — it lists the parent's direct replies by their own event time,
       // and an amplification is not a reply.
       if (!input.parentId) {
+        let gameHashtagKey: string | undefined;
+        if (input.gameSlug) {
+          const [matched] = await context.db
+            .select({ hashtagKey: game.hashtagKey })
+            .from(game)
+            .where(eq(game.slug, input.gameSlug))
+            .limit(1);
+          if (!matched) return { items: [], nextCursor: null, gameMentions: {} };
+          gameHashtagKey = matched.hashtagKey;
+        }
         const page = await feedEventPage(context.db, {
           viewerId,
           cursor: input.cursor,
@@ -1788,6 +1867,8 @@ export const postRouter = {
           feed: input.feed,
           kind,
           includeReposts: input.includeReposts,
+          q: input.q,
+          gameHashtagKey,
         });
         return {
           ...page,
