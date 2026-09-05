@@ -73,7 +73,8 @@ function fakeIgdb(options: FakeIgdbOptions): IgdbTransport {
   };
 }
 
-const TYPES = [{ id: 7, name: "Twitch hours watched" }];
+// IGDB's real, live-verified spelling (see IGDB_POPULARITY_TYPE_NAME).
+const TYPES = [{ id: 7, name: "24hr Hours Watched" }];
 
 /** The two-game DOOM fixture the hashtag tests reason with, hydrated. */
 function doomCatalog() {
@@ -318,7 +319,7 @@ describe("syncGamesCatalog", () => {
         games: new Map(),
         covers: new Map(),
       }),
-    ).rejects.toThrow(/Twitch hours watched/);
+    ).rejects.toThrow(/24hr Hours Watched/);
     // Nothing was staged, so nothing was written.
     expect(await db.select().from(game)).toHaveLength(0);
   });
