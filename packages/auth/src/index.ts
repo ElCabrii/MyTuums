@@ -141,7 +141,7 @@ export const auth = betterAuth({
     sendResetPassword: async ({ user, url }, request) => {
       await sendEmail({
         to: user.email,
-        ...passwordResetEmail(url, localeFromRequest(request?.headers)),
+        ...(await passwordResetEmail(url, localeFromRequest(request?.headers))),
       });
     },
   },
@@ -158,7 +158,7 @@ export const auth = betterAuth({
     sendVerificationEmail: async ({ user, url }, request) => {
       await sendEmail({
         to: user.email,
-        ...verificationEmail(url, localeFromRequest(request?.headers)),
+        ...(await verificationEmail(url, localeFromRequest(request?.headers))),
       });
     },
   },
@@ -302,7 +302,7 @@ export const auth = betterAuth({
         sendOTP: async ({ user, otp }, ctx) => {
           await sendEmail({
             to: user.email,
-            ...otpEmail(otp, localeFromRequest(ctx?.request?.headers ?? ctx?.headers)),
+            ...(await otpEmail(otp, localeFromRequest(ctx?.request?.headers ?? ctx?.headers))),
           });
         },
       },

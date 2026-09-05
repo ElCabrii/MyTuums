@@ -9,27 +9,28 @@ nothing else — no routes, no UI, no queries beyond the adapter.
 
 ## Start here
 
-| File            | Why                                                                                                                      |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `src/index.ts`  | The production instance. Every non-default setting is load-bearing and carries an inline comment.                        |
-| `src/rules.ts`  | The account rules, stated once. Browser-safe, import-free, read by the whole repo.                                       |
-| `src/social.ts` | Provider registration and `trustedProviders`, the account-linking control.                                               |
-| `src/env.ts`    | Quiet env resolution — missing values make a feature absent, never a crash.                                              |
-| `src/email.ts`  | The only place mail is sent, plus the en/fr copy.                                                                        |
-| `src/legal.ts`  | The email/password sign-up consent hook; OAuth/passkey consent is recorded by the web app's global legal consent dialog. |
+| File                   | Why                                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts`         | The production instance. Every non-default setting is load-bearing and carries an inline comment.                        |
+| `src/rules.ts`         | The account rules, stated once. Browser-safe, import-free, read by the whole repo.                                       |
+| `src/social.ts`        | Provider registration and `trustedProviders`, the account-linking control.                                               |
+| `src/env.ts`           | Quiet env resolution — missing values make a feature absent, never a crash.                                              |
+| `src/email.ts`         | The only place mail is sent, plus the en/fr copy.                                                                        |
+| `src/email-templates/` | The owned emailcn-style templates (`theme-mytuums`, shell, button, copy renderer) that render the HTML part.             |
+| `src/legal.ts`         | The email/password sign-up consent hook; OAuth/passkey consent is recorded by the web app's global legal consent dialog. |
 
 ## Change map
 
-| Intent                            | Primary                                        | Also touch                                                                                                       |
-| --------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Add or change an OAuth provider   | `src/social.ts`                                | `../../apps/server/src/env.ts`, `../../.env.example`, `VITE_SOCIAL_PROVIDERS`, `apps/web/src/lib/auth-client.ts` |
-| Change an auth email              | `src/email.ts`                                 | both locales in the same file, and `src/email.test.ts` when the rendering changes                                |
-| Translate an auth error           | `src/i18n.ts`                                  | `apps/web/src/lib/auth-error-message.ts`                                                                         |
-| Change a user-field rule          | `src/rules.ts`                                 | nothing — the hooks, both handle forms and `packages/api` all read it. Keep the file import-free                 |
-| Change how a violation is refused | `src/dob.ts`, `src/profile.ts`, `src/legal.ts` | the `APIError` translation only; the rule itself belongs in `src/rules.ts`                                       |
-| Change session or plugin config   | `src/index.ts`                                 | read the inline comment first; several settings are pinned                                                       |
-| Change an auth rate limit         | `src/index.ts` (`customRules`)                 | these are security controls, not tuning                                                                          |
-| Add a test-only helper            | `src/testing.ts`                               | never import it from application code                                                                            |
+| Intent                            | Primary                                                      | Also touch                                                                                                       |
+| --------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Add or change an OAuth provider   | `src/social.ts`                                              | `../../apps/server/src/env.ts`, `../../.env.example`, `VITE_SOCIAL_PROVIDERS`, `apps/web/src/lib/auth-client.ts` |
+| Change an auth email              | `src/email.ts` for copy, `src/email-templates/` for the look | both locales in the same file, and `src/email.test.ts` when the rendering changes                                |
+| Translate an auth error           | `src/i18n.ts`                                                | `apps/web/src/lib/auth-error-message.ts`                                                                         |
+| Change a user-field rule          | `src/rules.ts`                                               | nothing — the hooks, both handle forms and `packages/api` all read it. Keep the file import-free                 |
+| Change how a violation is refused | `src/dob.ts`, `src/profile.ts`, `src/legal.ts`               | the `APIError` translation only; the rule itself belongs in `src/rules.ts`                                       |
+| Change session or plugin config   | `src/index.ts`                                               | read the inline comment first; several settings are pinned                                                       |
+| Change an auth rate limit         | `src/index.ts` (`customRules`)                               | these are security controls, not tuning                                                                          |
+| Add a test-only helper            | `src/testing.ts`                                             | never import it from application code                                                                            |
 
 ## Invariants
 
@@ -98,8 +99,13 @@ Each of these is a deliberate, non-default setting. The inline comment in
   `apps/server/src/env.ts` is the loud boot-time validator. The split is what
   lets the better-auth CLI import this package with no server around.
 - **Every outgoing email is multipart.** `src/email.ts` keeps the English and
-  French plain-text copy as the source of truth, then safely renders the same
-  content through one restrained, table-based, inline-CSS HTML template. The
+  French plain-text copy as the source of truth, then renders the same
+  content to HTML through the owned emailcn-style templates in
+  `src/email-templates/` (a custom `theme-mytuums` over `react-email`
+  primitives — table-based, inline styles, deliberately no Tailwind runtime
+  in the server bundle). The builders are async because `react-email`'s
+  `render` inlines styles asynchronously, which is also why
+  `PendingEmail.build` in `packages/api` returns a promise. The
   verification, password-reset and moderation-appeal capability URLs must
   remain absolute and present in both parts, but appear only as escaped anchor
   `href` values behind localized HTML CTA labels; arbitrary URLs in quoted user
@@ -182,8 +188,9 @@ standing proof that the module needs no database, no environment and no
 better-auth instance to import.
 
 The one test suite owned here is `src/email.test.ts`, run by `vitest.config.ts`'s
-single **unit** project. The email HTML rendering (`escapeHtml`,
-`renderHtmlLine`, `renderHtmlCopy`, `renderActionButton`, `brandedEmail`) is the
+single **unit** project. The email HTML rendering (`EmailCopy`,
+`EmailButton`, `MytuumsShell`, `renderBrandedEmail` in
+`src/email-templates/`) is the
 only thing standing between moderator- and user-supplied copy and an email
 client's HTML parser, and it is pure — so it belongs in `pnpm test:unit`, which
 runs with no database service. The tests pin the localized CTA labels, escaped
