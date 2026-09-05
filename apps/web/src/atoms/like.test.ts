@@ -57,6 +57,9 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     removedReason: null,
     editedAt: null,
     unavailable: false,
+    private: false,
+    parentPrivate: false,
+    quotedPrivate: false,
     attachments: [],
     ...overrides,
   };

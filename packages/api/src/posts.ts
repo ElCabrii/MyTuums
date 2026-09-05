@@ -278,6 +278,36 @@ function parentPreview(viewerId: string | null) {
   )`;
 }
 
+/**
+ * True when the immediate parent is hidden from the viewer specifically by
+ * privacy (followers-only post or private account) rather than by a block,
+ * ban, or delete. The `parent` preview above yields null for all of those;
+ * this flag is what lets the client render "This post is private" instead of
+ * the generic unavailable line. Null parent ids yield false — there is no
+ * parent to be private.
+ */
+function parentPrivateFlag(viewerId: string | null) {
+  if (viewerId === null) {
+    return sql<boolean>`exists (
+      select 1 from ${post} as "parent_post"
+      inner join ${user} as "parent_author" on ${parentAuthor.id} = ${parentPost.authorId}
+      where ${parentPost.id} = ${post.parentId}
+        and (${parentAuthor.isPrivate} is true or ${parentPost.isPrivate} is true)
+    )`;
+  }
+  return sql<boolean>`exists (
+    select 1 from ${post} as "parent_post"
+    inner join ${user} as "parent_author" on ${parentAuthor.id} = ${parentPost.authorId}
+    where ${parentPost.id} = ${post.parentId}
+      and ((${parentAuthor.isPrivate} is true or ${parentPost.isPrivate} is true)
+        and ${parentPost.authorId} <> ${viewerId}
+        and not exists (
+          select 1 from ${follow}
+          where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${parentPost.authorId}
+        ))
+  )`;
+}
+
 /** Whether the viewer has liked this post — an EXISTS subquery. */
 function viewerHasLiked(viewerId: string | null) {
   return sql<boolean>`exists (
@@ -407,6 +437,35 @@ function quotedPreview(viewerId: string | null) {
 }
 
 /**
+ * True when the quoted post is hidden from the viewer specifically by privacy
+ * rather than by a block, ban, or missing row. Mirrors `parentPrivateFlag`
+ * above: the `quoted` preview yields null for all of those, and this flag is
+ * what lets the client render "This post is private" instead of the generic
+ * unavailable card. Null `quotedPostId` rows yield false.
+ */
+function quotedPrivateFlag(viewerId: string | null) {
+  if (viewerId === null) {
+    return sql<boolean>`exists (
+      select 1 from ${post} as "quoted_post"
+      inner join ${user} as "quoted_author" on ${quotedAuthor.id} = ${quotedPostTable.authorId}
+      where ${quotedPostTable.id} = ${outerPost("quoted_post_id")}
+        and (${quotedAuthor.isPrivate} is true or ${quotedPostTable.isPrivate} is true)
+    )`;
+  }
+  return sql<boolean>`exists (
+    select 1 from ${post} as "quoted_post"
+    inner join ${user} as "quoted_author" on ${quotedAuthor.id} = ${quotedPostTable.authorId}
+    where ${quotedPostTable.id} = ${outerPost("quoted_post_id")}
+      and ((${quotedAuthor.isPrivate} is true or ${quotedPostTable.isPrivate} is true)
+        and ${quotedPostTable.authorId} <> ${viewerId}
+        and not exists (
+          select 1 from ${follow}
+          where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${quotedPostTable.authorId}
+        ))
+  )`;
+}
+
+/**
  * The reposter a feed event attributes: who amplified the post, and when they
  * did (the event time the feed ordered the row by). A property of the *event*,
  * not the post — see `repostedBy` in `postSelection`.
@@ -512,6 +571,13 @@ export const postSelection = (viewerId: string | null) => ({
   // redaction in `feedEventPage`): read `unavailable` before ever reading
   // `author` off a feed item.
   unavailable: sql<boolean>`false`,
+  // True when this row is hidden from the viewer specifically by privacy
+  // (followers-only post or private account). Direct readers filter such rows
+  // before this projection, so it is always false there; the merged feed's
+  // second query reads without that filter and re-evaluates, so a repost of a
+  // private original keeps the event with `unavailable` + `private` both true
+  // — the client renders "This post is private" instead of "unavailable".
+  private: privatePostHidden(viewerId),
   createdAt: post.createdAt,
   // Null until the author edits the text (issue #264); carries the LAST edit
   // time, which is what the "Edited" marker renders. `createdAt` above stays
@@ -522,6 +588,9 @@ export const postSelection = (viewerId: string | null) => ({
   // than only in the thread payload.
   parentId: post.parentId,
   parent: parentPreview(viewerId),
+  // Null for every reason `parent` is null except privacy — when true the
+  // client renders the private copy instead of the generic unavailable line.
+  parentPrivate: parentPrivateFlag(viewerId),
   // The quote reference (issue #261): `quotedPostId` names the quoted post,
   // `quoted` is its embedded preview — full content and attachments, or the
   // tombstone flags, or null when the quoted author is hidden from this
@@ -529,6 +598,9 @@ export const postSelection = (viewerId: string | null) => ({
   // in the shared selection: every reader renders the same quote card.
   quotedPostId: post.quotedPostId,
   quoted: quotedPreview(viewerId),
+  // Like `parentPrivate` above: true when the quoted post is hidden
+  // specifically by privacy, so the client renders the private copy.
+  quotedPrivate: quotedPrivateFlag(viewerId),
   attachments: postAttachments,
   author: {
     id: user.id,
@@ -1424,6 +1496,7 @@ export const postRouter = {
         removedReason: null,
         editedAt: null,
         unavailable: false,
+        private: false,
         author: {
           id: context.user.id,
           name: context.user.name,

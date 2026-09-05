@@ -62,6 +62,7 @@ export function ComposerForm({
   submitLabel,
   rows = 2,
   header,
+  footerExtra,
   mentionScope = "composer",
   attachments = [],
   onAttachmentsChange,
@@ -80,6 +81,8 @@ export function ComposerForm({
   rows?: number;
   /** Rendered above the textarea — the reply box's "Replying to @x" line. */
   header?: ReactNode;
+  /** Rendered inside the form above the footer — e.g. the followers-only toggle. */
+  footerExtra?: ReactNode;
   /** Primitive key for transient mention state owned beside each draft atom. */
   mentionScope?: string;
   /** Optional image state; omitted only by callers that intentionally disable attachments. */
@@ -319,6 +322,8 @@ export function ComposerForm({
           <span>{attachmentError || errorMessage}</span>
         </div>
       )}
+
+      {footerExtra}
 
       <div className="border-border flex items-center justify-between gap-3 border-t pt-3">
         {/* The image picker rides the footer's action row like on every other
