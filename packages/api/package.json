@@ -39,6 +39,10 @@
     "./sql": {
       "types": "./src/sql.ts",
       "default": "./src/sql.ts"
+    },
+    "./games-sync": {
+      "types": "./src/games-sync.ts",
+      "default": "./src/games-sync.ts"
     }
   },
   "scripts": {
@@ -48,7 +52,8 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "reconcile:media": "dotenv -e ../../.env -- tsx scripts/reconcile-media.ts",
-    "prune:notifications": "dotenv -e ../../.env -- tsx scripts/prune-notifications.ts"
+    "prune:notifications": "dotenv -e ../../.env -- tsx scripts/prune-notifications.ts",
+    "games:seed": "dotenv -e ../../.env -- tsx scripts/seed-games.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1101.0",

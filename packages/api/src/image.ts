@@ -47,12 +47,20 @@ const KEY_PREFIX = {
  */
 export type ImageVariant = "original" | "display";
 
-const EXTENSION = {
+/**
+ * The file extension each allowed type is stored under. Exported for the
+ * game-cover sync (`games-sync.ts`), which re-hosts external images under
+ * the same extension convention — `jpeg` becoming `jpg` matters there: the
+ * media key allowlist (`isSafeObjectKey`) names extensions, not MIME types.
+ */
+export const IMAGE_EXTENSION = {
   "image/webp": "webp",
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/gif": "gif",
 } satisfies Record<AllowedImageType, string>;
+
+const EXTENSION = IMAGE_EXTENSION;
 
 /** The verdict of `acceptImage`: accepted with the sniffed type, or refused with a reason. */
 export interface ImageAcceptance {
@@ -196,6 +204,10 @@ export function objectKeyFromMediaPath(value: string | null | undefined): string
  * The optional `.w<N>.webp` suffix is a derived display variant (see
  * `MEDIA_VARIANT_WIDTHS` in ./constants.ts — structural only here; whether a
  * given width is one this app mints is `parseMediaVariantKey`'s to say).
+ *
+ * A game cover is `games/<igdbId>-<imageId>.<ext>` (issue #314): the IGDB id
+ * of the game and IGDB's own image hash, so the key is content-addressed and
+ * a repeat sync re-uploads exactly the same object — see `./game-media.ts`.
  */
 export function isSafeObjectKey(key: string): boolean {
   return (
@@ -207,6 +219,7 @@ export function isSafeObjectKey(key: string): boolean {
     ) ||
     /^link-cards\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(webp|png|jpg|gif)(?:\.w\d+\.webp)?$/.test(
       key,
-    )
+    ) ||
+    /^games\/\d+-[a-z0-9]{2,64}\.(webp|png|jpg|gif)(?:\.w\d+\.webp)?$/.test(key)
   );
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
+import { parseMediaVariantKey } from "./constants.js";
 import { createMediaResolver, type MediaAuthorizer } from "./media.js";
 import { createDestructiveStorage, type Storage } from "./storage.js";
 
@@ -168,5 +169,29 @@ describe("createMediaResolver", () => {
     expect(original).not.toHaveProperty("cacheControl");
     expect(cachePolicy).toHaveBeenCalledWith(PROFILE_KEY);
     expect(cachePolicy).toHaveBeenCalledWith(PROFILE_ORIGINAL_KEY);
+  });
+});
+
+/**
+ * The games half of the variant vocabulary (issue #314): a cover's derived
+ * widths are exactly 320 and 640 — the one place the allowlist is spelled for
+ * a key prefix, so a browser `srcset` and the server's lazy generation can
+ * never name a width the other refuses.
+ */
+describe("parseMediaVariantKey for game covers", () => {
+  it("parses 320 and 640 off a games base, and refuses every other width", () => {
+    expect(parseMediaVariantKey("games/123-co1r7e.jpg.w320.webp")).toEqual({
+      baseKey: "games/123-co1r7e.jpg",
+      width: 320,
+    });
+    expect(parseMediaVariantKey("games/123-co1r7e.jpg.w640.webp")).toEqual({
+      baseKey: "games/123-co1r7e.jpg",
+      width: 640,
+    });
+    // A width no surface of this app requests for covers: `isSafeObjectKey`
+    // accepts it structurally, the parse refuses it, so the resolver serves
+    // the rogue key AS IS — never a generation request.
+    expect(parseMediaVariantKey("games/123-co1r7e.jpg.w1280.webp")).toBeNull();
+    expect(parseMediaVariantKey("games/123-co1r7e.jpg")).toBeNull();
   });
 });

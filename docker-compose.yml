@@ -96,6 +96,12 @@ services:
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
       TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID:-}
       TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET:-}
+      # The game-catalog sync's IGDB pair — same portal as TWITCH_*, different
+      # purpose, and only ever read by `pnpm games:sync`, never by the server
+      # process itself. Passed through so a container-hosted sync behaves like
+      # a host-side one reading the same .env.
+      IGDB_CLIENT_ID: ${IGDB_CLIENT_ID:-}
+      IGDB_CLIENT_SECRET: ${IGDB_CLIENT_SECRET:-}
       # Object storage for avatars and banners. Passed through rather than
       # defaulted, same as the OAuth pairs above: `:-` yields an empty string
       # when unset, which the server treats as absent — so the container runs

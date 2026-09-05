@@ -9,12 +9,14 @@ import { CORSPlugin, SimpleCsrfProtectionHandlerPlugin } from "@orpc/server/plug
 import { ORPCError, onError } from "@orpc/server";
 import {
   appRouter,
+  canViewGameCoverMedia,
   canViewLinkCardMedia,
   canViewPostMedia,
   canViewProfileMedia,
   createContext,
   createMediaResolver,
   defaultStorage,
+  gameCoverRedirectCacheControl,
   profileDisplayRedirectCacheControl,
 } from "@my-tuums/api";
 import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
@@ -142,14 +144,15 @@ const handleRequest = createRequestHandler({
 
     return handler.handle(req, nodeResponse(res), { prefix: "/rpc", context });
   },
-  // One resolver, three authorizers: post attachments follow the post's
+  // One resolver, four authorizers: post attachments follow the post's
   // visibility (moderation tombstones, author blocks), profile images follow
   // the owner's visibility and the owner-only rule for `.orig` originals, and
-  // a stored link preview image is public web content this app mirrored.
-  // A null viewer — the anonymous post-permalink reader — is answered by the
-  // same authorizers, which keep the owner-only rules owner-only. Display-
-  // object redirects are the one class whose caching is worth its staleness
-  // budget — window-bounded, private, per-viewer on every miss.
+  // a stored link preview image or a re-hosted game cover is public web
+  // content this app mirrored. A null viewer — the anonymous post-permalink
+  // and public-games-page reader — is answered by the same authorizers, which
+  // keep the owner-only rules owner-only. Display-object redirects are the
+  // one class whose caching is worth its staleness budget — window-bounded,
+  // private for per-viewer decisions, public for the content-addressed covers.
   resolveMediaUrl: createMediaResolver(
     defaultStorage,
     (key, viewerId) =>
@@ -157,8 +160,13 @@ const handleRequest = createRequestHandler({
         ? canViewPostMedia(db, key, viewerId)
         : key.startsWith("link-cards/")
           ? canViewLinkCardMedia()
-          : canViewProfileMedia(db, key, viewerId),
-    profileDisplayRedirectCacheControl,
+          : key.startsWith("games/")
+            ? canViewGameCoverMedia()
+            : canViewProfileMedia(db, key, viewerId),
+    // The games arm runs first because it is the one public-cache class;
+    // everything else keeps the profile policy, which declines non-profile
+    // keys (post and link-card redirects stay unstored).
+    (key) => gameCoverRedirectCacheControl(key) ?? profileDisplayRedirectCacheControl(key),
   ),
   // Only when this deployment bundles the built web app — see the
   // `webStaticHandler` note above.
