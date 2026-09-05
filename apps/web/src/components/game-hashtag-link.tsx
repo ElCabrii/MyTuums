@@ -80,10 +80,13 @@ function GameHoverCardContent({ slug }: { slug: string }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
+        {/* No aria-label: the cover image's alt (the game name) names this
+            link, keeping it distinct from the "View game page" text link
+            below — two links sharing one accessible name is a strict-mode
+            and screen-reader ambiguity. */}
         <Link
           to="/games/$slug"
           params={{ slug }}
-          aria-label={m.game_hover_view()}
           className="focus-visible:ring-ring shrink-0 overflow-hidden rounded-md outline-none focus-visible:ring-2"
         >
           <span className="bg-muted block h-14 w-10 overflow-hidden">

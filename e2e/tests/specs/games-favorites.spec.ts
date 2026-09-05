@@ -39,26 +39,26 @@ test.describe("hashtag resolution", () => {
     page,
   }) => {
     // The fixture catalog answers `doom`; nothing answers `nothattag`.
+    // `.first()`: specs share one database truncated once per run, so a
+    // retried attempt posts twice — the newest post's links are first in the
+    // feed, and the assertion targets those.
     await page.goto("/");
     const composer = page.getByRole("textbox");
     await composer.fill("Fresh from the #doom vault, not #nothattag");
     await page.getByRole("button", { name: "Post", exact: true }).click();
 
-    const resolved = page.getByRole("link", { name: "#doom", exact: true });
+    const resolved = page.getByRole("link", { name: "#doom", exact: true }).first();
     await expect(resolved).toHaveAttribute("href", "/discover?game=doom");
-    await expect(page.getByRole("link", { name: "#nothattag", exact: true })).toHaveAttribute(
-      "href",
-      "/search?q=%23nothattag",
-    );
+    await expect(
+      page.getByRole("link", { name: "#nothattag", exact: true }).first(),
+    ).toHaveAttribute("href", "/search?q=%23nothattag");
 
-    // Hovering the resolved tag previews the game card, with a link to the
-    // game's page inside it.
+    // Hovering the resolved tag previews the game card, with links to the
+    // game's page inside it (cover + text share the destination).
     await resolved.hover();
-    await expect(page.getByText("Favorites: 0")).toBeVisible();
-    await expect(page.getByRole("link", { name: "View game page" })).toHaveAttribute(
-      "href",
-      "/games/doom",
-    );
+    await expect(page.getByText("Favorites: 0").first()).toBeVisible();
+    const viewGame = page.getByRole("link", { name: "View game page" }).first();
+    await expect(viewGame).toHaveAttribute("href", "/games/doom");
 
     // The resolved link lands on Discover filtered to that game.
     await resolved.click();
