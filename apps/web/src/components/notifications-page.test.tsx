@@ -14,6 +14,8 @@ const fakeClient = {
     list: vi.fn(),
     unreadCount: vi.fn(),
     markRead: vi.fn(),
+    delete: vi.fn(),
+    clearAll: vi.fn(),
   },
 };
 
@@ -22,6 +24,8 @@ installTestOrpc(createTanstackQueryUtils(fakeClient));
 beforeEach(() => {
   vi.clearAllMocks();
   fakeClient.notification.markRead.mockResolvedValue({ read: 0 });
+  fakeClient.notification.delete.mockResolvedValue({ success: true, id: "notification-id" });
+  fakeClient.notification.clearAll.mockResolvedValue({ deletedCount: 0 });
 });
 
 describe("NotificationsPage", () => {
@@ -250,5 +254,51 @@ describe("NotificationsPage", () => {
     });
 
     expect(screen.getByText(m.notifications_empty())).toBeInTheDocument();
+  });
+
+  it("offers a delete action on each row that calls the delete procedure", async () => {
+    const row = makeNotification({ id: "deletable-notification" });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).notifications.data([{ items: [row], nextCursor: null }]);
+
+    await renderWithProviders(<NotificationsPage />, {
+      queryClient,
+      initialPath: "/notifications",
+      signedInAs: true,
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: m.notification_delete() }));
+    await waitFor(() =>
+      expect(fakeClient.notification.delete).toHaveBeenCalledWith(
+        { id: "deletable-notification" },
+        expect.anything(),
+      ),
+    );
+  });
+
+  it("clears the inbox behind a confirmation dialog", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).notifications.data([
+      { items: [makeNotification()], nextCursor: null },
+    ]);
+
+    await renderWithProviders(<NotificationsPage />, {
+      queryClient,
+      initialPath: "/notifications",
+      signedInAs: true,
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: m.notifications_clear_all() }));
+    expect(screen.getByText(m.notifications_clear_all_title())).toBeInTheDocument();
+
+    const confirmButtons = screen.getAllByRole("button", {
+      name: m.notifications_clear_all(),
+    });
+    await user.click(confirmButtons[confirmButtons.length - 1]);
+    await waitFor(() =>
+      expect(fakeClient.notification.clearAll).toHaveBeenCalledWith({}, expect.anything()),
+    );
   });
 });

@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
@@ -186,7 +187,7 @@ const badgeTickKey = sql`(
   ${BURST_BUCKET_SECONDS}
 )`;
 
-/** The `notification` procedure group: list, unreadCount, markRead. */
+/** The `notification` procedure group: list, unreadCount, markRead, delete, clearAll. */
 export const notificationRouter = {
   /**
    * Pages the caller's notifications, newest first. Requires a session.
@@ -402,5 +403,47 @@ export const notificationRouter = {
         );
 
       return { read: row?.count ?? 0 };
+    }),
+
+  /**
+   * Deletes one of the caller's own notifications (issue #330).
+   *
+   * The row is the recipient's private inbox entry — deleting it affects no
+   * other user and no audit trail, unlike a moderation action row. The
+   * `and(id, recipientId)` predicate is the authorization: a row belonging
+   * to someone else reads as missing, so no existence oracle leaks across
+   * accounts. Deleting an unread row shrinks the badge through the same
+   * `unreadCount` query the header already reads — no cursor rewrite needed,
+   * the row is simply gone from the counted set.
+   */
+  delete: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.markRead))
+    .input(z.object({ id: z.uuid() }))
+    .handler(async ({ input, context }) => {
+      const deleted = await context.db
+        .delete(notification)
+        .where(and(eq(notification.id, input.id), eq(notification.recipientId, context.user.id)))
+        .returning({ id: notification.id });
+
+      if (deleted.length === 0) throw new ORPCError("NOT_FOUND");
+      return { success: true as const, id: input.id };
+    }),
+
+  /**
+   * Deletes every notification the caller owns (issue #330) — the inbox's
+   * "Clear all". One statement, no cursor involved: the read cursor
+   * (`notification_last_seen`) is left untouched, since a row that no longer
+   * exists needs no read state and a future row must still land unread.
+   */
+  clearAll: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.markRead))
+    .input(z.object({}))
+    .handler(async ({ context }) => {
+      const deleted = await context.db
+        .delete(notification)
+        .where(eq(notification.recipientId, context.user.id))
+        .returning({ id: notification.id });
+
+      return { deletedCount: deleted.length };
     }),
 };
