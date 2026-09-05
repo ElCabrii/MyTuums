@@ -46,7 +46,7 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
 
 function feedPage(posts: Post[]): InfiniteData<PostListPage> {
   return {
-    pages: [{ items: posts, nextCursor: null }],
+    pages: [{ items: posts, nextCursor: null, gameMentions: {} }],
     pageParams: [undefined],
   };
 }
@@ -57,6 +57,7 @@ function replyPage(directReply: Post, continuation: Post): InfiniteData<PostList
       {
         items: [directReply],
         nextCursor: null,
+        gameMentions: {},
         continuations: [
           {
             rootPostId: directReply.id,
@@ -72,7 +73,7 @@ function replyPage(directReply: Post, continuation: Post): InfiniteData<PostList
 
 function searchPage(posts: Post[]): InfiniteData<SearchPostsPage> {
   return {
-    pages: [{ items: posts, nextCursor: null }],
+    pages: [{ items: posts, nextCursor: null, gameMentions: {} }],
     pageParams: [undefined],
   };
 }
@@ -210,6 +211,7 @@ describe("post-cache", () => {
         post: shared,
         ancestors: [],
         truncated: false,
+        gameMentions: {},
       });
 
       // Thread B: "shared-1" shows up as an ancestor of a different focused post.
@@ -218,6 +220,7 @@ describe("post-cache", () => {
         post: reply,
         ancestors: [shared],
         truncated: false,
+        gameMentions: {},
       });
 
       updatePostEverywhere(queryClient, "shared-1", (post) => ({
@@ -248,7 +251,12 @@ describe("post-cache", () => {
       const queryClient = new QueryClient();
       const post = makePost({ id: "cold-1" });
       const key = orpc.post.thread.key({ input: { postId: "cold-1" } });
-      queryClient.setQueryData<Thread>(key, { post, ancestors: [], truncated: false });
+      queryClient.setQueryData<Thread>(key, {
+        post,
+        ancestors: [],
+        truncated: false,
+        gameMentions: {},
+      });
 
       expect(readCachedPost(queryClient, "cold-1")).toEqual(post);
     });
@@ -343,7 +351,12 @@ describe("post-cache", () => {
       const threadKey = orpc.post.thread.key({ input: { postId: "round-trip-1" } });
 
       queryClient.setQueryData(feedKey, feedPage([post]));
-      queryClient.setQueryData<Thread>(threadKey, { post, ancestors: [], truncated: false });
+      queryClient.setQueryData<Thread>(threadKey, {
+        post,
+        ancestors: [],
+        truncated: false,
+        gameMentions: {},
+      });
 
       const before = {
         feed: queryClient.getQueryData(feedKey),
@@ -647,7 +660,7 @@ describe("post-cache", () => {
       const searchKey = orpc.search.posts.key({ input: { q: "hello", limit: 20 } });
 
       queryClient.setQueryData(bookmarksKey, {
-        pages: [{ items: [target, neighbour], nextCursor: null }],
+        pages: [{ items: [target, neighbour], nextCursor: null, gameMentions: {} }],
         pageParams: [undefined],
       });
       queryClient.setQueryData(homeKey, feedPage([target]));
@@ -687,8 +700,8 @@ describe("post-cache", () => {
 
       queryClient.setQueryData(bookmarksKey, {
         pages: [
-          { items: [first], nextCursor: "cursor-1" },
-          { items: [second], nextCursor: null },
+          { items: [first], nextCursor: "cursor-1", gameMentions: {} },
+          { items: [second], nextCursor: null, gameMentions: {} },
         ],
         pageParams: [undefined, "cursor-1"],
       });

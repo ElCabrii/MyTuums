@@ -1,4 +1,5 @@
 import { isAllowedUsernameCharset, USERNAME_MAX_LENGTH } from "@my-tuums/auth/rules";
+import { SEARCH_QUERY_MAX_LENGTH } from "@my-tuums/api/constants";
 
 /** The token currently being completed in a composer. */
 export interface MentionToken {
@@ -80,4 +81,72 @@ export function insertMention(
   const mention = `@${handle}`;
   const nextValue = `${value.slice(0, token.start)}${mention}${value.slice(token.end)}`;
   return { value: nextValue, caret: token.start + mention.length };
+}
+
+/**
+ * The `#tag` half of composer completion (issue #314, Q4). The word charset
+ * and the boundary rules are the RENDERER's (`matchHashtag` in
+ * linked-text.tsx), restated here so a token this function offers to
+ * complete is exactly a token the published text would linkify: ASCII
+ * alphanumerics and `_`, refused after a word character (`word#tag`) or
+ * another `#` (`##tag`), capped at the length whose query search still
+ * accepts.
+ */
+const HASHTAG_WORD_CHARACTER = /[a-zA-Z0-9_]/;
+
+/** The longest tag the renderer links — `SEARCH_QUERY_MAX_LENGTH - 1` chars. */
+const HASHTAG_MAX_LENGTH = SEARCH_QUERY_MAX_LENGTH - 1;
+
+/**
+ * Finds the hashtag token containing a collapsed caret, if that caret is in
+ * a completable tag prefix — `mentionAtCaret`'s exact contract over `#`.
+ * Used by the composer's game-suggestion popover, so a partial or abbreviated
+ * tag (`#wow`) can be replaced by the catalog's full key
+ * (`#worldofwarcraft`).
+ */
+export function hashtagAtCaret(
+  value: string,
+  selectionStart: number | null,
+  selectionEnd: number | null = selectionStart,
+): MentionToken | null {
+  if (selectionStart === null || selectionEnd === null || selectionStart !== selectionEnd) {
+    return null;
+  }
+
+  const caret = Math.max(0, Math.min(selectionStart, value.length));
+  let prefixStart = caret;
+  while (prefixStart > 0 && HASHTAG_WORD_CHARACTER.test(value[prefixStart - 1] ?? "")) {
+    prefixStart -= 1;
+  }
+
+  if (value[prefixStart - 1] !== "#") return null;
+
+  const start = prefixStart - 1;
+  const before = value[start - 1];
+  if (before === "#" || HASHTAG_WORD_CHARACTER.test(before ?? "")) return null;
+
+  const query = value.slice(prefixStart, caret);
+  if (query.length === 0 || query.length > HASHTAG_MAX_LENGTH) return null;
+
+  let end = caret;
+  while (end < value.length && HASHTAG_WORD_CHARACTER.test(value[end] ?? "")) end += 1;
+  if (end - start - 1 > HASHTAG_MAX_LENGTH) return null;
+
+  return { start, end, query };
+}
+
+/**
+ * Replaces one hashtag token with the catalog's full key — the accept half
+ * of the game popover (Q4: typing `#wow` and accepting World of Warcraft
+ * writes `#worldofwarcraft`). Keys arrive canonical from the server; the
+ * `#` is added here for the same single-source reason as `insertMention`.
+ */
+export function insertHashtag(
+  value: string,
+  token: MentionToken,
+  hashtagKey: string,
+): MentionInsertion {
+  const tag = `#${hashtagKey}`;
+  const nextValue = `${value.slice(0, token.start)}${tag}${value.slice(token.end)}`;
+  return { value: nextValue, caret: token.start + tag.length };
 }

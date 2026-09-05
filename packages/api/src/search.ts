@@ -8,7 +8,7 @@ import {
   SEARCH_QUERY_MAX_LENGTH,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
-import { matchesGameQuery } from "./games.js";
+import { gameMentionsFor, matchesGameQuery } from "./games.js";
 import { keysetPage } from "./pagination.js";
 import { postSelection } from "./posts.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
@@ -168,6 +168,9 @@ export const searchRouter = {
       const games = await context.db
         .select({
           slug: game.slug,
+          // The composer's tag popover completes `#hashtagKey` (Q4) — the
+          // suggestion must carry the key it will write, not just its page.
+          hashtagKey: game.hashtagKey,
           name: game.name,
           coverMediaPath: game.coverMediaPath,
           firstReleaseYear: game.firstReleaseYear,
@@ -269,7 +272,7 @@ export const searchRouter = {
       ];
 
       const selection = postSelection(viewerId);
-      return keysetPage({
+      const page = await keysetPage({
         codec: searchPostCursor,
         cursor: input.cursor,
         limit: input.limit,
@@ -287,5 +290,10 @@ export const searchRouter = {
             .orderBy(desc(post.createdAt), desc(post.id))
             .limit(input.limit + 1),
       });
+
+      // Same per-batch map as the feeds (issue #314, Q16: tags render
+      // everywhere, search included).
+      const texts = page.items.flatMap((item) => [item.content, item.quoted?.content ?? null]);
+      return { ...page, gameMentions: await gameMentionsFor(context.db, texts) };
     }),
 };

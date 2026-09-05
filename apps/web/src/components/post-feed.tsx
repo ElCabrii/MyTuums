@@ -4,6 +4,7 @@ import { MessageSquare } from "lucide-react";
 import { PostCard } from "@/components/post-card";
 import { PaginatedState } from "@/components/paginated-state";
 import type { postFeedAtom } from "@/atoms/post-feed";
+import { mergedGameMentions } from "@/lib/game-mentions";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -32,6 +33,7 @@ export function PostFeed({
 }) {
   const feed = useAtomValue(feedAtom);
   const posts = feed.data?.pages.flatMap((page) => page.items) ?? [];
+  const gameMentions = mergedGameMentions(feed.data?.pages ?? []);
 
   return (
     <PaginatedState
@@ -57,6 +59,7 @@ export function PostFeed({
           post={post}
           showParentContext={showParentContext}
           priorityImages={index === 0}
+          gameMentions={gameMentions}
         />
       ))}
     </PaginatedState>

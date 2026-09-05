@@ -331,7 +331,7 @@ function linkedSegments(text: string): Segment[] {
   return segments;
 }
 
-function renderSegment(segment: Segment): ReactNode {
+function renderSegment(segment: Segment, gameMentions?: Record<string, string>): ReactNode {
   switch (segment.kind) {
     case "mention":
       return (
@@ -358,14 +358,29 @@ function renderSegment(segment: Segment): ReactNode {
           {segment.label}
         </a>
       );
-    case "hashtag":
-      // A tag is nothing but a link into post search filtered to itself: the
-      // query keeps the `#` so it matches hash-marked occurrences rather than
-      // the bare word. Post search is a substring scan, so a longer tag
-      // (`#tag_expo`), a glued word (`word#tag`) or a URL fragment still
-      // matches. The label stays as typed while the query carries the
-      // canonical lowercase tag, the same split as a mention's label versus
-      // its `/@handle` href.
+    case "hashtag": {
+      // A RESOLVED tag is a link to its game's page (issue #314, Q3): the
+      // server's per-batch map answers the canonical tag with the catalog's
+      // slug, and that answer is the whole mechanism — nothing is guessed
+      // client-side. Everything else keeps the original meaning: a link into
+      // post search filtered to itself, the query carrying the `#` so it
+      // matches hash-marked occurrences rather than the bare word. Post
+      // search is a substring scan, so a longer tag (`#tag_expo`), a glued
+      // word (`word#tag`) or a URL fragment still matches. The label stays
+      // as typed while the link carries the canonical target, the same split
+      // as a mention's label versus its `/@handle` href.
+      const gameSlug = gameMentions?.[segment.tag];
+      if (gameSlug !== undefined) {
+        return (
+          <Link
+            to="/games/$slug"
+            params={{ slug: gameSlug }}
+            className="text-link hover:text-link/80 underline underline-offset-2"
+          >
+            {segment.label}
+          </Link>
+        );
+      }
       return (
         <Link
           to="/search"
@@ -375,6 +390,7 @@ function renderSegment(segment: Segment): ReactNode {
           {segment.label}
         </Link>
       );
+    }
     case "text":
       return segment.value;
   }
@@ -395,9 +411,17 @@ function renderSegment(segment: Segment): ReactNode {
  * navigate on click (`PostCard`) already ignore clicks landing inside an
  * anchor, so a link opens its destination and nothing else.
  */
-export function LinkedText({ text }: { text: string }) {
+export function LinkedText({
+  text,
+  gameMentions,
+}: {
+  text: string;
+  gameMentions?: Record<string, string>;
+}) {
   return linkedSegments(text).map((segment) => (
-    <Fragment key={`${segment.kind}-${segment.start}`}>{renderSegment(segment)}</Fragment>
+    <Fragment key={`${segment.kind}-${segment.start}`}>
+      {renderSegment(segment, gameMentions)}
+    </Fragment>
   ));
 }
 

@@ -494,3 +494,74 @@ describe("ComposerForm", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(m.post_image_limit());
   });
 });
+
+describe("ComposerForm game tags (issue #314, Q4)", () => {
+  // `renderComposer` lives in the module scope above and mounts the same
+  // form the mention tests drive; these tests only swap the payload's games
+  // half in.
+
+  it("suggests games while typing a #tag and writes the catalog's full key on accept", async () => {
+    const payload: SearchTypeahead = {
+      users: [],
+      games: [
+        {
+          slug: "world-of-warcraft",
+          hashtagKey: "worldofwarcraft",
+          name: "World of Warcraft",
+          coverMediaPath: null,
+          firstReleaseYear: 2004,
+        },
+      ],
+      posts: [],
+    };
+    fakeClient.search.typeahead.mockResolvedValue(payload);
+    const onValueChange = vi.fn();
+    const rendered = await renderComposer({
+      value: "raiding #wow tonight",
+      onValueChange,
+      mentionScope: "game-tag-accept",
+    });
+    rendered.queryClient.setQueryData(
+      orpc.search.typeahead.queryKey({ input: { q: "wow" } }),
+      payload,
+    );
+
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    // Caret after `#wo` (index 10).
+    fireEvent.change(textarea, {
+      target: { value: "raiding #wow tonight", selectionStart: 10, selectionEnd: 10 },
+    });
+    textarea.setSelectionRange(10, 10);
+    fireEvent.select(textarea);
+
+    const option = await screen.findByRole("option", { name: /World of Warcraft/ });
+    expect(option).toHaveTextContent("#worldofwarcraft");
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onValueChange).toHaveBeenCalledWith("raiding #worldofwarcraft tonight");
+  });
+
+  it("keeps @handle completion unaffected while a tag popup is a different surface", async () => {
+    // Same query string through the @ path still offers users: the two token
+    // kinds share one typeahead but never one popup.
+    const payload: SearchTypeahead = {
+      users: [makeUserSummary({ id: "u-wow", name: "Wow Player", username: "wowplayer" })],
+      games: [],
+      posts: [],
+    };
+    fakeClient.search.typeahead.mockResolvedValue(payload);
+    const rendered = await renderComposer({ value: "@wow", mentionScope: "game-tag-mention" });
+    rendered.queryClient.setQueryData(
+      orpc.search.typeahead.queryKey({ input: { q: "wow" } }),
+      payload,
+    );
+
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(textarea, { target: { value: "@wow", selectionStart: 4, selectionEnd: 4 } });
+    textarea.setSelectionRange(4, 4);
+    fireEvent.select(textarea);
+
+    await screen.findByRole("option", { name: /Wow Player.*@wowplayer/i });
+  });
+});

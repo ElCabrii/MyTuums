@@ -150,6 +150,7 @@ export function makeThread(overrides: Partial<Thread> = {}): Thread {
     post: makePost(),
     ancestors: [],
     truncated: false,
+    gameMentions: {},
     ...overrides,
   };
 }

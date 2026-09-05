@@ -458,10 +458,13 @@ describe("search.posts", () => {
 
   it("finds a tagged post through the `#tag` query a hashtag link issues — case-folded, and not the bare word", async () => {
     // The hashtag tokenizer linkifies `#Tag` to post search with the
-    // lowercased, hash-prefixed query `#tag` (apps/web linked-text.tsx). This
-    // pins the server half of that contract: `ilike` folds the case the client
-    // folded, and the `#` keeps posts that merely contain the word out of what
-    // is presented as "posts tagged #tag".
+    // lowercased, hash-prefixed query `#tag` (apps/web linked-text.tsx) —
+    // unless the post batch's gameMentions map resolves the tag, in which
+    // case it links to `/games/{slug}` instead (issue #314, Q3; that half's
+    // server contract lives in games-mentions.int.test.ts). This pins the
+    // search half of the contract: `ilike` folds the case the client folded,
+    // and the `#` keeps posts that merely contain the word out of what is
+    // presented as "posts tagged #tag".
     const author = await createTestUser();
     const tag = uniqueTag();
     const tagged = await seedPostContent(author.id, `loving #${tag.toUpperCase()} today`);
@@ -667,11 +670,12 @@ describe("search.games", () => {
     );
 
     // Other World (rank 1) leads World at War (rank 2); the hashtag-key-only
-    // match joins them; Hades matches nothing.
-    expect(result.games.map((game) => game.slug)).toEqual([
-      "other-world",
-      "world-at-war",
-      "wow-classic",
+    // match joins them; Hades matches nothing. Each suggestion carries its
+    // hashtag key — the composer's tag popover completes `#<key>` (Q4).
+    expect(result.games.map((game) => [game.slug, game.hashtagKey])).toEqual([
+      ["other-world", "otherworld"],
+      ["world-at-war", "worldatwar"],
+      ["wow-classic", "worldofwarcraft"],
     ]);
 
     // The exact hashtag key matches too — the composer's `#worldofwarcraft`

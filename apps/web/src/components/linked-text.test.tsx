@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { SEARCH_QUERY_MAX_LENGTH } from "@my-tuums/api/constants";
 import { firstLinkUrl, LinkedText } from "@/components/linked-text";
 import { insertMention, mentionAtCaret } from "@/lib/composer-mentions";
@@ -193,6 +193,39 @@ describe("LinkedText", () => {
 
     expect(screen.getByRole("article", { name: "Published content" }).textContent).toBe(text);
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  // The issue-#314 resolution (Q3): a tag the server's batch map answers
+  // links to its game's page; every other tag — absent from the map, or a
+  // render with no map at all — keeps the original search link. The label
+  // stays as typed in both cases.
+  it("links a resolved tag to its game page while unresolved tags keep their search links", async () => {
+    const text = "Playing #doom and #unknownthing";
+    await renderWithProviders(
+      <article aria-label="Published content">
+        <LinkedText text={text} gameMentions={{ doom: "doom" }} />
+      </article>,
+    );
+
+    expect(screen.getByRole("link", { name: "#doom" })).toHaveAttribute("href", "/games/doom");
+    expect(screen.getByRole("link", { name: "#unknownthing" })).toHaveAttribute(
+      "href",
+      "/search?q=%23unknownthing",
+    );
+
+    // No map (a bio, or an older cache): every tag links the original way.
+    // Scoped — both renders stay mounted within one test, so the earlier
+    // resolved link would otherwise match the same query too.
+    await renderWithProviders(
+      <article aria-label="Unresolved content">
+        <LinkedText text="#doom" />
+      </article>,
+    );
+    const unresolved = within(screen.getByRole("article", { name: "Unresolved content" }));
+    expect(unresolved.getByRole("link", { name: "#doom" })).toHaveAttribute(
+      "href",
+      "/search?q=%23doom",
+    );
   });
 
   it("recognizes a tag only up to the length whose `#tag` query the search procedures still accept", async () => {

@@ -818,5 +818,6 @@
   "game_favorite_action": "Favorite",
   "game_unfavorite_action": "Unfavorite",
   "game_favorite_signed_out": "Sign in to favorite games.",
-  "profile_favorite_games": "Favorite games"
+  "profile_favorite_games": "Favorite games",
+  "composer_game_suggestions_aria": "Suggested games"
 }

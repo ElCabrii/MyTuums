@@ -232,6 +232,7 @@ export function ComposerForm({
           value={value}
           onValueChange={onValueChange}
           mentionScope={mentionScope}
+          enableGameSuggestions
           placeholder={placeholder}
           rows={rows}
           disabled={isPending}

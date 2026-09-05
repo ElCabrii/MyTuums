@@ -33,3 +33,50 @@ test.describe("game favorites", () => {
     await expect(page.getByText("Favorites: 0")).toBeVisible();
   });
 });
+
+test.describe("hashtag resolution", () => {
+  test("a post's resolved tag links to its game page, an unresolved one to search", async ({
+    page,
+  }) => {
+    // The fixture catalog answers `doom`; nothing answers `nothattag`.
+    await page.goto("/");
+    const composer = page.getByRole("textbox");
+    await composer.fill("Fresh from the #doom vault, not #nothattag");
+    await page.getByRole("button", { name: "Post", exact: true }).click();
+
+    const resolved = page.getByRole("link", { name: "#doom", exact: true });
+    await expect(resolved).toHaveAttribute("href", "/games/doom");
+    await expect(page.getByRole("link", { name: "#nothattag", exact: true })).toHaveAttribute(
+      "href",
+      "/search?q=%23nothattag",
+    );
+
+    // The resolved link lands on the game's page.
+    await resolved.click();
+    await expect(page).toHaveURL(/\/games\/doom$/);
+    await expect(page.getByRole("heading", { name: "DOOM", exact: true })).toBeVisible();
+  });
+
+  test("the composer's tag popover completes a partial tag with the catalog's key", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const composer = page.getByRole("textbox");
+    // Typed character by character: completion keys off the caret's live
+    // position, and typing leaves it right after the partial tag.
+    await composer.click();
+    await composer.pressSequentially("playing #do");
+
+    // "do" matches both DOOM and worldofwarcraft (a substring of the key),
+    // and popularity ranks WoW first — the issue's own `#wow` story. The
+    // assertion follows the top suggestion, whichever the fixture ranks.
+    const listbox = page.getByRole("listbox", { name: "Suggested games" });
+    await expect(listbox).toBeVisible();
+    const option = listbox.locator('[role="option"]').first();
+    const offeredKey = await option.locator("text=/^#/").textContent();
+    expect(offeredKey).toMatch(/^#[a-z0-9]+$/);
+
+    await option.click();
+    await expect(composer).toHaveValue(`playing ${offeredKey}`);
+  });
+});

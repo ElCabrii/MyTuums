@@ -33,6 +33,7 @@ import {
   LINK_CARD_URL_MAX_LENGTH,
 } from "./constants.js";
 import { createCursorCodec, createEventCursorCodec } from "./cursor.js";
+import { gameMentionsFor } from "./games.js";
 import { resolveLinkCard } from "./link-card.js";
 import { insertNotification } from "./notifications.js";
 import { keysetPage } from "./pagination.js";
@@ -746,6 +747,32 @@ type FeedEventRow = {
  *   not offer the repost control on replies rather than sell an action
  *   whose result never renders anywhere.
  */
+
+/**
+ * The texts a page's renderer linkifies — every surface that renders post
+ * text through the web's linkifier reads the response's `gameMentions`
+ * map, which is built from exactly these: each item's own content, its
+ * quoted preview's content, and any inline continuation slices the reply
+ * mode embedded (issue #314, Q16).
+ */
+function pageTextsForMentions(page: {
+  items: ReadonlyArray<{ content: string | null; quoted: { content: string | null } | null }>;
+  continuations?: ReadonlyArray<{
+    items: ReadonlyArray<{ content: string | null; quoted: { content: string | null } | null }>;
+  }>;
+}): Array<string | null> {
+  const texts: Array<string | null> = [];
+  for (const item of page.items) {
+    texts.push(item.content, item.quoted?.content ?? null);
+  }
+  for (const continuation of page.continuations ?? []) {
+    for (const item of continuation.items) {
+      texts.push(item.content, item.quoted?.content ?? null);
+    }
+  }
+  return texts;
+}
+
 async function feedEventPage(
   db: Database,
   args: {
@@ -1672,8 +1699,12 @@ export const postRouter = {
         const [continuation] = await replyContinuationPages(continuationArgs);
 
         return continuation
-          ? { items: continuation.items, nextCursor: continuation.nextCursor }
-          : { items: [], nextCursor: null };
+          ? {
+              items: continuation.items,
+              nextCursor: continuation.nextCursor,
+              gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(continuation)),
+            }
+          : { items: [], nextCursor: null, gameMentions: {} };
       }
 
       // The caller's private bookmarks page (issue #262): posts joined to
@@ -1700,7 +1731,7 @@ export const postRouter = {
           bookmarkedAt: postBookmark.createdAt,
         };
 
-        return keysetPage({
+        const bookmarkPage = await keysetPage({
           codec: postCursor,
           cursor: input.cursor,
           limit: input.limit,
@@ -1733,6 +1764,11 @@ export const postRouter = {
               .orderBy(desc(postBookmark.createdAt), desc(post.id))
               .limit(input.limit + 1),
         });
+
+        return {
+          ...bookmarkPage,
+          gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(bookmarkPage)),
+        };
       }
 
       const kind = input.kind ?? (input.includeReplies ? "all" : "posts");
@@ -1744,7 +1780,7 @@ export const postRouter = {
       // query — it lists the parent's direct replies by their own event time,
       // and an amplification is not a reply.
       if (!input.parentId) {
-        return feedEventPage(context.db, {
+        const page = await feedEventPage(context.db, {
           viewerId,
           cursor: input.cursor,
           limit: input.limit,
@@ -1753,6 +1789,10 @@ export const postRouter = {
           kind,
           includeReposts: input.includeReposts,
         });
+        return {
+          ...page,
+          gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(page)),
+        };
       }
 
       const filters = [
@@ -1792,10 +1832,10 @@ export const postRouter = {
             .limit(input.limit + 1),
       });
 
-      if (page.items.length === 0) return page;
+      if (page.items.length === 0) return { ...page, gameMentions: {} };
 
       const focusedAuthorId = await visiblePostAuthorId(context.db, viewerId, input.parentId);
-      if (!focusedAuthorId) return { ...page, continuations: [] };
+      if (!focusedAuthorId) return { ...page, continuations: [], gameMentions: {} };
 
       const continuations = await replyContinuationPages({
         db: context.db,
@@ -1805,7 +1845,11 @@ export const postRouter = {
         limit: THREAD_REPLY_BRANCH_INITIAL_SIZE,
       });
 
-      return { ...page, continuations };
+      const response = { ...page, continuations };
+      return {
+        ...response,
+        gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(response)),
+      };
     }),
 
   /**
@@ -1849,7 +1893,15 @@ export const postRouter = {
       // The common case by a wide margin: most posts are top-level, and
       // there is no chain to walk for those.
       if (!focused.parentId) {
-        return { post: focused, ancestors: [], truncated: false };
+        return {
+          post: focused,
+          ancestors: [],
+          truncated: false,
+          gameMentions: await gameMentionsFor(
+            context.db,
+            pageTextsForMentions({ items: [focused] }),
+          ),
+        };
       }
 
       const chain = await runSql<{ id: string; depth: number }>(
@@ -1888,6 +1940,13 @@ export const postRouter = {
       const byId = new Map(rows.map((row) => [row.id, row]));
       const ancestors = ancestorIds.map((id) => byId.get(id)).filter((row) => row !== undefined);
 
+      // The focused post AND every ancestor render their text through the
+      // same linkifier, so the map covers both.
+      const texts = [focused, ...ancestors].flatMap((row) => [
+        row.content,
+        row.quoted?.content ?? null,
+      ]);
+
       return {
         post: focused,
         ancestors,
@@ -1895,6 +1954,7 @@ export const postRouter = {
         // cut off by THREAD_ANCESTOR_MAX, not that we reached the top. Read
         // off the rows we already have rather than costing another query.
         truncated: ancestors[0]?.parentId != null,
+        gameMentions: await gameMentionsFor(context.db, texts),
       };
     }),
 
