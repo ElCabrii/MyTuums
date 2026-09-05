@@ -350,8 +350,9 @@ notification when a badge is earned.
 - A signed-in user can favorite a game from its page — a public stamp, not a
   private save: the count on the game page is public, and the user's profile
   carries a favorites rail (a cover strip on mobile, a column beside the
-  feed on desktop) visible to every signed-in viewer. The directory's fourth
-  sort orders games by that count.
+  feed on desktop) visible to every signed-in viewer — except on a private
+  profile, where the rail hides from non-followers like the follow lists do.
+  The directory's fourth sort orders games by that count.
 
 ## Media
 
@@ -532,7 +533,8 @@ game handle.
 
 **Game favorite** — a user's public stamp on a game: the count is public on
 the game's page, and the user's profile shows their favorited games to every
-signed-in viewer. Idempotent as a pair (`favorite` / `unfavorite`), newest
+signed-in viewer — except on a private profile, where the rail hides from
+non-followers. Idempotent as a pair (`favorite` / `unfavorite`), newest
 stamp wins the rail's order. The deliberate opposite of a bookmark's
 privacy. _Avoid:_ like, save, wishlist.
 

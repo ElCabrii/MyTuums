@@ -10,8 +10,10 @@ import { m } from "@/paraglide/messages.js";
  * a parallel column beside the feed on desktop (the parent places both).
  *
  * A showcase, not a feed (Q26): visible to every signed-in profile viewer,
- * by design. Renders nothing when the profile has no favorites — an empty
- * rail is a hole in the page, not information. Pending and error states
+ * by design — except on a private profile, where the server redacts it to
+ * empty for non-followers like the follow graphs, so nothing renders here.
+ * Renders nothing when the profile has no favorites — an empty rail is a
+ * hole in the page, not information. Pending and error states
  * render nothing too: the rail is decoration around a profile that must
  * render whatever the favorites query does.
  */
