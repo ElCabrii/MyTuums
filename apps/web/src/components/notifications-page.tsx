@@ -1,12 +1,25 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { Bell } from "lucide-react";
-import { markAllReadAtom, notificationsFeedAtom } from "@/atoms/notifications";
+import { Bell, Trash2 } from "lucide-react";
+import {
+  clearAllNotificationsAtom,
+  deleteNotificationAtom,
+  markAllReadAtom,
+  notificationsFeedAtom,
+} from "@/atoms/notifications";
 import { actionIcon, actionLabel } from "@/components/moderation/labels";
 import { PaginatedState } from "@/components/paginated-state";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { UserAvatar } from "@/components/user-avatar";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { formatRelativeTime } from "@/lib/format";
 import type { NotificationItem } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
@@ -23,10 +36,24 @@ import { getLocale } from "@/paraglide/runtime.js";
  * every unread row read, which is also what clears the header badge. The
  * invalidation that follows refetches the list, so the rows flip to their
  * read styling from the server's answer rather than a local patch.
+ *
+ * Rows are the recipient's private inbox entries (issue #330): each one can
+ * be deleted, and the header clears the whole inbox behind a confirmation.
  */
 export function NotificationsPage() {
   const feed = useAtomValue(notificationsFeedAtom);
   const markAllRead = useAtomValue(markAllReadAtom);
+  const deleteNotification = useAtomValue(deleteNotificationAtom);
+  const clearAll = useAtomValue(clearAllNotificationsAtom);
+  const [clearOpen, setClearOpen] = useState(false);
+  // Per-row pending ids, not the mutation's shared `isPending`: one row's
+  // round trip must not disable every other row's button while the server
+  // budget allows bursts.
+  const [deletingIds, setDeletingIds] = useState<ReadonlySet<string>>(new Set());
+  // Same-frame double-activation guard: `deletingIds` state only disables the
+  // button after a re-render, so two clicks within one frame would both fire.
+  // The ref owns the guarantee because state is stale in the same frame.
+  const deletingIdsRef = useRef(new Set<string>());
   // The once-per-mount guard is the ref, not the mutation state. The atom's
   // value is a fresh object on every emit (query events, pending → success
   // transitions), and on a slow machine the first `mutate`'s isPending flip
@@ -43,11 +70,77 @@ export function NotificationsPage() {
     }
   }, [markAllRead]);
 
+  // Closing on success rather than on click, like `DeletePostDialog`: a
+  // clear that fails has to leave its dialog standing with the error,
+  // because the inbox behind it still holds the rows. Awaited here instead
+  // of a success effect — the open flag is local `useState`, which the
+  // set-state-in-effect rule forbids writing from an effect.
+  const confirmClearAll = () => {
+    void (async () => {
+      try {
+        await clearAll.mutateAsync({});
+        handleClearOpenChange(false);
+      } catch {
+        // Stays open: `isError` below renders the failure.
+      }
+    })();
+  };
+
+  // Resetting the mutation when the dialog closes, like `DeletePostDialog`'s
+  // unmount: otherwise a failed clear's error survives Cancel and reappears
+  // on the next open before any new attempt. Closing mid-flight is refused
+  // while pending: `reset()` does not abort the request, so dismissing then
+  // would hide the coming failure and resurrect it as a stale error on the
+  // next open.
+  const handleClearOpenChange = (open: boolean) => {
+    if (!open && clearAll.isPending) return;
+    if (!open) clearAll.reset();
+    setClearOpen(open);
+  };
+
+  // Per-row pending around `mutateAsync` (settled via the promise, not a
+  // per-call callback): the page mounts the mutation observer, but the
+  // promise holds regardless, and the `finally` drops exactly this row's id.
+  // The page-level `isError` banner below still reports the failure.
+  const handleDelete = (id: string) => {
+    if (deletingIdsRef.current.has(id)) return;
+    deletingIdsRef.current.add(id);
+    setDeletingIds((previous) => new Set(previous).add(id));
+    void deleteNotification
+      .mutateAsync({ id })
+      .catch(() => {})
+      .finally(() => {
+        deletingIdsRef.current.delete(id);
+        setDeletingIds((previous) => {
+          const next = new Set(previous);
+          next.delete(id);
+          return next;
+        });
+      });
+  };
+
   const items = feed.data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 px-4 py-8">
-      <h1 className="text-lg font-bold tracking-tight">{m.notifications_title()}</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-lg font-bold tracking-tight">{m.notifications_title()}</h1>
+        {items.length > 0 && (
+          <Button variant="ghost" size="sm" onClick={() => setClearOpen(true)}>
+            {m.notifications_clear_all()}
+          </Button>
+        )}
+      </div>
+      {deleteNotification.isError && (
+        <div className="flex items-center justify-between gap-2">
+          <p role="alert" className="text-destructive text-xs">
+            {m.notification_delete_error()}
+          </p>
+          <Button variant="ghost" size="sm" onClick={() => deleteNotification.reset()}>
+            {m.common_close()}
+          </Button>
+        </div>
+      )}
       <PaginatedState
         query={feed}
         errorMessage={m.notifications_load_error()}
@@ -57,9 +150,45 @@ export function NotificationsPage() {
         listClassName="space-y-3"
       >
         {items.map((item) => (
-          <NotificationRow key={item.id} item={item} />
+          <NotificationRow
+            key={item.id}
+            item={item}
+            deleting={deletingIds.has(item.id)}
+            onDelete={handleDelete}
+          />
         ))}
       </PaginatedState>
+      <Dialog open={clearOpen} onOpenChange={handleClearOpenChange}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{m.notifications_clear_all_title()}</DialogTitle>
+            <DialogDescription>{m.notifications_clear_all_body()}</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2 px-6 pb-6">
+            {clearAll.isError && (
+              <p role="alert" className="text-destructive text-xs">
+                {m.notifications_clear_all_error()}
+              </p>
+            )}
+            <Button
+              variant="destructive"
+              className="w-full"
+              disabled={clearAll.isPending}
+              onClick={confirmClearAll}
+            >
+              {m.notifications_clear_all()}
+            </Button>
+            <Button
+              variant="ghost"
+              className="w-full"
+              disabled={clearAll.isPending}
+              onClick={() => handleClearOpenChange(false)}
+            >
+              {m.common_cancel()}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -73,7 +202,15 @@ function rowClassName(item: NotificationItem): string {
 }
 
 /** One notification: who did what, when, and — while unread — a marker dot. */
-function NotificationRow({ item }: { item: NotificationItem }) {
+function NotificationRow({
+  item,
+  deleting,
+  onDelete,
+}: {
+  item: NotificationItem;
+  deleting: boolean;
+  onDelete: (id: string) => void;
+}) {
   const locale = getLocale();
   const actor = item.actor;
   const handle = handleOf(actor);
@@ -81,7 +218,31 @@ function NotificationRow({ item }: { item: NotificationItem }) {
   const when = formatRelativeTime(item.createdAt, locale, m.post_just_now());
   const reason = item.action?.reason ?? null;
 
-  const body = (
+  // The delete button sits BESIDE the link, never inside it: a button in a
+  // link is invalid interactive nesting, and the row must stay clickable to
+  // its post or profile while offering its own dismiss action.
+  const actions = (
+    <span className="flex shrink-0 items-center gap-1.5">
+      {!item.read && (
+        <>
+          <span className="bg-primary sr-only">{m.notifications_unread_label()}</span>
+          <span className="bg-primary inline-block h-2 w-2 rounded-full" aria-hidden="true" />
+        </>
+      )}
+      <button
+        type="button"
+        aria-label={m.notification_delete()}
+        title={m.notification_delete()}
+        disabled={deleting}
+        onClick={() => onDelete(item.id)}
+        className="text-muted-foreground hover:text-destructive rounded p-1 transition-colors disabled:opacity-50"
+      >
+        <Trash2 className="h-4 w-4" aria-hidden="true" />
+      </button>
+    </span>
+  );
+
+  const content = (
     <>
       {actor ? (
         <UserAvatar
@@ -129,13 +290,6 @@ function NotificationRow({ item }: { item: NotificationItem }) {
           {when}
         </time>
       </div>
-
-      {!item.read && (
-        <span className="mt-1 flex shrink-0 items-center gap-1.5">
-          <span className="bg-primary sr-only">{m.notifications_unread_label()}</span>
-          <span className="bg-primary inline-block h-2 w-2 rounded-full" aria-hidden="true" />
-        </span>
-      )}
     </>
   );
 
@@ -149,9 +303,16 @@ function NotificationRow({ item }: { item: NotificationItem }) {
   // account-level actions: there is no account-sanction page to send them to.
   if ((item.type === "follow" || item.type === "follow_request") && handle) {
     return (
-      <Link to="/@{$username}" params={{ username: handle }} className={rowClassName(item)}>
-        {body}
-      </Link>
+      <div className={rowClassName(item)}>
+        <Link
+          to="/@{$username}"
+          params={{ username: handle }}
+          className="flex min-w-0 flex-1 items-start gap-3"
+        >
+          {content}
+        </Link>
+        {actions}
+      </div>
     );
   }
 
@@ -163,13 +324,25 @@ function NotificationRow({ item }: { item: NotificationItem }) {
       : item.postId;
   if (postId) {
     return (
-      <Link to="/post/$postId" params={{ postId }} className={rowClassName(item)}>
-        {body}
-      </Link>
+      <div className={rowClassName(item)}>
+        <Link
+          to="/post/$postId"
+          params={{ postId }}
+          className="flex min-w-0 flex-1 items-start gap-3"
+        >
+          {content}
+        </Link>
+        {actions}
+      </div>
     );
   }
 
-  return <div className={rowClassName(item)}>{body}</div>;
+  return (
+    <div className={rowClassName(item)}>
+      <div className="flex min-w-0 flex-1 items-start gap-3">{content}</div>
+      {actions}
+    </div>
+  );
 }
 
 /**

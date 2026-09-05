@@ -223,7 +223,9 @@ three events, not one collapsed one.
 - The notifications page (`/notifications`, reached from the header bell)
   lists them newest first, keyset-paginated like the feeds, with no grouping
   or ranking. The bell carries an unread count; opening the page is what
-  marks everything read.
+  marks everything read. Each row can be deleted, and the header clears the
+  whole inbox behind a confirmation — inbox management only, removing no
+  other user's rows and no audit trail.
 - A row about a post previews it (issue #281): the liked post's text — with
   thumbnails of its images — or the reply itself for a reply, as one
   truncated line under the sentence. A moderator-removed post previews

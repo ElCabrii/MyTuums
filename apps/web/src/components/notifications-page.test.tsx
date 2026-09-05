@@ -14,6 +14,8 @@ const fakeClient = {
     list: vi.fn(),
     unreadCount: vi.fn(),
     markRead: vi.fn(),
+    delete: vi.fn(),
+    clearAll: vi.fn(),
   },
 };
 
@@ -22,6 +24,8 @@ installTestOrpc(createTanstackQueryUtils(fakeClient));
 beforeEach(() => {
   vi.clearAllMocks();
   fakeClient.notification.markRead.mockResolvedValue({ read: 0 });
+  fakeClient.notification.delete.mockResolvedValue({ success: true, id: "notification-id" });
+  fakeClient.notification.clearAll.mockResolvedValue({ deletedCount: 0 });
 });
 
 describe("NotificationsPage", () => {
@@ -250,5 +254,143 @@ describe("NotificationsPage", () => {
     });
 
     expect(screen.getByText(m.notifications_empty())).toBeInTheDocument();
+  });
+
+  it("offers a delete action on each row that calls the delete procedure", async () => {
+    const row = makeNotification({ id: "deletable-notification" });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).notifications.data([{ items: [row], nextCursor: null }]);
+
+    await renderWithProviders(<NotificationsPage />, {
+      queryClient,
+      initialPath: "/notifications",
+      signedInAs: true,
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: m.notification_delete() }));
+    await waitFor(() =>
+      expect(fakeClient.notification.delete).toHaveBeenCalledWith(
+        { id: "deletable-notification" },
+        expect.anything(),
+      ),
+    );
+  });
+
+  it("only disables the row being deleted", async () => {
+    const first = makeNotification({ id: "n-1" });
+    const second = makeNotification({ id: "n-2" });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).notifications.data([{ items: [first, second], nextCursor: null }]);
+    let resolveDelete!: (value: { success: true; id: string }) => void;
+    fakeClient.notification.delete.mockReturnValue(
+      new Promise((resolve) => {
+        resolveDelete = resolve;
+      }),
+    );
+
+    await renderWithProviders(<NotificationsPage />, {
+      queryClient,
+      initialPath: "/notifications",
+      signedInAs: true,
+    });
+
+    const user = userEvent.setup();
+    const buttons = screen.getAllByRole("button", { name: m.notification_delete() });
+    expect(buttons).toHaveLength(2);
+    await user.click(buttons[0]);
+    await waitFor(() => expect(buttons[0]).toBeDisabled());
+    // The other row stays actionable while the first round trip is in flight.
+    expect(buttons[1]).not.toBeDisabled();
+
+    resolveDelete({ success: true, id: "n-1" });
+    // The deleted row leaves; the surviving row's button was never disabled.
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: m.notification_delete() })).toHaveLength(1),
+    );
+    expect(screen.getByRole("button", { name: m.notification_delete() })).not.toBeDisabled();
+  });
+
+  it("dismisses the delete error without another attempt", async () => {
+    const row = makeNotification({ id: "deletable-notification" });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).notifications.data([{ items: [row], nextCursor: null }]);
+    fakeClient.notification.delete.mockRejectedValueOnce(new Error("NOT_FOUND"));
+
+    await renderWithProviders(<NotificationsPage />, {
+      queryClient,
+      initialPath: "/notifications",
+      signedInAs: true,
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: m.notification_delete() }));
+    await waitFor(() =>
+      expect(screen.getByText(m.notification_delete_error())).toBeInTheDocument(),
+    );
+    expect(fakeClient.notification.delete).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: m.common_close() }));
+    await waitFor(() =>
+      expect(screen.queryByText(m.notification_delete_error())).not.toBeInTheDocument(),
+    );
+  });
+  it("clears the inbox behind a confirmation dialog", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).notifications.data([
+      { items: [makeNotification()], nextCursor: null },
+    ]);
+
+    await renderWithProviders(<NotificationsPage />, {
+      queryClient,
+      initialPath: "/notifications",
+      signedInAs: true,
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: m.notifications_clear_all() }));
+    expect(screen.getByText(m.notifications_clear_all_title())).toBeInTheDocument();
+
+    const confirmButtons = screen.getAllByRole("button", {
+      name: m.notifications_clear_all(),
+    });
+    await user.click(confirmButtons[confirmButtons.length - 1]);
+    await waitFor(() =>
+      expect(fakeClient.notification.clearAll).toHaveBeenCalledWith({}, expect.anything()),
+    );
+  });
+
+  it("clears the clear-all error when the dialog is closed and reopened", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).notifications.data([
+      { items: [makeNotification()], nextCursor: null },
+    ]);
+    fakeClient.notification.clearAll.mockRejectedValueOnce(new Error("FORBIDDEN"));
+
+    await renderWithProviders(<NotificationsPage />, {
+      queryClient,
+      initialPath: "/notifications",
+      signedInAs: true,
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: m.notifications_clear_all() }));
+    const confirmButtons = screen.getAllByRole("button", {
+      name: m.notifications_clear_all(),
+    });
+    await user.click(confirmButtons[confirmButtons.length - 1]);
+    await waitFor(() =>
+      expect(screen.getByText(m.notifications_clear_all_error())).toBeInTheDocument(),
+    );
+
+    // Cancel closes and resets — the next open starts with no stale error.
+    await user.click(screen.getByRole("button", { name: m.common_cancel() }));
+    await waitFor(() =>
+      expect(screen.queryByText(m.notifications_clear_all_title())).not.toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole("button", { name: m.notifications_clear_all() }));
+    expect(screen.getByText(m.notifications_clear_all_title())).toBeInTheDocument();
+    expect(screen.queryByText(m.notifications_clear_all_error())).not.toBeInTheDocument();
   });
 });

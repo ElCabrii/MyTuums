@@ -1,13 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fakeClient = {
-  notification: { list: vi.fn(), unreadCount: vi.fn(), markRead: vi.fn() },
+  notification: {
+    list: vi.fn(),
+    unreadCount: vi.fn(),
+    markRead: vi.fn(),
+    delete: vi.fn(),
+    clearAll: vi.fn(),
+  },
 };
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import { orpc } from "@/lib/orpc";
-import { markAllReadAtom, notificationsFeedAtom } from "@/atoms/notifications";
+import {
+  clearAllNotificationsAtom,
+  deleteNotificationAtom,
+  markAllReadAtom,
+  notificationsFeedAtom,
+} from "@/atoms/notifications";
 import { clearViewerState } from "@/atoms/session-teardown";
 import { makeNotification } from "@/test/factories";
 import type { NotificationItem } from "@/lib/orpc";
@@ -19,6 +30,8 @@ import { installTestOrpc } from "@/lib/orpc";
 
 beforeEach(() => {
   fakeClient.notification.markRead.mockReset();
+  fakeClient.notification.delete.mockReset();
+  fakeClient.notification.clearAll.mockReset();
 });
 
 afterEach(() => {
@@ -97,5 +110,113 @@ describe("markAllReadAtom", () => {
     await mutation.mutateAsync({});
 
     expect(singletonQueryClient.getQueryData(orpc.notification.list.key())).toBeUndefined();
+  });
+});
+
+/**
+ * The delete contract (issue #330): the row leaves every loaded page
+ * optimistically and returns on failure; the badge refetches because its
+ * damped ticks cannot be derived from one row.
+ */
+describe("deleteNotificationAtom", () => {
+  it("removes the row from the list and invalidates the badge on success", async () => {
+    const rows = [makeNotification({ id: "n-1" }), makeNotification({ id: "n-2" })];
+    singletonQueryClient.setQueryData(orpc.notification.list.key(), {
+      pages: [{ items: rows, nextCursor: null }],
+      pageParams: [undefined],
+    });
+    const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
+    const cancelSpy = vi.spyOn(singletonQueryClient, "cancelQueries");
+    fakeClient.notification.delete.mockResolvedValue({ success: true, id: "n-1" });
+
+    const mutation = singletonStore.get(deleteNotificationAtom);
+    await mutation.mutateAsync({ id: "n-1" });
+
+    // SAFETY: the shape seeded above — read back through the same key the patch wrote.
+    const list = singletonQueryClient.getQueryData(orpc.notification.list.key()) as {
+      pages: Array<{ items: NotificationItem[] }>;
+    };
+    expect(list.pages[0].items.map((item) => item.id)).toEqual(["n-2"]);
+    expect(cancelSpy).toHaveBeenCalledWith({ queryKey: orpc.notification.list.key() });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: unreadCountQueryOptions().queryKey,
+    });
+  });
+
+  it("restores the row when the server refuses", async () => {
+    const rows = [makeNotification({ id: "n-1" }), makeNotification({ id: "n-2" })];
+    singletonQueryClient.setQueryData(orpc.notification.list.key(), {
+      pages: [{ items: rows, nextCursor: null }],
+      pageParams: [undefined],
+    });
+    fakeClient.notification.delete.mockRejectedValue(new Error("NOT_FOUND"));
+
+    const mutation = singletonStore.get(deleteNotificationAtom);
+    await expect(mutation.mutateAsync({ id: "n-1" })).rejects.toThrow("NOT_FOUND");
+
+    // SAFETY: the shape seeded above — read back through the same key the rollback restored.
+    const list = singletonQueryClient.getQueryData(orpc.notification.list.key()) as {
+      pages: Array<{ items: NotificationItem[] }>;
+    };
+    expect(list.pages[0].items.map((item) => item.id)).toEqual(["n-1", "n-2"]);
+  });
+});
+
+/**
+ * The clear-all contract (issue #330): every loaded page empties
+ * optimistically and the badge is authoritative at zero — an empty inbox has
+ * no ticks under any damping.
+ */
+describe("clearAllNotificationsAtom", () => {
+  it("collapses to one empty page with no cursor and zeroes the badge", async () => {
+    const first = [makeNotification({ id: "n-1" })];
+    const second = [makeNotification({ id: "n-2" })];
+    singletonQueryClient.setQueryData(orpc.notification.list.key(), {
+      pages: [
+        { items: first, nextCursor: "cursor" },
+        { items: second, nextCursor: null },
+      ],
+      pageParams: [undefined, "cursor"],
+    });
+    const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
+    const cancelSpy = vi.spyOn(singletonQueryClient, "cancelQueries");
+    fakeClient.notification.clearAll.mockResolvedValue({ deletedCount: 2 });
+
+    const mutation = singletonStore.get(clearAllNotificationsAtom);
+    await mutation.mutateAsync({});
+
+    // SAFETY: the shape seeded above — read back through the same key the patch wrote.
+    const list = singletonQueryClient.getQueryData(orpc.notification.list.key()) as {
+      pages: Array<{ items: NotificationItem[]; nextCursor: string | null }>;
+      pageParams: unknown[];
+    };
+    // One empty page, no cursor: stale per-page cursors must not offer
+    // "load more" on an empty inbox.
+    expect(list.pages).toEqual([{ items: [], nextCursor: null }]);
+    expect(list.pageParams).toEqual([undefined]);
+    expect(singletonQueryClient.getQueryData(unreadCountQueryOptions().queryKey)).toEqual({
+      unreadCount: 0,
+    });
+    expect(cancelSpy).toHaveBeenCalledWith({ queryKey: orpc.notification.list.key() });
+    // The emptied list refetches so post-clear arrivals appear without a remount.
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.notification.list.key() });
+  });
+
+  it("restores every page when the server refuses", async () => {
+    const rows = [makeNotification({ id: "n-1" })];
+    singletonQueryClient.setQueryData(orpc.notification.list.key(), {
+      pages: [{ items: rows, nextCursor: null }],
+      pageParams: [undefined],
+    });
+    fakeClient.notification.clearAll.mockRejectedValue(new Error("FORBIDDEN"));
+
+    const mutation = singletonStore.get(clearAllNotificationsAtom);
+    await expect(mutation.mutateAsync({})).rejects.toThrow("FORBIDDEN");
+
+    // SAFETY: the shape seeded above — read back through the same key the rollback restored.
+    const list = singletonQueryClient.getQueryData(orpc.notification.list.key()) as {
+      pages: Array<{ items: NotificationItem[] }>;
+    };
+    expect(list.pages[0].items.map((item) => item.id)).toEqual(["n-1"]);
   });
 });
