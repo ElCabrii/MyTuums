@@ -14,12 +14,7 @@ import { postSelection } from "./posts.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { publicUserColumns, viewerHasRequested, viewerIsFollowing } from "./users.js";
-import {
-  invisibleAuthor,
-  privatePostHidden,
-  privateUserHidden,
-  visibleUser,
-} from "./visibility.js";
+import { invisibleAuthor, privatePostHidden, visibleUser } from "./visibility.js";
 
 /**
  * Search over users and posts, plus the games half of the typeahead (the
@@ -156,9 +151,9 @@ export const searchRouter = {
         .where(
           // Same visibility filter as the full results page: a banned or
           // blocked account never suggests itself in the dropdown. Private
-          // accounts (issue #328) suggest only to themselves and approved
-          // followers.
-          and(visibleUser(viewerId), not(privateUserHidden(viewerId)), matchesUserQuery(input.q)),
+          // accounts stay discoverable — the profile resolves to its locked
+          // notice, only their posts stay hidden.
+          and(visibleUser(viewerId), matchesUserQuery(input.q)),
         )
         .orderBy(
           // An exact normalised username ranks above longer prefixes, and
@@ -220,9 +215,8 @@ export const searchRouter = {
         matchesUserQuery(input.q),
         // The visibility filter (issue #38): banned and blocked accounts are
         // not search results, same as the typeahead above. Private accounts
-        // (issue #328) surface only to themselves and approved followers.
+        // stay discoverable — only their posts are hidden from non-followers.
         visibleUser(viewerId),
-        not(privateUserHidden(viewerId)),
       ];
 
       const selection = searchUserSelection(viewerId);
