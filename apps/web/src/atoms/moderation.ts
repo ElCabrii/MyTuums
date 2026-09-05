@@ -42,17 +42,8 @@ export const decodeCaseKey = (key: string): CaseRef => {
   };
 };
 
-/**
- * One infinite-query atom per queue scope, shared by every component that
- * reads that scope — the same structural-dedup reasoning as `postFeedFamily`
- * in `atoms/post-feed.ts`. There is exactly one queue today, so the key is
- * always `""`; the family exists so the sign-out sweep and a future filter
- * (post vs user cases) do not require a migration.
- */
-const queueFamily = atomFamily(() => atomWithInfiniteQuery(() => moderationQueueQueryOptions()));
-
-/** The infinite-query atom for the moderation queue — components read this, not the family. */
-export const moderationQueueAtom = queueFamily("");
+/** One moderation queue; its cached pages are cleared with the QueryClient at sign-out. */
+export const moderationQueueAtom = atomWithInfiniteQuery(() => moderationQueueQueryOptions());
 
 /**
  * What the queue's header reads: how many cases are loaded, how many of them
@@ -88,14 +79,8 @@ export const moderationQueueSummaryAtom = atom<QueueSummary>((get) => {
   };
 });
 
-/**
- * One infinite-query atom per audit-log scope — same reasoning as
- * `queueFamily`; the key is always `""` today.
- */
-const auditLogFamily = atomFamily(() => atomWithInfiniteQuery(() => auditLogQueryOptions()));
-
-/** The infinite-query atom for the audit log — components read this, not the family. */
-export const auditLogAtom = auditLogFamily("");
+/** One audit log; its cached pages are cleared with the QueryClient at sign-out. */
+export const auditLogAtom = atomWithInfiniteQuery(() => auditLogQueryOptions());
 
 /**
  * One query atom per case. Keyed on the case ref (encoded) so the queue rows
@@ -458,7 +443,7 @@ export const encodeAppealKey = (identifier: { token?: string; postId?: string })
  * The removed post behind one appeal identifier — what the appeal page renders
  * above its form.
  *
- * A family rather than a single atom for the same reason the queue is one:
+ * A family rather than a single atom because each appeal has its own query:
  * module-scope atoms take no parameters, and the page can be navigated from
  * one identifier to another. Signed-in state is read inside the atom so the
  * query starts itself the moment a session resolves, rather than staying
@@ -540,8 +525,6 @@ export const appealReviewFamily = atomFamily((appealId: string) =>
  * mounted against them.
  */
 export function clearModerationFamilies(): void {
-  for (const key of queueFamily.getParams()) queueFamily.remove(key);
-  for (const key of auditLogFamily.getParams()) auditLogFamily.remove(key);
   for (const key of caseFamily.getParams()) caseFamily.remove(key);
   for (const key of caseReviewNoteFamily.getParams()) caseReviewNoteFamily.remove(key);
   for (const key of appealReviewFamily.getParams()) appealReviewFamily.remove(key);

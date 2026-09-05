@@ -63,6 +63,8 @@ app's build from the same origin.
   added there, not in `signOutAtom`. Its lightweight coordinator clears the QueryClient
   synchronously, then dynamically imports each family for an independent,
   best-effort sweep so chunk loading cannot block sign-out.
+  Notifications, the moderation queue and the audit log use single query
+  atoms: their data is cleared by the QueryClient, with no family to sweep.
 - **Like and follow serialise per entity.** One `scope` id per entity,
   per-entity intent atoms drop superseded responses, and rollback rides on
   mutation-level `onError` — per-call callbacks never fire for write-only
