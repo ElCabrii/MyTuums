@@ -17,10 +17,10 @@ import {
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { keysetPage } from "./pagination.js";
-import { postAttachmentsSelection } from "./post-media.js";
+import { postAttachmentsSelection, type PostAttachment } from "./post-media.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
-import { effectivelyBanned, invisibleUser } from "./visibility.js";
+import { effectivelyBanned, invisibleUser, privatePostHidden } from "./visibility.js";
 
 /**
  * The notification surface (issue #259): the one place a like, reply,
@@ -36,7 +36,7 @@ import { effectivelyBanned, invisibleUser } from "./visibility.js";
  */
 
 /**
- * The six notification type codes — the `notification.type` check
+ * The seven notification type codes — the `notification.type` check
  * constraint's list (packages/db/src/schema/app.ts).
  *
  * Server-side only, unlike the moderation action codes in `./constants.ts`:
@@ -50,10 +50,11 @@ export const NOTIFICATION_TYPES = [
   "repost",
   "quote",
   "follow",
+  "follow_request",
   "moderation",
 ] as const;
 
-/** One of the six notification type codes. */
+/** One of the seven notification type codes. */
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 /**
@@ -170,14 +171,16 @@ function visibleNotification(viewerId: string) {
  * The rows the badge counts: the visible, retained, unread ones — collapsed
  * to one tick per user-caused `(actor, type, minute-bucket)` by the
  * `count(distinct (...))` below. Swapping the first composite slot to the row
- * id for moderation rows makes each of them distinct, which is the "never
- * damped" rule expressed in the same expression. The distinct row comparison
- * treats nulls as equal, so like/reply/follow rows from one actor collapse
- * exactly as intended.
+ * id for moderation and follow-request rows makes each of them distinct,
+ * which is the "never damped" rule expressed in the same expression: a
+ * follow request is actionable (issue #328) and must tick even in a burst,
+ * like a moderation notice. The distinct row comparison treats nulls as
+ * equal, so like/reply/follow rows from one actor collapse exactly as
+ * intended.
  */
 const BURST_BUCKET_SECONDS = sql`floor(extract(epoch from ${notification.createdAt}) / ${BURST_WINDOW_SECONDS})`;
 const badgeTickKey = sql`(
-  case when ${notification.type} = 'moderation' then ${notification.id} end,
+  case when ${notification.type} in ('moderation', 'follow_request') then ${notification.id} end,
   ${notification.actorId},
   ${notification.type},
   ${BURST_BUCKET_SECONDS}
@@ -228,11 +231,22 @@ export const notificationRouter = {
         // author-deleted post never reaches the page at all — the visibility
         // predicate above tombstones the row. Null/empty on follow and
         // moderation rows, whose `post_id` is null.
+        //
+        // A private post (issue #328) previews nothing either: its row still
+        // surfaces — the recipient should know someone replied — but the text
+        // and images redact. Here `user` is the actor and `post` the
+        // notified-about post, and for reply/quote rows the actor IS the post
+        // author, so `privatePostHidden` evaluates correctly; like/repost rows
+        // name the recipient's own post and correctly do not redact.
         postContent: sql<string | null>`case
           when ${post.removedAt} is not null or ${post.deletedAt} is not null then null
+          when ${privatePostHidden(context.user.id)} then null
           else ${post.content}
         end`,
-        postAttachments: postAttachmentsSelection(),
+        postAttachments: sql<PostAttachment[]>`case
+          when ${privatePostHidden(context.user.id)} then '[]'::jsonb
+          else ${postAttachmentsSelection()}
+        end`,
         actor: {
           id: user.id,
           name: user.name,

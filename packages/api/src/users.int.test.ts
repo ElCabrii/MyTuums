@@ -46,9 +46,17 @@ describe("user.byUsername", () => {
         "bio",
         "bannerImage",
         "createdAt",
+        // Visibility descriptor (issue #328): what the client's locked-account
+        // branch reads. Like the counts, it describes the profile rather than
+        // its owner's settings.
+        "isPrivate",
         "followerCount",
         "followingCount",
         "viewerIsFollowing",
+        // Follow-request state (issue #328): whether the viewer has a pending
+        // request against this profile — the FollowButton tri-state reads it
+        // alongside `viewerIsFollowing` and `isPrivate`.
+        "hasRequested",
         // Computed, never a stored column: the profile stub for a suspended
         // author (issue #38). Not part of publicUserColumns — the boolean is
         // derived at query time, so a real widening of that boundary still

@@ -132,8 +132,9 @@ export function clearViewerState(queryClient: QueryClient): void {
   sweepFamily(
     "post composer",
     () => import("@/atoms/composer"),
-    ({ clearComposerAttachments }) => {
+    ({ clearComposerAttachments, clearComposerPrivacy }) => {
       clearComposerAttachments();
+      clearComposerPrivacy();
     },
   );
   sweepFamily(

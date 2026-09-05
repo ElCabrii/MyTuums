@@ -21,7 +21,7 @@ import { and, eq, isNull, not, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import { post, postAttachment, user } from "@my-tuums/db/schema";
 import { mediaVariantPath } from "./constants.js";
-import { invisibleAuthor } from "./visibility.js";
+import { invisibleAuthor, privatePostHidden } from "./visibility.js";
 
 /** Mirrors `POST_TITLE_MAX_LENGTH` in apps/web's document-head.ts. */
 const TITLE_MAX_LENGTH = 68;
@@ -68,6 +68,8 @@ export async function publicPostHead(db: Database, postId: string): Promise<Publ
         isNull(post.removedAt),
         isNull(post.deletedAt),
         not(invisibleAuthor(null)),
+        // Private posts never unfurl for anonymous crawlers (issue #328).
+        not(privatePostHidden(null)),
       ),
     )
     .limit(1);

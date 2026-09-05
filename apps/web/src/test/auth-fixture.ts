@@ -43,6 +43,8 @@ export interface TestSessionUser {
   localePreference?: string | null;
   legalAcceptedAt?: Date | string | null;
   legalVersion?: string | null;
+  /** Account privacy (issue #328): null reads as public. Omit for public. */
+  isPrivate?: boolean | null;
   /** Read by `/settings/account`'s two-factor section to decide on/off. */
   twoFactorEnabled?: boolean | null;
   /**
@@ -250,6 +252,7 @@ export function signedInSession(user: Partial<TestSessionUser> = {}): TestSessio
         localePreference: null,
         legalAcceptedAt: new Date("2026-08-02T00:00:00.000Z"),
         legalVersion: LEGAL_VERSION,
+        isPrivate: null,
         // The unprivileged default every account starts at — see the
         // `role` field's doc comment above.
         role: "user",

@@ -77,7 +77,22 @@ function toggleMutationAtom(userId: string, direction: "follow" | "unfollow") {
         // Read at callback time, not via the factory's `get` — see the note in
         // `atoms/like.ts`; a dependency here would rebuild options per click.
         const intent = store.get(intentFamily(userId));
-        if (intent !== null && result.viewerIsFollowing !== intent) return;
+        // A private-target follow answers `{ viewerIsFollowing: false,
+        // requested: true }` for a follow intent — the request IS the
+        // fulfilment, so it matches `intent === true` (issue #328). Without
+        // this the guard drops every private follow and `reconcileFollow`
+        // never corrects the optimistic Following flip to Requested. The
+        // match must stay two-sided: a stale requested response must NOT match
+        // a later unfollow intent (both share `viewerIsFollowing: false`).
+        const isFollowingResponse = result.viewerIsFollowing === true;
+        const isRequestedResponse = result.viewerIsFollowing === false && result.requested === true;
+        const isUnfollowedResponse =
+          result.viewerIsFollowing === false && result.requested !== true;
+        const matches =
+          intent === null ||
+          (intent === true && (isFollowingResponse || isRequestedResponse)) ||
+          (intent === false && isUnfollowedResponse);
+        if (!matches) return;
         reconcileFollow(queryClient, result);
       },
 
@@ -92,8 +107,11 @@ function toggleMutationAtom(userId: string, direction: "follow" | "unfollow") {
       // background; resetting would recreate the skeleton flash this path is
       // meant to avoid. A failed follow never changed the membership, so the
       // error path skips the invalidation.
-      onSettled: (_data, error) => {
+      onSettled: (data, error) => {
         if (error) return;
+        // A request response changes no membership — the Following feed has
+        // no new posts to fetch until the request is accepted (issue #328).
+        if (data?.requested) return;
         // Only the Following feed derives membership from this relationship.
         // The global timeline, profile feeds and reply lists remain valid and
         // should keep their rendered rows rather than flashing to skeletons.

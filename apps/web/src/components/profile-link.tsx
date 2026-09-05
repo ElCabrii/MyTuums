@@ -175,6 +175,7 @@ function ProfileHoverCardContent({ username }: { username: string }) {
         <FollowButton
           userId={profile.id}
           isFollowing={profile.viewerIsFollowing}
+          hasRequested={profile.hasRequested}
           className="shrink-0"
         />
       </div>

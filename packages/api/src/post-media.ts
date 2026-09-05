@@ -10,7 +10,7 @@ import { and, eq, getTableName, isNull, not, or, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import { post, postAttachment, user } from "@my-tuums/db/schema";
 import { roleAtLeast } from "./roles.js";
-import { invisibleAuthor } from "./visibility.js";
+import { invisibleAuthor, privatePostHidden } from "./visibility.js";
 import { mediaPathFor, objectKeyFromMediaPath } from "./image.js";
 import { mediaVariantKeys, type AllowedImageType } from "./constants.js";
 import type { Storage } from "./storage.js";
@@ -288,6 +288,11 @@ export async function canViewPostMedia(
     : and(
         isNull(post.deletedAt),
         not(invisibleAuthor(viewerId)),
+        // Private posts and private-account posts (issue #328) gate the same
+        // way: the author and approved followers pass, anyone else (including
+        // anonymous) gets a 404 from the media route. Moderators bypass, like
+        // the tombstones — they need the evidence in the case view.
+        not(privatePostHidden(viewerId)),
         // The ONLY term the author is exempt from is the removal tombstone.
         // Ban and block visibility still applies to them, so this cannot
         // become a way to read anything back out of a hidden account. A null

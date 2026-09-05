@@ -1,6 +1,6 @@
 import { getRouteApi } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { MessageSquare } from "lucide-react";
+import { Lock, MessageSquare } from "lucide-react";
 import { viewerIdAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
 import { postFeedAtom, type PostFeedParams } from "@/atoms/post-feed";
@@ -37,6 +37,26 @@ export function ProfilePosts() {
 
   const isOwnProfile = viewerId === profile.id;
   const handle = handleOf(profile) ?? username;
+  // Private accounts (issue #328) show a locked notice to non-followers
+  // instead of the feed — the API already returns empty (security), this is
+  // the UX that says why. The author and approved followers walk the normal
+  // tabs below.
+  const isLocked = (profile.isPrivate ?? false) && !isOwnProfile && !profile.viewerIsFollowing;
+  if (isLocked) {
+    return (
+      <div className="space-y-4">
+        <div className="border-border flex items-center gap-2 border-b pb-2">
+          <MessageSquare className="text-foreground h-4 w-4" />
+          <h2 className="text-foreground text-sm font-bold">{m.profile_posts_heading()}</h2>
+        </div>
+        <div className="border-border bg-card flex flex-col items-center gap-2 rounded-xl border p-8 text-center shadow-sm">
+          <Lock className="text-muted-foreground h-8 w-8" aria-hidden="true" />
+          <p className="text-foreground text-sm font-bold">{m.profile_locked_title()}</p>
+          <p className="text-muted-foreground text-sm">{m.profile_locked_body()}</p>
+        </div>
+      </div>
+    );
+  }
   // Reposts interleave on the All and Posts tabs (issue #277) — the profile
   // carries the events its owner caused, so the reposter's own amplifications
   // render like X's profile does. The Replies tab stays replies-only, and no

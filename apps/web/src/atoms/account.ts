@@ -281,3 +281,51 @@ export const saveLocalePreferenceAtom = atom(
     }
   },
 );
+
+// -------------------------------------------------------------- privacy
+
+/**
+ * Toggles the account's private flag (issue #328).
+ *
+ * Goes through `authClient.updateUser` like the preferences above — `isPrivate`
+ * is an `additionalFields` boolean the server accepts. The session carries it
+ * back (returned fields), and `byUsername` reads it from the row, so the
+ * profile's locked branch flips once the viewer's own profile query is
+ * invalidated below.
+ */
+export const saveIsPrivateAtom = atom(
+  null,
+  async (get, set, isPrivate: boolean): Promise<boolean> => {
+    set(authErrorAtom, null);
+    set(authPendingAtom, true);
+    try {
+      // SAFETY: isPrivate is an additionalField the server accepts;
+      // better-auth's client types don't surface it (lib/auth-client.ts).
+      const res = await authClient.updateUser({ isPrivate } as Parameters<
+        typeof authClient.updateUser
+      >[0]);
+      if (res.error) {
+        set(authErrorAtom, res.error.message || m.common_something_went_wrong());
+        return false;
+      }
+
+      // The viewer's own profile header reads `isPrivate` off `byUsername`,
+      // not off the session — invalidate it so the toggle reflects without a
+      // reload. The handle is stable across this write, unlike a handle
+      // change, so no family removal is needed.
+      const handle = get(viewerHandleAtom);
+      if (handle) {
+        await get(queryClientAtom).invalidateQueries({
+          queryKey: orpc.user.byUsername.key({ input: { username: handle } }),
+        });
+      }
+      return true;
+    } catch (err) {
+      console.error("Privacy preference error:", err);
+      set(authErrorAtom, m.common_something_went_wrong());
+      return false;
+    } finally {
+      set(authPendingAtom, false);
+    }
+  },
+);

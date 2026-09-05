@@ -2,22 +2,52 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toggleFollowAtomFamily } from "@/atoms/follow";
+import { cancelFollowRequestAtom } from "@/atoms/follow-requests";
 import { viewerIdAtom } from "@/atoms/session";
 import { m } from "@/paraglide/messages.js";
 
 /**
- * The Follow/Unfollow toggle for a user row — write-only and optimistic (the
- * flip is the feedback), and nothing on the viewer's own row. Signed-out
+ * The withdraw control for a pending request — split from `FollowButton`
+ * below so the Follow/Following states never subscribe to the request
+ * mutation. Existing tests mount those states without a `followRequest`
+ * mock; only this branch needs one.
+ */
+function RequestedButton({ userId, className }: { userId: string; className?: string }) {
+  // A mutation atom, not a write-only action — `useAtomValue` yields
+  // `{ mutate }`, where `useSetAtom` would give the setter type error.
+  const cancelRequest = useAtomValue(cancelFollowRequestAtom);
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={() => cancelRequest.mutate({ targetId: userId })}
+      aria-pressed={false}
+      aria-label={m.follow_cancel_request()}
+      className={`gap-1.5 rounded-full ${className ?? ""}`}
+    >
+      <span>{m.follow_requested()}</span>
+    </Button>
+  );
+}
+
+/**
+ * The Follow/Requested/Unfollow control for a user row (issue #328 adds the
+ * middle state) — write-only and optimistic for the edge, invalidation for
+ * the request withdraw, and nothing on the viewer's own row. Signed-out
  * visitors never render this (every route it appears on is gated), so the
  * old login-link branch is gone.
  */
 export function FollowButton({
   userId,
   isFollowing,
+  hasRequested,
   className,
 }: {
   userId: string;
   isFollowing: boolean;
+  /** Pending outbound request (issue #328). Omitted reads as none. */
+  hasRequested?: boolean;
   className?: string;
 }) {
   const viewerId = useAtomValue(viewerIdAtom);
@@ -30,6 +60,15 @@ export function FollowButton({
   // constraint, so there is no state in which this button is meaningful on
   // your own row. Callers guard too; this is the backstop.
   if (viewerId === userId) return null;
+
+  // A pending request withdraws rather than unfollows — the edge never
+  // existed, so `toggleFollow` (which would delete a non-row) is the wrong
+  // call. Invalidation flips the button back to Follow once the delete lands;
+  // the request is rare enough that no optimistic patch is worth the
+  // rollback surface.
+  if (!isFollowing && hasRequested) {
+    return <RequestedButton userId={userId} className={className} />;
+  }
 
   // Deliberately no pending/disabled state: the optimistic flip *is* the
   // feedback and it lands on click, while disabling for the round trip would

@@ -54,6 +54,7 @@ function makeBlockedUser(overrides: Partial<BlockedUser> & { id: string }): Bloc
     bio: null,
     bannerImage: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    isPrivate: false,
     blockedAt: new Date("2026-02-01T00:00:00.000Z"),
     ...overrides,
   };
