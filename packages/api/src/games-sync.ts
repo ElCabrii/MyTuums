@@ -9,8 +9,8 @@
  * (`apps/server/src/games-sync.ts`) turns that into exit 1 so Railway marks
  * the cron run FAILED.
  *
- * Never delete, never freeze (Q29): the scan reads the current top set by
- * Twitch-hours-watched, but the ids hydrated are the union of that set with
+ * Never delete, never freeze (Q29): the scan reads the current Twitch
+ * popularity snapshot, but the ids hydrated are the union of that set with
  * EVERY id the `game` table already holds — dropouts are re-staged from
  * their existing row (IGDB-side removal tolerated), keep their last-known
  * `popularityRank`, and a dropout IGDB no longer returns at all survives
@@ -40,7 +40,6 @@ import {
   GAME_SUMMARY_MAX_LENGTH,
   GAMES_CATALOG_SIZE,
   GAMES_HYDRATION_BATCH,
-  IGDB_POPULARITY_TYPE_NAME,
 } from "./constants.js";
 import { gameCoverObjectKey } from "./game-media.js";
 import { assignHashtagKeys, type HashtagCandidate } from "./games-hashtag.js";
@@ -48,10 +47,9 @@ import {
   createIgdbClient,
   createIgdbTransport,
   igdbGameRowSchema,
-  igdbPopularityPrimitiveSchema,
-  igdbPopularityTypeSchema,
   type IgdbGameRow,
   type IgdbTransport,
+  type TwitchTopGame,
 } from "./igdb.js";
 
 // The transport factory rides along on this module's exports: it is the
@@ -103,6 +101,20 @@ export interface SyncGamesResult {
   coversKept: number;
   /** Per-cover failures — each kept the previous cover and will retry. */
   coversFailed: number;
+}
+
+/**
+ * Normalizes one Twitch `games/top` entry to the IGDB id the catalog stores,
+ * or null when the entry is not a storable game. Non-game categories (Just
+ * Chatting, IRL, Slots, …) arrive with an empty `igdb_id`; anything that is
+ * not a positive integer is malformed. Twitch's category `id` is never
+ * consulted — it names the category, not the game.
+ */
+function twitchIgdbId(entry: Pick<TwitchTopGame, "igdb_id">): number | null {
+  const text = (entry.igdb_id ?? "").trim();
+  if (!/^\d+$/.test(text)) return null;
+  const id = Number(text);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
 /**
@@ -346,57 +358,50 @@ export async function syncGamesCatalog(deps: {
     transport: deps.transport,
   });
 
-  // 1. Resolve the popularity type BY NAME (Q2) — the numeric id is not
-  //    stable across IGDB environments, and the docs only enumerate a few.
-  const types = parsePage(
-    igdbPopularityTypeSchema,
-    "popularity_types",
-    await client.query("popularity_types", "fields id,name; limit 100;"),
-  );
-  const popularityTypeId = types.find((type) => type.name === IGDB_POPULARITY_TYPE_NAME)?.id;
-  if (popularityTypeId === undefined) {
-    throw new CatalogValidationError(
-      types.length === 0
-        ? "popularity_types returned no rows — cannot rank the catalog"
-        : `popularity_types has no "${IGDB_POPULARITY_TYPE_NAME}" (received: ${types
-            .map((type) => type.name)
-            .join(", ")})`,
-    );
-  }
-
-  // 2. The popularity scan: pages of the top set by value desc. Ranks are
-  //    dense by first occurrence, which is the scan's own order.
+  // 1. The Twitch popularity snapshot: `games/top` pages in returned order
+  //    (current viewer count, most popular first), `first=100` per page,
+  //    following `pagination.cursor` until GAMES_CATALOG_SIZE unique, valid
+  //    IGDB ids are collected. Ranks are dense by first occurrence — Twitch's
+  //    own order. Non-game categories carry an empty `igdb_id` and are
+  //    skipped, as are malformed ids and repeats; only the `igdb_id` ever
+  //    becomes a rank, never Twitch's category `id`.
   const ranks = new Map<number, number>();
-  for (let offset = 0; offset < GAMES_CATALOG_SIZE; offset += GAMES_HYDRATION_BATCH) {
-    const rows = parsePage(
-      igdbPopularityPrimitiveSchema,
-      "popularity_primitives",
-      await client.query(
-        "popularity_primitives",
-        `fields game_id,value; where popularity_type = ${popularityTypeId} & game_id != null; sort value desc; limit ${GAMES_HYDRATION_BATCH}; offset ${offset};`,
-      ),
-    );
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      if (row.game_id === null) continue;
-      if (!ranks.has(row.game_id)) ranks.set(row.game_id, ranks.size + 1);
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await client.listTopGamesPage(cursor);
+    if (page.games.length === 0) break;
+    for (const entry of page.games) {
+      const id = twitchIgdbId(entry);
+      if (id === null || ranks.has(id)) continue;
+      ranks.set(id, ranks.size + 1);
+      if (ranks.size === GAMES_CATALOG_SIZE) break;
     }
-    if (rows.length < GAMES_HYDRATION_BATCH) break;
+    if (ranks.size === GAMES_CATALOG_SIZE) break;
+    // No cursor means no further pages; a repeated cursor means the pages
+    // loop — either way the snapshot is exhausted, and the size check below
+    // fails the run closed instead of looping forever.
+    const next = page.cursor;
+    if (!next || seenCursors.has(next)) break;
+    seenCursors.add(next);
+    cursor = next;
   }
-  if (ranks.size === 0) {
+  if (ranks.size < GAMES_CATALOG_SIZE) {
     throw new CatalogValidationError(
-      "the popularity scan returned no games — refusing to sync an empty catalog",
+      ranks.size === 0
+        ? "the Twitch popularity snapshot returned no games — refusing to sync an empty catalog"
+        : `the Twitch popularity snapshot ended after ${ranks.size} unique games — need ${GAMES_CATALOG_SIZE} to rank the catalog`,
     );
   }
 
-  // 3. Every id this run must leave better than it found it: the scan's top
+  // 2. Every id this run must leave better than it found it: the snapshot's
   //    set UNION every id the table already holds (Q29's "every sync
   //    refreshes ALL known games").
   const knownRows = await deps.db.select().from(game);
   const known = new Map(knownRows.map((row) => [row.igdbId, row]));
   const allIds = new Set<number>([...ranks.keys(), ...known.keys()]);
 
-  // 4. Hydration, id-batched, one request per batch (sub-expansion inline —
+  // 3. Hydration, id-batched, one request per batch (sub-expansion inline —
   //    three separate /covers /genres /platforms calls would triple the
   //    requests for a join no client-side code performs).
   const hydrated = new Map<number, IgdbGameRow>();
@@ -412,8 +417,8 @@ export async function syncGamesCatalog(deps: {
     for (const row of rows) hydrated.set(row.id, row);
   }
 
-  // 5. Stage. A CURRENT scan member IGDB fails to hydrate is a validation
-  //    failure (popularity says it exists); a dropout IGDB no longer returns
+  // 4. Stage. A CURRENT snapshot member IGDB fails to hydrate is a validation
+  //    failure (the snapshot says it exists); a dropout IGDB no longer returns
   //    is tolerated — staged verbatim from its existing row.
   const staged: StagedGameRow[] = [];
   const newCandidates: HashtagCandidate[] = [];
@@ -478,7 +483,7 @@ export async function syncGamesCatalog(deps: {
     }
   }
 
-  // 6. Sticky keys for the newcomers; `occupied` is every key an existing
+  // 5. Sticky keys for the newcomers; `occupied` is every key an existing
   //    row holds, so an incumbent can never be displaced.
   const assignments = assignHashtagKeys(
     newCandidates,
@@ -489,10 +494,10 @@ export async function syncGamesCatalog(deps: {
     if (assigned !== undefined) row.hashtagKey = assigned;
   }
 
-  // 7. Validate everything, before any write (the Q28 pin).
+  // 6. Validate everything, before any write (the Q28 pin).
   validateStaged(staged, now.getUTCFullYear() + 5);
 
-  // 8. Covers — bucket-only, before the transaction, only where IGDB's image
+  // 7. Covers — bucket-only, before the transaction, only where IGDB's image
   //    id CHANGED (the incremental rule, Q27). A cover's failure keeps the
   //    previous cover AND its compare key, so the next sync retries; a
   //    vanished cover (image id gone) nulls both out per Q28's
@@ -559,12 +564,12 @@ export async function syncGamesCatalog(deps: {
     }
   }
 
-  // 9. Commit: ONE transaction, all rows, all-or-nothing (Q28).
+  // 8. Commit: ONE transaction, all rows, all-or-nothing (Q28).
   await deps.db.transaction(async (tx) => {
     await upsertGames(tx, staged, now);
   });
 
-  // 10. Superseded covers leave AFTER the rows that referenced them are
+  // 9. Superseded covers leave AFTER the rows that referenced them are
   //     committed — the link-card ordering. Best-effort by design: a missed
   //     removal is an orphan, never a broken reference.
   for (const key of supersededKeys) {
