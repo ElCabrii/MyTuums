@@ -1,6 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
 import {
   type AuditEntry,
+  type GameCard,
+  type GamePageData,
   type ModerationCase,
   type ModerationCaseDetail,
   type NotificationItem,
@@ -370,6 +372,35 @@ export function makeNotification(overrides: Partial<NotificationItem> = {}): Not
     actor: makeAuthor(),
     action: null,
     targetPostDeletedAt: null,
+    ...overrides,
+  };
+}
+
+/** One game directory card — `game.list`'s row. */
+export function makeGameCard(overrides: Partial<GameCard> = {}): GameCard {
+  return {
+    igdbId: 1,
+    slug: "hades",
+    name: "Hades",
+    coverMediaPath: null,
+    firstReleaseYear: 2020,
+    popularityRank: 1,
+    ...overrides,
+  };
+}
+
+/** One game's public page payload — `game.bySlug`'s shape. */
+export function makeGamePageData(overrides: Partial<GamePageData> = {}): GamePageData {
+  return {
+    slug: "hades",
+    name: "Hades",
+    summary: "Zagreus fights his way out of the Underworld.",
+    coverMediaPath: null,
+    firstReleaseYear: 2020,
+    genres: ["Roguelike"],
+    platforms: ["PC"],
+    favoriteCount: 0,
+    viewerHasFavoritedGame: false,
     ...overrides,
   };
 }

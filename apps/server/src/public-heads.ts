@@ -23,6 +23,7 @@
  * compiles into the browser bundle and cannot reach a server-side string.
  */
 import type { Database } from "@my-tuums/db";
+import { publicGameHead, type PublicGameHead } from "@my-tuums/api/public-game-head";
 import { publicPostHead, type PublicPostHead } from "@my-tuums/api/public-post-head";
 import type { IndexHtmlTransform } from "./static-files.js";
 
@@ -120,6 +121,13 @@ const ROUTE_HEADS = new Map<string, RouteHead>([
     },
   ],
   [
+    "/games",
+    {
+      title: "Games",
+      description: "Browse the MyTuums game directory — every game the community talks about.",
+    },
+  ],
+  [
     "/banned",
     {
       title: "Account banned",
@@ -180,13 +188,15 @@ function replaceHeadBlock(html: string, replacement: string): string {
 }
 
 const POST_PATH_PREFIX = "/post/";
+const GAMES_PATH_PREFIX = "/games/";
 
 /**
  * The production `IndexHtmlTransform`: looks the route up in the static
- * table, asks the API for a post head on `/post/<uuid>`, and leaves every
- * other path on the generic fallback the file already carries (the gated
- * routes never reach a crawler — the page gate 302s it — and an unmarked
- * build must degrade to serving the file verbatim, never to a broken one).
+ * table, asks the API for a post head on `/post/<uuid>` or a game head on
+ * `/games/<slug>`, and leaves every other path on the generic fallback the
+ * file already carries (the gated routes never reach a crawler — the page
+ * gate 302s it — and an unmarked build must degrade to serving the file
+ * verbatim, never to a broken one).
  */
 export function createPublicHeadTransform(db: Database): IndexHtmlTransform {
   return async (pathname, html) => {
@@ -207,6 +217,30 @@ export function createPublicHeadTransform(db: Database): IndexHtmlTransform {
             title: head.title,
             description: head.description,
             path: `${POST_PATH_PREFIX}${encodeURIComponent(postId)}`,
+            imagePath: head.imagePath,
+          }),
+        );
+      }
+      return html;
+    }
+
+    if (pathname.startsWith(GAMES_PATH_PREFIX)) {
+      const slug = pathname.slice(GAMES_PATH_PREFIX.length).replace(/\/+$/, "");
+      let head: PublicGameHead | null = null;
+      try {
+        head = await publicGameHead(db, decodeURIComponent(slug));
+      } catch (error) {
+        // Same degradation as the post head: the unfurl falls back, the page
+        // itself still loads and the SPA takes over.
+        console.error("Failed to build the public game head:", error);
+      }
+      if (head) {
+        return replaceHeadBlock(
+          html,
+          headBlockFor({
+            title: head.title,
+            description: head.description,
+            path: `${GAMES_PATH_PREFIX}${slug}`,
             imagePath: head.imagePath,
           }),
         );

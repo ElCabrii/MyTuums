@@ -59,6 +59,19 @@ describe("createPublicHeadTransform", () => {
     ).resolves.toBe(FALLBACK_HEAD);
   });
 
+  it("replaces the fallback block for the /games hub, and degrades a game page whose head cannot be built", async () => {
+    // The hub is a static route like /login (issue #314, Q6)...
+    const hub = await transform("/games", FALLBACK_HEAD);
+    expect(hub).toContain("<title data-app-fallback>Games - MyTuums</title>");
+    expect(hub).toContain(
+      '<link data-app-fallback rel="canonical" href="https://mytuums.com/games" />',
+    );
+
+    // ...while a game page's head comes from the database: with an
+    // unreachable one it degrades exactly like a post permalink.
+    await expect(transform("/games/doom-2016", FALLBACK_HEAD)).resolves.toBe(FALLBACK_HEAD);
+  });
+
   it("leaves a build without the markers untouched — never a corrupted document", async () => {
     const unmarked = "<!doctype html><html><head><title>old</title></head></html>";
     await expect(transform("/login", unmarked)).resolves.toBe(unmarked);

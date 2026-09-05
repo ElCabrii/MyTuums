@@ -17,4 +17,5 @@ export {
 } from "./profile-media-authorization.js";
 export { objectKeyFromMediaPath } from "./image.js";
 export { publicPostHead, type PublicPostHead } from "./public-post-head.js";
+export { publicGameHead, type PublicGameHead } from "./public-game-head.js";
 export type { Storage } from "./storage.js";

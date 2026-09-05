@@ -83,6 +83,15 @@ export function clearViewerState(queryClient: QueryClient): void {
       clearFamily(profileAtomFamily);
     },
   );
+  // Only the game PAGE atoms — they carry `viewerHasFavoritedGame`. The
+  // directory's list family is viewer-free and deliberately not swept.
+  sweepFamily(
+    "game page",
+    () => import("@/atoms/games"),
+    ({ clearGameFamilies }) => {
+      clearGameFamilies();
+    },
+  );
   sweepFamily(
     "post feed",
     () => import("@/atoms/post-feed"),

@@ -5,6 +5,7 @@ import {
   MessageSquare,
   Bell,
   Compass,
+  Gamepad2,
   Home,
   Settings,
   LogOut,
@@ -117,6 +118,16 @@ export function Header() {
             >
               <Compass className="h-4 w-4" />
               <span>{m.nav_discover()}</span>
+            </Button>
+            {/* The game directory (issue #314) — public, so the nav item is
+                always shown, never gated on a session. */}
+            <Button
+              variant="ghost"
+              nativeButton={false}
+              render={<Link to="/games" className="flex items-center gap-2" />}
+            >
+              <Gamepad2 className="h-4 w-4" />
+              <span>{m.nav_games()}</span>
             </Button>
             {isModerator && (
               <Button

@@ -1,3 +1,4 @@
+import { gameRouter } from "./games.js";
 import { moderationRouter } from "./moderation.js";
 import { notificationRouter } from "./notifications.js";
 import { postRouter } from "./posts.js";
@@ -7,8 +8,8 @@ import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 
 /**
- * The oRPC router: `me`, plus the `post`, `user`, `search`, `notification`
- * and `moderation` procedure groups.
+ * The oRPC router: `me`, plus the `post`, `user`, `game`, `search`,
+ * `notification` and `moderation` procedure groups.
  *
  * Liveness/readiness is served over plain HTTP at GET /health (see
  * apps/server/src/index.ts) so orchestrators (Docker, k8s) that can't speak
@@ -23,6 +24,7 @@ export const appRouter = {
   }),
   post: postRouter,
   user: userRouter,
+  game: gameRouter,
   search: searchRouter,
   notification: notificationRouter,
   moderation: moderationRouter,

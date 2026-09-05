@@ -240,8 +240,9 @@ three events, not one collapsed one.
   such user"; a banned profile resolves to a suspended stub instead, without
   its authored profile fields, relationship counts or badges.
 - Search has three surfaces: a profile-only header typeahead (up to five
-  users), a full user search, and a full post search. User results rank
-  handle-prefix matches ahead of substring matches.
+  users, plus up to three games), a full user search, and a full post search.
+  User results rank handle-prefix matches ahead of substring matches; game
+  results match on name or hashtag key in the catalog's popularity order.
 
 ### Badges
 
@@ -282,6 +283,21 @@ one dependency-free module shared by server and browser
 
 Out of scope for 0.5.0: badges on post cards, staff-granted badges, and any
 notification when a badge is earned.
+
+## Games
+
+- The game directory is the app's public catalog of games, synced from IGDB
+  by a weekly job and seeded from a committed fixture in dev, CI and e2e. It
+  lives at `/games` (the hub, a cover grid with a filter bar and three
+  sorts: popularity, A→Z, release year) and `/games/{slug}` (one game's
+  page: cover, name, summary, release year, genres, platforms, and a public
+  favorites count). Both are open to signed-out visitors.
+- Every game the catalog has ever tracked stays listed — a game that drops
+  out of the popularity scan keeps its row and its last-known rank, so a
+  page that once resolved always resolves.
+- Games surface in search alongside people and posts: the header typeahead
+  offers up to three games (name or hashtag-key match, popularity order),
+  and `/search` carries a Games section.
 
 ## Media
 
@@ -445,6 +461,17 @@ edited. _Avoid:_ updated post, revised post.
 added text or images. An event about the original, not a post of its own: the
 feed renders the original attributed to the reposter. Idempotent as a pair
 (`repost` / `unrepost`). _Avoid:_ retweet, boost, share.
+
+**Game directory** — the public catalog of games at `/games`, synced from
+IGDB and never shrunk: a game that leaves the popularity scan keeps its row
+and its last-known rank. Each game has a page (`/games/{slug}`) carrying
+strictly game data — no post feed. _Avoid:_ games list, IGDB database.
+
+**Hashtag key** — a game's resolution key: its name lowercased with every
+non-alphanumeric character stripped (`Baldur's Gate 3` → `baldursgate3`).
+Assigned once and never rewritten — when two games collide, the later one
+takes a release-year suffix (`doom2016`). Distinct from the slug, which is
+the URL shape (`baldurs-gate-3`). _Avoid:_ tag id, game handle.
 
 **Share** — the post-card control that opens the share dialog: the post
 previewed, its canonical permalink offered for copy, the copy confirmed by a
