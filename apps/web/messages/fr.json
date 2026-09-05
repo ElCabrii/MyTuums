@@ -279,7 +279,7 @@
   "feed_for_you": "Pour vous",
   "feed_following": "Abonnements",
   "feed_find_people": "Trouver des personnes à suivre",
-  "discover_coming_soon": "La page Découvrir arrive bientôt — patience !",
+  "discover_empty": "Rien à découvrir pour l'instant — personne n'a encore publié.",
   "feed_empty_following": "Rien ici pour l'instant : vous ne suivez personne ayant publié.",
   "feed_empty": "Aucune publication pour l'instant. Publiez quelque chose en premier.",
   "feed_load_error": "Impossible de charger les publications.",
