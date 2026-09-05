@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import type { Database } from "@my-tuums/db";
-import { game, gameFavorite, user } from "@my-tuums/db/schema";
+import { game, gameFavorite, follow, user } from "@my-tuums/db/schema";
 import { USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH, normalizeUsername } from "@my-tuums/auth/rules";
 import { z } from "zod";
 import {
@@ -39,7 +39,9 @@ import { visibleUser } from "./visibility.js";
  * notification) and diverges on one deliberate point: the count is PUBLIC
  * (Q26's showcase — the rail is visible to every signed-in viewer), so it
  * is denormalized on `game.favorite_count` and maintained in the same
- * transaction as the pair's own write.
+ * transaction as the pair's own write. The rail itself is visible to every
+ * signed-in viewer EXCEPT on a private profile, where it redacts to empty
+ * for non-followers like the follow graphs do.
  */
 
 /**
@@ -463,7 +465,10 @@ export const gameRouter = {
    * newest first, capped — a showcase strip, not a list page. Session-gated
    * like every profile surface, and read through `visibleUser` so a banned
    * owner (or a blocked pair) answers NOT_FOUND exactly like their profile
-   * does — the rail never outlives the page that carries it.
+   * does — the rail never outlives the page that carries it. A private
+   * owner's rail reads as EMPTY for viewers who are neither the owner nor an
+   * approved follower — the same redaction the follow graphs apply, so the
+   * rail cannot disagree with the locked profile carrying it.
    */
   favorites: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
@@ -476,7 +481,7 @@ export const gameRouter = {
       // that would outlive the page carrying it. An owner with no favorites
       // IS an empty rail; the two must stay distinguishable.
       const [owner] = await context.db
-        .select({ id: user.id })
+        .select({ id: user.id, isPrivate: user.isPrivate })
         .from(user)
         .where(
           and(
@@ -488,6 +493,19 @@ export const gameRouter = {
         )
         .limit(1);
       if (!owner) throw new ORPCError("NOT_FOUND", { message: "No such user." });
+
+      // A private showcase hides like a private graph: the profile itself
+      // still resolves (so the client renders the locked notice), but the
+      // member list — here the favorited games — redacts to empty. Null
+      // `isPrivate` (pre-privacy rows) reads as public.
+      if (owner.isPrivate && owner.id !== context.user.id) {
+        const [edge] = await context.db
+          .select({ followerId: follow.followerId })
+          .from(follow)
+          .where(and(eq(follow.followerId, context.user.id), eq(follow.followingId, owner.id)))
+          .limit(1);
+        if (!edge) return { items: [] };
+      }
 
       const rows = await context.db
         .select({

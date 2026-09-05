@@ -1,6 +1,7 @@
 import { call } from "@orpc/server";
 import { closeDb, db } from "@my-tuums/db";
-import { gameFavorite } from "@my-tuums/db/schema";
+import { gameFavorite, user } from "@my-tuums/db/schema";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { upsertGames, type StagedGameRow } from "./games-sync.js";
 import { appRouter } from "./router.js";
@@ -215,6 +216,46 @@ describe("game.favorites (the profile rail)", () => {
     expect(rail.items).toHaveLength(12);
     // Newest first: the last-favorited game leads.
     expect(rail.items[0].slug).toBe(games.at(-1)?.slug);
+  });
+
+  it("hides a private owner's rail from strangers but not from followers or the owner", async () => {
+    const owner = await createTestUser();
+    const follower = await createTestUser();
+    const stranger = await createTestUser();
+    await db.update(user).set({ isPrivate: true }).where(eq(user.id, owner.id));
+    await call(appRouter.game.favorite, { slug: "game-31" }, { context: contextFor(owner) });
+
+    // A stranger gets the locked-graph treatment: the profile still resolves,
+    // the showcase redacts to empty — never NOT_FOUND, which would disagree
+    // with the page carrying it.
+    const forStranger = await call(
+      appRouter.game.favorites,
+      { username: owner.session.user.username! },
+      { context: contextFor(stranger) },
+    );
+    expect(forStranger.items).toEqual([]);
+
+    // An approved follower walks the same rail as a public profile's.
+    await call(appRouter.user.follow, { userId: owner.id }, { context: contextFor(follower) });
+    await call(
+      appRouter.user.followRequest.accept,
+      { requesterId: follower.id },
+      { context: contextFor(owner) },
+    );
+    const forFollower = await call(
+      appRouter.game.favorites,
+      { username: owner.session.user.username! },
+      { context: contextFor(follower) },
+    );
+    expect(forFollower.items.map((item) => item.slug)).toEqual(["game-31"]);
+
+    // The owner always sees their own showcase.
+    const forOwner = await call(
+      appRouter.game.favorites,
+      { username: owner.session.user.username! },
+      { context: contextFor(owner) },
+    );
+    expect(forOwner.items.map((item) => item.slug)).toEqual(["game-31"]);
   });
 });
 
