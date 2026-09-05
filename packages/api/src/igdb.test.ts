@@ -67,6 +67,7 @@ function client(transport: IgdbTransport) {
 
 const TOKEN_URL = "https://id.twitch.tv/oauth2/token";
 const GAMES_URL = "https://api.igdb.com/v4/games";
+const TOP_GAMES_URL = "https://api.twitch.tv/helix/games/top?first=100";
 
 describe("createIgdbClient", () => {
   it("fetches the token once and attaches credentials to every query", async () => {
@@ -169,6 +170,128 @@ describe("createIgdbClient", () => {
   });
 });
 
+describe("createIgdbClient.listTopGamesPage", () => {
+  const page = (entries: readonly unknown[], cursor?: string) =>
+    new Response(JSON.stringify({ data: entries, pagination: cursor ? { cursor } : {} }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+
+  const entry = (igdbId: string, id = `tw-${igdbId}`) => ({
+    id,
+    name: `Game ${igdbId}`,
+    box_art_url: `https://static-cdn.jtvnw.net/ttv-boxart/${id}-{width}x{height}.jpg`,
+    igdb_id: igdbId,
+  });
+
+  it("requests first=100 with the shared credentials and returns the entries plus the cursor", async () => {
+    const { transport, calls } = scriptedTransport([
+      () => new Response(TOKEN_BODY, { status: 200 }),
+      () => page([entry("10"), entry("20")], "cursor-1"),
+    ]);
+
+    const result = await client(transport).listTopGamesPage();
+
+    expect(result).toEqual({
+      games: [entry("10"), entry("20")],
+      cursor: "cursor-1",
+    });
+    const helixCalls = calls.filter((call) => call.url.startsWith(TOP_GAMES_URL));
+    expect(helixCalls).toHaveLength(1);
+    expect(helixCalls[0].url).toBe(TOP_GAMES_URL);
+    expect(helixCalls[0].method).toBe("GET");
+    expect(helixCalls[0].headers["Client-ID"]).toBe("client-id");
+    expect(helixCalls[0].headers.Authorization).toBe("Bearer token-1");
+  });
+
+  it("passes the previous cursor as after on the next page", async () => {
+    const { transport, calls } = scriptedTransport([
+      () => new Response(TOKEN_BODY, { status: 200 }),
+      () => page([entry("10")], "cursor-1"),
+      () => page([entry("20")]),
+    ]);
+
+    const igdb = client(transport);
+    const first = await igdb.listTopGamesPage();
+    const second = await igdb.listTopGamesPage(first.cursor);
+
+    expect(second).toEqual({ games: [entry("20")], cursor: undefined });
+    expect(calls.map((call) => call.url)).toContain(`${TOP_GAMES_URL}&after=cursor-1`);
+  });
+
+  it("keeps entries with an empty igdb_id — skipping them is the sync's decision, not the client's", async () => {
+    const { transport } = scriptedTransport([
+      () => new Response(TOKEN_BODY, { status: 200 }),
+      () =>
+        page([
+          {
+            id: "508093",
+            name: "Just Chatting",
+            box_art_url: "https://example.com/jc.jpg",
+            igdb_id: "",
+          },
+        ]),
+    ]);
+
+    const result = await client(transport).listTopGamesPage();
+    expect(result.games).toHaveLength(1);
+    expect(result.games[0].igdb_id).toBe("");
+  });
+
+  it("normalizes a numeric igdb_id to its string form at the wire boundary", async () => {
+    const { transport } = scriptedTransport([
+      () => new Response(TOKEN_BODY, { status: 200 }),
+      () =>
+        page([
+          {
+            id: "tw-10",
+            name: "Game 10",
+            box_art_url: "https://static-cdn.jtvnw.net/ttv-boxart/tw-10-{width}x{height}.jpg",
+            igdb_id: 10,
+          },
+        ]),
+    ]);
+
+    const result = await client(transport).listTopGamesPage();
+    expect(result.games[0].igdb_id).toBe("10");
+  });
+
+  it("fails immediately on a 401 from Helix — one attempt, no retry", async () => {
+    const { transport, calls } = scriptedTransport([
+      () => new Response(TOKEN_BODY, { status: 200 }),
+      () => new Response("nope", { status: 401 }),
+    ]);
+
+    await expect(client(transport).listTopGamesPage()).rejects.toMatchObject({
+      reason: "unauthorized",
+    });
+    expect(calls.filter((call) => call.url.startsWith(TOP_GAMES_URL))).toHaveLength(1);
+  });
+
+  it("succeeds when the single retry lands after a 5xx", async () => {
+    const { transport, calls } = scriptedTransport([
+      () => new Response(TOKEN_BODY, { status: 200 }),
+      () => new Response("boom", { status: 503 }),
+      () => page([entry("10")]),
+    ]);
+
+    await expect(client(transport).listTopGamesPage()).resolves.toMatchObject({
+      games: [entry("10")],
+    });
+    expect(calls.filter((call) => call.url.startsWith(TOP_GAMES_URL))).toHaveLength(2);
+  });
+
+  it("reports a page in an unexpected shape as bad_response", async () => {
+    const { transport } = scriptedTransport([
+      () => new Response(TOKEN_BODY, { status: 200 }),
+      () => json([{ id: 1 }]),
+    ]);
+
+    await expect(client(transport).listTopGamesPage()).rejects.toMatchObject({
+      reason: "bad_response",
+    });
+  });
+});
 describe("createIgdbClient.fetchCoverImage", () => {
   // FF D8 FF E0 — the JPEG signature `sniffImageType` keys on; the client
   // stores what the bytes ARE, not what a header claims.

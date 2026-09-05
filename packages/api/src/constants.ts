@@ -362,10 +362,11 @@ export const LINK_CARD_SITE_NAME_MAX_LENGTH = 300;
 /**
  * The IGDB half of the game catalog (issue #314). IGDB's API is Twitch's:
  * a client-credentials token from the Twitch developer portal, then Apicalypse
- * POST bodies against `api.igdb.com`. The budget IGDB documents is roughly
- * four requests a second, so the client paces itself under that by
- * construction (see `igdb.ts`) rather than reacting to 429s it could have
- * avoided.
+ * POST bodies against `api.igdb.com`. The same token authenticates the Twitch
+ * Helix ranking source below — one credential pair, two hosts. The budget
+ * IGDB documents is roughly four requests a second, so the client paces
+ * itself under that by construction (see `igdb.ts`) rather than reacting to
+ * 429s it could have avoided.
  *
  * `IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET` are a SEPARATE pair from the
  * `TWITCH_*` sign-in credentials — same portal, different purpose — and are
@@ -378,14 +379,25 @@ export const IGDB_TOKEN_URL = "https://id.twitch.tv/oauth2/token";
 /** Base of IGDB's CDN image URLs; `<size>/<imageId>.jpg` completes it. */
 export const IGDB_IMAGE_BASE_URL = "https://images.igdb.com/igdb/image/upload";
 /**
- * The `popularity_types` name the catalog ranks by: IGDB's PopScore derived
- * from Twitch hours watched (issue Q2) — "24hr Hours Watched" in IGDB's own
- * spelling, verified live. Resolved BY NAME at sync time — the numeric id is
- * not stable across IGDB environments and the docs only enumerate a few, and
- * a renamed type fails the sync loudly with the received names in the
- * message rather than ranking by the wrong thing.
+ * The ranking source for the game catalog: Twitch Helix `GET /helix/games/top`
+ * (see `igdb.ts`), ordered by current viewer count — a current Twitch
+ * popularity snapshot, not a rolling window. Authenticated with the same
+ * `IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET` token as the IGDB half above: those
+ * are Twitch developer-app credentials, so no second pair exists. Only the
+ * `igdb_id` of each entry is ever stored or hydrated — never Twitch's
+ * category `id`, never the box art (IGDB covers remain the only artwork).
  */
-export const IGDB_POPULARITY_TYPE_NAME = "24hr Hours Watched";
+/** Origin of the Twitch Helix API (the `games/top` ranking source). */
+export const TWITCH_HELIX_ORIGIN = "https://api.twitch.tv";
+/** Entries requested per `games/top` page — the endpoint's documented maximum. */
+export const TWITCH_TOP_GAMES_PAGE_SIZE = 100;
+/**
+ * How many games the Twitch popularity snapshot ranks, and therefore the
+ * catalog's steady-state size (issue Q2: "~top 1000, tune after seeing data" —
+ * the constant is the tuning point). Rows already known are never deleted when
+ * they fall out of it (Q29).
+ */
+export const GAMES_CATALOG_SIZE = 1000;
 /** Wall-clock ceiling on one API query, token request included. */
 export const IGDB_QUERY_TIMEOUT_MS = 15_000;
 /** Wall-clock ceiling on one cover download, body included. */
@@ -403,13 +415,6 @@ export const IGDB_RETRY_BACKOFF_MAX_MS = 30_000;
  * cached token is never used in the seconds it is about to die.
  */
 export const IGDB_TOKEN_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
-/**
- * How many games the popularity scan reads, and therefore the catalog's
- * steady-state size (issue Q2: "~top 1000, tune after seeing data" — the
- * constant is the tuning point). Rows already known are never deleted when
- * they fall out of it (Q29).
- */
-export const GAMES_CATALOG_SIZE = 1000;
 /** Ids per `/games` hydration query — IGDB's documented page limit. */
 export const GAMES_HYDRATION_BATCH = 500;
 /** Longest game summary stored; IGDB's can run to thousands of characters. */

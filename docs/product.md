@@ -286,8 +286,9 @@ notification when a badge is earned.
 
 ## Games
 
-- The game directory is the app's public catalog of games, synced from IGDB
-  by a weekly job and seeded from a committed fixture in dev, CI and e2e. It
+- The game directory is the app's public catalog of games, ranked by a
+  current Twitch popularity snapshot and hydrated from IGDB by a weekly job,
+  and seeded from a committed fixture in dev, CI and e2e. It
   lives at `/games` (the hub, a cover grid with a filter bar and three
   sorts: popularity, A→Z, release year) and `/games/{slug}` (one game's
   page: cover, name, summary, release year, genres, platforms, and a public
@@ -473,8 +474,9 @@ added text or images. An event about the original, not a post of its own: the
 feed renders the original attributed to the reposter. Idempotent as a pair
 (`repost` / `unrepost`). _Avoid:_ retweet, boost, share.
 
-**Game directory** — the public catalog of games at `/games`, synced from
-IGDB and never shrunk: a game that leaves the popularity scan keeps its row
+**Game directory** — the public catalog of games at `/games`, ranked by a
+current Twitch popularity snapshot, hydrated from IGDB, and never shrunk: a
+game that leaves the popularity scan keeps its row
 and its last-known rank. Each game has a page (`/games/{slug}`) carrying
 strictly game data — no post feed. _Avoid:_ games list, IGDB database.
 

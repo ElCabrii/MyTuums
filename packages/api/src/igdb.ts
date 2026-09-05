@@ -4,8 +4,8 @@
  * transport, one retry, pacing, deadline races) are lifted from the one
  * bounded outbound client that already exists, `./link-card-http.ts`.
  *
- * Fixed first-party hosts only (`api.igdb.com`, `id.twitch.tv`,
- * `images.igdb.com`), so none of the link-card SSRF machinery applies — there
+ * Fixed first-party hosts only (`api.igdb.com`, `api.twitch.tv`,
+ * `id.twitch.tv`, `images.igdb.com`), so none of the link-card SSRF machinery applies — there
  * is no author-supplied URL here to validate, only credentials and response
  * discipline:
  *
@@ -33,6 +33,8 @@ import {
   IGDB_RETRY_BACKOFF_MS,
   IGDB_TOKEN_EXPIRY_MARGIN_MS,
   IGDB_TOKEN_URL,
+  TWITCH_HELIX_ORIGIN,
+  TWITCH_TOP_GAMES_PAGE_SIZE,
   type AllowedImageType,
 } from "./constants.js";
 import { sniffImageType } from "./post-image.js";
@@ -46,16 +48,29 @@ const igdbTokenSchema = z.object({
   expires_in: z.number(),
 });
 
-/** `/popularity_types` rows — the by-name resolution input (issue Q2). */
-export const igdbPopularityTypeSchema = z.object({
-  id: z.number(),
+/**
+ * One Twitch Helix `games/top` entry. Only `igdb_id` is ever read downstream —
+ * never the category `id`, never the box art, which is ranking-only by design.
+ * Non-game categories (Just Chatting, IRL, Slots, …) arrive with an empty
+ * `igdb_id`; the sync skips those, so the field stays forgiving here and the
+ * skip decision lives in one place there.
+ */
+export const twitchTopGameSchema = z.object({
+  id: z.string(),
   name: z.string(),
+  box_art_url: z.string(),
+  // Twitch speaks the IGDB id as a string; a number is accepted and
+  // normalized at this boundary so downstream works on one domain type.
+  igdb_id: z
+    .union([z.string(), z.number()])
+    .nullish()
+    .transform((value) => (value == null ? value : String(value))),
 });
 
-/** `/popularity_primitives` rows, one page of the popularity scan. */
-export const igdbPopularityPrimitiveSchema = z.object({
-  game_id: z.number().nullable(),
-  value: z.number(),
+/** One `games/top` page: the entries plus the cursor for the next page. */
+export const twitchTopGamesPageSchema = z.object({
+  data: z.array(twitchTopGameSchema),
+  pagination: z.object({ cursor: z.string().nullish() }).nullish(),
 });
 
 /**
@@ -85,8 +100,8 @@ export const igdbGameRowSchema = z.object({
     .optional(),
 });
 
-export type IgdbPopularityType = z.infer<typeof igdbPopularityTypeSchema>;
-export type IgdbPopularityPrimitive = z.infer<typeof igdbPopularityPrimitiveSchema>;
+export type TwitchTopGame = z.infer<typeof twitchTopGameSchema>;
+export type TwitchTopGamesPage = z.infer<typeof twitchTopGamesPageSchema>;
 export type IgdbGameRow = z.infer<typeof igdbGameRowSchema>;
 
 /** Why a request failed — the entrypoint logs the reason, not a stack trace. */
@@ -153,6 +168,14 @@ export interface IgdbClient {
    * endpoints and the wire contract lives in one schema per row type.
    */
   query(endpoint: string, apicalypse: string): Promise<unknown[]>;
+  /**
+   * Reads one Twitch Helix `games/top` page (`first=100`, ordered by current
+   * viewer count) and returns its schema-validated entries plus the next-page
+   * cursor, if the response carried one. Callers own the ranking — this stays
+   * a page reader, so the skip/dedupe/rank decisions live in one place in the
+   * sync, not split across the wire boundary.
+   */
+  listTopGamesPage(cursor?: string): Promise<{ games: TwitchTopGame[]; cursor?: string }>;
   /**
    * Downloads one cover at `t_cover_big` size, sniffs the true format from
    * the bytes. Throws on any failure — a cover is per-game tolerance, not
@@ -364,6 +387,40 @@ export function createIgdbClient(config: {
         z.array(z.unknown()),
         `${endpoint} returned a non-array body`,
       );
+    },
+
+    async listTopGamesPage(cursor?: string): Promise<{ games: TwitchTopGame[]; cursor?: string }> {
+      const endpoint = "games/top";
+      const url =
+        `${TWITCH_HELIX_ORIGIN}/helix/games/top?first=${TWITCH_TOP_GAMES_PAGE_SIZE}` +
+        (cursor ? `&after=${encodeURIComponent(cursor)}` : "");
+      const response = await schedule(() =>
+        withRetry(endpoint, async () => {
+          // The same client-credentials token as the IGDB half: Twitch mints
+          // it, so it authorizes Helix too — no second credential pair.
+          const token = await accessToken();
+          return send(
+            url,
+            {
+              method: "GET",
+              headers: {
+                "Client-ID": config.clientId,
+                Authorization: `Bearer ${token}`,
+                Accept: "application/json",
+              },
+            },
+            IGDB_QUERY_TIMEOUT_MS,
+            endpoint,
+          );
+        }),
+      );
+
+      const page = await parseBody(
+        response,
+        twitchTopGamesPageSchema,
+        `${endpoint} returned a body in an unexpected shape`,
+      );
+      return { games: page.data, cursor: page.pagination?.cursor ?? undefined };
     },
 
     async fetchCoverImage(
