@@ -181,15 +181,6 @@ export function clearViewerState(queryClient: QueryClient): void {
       clearModerationFamilies();
     },
   );
-  // The notifications feed and the read state its rows carry belong to the
-  // person who earned them; the count dies with the QueryClient clear above.
-  sweepFamily(
-    "notifications",
-    () => import("@/atoms/notifications"),
-    ({ clearNotificationsFamily }) => {
-      clearNotificationsFamily();
-    },
-  );
   // Results keyed on the previous session's queries shouldn't outlive it. The
   // debounced query and the popover state die with the SearchBox at unmount,
   // which the session gate triggers right after sign-out.

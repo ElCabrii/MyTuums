@@ -7,7 +7,9 @@ const fakeClient = {
 installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import { orpc } from "@/lib/orpc";
-import { markAllReadAtom } from "@/atoms/notifications";
+import { markAllReadAtom, notificationsFeedAtom } from "@/atoms/notifications";
+import { clearViewerState } from "@/atoms/session-teardown";
+import { makeNotification } from "@/test/factories";
 import type { NotificationItem } from "@/lib/orpc";
 import { unreadCountQueryOptions } from "@/lib/query-definitions";
 import { store as singletonStore } from "@/lib/store";
@@ -22,6 +24,30 @@ beforeEach(() => {
 afterEach(() => {
   singletonQueryClient.clear();
   vi.restoreAllMocks();
+});
+
+it("loads the next viewer's notifications after sign-out and remount", async () => {
+  const previous = makeNotification({ id: "previous-viewer-notification" });
+  const current = makeNotification({ id: "current-viewer-notification" });
+  fakeClient.notification.list.mockResolvedValue({ items: [previous], nextCursor: null });
+  let unsubscribe = singletonStore.sub(notificationsFeedAtom, () => {});
+
+  try {
+    await vi.waitFor(() => {
+      expect(singletonStore.get(notificationsFeedAtom).data?.pages[0]?.items).toEqual([previous]);
+    });
+    unsubscribe();
+    clearViewerState(singletonQueryClient);
+    expect(singletonQueryClient.getQueryCache().getAll()).toEqual([]);
+
+    fakeClient.notification.list.mockResolvedValue({ items: [current], nextCursor: null });
+    unsubscribe = singletonStore.sub(notificationsFeedAtom, () => {});
+    await vi.waitFor(() => {
+      expect(singletonStore.get(notificationsFeedAtom).data?.pages[0]?.items).toEqual([current]);
+    });
+  } finally {
+    unsubscribe();
+  }
 });
 
 /**

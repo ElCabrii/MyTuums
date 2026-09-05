@@ -1,4 +1,3 @@
-import { atomFamily } from "jotai-family";
 import {
   atomWithInfiniteQuery,
   atomWithMutation,
@@ -14,18 +13,10 @@ import { notificationsQueryOptions, unreadCountQueryOptions } from "@/lib/query-
  * `/notifications` page, one count atom for the header badge, one mutation
  * that stamps everything the page just showed as read.
  *
- * There is exactly one list per viewer and no scope parameters, so the feed
- * is a family keyed on `""` rather than a bare `atomWithInfiniteQuery` — the
- * same single-entry shape `auditLogFamily` uses — purely so sign-out can
- * `remove()` it through the same sweep every other viewer-owned family goes
- * through (`atoms/session-teardown.ts`).
+ * There is one list with no scope parameters. Sign-out clears its data with
+ * the QueryClient, just like the unread-count query.
  */
-const notificationsFamily = atomFamily(() =>
-  atomWithInfiniteQuery(() => notificationsQueryOptions()),
-);
-
-/** The viewer's notifications, newest first — the `/notifications` page reads this. */
-export const notificationsFeedAtom = notificationsFamily("");
+export const notificationsFeedAtom = atomWithInfiniteQuery(() => notificationsQueryOptions());
 
 /**
  * The unread badge. Mounts with the header (signed-in chrome only), so the
@@ -74,12 +65,3 @@ export const markAllReadAtom = atomWithMutation((get) => {
     },
   };
 });
-
-/**
- * Removes the feed family's single entry. See `clearPostFeedFamily` in
- * `atoms/post-feed.ts` for why the family stays private behind an
- * all-or-nothing sweep; `clearViewerState` is the only caller.
- */
-export function clearNotificationsFamily(): void {
-  for (const key of notificationsFamily.getParams()) notificationsFamily.remove(key);
-}
