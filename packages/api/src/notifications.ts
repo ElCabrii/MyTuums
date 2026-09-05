@@ -17,10 +17,10 @@ import {
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { keysetPage } from "./pagination.js";
-import { postAttachmentsSelection } from "./post-media.js";
+import { postAttachmentsSelection, type PostAttachment } from "./post-media.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
-import { effectivelyBanned, invisibleUser } from "./visibility.js";
+import { effectivelyBanned, invisibleUser, privatePostHidden } from "./visibility.js";
 
 /**
  * The notification surface (issue #259): the one place a like, reply,
@@ -231,11 +231,22 @@ export const notificationRouter = {
         // author-deleted post never reaches the page at all — the visibility
         // predicate above tombstones the row. Null/empty on follow and
         // moderation rows, whose `post_id` is null.
+        //
+        // A private post (issue #328) previews nothing either: its row still
+        // surfaces — the recipient should know someone replied — but the text
+        // and images redact. Here `user` is the actor and `post` the
+        // notified-about post, and for reply/quote rows the actor IS the post
+        // author, so `privatePostHidden` evaluates correctly; like/repost rows
+        // name the recipient's own post and correctly do not redact.
         postContent: sql<string | null>`case
           when ${post.removedAt} is not null or ${post.deletedAt} is not null then null
+          when ${privatePostHidden(context.user.id)} then null
           else ${post.content}
         end`,
-        postAttachments: postAttachmentsSelection(),
+        postAttachments: sql<PostAttachment[]>`case
+          when ${privatePostHidden(context.user.id)} then '[]'::jsonb
+          else ${postAttachmentsSelection()}
+        end`,
         actor: {
           id: user.id,
           name: user.name,

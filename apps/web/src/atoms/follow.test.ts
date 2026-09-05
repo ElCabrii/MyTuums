@@ -489,6 +489,115 @@ describe("toggleFollowAtomFamily", () => {
     });
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
+
+  // Issue #328: a private-target follow answers `{ viewerIsFollowing: false,
+  // requested: true }` — the intent guard must treat the request as the
+  // fulfilment of a follow intent, so reconcile corrects the optimistic
+  // Following flip (and its +1) to Requested instead of dropping it.
+  it("reconciles a private-target follow to Requested instead of stuck Following", async () => {
+    const { store, queryClient } = freshStoreWithTarget(
+      makeProfile({
+        id: "target-1",
+        username: "target",
+        isPrivate: true,
+        followerCount: 5,
+        viewerIsFollowing: false,
+        hasRequested: false,
+      }),
+    );
+    fakeClient.user.follow.mockResolvedValue({
+      userId: "target-1",
+      followerCount: 5,
+      viewerIsFollowing: false,
+      requested: true,
+    });
+
+    store.set(toggleFollowAtomFamily("target-1"));
+    expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(true);
+
+    await vi.waitFor(() => {
+      expect(queryClient.getQueryData<Profile>(profileKey("target"))?.hasRequested).toBe(true);
+    });
+    expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(false);
+    expect(queryClient.getQueryData<Profile>(profileKey("target"))?.followerCount).toBe(5);
+  });
+
+  // The requested match must stay two-sided: follow-then-unfollow on a
+  // private target leaves a stale `{ requested: true }` in flight, and both
+  // it and the unfollow share `viewerIsFollowing: false` — the stale request
+  // must still be dropped rather than flip the row to Requested.
+  it("drops a stale requested response after a fast unfollow", async () => {
+    const { store, queryClient } = freshStoreWithTarget(
+      makeProfile({
+        id: "target-1",
+        username: "target",
+        isPrivate: true,
+        followerCount: 5,
+        viewerIsFollowing: false,
+        hasRequested: false,
+      }),
+    );
+
+    let resolveFollow!: (value: {
+      userId: string;
+      followerCount: number;
+      viewerIsFollowing: boolean;
+      requested: boolean;
+    }) => void;
+    fakeClient.user.follow.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFollow = resolve;
+        }),
+    );
+    fakeClient.user.unfollow.mockImplementation(() => new Promise(() => {}));
+
+    store.set(toggleFollowAtomFamily("target-1"));
+    store.set(toggleFollowAtomFamily("target-1"));
+    expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(false);
+
+    await vi.waitFor(() => expect(fakeClient.user.follow).toHaveBeenCalled());
+    resolveFollow({
+      userId: "target-1",
+      followerCount: 5,
+      viewerIsFollowing: false,
+      requested: true,
+    });
+
+    await vi.waitFor(() => expect(fakeClient.user.unfollow).toHaveBeenCalled());
+    expect(queryClient.getQueryData<Profile>(profileKey("target"))?.viewerIsFollowing).toBe(false);
+    expect(queryClient.getQueryData<Profile>(profileKey("target"))?.hasRequested).toBe(false);
+  });
+
+  // A request changes no feed membership — only an edge does — so the
+  // Following feed must not refetch for a `{ requested: true }` response.
+  it("does not invalidate the Following feed for a request response", async () => {
+    const { store, queryClient } = freshStoreWithTarget(
+      makeProfile({
+        id: "target-1",
+        username: "target",
+        isPrivate: true,
+        viewerIsFollowing: false,
+      }),
+    );
+    const followingKey = postListQueryOptions({ feed: "following" }).queryKey;
+    queryClient.setQueryData(followingKey, { pages: [], pageParams: [] });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    fakeClient.user.follow.mockResolvedValue({
+      userId: "target-1",
+      followerCount: 0,
+      viewerIsFollowing: false,
+      requested: true,
+    });
+
+    store.set(toggleFollowAtomFamily("target-1"));
+
+    await vi.waitFor(() => {
+      expect(queryClient.getQueryData<Profile>(profileKey("target"))?.hasRequested).toBe(true);
+    });
+    expect(invalidateSpy).not.toHaveBeenCalled();
+    expect(queryClient.getQueryState(followingKey)?.isInvalidated).toBe(false);
+  });
 });
 
 describe("clearFollowFamilies", () => {

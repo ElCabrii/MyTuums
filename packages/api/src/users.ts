@@ -386,7 +386,7 @@ export const userRouter = {
       }
 
       const [target] = await context.db
-        .select({ id: user.id, isPrivate: user.isPrivate })
+        .select({ id: user.id })
         .from(user)
         .where(eq(user.id, input.userId))
         .limit(1);
@@ -395,86 +395,23 @@ export const userRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
-      // Private accounts (issue #328) do not gain followers directly — the
-      // caller's intent becomes a pending request the target approves. The
-      // branch runs under the same relationship lock and block guard as the
-      // immediate path below, so a block racing a request cannot leave a
+      // One transaction under the pair's relationship lock, with the privacy
+      // branch decided INSIDE it (issue #328). Reading `isPrivate` outside
+      // would race a toggle: public→private between the read and the lock
+      // would mint a direct edge on a private account, bypassing approval.
+      // The block check is shared — a block racing either path cannot leave a
       // prohibited edge or request behind it.
-      if (target.isPrivate) {
-        await context.db.transaction(async (tx) => {
-          await acquireRelationshipLock(tx, context.user.id, input.userId);
-
-          const [block] = await tx
-            .select({ id: userBlock.blockerId })
-            .from(userBlock)
-            .where(
-              or(
-                and(
-                  eq(userBlock.blockerId, context.user.id),
-                  eq(userBlock.blockedId, input.userId),
-                ),
-                and(
-                  eq(userBlock.blockerId, input.userId),
-                  eq(userBlock.blockedId, context.user.id),
-                ),
-              ),
-            )
-            .limit(1);
-
-          if (block) {
-            throw new ORPCError("BAD_REQUEST", { message: "You can't follow this user." });
-          }
-
-          // Already following: idempotent success, no second request and no
-          // second notification — the follow edge is the terminal state.
-          const [existing] = await tx
-            .select({ followerId: follow.followerId })
-            .from(follow)
-            .where(
-              and(eq(follow.followerId, context.user.id), eq(follow.followingId, input.userId)),
-            )
-            .limit(1);
-          if (existing) {
-            return;
-          }
-
-          const inserted = await tx
-            .insert(followRequest)
-            .values({ requesterId: context.user.id, targetId: input.userId })
-            .onConflictDoNothing()
-            .returning({ requesterId: followRequest.requesterId });
-
-          if (inserted.length > 0) {
-            await insertNotification(tx, {
-              recipientId: input.userId,
-              actorId: context.user.id,
-              type: "follow_request",
-            });
-          }
-        });
-
-        return {
-          userId: input.userId,
-          followerCount: await countFollowers(context.db, input.userId),
-          viewerIsFollowing: false,
-          requested: true as const,
-        };
-      }
-
-      // The block check and the insert run under the pair's relationship lock,
-      // in one transaction. Unlocked, they are a TOCTOU: a `block` committing
-      // between them severs the existing follows and then this insert puts a
-      // new edge back, leaving a prohibited follow standing behind the block
-      // that reappears the moment the block is lifted. `block` and `unblock`
-      // take the same lock, so the two operations are serialized per pair
-      // rather than per table — which is the only place the invariant can be
-      // enforced, since the edges live in two tables no constraint spans.
+      //
+      // The lock also serializes against `block`/`unblock`, which take the
+      // same pair lock: without it a `block` committing between the check and
+      // the insert would be undone by the insert, leaving a prohibited edge
+      // standing behind the block.
+      let outcome = { viewerIsFollowing: false, requested: false };
       await context.db.transaction(async (tx) => {
         await acquireRelationshipLock(tx, context.user.id, input.userId);
 
         // A block in either direction makes the follow a bad request, not a
-        // silent no-op: the block severing follows is the P4 `block`
-        // procedure, and a follow that quietly did nothing would read as
+        // silent no-op: a follow that quietly did nothing would read as
         // broken UI. A blocked account's profile is already invisible, so this
         // guard is what stops a direct follow attempt after the block.
         const [block] = await tx
@@ -492,6 +429,56 @@ export const userRouter = {
           throw new ORPCError("BAD_REQUEST", { message: "You can't follow this user." });
         }
 
+        const [privacy] = await tx
+          .select({ isPrivate: user.isPrivate })
+          .from(user)
+          .where(eq(user.id, input.userId))
+          .limit(1);
+
+        // Private accounts do not gain followers directly — the caller's
+        // intent becomes a pending request the target approves.
+        if (privacy?.isPrivate) {
+          // Already following: idempotent success, no second request and no
+          // second notification — the follow edge is the terminal state. Any
+          // orphaned request row is cleared so the inbox and `hasRequested`
+          // cannot disagree with the edge.
+          const [existing] = await tx
+            .select({ followerId: follow.followerId })
+            .from(follow)
+            .where(
+              and(eq(follow.followerId, context.user.id), eq(follow.followingId, input.userId)),
+            )
+            .limit(1);
+          if (existing) {
+            await tx
+              .delete(followRequest)
+              .where(
+                and(
+                  eq(followRequest.requesterId, context.user.id),
+                  eq(followRequest.targetId, input.userId),
+                ),
+              );
+            outcome = { viewerIsFollowing: true, requested: false };
+            return;
+          }
+
+          const inserted = await tx
+            .insert(followRequest)
+            .values({ requesterId: context.user.id, targetId: input.userId })
+            .onConflictDoNothing()
+            .returning({ requesterId: followRequest.requesterId });
+
+          if (inserted.length > 0) {
+            await insertNotification(tx, {
+              recipientId: input.userId,
+              actorId: context.user.id,
+              type: "follow_request",
+            });
+          }
+          outcome = { viewerIsFollowing: false, requested: true };
+          return;
+        }
+
         // The (follower_id, following_id) primary key makes the duplicate
         // impossible; this just declines to error on it. `.returning()` is
         // empty exactly when it swallowed a duplicate, so the notification
@@ -503,6 +490,20 @@ export const userRouter = {
           .values({ followerId: context.user.id, followingId: input.userId })
           .onConflictDoNothing()
           .returning({ followerId: follow.followerId });
+
+        // A request that predates the target going public (requested while
+        // private, followed after the toggle) must not survive the edge: the
+        // inbox would keep showing a request from someone already following,
+        // and `hasRequested` would stick true on a public profile. Cleared
+        // unconditionally — even a duplicate edge implies the request is moot.
+        await tx
+          .delete(followRequest)
+          .where(
+            and(
+              eq(followRequest.requesterId, context.user.id),
+              eq(followRequest.targetId, input.userId),
+            ),
+          );
 
         if (inserted.length > 0) {
           await insertNotification(tx, {
@@ -525,13 +526,14 @@ export const userRouter = {
             await stampBadgeTier(tx, input.userId, FOLLOWER_BADGE_TIERS, badge);
           }
         }
+        outcome = { viewerIsFollowing: true, requested: false };
       });
 
       return {
         userId: input.userId,
         followerCount: await countFollowers(context.db, input.userId),
-        viewerIsFollowing: true,
-        requested: false as const,
+        viewerIsFollowing: outcome.viewerIsFollowing,
+        requested: outcome.requested,
       };
     }),
 
@@ -557,23 +559,31 @@ export const userRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
-      await context.db
-        .delete(follow)
-        .where(and(eq(follow.followerId, context.user.id), eq(follow.followingId, input.userId)));
-      // Withdrawing a pending request rides the same call (issue #328): a
-      // Requested row is the caller's own, so an unfollow that finds no edge
-      // still clears the request — the end state ("I do not follow them")
-      // is already true either way. The dedicated `cancel` below is the
-      // explicit withdraw; this keeps direct calls from stranding a request
-      // the page no longer renders.
-      await context.db
-        .delete(followRequest)
-        .where(
-          and(
-            eq(followRequest.requesterId, context.user.id),
-            eq(followRequest.targetId, input.userId),
-          ),
-        );
+      // Both deletes ride one transaction under the pair lock (issue #328):
+      // `accept` reads the request row under the same lock before inserting
+      // the edge, so an unlocked withdraw racing an accept could delete the
+      // request while the accept still lands the follow. The lock is the
+      // relationship invariant — every writer of either table takes it.
+      await context.db.transaction(async (tx) => {
+        await acquireRelationshipLock(tx, context.user.id, input.userId);
+        await tx
+          .delete(follow)
+          .where(and(eq(follow.followerId, context.user.id), eq(follow.followingId, input.userId)));
+        // Withdrawing a pending request rides the same call: a Requested row
+        // is the caller's own, so an unfollow that finds no edge still clears
+        // the request — the end state ("I do not follow them") is already true
+        // either way. The dedicated `cancel` below is the explicit withdraw;
+        // this keeps direct calls from stranding a request the page no longer
+        // renders.
+        await tx
+          .delete(followRequest)
+          .where(
+            and(
+              eq(followRequest.requesterId, context.user.id),
+              eq(followRequest.targetId, input.userId),
+            ),
+          );
+      });
 
       return {
         userId: input.userId,
@@ -617,6 +627,10 @@ export const userRouter = {
         return { items: [], nextCursor: null };
       }
 
+      // Your own graph lists everyone: a private follower you have not
+      // followed back still followed YOU, and hiding them here would
+      // contradict the follow notice that named them (issue #328).
+      const isOwnGraph = target.id === context.user.id;
       const filters = [
         eq(follow.followingId, target.id),
         // A user you can't see (or who can't see you) is not a follower to
@@ -624,7 +638,7 @@ export const userRouter = {
         // `resolveGraphTarget` above. Private members (issue #328) hide from
         // non-followers the same way.
         visibleUser(context.user.id),
-        not(privateUserHidden(context.user.id)),
+        ...(isOwnGraph ? [] : [not(privateUserHidden(context.user.id))]),
       ];
 
       const selection = {
@@ -679,12 +693,16 @@ export const userRouter = {
         return { items: [], nextCursor: null };
       }
 
+      // Same self-view exemption as `followers` above: your own graph
+      // lists everyone, so a private account you follow never hides from
+      // your own following page.
+      const isOwnFollowingGraph = target.id === context.user.id;
       const filters = [
         eq(follow.followerId, target.id),
         // Same member-side filter as `followers`, which is what keeps the
         // two lists symmetric. Private members hide from non-followers.
         visibleUser(context.user.id),
-        not(privateUserHidden(context.user.id)),
+        ...(isOwnFollowingGraph ? [] : [not(privateUserHidden(context.user.id))]),
       ];
 
       const selection = {
@@ -768,9 +786,10 @@ export const userRouter = {
 
     /**
      * Accepts a pending request: the request becomes a follow edge, and the
-     * requester is notified they are now followed. Idempotent — accepting
-     * twice, or accepting when already following, succeeds without a second
-     * edge or notice.
+     * target is notified they gained a follower — the same `follow` notice a
+     * public follow mints (recipient is the followed, actor the follower).
+     * Idempotent — accepting twice, or accepting when already following,
+     * succeeds without a second edge or notice.
      */
     accept: protectedProcedure
       .use(rateLimit(RATE_LIMITS.follow))
@@ -824,8 +843,8 @@ export const userRouter = {
 
           if (inserted.length > 0) {
             await insertNotification(tx, {
-              recipientId: input.requesterId,
-              actorId: context.user.id,
+              recipientId: context.user.id,
+              actorId: input.requesterId,
               type: "follow",
             });
 
@@ -836,10 +855,21 @@ export const userRouter = {
           }
         });
 
+        // Whether the acceptor follows the requester back — the profile shape
+        // this returns names the requester, so its viewer-relative flag reads
+        // from the acceptor's side.
+        const [backEdge] = await context.db
+          .select({ followerId: follow.followerId })
+          .from(follow)
+          .where(
+            and(eq(follow.followerId, context.user.id), eq(follow.followingId, input.requesterId)),
+          )
+          .limit(1);
+
         return {
           userId: input.requesterId,
           followerCount: await countFollowers(context.db, context.user.id),
-          viewerIsFollowing: false,
+          viewerIsFollowing: !!backEdge,
         };
       }),
 

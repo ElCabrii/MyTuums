@@ -1,8 +1,12 @@
 import { useAtom, useAtomValue } from "jotai";
-import { useState } from "react";
 import { Lock } from "lucide-react";
 import { ComposerForm } from "@/components/composer-form";
-import { composerAttachmentsAtom, composerDraftAtom, createPostAtom } from "@/atoms/composer";
+import {
+  composerAttachmentsAtom,
+  composerDraftAtom,
+  composerPrivacyAtom,
+  createPostAtom,
+} from "@/atoms/composer";
 import { viewerAtom } from "@/atoms/session";
 import { Switch } from "@/components/ui/switch";
 import { m } from "@/paraglide/messages.js";
@@ -18,9 +22,9 @@ export function PostComposer() {
   const [content, setContent] = useAtom(composerDraftAtom);
   const [attachments, setAttachments] = useAtom(composerAttachmentsAtom);
   const createPost = useAtomValue(createPostAtom);
-  // Local, not persisted: one dialog, bounded lifetime, nothing to evict.
-  // Defaults from the account on mount; flipping it affects only this post.
-  const [isPrivate, setIsPrivate] = useState<boolean | null>(null);
+  // In-memory, cleared on publish: null follows the account default, and
+  // flipping it affects only the post it was flipped for.
+  const [isPrivate, setIsPrivate] = useAtom(composerPrivacyAtom);
 
   if (!user) return null;
 

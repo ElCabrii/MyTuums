@@ -769,6 +769,38 @@ function aliasPrivateUserHidden(viewerId: string | null, u: UserVisibilityColumn
   )`;
 }
 
+/** The columns the aliased post-privacy predicate reads — any `alias(post, …)` provides them. */
+type PostVisibilityColumns = {
+  isPrivate: PgColumn;
+  authorId: PgColumn;
+};
+
+/**
+ * The private-post half of visibility (issue #328), restated over an aliased
+ * post row and its aliased author: true when the original is followers-only
+ * (its own flag or its author's) and the viewer is neither the author nor an
+ * approved follower. The repost arm uses it to exclude private originals from
+ * text-filtered reads, where matching their raw text while redacting the event
+ * would otherwise be a one-bit oracle for the hidden words.
+ */
+function aliasPrivatePostHidden(
+  viewerId: string | null,
+  p: PostVisibilityColumns,
+  u: UserVisibilityColumns,
+) {
+  if (viewerId === null) {
+    return sql<boolean>`(${u.isPrivate} is true or ${p.isPrivate} is true)`;
+  }
+  return sql<boolean>`(
+    (${u.isPrivate} is true or ${p.isPrivate} is true)
+    and ${p.authorId} <> ${viewerId}
+    and not exists (
+      select 1 from ${follow}
+      where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${u.id}
+    )
+  )`;
+}
+
 /** One row of the merged event timeline the home feeds walk (raw keys, as selected). */
 type FeedEventRow = {
   /**
@@ -932,9 +964,14 @@ async function feedEventPage(
     // a repost amplifies the original, so a filtered feed matches what the
     // event is about, not who amplified it. The `q` tombstone exclusion
     // mirrors the authored arm: the original's hidden text must not be
-    // probeable through the filter.
+    // probeable through the filter. A private original is excluded outright
+    // under either text filter — matching its raw words while redacting the
+    // event to `unavailable` would be a one-bit oracle for the hidden text.
     args.q ? isNull(feedOriginal.deletedAt) : undefined,
     args.q ? isNull(feedOriginal.removedAt) : undefined,
+    args.q || args.gameHashtagKey
+      ? not(aliasPrivatePostHidden(args.viewerId, feedOriginal, feedOriginalAuthor))
+      : undefined,
     args.q ? ilike(feedOriginal.content, `%${escapeFeedLikePattern(args.q)}%`) : undefined,
     args.gameHashtagKey
       ? ilike(feedOriginal.content, `%#${escapeFeedLikePattern(args.gameHashtagKey)}%`)
@@ -1213,11 +1250,14 @@ export const postRouter = {
           /** The same ordered image capability is available to posts and replies. */
           attachments: z.array(z.file()).max(POST_ATTACHMENT_MAX_COUNT).default([]),
           /**
-           * Followers-only visibility (issue #328). Omitted means "inherit
-           * the author's account default" — a private account's posts are
-           * private unless the caller explicitly opens one (and vice versa).
-           * Replies may carry it like top-level posts; the thread gates on
-           * both the focused post and each reply independently.
+           * Followers-only visibility (issue #328). Omitted inherits the
+           * author's account default. The flag is one-way while the account
+           * is private: an explicitly opened post from a private account is
+           * still gated by the author flag — only followers see it. The stored
+           * value matters if the account later goes public, at which point old
+           * private-by-default posts stay followers-only. Replies may carry it
+           * like top-level posts; the thread gates on both the focused post
+           * and each reply independently.
            */
           isPrivate: z.boolean().optional(),
         })
@@ -2266,7 +2306,15 @@ export const postRouter = {
       };
     }),
 
-  /** Removes the caller's like from a post. Requires a session; a no-op when the like isn't there. */
+  /**
+   * Removes the caller's like from a post. Requires a session; a no-op when the like isn't there.
+   *
+   * No private-visibility check (issue #328): the row is the caller's own, and
+   * a like left on a private account's post must stay removable after
+   * unfollowing — or after the author goes private — rather than strand.
+   * `unbookmark`'s comment applies verbatim. Ban/block visibility stays, the
+   * pre-existing behaviour for those surfaces.
+   */
   unlike: protectedProcedure
     .use(rateLimit(RATE_LIMITS.like))
     .input(z.object({ postId: z.uuid() }))
@@ -2275,13 +2323,7 @@ export const postRouter = {
         .select({ id: post.id })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(
-          and(
-            eq(post.id, input.postId),
-            not(invisibleAuthor(context.user.id)),
-            not(privatePostHidden(context.user.id)),
-          ),
-        )
+        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
         .limit(1);
 
       if (!target) {
@@ -2367,7 +2409,12 @@ export const postRouter = {
       };
     }),
 
-  /** Removes the caller's repost. Requires a session; a no-op when the repost isn't there. */
+  /**
+   * Removes the caller's repost. Requires a session; a no-op when the repost isn't there.
+   *
+   * No private-visibility check, the same reason as `unlike` above: a repost
+   * of a private post must stay removable after unfollowing.
+   */
   unrepost: protectedProcedure
     .use(rateLimit(RATE_LIMITS.repost))
     .input(z.object({ postId: z.uuid() }))
@@ -2376,13 +2423,7 @@ export const postRouter = {
         .select({ id: post.id })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(
-          and(
-            eq(post.id, input.postId),
-            not(invisibleAuthor(context.user.id)),
-            not(privatePostHidden(context.user.id)),
-          ),
-        )
+        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
         .limit(1);
 
       if (!target) {
