@@ -58,9 +58,11 @@ function makeProfile(overrides: Partial<Profile> & { id: string; username: strin
     bio: null,
     bannerImage: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    isPrivate: false,
     followerCount: 0,
     followingCount: 0,
     viewerIsFollowing: false,
+    hasRequested: false,
     // The suspension flag (issue #38): never suspended by default.
     suspended: false,
     // Earned badges (issue #308): none by default.
@@ -85,7 +87,9 @@ function makeSearchUser(
     bio: null,
     bannerImage: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    isPrivate: false,
     viewerIsFollowing: false,
+    hasRequested: false,
     ...overrides,
   };
 }
@@ -104,8 +108,10 @@ function makeSummary(
     bio: null,
     bannerImage: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    isPrivate: false,
     followedAt: new Date("2026-01-02T00:00:00.000Z"),
     viewerIsFollowing: false,
+    hasRequested: false,
     ...overrides,
   };
 }

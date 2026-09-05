@@ -11,7 +11,9 @@ function makeUser(overrides: Partial<SearchUser> & { id: string }): SearchUser {
     bio: null,
     bannerImage: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    isPrivate: false,
     viewerIsFollowing: false,
+    hasRequested: false,
     ...overrides,
   };
 }

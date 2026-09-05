@@ -13,8 +13,13 @@ import { keysetPage } from "./pagination.js";
 import { postSelection } from "./posts.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
-import { publicUserColumns, viewerIsFollowing } from "./users.js";
-import { invisibleAuthor, visibleUser } from "./visibility.js";
+import { publicUserColumns, viewerHasRequested, viewerIsFollowing } from "./users.js";
+import {
+  invisibleAuthor,
+  privatePostHidden,
+  privateUserHidden,
+  visibleUser,
+} from "./visibility.js";
 
 /**
  * Search over users and posts, plus the games half of the typeahead (the
@@ -63,14 +68,15 @@ const searchPostCursor = createCursorCodec(z.uuid());
 
 /**
  * The projection search results read users through: `publicUserColumns` plus
- * the viewer's follow flag, so the results page can render a follow button
- * without a second round trip per row. Spreads the same privacy boundary the
- * profile procedures use, so no search result can leak `email` or the
- * auth-reconnaissance columns.
+ * the viewer's follow and request flags, so the results page can render a
+ * follow button without a second round trip per row. Spreads the same privacy
+ * boundary the profile procedures use, so no search result can leak `email`
+ * or the auth-reconnaissance columns.
  */
 const searchUserSelection = (viewerId: string) => ({
   ...publicUserColumns,
   viewerIsFollowing: viewerIsFollowing(viewerId),
+  hasRequested: viewerHasRequested(viewerId),
 });
 
 /**
@@ -149,8 +155,10 @@ export const searchRouter = {
         .from(user)
         .where(
           // Same visibility filter as the full results page: a banned or
-          // blocked account never suggests itself in the dropdown.
-          and(visibleUser(viewerId), matchesUserQuery(input.q)),
+          // blocked account never suggests itself in the dropdown. Private
+          // accounts (issue #328) suggest only to themselves and approved
+          // followers.
+          and(visibleUser(viewerId), not(privateUserHidden(viewerId)), matchesUserQuery(input.q)),
         )
         .orderBy(
           // An exact normalised username ranks above longer prefixes, and
@@ -211,8 +219,10 @@ export const searchRouter = {
       const filters = [
         matchesUserQuery(input.q),
         // The visibility filter (issue #38): banned and blocked accounts are
-        // not search results, same as the typeahead above.
+        // not search results, same as the typeahead above. Private accounts
+        // (issue #328) surface only to themselves and approved followers.
         visibleUser(viewerId),
+        not(privateUserHidden(viewerId)),
       ];
 
       const selection = searchUserSelection(viewerId);
@@ -267,8 +277,10 @@ export const searchRouter = {
         isNull(post.removedAt),
         isNull(post.deletedAt),
         // The visibility filter (issue #38), same as `post.list`: a banned or
-        // blocked author's posts are not search results.
+        // blocked author's posts are not search results. Private posts and
+        // private-account posts (issue #328) hide the same way.
         not(invisibleAuthor(viewerId)),
+        not(privatePostHidden(viewerId)),
       ];
 
       const selection = postSelection(viewerId);

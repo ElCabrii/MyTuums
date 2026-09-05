@@ -220,6 +220,14 @@ export const auth = betterAuth({
       // legal consent dialog records them.
       legalAcceptedAt: { type: "date", required: false },
       legalVersion: { type: "string", required: false },
+
+      // Account privacy (issue #328): when true, posts/replies/follow lists
+      // are visible only to the author and approved followers. Nullable for
+      // the same OAuth reason as every other field here — null reads as
+      // public (false) everywhere, so no backfill can lock anyone out.
+      // Writable via `updateUser` (settings toggle); no hook validation
+      // needed beyond the boolean type.
+      isPrivate: { type: "boolean", required: false, defaultValue: false },
     },
   },
 
