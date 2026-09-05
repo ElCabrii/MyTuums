@@ -51,6 +51,18 @@ export function clearComposerAttachments(): void {
 }
 
 /**
+ * The composer's followers-only override (issue #328): null means "follow the
+ * account default", set means this post only. In-memory like the attachments
+ * — one composer, bounded lifetime — and cleared on publish alongside the
+ * draft, so flipping it affects only the post it was flipped for.
+ */
+export const composerPrivacyAtom = atom<boolean | null>(null);
+
+export function clearComposerPrivacy(): void {
+  store.set(composerPrivacyAtom, null);
+}
+
+/**
  * `post.create` as a mutation atom. Unlike like/follow this has no `scope`,
  * no optimistic update, and no rollback.
  *
@@ -66,6 +78,7 @@ export const createPostAtom = atomWithMutation((get) => {
     onSuccess: async () => {
       store.set(composerDraftAtom, "");
       clearComposerAttachments();
+      store.set(composerPrivacyAtom, null);
       // A new post belongs at the top of every feed it qualifies for, and
       // its position depends on server ordering — refetch rather than
       // guess where to splice it in.

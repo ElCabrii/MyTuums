@@ -16,8 +16,8 @@ import { getLocale } from "@/paraglide/runtime.js";
 /**
  * The `/notifications` page (issue #259): everything that happened to the
  * viewer while they were elsewhere — likes, replies, reposts, quotes,
- * follows and moderation notices — newest first, keyset-paginated, no
- * grouping and no ranking.
+ * follows, follow requests (issue #328) and moderation notices — newest
+ * first, keyset-paginated, no grouping and no ranking.
  *
  * Opening the page is what "read" means here: the mount effect below stamps
  * every unread row read, which is also what clears the header badge. The
@@ -139,15 +139,15 @@ function NotificationRow({ item }: { item: NotificationItem }) {
     </>
   );
 
-  // A follow leads to the follower's profile; a like, reply, repost or quote
-  // to the post it happened on (the reply or quote itself — the conversation
-  // to rejoin, or what the quoter said; a repost to the recipient's own
-  // post). A moderation notice leads to its post when it had one — and only while
-  // that post still exists, which unlike the like/reply rows is not covered
-  // by the server's tombstone filter (a moderation row carries the action,
-  // not the post) — and nowhere for account-level actions: there is no
-  // account-sanction page to send them to.
-  if (item.type === "follow" && handle) {
+  // A follow or follow request leads to the follower's profile; a like,
+  // reply, repost or quote to the post it happened on (the reply or quote
+  // itself — the conversation to rejoin, or what the quoter said; a repost
+  // to the recipient's own post). A moderation notice leads to its post when
+  // it had one — and only while that post still exists, which unlike the
+  // like/reply rows is not covered by the server's tombstone filter (a
+  // moderation row carries the action, not the post) — and nowhere for
+  // account-level actions: there is no account-sanction page to send them to.
+  if ((item.type === "follow" || item.type === "follow_request") && handle) {
     return (
       <Link to="/@{$username}" params={{ username: handle }} className={rowClassName(item)}>
         {body}
@@ -190,6 +190,8 @@ function notificationText(item: NotificationItem, displayName: string): string {
       return m.notification_quote({ name: displayName });
     case "follow":
       return m.notification_follow({ name: displayName });
+    case "follow_request":
+      return m.notification_follow_request({ name: displayName });
     case "moderation":
       return moderationText(item.action?.code);
   }

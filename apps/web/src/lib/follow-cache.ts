@@ -6,6 +6,8 @@ export interface FollowResult {
   userId: string;
   followerCount: number;
   viewerIsFollowing: boolean;
+  /** Present on `follow` only (issue #328): true when the call created a pending request instead of an edge. */
+  requested?: boolean;
 }
 
 /**
@@ -309,16 +311,62 @@ export function restoreFollowCaches(queryClient: QueryClient, snapshot: FollowSn
  * the profile cache from the response instead of refetching every visible
  * profile. Only the profile object is patched here — the list caches were
  * already brought in sync by the optimistic `patchFollowState` call, and the
- * response carries no per-row data to reconcile them with.
+ * response carries no per-row data to reconcile them with. A `requested`
+ * response (issue #328, private target) also flips `hasRequested` — the
+ * optimistic patch set `viewerIsFollowing` true, which the response corrects
+ * back to false alongside it.
  */
 export function reconcileFollow(queryClient: QueryClient, result: FollowResult): void {
-  queryClient.setQueriesData<Profile>({ queryKey: orpc.user.byUsername.key() }, (cached) =>
-    cached && cached.id === result.userId
-      ? {
-          ...cached,
-          viewerIsFollowing: result.viewerIsFollowing,
-          followerCount: result.followerCount,
-        }
-      : cached,
-  );
+  queryClient.setQueriesData<Profile>({ queryKey: orpc.user.byUsername.key() }, (cached) => {
+    if (!cached || cached.id !== result.userId) return cached;
+    const next: Profile = {
+      ...cached,
+      viewerIsFollowing: result.viewerIsFollowing,
+      followerCount: result.followerCount,
+    };
+    if (result.requested !== undefined) {
+      next.hasRequested = result.requested;
+    }
+    return next;
+  });
+  // List and search rows carry the same flags — bring them in sync when the
+  // response names a request state, so a private-target follow flips the row
+  // to Requested without waiting for a refetch.
+  if (result.requested !== undefined) {
+    const hasRequested = result.requested;
+    for (const key of [orpc.user.followers.key(), orpc.user.following.key()]) {
+      queryClient.setQueriesData<InfiniteData<UserListPage>>({ queryKey: key }, (cached) =>
+        cached
+          ? {
+              ...cached,
+              pages: cached.pages.map((page) => ({
+                ...page,
+                items: page.items.map((item) =>
+                  item.id === result.userId
+                    ? { ...item, viewerIsFollowing: result.viewerIsFollowing, hasRequested }
+                    : item,
+                ),
+              })),
+            }
+          : cached,
+      );
+    }
+    queryClient.setQueriesData<InfiniteData<SearchUsersPage>>(
+      { queryKey: orpc.search.users.key() },
+      (cached) =>
+        cached
+          ? {
+              ...cached,
+              pages: cached.pages.map((page) => ({
+                ...page,
+                items: page.items.map((item) =>
+                  item.id === result.userId
+                    ? { ...item, viewerIsFollowing: result.viewerIsFollowing, hasRequested }
+                    : item,
+                ),
+              })),
+            }
+          : cached,
+    );
+  }
 }

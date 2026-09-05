@@ -337,6 +337,21 @@ export function notificationsQueryOptions() {
   });
 }
 
+/** Inbound follow requests against the viewer's private account (issue #328), newest first. */
+export function followRequestListQueryOptions() {
+  return orpc.user.followRequest.list.infiniteOptions({
+    input: (cursor: string | undefined) => {
+      const input: PagedNotificationInput = { limit: FOLLOW_PAGE_SIZE };
+      if (cursor) input.cursor = cursor;
+      return input;
+    },
+    initialPageParam:
+      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+      undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  });
+}
+
 /**
  * The unread badge count. No polling and no custom staleness: the app's
  * QueryClient defaults refetch on mount and on window focus, which is the

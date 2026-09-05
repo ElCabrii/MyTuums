@@ -49,7 +49,11 @@ export function UserRow({ user }: { user: UserSummary | SearchUser }) {
         )}
       </div>
 
-      <FollowButton userId={user.id} isFollowing={user.viewerIsFollowing} />
+      <FollowButton
+        userId={user.id}
+        isFollowing={user.viewerIsFollowing}
+        hasRequested={user.hasRequested}
+      />
     </div>
   );
 }

@@ -305,13 +305,17 @@ not the boundary:
 - Every key is authorized **per viewer**, post attachments included
   (`canViewPostMedia`): a moderator may inspect a reported or tombstoned post,
   and an ordinary reader must clear both post tombstones and the author
-  visibility predicate. The one relaxation is that the **author of a
-  moderation-removed post may still read its attachments** — it discloses
+  visibility predicate. Private posts and private-account posts (issue #328)
+  gate the same way — author, approved followers and moderators pass,
+  anyone else (including anonymous) gets a 404. The one relaxation is that the
+  **author of a moderation-removed post may still read its attachments** — it discloses
   nothing they did not upload, the objects deliberately survive a removal so a
   restore is lossless, and it is what lets `moderation.appealPreview` show
   someone the images they are contesting. Ban and block visibility still
   applies to them, and an author-_deleted_ post stays closed to everyone but a
-  moderator because those objects are reaped.
+  moderator because those objects are reaped. Profile display objects stay
+  public for private accounts by decision — only posts, replies, lists and
+  their attachments lock.
 - Gating `/media` does **not** revoke a presigned URL already issued. That URL
   stays valid for its own TTL, because this server never sees it again.
 
@@ -359,19 +363,27 @@ cover in any case; it stays on `'unsafe-hashes'` plus its hash.
 
 `publicUserColumns` in `packages/api/src/users.ts` is a privacy boundary, not
 a convenience selection. It is exactly: `id`, `name`, `username`,
-`displayUsername`, `image`, `bio`, `bannerImage`, `createdAt`.
+`displayUsername`, `image`, `bio`, `bannerImage`, `createdAt`, `isPrivate`.
 
-Never add `email`, `twoFactorEnabled`, `lastLoginMethod`, `role` or any
+`isPrivate` is in because it describes the profile's visibility — what the
+client's locked-account branch reads — like the counts, not its owner's
+settings. Never add `email`, `twoFactorEnabled`, `lastLoginMethod`, `role` or any
 preference column. Sign-in method in particular is reconnaissance, not profile
 data. `packages/api/src/users.int.test.ts` pins the exact shape, so widening
 it fails a test rather than shipping.
 
 Visibility filtering is centralised in `packages/api/src/visibility.ts` so
-banned or blocked content cannot leak through a surface that forgot to filter.
-A blocked profile reads as "no such user" — the same response as a handle that
+banned, blocked or private content cannot leak through a surface that forgot
+to filter. A blocked profile reads as "no such user" — the same response as a handle that
 never existed, so the block itself does not leak. A banned profile resolves so
 the UI can show a suspension stub, but `user.byUsername` redacts its authored
-profile fields, relationship counts and viewer relationship state first.
+profile fields, relationship counts and viewer relationship state first. A
+private profile still resolves for everyone so the client can render the
+locked notice; its posts, replies, follower/following lists, search rows and
+media rows hide from non-followers at the query layer (`privatePostHidden`,
+`privateUserHidden`, `canViewPostMedia`), and `follow` becomes a request
+gated by the pair's relationship lock — `block` severs pending requests both
+directions like the edges themselves.
 
 ## Moderation authority
 

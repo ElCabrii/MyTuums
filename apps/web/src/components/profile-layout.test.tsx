@@ -120,6 +120,31 @@ describe("ProfileLayout role and ownership gates", () => {
     expect(screen.getByTitle(m.badge_founder())).toBeInTheDocument();
   });
 
+  it("renders locked counts as plain numbers with no list dialog for non-followers", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data(
+      "locked",
+      makeProfile({
+        username: "locked",
+        displayUsername: "Locked",
+        isPrivate: true,
+        followerCount: 5,
+        followingCount: 3,
+      }),
+    );
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@locked",
+      signedInAs: true,
+    });
+
+    // The counts read as text (issue #328) — no dialog trigger wraps them, so
+    // a non-follower can never open a list the server would only return empty.
+    expect(screen.getByText(m.follow_followers()).closest("button")).toBeNull();
+    expect(screen.getByText(m.follow_following()).closest("button")).toBeNull();
+  });
+
   it("renders no badges on the suspended stub", async () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data(

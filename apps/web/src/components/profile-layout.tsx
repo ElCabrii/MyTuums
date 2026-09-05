@@ -19,7 +19,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatJoinDate } from "@/lib/format";
+import { formatJoinDate, formatCount } from "@/lib/format";
 import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/user-avatar";
@@ -104,6 +104,11 @@ export function ProfileLayout() {
   const isOwnProfile = viewer?.id === profile.id;
   const handle = handleOf(profile) || username;
   const displayName = profile.name || handle;
+  // Locked profiles (issue #328) hide the member lists from non-followers at
+  // the query layer; the counts render as plain numbers here rather than
+  // dialog triggers so nobody opens an inbox that can only ever come back
+  // empty.
+  const isLocked = (profile.isPrivate ?? false) && !isOwnProfile && !profile.viewerIsFollowing;
   const hasViewableAvatar = Boolean(profile.image && failedAvatarUrl !== profile.image);
 
   // The `suspended` flag is the server's contract for a banned profile (see
@@ -228,7 +233,11 @@ export function ProfileLayout() {
             </div>
           ) : (
             <div className="mb-2 flex items-center gap-2">
-              <FollowButton userId={profile.id} isFollowing={profile.viewerIsFollowing} />
+              <FollowButton
+                userId={profile.id}
+                isFollowing={profile.viewerIsFollowing}
+                hasRequested={profile.hasRequested}
+              />
               {/* Report and Block on someone else's profile — same shared
                   dialogs as the post card's kebab (see `atoms/moderation.ts`). */}
               <DropdownMenu>
@@ -292,18 +301,39 @@ export function ProfileLayout() {
           )}
 
           <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
-            <FollowListDialog
-              username={username}
-              handle={handle}
-              direction="following"
-              count={profile.followingCount}
-            />
-            <FollowListDialog
-              username={username}
-              handle={handle}
-              direction="followers"
-              count={profile.followerCount}
-            />
+            {isLocked ? (
+              <>
+                <span>
+                  <span className="text-foreground font-bold">
+                    {formatCount(profile.followingCount, getLocale())}
+                  </span>{" "}
+                  <span className="text-muted-foreground">{m.follow_following()}</span>
+                </span>
+                <span>
+                  <span className="text-foreground font-bold">
+                    {formatCount(profile.followerCount, getLocale())}
+                  </span>{" "}
+                  <span className="text-muted-foreground">
+                    {profile.followerCount === 1 ? m.follow_follower() : m.follow_followers()}
+                  </span>
+                </span>
+              </>
+            ) : (
+              <>
+                <FollowListDialog
+                  username={username}
+                  handle={handle}
+                  direction="following"
+                  count={profile.followingCount}
+                />
+                <FollowListDialog
+                  username={username}
+                  handle={handle}
+                  direction="followers"
+                  count={profile.followerCount}
+                />
+              </>
+            )}
           </div>
 
           <div className="text-muted-foreground flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">

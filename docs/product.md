@@ -176,24 +176,40 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   Signed-out permalink viewers keep the sign-in-link treatment — the control
   is signed-in only.
 - Follows are the same shape: `follow` / `unfollow`, with follower and
-  following lists.
+  following lists. A private account (issue #328, toggled in settings) does
+  not gain followers directly — `follow` creates a pending `follow_request`
+  instead, the owner is notified, and `followRequest.accept` converts it into
+  the edge (rejecting or cancelling deletes it). The profile button reads
+  Follow / Requested / Following from `viewerIsFollowing` + `hasRequested`.
 - Feeds come in two scopes — everyone, and the people you follow — and are
   keyset-paginated so a page boundary can never skip or repeat an event. The
   timeline is strictly reverse-chronological by event time — a post at its own
   creation, a repost at the repost's — with no ranking and no deduplication:
-  the same post can appear once authored and once reposted.
+  the same post can appear once authored and once reposted. Private posts and
+  private-account posts (issue #328) appear only for the author and approved
+  followers; everyone else walks the same timeline without them. A repost of
+  a private original keeps the reposter's event but redacts the original to
+  the unavailable treatment.
+- Authors can mark individual posts followers-only at creation; a private
+  account's posts are private by default. Private posts never surface in
+  Discover, search, hashtag matches or anonymous permalinks — those return
+  NOT_FOUND for non-viewers — and their `/media/` attachments 404 the same
+  way except for the author, approved followers and moderators inspecting a
+  report.
 - Discover (`/discover`) is the global feed as a reading surface — no
   composer, no scope tabs — with a search box and a game filter on top. Both
   narrow the same chronological timeline and compose as AND: free text
   matches post text, the game filter matches `#hashtagKey` in post text
   (resolved server-side from the game's slug), and the view is URL-persisted
   (`?q=`, `?game=`) so it is shareable and the back button restores it. A
-  game hashtag click lands here filtered on that game.
+  game hashtag click lands here filtered on that game. Private posts never
+  appear here for non-viewers.
 
 ## Notifications
 
 A like on your post, a reply to your post, a repost of your post, a quote of
-your post, a new follower, and a moderation action on your content or account
+your post, a new follower, a follow request against your private account
+(issue #328), and a moderation action on your content or account
 each leave one in-app notification — written in the same transaction as the
 event that caused it, and exactly once per event: a retried like, repost or
 follow mints no second notice, while like → unlike → like again is honestly
@@ -212,7 +228,8 @@ three events, not one collapsed one.
   cycling — moves the badge at most once a minute: every event still appears
   on the page, still unread, but the badge counts the burst as one tick.
   Different kinds of event each tick — a like, a reply and a follow are three
-  signals, not one — and moderation notices are never damped.
+  signals, not one — and moderation and follow-request notices are never
+  damped: each request is actionable, so each ticks.
 - Self-caused events never notify — liking, replying to, reposting or
   quoting your own post creates nothing.
 - Blocks hold on both sides: a user blocked by the recipient cannot generate
@@ -245,7 +262,11 @@ three events, not one collapsed one.
   use the same safe linkification as posts and replies.
 - Profiles are addressed by handle. A profile hidden by a block reads as "no
   such user"; a banned profile resolves to a suspended stub instead, without
-  its authored profile fields, relationship counts or badges.
+  its authored profile fields, relationship counts or badges. A private
+  profile (issue #328) still resolves for everyone — the page shows the
+  header and a locked notice instead of the feed when the viewer is neither
+  the owner nor an approved follower, and the follower/following lists read
+  as empty for the same viewer.
 - Search has three surfaces: a profile-only header typeahead (up to five
   users, plus up to three games), a full user search, and a full post search.
   User results rank handle-prefix matches ahead of substring matches; game

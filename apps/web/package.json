@@ -29,6 +29,7 @@
     "better-auth": "catalog:",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cn": "^0.2.5",
     "gifenc": "^1.0.3",
     "gifuct-js": "^2.1.2",
     "jotai": "^2.12.5",

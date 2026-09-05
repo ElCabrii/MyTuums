@@ -239,6 +239,13 @@
       "when": 1788581172551,
       "tag": "0033_fresh_killraven",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1788587490877,
+      "tag": "0034_purple_galactus",
+      "breakpoints": true
     }
   ]
 }

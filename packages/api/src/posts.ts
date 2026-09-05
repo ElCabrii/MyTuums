@@ -49,7 +49,12 @@ import {
 } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { runSql } from "./sql.js";
-import { invisibleAuthor, visibleUser } from "./visibility.js";
+import {
+  invisibleAuthor,
+  privatePostHidden,
+  privateUserHidden,
+  visibleUser,
+} from "./visibility.js";
 import { acceptPostImage, type ImageRejection } from "./post-image.js";
 import {
   discardPostAttachments,
@@ -217,6 +222,17 @@ async function readPostAttachments(files: readonly File[]): Promise<PostAttachme
  * rendering.
  */
 function parentPreview(viewerId: string | null) {
+  const privateHidden =
+    viewerId === null
+      ? sql`(${parentAuthor.isPrivate} is true or ${parentPost.isPrivate} is true)`
+      : sql`(
+          (${parentAuthor.isPrivate} is true or ${parentPost.isPrivate} is true)
+          and ${parentPost.authorId} <> ${viewerId}
+          and not exists (
+            select 1 from ${follow}
+            where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${parentPost.authorId}
+          )
+        )`;
   return sql<ParentPreview | null>`(
     select jsonb_build_object(
       'id', ${parentPost.id},
@@ -257,6 +273,7 @@ function parentPreview(viewerId: string | null) {
             and ${userBlock.blockedId} = ${parentPost.authorId}
         )
       )
+      and not (${privateHidden})
     limit 1
   )`;
 }
@@ -315,6 +332,17 @@ export type QuotedPostPreview = {
  *   but they must not render).
  */
 function quotedPreview(viewerId: string | null) {
+  const privateHidden =
+    viewerId === null
+      ? sql`(${quotedAuthor.isPrivate} is true or ${quotedPostTable.isPrivate} is true)`
+      : sql`(
+          (${quotedAuthor.isPrivate} is true or ${quotedPostTable.isPrivate} is true)
+          and ${quotedPostTable.authorId} <> ${viewerId}
+          and not exists (
+            select 1 from ${follow}
+            where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${quotedPostTable.authorId}
+          )
+        )`;
   return sql<QuotedPostPreview | null>`(
     select jsonb_build_object(
       'id', ${quotedPostTable.id},
@@ -373,6 +401,7 @@ function quotedPreview(viewerId: string | null) {
             and ${userBlock.blockedId} = ${quotedPostTable.authorId}
         )
       )
+      and not (${privateHidden})
     limit 1
   )`;
 }
@@ -542,7 +571,9 @@ async function visiblePostAuthorId(
     .select({ authorId: post.authorId })
     .from(post)
     .innerJoin(user, eq(user.id, post.authorId))
-    .where(and(eq(post.id, postId), not(invisibleAuthor(viewerId))))
+    .where(
+      and(eq(post.id, postId), not(invisibleAuthor(viewerId)), not(privatePostHidden(viewerId))),
+    )
     .limit(1);
 
   return visiblePost?.authorId;
@@ -641,7 +672,13 @@ async function replyContinuationPages(args: ReplyContinuationPageArgs) {
     .select(postSelection(args.viewerId))
     .from(post)
     .innerJoin(user, eq(user.id, post.authorId))
-    .where(and(inArray(post.id, selectedIds), not(invisibleAuthor(args.viewerId))));
+    .where(
+      and(
+        inArray(post.id, selectedIds),
+        not(invisibleAuthor(args.viewerId)),
+        not(privatePostHidden(args.viewerId)),
+      ),
+    );
   const visibleById = new Map(visibleRows.map((row) => [row.id, row]));
 
   return args.rootPostIds.flatMap((rootPostId) => {
@@ -683,8 +720,13 @@ const feedOriginal = alias(post, "feed_original");
 const feedReposter = alias(user, "feed_reposter");
 const feedOriginalAuthor = alias(user, "feed_original_author");
 
-/** The three columns the per-alias visibility predicate reads — any `alias(user, …)` provides them. */
-type UserVisibilityColumns = { id: PgColumn; banned: PgColumn; banExpires: PgColumn };
+/** The columns the per-alias visibility predicates read — any `alias(user, …)` provides them. */
+type UserVisibilityColumns = {
+  id: PgColumn;
+  banned: PgColumn;
+  banExpires: PgColumn;
+  isPrivate: PgColumn;
+};
 
 /**
  * The block/ban visibility half of `invisibleAuthor` (./visibility.ts),
@@ -702,6 +744,59 @@ function aliasVisibleTo(viewerId: string | null, u: UserVisibilityColumns) {
     or exists (
       select 1 from ${userBlock}
       where ${userBlock.blockerId} = ${viewerId} and ${userBlock.blockedId} = ${u.id}
+    )
+  )`;
+}
+
+/**
+ * The private-account half of visibility (issue #328), restated over an
+ * aliased `user` row: true when the aliased account is private and the viewer
+ * is neither the account nor an approved follower. Null `is_private`
+ * reads as public. Composed alongside `aliasVisibleTo` wherever a reposter
+ * or preview author is filtered.
+ */
+function aliasPrivateUserHidden(viewerId: string | null, u: UserVisibilityColumns) {
+  if (viewerId === null) {
+    return sql<boolean>`${u.isPrivate} is true`;
+  }
+  return sql<boolean>`(
+    ${u.isPrivate} is true
+    and ${u.id} <> ${viewerId}
+    and not exists (
+      select 1 from ${follow}
+      where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${u.id}
+    )
+  )`;
+}
+
+/** The columns the aliased post-privacy predicate reads — any `alias(post, …)` provides them. */
+type PostVisibilityColumns = {
+  isPrivate: PgColumn;
+  authorId: PgColumn;
+};
+
+/**
+ * The private-post half of visibility (issue #328), restated over an aliased
+ * post row and its aliased author: true when the original is followers-only
+ * (its own flag or its author's) and the viewer is neither the author nor an
+ * approved follower. The repost arm uses it to exclude private originals from
+ * text-filtered reads, where matching their raw text while redacting the event
+ * would otherwise be a one-bit oracle for the hidden words.
+ */
+function aliasPrivatePostHidden(
+  viewerId: string | null,
+  p: PostVisibilityColumns,
+  u: UserVisibilityColumns,
+) {
+  if (viewerId === null) {
+    return sql<boolean>`(${u.isPrivate} is true or ${p.isPrivate} is true)`;
+  }
+  return sql<boolean>`(
+    (${u.isPrivate} is true or ${p.isPrivate} is true)
+    and ${p.authorId} <> ${viewerId}
+    and not exists (
+      select 1 from ${follow}
+      where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${u.id}
     )
   )`;
 }
@@ -850,6 +945,10 @@ async function feedEventPage(
           ))`
       : undefined,
     not(invisibleAuthor(args.viewerId)),
+    // Private posts and private-account posts (issue #328) drop from feeds
+    // for non-followers, like banned/blocked authors above — the author and
+    // approved followers still walk the same timeline.
+    not(privatePostHidden(args.viewerId)),
   ];
 
   const repostArmFilters = [
@@ -857,14 +956,22 @@ async function feedEventPage(
     // ORIGINAL author is deliberately not a filter — a hidden original keeps
     // the reposter's event and is redacted to the unavailable treatment below,
     // which is the same "the author is gone" result blocked profiles use.
+    // Private reposters (issue #328) hide the same way: a private account's
+    // amplifications are visible only to their followers.
     aliasVisibleTo(args.viewerId, feedReposter),
+    not(aliasPrivateUserHidden(args.viewerId, feedReposter)),
     // The text and game filters read the ORIGINAL's text on the repost arm —
     // a repost amplifies the original, so a filtered feed matches what the
     // event is about, not who amplified it. The `q` tombstone exclusion
     // mirrors the authored arm: the original's hidden text must not be
-    // probeable through the filter.
+    // probeable through the filter. A private original is excluded outright
+    // under either text filter — matching its raw words while redacting the
+    // event to `unavailable` would be a one-bit oracle for the hidden text.
     args.q ? isNull(feedOriginal.deletedAt) : undefined,
     args.q ? isNull(feedOriginal.removedAt) : undefined,
+    args.q || args.gameHashtagKey
+      ? not(aliasPrivatePostHidden(args.viewerId, feedOriginal, feedOriginalAuthor))
+      : undefined,
     args.q ? ilike(feedOriginal.content, `%${escapeFeedLikePattern(args.q)}%`) : undefined,
     args.gameHashtagKey
       ? ilike(feedOriginal.content, `%#${escapeFeedLikePattern(args.gameHashtagKey)}%`)
@@ -932,8 +1039,10 @@ async function feedEventPage(
       // Re-evaluated in the projection phase, closing a block/ban race between
       // the event query and this read without throwing the reposter's event
       // away. Only repost events consume a hidden row; authored events below
-      // still disappear exactly like every other feed surface.
-      originalUnavailable: invisibleAuthor(args.viewerId),
+      // still disappear exactly like every other feed surface. Private
+      // originals (issue #328) redact the same way — the event stays, the
+      // content does not cross to non-followers.
+      originalUnavailable: sql<boolean>`${invisibleAuthor(args.viewerId)} or ${privatePostHidden(args.viewerId)}`,
     })
     .from(post)
     .innerJoin(user, eq(user.id, post.authorId))
@@ -953,7 +1062,13 @@ async function feedEventPage(
           image: user.image,
         })
         .from(user)
-        .where(and(inArray(user.id, reposterIds), visibleUser(args.viewerId)))
+        .where(
+          and(
+            inArray(user.id, reposterIds),
+            visibleUser(args.viewerId),
+            not(privateUserHidden(args.viewerId)),
+          ),
+        )
     : [];
   const reposterById = new Map(reposters.map((rep) => [rep.id, rep]));
 
@@ -1057,6 +1172,7 @@ async function insertPost(
     content: string;
     parentId: string | undefined;
     quotedPostId: string | undefined;
+    isPrivate: boolean;
     prepared: ReturnType<typeof preparePostAttachments>;
   },
 ): Promise<CreatedPost | undefined> {
@@ -1068,6 +1184,7 @@ async function insertPost(
       content: args.content,
       parentId: args.parentId ?? null,
       quotedPostId: args.quotedPostId ?? null,
+      isPrivate: args.isPrivate,
     })
     .returning({
       id: post.id,
@@ -1132,6 +1249,17 @@ export const postRouter = {
           quotedPostId: z.uuid().optional(),
           /** The same ordered image capability is available to posts and replies. */
           attachments: z.array(z.file()).max(POST_ATTACHMENT_MAX_COUNT).default([]),
+          /**
+           * Followers-only visibility (issue #328). Omitted inherits the
+           * author's account default. The flag is one-way while the account
+           * is private: an explicitly opened post from a private account is
+           * still gated by the author flag — only followers see it. The stored
+           * value matters if the account later goes public, at which point old
+           * private-by-default posts stay followers-only. Replies may carry it
+           * like top-level posts; the thread gates on both the focused post
+           * and each reply independently.
+           */
+          isPrivate: z.boolean().optional(),
         })
         // The one invariant neither field can hold alone (issue #202): a post
         // must carry text, images, or both. Keeping `content` string-shaped
@@ -1165,7 +1293,13 @@ export const postRouter = {
           .select({ id: post.id, authorId: post.authorId })
           .from(post)
           .innerJoin(user, eq(user.id, post.authorId))
-          .where(and(eq(post.id, postId), not(invisibleAuthor(context.user.id))))
+          .where(
+            and(
+              eq(post.id, postId),
+              not(invisibleAuthor(context.user.id)),
+              not(privatePostHidden(context.user.id)),
+            ),
+          )
           .limit(1);
         return visible;
       };
@@ -1198,6 +1332,16 @@ export const postRouter = {
       const prepared = preparePostAttachments(context.user.id, postId, mediaInputs);
       const storage = prepared.length > 0 ? requireStorage(context) : null;
 
+      // Account-default privacy (issue #328): an omitted `isPrivate` inherits
+      // the author's `isPrivate` — private accounts post private by default.
+      // Null (pre-privacy rows) reads as public.
+      const [authorRow] = await context.db
+        .select({ isPrivate: user.isPrivate })
+        .from(user)
+        .where(eq(user.id, context.user.id))
+        .limit(1);
+      const isPrivate = input.isPrivate ?? authorRow?.isPrivate ?? false;
+
       let created: CreatedPost | undefined;
       try {
         created = await context.db.transaction(async (tx) => {
@@ -1225,6 +1369,7 @@ export const postRouter = {
             content: input.content,
             parentId: input.parentId,
             quotedPostId: input.quotedPostId,
+            isPrivate,
             prepared,
           });
           if (inserted && parentAuthorId) {
@@ -1744,7 +1889,13 @@ export const postRouter = {
           .select({ parentId: post.parentId })
           .from(post)
           .innerJoin(user, eq(user.id, post.authorId))
-          .where(and(eq(post.id, input.continuationRootId), not(invisibleAuthor(viewerId))))
+          .where(
+            and(
+              eq(post.id, input.continuationRootId),
+              not(invisibleAuthor(viewerId)),
+              not(privatePostHidden(viewerId)),
+            ),
+          )
           .limit(1);
         if (!rootReply?.parentId) {
           throw new ORPCError("NOT_FOUND", { message: "Reply not found." });
@@ -1827,6 +1978,7 @@ export const postRouter = {
                   // filter.
                   isNull(post.deletedAt),
                   not(invisibleAuthor(viewerId)),
+                  not(privatePostHidden(viewerId)),
                   cursorFilter,
                 ),
               )
@@ -1887,6 +2039,7 @@ export const postRouter = {
         // someone blocked in either direction drop out of every feed. This
         // does NOT drop removed posts — removal is not invisibility.
         not(invisibleAuthor(viewerId)),
+        not(privatePostHidden(viewerId)),
       ];
 
       // The cursor filter, the hasMore decision and the next-cursor anchor
@@ -1964,7 +2117,13 @@ export const postRouter = {
         .select(postSelection(viewerId))
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(viewerId))))
+        .where(
+          and(
+            eq(post.id, input.postId),
+            not(invisibleAuthor(viewerId)),
+            not(privatePostHidden(viewerId)),
+          ),
+        )
         .limit(1);
 
       if (!focused) {
@@ -2014,7 +2173,13 @@ export const postRouter = {
         .select(postSelection(viewerId))
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(inArray(post.id, ancestorIds), not(invisibleAuthor(viewerId))));
+        .where(
+          and(
+            inArray(post.id, ancestorIds),
+            not(invisibleAuthor(viewerId)),
+            not(privatePostHidden(viewerId)),
+          ),
+        );
 
       // `inArray` has no ordering of its own, so the CTE's depth ordering is
       // reapplied here rather than trusted from the second query.
@@ -2084,7 +2249,13 @@ export const postRouter = {
         .select({ id: post.id, authorId: post.authorId })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
+        .where(
+          and(
+            eq(post.id, input.postId),
+            not(invisibleAuthor(context.user.id)),
+            not(privatePostHidden(context.user.id)),
+          ),
+        )
         .limit(1);
 
       if (!target) {
@@ -2135,7 +2306,15 @@ export const postRouter = {
       };
     }),
 
-  /** Removes the caller's like from a post. Requires a session; a no-op when the like isn't there. */
+  /**
+   * Removes the caller's like from a post. Requires a session; a no-op when the like isn't there.
+   *
+   * No private-visibility check (issue #328): the row is the caller's own, and
+   * a like left on a private account's post must stay removable after
+   * unfollowing — or after the author goes private — rather than strand.
+   * `unbookmark`'s comment applies verbatim. Ban/block visibility stays, the
+   * pre-existing behaviour for those surfaces.
+   */
   unlike: protectedProcedure
     .use(rateLimit(RATE_LIMITS.like))
     .input(z.object({ postId: z.uuid() }))
@@ -2185,7 +2364,13 @@ export const postRouter = {
         .select({ id: post.id, authorId: post.authorId })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
+        .where(
+          and(
+            eq(post.id, input.postId),
+            not(invisibleAuthor(context.user.id)),
+            not(privatePostHidden(context.user.id)),
+          ),
+        )
         .limit(1);
 
       if (!target) {
@@ -2224,7 +2409,12 @@ export const postRouter = {
       };
     }),
 
-  /** Removes the caller's repost. Requires a session; a no-op when the repost isn't there. */
+  /**
+   * Removes the caller's repost. Requires a session; a no-op when the repost isn't there.
+   *
+   * No private-visibility check, the same reason as `unlike` above: a repost
+   * of a private post must stay removable after unfollowing.
+   */
   unrepost: protectedProcedure
     .use(rateLimit(RATE_LIMITS.repost))
     .input(z.object({ postId: z.uuid() }))
@@ -2277,7 +2467,13 @@ export const postRouter = {
         .select({ id: post.id })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
+        .where(
+          and(
+            eq(post.id, input.postId),
+            not(invisibleAuthor(context.user.id)),
+            not(privatePostHidden(context.user.id)),
+          ),
+        )
         .limit(1);
 
       if (!target) {

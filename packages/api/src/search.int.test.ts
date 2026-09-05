@@ -378,7 +378,9 @@ describe("search.users", () => {
         "bio",
         "bannerImage",
         "createdAt",
+        "isPrivate",
         "viewerIsFollowing",
+        "hasRequested",
       ].sort(),
     );
     expect(item).not.toHaveProperty("email");

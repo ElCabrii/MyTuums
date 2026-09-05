@@ -8,6 +8,7 @@ import {
   integer,
   uuid,
   timestamp,
+  boolean,
   index,
   uniqueIndex,
   primaryKey,
@@ -90,6 +91,13 @@ export const post = pgTable(
     // the recorded history so a moderator judges what was written, not only
     // what currently stands.
     editedAt: timestamp("edited_at", { withTimezone: true, precision: 3 }),
+    // Followers-only visibility (issue #328): when true, the post is visible
+    // only to its author and the author's approved followers (plus moderators
+    // inspecting reported content). A private account's posts are private by
+    // default — `post.create` fills this from the author's `isPrivate` when
+    // the caller omits it. NOT NULL DEFAULT false so every pre-privacy row
+    // reads public without a backfill.
+    isPrivate: boolean("is_private").default(false).notNull(),
     // `withTimezone` is not cosmetic. On a bare `timestamp` (no time zone),
     // Postgres resolves `now()` to the *database session's* local wall clock,
     // while Drizzle's `mapFromDriverValue` reads the column back by appending
@@ -372,6 +380,50 @@ export const follow = pgTable(
       t.followerId.desc(),
     ),
     index("follow_follower_created_idx").on(t.followerId, t.createdAt.desc(), t.followingId.desc()),
+  ],
+);
+
+/**
+ * A pending follow request against a private account (issue #328) — the rows
+ * the follow-request inbox is built from.
+ *
+ * `user.follow` inserts here instead of `follow` when the target's `isPrivate`
+ * is true; accepting converts the row into a `follow` edge, rejecting/cancelling
+ * deletes it. The composite primary key *is* the "one pending request per
+ * (requester, target) pair" rule, so requesting twice is idempotent via
+ * `onConflictDoNothing`, exactly like `follow` itself.
+ */
+export const followRequest = pgTable(
+  "follow_request",
+  {
+    // Both sides are `text` for the same reason follow's are: `user.id` is
+    // BetterAuth's own id format, not a uuid.
+    requesterId: text("requester_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    targetId: text("target_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // follow.created_at above — requests are routinely listed newest-first.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.requesterId, t.targetId] }),
+    // Requesting yourself is meaningless, same as following yourself.
+    check("follow_request_not_self", sql`${t.requesterId} <> ${t.targetId}`),
+    // Both indexes mirror the keyset pagination the request inbox will use:
+    // newest first, with the *other* party's id breaking ties.
+    index("follow_request_target_created_idx").on(
+      t.targetId,
+      t.createdAt.desc(),
+      t.requesterId.desc(),
+    ),
+    index("follow_request_requester_created_idx").on(
+      t.requesterId,
+      t.createdAt.desc(),
+      t.targetId.desc(),
+    ),
   ],
 );
 
@@ -729,13 +781,13 @@ export const notification = pgTable(
     // matching the branded email that never names the moderator); set null on
     // actor deletion, see the table comment.
     actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
-    // `'like'`, `'reply'`, `'repost'`, `'quote'`, `'follow'` or
-    // `'moderation'` (checked below). The `$type` union mirrors that check
-    // constraint so selects carry the six codes to TypeScript consumers —
-    // the same mirroring `MODERATION_ACTION_CODES` in packages/api does for
-    // `moderation_action`.
+    // `'like'`, `'reply'`, `'repost'`, `'quote'`, `'follow'`,
+    // `'follow_request'` or `'moderation'` (checked below). The `$type` union
+    // mirrors that check constraint so selects carry the seven codes to
+    // TypeScript consumers — the same mirroring `MODERATION_ACTION_CODES` in
+    // packages/api does for `moderation_action`.
     type: text("type")
-      .$type<"like" | "reply" | "repost" | "quote" | "follow" | "moderation">()
+      .$type<"like" | "reply" | "repost" | "quote" | "follow" | "follow_request" | "moderation">()
       .notNull(),
     // The like's or repost's post / the reply or quote itself (the thing the
     // recipient clicks through to). Null for follow and moderation.
@@ -751,12 +803,12 @@ export const notification = pgTable(
   (t) => [
     check(
       "notification_type",
-      sql`${t.type} in ('like', 'reply', 'repost', 'quote', 'follow', 'moderation')`,
+      sql`${t.type} in ('like', 'reply', 'repost', 'quote', 'follow', 'follow_request', 'moderation')`,
     ),
-    // Like, reply, repost and quote rows name the post they are about; follow
-    // and moderation rows carry no post reference. An equality of booleans
-    // rather than a bare `is not null`, so neither type can smuggle the
-    // other's target.
+    // Like, reply, repost and quote rows name the post they are about; follow,
+    // follow_request and moderation rows carry no post reference. An equality
+    // of booleans rather than a bare `is not null`, so neither type can
+    // smuggle the other's target.
     check(
       "notification_post_ref",
       sql`(${t.type} in ('like', 'reply', 'repost', 'quote')) = (${t.postId} is not null)`,
@@ -1050,6 +1102,20 @@ export const followRelations = relations(follow, ({ one }) => ({
     fields: [follow.followingId],
     references: [user.id],
     relationName: "following",
+  }),
+}));
+
+/** Drizzle relations for `followRequest` — the requester and the private target. */
+export const followRequestRelations = relations(followRequest, ({ one }) => ({
+  requester: one(user, {
+    fields: [followRequest.requesterId],
+    references: [user.id],
+    relationName: "followRequester",
+  }),
+  target: one(user, {
+    fields: [followRequest.targetId],
+    references: [user.id],
+    relationName: "followRequestTarget",
   }),
 }));
 
