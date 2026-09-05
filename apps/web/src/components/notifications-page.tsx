@@ -50,6 +50,10 @@ export function NotificationsPage() {
   // round trip must not disable every other row's button while the server
   // budget allows bursts.
   const [deletingIds, setDeletingIds] = useState<ReadonlySet<string>>(new Set());
+  // Same-frame double-activation guard: `deletingIds` state only disables the
+  // button after a re-render, so two clicks within one frame would both fire.
+  // The ref owns the guarantee because state is stale in the same frame.
+  const deletingIdsRef = useRef(new Set<string>());
   // The once-per-mount guard is the ref, not the mutation state. The atom's
   // value is a fresh object on every emit (query events, pending → success
   // transitions), and on a slow machine the first `mutate`'s isPending flip
@@ -84,8 +88,12 @@ export function NotificationsPage() {
 
   // Resetting the mutation when the dialog closes, like `DeletePostDialog`'s
   // unmount: otherwise a failed clear's error survives Cancel and reappears
-  // on the next open before any new attempt.
+  // on the next open before any new attempt. Closing mid-flight is refused
+  // while pending: `reset()` does not abort the request, so dismissing then
+  // would hide the coming failure and resurrect it as a stale error on the
+  // next open.
   const handleClearOpenChange = (open: boolean) => {
+    if (!open && clearAll.isPending) return;
     if (!open) clearAll.reset();
     setClearOpen(open);
   };
@@ -95,11 +103,14 @@ export function NotificationsPage() {
   // promise holds regardless, and the `finally` drops exactly this row's id.
   // The page-level `isError` banner below still reports the failure.
   const handleDelete = (id: string) => {
+    if (deletingIdsRef.current.has(id)) return;
+    deletingIdsRef.current.add(id);
     setDeletingIds((previous) => new Set(previous).add(id));
     void deleteNotification
       .mutateAsync({ id })
       .catch(() => {})
       .finally(() => {
+        deletingIdsRef.current.delete(id);
         setDeletingIds((previous) => {
           const next = new Set(previous);
           next.delete(id);
@@ -167,7 +178,12 @@ export function NotificationsPage() {
             >
               {m.notifications_clear_all()}
             </Button>
-            <Button variant="ghost" className="w-full" onClick={() => handleClearOpenChange(false)}>
+            <Button
+              variant="ghost"
+              className="w-full"
+              disabled={clearAll.isPending}
+              onClick={() => handleClearOpenChange(false)}
+            >
               {m.common_cancel()}
             </Button>
           </div>
