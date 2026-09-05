@@ -216,7 +216,7 @@ describe("account privacy (issue #328)", () => {
     await expect(threadCall).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("search excludes private posts and private accounts for non-followers", async () => {
+  it("search excludes private posts but still surfaces private accounts for non-followers", async () => {
     const alice = await createTestUser();
     const bob = await createTestUser();
     await setPrivate(alice.id, true);
@@ -231,7 +231,14 @@ describe("account privacy (issue #328)", () => {
       { q: alice.session.user.username! },
       { context: contextFor(bob) },
     );
-    expect(users.items.map((i) => i.id)).not.toContain(alice.id);
+    expect(users.items.map((i) => i.id)).toContain(alice.id);
+
+    const typeahead = await call(
+      appRouter.search.typeahead,
+      { q: alice.session.user.username! },
+      { context: contextFor(bob) },
+    );
+    expect(typeahead.users.map((i) => i.id)).toContain(alice.id);
   });
 
   it("notification reply previews redact a private replier's content while the row still surfaces", async () => {
@@ -374,15 +381,15 @@ describe("account privacy (issue #328)", () => {
     await call(appRouter.post.repost, { postId: post.id }, { context: contextFor(bob) });
     await call(appRouter.user.follow, { userId: bob.id }, { context: contextFor(carol) });
 
-    // Unfiltered, Carol sees Bob's event redacted to unavailable — the repost
-    // is Bob's, the content is not Carol's to read.
+    // Unfiltered, Carol sees Bob's event redacted to the private treatment —
+    // the repost is Bob's, the content is not Carol's to read.
     const unfiltered = await call(
       appRouter.post.list,
       { feed: "global" },
       { context: contextFor(carol) },
     );
     const redacted = unfiltered.items.find((i) => i.id === post.id && i.repostedBy);
-    expect(redacted).toMatchObject({ unavailable: true });
+    expect(redacted).toMatchObject({ unavailable: true, private: true });
 
     // Filtered by the hidden words, the event must vanish entirely — matching
     // the raw text while redacting the row would be a one-bit oracle.
@@ -392,6 +399,64 @@ describe("account privacy (issue #328)", () => {
       { context: contextFor(carol) },
     );
     expect(filtered.items.map((i) => i.id)).not.toContain(post.id);
+  });
+
+  it("quotes and replies of a private post flag the embedded preview as private, not merely unavailable", async () => {
+    const alice = await createTestUser();
+    const bob = await createTestUser();
+    const carol = await createTestUser();
+    await setPrivate(alice.id, true);
+
+    const target = await call(
+      appRouter.post.create,
+      { content: "private original" },
+      { context: contextFor(alice) },
+    );
+
+    // Bob follows Alice so he can see and amplify the private post; Carol
+    // follows Bob (public) but not Alice.
+    await call(appRouter.user.follow, { userId: alice.id }, { context: contextFor(bob) });
+    await call(
+      appRouter.user.followRequest.accept,
+      { requesterId: bob.id },
+      { context: contextFor(alice) },
+    );
+    const quote = await call(
+      appRouter.post.create,
+      { content: "quoting", quotedPostId: target.id },
+      { context: contextFor(bob) },
+    );
+    const reply = await call(
+      appRouter.post.create,
+      { content: "replying", parentId: target.id },
+      { context: contextFor(bob) },
+    );
+
+    const asCarol = await call(
+      appRouter.post.list,
+      { feed: "global" },
+      { context: contextFor(carol) },
+    );
+    const quoteRow = asCarol.items.find((i) => i.id === quote.id);
+    expect(quoteRow).toMatchObject({ quotedPostId: target.id, quoted: null, quotedPrivate: true });
+    // Replies never surface in the top-level global feed — read the reply list
+    // under the private parent to see its parent flags.
+    const replies = await call(
+      appRouter.post.list,
+      { parentId: target.id },
+      { context: contextFor(carol) },
+    );
+    const replyRow = replies.items.find((i) => i.id === reply.id);
+    expect(replyRow).toMatchObject({ parentId: target.id, parent: null, parentPrivate: true });
+    const thread = await call(
+      appRouter.post.thread,
+      { postId: reply.id },
+      { context: contextFor(carol) },
+    );
+    // Carol can open Bob's public reply — Bob is public — but its parent
+    // preview must flag private rather than merely null.
+    expect(thread.post.parentPrivate).toBe(true);
+    expect(thread.post.parent).toBeNull();
   });
 
   it("likes and reposts on private posts stay removable after unfollowing", async () => {

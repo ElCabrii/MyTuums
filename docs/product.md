@@ -155,7 +155,10 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   original whose author is banned or blocked reads like the author is gone —
   a quote keeps its own words with an unavailable embedded post, while a repost
   keeps the reposter's event but redacts the original author, content, media,
-  counts and interactions to the unavailable treatment.
+  counts and interactions to the unavailable treatment. A private original
+  (followers-only post or private account) degrades the same way but says so:
+  the quote's embedded post, the reply's parent line, and the repost's event
+  all render "This post is private" instead of the generic unavailable copy.
 - Bookmarks are the same idempotent pair — `bookmark` / `unbookmark` — holding
   a post for later. They are private by construction: no counts, no visibility
   to other users or to the post's author, nothing on the public profile, and
@@ -189,13 +192,15 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   private-account posts (issue #328) appear only for the author and approved
   followers; everyone else walks the same timeline without them. A repost of
   a private original keeps the reposter's event but redacts the original to
-  the unavailable treatment.
-- Authors can mark individual posts followers-only at creation; a private
-  account's posts are private by default. Private posts never surface in
-  Discover, search, hashtag matches or anonymous permalinks — those return
-  NOT_FOUND for non-viewers — and their `/media/` attachments 404 the same
-  way except for the author, approved followers and moderators inspecting a
-  report.
+  the private treatment ("This post is private").
+- Authors can mark individual posts followers-only at creation from the toggle
+  inside the composer; a private account's posts are private by default and its
+  composer toggle is locked on with an explanatory note. Private posts never
+  surface in Discover, post search, hashtag matches or anonymous permalinks —
+  those return NOT_FOUND for non-viewers — and their `/media/` attachments 404
+  the same way except for the author, approved followers and moderators
+  inspecting a report. Private accounts themselves stay discoverable in user
+  search and the typeahead — only their posts are hidden.
 - Discover (`/discover`) is the global feed as a reading surface — no
   composer, no scope tabs — with a search box and a game filter on top. Both
   narrow the same chronological timeline and compose as AND: free text
@@ -271,6 +276,8 @@ three events, not one collapsed one.
   users, plus up to three games), a full user search, and a full post search.
   User results rank handle-prefix matches ahead of substring matches; game
   results match on name or hashtag key in the catalog's popularity order.
+  Private accounts appear in user search and the typeahead like any other
+  account — only their posts are hidden from non-followers.
 
 ### Badges
 

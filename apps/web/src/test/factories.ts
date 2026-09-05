@@ -100,9 +100,12 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     removedReason: null,
     editedAt: null,
     unavailable: false,
+    private: false,
     ...overrides,
     parent: overrides.parent ?? null,
+    parentPrivate: overrides.parentPrivate ?? false,
     quoted: overrides.quoted ?? null,
+    quotedPrivate: overrides.quotedPrivate ?? false,
     attachments: overrides.attachments ?? [],
   };
 }

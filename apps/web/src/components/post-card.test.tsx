@@ -303,6 +303,14 @@ describe("PostCard", () => {
 
       expect(screen.queryByText(m.reply_parent_unavailable())).not.toBeInTheDocument();
     });
+
+    it("renders the private parent line when the parent is followers-only", async () => {
+      const post = makePost({ parentId: "parent-1", parent: null, parentPrivate: true });
+      await renderWithProviders(<PostCard post={post} />);
+
+      expect(screen.getByText(m.reply_parent_private())).toBeInTheDocument();
+      expect(screen.queryByText(m.reply_parent_unavailable())).not.toBeInTheDocument();
+    });
   });
 
   describe("author without a handle", () => {
@@ -719,6 +727,35 @@ describe("PostCard", () => {
       await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
 
       expect(screen.getByText(m.post_quoted_unavailable())).toBeInTheDocument();
+    });
+
+    it("renders the private copy when the quoted post is followers-only", async () => {
+      const post = makePost({ quotedPostId: "quoted-1", quoted: null, quotedPrivate: true });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(screen.getByText(m.post_quoted_private())).toBeInTheDocument();
+      expect(screen.queryByText(m.post_quoted_unavailable())).not.toBeInTheDocument();
+    });
+
+    it("renders the private copy for a repost of a followers-only original", async () => {
+      const post = makePost({
+        unavailable: true,
+        private: true,
+        content: null,
+        author: { id: "", name: "", username: null, displayUsername: null, image: null },
+        repostedBy: {
+          id: "reposter-1",
+          name: "Reposter Name",
+          username: "reposter",
+          displayUsername: "Reposter",
+          image: null,
+          repostedAt: new Date("2026-08-30T10:00:00Z"),
+        },
+      });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(screen.getByText(m.post_private_stub())).toBeInTheDocument();
+      expect(screen.queryByText(m.post_quoted_unavailable())).not.toBeInTheDocument();
     });
 
     it("opens the quote dialog from the repost menu's quote item", async () => {

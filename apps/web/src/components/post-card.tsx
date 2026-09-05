@@ -339,6 +339,8 @@ export function PostCard({
                 </span>
               )}
             </>
+          ) : post.parentPrivate ? (
+            m.reply_parent_private()
           ) : (
             m.reply_parent_unavailable()
           )}
@@ -492,7 +494,9 @@ export function PostCard({
 
           {post.unavailable ? (
             <div className="border-border/60 bg-muted/30 mb-3 rounded-lg border p-3">
-              <p className="text-muted-foreground text-sm">{m.post_quoted_unavailable()}</p>
+              <p className="text-muted-foreground text-sm">
+                {post.private ? m.post_private_stub() : m.post_quoted_unavailable()}
+              </p>
             </div>
           ) : post.removed ? (
             /* The removal stub. `removedReason` is author-only (the server
@@ -553,7 +557,9 @@ export function PostCard({
                   <QuotedPostCard quoted={post.quoted} gameMentions={gameMentions} />
                 ) : (
                   <div className="border-border/60 bg-muted/30 mb-3 rounded-lg border p-3">
-                    <p className="text-muted-foreground text-sm">{m.post_quoted_unavailable()}</p>
+                    <p className="text-muted-foreground text-sm">
+                      {post.quotedPrivate ? m.post_quoted_private() : m.post_quoted_unavailable()}
+                    </p>
                   </div>
                 ))}
             </>
