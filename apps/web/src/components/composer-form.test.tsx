@@ -262,6 +262,40 @@ describe("ComposerForm", () => {
     expect(onValueChange).toHaveBeenCalledWith("before @alice after");
   });
 
+  it("anchors the mention panel to the caret via an inline top, not the field bottom (issue #336)", async () => {
+    const payload: SearchTypeahead = {
+      users: [
+        makeUserSummary({
+          id: "alice-anchor",
+          name: "Alice Example",
+          username: "alice",
+          displayUsername: "Alice",
+        }),
+      ],
+      games: [],
+      posts: [],
+    };
+    fakeClient.search.typeahead.mockResolvedValue(payload);
+    const rendered = await renderComposer({ value: "@al", mentionScope: "mention-anchor" });
+    rendered.queryClient.setQueryData(
+      orpc.search.typeahead.queryKey({ input: { q: "al" } }),
+      payload,
+    );
+
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(textarea, { target: { value: "@al", selectionStart: 3, selectionEnd: 3 } });
+    textarea.setSelectionRange(3, 3);
+    fireEvent.select(textarea);
+    await screen.findByRole("option", { name: /Alice Example.*@alice/i });
+
+    // jsdom has no layout, so every measured offset is zero — what this pins
+    // is the wiring, not the pixels: the panel carries the anchor's inline
+    // `top` instead of the old bottom-anchored class.
+    const listbox = screen.getByRole("listbox");
+    expect(listbox.style.top).toMatch(/^-?\d+px$/);
+    expect(listbox.className).not.toContain("top-[calc(100%");
+  });
+
   it("dismisses an open mention popup with Escape", async () => {
     const payload: SearchTypeahead = {
       users: [

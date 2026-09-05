@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { createStore } from "jotai";
 import { SearchBox } from "@/components/search-box";
 import {
@@ -136,6 +136,37 @@ describe("SearchBox suggestions", () => {
 describe("SearchBox debounce and keyboard contract", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("inserts typed spaces with the popover open and closed, and debounces the full phrase (issue #335)", async () => {
+    const store = createStore();
+    const queryClient = createTestQueryClient();
+    // Seed the multi-word typeahead so the debounced query resolves from the
+    // cache instead of hitting the network once the debounce lands.
+    queryClient.setQueryData(orpc.search.typeahead.queryKey({ input: { q: "hello world" } }), {
+      users: [],
+      games: [],
+      posts: [],
+    });
+    await renderWithProviders(<SearchBox />, { store, queryClient });
+    const user = userEvent.setup();
+    const input = screen.getByRole("combobox");
+    act(() => input.focus());
+
+    // The first Space lands while the popover is still closed; the rest land
+    // with it open. Base-ui's trigger emulates a button Space press on
+    // non-native triggers and preventDefaults the keydown, which used to
+    // swallow the character in both states.
+    await user.keyboard(" ");
+    expect(input).toHaveValue(" ");
+
+    await user.keyboard("hello world");
+    expect(input).toHaveValue(" hello world");
+    expect(store.get(searchInputAtom)).toBe(" hello world");
+
+    // The debounced copy is trimmed, so the full phrase is what queries run
+    // against and what Enter carries into /search.
+    await waitFor(() => expect(store.get(debouncedSearchQueryAtom)).toBe("hello world"));
   });
 
   it("updates the input immediately but lands only the final debounced query after 300 ms", async () => {

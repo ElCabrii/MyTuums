@@ -72,11 +72,16 @@ export function Header() {
     <header className="bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 w-full border-b backdrop-blur">
       <div className="flex h-16 w-full items-center justify-between gap-2 px-4 sm:gap-4 sm:px-8">
         {/* Left Section: Logo & Nav Links.
-            `min-w-0` (rather than `shrink-0`) is what keeps the header from
-            overflowing the viewport on narrow screens: the right-hand actions
-            are the ones that must stay reachable, so the brand is the part
-            that yields, truncating its wordmark as a last resort instead of
-            pushing sign-in off-screen and making the page scroll sideways. */}
+            `min-w-0` is what keeps the header from overflowing the viewport
+            on narrow screens: the right-hand actions are the ones that must
+            stay reachable, so below `xl` the section may shrink and the
+            wordmark truncates as a last resort instead of pushing actions
+            off-screen and making the page scroll sideways. At `xl` and up
+            `min-w-fit` takes over — the section claims its full content width
+            even past its equal third, and the search box (already
+            `min-w-0 flex-1`) donates the difference. The search drifts
+            slightly off exact center exactly when the brand needs the room;
+            at wide viewports the thirds still agree and it stays centered. */}
         {/* `xl:flex-1` gives the left and right sections the same flex share
             as the search bar (all three grow from basis 0), so the middle
             lands exactly on the viewport center instead of in the leftover
@@ -84,7 +89,7 @@ export function Header() {
             happen to be equally wide, which they never are. Below `xl` the
             bar keeps taking the leftover room, where the sides would not fit
             in equal thirds anyway. */}
-        <div className="flex min-w-0 items-center gap-6 xl:flex-1">
+        <div className="flex min-w-0 items-center gap-6 xl:min-w-fit xl:flex-1">
           <Link
             to="/"
             className="text-primary dark:text-foreground flex min-w-0 items-center gap-2 text-xl font-bold tracking-tight"
@@ -96,7 +101,11 @@ export function Header() {
               height={2048}
               className="h-7 w-auto shrink-0"
             />
-            <span className="truncate">MyTuums</span>
+            {/* The desktop wordmark never truncates (issue #329): at `xl`
+                the section's `min-w-fit` guarantees the room, so the
+                ellipsis only ever engages below `xl` where yielding keeps
+                the actions reachable. */}
+            <span className="truncate xl:overflow-visible">MyTuums</span>
             {/* Pre-1.0 builds are tagged next to the wordmark (alpha/beta);
                 stable builds render nothing. The `shrink-0` lives on the tag
                 so the wordmark's truncate can never swallow it. */}
