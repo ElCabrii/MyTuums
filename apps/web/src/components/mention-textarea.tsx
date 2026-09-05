@@ -270,7 +270,9 @@ export function MentionTextarea({
   // its static position just under the textarea for exactly one frame.
   const [panelTop, setPanelTop] = useState<number | null>(null);
   const [mentionState, setMentionState] = useAtom(composerMentionAtomFamily(mentionScope));
-  const mentionQuery = mentionState.token?.query ?? "";
+  const mentionToken = mentionState.token;
+  const mentionOpen = mentionState.open;
+  const mentionQuery = mentionToken?.query ?? "";
   const typeahead = useAtomValue(typeaheadQueryAtomFamily(mentionQuery));
   // Which kind of token is active is a property of the marker the state's
   // token was found under — one token, one kind, never both.
@@ -316,26 +318,55 @@ export function MentionTextarea({
   // Anchors the suggestion panel to the caret line (issue #336). The mirror
   // measures the caret in the textarea's frame; adding the textarea's own
   // offset within the relative wrapper converts to the panel's frame, minus
-  // the scroll the mirror never sees. Runs on every state change while open
-  // — typing moves the caret, and loading-to-rows swaps the panel height the
-  // flip decision reads — and writes state only when the offset moved, so a
-  // highlight-only arrow press re-measures but never re-renders. A reopened
-  // panel never flashes a stale anchor: this is a layout effect, so the
-  // fresh measurement lands before the browser paints.
+  // the scroll the mirror never sees. Runs while open when the caret or the
+  // panel height can move — typing, token changes, and loading-to-rows swaps
+  // — but not on highlight-only arrow presses: the token ref is stable across
+  // those (see updateMentionState), so depending on the token instead of the
+  // whole mention state skips a mirror build and forced layout per press. A
+  // reopened panel never flashes a stale anchor: this is a layout effect, so
+  // the fresh measurement lands before the browser paints.
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea || !showMentionSuggestions) return;
-    const line = measureCaretLine(textarea, textarea.selectionStart ?? textarea.value.length);
-    const placement = caretPanelPlacement({
-      caretTop: textarea.offsetTop + line.top - textarea.scrollTop,
-      lineHeight: line.lineHeight,
-      gap: PANEL_GAP_PX,
-      panelHeight: panelRef.current?.offsetHeight || PANEL_MAX_HEIGHT_PX,
-      caretViewportBottom: line.viewportBottom,
-      viewportHeight: window.innerHeight,
-    });
-    setPanelTop((previous) => (previous === placement.top ? previous : placement.top));
-  }, [showMentionSuggestions, mentionState, value, typeahead.isPending, activeRowCount]);
+    const reposition = () => {
+      const line = measureCaretLine(textarea, textarea.selectionStart ?? textarea.value.length);
+      const placement = caretPanelPlacement({
+        caretTop: textarea.offsetTop + line.top - textarea.scrollTop,
+        lineHeight: line.lineHeight,
+        gap: PANEL_GAP_PX,
+        panelHeight: panelRef.current?.offsetHeight || PANEL_MAX_HEIGHT_PX,
+        caretViewportBottom: line.viewportBottom,
+        viewportHeight: window.innerHeight,
+      });
+      setPanelTop((previous) => (previous === placement.top ? previous : placement.top));
+    };
+    reposition();
+    // Scroll and resize move the anchor without a value change: the
+    // textarea's own scroll shifts `scrollTop`, a window scroll shifts the
+    // textarea's viewport rect, and a resize shifts `innerHeight`. Listen
+    // while open, rAF-throttled and passive so wheel stays smooth.
+    let raf = 0;
+    const schedule = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(reposition);
+    };
+    textarea.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("scroll", schedule, { passive: true, capture: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      cancelAnimationFrame(raf);
+      textarea.removeEventListener("scroll", schedule);
+      window.removeEventListener("scroll", schedule, { capture: true });
+      window.removeEventListener("resize", schedule);
+    };
+  }, [
+    showMentionSuggestions,
+    mentionToken,
+    mentionOpen,
+    value,
+    typeahead.isPending,
+    activeRowCount,
+  ]);
 
   const updateMentionState = (nextValue: string, start: number | null, end: number | null) => {
     if (suppressSelectionRef.current) return;

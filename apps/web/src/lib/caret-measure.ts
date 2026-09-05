@@ -20,8 +20,12 @@ export interface CaretLine {
 /**
  * The computed-style properties that decide where text wraps and how tall a
  * line is. Copied onto the mirror so its layout matches the textarea's;
- * `whiteSpace` is included because a div defaults to collapsing whitespace
- * while a textarea preserves and wraps it.
+ * wrapping (`whiteSpace`/`wordWrap`/`overflowWrap`) is forced after the copy
+ * instead — a div defaults to collapsing whitespace while a textarea
+ * preserves and wraps it, and the force-set must win over the copy.
+ * Border styles ride along with their widths: with `box-sizing: border-box`
+ * a border width without its style renders no border, leaving the mirror's
+ * content box wider than the textarea's.
  */
 const COPIED_PROPERTIES = [
   "boxSizing",
@@ -40,9 +44,10 @@ const COPIED_PROPERTIES = [
   "borderRightWidth",
   "borderBottomWidth",
   "borderLeftWidth",
-  "whiteSpace",
-  "wordWrap",
-  "overflowWrap",
+  "borderTopStyle",
+  "borderRightStyle",
+  "borderBottomStyle",
+  "borderLeftStyle",
 ] as const;
 
 /** The marker's content: zero width, but it still occupies the line's height. */
@@ -57,12 +62,30 @@ export function measureCaretLine(textarea: HTMLTextAreaElement, caretIndex: numb
   mirrorStyle.visibility = "hidden";
   mirrorStyle.top = "0";
   mirrorStyle.left = "0";
-  mirrorStyle.whiteSpace = "pre-wrap";
-  // A long unbroken prefix must wrap exactly like the textarea wraps it —
-  // without this the marker lands on a line the real caret never reaches.
-  mirrorStyle.wordWrap = "break-word";
   for (const property of COPIED_PROPERTIES) {
     mirrorStyle[property] = computed[property];
+  }
+  // Forced after the copy so the copy cannot overwrite them (see above).
+  // A long unbroken prefix must wrap exactly like the textarea wraps it —
+  // without this the marker lands on a line the real caret never reaches.
+  mirrorStyle.whiteSpace = "pre-wrap";
+  mirrorStyle.wordWrap = "break-word";
+  mirrorStyle.overflowWrap = "break-word";
+  // The mirror never scrolls; the textarea's scroll is subtracted back in
+  // `viewportBottom` and the width adjustment below.
+  mirrorStyle.overflow = "hidden";
+  // The mirror renders no scrollbar, so once the textarea shows one (capped
+  // `max-h` + long draft) the mirror would wrap ~15px wider and anchor a
+  // borderline word to the wrong line. Shrink the mirror's border-box width
+  // by the scrollbar's width so both content boxes agree.
+  const borderLeft = Number.parseFloat(computed.borderLeftWidth) || 0;
+  const borderRight = Number.parseFloat(computed.borderRightWidth) || 0;
+  const scrollbarWidth = textarea.offsetWidth - textarea.clientWidth - borderLeft - borderRight;
+  if (scrollbarWidth > 0) {
+    const mirrorWidth = Number.parseFloat(computed.width);
+    if (Number.isFinite(mirrorWidth)) {
+      mirrorStyle.width = `${mirrorWidth - scrollbarWidth}px`;
+    }
   }
   mirror.append(document.createTextNode(textarea.value.slice(0, caret)));
   const marker = document.createElement("span");
