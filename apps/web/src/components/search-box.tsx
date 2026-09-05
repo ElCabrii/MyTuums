@@ -422,6 +422,18 @@ export function SearchBox() {
   const rows = suggestionRows(typeahead.data);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    // The trigger renders as an `<Input>` through base-ui's `PopoverTrigger`
+    // (`nativeButton={false}`), so base-ui's button emulation treats Space as
+    // an activation key and preventDefaults the keydown — the character never
+    // reaches the input and multi-word queries cannot be typed. The escape
+    // hatch stops the library's handler the same way `handleTriggerClick`
+    // does for clicks; no preventDefault of our own, so insertion proceeds.
+    if (event.key === " ") {
+      // SAFETY: base-ui merges its trigger keydown handler onto the synthetic
+      // event; this optional field is the documented escape hatch (see comment above).
+      (event as BaseUiMergedEvent).preventBaseUIHandler?.();
+      return;
+    }
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();

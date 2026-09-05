@@ -1,5 +1,13 @@
 import { useAtom, useAtomValue } from "jotai";
-import { useEffect, useLayoutEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type Ref,
+} from "react";
 import { Loader2 } from "lucide-react";
 import { composerMentionAtomFamily } from "@/atoms/composer-mentions";
 import { typeaheadQueryAtomFamily } from "@/atoms/search";
@@ -12,6 +20,8 @@ import {
   insertMention,
   mentionAtCaret,
 } from "@/lib/composer-mentions";
+import { measureCaretLine } from "@/lib/caret-measure";
+import { caretPanelPlacement } from "@/lib/caret-panel";
 import { nextHighlight, suggestionRows, type SuggestionRow } from "@/lib/search-suggestions";
 import { type SearchUser, type TypeaheadGame } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
@@ -44,9 +54,25 @@ function mentionUsers(rows: SuggestionRow[]): MentionableUser[] {
   return users;
 }
 
-/** Frame classes shared by the populated list and the loading spinner. */
+/**
+ * Frame classes shared by the populated list and the loading spinner. The
+ * panel stays full-width (`right-0 left-0`); only its `top` moves, and that
+ * arrives as an inline style from the caret anchor below (issue #336) — so
+ * there is deliberately no top/bottom class here. Before the first
+ * measurement the panel takes its static position, just under the textarea,
+ * which is also where it used to be pinned.
+ */
 const panelClass =
-  "border-border bg-popover text-popover-foreground absolute top-[calc(100%+0.5rem)] right-0 left-0 z-50 rounded-xl border shadow-lg";
+  "border-border bg-popover text-popover-foreground absolute right-0 left-0 z-50 rounded-xl border shadow-lg";
+
+/** Gap between the caret line and the panel, in px — the old `0.5rem` offset. */
+const PANEL_GAP_PX = 8;
+
+/**
+ * The panel's height budget for the flip decision before it has rendered and
+ * measured itself, in px — matches the `max-h-60` cap on the lists below.
+ */
+const PANEL_MAX_HEIGHT_PX = 240;
 
 function GameSuggestions({
   rows,
@@ -55,6 +81,8 @@ function GameSuggestions({
   onAccept,
   listboxId,
   optionId,
+  panelRef,
+  panelStyle,
 }: {
   rows: SuggestableGame[];
   highlight: number;
@@ -62,12 +90,18 @@ function GameSuggestions({
   onAccept: (index: number) => void;
   listboxId: string;
   optionId: (index: number) => string;
+  /** Measures the rendered panel for the caret anchor's flip decision. */
+  panelRef: Ref<HTMLDivElement>;
+  /** The caret anchor's `top` — the panel's only positioning. */
+  panelStyle: CSSProperties | undefined;
 }) {
   return (
     <div
       id={listboxId}
       role="listbox"
       aria-label={m.composer_game_suggestions_aria()}
+      ref={panelRef}
+      style={panelStyle}
       className={`${panelClass} max-h-60 overflow-y-auto p-1.5`}
     >
       {rows.map((row, index) => (
@@ -107,6 +141,8 @@ function MentionSuggestions({
   onAccept,
   listboxId,
   optionId,
+  panelRef,
+  panelStyle,
 }: {
   rows: MentionableUser[];
   highlight: number;
@@ -116,12 +152,18 @@ function MentionSuggestions({
   listboxId: string;
   /** Builds the option id for a given index; mirrors `aria-activedescendant`. */
   optionId: (index: number) => string;
+  /** Measures the rendered panel for the caret anchor's flip decision. */
+  panelRef: Ref<HTMLDivElement>;
+  /** The caret anchor's `top` — the panel's only positioning. */
+  panelStyle: CSSProperties | undefined;
 }) {
   return (
     <div
       id={listboxId}
       role="listbox"
       aria-label={m.composer_mention_suggestions_aria()}
+      ref={panelRef}
+      style={panelStyle}
       className={`${panelClass} max-h-60 overflow-y-auto p-1.5`}
     >
       {rows.map((row, index) => {
@@ -222,8 +264,15 @@ export function MentionTextarea({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingCaretRef = useRef<number | null>(null);
   const suppressSelectionRef = useRef(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // The panel's `top` in px from the wrapper's top edge — the caret anchor
+  // (issue #336). Null until the first measurement; the panel then takes
+  // its static position just under the textarea for exactly one frame.
+  const [panelTop, setPanelTop] = useState<number | null>(null);
   const [mentionState, setMentionState] = useAtom(composerMentionAtomFamily(mentionScope));
-  const mentionQuery = mentionState.token?.query ?? "";
+  const mentionToken = mentionState.token;
+  const mentionOpen = mentionState.open;
+  const mentionQuery = mentionToken?.query ?? "";
   const typeahead = useAtomValue(typeaheadQueryAtomFamily(mentionQuery));
   // Which kind of token is active is a property of the marker the state's
   // token was found under — one token, one kind, never both.
@@ -265,6 +314,59 @@ export function MentionTextarea({
       // the onChange/onClick handlers.
     }
   }, [value]);
+
+  // Anchors the suggestion panel to the caret line (issue #336). The mirror
+  // measures the caret in the textarea's frame; adding the textarea's own
+  // offset within the relative wrapper converts to the panel's frame, minus
+  // the scroll the mirror never sees. Runs while open when the caret or the
+  // panel height can move — typing, token changes, and loading-to-rows swaps
+  // — but not on highlight-only arrow presses: the token ref is stable across
+  // those (see updateMentionState), so depending on the token instead of the
+  // whole mention state skips a mirror build and forced layout per press. A
+  // reopened panel never flashes a stale anchor: this is a layout effect, so
+  // the fresh measurement lands before the browser paints.
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || !showMentionSuggestions) return;
+    const reposition = () => {
+      const line = measureCaretLine(textarea, textarea.selectionStart ?? textarea.value.length);
+      const placement = caretPanelPlacement({
+        caretTop: textarea.offsetTop + line.top - textarea.scrollTop,
+        lineHeight: line.lineHeight,
+        gap: PANEL_GAP_PX,
+        panelHeight: panelRef.current?.offsetHeight || PANEL_MAX_HEIGHT_PX,
+        caretViewportBottom: line.viewportBottom,
+        viewportHeight: window.innerHeight,
+      });
+      setPanelTop((previous) => (previous === placement.top ? previous : placement.top));
+    };
+    reposition();
+    // Scroll and resize move the anchor without a value change: the
+    // textarea's own scroll shifts `scrollTop`, a window scroll shifts the
+    // textarea's viewport rect, and a resize shifts `innerHeight`. Listen
+    // while open, rAF-throttled and passive so wheel stays smooth.
+    let raf = 0;
+    const schedule = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(reposition);
+    };
+    textarea.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("scroll", schedule, { passive: true, capture: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      cancelAnimationFrame(raf);
+      textarea.removeEventListener("scroll", schedule);
+      window.removeEventListener("scroll", schedule, { capture: true });
+      window.removeEventListener("resize", schedule);
+    };
+  }, [
+    showMentionSuggestions,
+    mentionToken,
+    mentionOpen,
+    value,
+    typeahead.isPending,
+    activeRowCount,
+  ]);
 
   const updateMentionState = (nextValue: string, start: number | null, end: number | null) => {
     if (suppressSelectionRef.current) return;
@@ -354,6 +456,9 @@ export function MentionTextarea({
   };
 
   const wrapperClass = ["relative", wrapperClassName].filter(Boolean).join(" ");
+  // The caret anchor's inline style: the panel's only positioning (the frame
+  // class carries no top). Undefined until the first measurement.
+  const panelStyle: CSSProperties | undefined = panelTop === null ? undefined : { top: panelTop };
 
   return (
     <div className={wrapperClass}>
@@ -424,12 +529,16 @@ export function MentionTextarea({
             onAccept={acceptMention}
             listboxId={listboxId}
             optionId={optionId}
+            panelRef={panelRef}
+            panelStyle={panelStyle}
           />
         ) : typeahead.isPending ? (
           <div
             id={listboxId}
             role="listbox"
             aria-label={m.composer_mention_suggestions_aria()}
+            ref={panelRef}
+            style={panelStyle}
             className={`${panelClass} flex items-center justify-center p-4`}
           >
             <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
@@ -444,6 +553,8 @@ export function MentionTextarea({
             onAccept={acceptMention}
             listboxId={listboxId}
             optionId={optionId}
+            panelRef={panelRef}
+            panelStyle={panelStyle}
           />
         ))}
     </div>
