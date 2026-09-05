@@ -66,8 +66,13 @@ export const markAllReadAtom = atomWithMutation((get) => {
   };
 });
 
+type NotificationListPage = {
+  items: NotificationItem[];
+  nextCursor: string | null;
+};
+
 type NotificationListCache = {
-  pages: Array<{ items: NotificationItem[] }>;
+  pages: NotificationListPage[];
   pageParams: unknown[];
 };
 
@@ -99,6 +104,10 @@ export const deleteNotificationAtom = atomWithMutation<
     ...orpc.notification.delete.mutationOptions(),
     onMutate: (variables) => {
       const key = orpc.notification.list.key();
+      // Cancel before snapshotting, like `beginPostPatch`: an in-flight
+      // refetch landing after the patch would overwrite the removal with
+      // pre-click server state.
+      void queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueriesData<NotificationListCache>({ queryKey: key });
       const snapshot: NotificationListSnapshot = previous.map(([queryKey, data]) => [
         queryKey,
@@ -146,13 +155,17 @@ export const clearAllNotificationsAtom = atomWithMutation<
     ...orpc.notification.clearAll.mutationOptions(),
     onMutate: () => {
       const key = orpc.notification.list.key();
+      // Same cancel-before-snapshot as the single delete above.
+      void queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueriesData<NotificationListCache>({ queryKey: key });
       const snapshot: NotificationListSnapshot = previous.map(([queryKey, data]) => [
         queryKey,
         data,
       ]);
+      // Collapse to one empty page with no cursor: keeping each page's
+      // `nextCursor` would offer "load more" on an empty inbox.
       queryClient.setQueriesData<NotificationListCache>({ queryKey: key }, (data) =>
-        data ? { ...data, pages: data.pages.map((page) => ({ ...page, items: [] })) } : data,
+        data ? { pages: [{ items: [], nextCursor: null }], pageParams: [undefined] } : data,
       );
       return { snapshot };
     },
@@ -164,6 +177,9 @@ export const clearAllNotificationsAtom = atomWithMutation<
     },
     onSuccess: () => {
       queryClient.setQueryData(unreadCountQueryOptions().queryKey, { unreadCount: 0 });
+      // Refetch the emptied list so post-clear arrivals appear without a
+      // remount — the optimistic collapse above is the instant feedback.
+      void queryClient.invalidateQueries({ queryKey: orpc.notification.list.key() });
     },
   };
 });

@@ -126,6 +126,7 @@ describe("deleteNotificationAtom", () => {
       pageParams: [undefined],
     });
     const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
+    const cancelSpy = vi.spyOn(singletonQueryClient, "cancelQueries");
     fakeClient.notification.delete.mockResolvedValue({ success: true, id: "n-1" });
 
     const mutation = singletonStore.get(deleteNotificationAtom);
@@ -136,6 +137,7 @@ describe("deleteNotificationAtom", () => {
       pages: Array<{ items: NotificationItem[] }>;
     };
     expect(list.pages[0].items.map((item) => item.id)).toEqual(["n-2"]);
+    expect(cancelSpy).toHaveBeenCalledWith({ queryKey: orpc.notification.list.key() });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: unreadCountQueryOptions().queryKey,
     });
@@ -166,7 +168,7 @@ describe("deleteNotificationAtom", () => {
  * no ticks under any damping.
  */
 describe("clearAllNotificationsAtom", () => {
-  it("empties every loaded page and zeroes the badge", async () => {
+  it("collapses to one empty page with no cursor and zeroes the badge", async () => {
     const first = [makeNotification({ id: "n-1" })];
     const second = [makeNotification({ id: "n-2" })];
     singletonQueryClient.setQueryData(orpc.notification.list.key(), {
@@ -176,6 +178,8 @@ describe("clearAllNotificationsAtom", () => {
       ],
       pageParams: [undefined, "cursor"],
     });
+    const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
+    const cancelSpy = vi.spyOn(singletonQueryClient, "cancelQueries");
     fakeClient.notification.clearAll.mockResolvedValue({ deletedCount: 2 });
 
     const mutation = singletonStore.get(clearAllNotificationsAtom);
@@ -183,12 +187,19 @@ describe("clearAllNotificationsAtom", () => {
 
     // SAFETY: the shape seeded above — read back through the same key the patch wrote.
     const list = singletonQueryClient.getQueryData(orpc.notification.list.key()) as {
-      pages: Array<{ items: NotificationItem[] }>;
+      pages: Array<{ items: NotificationItem[]; nextCursor: string | null }>;
+      pageParams: unknown[];
     };
-    expect(list.pages.map((page) => page.items)).toEqual([[], []]);
+    // One empty page, no cursor: stale per-page cursors must not offer
+    // "load more" on an empty inbox.
+    expect(list.pages).toEqual([{ items: [], nextCursor: null }]);
+    expect(list.pageParams).toEqual([undefined]);
     expect(singletonQueryClient.getQueryData(unreadCountQueryOptions().queryKey)).toEqual({
       unreadCount: 0,
     });
+    expect(cancelSpy).toHaveBeenCalledWith({ queryKey: orpc.notification.list.key() });
+    // The emptied list refetches so post-clear arrivals appear without a remount.
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: orpc.notification.list.key() });
   });
 
   it("restores every page when the server refuses", async () => {

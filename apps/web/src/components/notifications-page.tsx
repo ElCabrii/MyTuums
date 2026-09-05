@@ -46,6 +46,10 @@ export function NotificationsPage() {
   const deleteNotification = useAtomValue(deleteNotificationAtom);
   const clearAll = useAtomValue(clearAllNotificationsAtom);
   const [clearOpen, setClearOpen] = useState(false);
+  // Per-row pending ids, not the mutation's shared `isPending`: one row's
+  // round trip must not disable every other row's button while the server
+  // budget allows bursts.
+  const [deletingIds, setDeletingIds] = useState<ReadonlySet<string>>(new Set());
   // The once-per-mount guard is the ref, not the mutation state. The atom's
   // value is a fresh object on every emit (query events, pending → success
   // transitions), and on a slow machine the first `mutate`'s isPending flip
@@ -71,11 +75,37 @@ export function NotificationsPage() {
     void (async () => {
       try {
         await clearAll.mutateAsync({});
-        setClearOpen(false);
+        handleClearOpenChange(false);
       } catch {
         // Stays open: `isError` below renders the failure.
       }
     })();
+  };
+
+  // Resetting the mutation when the dialog closes, like `DeletePostDialog`'s
+  // unmount: otherwise a failed clear's error survives Cancel and reappears
+  // on the next open before any new attempt.
+  const handleClearOpenChange = (open: boolean) => {
+    if (!open) clearAll.reset();
+    setClearOpen(open);
+  };
+
+  // Per-row pending around `mutateAsync` (settled via the promise, not a
+  // per-call callback): the page mounts the mutation observer, but the
+  // promise holds regardless, and the `finally` drops exactly this row's id.
+  // The page-level `isError` banner below still reports the failure.
+  const handleDelete = (id: string) => {
+    setDeletingIds((previous) => new Set(previous).add(id));
+    void deleteNotification
+      .mutateAsync({ id })
+      .catch(() => {})
+      .finally(() => {
+        setDeletingIds((previous) => {
+          const next = new Set(previous);
+          next.delete(id);
+          return next;
+        });
+      });
   };
 
   const items = feed.data?.pages.flatMap((page) => page.items) ?? [];
@@ -91,9 +121,14 @@ export function NotificationsPage() {
         )}
       </div>
       {deleteNotification.isError && (
-        <p role="alert" className="text-destructive text-xs">
-          {m.notification_delete_error()}
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <p role="alert" className="text-destructive text-xs">
+            {m.notification_delete_error()}
+          </p>
+          <Button variant="ghost" size="sm" onClick={() => deleteNotification.reset()}>
+            {m.common_close()}
+          </Button>
+        </div>
       )}
       <PaginatedState
         query={feed}
@@ -107,12 +142,12 @@ export function NotificationsPage() {
           <NotificationRow
             key={item.id}
             item={item}
-            deleting={deleteNotification.isPending}
-            onDelete={(id) => deleteNotification.mutate({ id })}
+            deleting={deletingIds.has(item.id)}
+            onDelete={handleDelete}
           />
         ))}
       </PaginatedState>
-      <Dialog open={clearOpen} onOpenChange={setClearOpen}>
+      <Dialog open={clearOpen} onOpenChange={handleClearOpenChange}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{m.notifications_clear_all_title()}</DialogTitle>
@@ -132,7 +167,7 @@ export function NotificationsPage() {
             >
               {m.notifications_clear_all()}
             </Button>
-            <Button variant="ghost" className="w-full" onClick={() => setClearOpen(false)}>
+            <Button variant="ghost" className="w-full" onClick={() => handleClearOpenChange(false)}>
               {m.common_cancel()}
             </Button>
           </div>
