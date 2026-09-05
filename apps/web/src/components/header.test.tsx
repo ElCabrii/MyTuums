@@ -122,6 +122,23 @@ describe("Header account menu", () => {
   });
 });
 
+describe("Header brand wordmark", () => {
+  it("never truncates the wordmark on desktop widths (issue #329)", async () => {
+    await renderWithProviders(<Header />, { signedInAs: { username: "alexmercer" } });
+
+    // jsdom has no layout, so this pins the classes that carry the
+    // invariant rather than measuring pixels: the left section claims its
+    // content width from `xl` up (`xl:min-w-fit`, donating search width
+    // instead of squeezing the brand), and the wordmark's ellipsis only
+    // engages below `xl` (`xl:overflow-visible` defeats `truncate` there,
+    // whose `text-overflow` needs a non-visible overflow to bite).
+    const wordmark = screen.getByText("MyTuums");
+    expect(wordmark).toHaveClass("xl:overflow-visible");
+    const section = wordmark.closest("div");
+    expect(section?.className).toMatch(/xl:min-w-fit/);
+  });
+});
+
 describe("Header notifications bell", () => {
   it("links to /notifications and carries the unread count on itself and in its label", async () => {
     const queryClient = createTestQueryClient();
