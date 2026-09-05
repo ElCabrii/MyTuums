@@ -1,4 +1,11 @@
-import { Fragment, type ReactNode } from "react";
+// The default React import is load-bearing under `tsx`: files outside
+// `apps/server`'s `include` compile as classic JSX (`React.createElement`),
+// so rendering without it throws `React is not defined` in dev/E2E while the
+// `tsup` production bundle (automatic runtime) works fine. Referenced as
+// `<React.Fragment>` (not a bare `Fragment` import) so the import counts as
+// used under `noUnusedLocals` in the web typecheck, which sees these sources
+// transitively via `@my-tuums/api`.
+import React, { type ReactNode } from "react";
 import { Link, Text } from "react-email";
 import { EmailButton, type EmailAction } from "./button.js";
 import { MYTUUMS_EMAIL_THEME as theme } from "./theme.js";
@@ -66,9 +73,9 @@ function lineSegments(line: string, otp: string | undefined, keyPrefix: string):
 
     if (token.start > previousEnd) {
       segments.push(
-        <Fragment key={`${keyPrefix}-t${previousEnd}`}>
+        <React.Fragment key={`${keyPrefix}-t${previousEnd}`}>
           {line.slice(previousEnd, token.start)}
-        </Fragment>,
+        </React.Fragment>,
       );
     }
     segments.push(
@@ -111,7 +118,9 @@ function lineSegments(line: string, otp: string | undefined, keyPrefix: string):
 
   if (previousEnd < line.length) {
     segments.push(
-      <Fragment key={`${keyPrefix}-t${previousEnd}`}>{line.slice(previousEnd)}</Fragment>,
+      <React.Fragment key={`${keyPrefix}-t${previousEnd}`}>
+        {line.slice(previousEnd)}
+      </React.Fragment>,
     );
   }
   return segments;
@@ -150,10 +159,10 @@ export function EmailCopy({
     const renderedLines = lines
       .filter((line) => line.trim().length > 0 && line.trim() !== actionUrl)
       .map((line, lineIndex) => (
-        <Fragment key={`p${paragraphIndex}-l${lineIndex}`}>
+        <React.Fragment key={`p${paragraphIndex}-l${lineIndex}`}>
           {lineIndex > 0 ? <br /> : null}
           {lineSegments(line, otp, `p${paragraphIndex}-l${lineIndex}`)}
-        </Fragment>
+        </React.Fragment>
       ));
 
     if (containsAction) actionRendered = true;
@@ -170,5 +179,5 @@ export function EmailCopy({
     }
   });
 
-  return <>{blocks}</>;
+  return <React.Fragment>{blocks}</React.Fragment>;
 }
