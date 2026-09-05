@@ -1,8 +1,9 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { Link } from "@tanstack/react-router";
-import { Calendar, Gamepad2, Loader2, Star } from "lucide-react";
+import { Calendar, Gamepad2, Star } from "lucide-react";
 import { GameCover } from "@/components/game-cover";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { gamePageAtomFamily, toggleFavoriteAtomFamily } from "@/atoms/games";
 import { viewerAtom } from "@/atoms/session";
 import { useDocumentHead } from "@/hooks/use-document-head";
@@ -24,11 +25,7 @@ export function GamePage({ slug }: { slug: string }) {
   const game = useAtomValue(gamePageAtomFamily(slug));
 
   if (game.isPending) {
-    return (
-      <div className="flex justify-center py-16">
-        <Loader2 className="text-primary dark:text-link h-8 w-8 animate-spin motion-reduce:animate-none" />
-      </div>
-    );
+    return <GameDetailSkeleton />;
   }
 
   if (game.isError || !game.data) {
@@ -47,6 +44,31 @@ export function GamePage({ slug }: { slug: string }) {
   }
 
   return <GameDetail game={game.data} slug={slug} />;
+}
+
+/**
+ * The `GamePage` loading state: hero cover, title, year, favorite button and
+ * description rows, in the detail's own layout so nothing jumps when it lands.
+ *
+ * `aria-hidden`: it paints structure, not information.
+ */
+export function GameDetailSkeleton() {
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-8" aria-hidden>
+      <div className="gap-6 sm:flex">
+        <Skeleton className="mx-auto aspect-[2/3] w-40 shrink-0 rounded-lg sm:mx-0 sm:w-48" />
+        <div className="mt-4 min-w-0 flex-1 sm:mt-0">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="mt-2 h-4 w-32" />
+          <Skeleton className="mt-2 h-4 w-24" />
+          <Skeleton className="mt-3 h-9 w-32 rounded-full" />
+        </div>
+      </div>
+      <Skeleton className="mt-6 h-4 w-full" />
+      <Skeleton className="mt-2 h-4 w-5/6" />
+      <Skeleton className="mt-2 h-4 w-2/3" />
+    </div>
+  );
 }
 
 function GameDetail({ game, slug }: { game: GamePageData; slug: string }) {

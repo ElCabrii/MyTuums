@@ -1,9 +1,9 @@
 import { Link } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Compass, Loader2 } from "lucide-react";
+import { Compass } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PostComposer } from "@/components/post-composer";
-import { PostFeed } from "@/components/post-feed";
+import { PostFeed, FeedSkeleton } from "@/components/post-feed";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import { homeFeedScopeAtom, postFeedAtom } from "@/atoms/post-feed";
 import { feedScopeAtom } from "@/lib/feed-scope";
@@ -49,9 +49,7 @@ export function HomePage() {
         so it costs no visible state.
       */}
       {scope === null ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="text-primary dark:text-link h-6 w-6 animate-spin motion-reduce:animate-none" />
-        </div>
+        <FeedSkeleton />
       ) : (
         <PostFeed
           feedAtom={postFeedAtom({ feed: scope })}

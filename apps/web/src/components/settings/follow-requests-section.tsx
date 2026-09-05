@@ -9,6 +9,7 @@ import { Section } from "@/components/settings/section";
 import { PaginatedState } from "@/components/paginated-state";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileLink } from "@/components/profile-link";
+import { UserListSkeleton } from "@/components/user-list";
 import { Button } from "@/components/ui/button";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
@@ -38,6 +39,7 @@ export function FollowRequestsSection() {
         errorMessage={m.settings_privacy_requests_error()}
         emptyIcon={Inbox}
         isEmpty={people.length === 0}
+        loadingFallback={<UserListSkeleton />}
       >
         {people.map((user) => {
           const handle = handleOf(user);

@@ -13,6 +13,7 @@ import { PaginatedState } from "@/components/paginated-state";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
@@ -148,6 +149,7 @@ export function NotificationsPage() {
         emptyMessage={m.notifications_empty()}
         isEmpty={items.length === 0}
         listClassName="space-y-3"
+        loadingFallback={<NotificationListSkeleton />}
       >
         {items.map((item) => (
           <NotificationRow
@@ -189,6 +191,31 @@ export function NotificationsPage() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/** Three placeholder rows that mirror `NotificationRow` (avatar + text lines)
+ * while the inbox loads.
+ *
+ * `aria-hidden`: it paints structure, not information.
+ */
+export function NotificationListSkeleton() {
+  return (
+    <div className="space-y-3" aria-hidden>
+      {[0, 1, 2].map((row) => (
+        <div
+          key={row}
+          className="border-border bg-card flex items-start gap-3 rounded-xl border p-4"
+        >
+          <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-3/4" />
+            <Skeleton className="h-3 w-1/2" />
+            <Skeleton className="h-3 w-20" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
