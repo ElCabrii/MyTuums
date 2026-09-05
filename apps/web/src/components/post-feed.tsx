@@ -88,14 +88,14 @@ export function FeedSkeleton() {
       {[0, 1, 2].map((row) => (
         <div key={row} className="border-border bg-card rounded-xl border p-4 sm:p-5">
           <div className="flex items-start gap-3">
-            <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+            <Skeleton className="h-10 w-10 shrink-0 rounded-full motion-reduce:animate-none" />
             <div className="w-full space-y-2">
-              <Skeleton className="h-3.5 w-32" />
-              <Skeleton className="h-3 w-full" />
-              <Skeleton className="h-3 w-4/5" />
+              <Skeleton className="h-3.5 w-32 motion-reduce:animate-none" />
+              <Skeleton className="h-3 w-full motion-reduce:animate-none" />
+              <Skeleton className="h-3 w-4/5 motion-reduce:animate-none" />
             </div>
           </div>
-          <Skeleton className="mt-4 h-40 w-full rounded-lg" />
+          <Skeleton className="mt-4 h-40 w-full rounded-lg motion-reduce:animate-none" />
         </div>
       ))}
     </div>

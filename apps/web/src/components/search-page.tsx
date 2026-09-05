@@ -150,10 +150,10 @@ function SearchGameRowSkeleton() {
     <div className="space-y-1" aria-hidden>
       {[0, 1, 2].map((row) => (
         <div key={row} className="flex items-center gap-3 px-2 py-1.5">
-          <Skeleton className="h-14 w-10 shrink-0 rounded-md" />
+          <Skeleton className="h-14 w-10 shrink-0 rounded-md motion-reduce:animate-none" />
           <div className="min-w-0 flex-1 space-y-2">
-            <Skeleton className="h-3.5 w-40" />
-            <Skeleton className="h-3 w-16" />
+            <Skeleton className="h-3.5 w-40 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-16 motion-reduce:animate-none" />
           </div>
         </div>
       ))}
@@ -163,11 +163,11 @@ function SearchGameRowSkeleton() {
 
 /**
  * The data-shaped half of a results section — the same four states the shared
- * `PaginatedState` renders (spinner, retryable error, dashed empty, "Load
- * more" rows), fed by either the users or the posts atom. The heading is
+ * `PaginatedState` renders (skeleton, retryable error, dashed empty, "Load
+ * more" rows), fed by the users, posts or games atom. The heading is
  * hoisted because it must stay mounted in every state: the `aria-labelledby`
  * pair gives the region its accessible name, so a section that swapped its
- * heading for a spinner would lose it.
+ * heading for a skeleton would lose it.
  */
 function SearchResultsSection<T>({
   feed,

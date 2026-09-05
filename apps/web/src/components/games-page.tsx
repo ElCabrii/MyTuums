@@ -146,9 +146,9 @@ export function GamesSkeleton() {
     >
       {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((card) => (
         <div key={card}>
-          <Skeleton className="aspect-[2/3] w-full rounded-lg" />
-          <Skeleton className="mt-1.5 h-4 w-3/4" />
-          <Skeleton className="mt-1 h-3 w-1/4" />
+          <Skeleton className="aspect-[2/3] w-full rounded-lg motion-reduce:animate-none" />
+          <Skeleton className="mt-1.5 h-4 w-3/4 motion-reduce:animate-none" />
+          <Skeleton className="mt-1 h-3 w-1/4 motion-reduce:animate-none" />
         </div>
       ))}
     </div>

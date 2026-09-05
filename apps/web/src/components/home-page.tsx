@@ -45,7 +45,7 @@ export function HomePage() {
         `scope` is null exactly while the session is pending — see
         `homeFeedScopeAtom`. Rendering the feed straight away would mount the
         *global* one, fire a request, then flip to Following a tick later and
-        fire a second. This is the same spinner PostFeed shows while loading,
+        fire a second. This is the same skeleton PostFeed shows while loading,
         so it costs no visible state.
       */}
       {scope === null ? (

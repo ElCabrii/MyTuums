@@ -56,17 +56,17 @@ export function GameDetailSkeleton() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8" aria-hidden>
       <div className="gap-6 sm:flex">
-        <Skeleton className="mx-auto aspect-[2/3] w-40 shrink-0 rounded-lg sm:mx-0 sm:w-48" />
+        <Skeleton className="mx-auto aspect-[2/3] w-40 shrink-0 rounded-lg motion-reduce:animate-none sm:mx-0 sm:w-48" />
         <div className="mt-4 min-w-0 flex-1 sm:mt-0">
-          <Skeleton className="h-7 w-48" />
-          <Skeleton className="mt-2 h-4 w-32" />
-          <Skeleton className="mt-2 h-4 w-24" />
-          <Skeleton className="mt-3 h-9 w-32 rounded-full" />
+          <Skeleton className="h-7 w-48 motion-reduce:animate-none" />
+          <Skeleton className="mt-2 h-4 w-32 motion-reduce:animate-none" />
+          <Skeleton className="mt-2 h-4 w-24 motion-reduce:animate-none" />
+          <Skeleton className="mt-3 h-9 w-32 rounded-full motion-reduce:animate-none" />
         </div>
       </div>
-      <Skeleton className="mt-6 h-4 w-full" />
-      <Skeleton className="mt-2 h-4 w-5/6" />
-      <Skeleton className="mt-2 h-4 w-2/3" />
+      <Skeleton className="mt-6 h-4 w-full motion-reduce:animate-none" />
+      <Skeleton className="mt-2 h-4 w-5/6 motion-reduce:animate-none" />
+      <Skeleton className="mt-2 h-4 w-2/3 motion-reduce:animate-none" />
     </div>
   );
 }

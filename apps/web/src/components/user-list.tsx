@@ -114,12 +114,12 @@ export function UserListSkeleton() {
           key={row}
           className="border-border bg-card flex items-center gap-3 rounded-xl border p-4"
         >
-          <Skeleton className="h-11 w-11 shrink-0 rounded-full" />
+          <Skeleton className="h-11 w-11 shrink-0 rounded-full motion-reduce:animate-none" />
           <div className="min-w-0 flex-1 space-y-2">
-            <Skeleton className="h-3.5 w-32" />
-            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3.5 w-32 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-24 motion-reduce:animate-none" />
           </div>
-          <Skeleton className="h-9 w-20 shrink-0 rounded-full" />
+          <Skeleton className="h-9 w-20 shrink-0 rounded-full motion-reduce:animate-none" />
         </div>
       ))}
     </div>

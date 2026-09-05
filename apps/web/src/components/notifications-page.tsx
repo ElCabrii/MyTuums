@@ -208,11 +208,11 @@ export function NotificationListSkeleton() {
           key={row}
           className="border-border bg-card flex items-start gap-3 rounded-xl border p-4"
         >
-          <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+          <Skeleton className="h-10 w-10 shrink-0 rounded-full motion-reduce:animate-none" />
           <div className="min-w-0 flex-1 space-y-2">
-            <Skeleton className="h-3.5 w-3/4" />
-            <Skeleton className="h-3 w-1/2" />
-            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-3.5 w-3/4 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-1/2 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-20 motion-reduce:animate-none" />
           </div>
         </div>
       ))}

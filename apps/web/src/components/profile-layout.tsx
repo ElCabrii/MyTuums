@@ -58,20 +58,28 @@ const routeApi = getRouteApi("/@{$username}");
 export function ProfileSkeleton() {
   return (
     <div className="bg-background min-h-screen pb-12" aria-hidden>
-      <Skeleton className="mx-auto w-full rounded-none" style={{ aspectRatio: "3 / 1" }} />
+      <Skeleton
+        className="border-border bg-muted mx-auto w-full overflow-hidden rounded-none border-b motion-reduce:animate-none"
+        style={{
+          aspectRatio: BANNER_ASPECT_RATIO,
+          maxWidth: BANNER_FRAME_MAX_WIDTH,
+          minHeight: BANNER_FRAME_MIN_HEIGHT,
+          maxHeight: BANNER_FRAME_MAX_HEIGHT,
+        }}
+      />
       <div className="mx-auto max-w-[1500px] px-4 sm:px-8">
         <div className="relative -mt-16 mb-4 flex items-end justify-between sm:-mt-20">
-          <Skeleton className="h-28 w-28 rounded-full sm:h-36 sm:w-36" />
-          <Skeleton className="h-9 w-24 rounded-full" />
+          <Skeleton className="h-28 w-28 rounded-full motion-reduce:animate-none sm:h-36 sm:w-36" />
+          <Skeleton className="h-9 w-24 rounded-full motion-reduce:animate-none" />
         </div>
         <div className="mb-6 space-y-3">
-          <Skeleton className="h-7 w-48" />
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="h-4 w-full max-w-2xl" />
-          <Skeleton className="h-4 w-2/3 max-w-2xl" />
+          <Skeleton className="h-7 w-48 motion-reduce:animate-none" />
+          <Skeleton className="h-4 w-32 motion-reduce:animate-none" />
+          <Skeleton className="h-4 w-full max-w-2xl motion-reduce:animate-none" />
+          <Skeleton className="h-4 w-2/3 max-w-2xl motion-reduce:animate-none" />
           <div className="flex gap-5">
-            <Skeleton className="h-4 w-20" />
-            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-4 w-20 motion-reduce:animate-none" />
+            <Skeleton className="h-4 w-20 motion-reduce:animate-none" />
           </div>
         </div>
       </div>

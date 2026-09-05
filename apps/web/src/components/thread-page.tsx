@@ -30,29 +30,29 @@ const routeApi = getRouteApi("/post/$postId");
 export function ThreadSkeleton() {
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-8" aria-hidden>
-      <div className="flex items-center gap-2 border-b pb-2">
-        <Skeleton className="h-9 w-9 rounded-full" />
-        <Skeleton className="h-5 w-24" />
+      <div className="border-border flex items-center gap-2 border-b pb-2">
+        <Skeleton className="h-9 w-9 rounded-full motion-reduce:animate-none" />
+        <Skeleton className="h-5 w-24 motion-reduce:animate-none" />
       </div>
-      <div className="rounded-xl border p-4 sm:p-5">
+      <div className="border-border bg-card rounded-xl border p-4 sm:p-5">
         <div className="flex items-start gap-3">
-          <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+          <Skeleton className="h-10 w-10 shrink-0 rounded-full motion-reduce:animate-none" />
           <div className="w-full space-y-2">
-            <Skeleton className="h-3.5 w-32" />
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-3 w-4/5" />
+            <Skeleton className="h-3.5 w-32 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-full motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-4/5 motion-reduce:animate-none" />
           </div>
         </div>
       </div>
       <div className="space-y-4">
         {[0, 1].map((row) => (
-          <div key={row} className="rounded-xl border p-4">
+          <div key={row} className="border-border bg-card rounded-xl border p-4">
             <div className="flex items-start gap-3">
-              <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+              <Skeleton className="h-10 w-10 shrink-0 rounded-full motion-reduce:animate-none" />
               <div className="w-full space-y-2">
-                <Skeleton className="h-3.5 w-28" />
-                <Skeleton className="h-3 w-full" />
-                <Skeleton className="h-3 w-3/5" />
+                <Skeleton className="h-3.5 w-28 motion-reduce:animate-none" />
+                <Skeleton className="h-3 w-full motion-reduce:animate-none" />
+                <Skeleton className="h-3 w-3/5 motion-reduce:animate-none" />
               </div>
             </div>
           </div>
