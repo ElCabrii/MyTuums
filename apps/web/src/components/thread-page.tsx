@@ -1,9 +1,10 @@
 import { getRouteApi, Link, useLocation } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { ORPCError } from "@orpc/client";
-import { AlertCircle, ArrowLeft, FileQuestion, Loader2, MoreHorizontal } from "lucide-react";
+import { AlertCircle, ArrowLeft, FileQuestion, MoreHorizontal } from "lucide-react";
 import { THREAD_ANCESTOR_MAX } from "@my-tuums/api/constants";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PostCard } from "@/components/post-card";
 import { ThreadReplyFeed } from "@/components/thread-reply-feed";
 import { ProfileMessage } from "@/components/profile-message";
@@ -18,6 +19,48 @@ import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
 const routeApi = getRouteApi("/post/$postId");
+
+/**
+ * The `ThreadPage` loading state: the header row, one focused-post-shaped
+ * card and two reply-shaped rows, so ancestors, post and replies land without
+ * the full-page spinner-to-thread jump.
+ *
+ * `aria-hidden`: it paints structure, not information.
+ */
+export function ThreadSkeleton() {
+  return (
+    <div className="mx-auto max-w-2xl space-y-4 px-4 py-8" aria-hidden>
+      <div className="border-border flex items-center gap-2 border-b pb-2">
+        <Skeleton className="h-9 w-9 rounded-full motion-reduce:animate-none" />
+        <Skeleton className="h-5 w-24 motion-reduce:animate-none" />
+      </div>
+      <div className="border-border bg-card rounded-xl border p-4 sm:p-5">
+        <div className="flex items-start gap-3">
+          <Skeleton className="h-10 w-10 shrink-0 rounded-full motion-reduce:animate-none" />
+          <div className="w-full space-y-2">
+            <Skeleton className="h-3.5 w-32 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-full motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-4/5 motion-reduce:animate-none" />
+          </div>
+        </div>
+      </div>
+      <div className="space-y-4">
+        {[0, 1].map((row) => (
+          <div key={row} className="border-border bg-card rounded-xl border p-4">
+            <div className="flex items-start gap-3">
+              <Skeleton className="h-10 w-10 shrink-0 rounded-full motion-reduce:animate-none" />
+              <div className="w-full space-y-2">
+                <Skeleton className="h-3.5 w-28 motion-reduce:animate-none" />
+                <Skeleton className="h-3 w-full motion-reduce:animate-none" />
+                <Skeleton className="h-3 w-3/5 motion-reduce:animate-none" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /**
  * The `/post/$postId` page: the ancestor chain above the focused post, the
@@ -36,11 +79,7 @@ export function ThreadPage() {
   useDocumentHead(postPageName(focusedPost?.content), postPageDescription(focusedPost?.content));
 
   if (threadQuery.isPending) {
-    return (
-      <div className="flex h-[70vh] items-center justify-center">
-        <Loader2 className="text-primary dark:text-link h-8 w-8 animate-spin motion-reduce:animate-none" />
-      </div>
-    );
+    return <ThreadSkeleton />;
   }
 
   if (threadQuery.isError) {

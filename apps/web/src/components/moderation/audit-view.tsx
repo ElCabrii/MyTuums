@@ -77,10 +77,10 @@ function AuditSkeleton() {
     <Card size="sm" className="gap-3">
       {[0, 1, 2, 3, 4].map((row) => (
         <div key={row} className="flex items-center gap-3 px-4">
-          <Skeleton className="h-4 flex-1" />
-          <Skeleton className="h-4 w-24" />
-          <Skeleton className="h-4 w-24" />
-          <Skeleton className="h-4 w-12" />
+          <Skeleton className="h-4 flex-1 motion-reduce:animate-none" />
+          <Skeleton className="h-4 w-24 motion-reduce:animate-none" />
+          <Skeleton className="h-4 w-24 motion-reduce:animate-none" />
+          <Skeleton className="h-4 w-12 motion-reduce:animate-none" />
         </div>
       ))}
     </Card>

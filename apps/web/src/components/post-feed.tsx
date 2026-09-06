@@ -3,6 +3,7 @@ import { useAtomValue } from "jotai";
 import { MessageSquare } from "lucide-react";
 import { PostCard } from "@/components/post-card";
 import { PaginatedState } from "@/components/paginated-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { postFeedAtom } from "@/atoms/post-feed";
 import { mergedGameMentions } from "@/lib/game-mentions";
 import { m } from "@/paraglide/messages.js";
@@ -77,21 +78,24 @@ export function PostFeed({
  *
  * `aria-hidden`: it paints structure, not information — the loading state it
  * stands for is already conveyed by the page not answering.
+ *
+ * Exported for the surfaces whose rows are post cards but which do not mount
+ * a `PostFeed` (the home scope gate, the thread reply feed, search posts).
  */
-function FeedSkeleton() {
+export function FeedSkeleton() {
   return (
     <div className="space-y-4" aria-hidden>
       {[0, 1, 2].map((row) => (
-        <div key={row} className="border-border bg-card animate-pulse rounded-xl border p-4 sm:p-5">
+        <div key={row} className="border-border bg-card rounded-xl border p-4 sm:p-5">
           <div className="flex items-start gap-3">
-            <div className="bg-muted h-10 w-10 shrink-0 rounded-full" />
+            <Skeleton className="h-10 w-10 shrink-0 rounded-full motion-reduce:animate-none" />
             <div className="w-full space-y-2">
-              <div className="bg-muted h-3.5 w-32 rounded" />
-              <div className="bg-muted h-3 w-full rounded" />
-              <div className="bg-muted h-3 w-4/5 rounded" />
+              <Skeleton className="h-3.5 w-32 motion-reduce:animate-none" />
+              <Skeleton className="h-3 w-full motion-reduce:animate-none" />
+              <Skeleton className="h-3 w-4/5 motion-reduce:animate-none" />
             </div>
           </div>
-          <div className="bg-muted/60 mt-4 h-40 w-full rounded-lg" />
+          <Skeleton className="mt-4 h-40 w-full rounded-lg motion-reduce:animate-none" />
         </div>
       ))}
     </div>

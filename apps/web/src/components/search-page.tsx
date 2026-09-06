@@ -4,8 +4,10 @@ import { useAtomValue } from "jotai";
 import { Gamepad2, MessageSquare, Search, Users } from "lucide-react";
 import { GameCover } from "@/components/game-cover";
 import { PostCard } from "@/components/post-card";
+import { FeedSkeleton } from "@/components/post-feed";
 import { PaginatedState, type PaginatedStateQuery } from "@/components/paginated-state";
-import { UserRow } from "@/components/user-list";
+import { Skeleton } from "@/components/ui/skeleton";
+import { UserRow, UserListSkeleton } from "@/components/user-list";
 import { mergedGameMentions } from "@/lib/game-mentions";
 import { gameListAtom } from "@/atoms/games";
 import { searchPostsAtom, searchUsersAtom } from "@/atoms/search";
@@ -73,6 +75,7 @@ function SearchResultsBody({ q }: { q: string }) {
         emptyIcon={Users}
         emptyMessage={m.search_no_users({ query: q })}
         listClassName="space-y-3"
+        loadingFallback={<UserListSkeleton />}
         renderItem={(user) => <UserRow key={user.id} user={user} />}
       />
       <SearchResultsSection
@@ -82,6 +85,7 @@ function SearchResultsBody({ q }: { q: string }) {
         emptyIcon={Gamepad2}
         emptyMessage={m.search_no_games({ query: q })}
         listClassName="space-y-3"
+        loadingFallback={<SearchGameRowSkeleton />}
         renderItem={(game) => (
           <GameResultRow
             key={game.igdbId}
@@ -99,6 +103,7 @@ function SearchResultsBody({ q }: { q: string }) {
         emptyIcon={MessageSquare}
         emptyMessage={m.search_no_posts({ query: q })}
         listClassName="space-y-4"
+        loadingFallback={<FeedSkeleton />}
         renderItem={(post) => <PostCard key={post.id} post={post} gameMentions={gameMentions} />}
       />
     </div>
@@ -135,12 +140,34 @@ function GameResultRow({
 }
 
 /**
+ * Three placeholder rows that mirror `GameResultRow` (cover thumb + name +
+ * year) while game search loads.
+ *
+ * `aria-hidden`: it paints structure, not information.
+ */
+function SearchGameRowSkeleton() {
+  return (
+    <div className="space-y-1" aria-hidden>
+      {[0, 1, 2].map((row) => (
+        <div key={row} className="flex items-center gap-3 px-2 py-1.5">
+          <Skeleton className="h-14 w-10 shrink-0 rounded-md motion-reduce:animate-none" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-40 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-16 motion-reduce:animate-none" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
  * The data-shaped half of a results section — the same four states the shared
- * `PaginatedState` renders (spinner, retryable error, dashed empty, "Load
- * more" rows), fed by either the users or the posts atom. The heading is
+ * `PaginatedState` renders (skeleton, retryable error, dashed empty, "Load
+ * more" rows), fed by the users, posts or games atom. The heading is
  * hoisted because it must stay mounted in every state: the `aria-labelledby`
  * pair gives the region its accessible name, so a section that swapped its
- * heading for a spinner would lose it.
+ * heading for a skeleton would lose it.
  */
 function SearchResultsSection<T>({
   feed,
@@ -149,6 +176,7 @@ function SearchResultsSection<T>({
   emptyIcon,
   emptyMessage,
   listClassName,
+  loadingFallback,
   renderItem,
 }: {
   feed: PaginatedStateQuery & { data?: { pages: Array<{ items: T[] }> } };
@@ -157,6 +185,7 @@ function SearchResultsSection<T>({
   emptyIcon: typeof Users;
   emptyMessage: string;
   listClassName: string;
+  loadingFallback?: ReactNode;
   renderItem: (item: T) => ReactNode;
 }) {
   const items = feed.data?.pages.flatMap((page) => page.items) ?? [];
@@ -173,6 +202,7 @@ function SearchResultsSection<T>({
         emptyMessage={emptyMessage}
         isEmpty={items.length === 0}
         listClassName={listClassName}
+        loadingFallback={loadingFallback}
       >
         {items.map(renderItem)}
       </PaginatedState>

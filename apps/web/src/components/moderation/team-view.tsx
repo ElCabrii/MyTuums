@@ -278,14 +278,14 @@ function TeamSkeleton() {
       {[0, 1, 2].map((row) => (
         <Item key={row} variant="outline">
           <ItemMedia>
-            <Skeleton className="size-9 rounded-full" />
+            <Skeleton className="size-9 rounded-full motion-reduce:animate-none" />
           </ItemMedia>
           <ItemContent className="gap-2">
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-4 w-32 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-20 motion-reduce:animate-none" />
           </ItemContent>
           <ItemActions>
-            <Skeleton className="h-5 w-16 rounded-full" />
+            <Skeleton className="h-5 w-16 rounded-full motion-reduce:animate-none" />
           </ItemActions>
         </Item>
       ))}

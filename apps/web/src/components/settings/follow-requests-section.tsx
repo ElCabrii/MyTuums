@@ -10,8 +10,35 @@ import { PaginatedState } from "@/components/paginated-state";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileLink } from "@/components/profile-link";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
+
+/**
+ * Three placeholder rows that mirror the follow-request row (avatar + name/handle
+ * + Accept/Reject) while the inbox loads.
+ *
+ * `aria-hidden`: it paints structure, not information.
+ */
+function FollowRequestsSkeleton() {
+  return (
+    <div className="space-y-1" aria-hidden>
+      {[0, 1, 2].map((row) => (
+        <div key={row} className="flex items-center gap-3 py-2">
+          <Skeleton className="h-9 w-9 shrink-0 rounded-full motion-reduce:animate-none" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-32 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-24 motion-reduce:animate-none" />
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Skeleton className="h-9 w-16 shrink-0 rounded-md motion-reduce:animate-none" />
+            <Skeleton className="h-9 w-16 shrink-0 rounded-md motion-reduce:animate-none" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Inbound follow requests (issue #328) — the target-side inbox for a private
@@ -38,6 +65,7 @@ export function FollowRequestsSection() {
         errorMessage={m.settings_privacy_requests_error()}
         emptyIcon={Inbox}
         isEmpty={people.length === 0}
+        loadingFallback={<FollowRequestsSkeleton />}
       >
         {people.map((user) => {
           const handle = handleOf(user);

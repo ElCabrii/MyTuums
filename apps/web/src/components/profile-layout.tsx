@@ -22,6 +22,7 @@ import {
 import { formatJoinDate, formatCount } from "@/lib/format";
 import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/components/user-avatar";
 import { ImageViewer } from "@/components/image-viewer";
 import { AvatarUpgradePrompt } from "@/components/avatar-upgrade-prompt";
@@ -48,6 +49,45 @@ import { profilePageDescription } from "@/lib/document-head";
 const routeApi = getRouteApi("/@{$username}");
 
 /**
+ * The `ProfileLayout` loading state: banner plate, avatar, name/handle,
+ * bio and stats rows, so the header lands without the full-page
+ * spinner-to-profile jump.
+ *
+ * `aria-hidden`: it paints structure, not information.
+ */
+export function ProfileSkeleton() {
+  return (
+    <div className="bg-background min-h-screen pb-12" aria-hidden>
+      <Skeleton
+        className="border-border bg-muted mx-auto w-full overflow-hidden rounded-none border-b motion-reduce:animate-none"
+        style={{
+          aspectRatio: BANNER_ASPECT_RATIO,
+          maxWidth: BANNER_FRAME_MAX_WIDTH,
+          minHeight: BANNER_FRAME_MIN_HEIGHT,
+          maxHeight: BANNER_FRAME_MAX_HEIGHT,
+        }}
+      />
+      <div className="mx-auto max-w-[1500px] px-4 sm:px-8">
+        <div className="relative -mt-16 mb-4 flex items-end justify-between sm:-mt-20">
+          <Skeleton className="h-28 w-28 rounded-full motion-reduce:animate-none sm:h-36 sm:w-36" />
+          <Skeleton className="h-9 w-24 rounded-full motion-reduce:animate-none" />
+        </div>
+        <div className="mb-6 space-y-3">
+          <Skeleton className="h-7 w-48 motion-reduce:animate-none" />
+          <Skeleton className="h-4 w-32 motion-reduce:animate-none" />
+          <Skeleton className="h-4 w-full max-w-2xl motion-reduce:animate-none" />
+          <Skeleton className="h-4 w-2/3 max-w-2xl motion-reduce:animate-none" />
+          <div className="flex gap-5">
+            <Skeleton className="h-4 w-20 motion-reduce:animate-none" />
+            <Skeleton className="h-4 w-20 motion-reduce:animate-none" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The persistent half of a profile: banner, avatar, name and follow state. The
  * body — the person's posts — is the nested index route rendered through
  * `<Outlet />`. The follower and following lists are not sections of the page;
@@ -70,11 +110,7 @@ export function ProfileLayout() {
   );
 
   if (profileQuery.isPending) {
-    return (
-      <div className="flex h-[70vh] items-center justify-center">
-        <Loader2 className="text-primary dark:text-link h-8 w-8 animate-spin motion-reduce:animate-none" />
-      </div>
-    );
+    return <ProfileSkeleton />;
   }
 
   if (profileQuery.isError) {

@@ -82,14 +82,14 @@ function ProfileHoverCardContent({ username }: { username: string }) {
     return (
       <div className="space-y-3" aria-label={m.profile_hover_loading()}>
         <div className="flex items-center gap-3">
-          <Skeleton className="size-12 rounded-full" />
+          <Skeleton className="size-12 rounded-full motion-reduce:animate-none" />
           <div className="flex-1 space-y-2">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-4 w-28 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-20 motion-reduce:animate-none" />
           </div>
         </div>
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-8 w-24" />
+        <Skeleton className="h-10 w-full motion-reduce:animate-none" />
+        <Skeleton className="h-8 w-24 motion-reduce:animate-none" />
       </div>
     );
   }

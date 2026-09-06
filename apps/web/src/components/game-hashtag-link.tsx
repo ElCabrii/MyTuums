@@ -54,13 +54,13 @@ function GameHoverCardContent({ slug }: { slug: string }) {
     return (
       <div className="space-y-3" aria-label={m.game_hover_loading()}>
         <div className="flex items-center gap-3">
-          <Skeleton className="h-14 w-10 rounded-md" />
+          <Skeleton className="h-14 w-10 rounded-md motion-reduce:animate-none" />
           <div className="flex-1 space-y-2">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-4 w-28 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-20 motion-reduce:animate-none" />
           </div>
         </div>
-        <Skeleton className="h-8 w-24" />
+        <Skeleton className="h-8 w-24 motion-reduce:animate-none" />
       </div>
     );
   }

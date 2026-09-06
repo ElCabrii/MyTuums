@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { GameCover } from "@/components/game-cover";
 import { PaginatedState } from "@/components/paginated-state";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
+import { Skeleton } from "@/components/ui/skeleton";
 import { gameListAtom } from "@/atoms/games";
 import type { GameListParams } from "@/lib/query-definitions";
 import { m } from "@/paraglide/messages.js";
@@ -94,6 +95,7 @@ export function GamesPage() {
         }
         isEmpty={games.length === 0}
         listClassName="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
+        loadingFallback={<GamesSkeleton />}
       >
         {games.map((game) => (
           <Link
@@ -126,6 +128,29 @@ export function GamesPage() {
           </Link>
         ))}
       </PaginatedState>
+    </div>
+  );
+}
+
+/**
+ * Ten placeholder cards that mirror the directory's cover grid (cover +
+ * name + year) while the listing loads.
+ *
+ * `aria-hidden`: it paints structure, not information.
+ */
+export function GamesSkeleton() {
+  return (
+    <div
+      aria-hidden
+      className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
+    >
+      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((card) => (
+        <div key={card}>
+          <Skeleton className="aspect-[2/3] w-full rounded-lg motion-reduce:animate-none" />
+          <Skeleton className="mt-1.5 h-4 w-3/4 motion-reduce:animate-none" />
+          <Skeleton className="mt-1 h-3 w-1/4 motion-reduce:animate-none" />
+        </div>
+      ))}
     </div>
   );
 }
