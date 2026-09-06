@@ -42,7 +42,7 @@ function ConfiguredAnalyticsConsent({
   analytics: AnalyticsAdapter;
   measurementId: string;
 }) {
-  const { pathname } = useLocation();
+  const { pathname, searchStr } = useLocation();
   const consent = useAtomValue(analyticsConsentAtom);
   const expiresAt = useAtomValue(analyticsConsentExpiresAtAtom);
   const setConsent = useSetAtom(analyticsConsentAtom);
@@ -62,6 +62,9 @@ function ConfiguredAnalyticsConsent({
         if (!current) return;
         // Capability tokens live in the query string (`/reset-password`,
         // `/appeal`), so only the origin and pathname ever leave the device.
+        // `searchStr` is still a dependency below so query-only navigations
+        // (`/search?q=one` to `/search?q=two`) emit a page view for the new
+        // state while the reported location stays sanitized.
         analytics.trackPageView(measurementId, {
           location: new URL(pathname, window.location.origin).href,
           title: document.title,
@@ -74,7 +77,7 @@ function ConfiguredAnalyticsConsent({
     return () => {
       current = false;
     };
-  }, [analytics, consent, pathname, measurementId]);
+  }, [analytics, consent, pathname, searchStr, measurementId]);
 
   // The consent atom caches until storage changes, so without this a tab open
   // across the six-month boundary would keep a granted choice (and a running
@@ -115,7 +118,7 @@ function ConfiguredAnalyticsConsent({
       cancelled = true;
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     };
-  }, [analytics, consent, expiresAt, measurementId, pathname, setConsent]);
+  }, [analytics, consent, expiresAt, measurementId, pathname, searchStr, setConsent]);
 
   if (consent !== null && !preferencesOpen) return null;
 

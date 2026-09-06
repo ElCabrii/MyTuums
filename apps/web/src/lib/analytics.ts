@@ -3,7 +3,7 @@ import { ANALYTICS_CONSENT_LIFETIME_MS } from "@/lib/analytics-config";
 type Gtag = (...args: unknown[]) => void;
 
 interface AnalyticsWindow extends Window {
-  dataLayer?: unknown[][];
+  dataLayer?: IArguments[];
   gtag?: Gtag;
 }
 
@@ -42,8 +42,12 @@ function setCollectionDisabled(measurementId: string, disabled: boolean): void {
 function installCommandQueue(): Gtag {
   const target = analyticsWindow();
   target.dataLayer ??= [];
-  target.gtag ??= (...args: unknown[]) => {
-    target.dataLayer?.push(args);
+  // Google's documented snippet queues the `arguments` object itself, not an
+  // array: gtag.js ignores array entries, so an arrow function spreading into
+  // `push(args)` loads the tag but never records config or page views.
+  target.gtag ??= function () {
+    // eslint-disable-next-line prefer-rest-params -- gtag.js requires the Arguments object; rest params would queue an Array it ignores, see above
+    target.dataLayer?.push(arguments);
   };
   return target.gtag;
 }

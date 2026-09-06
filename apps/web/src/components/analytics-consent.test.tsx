@@ -96,6 +96,29 @@ describe("AnalyticsConsent", () => {
     expect(trackedLocation).not.toContain("secret-token");
   });
 
+  it("tracks query-only navigations while keeping the location sanitized", async () => {
+    const analytics = analyticsDouble();
+    const user = userEvent.setup();
+
+    const rendered = await renderWithProviders(
+      <AnalyticsConsent analytics={analytics} measurementId="G-TEST" />,
+      { initialPath: "/search?q=one" },
+    );
+
+    await user.click(screen.getByRole("button", { name: m.analytics_consent_accept() }));
+
+    await waitFor(() => expect(analytics.trackPageView).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      await rendered.router.navigate({ to: "/search", search: { q: "two" } });
+    });
+
+    await waitFor(() => expect(analytics.trackPageView).toHaveBeenCalledTimes(2));
+    const secondLocation = String(analytics.trackPageView.mock.calls[1]?.[1]?.location ?? "");
+    expect(secondLocation).toBe(new URL("/search", window.location.origin).href);
+    expect(secondLocation).not.toContain("two");
+  });
+
   it("expires a granted choice without a reload (issue #345)", async () => {
     const analytics = analyticsDouble();
     const store = createStore();
