@@ -5,6 +5,7 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import { preloadInjectionPlugin } from "./build-inject-plugin.ts";
 import { pwaPlugin } from "./pwa-plugin.ts";
+import { loadBuiltChangelog } from "./src/build/changelog.ts";
 import path from "node:path";
 import pkg from "./package.json" with { type: "json" };
 
@@ -12,6 +13,7 @@ import pkg from "./package.json" with { type: "json" };
 // can point the web app at its own server on a different port and run beside
 // a live `pnpm dev` (or the docker container) instead of fighting it for 3001.
 const rpcTarget = process.env.RPC_TARGET ?? "http://localhost:3001";
+const changelog = loadBuiltChangelog(path.resolve(import.meta.dirname, "changelog"), pkg.version);
 
 export default defineConfig({
   // Vite only loads .env files from its own project root by default, which is
@@ -30,6 +32,9 @@ export default defineConfig({
     // vitest.config.ts carries a stand-in define of its own because it
     // deliberately does not load this file.
     __APP_VERSION__: JSON.stringify(pkg.version),
+    // Release notes are repository-owned Markdown, compiled here so the
+    // browser ships neither a parser nor notes from any other version.
+    __APP_CHANGELOG__: JSON.stringify(changelog),
   },
   plugins: [
     tailwindcss(),

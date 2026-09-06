@@ -400,6 +400,10 @@ app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
 - Legal pages (`/privacy`, `/terms`, `/mentions-legales`) are localized like
   everything else; the French text of `/mentions-legales` is the legally
   authoritative filing.
+- Each release can carry English and French release notes. The matching notes
+  are built into that version of the app and shown once per device, including
+  on a first or signed-out visit. Dismissal is local to the device; a rollback
+  never replays older notes, and a release without notes stays silent.
 - **Google Analytics 4 is configuration-dependent and opt-in.** With no
   `VITE_GA_MEASUREMENT_ID`, no banner or analytics code runs. With one, every
   signed-in and signed-out surface offers equally prominent accept/refuse
