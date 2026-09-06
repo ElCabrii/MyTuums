@@ -315,6 +315,7 @@ jobs:
           build-args: |
             VITE_SOCIAL_PROVIDERS=google,discord,twitch
             VITE_GOOGLE_CLIENT_ID=ci-placeholder.apps.googleusercontent.com
+            VITE_GA_MEASUREMENT_ID=G-CI306TEST
           load: true
           tags: mytuums-server:ci
           cache-from: type=gha
@@ -331,7 +332,8 @@ jobs:
           docker rm ci-check
           grep -rq "google,discord,twitch" ./image-web-dist/assets             || { echo "::error::VITE_SOCIAL_PROVIDERS did not reach the bundle - is the ARG declared in the builder stage?"; exit 1; }
           grep -rq "ci-placeholder.apps.googleusercontent.com" ./image-web-dist/assets             || { echo "::error::VITE_GOOGLE_CLIENT_ID did not reach the bundle - is the ARG declared in the builder stage?"; exit 1; }
-          echo "Both VITE_* build args are baked into the bundle."
+          grep -rq "G-CI306TEST" ./image-web-dist/assets             || { echo "::error::VITE_GA_MEASUREMENT_ID did not reach the bundle - is the ARG declared on the base stage?"; exit 1; }
+          echo "All VITE_* build args are baked into the bundle."
 
       # The footer's version is baked in from package.json by vite.config.ts's
       # `define`; a broken define would leave the raw `__APP_VERSION__`

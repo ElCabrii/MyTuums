@@ -11,6 +11,7 @@ import { HandleSection } from "@/components/settings/handle-section";
 import { PasswordSection } from "@/components/settings/password-section";
 import { PreferencesSection } from "@/components/settings/preferences-section";
 import { PrivacySection } from "@/components/settings/privacy-section";
+import { AnalyticsSection } from "@/components/settings/analytics-section";
 import { FollowRequestsSection } from "@/components/settings/follow-requests-section";
 import { TwoFactorSection } from "@/components/settings/two-factor-section";
 import { PasskeySection } from "@/components/settings/passkey-section";
@@ -90,6 +91,7 @@ export function AccountSettingsPage() {
         <PasswordSection />
         <PreferencesSection />
         <PrivacySection />
+        <AnalyticsSection />
         <FollowRequestsSection />
         <TwoFactorSection />
         <PasskeySection />

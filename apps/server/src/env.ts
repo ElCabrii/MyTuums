@@ -40,6 +40,11 @@ const envSchema = z
     // SDK's capture calls are no-ops then, so nothing gates on this.
     SENTRY_DSN: z.string().optional(),
 
+    // Public GA4 measurement id. Vite reads the same value at build time; the
+    // Dockerfile retains it in the runner so this server can emit the matching
+    // conditional CSP. Empty and unset both mean analytics is absent.
+    VITE_GA_MEASUREMENT_ID: z.string().optional(),
+
     // Defaults to WEB_ORIGIN's hostname in packages/auth. Only set this when the
     // browser origin and the intended WebAuthn Relying Party differ.
     PASSKEY_RP_ID: z.string().optional(),

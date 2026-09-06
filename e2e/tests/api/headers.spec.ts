@@ -53,6 +53,10 @@ function expectContentSecurityPolicy(headers: Record<string, string | string[] |
   expect(scriptSrc).toContain("https://accounts.google.com");
   expect(scriptSrc).toContain("'unsafe-hashes'");
   expect(scriptSrc).toMatch(/'sha256-[\w+/]+=*'/);
+  // The default E2E stack carries no GA measurement id, so its policy must
+  // stay free of analytics-specific third-party origins.
+  expect(scriptSrc).not.toContain("googletagmanager.com");
+  expect(csp).not.toContain("google-analytics.com");
 
   expect(headers["content-security-policy-report-only"]).toBeUndefined();
 }

@@ -76,6 +76,10 @@ app's build from the same origin.
   them.
 - **Persisted atoms read `localStorage` as `unknown`, sanitise on read, and
   set `getOnInit: true`** — without it the first render flashes the default.
+- **Analytics has one root-mounted controller.** `AnalyticsConsent` alone
+  loads/stops GA and emits SPA page views; `analyticsConsentAtom` owns the
+  sanitised, six-month per-device choice. With no measurement id there is no
+  banner, storage write, script, page view, or analytics-specific CSP source.
 - **Exactly one effect owns each redirect.** Auth pages call
   `useRedirectWhenSignedIn` and never navigate on success themselves;
   double-navigation races were real bugs.
@@ -169,8 +173,8 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   `/verify-email` itself rather than waiting on `useRedirectWhenSignedIn`, and
   `/login` does the same on the `EMAIL_NOT_VERIFIED` outcome.
 - In dev, Vite proxies `/rpc`, `/api/auth` and `/media` to the API on `:3001`.
-- Only two `VITE_*` variables are read: `VITE_SOCIAL_PROVIDERS` and
-  `VITE_GOOGLE_CLIENT_ID`. Both are inlined at build time — see
+- Only three `VITE_*` variables are read: `VITE_SOCIAL_PROVIDERS`,
+  `VITE_GOOGLE_CLIENT_ID`, and `VITE_GA_MEASUREMENT_ID`. All are inlined at build time — see
   [docs/operations.md](../../docs/operations.md).
 
 ## Generated files

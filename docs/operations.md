@@ -145,12 +145,31 @@ in the stage that needs it. The declared build arguments are:
 
 - `VITE_SOCIAL_PROVIDERS`
 - `VITE_GOOGLE_CLIENT_ID`
+- `VITE_GA_MEASUREMENT_ID`
 
-Miss one and the image starts cleanly, serves everything, and silently renders
-no sign-in buttons. CI greps the built bundle for both, and separately probes
-the booted container's `/api/auth/sign-in/social` so the server's registered
-providers and the client's offered providers are asserted against each other
-from both sides.
+Miss one and the image starts cleanly, serves everything, and silently omits
+the corresponding browser integration. CI greps the built bundle for all
+three; it separately probes the booted container's `/api/auth/sign-in/social`
+so the server's registered providers and the client's offered providers are
+asserted against each other from both sides.
+
+When `VITE_GA_MEASUREMENT_ID` is set, configure that GA4 property under
+**Admin → Data collection and modification → Data retention** for 14 months.
+The app limits both its consent record and GA cookies to six months, disables
+Google signals and advertising-personalization signals, and never loads the
+tag before consent; the property setting is the remaining deployment-side
+retention control and cannot be enforced from this repository.
+
+The app sends SPA page views manually (`send_page_view: false` plus one
+`page_view` per TanStack Router navigation, with only the origin and pathname
+so capability tokens in query strings never leave the device). That flag alone
+does not stop Enhanced Measurement from also emitting a `page_view` on every
+browser-history change, so disable **Admin → Data collection and modification
+→ Data streams → Web → Enhanced measurement → Page views → Show advanced
+settings → Page changes based on browser history events** for the same
+property. Otherwise each navigation is counted twice — once automatically,
+once manually. See
+https://developers.google.com/analytics/devguides/collection/ga4/views#disable_page_changes_based_on_browser_history_events.
 
 **Runtime.** Everything else is read from the process environment at boot and
 validated by `apps/server/src/env.ts`. Only `DATABASE_URL` escapes that

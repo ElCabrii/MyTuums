@@ -22,6 +22,7 @@ describe("parseEnv", () => {
     expect(env.GOOGLE_CLIENT_ID).toBeUndefined();
     expect(env.RESEND_API_KEY).toBeUndefined();
     expect(env.PASSKEY_RP_ID).toBeUndefined();
+    expect(env.VITE_GA_MEASUREMENT_ID).toBeUndefined();
     expect(env.WEB_ORIGIN).toBe("http://localhost:5173");
   });
 
@@ -127,6 +128,15 @@ describe("parseEnv", () => {
       expect(
         parseEnv({ ...required, SENTRY_DSN: "https://abc@example.ingest.sentry.io/1" }).SENTRY_DSN,
       ).toBe("https://abc@example.ingest.sentry.io/1");
+    });
+  });
+
+  describe("VITE_GA_MEASUREMENT_ID", () => {
+    it("is optional and exposes the public build flag to the server", () => {
+      expect(parseEnv({ ...required }).VITE_GA_MEASUREMENT_ID).toBeUndefined();
+      expect(
+        parseEnv({ ...required, VITE_GA_MEASUREMENT_ID: "G-EXAMPLE" }).VITE_GA_MEASUREMENT_ID,
+      ).toBe("G-EXAMPLE");
     });
   });
 

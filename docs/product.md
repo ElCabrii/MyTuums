@@ -400,6 +400,12 @@ app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
 - Legal pages (`/privacy`, `/terms`, `/mentions-legales`) are localized like
   everything else; the French text of `/mentions-legales` is the legally
   authoritative filing.
+- **Google Analytics 4 is configuration-dependent and opt-in.** With no
+  `VITE_GA_MEASUREMENT_ID`, no banner or analytics code runs. With one, every
+  signed-in and signed-out surface offers equally prominent accept/refuse
+  choices, remembers either choice on that device for at most six months, and
+  loads GA only after acceptance. The footer and account settings can reopen
+  the choice at any time; refusing changes no product behavior.
 
 ## Blocks
 
