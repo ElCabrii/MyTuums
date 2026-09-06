@@ -58,12 +58,11 @@
   --card-foreground: oklch(0.141 0.005 285.823);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.525 0.223 3.958);
+  /* Leave contrast headroom for the preset's 80%-opacity button hover. */
+  --primary: oklch(0.5 0.21 3.958);
   --primary-foreground: oklch(0.971 0.014 343.198);
-  /* Link text. Identical to --primary in light mode; dark mode needs a
-       lighter red than the primary fill (see .dark below) to clear 4.5:1 on
-       the near-black background. Kept separate so the two can diverge without
-       the primary fill losing its own contrast budget. */
+  /* Links and button fills have different contrast needs: links sit on the
+       page or card, while primary buttons must support light labels on hover. */
   --link: oklch(0.525 0.223 3.958);
   --secondary: oklch(0.94 0.003 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
@@ -87,7 +86,7 @@
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.525 0.223 3.958);
+  --sidebar-primary: oklch(0.5 0.21 3.958);
   --sidebar-primary-foreground: oklch(0.971 0.014 343.198);
   --sidebar-accent: oklch(0.92 0.004 286.32);
   --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
