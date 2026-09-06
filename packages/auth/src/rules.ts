@@ -236,7 +236,7 @@ export function usernameRuleViolation(username: string): string | null {
  * `legal_terms_updated` / `legal_privacy_updated`; this value is what the
  * database stores so consent can be demonstrated without parsing prose.
  */
-export const LEGAL_VERSION = "2026-09-06";
+export const LEGAL_VERSION = "2026-09-07";
 
 /**
  * Rejection for an email/password sign-up that did not record consent. The

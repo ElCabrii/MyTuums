@@ -48,6 +48,9 @@ by the Playwright `api` project.
 - **`parseEnv` must never call `process.exit`.** Only `src/index.ts` may turn
   a bad environment into an exit. Otherwise merely importing the module kills
   any test or script that wanted to inspect the failure.
+- **Google Translation credentials are an all-or-nothing, server-only group.**
+  Unset means no translator and unchanged post reads; a partial group fails at
+  boot. The POC group belongs only in Railway Preview, never production.
 - **The request id is generated at the top of the tree, before any branch.**
   That is what puts it on responses written by the injected handlers (auth,
   RPC, static) as well as the tree's own. The access log reads the header back

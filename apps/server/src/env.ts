@@ -35,6 +35,18 @@ const envSchema = z
     IGDB_CLIENT_ID: z.string().optional(),
     IGDB_CLIENT_SECRET: z.string().optional(),
 
+    // Post translation through Google Cloud Translation (issue #310). A
+    // least-privilege service account the server uses to translate post text
+    // view-time. All optional as a group: with none of them set the server
+    // boots and every post renders untranslated — the dev, CI and production
+    // state for the POC, which is configured only in Railway Preview.
+    // `packages/api/src/context.ts` reads these again to build the client;
+    // as with the pairs above, this schema is not the source of the values,
+    // only the loud check that a partial group is caught at boot.
+    GOOGLE_TRANSLATION_PROJECT_ID: z.string().optional(),
+    GOOGLE_TRANSLATION_CLIENT_EMAIL: z.string().optional(),
+    GOOGLE_TRANSLATION_PRIVATE_KEY: z.string().optional(),
+
     // Sentry error tracking (apps/server/src/sentry.ts). Optional: without it
     // the server runs with no error-tracking client — the dev/CI state. The
     // SDK's capture calls are no-ops then, so nothing gates on this.
@@ -145,6 +157,29 @@ const envSchema = z
           env.IGDB_CLIENT_ID ? "IGDB_CLIENT_ID" : "IGDB_CLIENT_SECRET"
         } is set — the game-catalog sync needs both or neither`,
       });
+    }
+
+    // The translation group, same all-or-nothing rule one step stricter
+    // because the group is three wide: translating with two of three
+    // credentials fails at request time with a provider error nobody can
+    // trace back to a missing line in `.env`.
+    const translationRequired = [
+      "GOOGLE_TRANSLATION_PROJECT_ID",
+      "GOOGLE_TRANSLATION_CLIENT_EMAIL",
+      "GOOGLE_TRANSLATION_PRIVATE_KEY",
+    ] as const;
+    const translationPresent = translationRequired.filter((key) => Boolean(env[key]));
+
+    if (translationPresent.length > 0 && translationPresent.length < translationRequired.length) {
+      for (const key of translationRequired.filter((k) => !env[k])) {
+        ctx.addIssue({
+          code: "custom",
+          path: [key],
+          message: `is required because ${translationPresent.join(", ")} ${
+            translationPresent.length === 1 ? "is" : "are"
+          } set — post translation needs the whole GOOGLE_TRANSLATION_* group or none of it`,
+        });
+      }
     }
   });
 

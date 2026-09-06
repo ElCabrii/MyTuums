@@ -135,6 +135,11 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   own scrollbar colors or dimensions.
 - **Feed and list parameterisation lives in atoms.** `PostFeed` takes a
   `feedAtom` prop and never knows its own scope or author.
+- **Post translation follows the Paraglide locale, but search remains
+  original-only.** Post-list and thread query definitions include the current
+  `en`/`fr` locale; search definitions do not. `TranslatedPostContent` alone
+  owns the original/translation toggle, official Google attribution,
+  machine-translation `lang` markup and the shared `LinkedText` renderer.
 - **A link preview card belongs to its URL, not to the viewer (issue #260).**
   `PostCard` asks `firstLinkUrl` (exported by `linked-text.tsx`, the same
   scanner that renders the inline links) for the first URL only, and
