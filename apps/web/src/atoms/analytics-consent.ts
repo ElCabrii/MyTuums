@@ -27,6 +27,10 @@ const storedAnalyticsConsentAtom = atomWithStorage<unknown>(STORAGE_KEY, null, j
  * future-dated, or six-month-old value is absence, which makes the root banner
  * ask again. Writes always replace it with a fresh timestamp; `null` removes
  * the key entirely.
+ *
+ * `Date.now()` is not reactive, so a tab open across the expiry boundary keeps
+ * reading the cached decision until storage changes. `AnalyticsConsent`
+ * schedules that boundary from `analyticsConsentExpiresAtAtom` below.
  */
 export const analyticsConsentAtom = atom(
   (get): AnalyticsConsent | null => {
@@ -50,3 +54,18 @@ export const analyticsConsentAtom = atom(
 
 /** Opens the app-wide preference banner from the footer or account settings. */
 export const analyticsPreferencesOpenAtom = atom(false);
+
+/**
+ * The timestamp at which the current valid choice expires, or null when there
+ * is no valid choice to expire. The root controller schedules a one-shot
+ * update at this boundary so expiry applies without a reload.
+ */
+export const analyticsConsentExpiresAtAtom = atom((get): number | null => {
+  const parsed = storedConsentSchema.safeParse(get(storedAnalyticsConsentAtom));
+  if (!parsed.success) return null;
+
+  const age = Date.now() - parsed.data.decidedAt;
+  if (age < 0 || age >= ANALYTICS_CONSENT_LIFETIME_MS) return null;
+
+  return parsed.data.decidedAt + ANALYTICS_CONSENT_LIFETIME_MS;
+});

@@ -5,14 +5,15 @@ import { createStore } from "jotai";
 import { analyticsConsentAtom, analyticsPreferencesOpenAtom } from "@/atoms/analytics-consent";
 import { AnalyticsConsent } from "@/components/analytics-consent";
 import type { AnalyticsAdapter } from "@/lib/analytics";
+import { ANALYTICS_CONSENT_LIFETIME_MS } from "@/lib/analytics-config";
 import { renderWithProviders } from "@/test/render";
 import { m } from "@/paraglide/messages.js";
 
 function analyticsDouble() {
   return {
-    start: vi.fn(() => Promise.resolve()),
-    stop: vi.fn(),
-    trackPageView: vi.fn(),
+    start: vi.fn<AnalyticsAdapter["start"]>(() => Promise.resolve()),
+    stop: vi.fn<AnalyticsAdapter["stop"]>(),
+    trackPageView: vi.fn<AnalyticsAdapter["trackPageView"]>(),
   } satisfies AnalyticsAdapter;
 }
 
@@ -76,6 +77,52 @@ describe("AnalyticsConsent", () => {
     await user.click(screen.getByRole("button", { name: m.analytics_consent_refuse() }));
 
     expect(store.get(analyticsConsentAtom)).toBe("denied");
+    expect(analytics.stop).toHaveBeenCalledWith("G-TEST");
+  });
+
+  it("strips query and hash from the tracked page location (issue #345)", async () => {
+    const analytics = analyticsDouble();
+    const user = userEvent.setup();
+
+    await renderWithProviders(<AnalyticsConsent analytics={analytics} measurementId="G-TEST" />, {
+      initialPath: "/reset-password?token=secret-token#hash",
+    });
+
+    await user.click(screen.getByRole("button", { name: m.analytics_consent_accept() }));
+
+    await waitFor(() => expect(analytics.trackPageView).toHaveBeenCalledTimes(1));
+    const trackedLocation = String(analytics.trackPageView.mock.calls[0]?.[1]?.location ?? "");
+    expect(trackedLocation).toBe(new URL("/reset-password", window.location.origin).href);
+    expect(trackedLocation).not.toContain("secret-token");
+  });
+
+  it("expires a granted choice without a reload (issue #345)", async () => {
+    const analytics = analyticsDouble();
+    const store = createStore();
+    localStorage.setItem(
+      "my-tuums.analytics-consent",
+      JSON.stringify({
+        decision: "granted",
+        decidedAt: Date.now() - ANALYTICS_CONSENT_LIFETIME_MS + 200,
+      }),
+    );
+
+    await renderWithProviders(<AnalyticsConsent analytics={analytics} measurementId="G-TEST" />, {
+      initialPath: "/login",
+      store,
+    });
+
+    // Still valid on mount, so the banner stays hidden until the boundary.
+    expect(
+      screen.queryByRole("region", { name: m.analytics_consent_title() }),
+    ).not.toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: m.analytics_consent_title() }),
+      ).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(store.get(analyticsConsentAtom)).toBeNull());
     expect(analytics.stop).toHaveBeenCalledWith("G-TEST");
   });
 });

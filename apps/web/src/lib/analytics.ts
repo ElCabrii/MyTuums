@@ -111,6 +111,12 @@ export const googleAnalytics: AnalyticsAdapter = {
 
     if (configuredMeasurementId !== measurementId) {
       gtag("js", new Date());
+      // Manual SPA page views: `send_page_view: false` stops only the
+      // tag-load event. The GA4 property must also disable Enhanced
+      // Measurement's "Page changes based on browser history events"
+      // (see docs/operations.md), otherwise every TanStack Router
+      // navigation is counted twice — once automatically, once below.
+      // https://developers.google.com/analytics/devguides/collection/ga4/views#disable_page_changes_based_on_browser_history_events
       gtag("config", measurementId, {
         allow_ad_personalization_signals: false,
         allow_google_signals: false,

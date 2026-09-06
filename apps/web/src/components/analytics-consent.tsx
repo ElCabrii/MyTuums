@@ -3,6 +3,7 @@ import { Link, useLocation } from "@tanstack/react-router";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   analyticsConsentAtom,
+  analyticsConsentExpiresAtAtom,
   analyticsPreferencesOpenAtom,
   type AnalyticsConsent as AnalyticsConsentDecision,
 } from "@/atoms/analytics-consent";
@@ -15,6 +16,10 @@ interface AnalyticsConsentProps {
   analytics?: AnalyticsAdapter;
   measurementId?: string | null;
 }
+
+// setTimeout overflows past 2^31-1 ms, so a six-month expiry is scheduled in
+// chunks rather than as a single timer.
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /**
  * The single owner of analytics consent, tag lifecycle, and SPA page views.
@@ -37,8 +42,9 @@ function ConfiguredAnalyticsConsent({
   analytics: AnalyticsAdapter;
   measurementId: string;
 }) {
-  const location = useLocation();
+  const { pathname } = useLocation();
   const consent = useAtomValue(analyticsConsentAtom);
+  const expiresAt = useAtomValue(analyticsConsentExpiresAtAtom);
   const setConsent = useSetAtom(analyticsConsentAtom);
   const [preferencesOpen, setPreferencesOpen] = useAtom(analyticsPreferencesOpenAtom);
 
@@ -54,8 +60,10 @@ function ConfiguredAnalyticsConsent({
       .start(measurementId)
       .then(() => {
         if (!current) return;
+        // Capability tokens live in the query string (`/reset-password`,
+        // `/appeal`), so only the origin and pathname ever leave the device.
         analytics.trackPageView(measurementId, {
-          location: new URL(location.href, window.location.origin).href,
+          location: new URL(pathname, window.location.origin).href,
           title: document.title,
         });
       })
@@ -66,7 +74,48 @@ function ConfiguredAnalyticsConsent({
     return () => {
       current = false;
     };
-  }, [analytics, consent, location.href, measurementId]);
+  }, [analytics, consent, pathname, measurementId]);
+
+  // The consent atom caches until storage changes, so without this a tab open
+  // across the six-month boundary would keep a granted choice (and a running
+  // tag) past expiry. Re-running on navigation also catches a clock jump that
+  // lands past expiry while the tab was open.
+  useEffect(() => {
+    if (consent === null || expiresAt === null) return;
+
+    if (expiresAt - Date.now() <= 0) {
+      if (consent === "granted") analytics.stop(measurementId);
+      setConsent(null);
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const schedule = (delay: number): void => {
+      // setTimeout clamps past 2^31-1 ms (~24.8 days), well under six months,
+      // so chunk a far-future expiry instead of overflowing to an early fire.
+      timeoutId = setTimeout(
+        () => {
+          if (cancelled) return;
+          if (Date.now() >= expiresAt) {
+            if (consent === "granted") analytics.stop(measurementId);
+            setConsent(null);
+            return;
+          }
+          schedule(expiresAt - Date.now());
+        },
+        Math.min(delay, MAX_TIMEOUT_MS),
+      );
+    };
+
+    schedule(expiresAt - Date.now());
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    };
+  }, [analytics, consent, expiresAt, measurementId, pathname, setConsent]);
 
   if (consent !== null && !preferencesOpen) return null;
 

@@ -13,6 +13,11 @@ async function freshConsentAtom() {
   return (await import("@/atoms/analytics-consent")).analyticsConsentAtom;
 }
 
+async function freshExpiryAtom() {
+  vi.resetModules();
+  return (await import("@/atoms/analytics-consent")).analyticsConsentExpiresAtAtom;
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
@@ -71,5 +76,35 @@ describe("analyticsConsentAtom", () => {
 
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
     expect(store.get(consentAtom)).toBeNull();
+  });
+});
+
+describe("analyticsConsentExpiresAtAtom", () => {
+  it("returns the six-month boundary for a valid choice", async () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ decision: "granted", decidedAt: NOW.getTime() }),
+    );
+
+    const expiryAtom = await freshExpiryAtom();
+
+    expect(createStore().get(expiryAtom)).toBe(NOW.getTime() + ANALYTICS_CONSENT_LIFETIME_MS);
+  });
+
+  it("returns null when there is no valid choice to expire", async () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        decision: "granted",
+        decidedAt: NOW.getTime() - ANALYTICS_CONSENT_LIFETIME_MS,
+      }),
+    );
+
+    const expiredAtom = await freshExpiryAtom();
+    expect(createStore().get(expiredAtom)).toBeNull();
+
+    localStorage.removeItem(STORAGE_KEY);
+    const missingAtom = await freshExpiryAtom();
+    expect(createStore().get(missingAtom)).toBeNull();
   });
 });
