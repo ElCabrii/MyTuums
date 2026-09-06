@@ -49,6 +49,9 @@ interface ImportMeta {
  */
 declare const __APP_VERSION__: string;
 
+/** The current release's build-rendered Markdown, selected by device locale. */
+declare const __APP_CHANGELOG__: Readonly<Record<"en" | "fr", string | null>>;
+
 /**
  * `gifenc` (issue #201) ships no types of its own and has none published to
  * DefinitelyTyped. This covers exactly the exports `lib/gif-pipeline.ts`

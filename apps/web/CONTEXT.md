@@ -30,6 +30,7 @@ app's build from the same origin.
 | Router-touching behaviour            | `src/hooks/`                                                                          | never an atom — see the invariants                                                                                                                                                                                 |
 | Change an auth flow page             | `src/routes/` + `src/atoms/auth.ts`                                                   | `src/lib/auth-validation.ts` (form policy only — the rules live in `@my-tuums/auth/rules`)                                                                                                                         |
 | Change the legal consent gate        | `src/atoms/legal-consent.ts`, `src/components/legal-consent-dialog.tsx`               | `LEGAL_VERSION` in `@my-tuums/auth/rules`; `e2e/support/users.ts` seeds consent for every fixture                                                                                                                  |
+| Add release notes                    | `changelog/`                                                                          | `src/build/changelog.ts` compiles the current version; `src/components/changelog-dialog.tsx` owns display                                                                                                          |
 | Add a moderation surface             | `src/atoms/moderation.ts`, `src/components/moderation/`                               | `src/hooks/use-require-role.ts`                                                                                                                                                                                    |
 | Change a public route's crawler head | `apps/server/src/public-heads.ts` (server half), this app's `index.html` marker block | keep the title/description copy in step with `src/lib/document-head.ts` and `messages/en.json`                                                                                                                     |
 | Change the notifications surface     | `src/atoms/notifications.ts`, `src/components/notifications-page.tsx`                 | the unread badge on the header bell (`src/components/header.tsx`); the per-type copy in `messages/`                                                                                                                |
@@ -80,6 +81,13 @@ app's build from the same origin.
   loads/stops GA and emits SPA page views; `analyticsConsentAtom` owns the
   sanitised, six-month per-device choice. With no measurement id there is no
   banner, storage write, script, page view, or analytics-specific CSP source.
+- **Release notes travel with their release.** Vite compiles only
+  `changelog/<version>.<locale>.md` matching `package.json`; the browser ships
+  rendered HTML, not Marked or historical notes. `ChangelogDialog` shows it
+  once per version and device, including new and signed-out users, while the
+  mandatory legal-consent dialog has priority. A missing file advances the
+  stored version silently, and an older cached bundle never overwrites a newer
+  seen version.
 - **Exactly one effect owns each redirect.** Auth pages call
   `useRedirectWhenSignedIn` and never navigate on success themselves;
   double-navigation races were real bugs.

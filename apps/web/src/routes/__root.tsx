@@ -6,6 +6,7 @@ import { Footer } from "@/components/footer";
 import { NotFoundPage } from "@/components/not-found-page";
 import { LegalConsentDialog } from "@/components/legal-consent-dialog";
 import { AnalyticsConsent } from "@/components/analytics-consent";
+import { ChangelogDialog } from "@/components/changelog-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { resolvedThemeAtom, themeClassEffect } from "@/atoms/theme";
 import { localeDocumentEffect, localePreferenceEffect } from "@/atoms/locale";
@@ -130,6 +131,9 @@ function RootLayout() {
             documents itself. Duplicating half of that here would let the two
             drift. */}
         <LegalConsentDialog />
+        {/* Informational release notes yield to the mandatory legal gate, then
+            remember dismissal per device. The dialog owns that decision. */}
+        <ChangelogDialog />
         {/* This controller owns both the non-blocking consent banner and GA's
             lifecycle. With no build-time measurement id it renders nothing
             and performs no storage or network work. */}

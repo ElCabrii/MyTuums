@@ -105,6 +105,12 @@ and storage and auto-deploys the active release branch. When a new release
 branch is opened, update the Preview service's Railway deployment trigger to
 that branch. Production continues to auto-deploy `main` only.
 
+Release notes live in [the web changelog directory](../apps/web/changelog).
+Add English and French Markdown files named for the version in
+`apps/web/package.json`. Vite compiles only that matching pair into the bundle;
+if neither file exists, the release ships without a popup. Preview is where to
+verify the final copy after the version bump and before merging to `main`.
+
 Keep production third-party credentials out of Preview. OAuth, transactional
 email, and error-reporting integrations remain disabled there until dedicated
 non-production credentials are configured.
