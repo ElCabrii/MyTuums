@@ -145,8 +145,10 @@ by the Playwright `api` project.
   The web tree is already bundled into `dist`; a second, server-only
   `turbo prune` keeps it out structurally rather than by install-time luck
   (issue #58). CI asserts both directions.
-- **`VITE_SOCIAL_PROVIDERS` and `VITE_GOOGLE_CLIENT_ID` must stay declared as
-  `ARG` in the builder stage**, or the OAuth buttons silently do not ship.
+- **Every web `VITE_*` read must stay a Docker build argument.** The two auth
+  values are declared in the builder stage; `VITE_GA_MEASUREMENT_ID` is
+  declared on the shared base because both the web build and runtime server
+  need the same public flag for bundle/CSP agreement.
 
 ## Dependencies and boundaries
 

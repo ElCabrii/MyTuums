@@ -26,6 +26,11 @@
 # compute the pruned subset.
 
 FROM node:24-alpine AS base
+# Unlike the other VITE_* values, this public flag is also needed by the
+# runtime server to select the matching CSP. Defining it on the shared base
+# makes the exact build argument available to both the web builder and runner.
+ARG VITE_GA_MEASUREMENT_ID
+ENV VITE_GA_MEASUREMENT_ID=$VITE_GA_MEASUREMENT_ID
 RUN corepack enable
 
 # ---- Prune the monorepo down to what @my-tuums/server needs to build ----
@@ -74,10 +79,10 @@ RUN pnpm --filter @my-tuums/server run build
 #
 # Vite bakes every `import.meta.env.VITE_*` into the bundle AT BUILD TIME, and
 # Railway only makes service variables visible to a Docker build when the
-# Dockerfile declares them with ARG in the stage that needs them — so these two
-# are the app's only VITE_* reads (grep `import.meta.env.VITE_` in apps/web/src)
-# and they must be listed here or the OAuth buttons and One Tap silently never
-# render in production while working fine in dev.
+# Dockerfile declares them with ARG in the stage that needs them. The two auth
+# values are builder-only; VITE_GA_MEASUREMENT_ID is declared on `base` above
+# because the runner also needs the flag for CSP. Miss any of the three and the
+# corresponding browser feature silently disappears in production.
 ARG VITE_SOCIAL_PROVIDERS
 ARG VITE_GOOGLE_CLIENT_ID
 # The self-hosted CI Docker VM has about 956 MiB available. Node derives an

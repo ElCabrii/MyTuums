@@ -206,7 +206,15 @@ const handleRequest = createRequestHandler({
 // the requestId the routing tree generated. It composes with the decorator
 // because both wrap the same object and each only adds what it owns.
 const server = createServer((req, res) => {
-  void handleRequest(req, attachAccessLog(req, decorateResponse(req, res)));
+  void handleRequest(
+    req,
+    attachAccessLog(
+      req,
+      decorateResponse(req, res, {
+        googleAnalytics: Boolean(env.VITE_GA_MEASUREMENT_ID?.trim()),
+      }),
+    ),
+  );
 });
 
 /**

@@ -326,6 +326,11 @@ local image preview in the crop editor), `frame-ancestors 'none'`,
 `X-Content-Type-Options: nosniff`,
 `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`
 and HSTS. Inner handlers win, so a handler setting its own header keeps it.
+The GA4 script and collection origins are added to `script-src` and
+`connect-src` only when the image was built with `VITE_GA_MEASUREMENT_ID`;
+they remain absent from unconfigured deployments and from the separate,
+script-free branding host. The browser still loads the tag only after a valid
+per-device opt-in.
 
 **The CSP is hash-based, which constrains the edge in front of the app.**
 Cloudflare's JavaScript Detections injects its own inline `<script>` into every

@@ -145,12 +145,20 @@ in the stage that needs it. The declared build arguments are:
 
 - `VITE_SOCIAL_PROVIDERS`
 - `VITE_GOOGLE_CLIENT_ID`
+- `VITE_GA_MEASUREMENT_ID`
 
-Miss one and the image starts cleanly, serves everything, and silently renders
-no sign-in buttons. CI greps the built bundle for both, and separately probes
-the booted container's `/api/auth/sign-in/social` so the server's registered
-providers and the client's offered providers are asserted against each other
-from both sides.
+Miss one and the image starts cleanly, serves everything, and silently omits
+the corresponding browser integration. CI greps the built bundle for all
+three; it separately probes the booted container's `/api/auth/sign-in/social`
+so the server's registered providers and the client's offered providers are
+asserted against each other from both sides.
+
+When `VITE_GA_MEASUREMENT_ID` is set, configure that GA4 property under
+**Admin → Data collection and modification → Data retention** for 14 months.
+The app limits both its consent record and GA cookies to six months, disables
+Google signals and advertising-personalization signals, and never loads the
+tag before consent; the property setting is the remaining deployment-side
+retention control and cannot be enforced from this repository.
 
 **Runtime.** Everything else is read from the process environment at boot and
 validated by `apps/server/src/env.ts`. Only `DATABASE_URL` escapes that
