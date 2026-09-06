@@ -51,7 +51,8 @@
 
 :root {
   color-scheme: light;
-  --background: oklch(1 0 0);
+  /* Keep white cards distinct from the canvas without component overrides. */
+  --background: oklch(0.975 0.002 286.375);
   --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.141 0.005 285.823);
@@ -64,19 +65,20 @@
        the near-black background. Kept separate so the two can diverge without
        the primary fill losing its own contrast budget. */
   --link: oklch(0.525 0.223 3.958);
-  --secondary: oklch(0.967 0.001 286.375);
+  --secondary: oklch(0.94 0.003 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
+  --muted: oklch(0.955 0.003 286.375);
+  /* Small metadata clears 7:1 on cards and 4.5:1 on tinted control fills. */
+  --muted-foreground: oklch(0.45 0.016 285.938);
+  --accent: oklch(0.92 0.004 286.32);
   --accent-foreground: oklch(0.21 0.006 285.885);
-  /* Darkened from oklch(0.577 ...): the old value only cleared 4.01:1 as
-       text on its own 10% tint in light mode. This one measures 4.55:1 there
-       and 5.44:1 on white; the dark-mode value is untouched. */
-  --destructive: oklch(0.53 0.245 27.3);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
+  /* Error text must stay readable on its tint over the off-white canvas,
+       including the stronger tint used by destructive button hovers. */
+  --destructive: oklch(0.46 0.2 27.3);
+  /* Boundaries clear 3:1 even on accent surfaces; inputs also tint their fill. */
+  --border: oklch(0.6 0.012 286.32);
+  --input: oklch(0.58 0.012 286.32);
+  --ring: oklch(0.442 0.017 285.786);
   --chart-1: oklch(0.871 0.006 286.286);
   --chart-2: oklch(0.552 0.016 285.938);
   --chart-3: oklch(0.442 0.017 285.786);
@@ -85,12 +87,12 @@
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.592 0.249 0.584);
+  --sidebar-primary: oklch(0.525 0.223 3.958);
   --sidebar-primary-foreground: oklch(0.971 0.014 343.198);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
+  --sidebar-accent: oklch(0.92 0.004 286.32);
   --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.705 0.015 286.067);
+  --sidebar-border: oklch(0.6 0.012 286.32);
+  --sidebar-ring: oklch(0.442 0.017 285.786);
 }
 
 .dark {
