@@ -159,6 +159,20 @@ export function PrivacyPolicy() {
         <li>{m.legal_privacy_sharing_li2()}</li>
       </ul>
       <p>{m.legal_privacy_sharing_tail()}</p>
+      {/* Automatic post translation (issue #310): what is sent to Google Cloud
+          Translation, why, under which safeguards — plus Google's required
+          disclaimer verbatim. It lives under this section because the
+          translation processor is one of the recipients above. */}
+      <p>{m.legal_privacy_translation_p1()}</p>
+      <p>{m.legal_privacy_translation_p2()}</p>
+      <p>
+        {m.legal_privacy_translation_dpa_before()}
+        <a href="https://cloud.google.com/terms/data-processing-addendum">
+          {m.legal_privacy_translation_dpa_label()}
+        </a>
+        {m.legal_privacy_translation_dpa_after()}
+      </p>
+      <p>{m.legal_privacy_translation_disclaimer()}</p>
 
       <h2>{m.legal_privacy_transfers_title()}</h2>
       <p>{m.legal_privacy_transfers_p1()}</p>

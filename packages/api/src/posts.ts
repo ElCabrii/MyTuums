@@ -12,6 +12,7 @@ import {
   postEdit,
   postLike,
   postRepost,
+  postTranslation,
   user,
   userBlock,
 } from "@my-tuums/db/schema";
@@ -40,6 +41,7 @@ import { gameMentionsFor } from "./games.js";
 import { resolveLinkCard } from "./link-card.js";
 import { insertNotification } from "./notifications.js";
 import { keysetPage } from "./pagination.js";
+import { withPostTranslations, type PostTranslationView } from "./post-translation.js";
 import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";
 import {
   protectedProcedure,
@@ -328,6 +330,7 @@ function viewerHasReposted(viewerId: string | null) {
 export type QuotedPostPreview = {
   id: string;
   content: string | null;
+  translation?: PostTranslationView | null;
   removed: boolean;
   deleted: boolean;
   removedReason: string | null;
@@ -380,6 +383,7 @@ function quotedPreview(viewerId: string | null) {
         when ${quotedPostTable.removedAt} is not null or ${quotedPostTable.deletedAt} is not null then null
         else ${quotedPostTable.content}
       end,
+      'translation', null,
       'removed', ${quotedPostTable.removedAt} is not null,
       'deleted', ${quotedPostTable.deletedAt} is not null,
       'removedReason', case
@@ -554,6 +558,10 @@ export const postSelection = (viewerId: string | null) => ({
   content: sql<
     string | null
   >`case when ${post.removedAt} is not null or ${post.deletedAt} is not null then null else ${post.content} end`,
+  // Translation is a view-time overlay populated only by `post.list` and
+  // `post.thread`; the shared projection keeps a null field so search and
+  // write responses retain the same post shape without calling a provider.
+  translation: sql<PostTranslationView | null>`null`,
   removed: sql<boolean>`${post.removedAt} is not null`,
   // Two flags rather than one, because the two tombstones mean different
   // things to the reader: a removal is a moderation action the author can
@@ -1692,6 +1700,10 @@ export const postRouter = {
         await tx
           .insert(postEdit)
           .values({ postId: input.postId, content: current.content, createdAt: editedAt });
+        // Cached translations derive from the text being replaced. Keeping
+        // invalidation inside this transaction makes the post and its cache
+        // move as one state under the same row lock.
+        await tx.delete(postTranslation).where(eq(postTranslation.postId, input.postId));
         return row;
       });
 
@@ -1900,6 +1912,8 @@ export const postRouter = {
            * renders Discover's empty state instead of an error card.
            */
           gameSlug: z.string().trim().min(1).max(GAME_SLUG_MAX_LENGTH).optional(),
+          /** The viewer's current app language; absent keeps the legacy untranslated response. */
+          targetLocale: z.enum(["en", "fr"]).optional(),
         })
         .superRefine((input, refinement) => {
           if (
@@ -1991,13 +2005,23 @@ export const postRouter = {
         }
         const [continuation] = await replyContinuationPages(continuationArgs);
 
-        return continuation
-          ? {
-              items: continuation.items,
-              nextCursor: continuation.nextCursor,
-              gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(continuation)),
-            }
-          : { items: [], nextCursor: null, gameMentions: {} };
+        if (!continuation) return { items: [], nextCursor: null, gameMentions: {} };
+        const translated = {
+          items: await withPostTranslations(
+            context.db,
+            context.translator,
+            context.translationCoordinator,
+            input.targetLocale,
+            continuation.items,
+            context.requestId,
+            context.observeTranslation,
+          ),
+          nextCursor: continuation.nextCursor,
+        };
+        return {
+          ...translated,
+          gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(translated)),
+        };
       }
 
       // The caller's private bookmarks page (issue #262): posts joined to
@@ -2059,9 +2083,21 @@ export const postRouter = {
               .limit(input.limit + 1),
         });
 
-        return {
+        const translated = {
           ...bookmarkPage,
-          gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(bookmarkPage)),
+          items: await withPostTranslations(
+            context.db,
+            context.translator,
+            context.translationCoordinator,
+            input.targetLocale,
+            bookmarkPage.items,
+            context.requestId,
+            context.observeTranslation,
+          ),
+        };
+        return {
+          ...translated,
+          gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(translated)),
         };
       }
 
@@ -2095,9 +2131,21 @@ export const postRouter = {
           q: input.q,
           gameHashtagKey,
         });
-        return {
+        const translated = {
           ...page,
-          gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(page)),
+          items: await withPostTranslations(
+            context.db,
+            context.translator,
+            context.translationCoordinator,
+            input.targetLocale,
+            page.items,
+            context.requestId,
+            context.observeTranslation,
+          ),
+        };
+        return {
+          ...translated,
+          gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(translated)),
         };
       }
 
@@ -2152,7 +2200,32 @@ export const postRouter = {
         limit: THREAD_REPLY_BRANCH_INITIAL_SIZE,
       });
 
-      const response = { ...page, continuations };
+      const allItems = [
+        ...page.items,
+        ...continuations.flatMap((continuation) => continuation.items),
+      ];
+      const translatedItems = await withPostTranslations(
+        context.db,
+        context.translator,
+        context.translationCoordinator,
+        input.targetLocale,
+        allItems,
+        context.requestId,
+        context.observeTranslation,
+      );
+      let continuationOffset = page.items.length;
+      const response = {
+        ...page,
+        items: translatedItems.slice(0, page.items.length),
+        continuations: continuations.map((continuation) => {
+          const items = translatedItems.slice(
+            continuationOffset,
+            continuationOffset + continuation.items.length,
+          );
+          continuationOffset += continuation.items.length;
+          return { ...continuation, items };
+        }),
+      };
       return {
         ...response,
         gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(response)),
@@ -2182,7 +2255,12 @@ export const postRouter = {
    */
   thread: publicReadProcedure
     .use(publicRateLimit(RATE_LIMITS.read))
-    .input(z.object({ postId: z.uuid() }))
+    .input(
+      z.object({
+        postId: z.uuid(),
+        targetLocale: z.enum(["en", "fr"]).optional(),
+      }),
+    )
     .handler(async ({ input, context }) => {
       const viewerId = context.user?.id ?? null;
 
@@ -2206,13 +2284,23 @@ export const postRouter = {
       // The common case by a wide margin: most posts are top-level, and
       // there is no chain to walk for those.
       if (!focused.parentId) {
+        const [translatedFocused] = await withPostTranslations(
+          context.db,
+          context.translator,
+          context.translationCoordinator,
+          input.targetLocale,
+          [focused],
+          context.requestId,
+          context.observeTranslation,
+        );
+        const renderedFocused = translatedFocused ?? focused;
         return {
-          post: focused,
+          post: renderedFocused,
           ancestors: [],
           truncated: false,
           gameMentions: await gameMentionsFor(
             context.db,
-            pageTextsForMentions({ items: [focused] }),
+            pageTextsForMentions({ items: [renderedFocused] }),
           ),
         };
       }
@@ -2259,21 +2347,32 @@ export const postRouter = {
       const byId = new Map(rows.map((row) => [row.id, row]));
       const ancestors = ancestorIds.map((id) => byId.get(id)).filter((row) => row !== undefined);
 
-      // The focused post AND every ancestor render their text through the
-      // same linkifier, so the map covers both.
-      const texts = [focused, ...ancestors].flatMap((row) => [
-        row.content,
-        row.quoted?.content ?? null,
-      ]);
+      const translated = await withPostTranslations(
+        context.db,
+        context.translator,
+        context.translationCoordinator,
+        input.targetLocale,
+        [focused, ...ancestors],
+        context.requestId,
+        context.observeTranslation,
+      );
+      const translatedFocused = translated[0] ?? focused;
+      const translatedAncestors = translated.slice(1);
 
       return {
-        post: focused,
-        ancestors,
+        post: translatedFocused,
+        ancestors: translatedAncestors,
         // The root-most ancestor still having a parent means the chain was
         // cut off by THREAD_ANCESTOR_MAX, not that we reached the top. Read
         // off the rows we already have rather than costing another query.
-        truncated: ancestors[0]?.parentId != null,
-        gameMentions: await gameMentionsFor(context.db, texts),
+        truncated: translatedAncestors[0]?.parentId != null,
+        gameMentions: await gameMentionsFor(
+          context.db,
+          [translatedFocused, ...translatedAncestors].flatMap((row) => [
+            row.content,
+            row.quoted?.content ?? null,
+          ]),
+        ),
       };
     }),
 

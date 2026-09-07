@@ -74,7 +74,7 @@ export function makeAuthor(overrides: Partial<Post["author"]> = {}): Post["autho
 
 /** A minimal post for fixtures. */
 export function makePost(overrides: Partial<Post> = {}): Post {
-  return {
+  const post: Post = {
     id: crypto.randomUUID(),
     content: "Hello, world!",
     createdAt: new Date(),
@@ -101,6 +101,7 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     editedAt: null,
     unavailable: false,
     private: false,
+    translation: null,
     ...overrides,
     parent: overrides.parent ?? null,
     parentPrivate: overrides.parentPrivate ?? false,
@@ -108,6 +109,7 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     quotedPrivate: overrides.quotedPrivate ?? false,
     attachments: overrides.attachments ?? [],
   };
+  return post;
 }
 
 /** A minimal follower/following list entry for fixtures. */

@@ -48,6 +48,9 @@ by the Playwright `api` project.
 - **`parseEnv` must never call `process.exit`.** Only `src/index.ts` may turn
   a bad environment into an exit. Otherwise merely importing the module kills
   any test or script that wanted to inspect the failure.
+- **Google Translation credentials are an all-or-nothing, server-only group.**
+  Unset means no translator and unchanged post reads; a partial group fails at
+  boot. The POC group belongs only in Railway Preview, never production.
 - **The request id is generated at the top of the tree, before any branch.**
   That is what puts it on responses written by the injected handlers (auth,
   RPC, static) as well as the tree's own. The access log reads the header back
@@ -144,7 +147,11 @@ by the Playwright `api` project.
 - **The runner stage installs only the server's own production dependencies.**
   The web tree is already bundled into `dist`; a second, server-only
   `turbo prune` keeps it out structurally rather than by install-time luck
-  (issue #58). CI asserts both directions.
+  (issue #58). CI asserts both directions. The CommonJS-heavy Google Cloud
+  Translation SDK is deliberately one of those runtime dependencies: bundling
+  it into the ESM server output leaves dynamic `require()` calls that crash at
+  boot as soon as the API context module initializes, even when translation is
+  not configured.
 - **Every web `VITE_*` read must stay a Docker build argument.** The two auth
   values are declared in the builder stage; `VITE_GA_MEASUREMENT_ID` is
   declared on the shared base because both the web build and runtime server
@@ -155,7 +162,8 @@ by the Playwright `api` project.
 - `@my-tuums/api` supplies the router, the per-request context and the media
   presigner; `@my-tuums/auth` the better-auth node handler; `@my-tuums/db` the
   pool (`pingDb`/`closeDb`) and migrations. tsup inlines all three — only the
-  packages this app declares in `dependencies` stay external.
+  packages this app declares in `dependencies`, including
+  `@google-cloud/translate`, stay external.
 - One origin is a requirement, not a preference. See
   [docs/architecture.md](../../docs/architecture.md).
 

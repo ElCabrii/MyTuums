@@ -29,8 +29,8 @@ export default defineConfig({
   // Inlining them here is the fix — everything matching `@my-tuums/*` gets
   // bundled into dist/index.js instead of left as an external `require`.
   // Only the packages THIS app declares in `dependencies` (better-auth,
-  // @orpc/server, zod, @sentry/node, @opentelemetry/core) stay external
-  // and are resolved from node_modules at
+  // @orpc/server, zod, @sentry/node, @opentelemetry/core,
+  // @google-cloud/translate) stay external and are resolved from node_modules at
   // runtime; tsup follows a bundled module's imports, so the transitive npm
   // deps of the inlined workspace packages (drizzle-orm, postgres, ...) are
   // bundled too — grep the external `from "..."` imports in dist/index.js

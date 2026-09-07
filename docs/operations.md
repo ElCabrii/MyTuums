@@ -14,7 +14,7 @@ does, what happens when it is unset, and where the values come from. This
 document does not repeat it; it covers only the rules that are not obvious from
 a variable's own description.
 
-Four traps worth restating, because each one fails silently:
+Five traps worth restating, because each one fails silently:
 
 - `S3_BUCKET` is the bucket's **globally unique** name (display name plus a
   short hash), not the display name and not `RAILWAY_BUCKET_NAME`.
@@ -27,11 +27,14 @@ Four traps worth restating, because each one fails silently:
 - `BETTER_AUTH_SECRET` must be at least 32 characters of real randomness. It
   also keys the appeal-link HMAC, so rotating it invalidates outstanding
   appeal links.
+- `GOOGLE_TRANSLATION_PROJECT_ID`, `GOOGLE_TRANSLATION_CLIENT_EMAIL` and
+  `GOOGLE_TRANSLATION_PRIVATE_KEY` are one server-only group. For the POC they
+  belong only to Preview; an unset group keeps posts untranslated.
 
 Partial groups are refused at boot by `apps/server/src/env.ts`: an OAuth pair
-missing a half, or an `S3_*` group missing one of endpoint, bucket, access key
-or secret. All-or-nothing is the rule; `S3_REGION` is exempt because it has a
-real default (`auto`).
+missing a half, an `S3_*` group missing one of endpoint, bucket, access key or
+secret, or an incomplete `GOOGLE_TRANSLATION_*` group. All-or-nothing is the
+rule; `S3_REGION` is exempt because it has a real default (`auto`).
 
 ## Local development
 
@@ -110,6 +113,28 @@ Add English and French Markdown files named for the version in
 `apps/web/package.json`. Vite compiles only that matching pair into the bundle;
 if neither file exists, the release ships without a popup. Preview is where to
 verify the final copy after the version bump and before merging to `main`.
+
+### Translation POC
+
+Google Cloud Translation is a Preview-only release experiment. Before adding
+its three service variables to Railway Preview:
+
+1. Use a dedicated Google Cloud project or service account with only
+   the **Cloud Translation API User** role (IAM identifier
+   roles/cloudtranslate.user),
+   and enable Cloud Translation Advanced v3.
+2. Lower the Google Cloud project's character/request quotas to the deliberate
+   Preview spending ceiling. The app's in-memory rate limiter is not a billing
+   boundary: it resets on deploy and multiplies per replica.
+3. Confirm the privacy disclosure, renewed legal acceptance, official Google
+   attribution, disclaimer and machine-translated permalink markup in Preview.
+4. Set the complete `GOOGLE_TRANSLATION_*` group on the app service in Preview
+   only. Confirm the same names are absent from production, dev and CI.
+
+The adapter always calls `translate-eu.googleapis.com` with an `eu` parent and
+the pre-trained NMT model. It has no global fallback. Removing the three
+variables and redeploying is the kill switch; existing cache rows become inert
+because no translation overlay runs without a configured provider.
 
 Keep production third-party credentials out of Preview. OAuth, transactional
 email, and error-reporting integrations remain disabled there until dedicated
@@ -258,6 +283,13 @@ Destructive helpers refuse to touch anything else.
   `apps/server/src/sentry.ts` is the reporting adapter, while `index.ts` owns
   the actual shutdown and flush.
 - **Health.** `GET /health` is DB-backed and returns `{"status":"ok"}`.
+- **Translation.** Each enabled `post.list` or `post.thread` overlay writes one
+  JSON line with `type: "translation"`, the request id, target locale, provider
+  model, duration, cache hits/misses, provider request count, successfully
+  submitted character count, timeouts, provider failures, invalid results and
+  cache failures. It contains no original or translated post text, marker
+  values, credentials or provider error message. Railway log queries can sum
+  these counters during the Preview evaluation.
 
 ## CI checks
 

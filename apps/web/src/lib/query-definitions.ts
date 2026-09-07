@@ -8,6 +8,25 @@ import {
 } from "@my-tuums/api/constants";
 import type { FeedScope } from "@/lib/feed-scope";
 import { orpc, retryUnlessClientError } from "@/lib/orpc";
+import { getLocale } from "@/paraglide/runtime.js";
+
+/** The UI locales post translation is served between (issue #310). */
+export type TranslationLocale = "en" | "fr";
+
+/**
+ * The locale the viewer reads the app in — the translation target every post
+ * query carries. Read centrally here so feed, thread, reply, bookmark,
+ * profile and discover requests all ask for the same language without each
+ * call site repeating it; search stays untranslated by construction (its
+ * helpers below never set this field). A locale switch reloads the document
+ * (see `atoms/locale.ts`), so this is effectively static per page load — and
+ * because it rides inside the input, each language keeps its own cache entry
+ * instead of showing the previous language's translations.
+ */
+function translationTarget(): TranslationLocale {
+  const locale = getLocale();
+  return locale === "fr" ? "fr" : "en";
+}
 
 interface PostListInput {
   limit: number;
@@ -20,6 +39,7 @@ interface PostListInput {
   feed?: FeedScope | "bookmarks";
   q?: string;
   gameSlug?: string;
+  targetLocale?: TranslationLocale;
   cursor?: string;
 }
 interface PagedSearchInput {
@@ -88,7 +108,7 @@ export function postListQueryOptions({
 }: PostFeedParams) {
   return orpc.post.list.infiniteOptions({
     input: (cursor: string | undefined) => {
-      const input: PostListInput = { limit: POST_PAGE_SIZE };
+      const input: PostListInput = { limit: POST_PAGE_SIZE, targetLocale: translationTarget() };
       if (authorId) input.authorId = authorId;
       if (parentId) input.parentId = parentId;
       if (kind === "replies") input.kind = "replies";
@@ -122,6 +142,7 @@ export function replyContinuationQueryOptions(rootPostId: string, initialCursor:
       const input: PostListInput = {
         limit: POST_PAGE_SIZE,
         continuationRootId: rootPostId,
+        targetLocale: translationTarget(),
       };
       if (cursor) input.cursor = cursor;
       return input;
@@ -202,7 +223,9 @@ export function gameListQueryOptions({ sort, q }: GameListParams) {
 
 export function threadQueryOptions(postId: string) {
   return {
-    ...orpc.post.thread.queryOptions({ input: { postId } }),
+    ...orpc.post.thread.queryOptions({
+      input: { postId, targetLocale: translationTarget() },
+    }),
     retry: retryUnlessClientError,
   };
 }

@@ -114,6 +114,47 @@ describe("parseEnv", () => {
     });
   });
 
+  /**
+   * Post translation through Google Cloud Translation (issue #310) follows
+   * the group rule without being a provider: an all-or-nothing trio whose
+   * absence is the normal dev/CI/production state for the POC, so a partial
+   * group must be refused on its own message.
+   */
+  describe("half-configured translation group", () => {
+    const fullTranslation = {
+      GOOGLE_TRANSLATION_PROJECT_ID: "test-project",
+      GOOGLE_TRANSLATION_CLIENT_EMAIL: "translator@test-project.iam.gserviceaccount.com",
+      GOOGLE_TRANSLATION_PRIVATE_KEY:
+        "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n",
+    };
+
+    it("accepts the whole group, and none of it", () => {
+      expect(parseEnv({ ...required, ...fullTranslation }).GOOGLE_TRANSLATION_PROJECT_ID).toBe(
+        "test-project",
+      );
+      expect(parseEnv({ ...required }).GOOGLE_TRANSLATION_PROJECT_ID).toBeUndefined();
+    });
+
+    it("rejects a project id alone, naming both missing halves", () => {
+      expect(() =>
+        parseEnv({ ...required, GOOGLE_TRANSLATION_PROJECT_ID: "test-project" }),
+      ).toThrow(/GOOGLE_TRANSLATION_CLIENT_EMAIL/);
+      expect(() =>
+        parseEnv({ ...required, GOOGLE_TRANSLATION_PROJECT_ID: "test-project" }),
+      ).toThrow(/GOOGLE_TRANSLATION_PRIVATE_KEY/);
+    });
+
+    it("rejects any other partial group, naming the missing half", () => {
+      expect(() =>
+        parseEnv({
+          ...required,
+          GOOGLE_TRANSLATION_CLIENT_EMAIL: "translator@example.com",
+          GOOGLE_TRANSLATION_PRIVATE_KEY: "key",
+        }),
+      ).toThrow(/GOOGLE_TRANSLATION_PROJECT_ID/);
+    });
+  });
+
   describe("AUTH_RATE_LIMIT", () => {
     it("is optional and accepts only true/false", () => {
       expect(parseEnv({ ...required }).AUTH_RATE_LIMIT).toBeUndefined();

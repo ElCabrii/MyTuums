@@ -19,3 +19,8 @@ export { objectKeyFromMediaPath } from "./image.js";
 export { publicPostHead, type PublicPostHead } from "./public-post-head.js";
 export { publicGameHead, type PublicGameHead } from "./public-game-head.js";
 export type { Storage } from "./storage.js";
+export type {
+  Translator,
+  TranslationResult,
+  TranslationTargetLocale,
+} from "./google-translation.js";
