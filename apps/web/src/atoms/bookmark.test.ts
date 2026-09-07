@@ -30,7 +30,6 @@ import { installTestOrpc } from "@/lib/orpc";
 function makePost(overrides: Partial<Post> & { id: string }): Post {
   return {
     content: "hello",
-    translation: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     parentId: null,
     parent: null,

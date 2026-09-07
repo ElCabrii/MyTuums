@@ -161,12 +161,9 @@ Ordering facts that are load-bearing:
 `packages/api/src/router.ts`
 
 `createContext` builds one `Context` per request carrying `db`, `session`,
-`rateLimiter`, `storage`, `translator`, its singleflight coordinator,
-content-free observer and `requestId`. The rate limiter, storage client and
-translation dependencies are threaded on the context, never imported as module
-globals, so tests substitute fakes and one suite's state cannot bleed into
-another's. Translation is nullable: an unconfigured deployment gets `null`,
-not a client that fails on every feed read.
+`rateLimiter`, `storage` and `requestId`. The rate limiter and the storage
+client are threaded on the context, never imported as module globals, so tests
+substitute fakes and one suite's limiter state cannot bleed into another's.
 
 The router's top-level groups:
 
@@ -187,42 +184,6 @@ Procedures are built from four gates in `packages/api/src/procedures.ts`:
 `protectedProcedure` (session required), `moderatorProcedure`,
 `staffProcedure`, `adminProcedure` — plus `baseProcedure`, used by exactly one
 procedure (`moderation.appealOpen`). See [security.md](security.md).
-
-## Post translation overlay
-
-**Source of truth:** `packages/api/src/google-translation.ts`,
-`packages/api/src/post-translation.ts`, `packages/api/src/posts.ts`,
-`packages/db/src/schema/app.ts`
-
-`post.list` and `post.thread` accept an optional English/French target locale.
-They complete their ordinary visibility projection first, then hand only
-non-redacted post and quoted-post text to the translation overlay. Search,
-notifications, profiles, email and moderation never call it; the stored post,
-report snapshots and edit history always remain the authored text.
-
-The cache key is `(post_id, target_locale, provider_model)`. A positive row
-stores translated text and Google's detected source locale. A null translation
-is a stable negative result for same-language or unsupported source text, so it
-also prevents another paid call. Failures, missing detections and malformed
-token restoration are not cached. `post.edit` deletes every cache row for the
-post in the same locked transaction that writes the new text. Cache writes
-re-check the live source under a shared row lock, so a provider result produced
-for text that changed in flight cannot be attached to the new version.
-
-Identical post versions are coalesced process-wide while in flight, then each
-caller's owned misses are partitioned into requests of at most 100 posts and
-25,000 protected Unicode code points.
-Independent bounded calls run concurrently so a large reply page still pays
-one provider deadline rather than one deadline per batch.
-URLs, mentions, hashtags, emoji and line breaks are replaced with markers
-before translation and restored afterward; a missing or duplicated marker
-rejects that result. The Google adapter fixes the endpoint to
-`translate-eu.googleapis.com`, parent location to `europe-west1`, model to the
-pre-trained NMT resource, and omits `sourceLanguageCode` for provider detection.
-Its five-second deadline and every provider or cache-read error degrade to
-original text. A cache-write error keeps the validated result for the current
-response but records no reusable row. The Context-threaded observer emits
-counts and timing only, never text or credentials.
 
 ## Client state ownership — Jotai and TanStack Query
 

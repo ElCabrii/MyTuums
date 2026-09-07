@@ -53,9 +53,6 @@ databases. It serves data only — no HTTP, no business logic.
   (`BADGE_IDS` in `@my-tuums/api/badges`) as a SQL literal, and
   `src/stamp-join-badges.ts` repeats the join family's ranks and ids — the
   dependency points one way, so keep the copies in step.
-- **The translation cache identity is a composite primary key.** One
-  `(post_id, target_locale, provider_model)` row is one positive or stable
-  negative result; the post foreign key cascades hard deletion.
 - **A quote reference is deliberately FK-less.** `post.quoted_post_id` names
   another post, but a hard delete of that row (today, through its author's
   account cascade) must not delete the quoting author's own post. Readers
