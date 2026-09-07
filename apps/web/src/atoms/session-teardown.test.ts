@@ -39,7 +39,12 @@ describe("clearViewerState", () => {
     // cache is cleared wholesale rather than invalidated.
     fixtures.profile.data("alexmercer", makeProfile({ viewerIsFollowing: true }));
     fixtures.postList.data([
-      { items: [makePost({ viewerHasLiked: true })], nextCursor: null, gameMentions: {} },
+      {
+        items: [makePost({ viewerHasLiked: true })],
+        nextCursor: null,
+        gameMentions: {},
+        ranking: null,
+      },
     ]);
     fixtures.thread.data("post-1", makeThread());
     fixtures.userList.data("alexmercer", "followers", [

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
-import { createTestQueryClient, makeGameCard, makePost } from "@/test/factories";
+import {
+  createTestQueryClient,
+  makeGameCard,
+  makePost,
+  makePostListPage,
+  makeRanking,
+  makeRankSuggestion,
+} from "@/test/factories";
 import { queryFixtures } from "@/test/query-fixtures";
 import { renderWithProviders } from "@/test/render";
 import { DiscoverPage } from "@/components/discover-page";
@@ -9,20 +16,24 @@ import { m } from "@/paraglide/messages.js";
 // The four-state skeleton is PaginatedState's, owned by
 // paginated-state.test.tsx; the feed atom family is owned by
 // atoms/post-feed.test.ts. This file proves only the page's wiring: the
-// global feed renders through the shared chrome, the empty state carries
-// Discover's own copy, the search box and game filter narrow the feed through
-// URL-persisted params, and the page stays a reading surface — no composer,
-// no scope tabs.
+// ranked Discover feed renders through the shared chrome, the empty state
+// carries Discover's own copy, the search box and game filter narrow the
+// feed through URL-persisted params, Who-to-Follow reads the feed's own
+// metadata, and the page stays a reading surface — no composer, no scope
+// tabs, no ranking toggle.
 describe("DiscoverPage", () => {
-  it("renders the global feed's posts with a Load-more control while a next page exists", async () => {
+  it("renders the ranked feed's posts with a Load-more control while a next page exists", async () => {
     const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).postList.data([
-      {
-        items: [makePost({ content: "A community post" })],
-        nextCursor: "cursor-1",
-        gameMentions: {},
-      },
-    ]);
+    queryFixtures(queryClient).postList.data(
+      [
+        makePostListPage({
+          items: [makePost({ content: "A community post" })],
+          nextCursor: "cursor-1",
+          ranking: makeRanking({ suggestions: [] }),
+        }),
+      ],
+      { feed: "discover", ranked: true },
+    );
 
     await renderWithProviders(<DiscoverPage />, {
       queryClient,
@@ -32,11 +43,15 @@ describe("DiscoverPage", () => {
 
     expect(screen.getByText("A community post")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: m.common_load_more() })).toBeEnabled();
+    expect(screen.getByRole("button", { name: m.feed_refresh() })).toBeInTheDocument();
   });
 
   it("renders Discover's empty state when the feed has no posts", async () => {
     const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }]);
+    queryFixtures(queryClient).postList.data(
+      [makePostListPage({ ranking: makeRanking({ suggestions: [] }) })],
+      { feed: "discover", ranked: true },
+    );
 
     await renderWithProviders(<DiscoverPage />, {
       queryClient,
@@ -49,9 +64,12 @@ describe("DiscoverPage", () => {
     expect(screen.queryByRole("button", { name: m.common_load_more() })).not.toBeInTheDocument();
   });
 
-  it("is a reading surface — no composer, no scope tabs", async () => {
+  it("is a reading surface — no composer, no scope tabs, no ranking toggle", async () => {
     const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }]);
+    queryFixtures(queryClient).postList.data(
+      [makePostListPage({ ranking: makeRanking({ suggestions: [] }) })],
+      { feed: "discover", ranked: true },
+    );
 
     await renderWithProviders(<DiscoverPage />, {
       queryClient,
@@ -66,7 +84,10 @@ describe("DiscoverPage", () => {
 
   it("renders the search box and game filter controls", async () => {
     const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }]);
+    queryFixtures(queryClient).postList.data(
+      [makePostListPage({ ranking: makeRanking({ suggestions: [] }) })],
+      { feed: "discover", ranked: true },
+    );
 
     await renderWithProviders(<DiscoverPage />, {
       queryClient,
@@ -82,10 +103,14 @@ describe("DiscoverPage", () => {
 
   it("renders the filtered empty state and a clear-filters control when the URL carries filters", async () => {
     const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
-      feed: "global",
-      q: "zelda",
-    });
+    queryFixtures(queryClient).postList.data(
+      [makePostListPage({ ranking: makeRanking({ suggestions: [] }) })],
+      {
+        feed: "discover",
+        ranked: true,
+        q: "zelda",
+      },
+    );
 
     await renderWithProviders(<DiscoverPage />, {
       queryClient,
@@ -99,10 +124,14 @@ describe("DiscoverPage", () => {
 
   it("renders the active game chip when the URL carries a game filter", async () => {
     const queryClient = createTestQueryClient();
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
-      feed: "global",
-      gameSlug: "hades",
-    });
+    queryFixtures(queryClient).postList.data(
+      [makePostListPage({ ranking: makeRanking({ suggestions: [] }) })],
+      {
+        feed: "discover",
+        ranked: true,
+        gameSlug: "hades",
+      },
+    );
     queryFixtures(queryClient).game.page("hades", {
       slug: "hades",
       name: "Hades",
@@ -133,5 +162,109 @@ describe("DiscoverPage", () => {
 
     expect(screen.getByText(m.discover_game_chip({ name: "Hades" }))).toBeInTheDocument();
     expect(screen.getByText(m.discover_filtered_empty())).toBeInTheDocument();
+  });
+
+  it("renders Who-to-Follow above the posts from the feed's own ranking metadata", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).postList.data(
+      [
+        makePostListPage({
+          items: [makePost({ content: "A community post" })],
+          nextCursor: null,
+          ranking: makeRanking({
+            suggestions: [
+              makeRankSuggestion({ id: "user-1", username: "jamierivera", name: "Jamie Rivera" }),
+              makeRankSuggestion({ id: "user-2", username: "samkim", name: "Sam Kim" }),
+              makeRankSuggestion({ id: "user-3", username: "taylorw", name: "Taylor Wu" }),
+              makeRankSuggestion({ id: "user-4", username: "fourth", name: "Fourth Person" }),
+            ],
+          }),
+        }),
+      ],
+      { feed: "discover", ranked: true },
+    );
+
+    await renderWithProviders(<DiscoverPage />, {
+      queryClient,
+      signedInAs: true,
+      initialPath: "/discover",
+    });
+
+    expect(screen.getByRole("heading", { name: m.who_to_follow_title() })).toBeInTheDocument();
+    expect(screen.getByText("Jamie Rivera")).toBeInTheDocument();
+    expect(screen.getByText("Sam Kim")).toBeInTheDocument();
+    expect(screen.getByText("Taylor Wu")).toBeInTheDocument();
+    // Top three only — the fourth candidate waits for the next snapshot.
+    expect(screen.queryByText("Fourth Person")).not.toBeInTheDocument();
+    // The posts still render below the module, in feed order.
+    expect(screen.getByText("A community post")).toBeInTheDocument();
+  });
+
+  it("hides already-followed and requested candidates without shuffling the feed", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).postList.data(
+      [
+        makePostListPage({
+          items: [makePost({ content: "A community post" })],
+          nextCursor: null,
+          ranking: makeRanking({
+            suggestions: [
+              makeRankSuggestion({ id: "user-1", username: "followed", name: "Followed Person" }),
+              makeRankSuggestion({
+                id: "user-2",
+                username: "following",
+                name: "Following Person",
+                viewerIsFollowing: true,
+              }),
+              makeRankSuggestion({
+                id: "user-3",
+                username: "requested",
+                name: "Requested Person",
+                hasRequested: true,
+              }),
+            ],
+          }),
+        }),
+      ],
+      { feed: "discover", ranked: true },
+    );
+
+    await renderWithProviders(<DiscoverPage />, {
+      queryClient,
+      signedInAs: true,
+      initialPath: "/discover",
+    });
+
+    expect(screen.getByText("Followed Person")).toBeInTheDocument();
+    expect(screen.queryByText("Following Person")).not.toBeInTheDocument();
+    expect(screen.queryByText("Requested Person")).not.toBeInTheDocument();
+    expect(screen.getByText("A community post")).toBeInTheDocument();
+  });
+
+  it("prompts for favorite games on a cold start, without blocking the feed", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).postList.data(
+      [
+        makePostListPage({
+          items: [makePost({ content: "A community post" })],
+          nextCursor: null,
+          ranking: makeRanking({ hasInterests: false, suggestions: [] }),
+        }),
+      ],
+      { feed: "discover", ranked: true },
+    );
+
+    await renderWithProviders(<DiscoverPage />, {
+      queryClient,
+      signedInAs: true,
+      initialPath: "/discover",
+    });
+
+    expect(screen.getByText(m.who_to_follow_games_prompt())).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: m.who_to_follow_games_link() })).toHaveAttribute(
+      "href",
+      "/games",
+    );
+    expect(screen.getByText("A community post")).toBeInTheDocument();
   });
 });

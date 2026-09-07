@@ -240,8 +240,14 @@ export const postLike = pgTable(
     // simply say `onConflictDoNothing` instead of read-then-write racing.
     primaryKey({ columns: [t.postId, t.userId] }),
     // The PK already covers (post_id, user_id) lookups; this covers the
-    // other direction — "has the viewer liked these posts".
-    index("post_like_user_idx").on(t.userId),
+    // other direction — the viewer's recent likes, newest first. The
+    // `fetchViewerHistory` read in packages/api/src/feed-rank.ts orders by
+    // (created_at DESC, post_id DESC) with FEED_RANK_HISTORY_LIMIT, so the
+    // index mirrors exactly that ordering, `post_id` breaking ties between
+    // likes sharing a timestamp. Same shape as
+    // `post_bookmark_user_created_idx`: once `user_id` is bound,
+    // (created_at, post_id) is the rest of the comparison.
+    index("post_like_user_created_idx").on(t.userId, t.createdAt.desc(), t.postId.desc()),
   ],
 );
 
@@ -1219,4 +1225,76 @@ export const gameRelations = relations(game, ({ many }) => ({
 export const gameFavoriteRelations = relations(gameFavorite, ({ one }) => ({
   game: one(game, { fields: [gameFavorite.gameId], references: [game.igdbId] }),
   user: one(user, { fields: [gameFavorite.userId], references: [user.id] }),
+}));
+
+/**
+ * One ordered entry of a ranked-feed snapshot: the post, the repost event
+ * that surfaced it (null for an authored-post event), and the event instant
+ * the freshness component was scored from. IDs and attribution only — never
+ * content: every page re-reads the posts live through `postSelection` and
+ * re-applies visibility and scope-membership, so a snapshot cannot serve a
+ * post the viewer may no longer see.
+ */
+export interface FeedRankSnapshotItem {
+  postId: string;
+  reposterId: string | null;
+  /** ISO instant of the event (the post's or the repost's `created_at`). */
+  eventAt: string;
+}
+
+/**
+ * A frozen ranked-feed ordering (issue #305) — one viewer's snapshot of a
+ * ranked feed, so pages stay stable while new posts land.
+ *
+ * A snapshot is viewer-owned (`viewerId`), scope-bound (`scope` plus the
+ * `q`/`gameSlug` filters it was built under) and short-lived (`expiresAt`,
+ * 30 minutes). Resuming with an unknown, foreign, differently-scoped or
+ * expired id is an explicit error, never a silent restart. Request-time
+ * maintenance runs on snapshot creation: a bounded global expiry sweep and
+ * a per-viewer live-row cap, both by indexed predicates.
+ */
+export const feedRankSnapshot = pgTable(
+  "feed_rank_snapshot",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // `user.id` is text (BetterAuth's own id format), so the FK must be too.
+    viewerId: text("viewer_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // The ranked feed scope: 'global' (For you), 'following', or 'discover'.
+    scope: text("scope").notNull(),
+    // The candidate filters the snapshot was built under — null when the
+    // page was unfiltered. Part of the resume contract: a snapshot resumes
+    // only under the same scope AND filters.
+    q: text("q"),
+    gameSlug: text("game_slug"),
+    // The catalog hashtag key `gameSlug` resolved to at build time, so pages
+    // re-check membership against the same key even if the catalog moves.
+    gameHashtagKey: text("game_hashtag_key"),
+    // The frozen rank order: `FeedRankSnapshotItem[]`, best first.
+    items: jsonb("items").$type<FeedRankSnapshotItem[]>().notNull().default([]),
+    // Whether the viewer had any interest history at build time (favorites,
+    // follows, likes, reposts, reply-thread topics). False marks a cold
+    // start — freshness/popularity/diversity ordering — and tells the client
+    // to prompt for game interests.
+    hasInterests: boolean("has_interests").default(false).notNull(),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, precision: 3 }).notNull(),
+  },
+  (t) => [
+    check("feed_rank_snapshot_scope", sql`${t.scope} in ('global', 'following', 'discover')`),
+    // The request-time maintenance path: the viewer's rows by expiry, so
+    // deleting their expired snapshots and enforcing the per-viewer live cap
+    // are index scans, not table scans.
+    index("feed_rank_snapshot_viewer_expires_idx").on(t.viewerId, t.expiresAt.desc()),
+    // The expiry read: rows past their TTL, for bounded cleanup.
+    index("feed_rank_snapshot_expires_idx").on(t.expiresAt),
+  ],
+);
+
+/** Drizzle relations for `feedRankSnapshot` — the viewer whose ordering it freezes. */
+export const feedRankSnapshotRelations = relations(feedRankSnapshot, ({ one }) => ({
+  viewer: one(user, { fields: [feedRankSnapshot.viewerId], references: [user.id] }),
 }));

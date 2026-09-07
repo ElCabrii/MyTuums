@@ -35,10 +35,11 @@ interface FollowVariables {
  * used from a write-only action atom).
  *
  * It differs in *which* caches it sweeps — see `lib/follow-cache.ts`. A
- * person's follow state is cached in three shapes at once: their profile (a
- * flat object) and any follower/following list they appear in (paginated).
- * All three are patched locally. The Following *feed* is the fourth and the
- * one that can't be patched, so it is invalidated in `onSettled`.
+ * person's follow state is cached in five shapes at once: their profile (a
+ * flat object), any follower/following list they appear in (paginated), any
+ * search row, and any ranked-feed suggestion row. All are patched locally.
+ * The Following *feed* is the cache that can't be patched, so it is
+ * invalidated in `onSettled`.
  */
 function toggleMutationAtom(userId: string, direction: "follow" | "unfollow") {
   // Explicit type parameters: inference does not flow the variables/context
@@ -106,7 +107,9 @@ function toggleMutationAtom(userId: string, direction: "follow" | "unfollow") {
       // keeps its rendered rows in place while an active feed refreshes in the
       // background; resetting would recreate the skeleton flash this path is
       // meant to avoid. A failed follow never changed the membership, so the
-      // error path skips the invalidation.
+      // error path skips the invalidation. The ranked Following feed (issue
+      // #305) refetches against its pinned snapshot, so the order holds while
+      // membership updates — a new sequence starts only on explicit Refresh.
       onSettled: (data, error) => {
         if (error) return;
         // A request response changes no membership — the Following feed has
@@ -115,6 +118,14 @@ function toggleMutationAtom(userId: string, direction: "follow" | "unfollow") {
         // Only the Following feed derives membership from this relationship.
         // The global timeline, profile feeds and reply lists remain valid and
         // should keep their rendered rows rather than flashing to skeletons.
+        // Ranked (issue #305): the key carries `ranked`, so the unranked key
+        // would miss with `exact`.
+        void queryClient.invalidateQueries({
+          queryKey: postListQueryOptions({ feed: "following", ranked: true }).queryKey,
+          exact: true,
+        });
+        // A chronological Following entry may still exist (pre-#305 cache or
+        // a non-rankable fallback): sweep it too rather than leave it stale.
         void queryClient.invalidateQueries({
           queryKey: postListQueryOptions({ feed: "following" }).queryKey,
           exact: true,

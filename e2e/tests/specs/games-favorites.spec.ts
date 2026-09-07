@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { postCardWithText } from "../../support/post-card";
 
 // The favorite journey (issue #314, stage 3), signed in as the project's
 // default fixture account (alice). The catalog comes from the committed
@@ -39,19 +40,22 @@ test.describe("hashtag resolution", () => {
     page,
   }) => {
     // The fixture catalog answers `doom`; nothing answers `nothattag`.
-    // `.first()`: specs share one database truncated once per run, so a
-    // retried attempt posts twice — the newest post's links are first in the
-    // feed, and the assertion targets those.
+    // Unique content prevents a previous attempt's post from satisfying the assertions.
     await page.goto("/");
     const composer = page.getByRole("textbox");
-    await composer.fill("Fresh from the #doom vault, not #nothattag");
+    const content = `Fresh from the #doom vault, not #nothattag ${Date.now().toString()}`;
+    await composer.fill(content);
     await page.getByRole("button", { name: "Post", exact: true }).click();
+    await expect(composer).toHaveValue("");
+    await page.getByRole("button", { name: "Refresh" }).first().click();
 
-    const resolved = page.getByRole("link", { name: "#doom", exact: true }).first();
+    const card = postCardWithText(page, content);
+    const resolved = card.getByRole("link", { name: "#doom", exact: true });
     await expect(resolved).toHaveAttribute("href", "/discover?game=doom");
-    await expect(
-      page.getByRole("link", { name: "#nothattag", exact: true }).first(),
-    ).toHaveAttribute("href", "/search?q=%23nothattag");
+    await expect(card.getByRole("link", { name: "#nothattag", exact: true })).toHaveAttribute(
+      "href",
+      "/search?q=%23nothattag",
+    );
 
     // Hovering the resolved tag previews the game card, with links to the
     // game's page inside it (cover + text share the destination).

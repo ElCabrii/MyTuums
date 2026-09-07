@@ -68,6 +68,105 @@ export const NOTIFICATION_PAGE_SIZE = 20;
 export const NOTIFICATION_PAGE_SIZE_MAX = 50;
 
 /**
+ * The `post.list` ranked feeds' snapshot horizon (issue #305): a frozen
+ * ordering stays servable this long, then resumes are refused and the client
+ * builds a fresh one. Short enough that a feed never reads stale for long,
+ * long enough that paging through it never restarts mid-scroll.
+ */
+export const FEED_RANK_SNAPSHOT_TTL_MS = 30 * 60 * 1000;
+
+/** Shared with the web's explicit-refresh recovery for refused snapshot resumes. */
+export const RANK_SNAPSHOT_INVALID_MESSAGE =
+  "This ranking is no longer valid. Refresh the feed to build a new one.";
+
+/**
+ * How many live ranked snapshots one viewer may hold. Each snapshot build
+ * deletes expired rows and trims past this cap (oldest first), so the
+ * table stays bounded per viewer without a background job.
+ */
+export const FEED_RANK_MAX_SNAPSHOTS_PER_VIEWER = 10;
+
+/**
+ * The ranked candidate window (issue #305): candidates are top-level posts
+ * from the last 7 days, widened to 30 days only when the 7-day pool is
+ * sparse. Recency is a ranking signal, not just a filter — the window is
+ * what keeps a ranked feed from surfacing archaeology.
+ */
+export const FEED_RANK_WINDOW_DAYS = 7;
+export const FEED_RANK_WINDOW_MAX_DAYS = 30;
+
+/** Below this many 7-day candidates, the build widens to the 30-day window. */
+export const FEED_RANK_SPARSE_THRESHOLD = 50;
+
+/** Hard ceiling on candidates scored per snapshot build. */
+export const FEED_RANK_POOL_LIMIT = 500;
+
+/**
+ * How much of the viewer's recent history one snapshot build reads per
+ * signal (likes, reposts, replies, favorites). Bounded so a
+ * decade-old account costs the same as a new one.
+ */
+export const FEED_RANK_HISTORY_LIMIT = 200;
+
+/** How far up a reply chain the topic walk follows `parent_id` per reply. */
+export const FEED_RANK_THREAD_WALK_MAX_DEPTH = 25;
+
+/**
+ * The ranked scorer's weights (issue #305) — interest first, then
+ * outside-network discovery, then raw popularity. Each signal category is
+ * capped before weighting, so the maxima keep this order: one favorite-game
+ * match outranks the whole like category, which outranks the follow edge,
+ * which outranks the repost category, the reply-topic interest, and the
+ * popularity total. Popularity is log-scaled AND capped, so a viral post
+ * cannot outrun genuine interest; freshness decays exponentially off a
+ * time-bucketed clock so scores stay identical across pages within a snapshot.
+ */
+export const FEED_RANK_WEIGHT_FAVORITE_GAME = 12;
+export const FEED_RANK_WEIGHT_LIKE_AFFINITY = 7;
+export const FEED_RANK_WEIGHT_FOLLOW = 5;
+export const FEED_RANK_WEIGHT_REPOST_AFFINITY = 3;
+export const FEED_RANK_WEIGHT_REPLY_TOPIC = 3;
+export const FEED_RANK_WEIGHT_POPULARITY_LIKE = 1;
+export const FEED_RANK_WEIGHT_POPULARITY_REPOST = 0.8;
+export const FEED_RANK_WEIGHT_POPULARITY_REPLY = 0.6;
+export const FEED_RANK_WEIGHT_FRESHNESS = 6;
+/** Freshness half-life, in hours, of the exponential recency decay. */
+export const FEED_RANK_FRESHNESS_HALF_LIFE_HOURS = 48;
+/** The recency clock's bucket, in ms — scores bucketed here never shift mid-scroll. */
+export const FEED_RANK_FRESHNESS_BUCKET_MS = 60 * 60 * 1000;
+
+/**
+ * Affinity caps: the per-signal ceilings inside each category. Author and
+ * topic affinity share ONE category cap each (likes, reposts), so a post
+ * that matches both halves of a category earns no more than a post that
+ * saturates one. The favorite-game overlap caps at a single match — one
+ * favorited game named is the whole signal.
+ */
+export const FEED_RANK_CAP_FAVORITE_GAME = 1;
+export const FEED_RANK_CAP_REPLY_TOPIC = 3;
+export const FEED_RANK_CAP_AUTHOR_LIKES = 5;
+export const FEED_RANK_CAP_LIKE_TOPIC = 3;
+export const FEED_RANK_CAP_AUTHOR_REPOSTS = 3;
+export const FEED_RANK_CAP_REPOST_TOPIC = 3;
+/** Ceiling on the whole popularity component — tertiary, never decisive. */
+export const FEED_RANK_CAP_POPULARITY = 3;
+
+/**
+ * The repeated-author penalty (issue #305): after the pure score orders the
+ * pool, each further post by an already-placed author keeps
+ * `1 / (1 + n * PENALTY)` of its score, where n is how many of that author's
+ * posts already precede it. Mild and post-hoc — the pure score never knows
+ * about it — and never a hard cap: no author is excluded, however many posts
+ * they placed.
+ */
+export const FEED_RANK_AUTHOR_PENALTY = 0.12;
+
+/** How many follow suggestions a Discover ranked page carries. */
+export const FEED_RANK_SUGGESTION_LIMIT = 3;
+/** How far down the frozen order suggestions are sought. */
+export const FEED_RANK_SUGGESTION_SCAN_LIMIT = 100;
+
+/**
  * How many days of notifications exist for a recipient. The list and the
  * unread badge stop at this horizon, and `scripts/prune-notifications.ts`
  * deletes past it — one shared boundary, so the badge and the page can never

@@ -443,12 +443,16 @@ describe("toggleFollowAtomFamily", () => {
   // Following someone changes which posts belong in the Following feed, and
   // there's no way to synthesise that client-side — so unlike every other
   // cache this module touches, `post.list` has to actually be refetched.
+  // Ranked (issue #305): the sweep hits the ranked key the home feed reads
+  // plus the chronological fallback, and nothing else.
   it("invalidates exactly the Following feed without resetting its rendered rows", async () => {
     const { store, queryClient } = freshStoreWithTarget(
       makeProfile({ id: "target-1", username: "target", viewerIsFollowing: false }),
     );
+    const rankedFollowingKey = postListQueryOptions({ feed: "following", ranked: true }).queryKey;
     const followingKey = postListQueryOptions({ feed: "following" }).queryKey;
     const globalKey = postListQueryOptions({ feed: "global" }).queryKey;
+    queryClient.setQueryData(rankedFollowingKey, { pages: [], pageParams: [] });
     queryClient.setQueryData(followingKey, { pages: [], pageParams: [] });
     queryClient.setQueryData(globalKey, { pages: [], pageParams: [] });
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
@@ -463,9 +467,14 @@ describe("toggleFollowAtomFamily", () => {
 
     await vi.waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: rankedFollowingKey,
+        exact: true,
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
         queryKey: followingKey,
         exact: true,
       });
+      expect(queryClient.getQueryState(rankedFollowingKey)?.isInvalidated).toBe(true);
       expect(queryClient.getQueryState(followingKey)?.isInvalidated).toBe(true);
     });
     expect(queryClient.getQueryState(globalKey)?.isInvalidated).toBe(false);
@@ -581,7 +590,9 @@ describe("toggleFollowAtomFamily", () => {
       }),
     );
     const followingKey = postListQueryOptions({ feed: "following" }).queryKey;
+    const rankedFollowingKey = postListQueryOptions({ feed: "following", ranked: true }).queryKey;
     queryClient.setQueryData(followingKey, { pages: [], pageParams: [] });
+    queryClient.setQueryData(rankedFollowingKey, { pages: [], pageParams: [] });
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     fakeClient.user.follow.mockResolvedValue({
       userId: "target-1",
@@ -597,6 +608,7 @@ describe("toggleFollowAtomFamily", () => {
     });
     expect(invalidateSpy).not.toHaveBeenCalled();
     expect(queryClient.getQueryState(followingKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(rankedFollowingKey)?.isInvalidated).toBe(false);
   });
 });
 

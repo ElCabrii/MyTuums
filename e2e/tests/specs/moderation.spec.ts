@@ -3,8 +3,8 @@ import { postCardWithText } from "../../support/post-card";
 
 /**
  * The moderation desk, walked end to end: bob posts, alice (the moderator
- * fixture — promoted in auth.setup.ts) reports the post from her feed, removes
- * it from the queue, bob's post becomes a stub in his own feed with the
+ * fixture — promoted in auth.setup.ts) reports the post from its permalink, removes
+ * it from the queue, bob's post becomes a stub on its permalink with the
  * author-only appeal link, bob appeals from the stub — seeing the post he is
  * contesting on the way — and the open appeal brings the case back into
  * alice's queue.
@@ -27,7 +27,7 @@ test.describe("moderation", () => {
     if (!post) throw new Error("seedPosts returned no row");
 
     // ── Report: alice's kebab on bob's post, reason picked in the dialog. ──
-    await page.goto("/");
+    await page.goto(`/post/${post.id}`);
     await postCardWithText(page, marker).getByRole("button", { name: "More" }).click();
     await page.getByRole("menuitem", { name: "Report post" }).click();
     await expect(page.getByRole("heading", { name: "Report post" })).toBeVisible();
@@ -59,7 +59,8 @@ test.describe("moderation", () => {
     await expect(page.getByText("No open cases. Nothing needs attention.")).toBeVisible();
 
     // ── The stub: bob sees the removal reason and the appeal link. ──
-    await bobPage.goto("/");
+    // Ranked feeds omit removed posts; the permalink retains the appeal stub.
+    await bobPage.goto(`/post/${post.id}`);
     const stub = postCardWithText(bobPage, `removed by e2e ${marker}`);
     await expect(stub.getByText("This post was removed for violating our rules.")).toBeVisible();
     await stub.getByRole("link", { name: "Appeal this decision" }).click();
@@ -70,7 +71,7 @@ test.describe("moderation", () => {
       bobPage.getByRole("heading", { name: "Appeal a moderation decision" }),
     ).toBeVisible();
     // The preview hands bob back the post he is contesting — the same content
-    // the feed stub above takes away from him.
+    // the permalink stub above takes away from him.
     await expect(bobPage.getByText("The post you're appealing")).toBeVisible();
     await expect(bobPage.getByText(marker, { exact: true })).toBeVisible();
     await bobPage

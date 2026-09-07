@@ -237,6 +237,14 @@ migrations run as a **pre-deploy step** (`apps/server/dist/migrate.js`), which
 exits non-zero so a failed migration aborts the deploy. Never at server boot —
 N replicas would race the same DDL.
 
+The ranked-feeds change (issue #305) ships as migration
+`0035_charming_sandman` (`packages/db/drizzle/0035_charming_sandman.sql`),
+which creates the `feed_rank_snapshot` table and its two indexes. It deploys
+through that same standard pre-deploy step — no environment variables, no new
+services, no separate cron or migration deployment. Snapshot expiry needs no
+scheduler either: expired rows are refused at read time and reaped by bounded
+request-time maintenance on ranked calls.
+
 The `_test` database is a separate database whose name ends in `_test`;
 `DATABASE_URL_TEST` is optional and derived from `DATABASE_URL` when unset.
 Destructive helpers refuse to touch anything else.

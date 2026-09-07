@@ -103,8 +103,10 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   500-character trim rule as creation applies, and images are not editable —
   an edit rewrites the body and nothing else. An edited post carries a visible
   "Edited" marker with the last edit time wherever it renders. Editing never
-  changes the post's timestamp, so feeds and search reflect the new text
-  without re-ranking or bumping the post. A removed or deleted post cannot be
+  changes the post's timestamp, so chronological feeds and search reflect the
+  new text without re-ranking or bumping the post; a ranked snapshot keeps the
+  frozen order it was built with, but its pages re-check filter membership
+  live, so an edit that removes the searched text or hashtag drops the item. A removed or deleted post cannot be
   edited — a removal keeps the story the author would appeal about immutable.
   A post under review stays editable: every edit records the text it replaced,
   and the moderation case view shows that history (the 50 most recent
@@ -184,15 +186,31 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   instead, the owner is notified, and `followRequest.accept` converts it into
   the edge (rejecting or cancelling deletes it). The profile button reads
   Follow / Requested / Following from `viewerIsFollowing` + `hasRequested`.
-- Feeds come in two scopes — everyone, and the people you follow — and are
-  keyset-paginated so a page boundary can never skip or repeat an event. The
-  timeline is strictly reverse-chronological by event time — a post at its own
-  creation, a repost at the repost's — with no ranking and no deduplication:
-  the same post can appear once authored and once reposted. Private posts and
-  private-account posts (issue #328) appear only for the author and approved
-  followers; everyone else walks the same timeline without them. A repost of
-  a private original keeps the reposter's event but redacts the original to
-  the private treatment ("This post is private").
+- The home feeds are ranked, not chronological. **For you** (everyone),
+  **Following** (you and the people you follow), and **Discover** (people you
+  neither follow nor are) each serve the same scorer over their own candidate
+  set, frozen into a per-viewer snapshot that stays stable for 30 minutes and
+  advances only through an explicit **Refresh**. There is deliberately no
+  chronological toggle on these three surfaces. Interest outranks
+  outside-network discovery, which outranks raw popularity: favorite games
+  first, then likes, then the follow edge, then reposts and reply-thread
+  topics, with popularity last and freshness decaying throughout. No machine
+  learning — a transparent weighted score over data the app already holds
+  (favorites outrank likes, which outrank follows, which outrank reposts;
+  replying anywhere in a thread counts as topic interest in that thread).
+  Bookmarks never feed the score. A repeated author is gently pushed down,
+  never capped out. A viewer with no history gets a freshness/popularity
+  ordering plus an optional nudge to favorite games for sharper suggestions.
+  Removed or author-deleted posts never rank; if one disappears after the
+  snapshot was built, the page drops it rather than stubbing it (the stub
+  rules still apply on chronological surfaces, profiles, threads and repost
+  events). Follows and privacy are re-checked live on every page, so an
+  unfollow, a new follow, or a lock since the build changes what renders
+  without moving the frozen order. An unknown, foreign, differently-scoped or
+  expired snapshot is an explicit error that asks for a Refresh, never a
+  silent restart. The chronological RPC still exists underneath for the
+  surfaces that never ranked — profiles, bookmarks, post search, replies —
+  but the web offers no chronological switch on the home or Discover feeds.
 - Authors choose Public or Followers only from the visibility popover beside
   Add images in the home and own-profile composers. The trigger identifies the
   effective audience; private accounts always show Followers only, with Public
@@ -203,9 +221,13 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   the same way except for the author, approved followers and moderators
   inspecting a report. Private accounts themselves stay discoverable in user
   search and the typeahead — only their posts are hidden.
-- Discover (`/discover`) is the global feed as a reading surface — no
-  composer, no scope tabs — with a search box and a game filter on top. Both
-  narrow the same chronological timeline and compose as AND: free text
+- Discover (`/discover`) is the ranked outside-network reading surface — no
+  composer, no scope tabs — with a search box and a game filter on top. It
+  shows original posts by authors the viewer neither follows nor is, with a
+  **Who to follow** module above the posts: the first three distinct authors
+  in the frozen order, filtered live against follows and follow requests, with
+  no refill until the next Refresh. Both filters narrow the same ranked
+  snapshot and compose as AND: free text
   matches post text, the game filter matches `#hashtagKey` in post text
   (resolved server-side from the game's slug), and the view is URL-persisted
   (`?q=`, `?game=`) so it is shareable and the back button restores it. A
@@ -521,7 +543,8 @@ it cannot be restored. _Avoid:_ removed post, withdrawn post.
 
 **Edited post** — a post whose author rewrote its text after publishing. The
 row carries the last edit time and every surface renders an "Edited" marker;
-the creation timestamp never moves, so an edit never re-ranks a feed. Each
+the creation timestamp never moves, and an edit leaves an existing ranked
+snapshot's order unchanged. A subsequent Refresh can score the new text. Each
 edit records the text it replaced; that history is visible to moderators in
 the case view, never on public surfaces. A removed or deleted post cannot be
 edited. _Avoid:_ updated post, revised post.
@@ -530,6 +553,19 @@ edited. _Avoid:_ updated post, revised post.
 added text or images. An event about the original, not a post of its own: the
 feed renders the original attributed to the reposter. Idempotent as a pair
 (`repost` / `unrepost`). _Avoid:_ retweet, boost, share.
+
+**Discover** — the ranked outside-network feed at `/discover`: top-level
+posts by authors the viewer neither follows nor is, ordered by the shared
+ranked scorer, with the search and game filters composing as candidate
+filters and a Who-to-Follow module above the posts. Ranked-only: it has no
+chronological mode. _Avoid:_ global feed, explore.
+
+**Rank snapshot** — one viewer's frozen ranked ordering for one scope and
+filter set: ordered post IDs with repost attribution, never content, stable
+for 30 minutes and resumable by cursor. Follows, blocks, bans, privacy,
+tombstones and filter membership are re-checked live on every page; an
+unknown, foreign, mismatched or expired snapshot id is an explicit error
+asking for a Refresh. _Avoid:_ ranking cache, feed cache.
 
 **Game directory** — the public catalog of games at `/games`, ranked by a
 current Twitch popularity snapshot, hydrated from IGDB, and never shrunk: a
