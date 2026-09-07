@@ -13,7 +13,7 @@ import {
 } from "@my-tuums/db/schema";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RANK_SNAPSHOT_INVALID_MESSAGE } from "./constants.js";
+import { FEED_RANK_POOL_LIMIT, RANK_SNAPSHOT_INVALID_MESSAGE } from "./constants.js";
 import { upsertGames, type StagedGameRow } from "./games-sync.js";
 import { appRouter } from "./router.js";
 import {
@@ -755,5 +755,80 @@ describe("ranked cold start", () => {
     expect(page.items.length).toBeGreaterThan(0);
     expect(page.ranking?.hasInterests).toBe(false);
     expect(page.ranking?.snapshotId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+});
+
+describe("ranked candidate limits (#356)", () => {
+  it.each(["authored", "reposts"] as const)(
+    "finds exact game matches beyond a full batch of %s false positives",
+    async (arm) => {
+      const reader = await createTestUser();
+      const author = await createTestUser();
+      const q = `game-limit-${reader.id}`;
+      const createdAt = new Date(Date.now() - (arm === "authored" ? 1 : 24 * 40) * HOUR);
+      const noise = await db
+        .insert(post)
+        .values(
+          Array.from({ length: FEED_RANK_POOL_LIMIT }, () => ({
+            authorId: author.id,
+            content: `${q} #doom2016`,
+            createdAt,
+          })),
+        )
+        .returning({ id: post.id });
+      const exactId = await makePost(author.id, `${q} #DOOM!`, arm === "authored" ? 2 : 24 * 41);
+      if (arm === "reposts") {
+        await db.insert(postRepost).values([
+          ...noise.map(({ id }) => ({
+            postId: id,
+            userId: reader.id,
+            createdAt: new Date(Date.now() - HOUR),
+          })),
+          { postId: exactId, userId: reader.id, createdAt: new Date(Date.now() - 2 * HOUR) },
+        ]);
+      }
+      const page = await call(
+        appRouter.post.list,
+        { feed: "global", ranked: true, q, gameSlug: "doom" },
+        { context: rankedContext(reader) },
+      );
+      expect(page.items.map((item) => item.id)).toEqual([exactId]);
+      expect(page.items[0]?.repostedBy?.id ?? null).toBe(arm === "reposts" ? reader.id : null);
+    },
+  );
+
+  it("counts distinct originals rather than a viral post's repost events", async () => {
+    const reader = await createTestUser();
+    const author = await createTestUser();
+    const q = `repost-limit-${reader.id}`;
+    const viralId = await makePost(author.id, `${q} viral`, 24 * 40);
+    const otherId = await makePost(author.id, `${q} other`, 24 * 40);
+    // These actors need no sessions; bulk seeding keeps the 500-event regression cheap.
+    const actors = await db
+      .insert(user)
+      .values(
+        Array.from({ length: FEED_RANK_POOL_LIMIT }, (_, i) => ({
+          id: `${reader.id}-reposter-${i}`,
+          name: `Reposter ${i}`,
+          email: `${reader.id}-reposter-${i}@example.com`,
+        })),
+      )
+      .returning({ id: user.id });
+    await db.insert(postRepost).values([
+      ...actors.map(({ id }, i) => ({
+        postId: viralId,
+        userId: id,
+        createdAt: new Date(Date.now() - HOUR - i * 1000),
+      })),
+      { postId: otherId, userId: reader.id, createdAt: new Date(Date.now() - 2 * HOUR) },
+      { postId: viralId, userId: privateReposter.id, createdAt: new Date() },
+    ]);
+    const page = await call(
+      appRouter.post.list,
+      { feed: "global", ranked: true, q },
+      { context: rankedContext(reader) },
+    );
+    expect(page.items.map((item) => item.id).sort()).toEqual([viralId, otherId].sort());
+    expect(page.items.find((item) => item.id === viralId)?.repostedBy?.id).toBe(actors[0]?.id);
   });
 });

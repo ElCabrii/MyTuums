@@ -136,42 +136,48 @@ export function postListQueryOptions(
     !includeReplies &&
     !includeReposts &&
     !kind;
-  return orpc.post.list.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PostListInput = { limit: POST_PAGE_SIZE };
-      if (authorId) input.authorId = authorId;
-      if (parentId) input.parentId = parentId;
-      if (kind === "replies") input.kind = "replies";
-      else if (kind === "both" || includeReplies) input.includeReplies = true;
-      // Same conditional-spread rule as the fields above: only a profile
-      // feed sets this, so every other feed's key stays exactly as it was.
-      if (includeReposts) input.includeReposts = true;
-      // Discover filters ride the same rule: absent means no key entry, so
-      // the unfiltered global feed keeps its bare key and its cache entry.
-      const trimmedQ = q?.trim();
-      if (trimmedQ) input.q = trimmedQ;
-      const trimmedGame = gameSlug?.trim();
-      if (trimmedGame) input.gameSlug = trimmedGame;
-      // The global feed keeps a bare key (see the note on the conditional
-      // spreads above); the scoped feeds carry their discriminator. Ranked
-      // is its own discriminator beside them: a ranked global feed never
-      // shares a cache entry with its chronological twin.
-      if (scope === "following" || scope === "bookmarks" || scope === "discover") {
-        input.feed = scope;
-      }
-      if (rankable) {
-        input.ranked = true;
-        const snapshotId = opts?.getSnapshotId?.();
-        if (snapshotId) input.snapshotId = snapshotId;
-      }
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam:
-      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
-      undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  // An expired ranked snapshot is a BAD_REQUEST the server will refuse
+  // again — retrying resends the same id, so Refresh (a new snapshot) owns
+  // recovery, never the retryer.
+  return {
+    ...orpc.post.list.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PostListInput = { limit: POST_PAGE_SIZE };
+        if (authorId) input.authorId = authorId;
+        if (parentId) input.parentId = parentId;
+        if (kind === "replies") input.kind = "replies";
+        else if (kind === "both" || includeReplies) input.includeReplies = true;
+        // Same conditional-spread rule as the fields above: only a profile
+        // feed sets this, so every other feed's key stays exactly as it was.
+        if (includeReposts) input.includeReposts = true;
+        // Discover filters ride the same rule: absent means no key entry, so
+        // the unfiltered global feed keeps its bare key and its cache entry.
+        const trimmedQ = q?.trim();
+        if (trimmedQ) input.q = trimmedQ;
+        const trimmedGame = gameSlug?.trim();
+        if (trimmedGame) input.gameSlug = trimmedGame;
+        // The global feed keeps a bare key (see the note on the conditional
+        // spreads above); the scoped feeds carry their discriminator. Ranked
+        // is its own discriminator beside them: a ranked global feed never
+        // shares a cache entry with its chronological twin.
+        if (scope === "following" || scope === "bookmarks" || scope === "discover") {
+          input.feed = scope;
+        }
+        if (rankable) {
+          input.ranked = true;
+          const snapshotId = opts?.getSnapshotId?.();
+          if (snapshotId) input.snapshotId = snapshotId;
+        }
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 /** Loads continuation pages after the branch slice embedded in a direct-reply page. */

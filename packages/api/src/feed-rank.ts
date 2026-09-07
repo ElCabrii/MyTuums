@@ -95,7 +95,7 @@ export type RankScope = "global" | "following" | "discover";
  * and raw fragments. A transaction handle satisfies it, so the snapshot
  * persist serializes its insert, sweep, and trim in one transaction.
  */
-type RankStore = Pick<Database, "select" | "insert" | "delete" | "execute">;
+type RankStore = Pick<Database, "select" | "selectDistinctOn" | "insert" | "delete" | "execute">;
 
 /**
  * The features one candidate post is scored from. Counts are raw — capping
@@ -342,6 +342,27 @@ interface RankCandidate {
   replyCount: number;
 }
 
+/** SQL prefilters are supersets; only exact matches consume the candidate budget. */
+async function collectRankCandidates(
+  fetchPage: (after: RankCandidate | undefined) => Promise<RankCandidate[]>,
+  gameHashtagKey: string | undefined,
+): Promise<RankCandidate[]> {
+  const candidates: RankCandidate[] = [];
+  let after: RankCandidate | undefined;
+  while (candidates.length < FEED_RANK_POOL_LIMIT) {
+    const rows = await fetchPage(after);
+    for (const row of rows) {
+      if (!gameHashtagKey || extractRankHashtagKeys([row.content]).includes(gameHashtagKey)) {
+        candidates.push(row);
+        if (candidates.length === FEED_RANK_POOL_LIMIT) return candidates;
+      }
+    }
+    if (rows.length < FEED_RANK_POOL_LIMIT) break;
+    after = rows.at(-1);
+  }
+  return candidates;
+}
+
 const candidateLikeCount = sql<number>`(
   select count(*)::int from ${postLike} where ${postLike.postId} = ${post.id}
 )`;
@@ -406,7 +427,7 @@ function aliasPrivateHidden(
 /**
  * Fetches the authored-post candidates for a scope: top-level, author-alive
  * posts inside the window, through the shared visibility filter. Repost
- * events join in `fetchRepostCandidates` for the Following scope only.
+ * events join in `fetchRepostCandidates` under their own scope rules.
  */
 async function fetchAuthoredCandidates(
   db: RankStore,
@@ -435,45 +456,50 @@ async function fetchAuthoredCandidates(
             ),
           )
         : undefined;
-  const rows = await db
-    .select({
-      postId: post.id,
-      authorId: post.authorId,
-      content: post.content,
-      createdAt: post.createdAt,
-      likeCount: candidateLikeCount,
-      repostCount: candidateRepostCount,
-      replyCount: candidateReplyCount,
-    })
-    .from(post)
-    .innerJoin(user, eq(user.id, post.authorId))
-    .where(
-      and(
-        isNull(post.parentId),
-        isNull(post.deletedAt),
-        // Removed posts never rank: scoring invisible text would surface
-        // words no reader may see, and the game filter would oracle them.
-        isNull(post.removedAt),
-        gte(post.createdAt, args.cutoff),
-        args.q ? ilike(post.content, `%${escapeRankLikePattern(args.q)}%`) : undefined,
-        // A selectivity prefilter only: the superset `%#key%` spelling also
-        // matches `#key2016`, so the exact-token pass in `buildRankSnapshot`
-        // re-checks every surviving candidate in JS.
-        args.gameHashtagKey
-          ? ilike(post.content, `%#${escapeRankLikePattern(args.gameHashtagKey)}%`)
-          : undefined,
-        scopeFilter,
-        not(invisibleAuthor(args.viewerId)),
-        not(privatePostHidden(args.viewerId)),
-      ),
-    )
-    .orderBy(desc(post.createdAt), desc(post.id))
-    .limit(FEED_RANK_POOL_LIMIT);
-  return rows.map((row) => ({
-    ...row,
-    reposterId: null,
-    eventAt: row.createdAt,
-  }));
+  return collectRankCandidates(async (after) => {
+    const rows = await db
+      .select({
+        postId: post.id,
+        authorId: post.authorId,
+        content: post.content,
+        createdAt: post.createdAt,
+        likeCount: candidateLikeCount,
+        repostCount: candidateRepostCount,
+        replyCount: candidateReplyCount,
+      })
+      .from(post)
+      .innerJoin(user, eq(user.id, post.authorId))
+      .where(
+        and(
+          isNull(post.parentId),
+          isNull(post.deletedAt),
+          // Removed posts never rank: scoring invisible text would surface
+          // words no reader may see, and the game filter would oracle them.
+          isNull(post.removedAt),
+          gte(post.createdAt, args.cutoff),
+          args.q ? ilike(post.content, `%${escapeRankLikePattern(args.q)}%`) : undefined,
+          // A selectivity prefilter only: the superset `%#key%` spelling also
+          // matches `#key2016`, so the collector checks exact tokens before
+          // consuming the budget and scans further when necessary.
+          args.gameHashtagKey
+            ? ilike(post.content, `%#${escapeRankLikePattern(args.gameHashtagKey)}%`)
+            : undefined,
+          scopeFilter,
+          not(invisibleAuthor(args.viewerId)),
+          not(privatePostHidden(args.viewerId)),
+          after
+            ? sql`(${post.createdAt}, ${post.id}) < (${sql.param(after.eventAt, post.createdAt)}, ${after.postId})`
+            : undefined,
+        ),
+      )
+      .orderBy(desc(post.createdAt), desc(post.id))
+      .limit(FEED_RANK_POOL_LIMIT);
+    return rows.map((row) => ({
+      ...row,
+      reposterId: null,
+      eventAt: row.createdAt,
+    }));
+  }, args.gameHashtagKey);
 }
 
 /**
@@ -520,17 +546,19 @@ async function fetchRepostCandidates(
           ),
         )
       : undefined;
-  const rows = await db
-    .select({
+  // Pick the latest visible amplification per original before limiting;
+  // otherwise one viral post can consume the entire repost budget.
+  const latestReposts = db
+    .selectDistinctOn([post.id], {
       postId: post.id,
       authorId: post.authorId,
       content: post.content,
       createdAt: post.createdAt,
-      reposterId: rankReposter.id,
-      eventAt: postRepost.createdAt,
-      likeCount: candidateLikeCount,
-      repostCount: candidateRepostCount,
-      replyCount: candidateReplyCount,
+      reposterId: sql<string>`${rankReposter.id}`.as("reposter_id"),
+      eventAt: sql<Date>`${postRepost.createdAt}`.mapWith(postRepost.createdAt).as("event_at"),
+      likeCount: candidateLikeCount.as("like_count"),
+      repostCount: candidateRepostCount.as("repost_count"),
+      replyCount: candidateReplyCount.as("reply_count"),
     })
     .from(postRepost)
     .innerJoin(rankReposter, eq(rankReposter.id, postRepost.userId))
@@ -554,9 +582,22 @@ async function fetchRepostCandidates(
         not(aliasPrivateHidden(args.viewerId, rankReposter)),
       ),
     )
-    .orderBy(desc(postRepost.createdAt), desc(post.id), desc(postRepost.userId))
-    .limit(FEED_RANK_POOL_LIMIT);
-  return rows.map((row) => ({ ...row, reposterId: row.reposterId ?? null }));
+    .orderBy(post.id, desc(postRepost.createdAt), desc(postRepost.userId))
+    .as("latest_rank_reposts");
+  return collectRankCandidates(
+    async (after) =>
+      db
+        .select()
+        .from(latestReposts)
+        .where(
+          after
+            ? sql`(${latestReposts.eventAt}, ${latestReposts.postId}) < (${sql.param(after.eventAt, postRepost.createdAt)}, ${after.postId})`
+            : undefined,
+        )
+        .orderBy(desc(latestReposts.eventAt), desc(latestReposts.postId))
+        .limit(FEED_RANK_POOL_LIMIT),
+    args.gameHashtagKey,
+  );
 }
 
 /** The viewer's bounded interest history — every signal the scorer reads. */
@@ -598,7 +639,7 @@ async function fetchViewerHistory(db: RankStore, viewerId: string): Promise<View
           not(privatePostHidden(viewerId)),
         ),
       )
-      .orderBy(desc(postLike.createdAt))
+      .orderBy(desc(postLike.createdAt), desc(postLike.postId))
       .limit(FEED_RANK_HISTORY_LIMIT),
     db
       .select({ postId: post.id, authorId: post.authorId })
@@ -848,17 +889,9 @@ export async function buildRankSnapshot(
         byPost.set(candidate.postId, candidate);
       }
     }
-    // The exact-token pass: the SQL `%#key%` prefilter is a superset, so
-    // every surviving game-filtered candidate is re-checked in JS. Then a
-    // deterministic order (event time, post, reposter) and the pool bound —
-    // the pool holds 500 rankable candidates, never 500 per arm.
-    let scoped = [...byPost.values()];
-    const gameKey: string | null = gameHashtagKey;
-    if (gameKey) {
-      scoped = scoped.filter((candidate) =>
-        extractRankHashtagKeys([candidate.content]).includes(gameKey),
-      );
-    }
+    // Both arms already contain exact matches. The merged pool holds at
+    // most 500 distinct rankable candidates, never 500 per arm.
+    const scoped = [...byPost.values()];
     scoped.sort(
       (a, b) =>
         b.eventAt.getTime() - a.eventAt.getTime() ||

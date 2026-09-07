@@ -240,8 +240,14 @@ export const postLike = pgTable(
     // simply say `onConflictDoNothing` instead of read-then-write racing.
     primaryKey({ columns: [t.postId, t.userId] }),
     // The PK already covers (post_id, user_id) lookups; this covers the
-    // other direction — "has the viewer liked these posts".
-    index("post_like_user_idx").on(t.userId),
+    // other direction — the viewer's recent likes, newest first. The
+    // `fetchViewerHistory` read in packages/api/src/feed-rank.ts orders by
+    // (created_at DESC, post_id DESC) with FEED_RANK_HISTORY_LIMIT, so the
+    // index mirrors exactly that ordering, `post_id` breaking ties between
+    // likes sharing a timestamp. Same shape as
+    // `post_bookmark_user_created_idx`: once `user_id` is bound,
+    // (created_at, post_id) is the rest of the comparison.
+    index("post_like_user_created_idx").on(t.userId, t.createdAt.desc(), t.postId.desc()),
   ],
 );
 

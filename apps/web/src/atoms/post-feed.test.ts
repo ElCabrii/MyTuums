@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
+import { ORPCError } from "@orpc/client";
+import { RANK_SNAPSHOT_INVALID_MESSAGE } from "@my-tuums/api/constants";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc, type PostListPage } from "@/lib/orpc";
 
@@ -266,6 +268,30 @@ describe("ranked snapshot continuity (issue #305)", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(store.get(atom).data?.pages).toHaveLength(1);
     expect(store.get(atom).data?.pages[0]?.items[0]?.content).toBe("s2a");
+
+    unsub();
+  });
+
+  // An expired snapshot is a BAD_REQUEST the server will refuse again —
+  // retrying resends the same id, so Refresh (a new snapshot) owns recovery.
+  // The client forces `retry: 3` because TanStack defaults to no retries on
+  // the server (this `node`-project test has no `window`), which would make
+  // a missing `retry` rule pass by accident instead of by contract.
+  it("does not retry an expired snapshot BAD_REQUEST", async () => {
+    fakeClient.post.list.mockRejectedValue(
+      new ORPCError("BAD_REQUEST", { message: RANK_SNAPSHOT_INVALID_MESSAGE }),
+    );
+
+    const store = createStore();
+    store.set(
+      queryClientAtom,
+      new QueryClient({ defaultOptions: { queries: { retry: 3, retryDelay: 0 } } }),
+    );
+    const atom = postFeedAtom({ feed: "global", ranked: true });
+    const unsub = store.sub(atom, () => {});
+
+    await vi.waitFor(() => expect(store.get(atom).isError).toBe(true));
+    expect(fakeClient.post.list).toHaveBeenCalledTimes(1);
 
     unsub();
   });
