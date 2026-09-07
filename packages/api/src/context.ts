@@ -1,13 +1,7 @@
 import { auth, sendEmail, type OutgoingEmail } from "@my-tuums/auth";
 import { db, type Database } from "@my-tuums/db";
-import { createGoogleTranslator, type Translator } from "./google-translation.js";
 import { createLinkFetchTransport, type LinkFetchTransport } from "./link-card-http.js";
 import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
-import {
-  createTranslationCoordinator,
-  type TranslationCoordinator,
-  type TranslationObserver,
-} from "./post-translation.js";
 import { createStorage, type Storage } from "./storage.js";
 
 type Session = Awaited<ReturnType<typeof auth.api.getSession>>;
@@ -84,22 +78,6 @@ export interface Context {
    * for a global client.
    */
   linkTransport: LinkFetchTransport;
-  /**
-   * Post translation for the Google Cloud Translation POC (issue #310), or
-   * `null` when this deployment has no translation credentials.
-   *
-   * Nullable rather than absent, and threaded on the context for the same
-   * reason `storage` is: procedures must not reach for a module global, and
-   * a test must be able to hand them a fake. `null` is a first-class state —
-   * a deployment without the `GOOGLE_TRANSLATION_*` group boots, serves
-   * every procedure, and renders every post untranslated, which mirrors how
-   * an unconfigured OAuth provider is simply absent rather than fatal.
-   */
-  translator: Translator | null;
-  /** Process-wide singleflight for identical translation miss sets. */
-  translationCoordinator: TranslationCoordinator;
-  /** Content-free cache, billing, timeout and failure counters for post translation. */
-  observeTranslation: TranslationObserver;
   /** Email delivery is explicit so tests can record sends without replacing the auth module. */
   emailSender: EmailSender;
   /**
@@ -157,34 +135,6 @@ const defaultStorage: Storage | null =
 const defaultLinkTransport = createLinkFetchTransport();
 
 /**
- * The one translator this process uses, or `null` when the
- * `GOOGLE_TRANSLATION_*` group is unset.
- *
- * Read from the environment here rather than in `./google-translation.ts` so
- * that module stays a pure factory with no ambient dependency — the same
- * split `rate-limit.ts` and this file already have. `apps/server/src/env.ts`
- * is what refuses to boot on a *partial* group; by the time this runs, the
- * variables are either all present or all absent.
- *
- * Built once at module load, not per request: the client holds its auth and
- * connection state, and constructing one per call would discard it every
- * time.
- */
-const defaultTranslator: Translator | null =
-  process.env.GOOGLE_TRANSLATION_PROJECT_ID &&
-  process.env.GOOGLE_TRANSLATION_CLIENT_EMAIL &&
-  process.env.GOOGLE_TRANSLATION_PRIVATE_KEY
-    ? createGoogleTranslator({
-        projectId: process.env.GOOGLE_TRANSLATION_PROJECT_ID,
-        clientEmail: process.env.GOOGLE_TRANSLATION_CLIENT_EMAIL,
-        privateKey: process.env.GOOGLE_TRANSLATION_PRIVATE_KEY,
-      })
-    : null;
-
-const defaultTranslationCoordinator = createTranslationCoordinator();
-const defaultTranslationObserver: TranslationObserver = () => undefined;
-
-/**
  * Builds a `Context` for one request: resolves the session from the request
  * headers and threads the process-wide limiter and storage.
  */
@@ -195,9 +145,6 @@ export async function createContext({
   storage = defaultStorage,
   emailSender = defaultEmailSender,
   linkTransport = defaultLinkTransport,
-  translator = defaultTranslator,
-  translationCoordinator = defaultTranslationCoordinator,
-  observeTranslation = defaultTranslationObserver,
 }: {
   headers: Headers;
   /** The server's per-request identity — see `Context.requestId`. */
@@ -210,27 +157,9 @@ export async function createContext({
   emailSender?: EmailSender;
   /** Override so a test can drive the card fetch guard with a fake network. */
   linkTransport?: LinkFetchTransport;
-  /** Override so a test can drive translation with a fake provider. */
-  translator?: Translator | null;
-  /** Override so tests can isolate or inspect translation singleflight behavior. */
-  translationCoordinator?: TranslationCoordinator;
-  /** Override so tests can inspect translation metrics without writing logs. */
-  observeTranslation?: TranslationObserver;
 }): Promise<Context> {
   const session = await auth.api.getSession({ headers });
-  return {
-    db,
-    session,
-    requestId,
-    rateLimiter,
-    storage,
-    linkTransport,
-    translator,
-    translationCoordinator,
-    observeTranslation,
-    emailSender,
-    headers,
-  };
+  return { db, session, requestId, rateLimiter, storage, linkTransport, emailSender, headers };
 }
 
 /** The process-wide storage client, for callers outside a procedure (the `/media` route). */

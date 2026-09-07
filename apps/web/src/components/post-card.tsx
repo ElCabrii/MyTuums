@@ -4,10 +4,9 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { Bookmark, Heart, MessageCircle, MoreHorizontal, Repeat2, Share } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileLink } from "@/components/profile-link";
-import { firstLinkUrl } from "@/components/linked-text";
+import { firstLinkUrl, LinkedText } from "@/components/linked-text";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { PostTimestamps } from "@/components/post-timestamps";
-import { postTranslation, TranslatedPostContent } from "@/components/translated-post-content";
 import { PostLinkCard } from "@/components/post-link-card";
 import { QuotePostIcon } from "@/components/icons/quote-post-icon";
 import { toggleLikeAtomFamily } from "@/atoms/like";
@@ -121,11 +120,7 @@ function QuotedPostCard({
       </Link>
       {quoted.content && (
         <p className="text-foreground/90 text-sm leading-relaxed break-words whitespace-pre-line">
-          <TranslatedPostContent
-            original={quoted.content}
-            translation={postTranslation(quoted)}
-            gameMentions={gameMentions}
-          />
+          <LinkedText text={quoted.content} gameMentions={gameMentions} />
         </p>
       )}
       <PostAttachmentGrid attachments={quoted.attachments} />
@@ -543,11 +538,7 @@ export function PostCard({
                     isFocused ? "text-base" : "text-sm"
                   }`}
                 >
-                  <TranslatedPostContent
-                    original={post.content}
-                    translation={postTranslation(post)}
-                    gameMentions={gameMentions}
-                  />
+                  <LinkedText text={post.content} gameMentions={gameMentions} />
                 </p>
               )}
               {/* The card belongs to the first URL of the text (issue #260),

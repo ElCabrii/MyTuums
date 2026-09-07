@@ -17,7 +17,6 @@ import { post, user } from "@my-tuums/db/schema";
 import { LEGAL_VERSION } from "@my-tuums/auth/rules";
 import type { Context, EmailSender } from "../context.js";
 import { createLinkFetchTransport } from "../link-card-http.js";
-import { createTranslationCoordinator } from "../post-translation.js";
 import { createRateLimiter, type RateLimiter } from "../rate-limit.js";
 import type { UserRole } from "../roles.js";
 import { runSql } from "../sql.js";
@@ -94,7 +93,6 @@ const forwardingRateLimiter: RateLimiter = {
  * builds its contexts by hand for exactly that reason.
  */
 const defaultTestLinkTransport = createLinkFetchTransport();
-const defaultTestTranslationCoordinator = createTranslationCoordinator();
 
 /** Recording email adapter shared by integration-test contexts. */
 export const testEmailSender: EmailSender = {
@@ -261,9 +259,6 @@ export async function createTestUser(overrides?: {
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
       linkTransport: defaultTestLinkTransport,
-      translator: null,
-      translationCoordinator: defaultTestTranslationCoordinator,
-      observeTranslation: () => undefined,
       emailSender: testEmailSender,
     },
   };
@@ -341,9 +336,6 @@ export async function createPasswordTestUser(): Promise<
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
       linkTransport: defaultTestLinkTransport,
-      translator: null,
-      translationCoordinator: defaultTestTranslationCoordinator,
-      observeTranslation: () => undefined,
       emailSender: testEmailSender,
     },
   };
@@ -357,9 +349,6 @@ export const anonContext: Context = {
   rateLimiter: forwardingRateLimiter,
   storage: testStorage,
   linkTransport: defaultTestLinkTransport,
-  translator: null,
-  translationCoordinator: defaultTestTranslationCoordinator,
-  observeTranslation: () => undefined,
   emailSender: testEmailSender,
 };
 
@@ -382,9 +371,6 @@ export function contextFor(
     rateLimiter,
     storage,
     linkTransport: defaultTestLinkTransport,
-    translator: null,
-    translationCoordinator: defaultTestTranslationCoordinator,
-    observeTranslation: () => undefined,
     emailSender,
   };
 }
@@ -401,7 +387,7 @@ export async function truncateAll(): Promise<void> {
   assertTestDatabase();
   await runSql(
     db,
-    sql`TRUNCATE TABLE "post_like", "post_repost", "post_bookmark", "post_edit", "post_translation", "follow", "report", "user_block", "appeal", "moderation_action", "notification", "notification_last_seen", "post", "link_card", "game_favorite", "game", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE "post_like", "post_repost", "post_bookmark", "post_edit", "follow", "report", "user_block", "appeal", "moderation_action", "notification", "notification_last_seen", "post", "link_card", "game_favorite", "game", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
   );
 }
 
@@ -498,9 +484,6 @@ export async function freshSessionFor(testUser: TestUser): Promise<TestUser> {
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
       linkTransport: defaultTestLinkTransport,
-      translator: null,
-      translationCoordinator: defaultTestTranslationCoordinator,
-      observeTranslation: () => undefined,
       emailSender: testEmailSender,
     },
   };

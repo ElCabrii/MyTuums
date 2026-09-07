@@ -17,7 +17,6 @@ over HTTP and imports only its browser-safe subpaths.
 | `src/router.ts`             | The six groups and what owns each.                                                                                                                                                       |
 | `src/procedures.ts`         | The four gates, the legal consent and onboarding gates, the two rate-limit mechanisms, the one exception.                                                                                |
 | `src/context.ts`            | What every handler is handed, and why nothing is a module global.                                                                                                                        |
-| `src/post-translation.ts`   | The visible-post translation overlay: cache, batching, token preservation, fallback and content-free observations.                                                                       |
 | `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                                                                                                                                  |
 | `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                                                                                                                       |
 | `src/notifications.ts`      | The notification inbox (list, unread count, mark-read, delete, clear-all) and `insertNotification`, the single mint point every cause's transaction calls.                               |
@@ -47,7 +46,6 @@ over HTTP and imports only its browser-safe subpaths.
 | Change what an appellant is shown           | `src/moderation-appeals.ts` (`appealPreview`), `src/post-media.ts` (`canViewPostMedia`)             | `src/appeal-preview.int.test.ts`, `src/post-media.int.test.ts`; `docs/security.md` — media retrieval                                                                      |
 | Change profile-image upload rules           | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                                 | `src/image.test.ts`; `src/dimensions.ts` for a new format                                                                                                                 |
 | Change post-attachment upload rules         | `src/post-image.ts`, `src/constants.ts` (`POST_ATTACHMENT_*`)                                       | `src/image.test.ts`; `src/posts.int.test.ts`                                                                                                                              |
-| Change post translation                     | `src/post-translation.ts`, `src/google-translation.ts`                                              | `src/posts.ts`; `src/post-translation.int.test.ts`; `docs/{architecture,product,security,operations}.md`                                                                  |
 | Change the profile upload lifecycle         | `src/profile-media.ts`                                                                              | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                                                                                       |
 | Change the post attachment lifecycle        | `src/post-media.ts`, `src/post-media-lock.ts`                                                       | `src/posts.int.test.ts`; `src/reconcile-media.ts`; `scripts/reconcile-media.ts`                                                                                           |
 | Change follow, block or unblock             | `src/users.ts`, `src/moderation.ts`                                                                 | `src/relationship-lock.ts` — every relationship writer must take the pair lock                                                                                            |
@@ -62,18 +60,10 @@ over HTTP and imports only its browser-safe subpaths.
 
 ## Invariants
 
-- **The rate limiter, storage client, translator, translation coordinator,
-  translation observer and email sender are threaded on `Context`, never module
-  globals.** Tests substitute
-  them; one suite's limiter state
+- **The rate limiter, storage client, and email sender are threaded on `Context`,
+  never module globals.** Tests substitute all three; one suite's limiter state
   must not bleed into another's, and moderation tests record delivery through
   the same sender interface production uses.
-- **Translation runs only after post visibility projection.** `post.list` and
-  `post.thread` may overlay text for an English/French target locale; no search,
-  notification or moderation path calls it. Positive and stable negative
-  results use `(post_id, target_locale, provider_model)`; failures do not cache,
-  edits purge every target atomically, identical in-flight post versions share one
-  provider operation, and observations contain counters only.
 - **`rateLimit` keys on `user:<id>`; `rateLimitCapability` keys on a
   capability.** Do not describe limiting here as uniformly per-user.
   `rateLimitCapability` is what throttles `moderation.appealOpen`

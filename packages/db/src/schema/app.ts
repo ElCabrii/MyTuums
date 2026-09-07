@@ -336,38 +336,6 @@ export const postBookmark = pgTable(
 );
 
 /**
- * A cached translation of a post's content (issue #310) — one row per
- * (post, target locale, provider model). The composite primary key is the
- * cache key, so refetching a translation is an idempotent upsert.
- *
- * A row with `translatedContent` set is a positive cache entry; a row with
- * it null is a negative entry — "this post needs no translation for this
- * locale" (source matches target, or the provider reports unsupported) —
- * so repeated views do not refetch. The detected source is retained for both
- * shapes; provider failures have no trustworthy detection and are not cached.
- */
-export const postTranslation = pgTable(
-  "post_translation",
-  {
-    postId: uuid("post_id")
-      .notNull()
-      .references(() => post.id, { onDelete: "cascade" }),
-    targetLocale: text("target_locale").notNull(),
-    providerModel: text("provider_model").notNull(),
-    translatedContent: text("translated_content"),
-    detectedSourceLocale: text("detected_source_locale").notNull(),
-    // `timestamptz` and `precision: 3` for the same reasons as
-    // post.created_at above.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.postId, t.targetLocale, t.providerModel] }),
-    check("post_translation_target_locale", sql`${t.targetLocale} in ('en', 'fr')`),
-    check("post_translation_detected_source", sql`${t.detectedSourceLocale} <> ''`),
-  ],
-);
-
-/**
  * A directed follow edge from `followerId` to `followingId` — the rows the
  * Following feed and the follow lists are built from.
  */
@@ -1082,7 +1050,6 @@ export const postRelations = relations(post, ({ one, many }) => ({
   }),
   replies: many(post, { relationName: "replies" }),
   edits: many(postEdit),
-  translations: many(postTranslation),
   // The quote self-relation (issue #261): `quotedPost` is the post this one
   // references, `quotes` the posts referencing this one. A separate
   // `relationName` from "replies" so the two self-relations stay distinct.
@@ -1120,11 +1087,6 @@ export const postRepostRelations = relations(postRepost, ({ one }) => ({
 export const postBookmarkRelations = relations(postBookmark, ({ one }) => ({
   post: one(post, { fields: [postBookmark.postId], references: [post.id] }),
   user: one(user, { fields: [postBookmark.userId], references: [user.id] }),
-}));
-
-/** Drizzle relations for `postTranslation` — the `post` a cached translation belongs to. */
-export const postTranslationRelations = relations(postTranslation, ({ one }) => ({
-  post: one(post, { fields: [postTranslation.postId], references: [post.id] }),
 }));
 
 /** Drizzle relations for `follow` — the `user` rows on both sides of the edge. */

@@ -773,66 +773,6 @@ describe("PostCard", () => {
     });
   });
 
-  // Issue #310: automatic post translation. The card shows the translated
-  // text by default with Google's badge beside it, toggles to the original,
-  // and keeps the link preview derived from the original text.
-  describe("post translation", () => {
-    it("shows the translated text by default while the link card still probes the original URL", async () => {
-      const post = makePost({
-        content: "Bonjour, lisez https://example.com",
-        translation: { content: "Hello, read this", sourceLocale: "fr" },
-      });
-      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
-
-      expect(screen.getByText("Hello, read this")).toBeInTheDocument();
-      expect(screen.queryByText(/Bonjour, lisez/)).not.toBeInTheDocument();
-      expect(screen.getByRole("link", { name: m.post_translation_badge_alt() })).toHaveAttribute(
-        "href",
-        "https://translate.google.com/",
-      );
-
-      // The preview card belongs to the first URL of the ORIGINAL text (issue
-      // #260) — the translation carries no URL, so a translated probe would
-      // never ask about anything.
-      await waitFor(() =>
-        expect(fakeClient.post.linkCard).toHaveBeenCalledWith(
-          { url: "https://example.com/" },
-          expect.anything(),
-        ),
-      );
-
-      const user = userEvent.setup();
-      await user.click(screen.getByRole("button", { name: m.post_translation_view_original() }));
-      expect(screen.getByText(/Bonjour, lisez/)).toBeInTheDocument();
-    });
-
-    it("shows the quoted post's translation by default, with its own original toggle", async () => {
-      const post = makePost({
-        content: "quote survives",
-        quotedPostId: "quoted-1",
-        quoted: {
-          id: "quoted-1",
-          content: "les mots cités",
-          removed: false,
-          deleted: false,
-          removedReason: null,
-          attachments: [],
-          author: makeAuthor({ name: "Quoted Author" }),
-          translation: { content: "the quoted words", sourceLocale: "fr" },
-        },
-      });
-      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
-
-      expect(screen.getByText("quote survives")).toBeInTheDocument();
-      expect(screen.getByText("the quoted words")).toBeInTheDocument();
-      expect(screen.queryByText("les mots cités")).not.toBeInTheDocument();
-
-      const user = userEvent.setup();
-      await user.click(screen.getByRole("button", { name: m.post_translation_view_original() }));
-      expect(screen.getByText("les mots cités")).toBeInTheDocument();
-    });
-  });
-
   // Issue #307: the share control opens the root-mounted share dialog. The
   // dialog's own suite pins what it renders and how it copies; these pin the
   // card's wiring — the control's presence and accessible name, that a click

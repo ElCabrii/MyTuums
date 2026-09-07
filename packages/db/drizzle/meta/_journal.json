@@ -246,13 +246,6 @@
       "when": 1788587490877,
       "tag": "0034_purple_galactus",
       "breakpoints": true
-    },
-    {
-      "idx": 35,
-      "version": "7",
-      "when": 1788731215025,
-      "tag": "0035_strange_deathbird",
-      "breakpoints": true
     }
   ]
 }

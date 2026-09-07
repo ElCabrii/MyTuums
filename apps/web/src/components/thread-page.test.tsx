@@ -86,7 +86,7 @@ describe("ThreadPage query states", () => {
     expect(await screen.findByText("Recovered thread")).toBeInTheDocument();
     await waitFor(() =>
       expect(fakeClient.post.thread).toHaveBeenCalledWith(
-        { postId: "network-post", targetLocale: "en" },
+        { postId: "network-post" },
         expect.anything(),
       ),
     );
@@ -283,7 +283,6 @@ describe("ThreadPage successful rendering", () => {
         {
           limit: 20,
           continuationRootId: directReply.id,
-          targetLocale: "en",
           cursor: "branch-cursor",
         },
         expect.anything(),

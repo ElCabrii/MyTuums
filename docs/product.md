@@ -84,16 +84,6 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   — leaves the post with the plain link it always had. A moderator can purge
   a URL's card (`moderation.purgeLinkCard`), which removes the preview from
   every post carrying the URL and stops the URL from ever unfurling again.
-- **Automatic English/French post translation is configuration-dependent.**
-  When Cloud Translation is configured, feeds, replies, threads and post
-  permalinks ask for the viewer's selected app language. A post detected in the
-  other supported language displays Google's automatic translation by default,
-  beside official attribution and a control that switches between translation
-  and original; the translated body goes through the same link renderer as the
-  authored one. Same-language or unsupported text and every timeout, invalid
-  result or provider failure display the original without a translation marker.
-  Search results, notifications, profiles, bios, emails and all moderation
-  evidence remain original-only. Translation changes no authored data.
 - A reply is a post with a parent. Threads show the focused post, up to 20
   ancestors of context, and keyset-paginated direct replies. Beneath each
   direct reply, the thread groups the deterministic descendant branch first

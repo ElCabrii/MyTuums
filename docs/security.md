@@ -15,8 +15,7 @@ There are four, and only the first two carry untrusted input:
    browser follows directly to the bucket.
 3. **The server → Postgres.** TLS is required for dotted hostnames and
    disabled for loopback and single-label (Compose-internal) hosts.
-4. **The application → third parties** — OAuth providers, Resend, consented
-   Google Analytics, and the Preview-only Google Cloud Translation provider.
+4. **The server → third parties** — the OAuth providers and Resend.
 
 ## Exposed surfaces
 
@@ -391,35 +390,6 @@ media rows hide from non-followers at the query layer (`privatePostHidden`,
 gated by the pair's relationship lock — `block` severs pending requests both
 directions like the edges themselves.
 
-## Translation trust boundary
-
-Automatic post translation adds one server-to-provider data flow, only when
-the complete `GOOGLE_TRANSLATION_*` credential group is configured. After the
-ordinary visibility projection, `post.list` and `post.thread` may send visible
-authored post text to Google Cloud Translation. Tombstones, content hidden from
-the viewer by privacy or blocking, moderation evidence, report snapshots and
-edit history never cross that boundary. An authorized viewer can therefore
-request translation of a private post they are permitted to read. The returned
-text is a display-only cache entry and can never overwrite `post.content` or
-become moderation evidence.
-
-The adapter pins both its API hostname and resource location to the EU
-multi-region and has no global fallback. Google documents that request text is
-held briefly in memory to provide the service, is not used to train translation
-models and is not shared with third parties. The applicable processor terms are
-the [Google Cloud Data Processing Addendum](https://cloud.google.com/terms/data-processing-addendum).
-The public privacy policy discloses the provider, transfer safeguards and
-required translation disclaimer; changing that disclosure advanced
-`LEGAL_VERSION`, so the existing consent gate requires acceptance again.
-
-Translation credentials stay server-side. Structured `translation` log lines
-contain only request id, locale/model identifiers, counts, outcomes and elapsed
-time. Post text, translated text, marker values, provider error detail and
-credentials are absent. The provider adapter parses external responses before
-use. Timeout, malformed response or cache-read failure degrades to the original
-visible post. Observer failures are ignored; a cache-write failure keeps a
-validated fresh result for that response without retaining it for later reads.
-
 ## Moderation authority
 
 - The hierarchy is `user` → `moderator` → `staff` → `admin`
@@ -453,8 +423,8 @@ validated fresh result for that response without retaining it for later reads.
 ## Configuration and secrets
 
 - `apps/server/src/env.ts` is the loud boot-time validator: it refuses to
-  start on a partial OAuth pair, `S3_*` group or `GOOGLE_TRANSLATION_*` group,
-  and requires `BETTER_AUTH_SECRET` to be at least 32 characters. `parseEnv` throws but
+  start on a partial OAuth pair or a partial `S3_*` group, and requires
+  `BETTER_AUTH_SECRET` to be at least 32 characters. `parseEnv` throws but
   never calls `process.exit` — only `apps/server/src/index.ts` turns a bad
   environment into an exit, so tests can inspect the failure.
 - `packages/auth/src/env.ts` is the quiet reader: a missing value makes a

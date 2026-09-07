@@ -140,7 +140,6 @@ const handleRequest = createRequestHandler({
       // tag. The dash fallback mirrors observability.ts's — unreachable in
       // production, harmless if a future caller skips the routing tree.
       requestId: responseHeaderText(res.getHeader("x-request-id")),
-      observeTranslation: (observation) => console.log(JSON.stringify(observation)),
     });
 
     return handler.handle(req, nodeResponse(res), { prefix: "/rpc", context });
