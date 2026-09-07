@@ -6,8 +6,8 @@
  * Fixed wire rules, all load-bearing for the POC's privacy and billing
  * posture: requests go to the EU multi-regional endpoint
  * (`translate-eu.googleapis.com`), never the global one, with the parent
- * location `eu` and the pre-trained NMT model
- * (`projects/<project>/locations/eu/models/general/nmt`). There is
+ * location `europe-west1` and the pre-trained NMT model
+ * (`projects/<project>/locations/europe-west1/models/general/nmt`). There is
  * deliberately no fallback: a request that cannot be served from the EU
  * endpoint fails rather than silently processing elsewhere.
  *
@@ -32,8 +32,8 @@ type TranslateTextResponse = protos.google.cloud.translation.v3.ITranslateTextRe
 /** The EU multi-regional endpoint — the only endpoint this adapter dials. */
 export const GOOGLE_TRANSLATION_API_ENDPOINT = "translate-eu.googleapis.com";
 
-/** The location every parent and model resource is built from. */
-export const GOOGLE_TRANSLATION_LOCATION = "eu";
+/** The EU region every parent and model resource is built from. */
+export const GOOGLE_TRANSLATION_LOCATION = "europe-west1";
 
 /**
  * The stable cache identity of this provider/model pair. Stored as the
@@ -41,7 +41,7 @@ export const GOOGLE_TRANSLATION_LOCATION = "eu";
  * (NMT today, something else later) invalidates existing rows cleanly:
  * bump this when the model resource below changes.
  */
-export const GOOGLE_TRANSLATION_MODEL = "google-nmt-eu";
+export const GOOGLE_TRANSLATION_MODEL = "google-nmt-europe-west1";
 
 /**
  * Wall-clock ceiling on one `translateText` call, passed through the

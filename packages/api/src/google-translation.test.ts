@@ -114,8 +114,8 @@ describe("createGoogleTranslator", () => {
 
     expect(calls).toHaveLength(1);
     const request = calls[0]?.request;
-    expect(request?.parent).toBe("projects/test-project/locations/eu");
-    expect(request?.model).toBe("projects/test-project/locations/eu/models/general/nmt");
+    expect(request?.parent).toBe("projects/test-project/locations/europe-west1");
+    expect(request?.model).toBe("projects/test-project/locations/europe-west1/models/general/nmt");
     expect(request?.mimeType).toBe("text/plain");
     expect(request?.targetLanguageCode).toBe("fr");
     expect(request?.contents).toEqual(["Hello world", "Goodbye"]);

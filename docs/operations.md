@@ -131,10 +131,10 @@ its three service variables to Railway Preview:
 4. Set the complete `GOOGLE_TRANSLATION_*` group on the app service in Preview
    only. Confirm the same names are absent from production, dev and CI.
 
-The adapter always calls `translate-eu.googleapis.com` with an `eu` parent and
-the pre-trained NMT model. It has no global fallback. Removing the three
-variables and redeploying is the kill switch; existing cache rows become inert
-because no translation overlay runs without a configured provider.
+The adapter always calls `translate-eu.googleapis.com` with the `europe-west1`
+parent and the pre-trained NMT model. It has no global fallback. Removing the
+three variables and redeploying is the kill switch; existing cache rows become
+inert because no translation overlay runs without a configured provider.
 
 Keep production third-party credentials out of Preview. OAuth, transactional
 email, and error-reporting integrations remain disabled there until dedicated
