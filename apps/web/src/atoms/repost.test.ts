@@ -61,7 +61,10 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
 }
 
 function feedPage(posts: Post[]): InfiniteData<PostListPage> {
-  return { pages: [{ items: posts, nextCursor: null, gameMentions: {} }], pageParams: [undefined] };
+  return {
+    pages: [{ items: posts, nextCursor: null, gameMentions: {}, ranking: null }],
+    pageParams: [undefined],
+  };
 }
 
 function freshStoreWithPost(post: Post) {

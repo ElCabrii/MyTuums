@@ -49,7 +49,7 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
 
 function feedPage(posts: Post[]): InfiniteData<PostListPage> {
   return {
-    pages: [{ items: posts, nextCursor: null, gameMentions: {} }],
+    pages: [{ items: posts, nextCursor: null, gameMentions: {}, ranking: null }],
     pageParams: [undefined],
   };
 }
@@ -61,6 +61,7 @@ function replyPage(directReply: Post, continuation: Post): InfiniteData<PostList
         items: [directReply],
         nextCursor: null,
         gameMentions: {},
+        ranking: null,
         continuations: [
           {
             rootPostId: directReply.id,
@@ -201,6 +202,32 @@ describe("post-cache", () => {
         likeCount: 3,
         viewerHasLiked: true,
       });
+    });
+
+    it("leaves a ranked page's snapshot block untouched while reconciling a like in place", () => {
+      const queryClient = new QueryClient();
+      const target = makePost({ id: "ranked-1", likeCount: 3, viewerHasLiked: false });
+      const key = orpc.post.list.key({ input: { limit: 20, feed: "discover", ranked: true } });
+      const ranking = {
+        snapshotId: "snapshot-1",
+        expiresAt: new Date("2026-09-07T00:00:00.000Z").toISOString(),
+        hasInterests: true,
+        suggestions: [],
+      };
+      queryClient.setQueryData<InfiniteData<PostListPage>>(key, {
+        pages: [{ items: [target], nextCursor: null, gameMentions: {}, ranking }],
+        pageParams: [undefined],
+      });
+
+      updatePostEverywhere(queryClient, "ranked-1", (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+        viewerHasLiked: true,
+      }));
+
+      const page = queryClient.getQueryData<InfiniteData<PostListPage>>(key)?.pages[0];
+      expect(page?.items[0]).toMatchObject({ likeCount: 4, viewerHasLiked: true });
+      expect(page?.ranking).toEqual(ranking);
     });
 
     it("patches the same post inside a post.thread entry as both data.post and an ancestor", () => {
@@ -663,7 +690,7 @@ describe("post-cache", () => {
       const searchKey = orpc.search.posts.key({ input: { q: "hello", limit: 20 } });
 
       queryClient.setQueryData(bookmarksKey, {
-        pages: [{ items: [target, neighbour], nextCursor: null, gameMentions: {} }],
+        pages: [{ items: [target, neighbour], nextCursor: null, gameMentions: {}, ranking: null }],
         pageParams: [undefined],
       });
       queryClient.setQueryData(homeKey, feedPage([target]));
@@ -703,8 +730,8 @@ describe("post-cache", () => {
 
       queryClient.setQueryData(bookmarksKey, {
         pages: [
-          { items: [first], nextCursor: "cursor-1", gameMentions: {} },
-          { items: [second], nextCursor: null, gameMentions: {} },
+          { items: [first], nextCursor: "cursor-1", gameMentions: {}, ranking: null },
+          { items: [second], nextCursor: null, gameMentions: {}, ranking: null },
         ],
         pageParams: [undefined, "cursor-1"],
       });

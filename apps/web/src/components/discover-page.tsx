@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { Compass, Search, X } from "lucide-react";
-import { PostFeed } from "@/components/post-feed";
+import { RankedFeed } from "@/components/ranked-feed";
 import { GameCover } from "@/components/game-cover";
 import { Input } from "@/components/ui/input";
-import { postFeedAtom, type PostFeedParams } from "@/atoms/post-feed";
+import type { PostFeedParams } from "@/atoms/post-feed";
 import { gameListAtom } from "@/atoms/games";
 import { gamePageAtomFamily } from "@/atoms/games";
 import { m } from "@/paraglide/messages.js";
@@ -30,9 +30,10 @@ interface DiscoverSearch {
 const FILTER_DEBOUNCE_MS = 300;
 
 /**
- * The Discover page (route `/discover`): recent top-level posts from everyone,
- * newest first — the out-of-network reading surface — plus the search box and
- * game filter the feedback asked for.
+ * The Discover page (route `/discover`): ranked top-level posts from everyone
+ * (issue #305) — the out-of-network reading surface — plus the search box and
+ * game filter the feedback asked for, and the Who-to-Follow module above the
+ * posts.
  *
  * Both filters compose as AND through `post.list`'s `q` + `gameSlug` (the
  * game slug resolves server-side to its hashtag key and matches `#key` in
@@ -120,7 +121,7 @@ export function DiscoverPage() {
     pushSearch({});
   }
 
-  const feedParams: PostFeedParams = { feed: "global" };
+  const feedParams: PostFeedParams = { feed: "discover", ranked: true };
   if (trimmedQ) feedParams.q = trimmedQ;
   if (trimmedGame) feedParams.gameSlug = trimmedGame;
 
@@ -179,10 +180,11 @@ export function DiscoverPage() {
         )}
       </div>
 
-      <PostFeed
-        feedAtom={postFeedAtom(feedParams)}
+      <RankedFeed
+        params={feedParams}
         emptyMessage={isFiltered ? m.discover_filtered_empty() : m.discover_empty()}
         emptyIcon={Compass}
+        suggestions="discover"
       />
     </div>
   );

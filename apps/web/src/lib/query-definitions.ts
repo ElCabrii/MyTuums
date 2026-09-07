@@ -17,10 +17,12 @@ interface PostListInput {
   includeReplies?: boolean;
   includeReposts?: boolean;
   kind?: "posts" | "replies" | "all";
-  feed?: FeedScope | "bookmarks";
+  feed?: PostListScope;
   q?: string;
   gameSlug?: string;
   cursor?: string;
+  ranked?: boolean;
+  snapshotId?: string;
 }
 interface PagedSearchInput {
   q: string;
@@ -50,11 +52,12 @@ export type PostFeedKind = "posts" | "replies" | "both";
 
 /**
  * Which `post.list` scope a feed atom reads. The two home scopes are the
- * persisted `FeedScope`; `bookmarks` is the caller's private saved page and is
+ * persisted `FeedScope`; `discover` is the out-of-network reading surface
+ * (issue #305); `bookmarks` is the caller's private saved page and is
  * never a home-feed choice — it deliberately stays out of `feedScopeAtom`'s
  * enum so a hand-edited `localStorage` value can never select it.
  */
-export type PostListScope = FeedScope | "bookmarks";
+export type PostListScope = FeedScope | "bookmarks" | "discover";
 
 export type PostFeedParams = {
   /** Omit for the global timeline; set to scope the feed to one author. */
@@ -73,19 +76,66 @@ export type PostFeedParams = {
   q?: string;
   /** Discover-only game filter — a catalog slug, matched as `#hashtagKey`. */
   gameSlug?: string;
+  /**
+   * Ranked (issue #305) rather than chronological. First-class for the home
+   * feeds and Discover only — profile, thread, search and bookmarks feeds
+   * never set it, so their keys and their chronological contract never move.
+   */
+  ranked?: boolean;
 };
 
+/**
+ * Whether these params may ride the ranked path (issue #305): the global,
+ * following and discover scopes with no author, reply, repost or activity
+ * scoping. `q`/`gameSlug` compose (filtered Discover stays ranked); every
+ * other combination stays chronological so the server never sees a ranked
+ * request it must refuse.
+ */
+export function isRankableFeedParams(params: PostFeedParams): boolean {
+  return (
+    params.ranked === true &&
+    (params.feed === "global" || params.feed === "following" || params.feed === "discover") &&
+    !params.authorId &&
+    !params.parentId &&
+    !params.includeReplies &&
+    !params.includeReposts &&
+    !params.kind
+  );
+}
+
 /** Authoritative query definitions shared by production atoms and test fixtures. */
-export function postListQueryOptions({
-  authorId,
-  feed: scope,
-  parentId,
-  includeReplies,
-  includeReposts,
-  kind,
-  q,
-  gameSlug,
-}: PostFeedParams) {
+export function postListQueryOptions(
+  {
+    authorId,
+    feed: scope,
+    parentId,
+    includeReplies,
+    includeReposts,
+    kind,
+    q,
+    gameSlug,
+    ranked,
+  }: PostFeedParams,
+  opts?: {
+    /**
+     * Resumes a ranked browsing snapshot (issue #305): read at fetch time
+     * per input build, so the first page and every cursor page carry the
+     * pinned id. This also runs once to derive the query key — callers that
+     * pass a reader MUST pin the key to the snapshot-free input (as
+     * `postFeedAtom` does), or the first resume forks a second cache entry
+     * the optimistic sweeps no longer match.
+     */
+    getSnapshotId?: () => string | undefined;
+  },
+) {
+  const rankable =
+    ranked === true &&
+    (scope === "global" || scope === "following" || scope === "discover") &&
+    !authorId &&
+    !parentId &&
+    !includeReplies &&
+    !includeReposts &&
+    !kind;
   return orpc.post.list.infiniteOptions({
     input: (cursor: string | undefined) => {
       const input: PostListInput = { limit: POST_PAGE_SIZE };
@@ -103,8 +153,17 @@ export function postListQueryOptions({
       const trimmedGame = gameSlug?.trim();
       if (trimmedGame) input.gameSlug = trimmedGame;
       // The global feed keeps a bare key (see the note on the conditional
-      // spreads above); the two scoped feeds carry their discriminator.
-      if (scope === "following" || scope === "bookmarks") input.feed = scope;
+      // spreads above); the scoped feeds carry their discriminator. Ranked
+      // is its own discriminator beside them: a ranked global feed never
+      // shares a cache entry with its chronological twin.
+      if (scope === "following" || scope === "bookmarks" || scope === "discover") {
+        input.feed = scope;
+      }
+      if (rankable) {
+        input.ranked = true;
+        const snapshotId = opts?.getSnapshotId?.();
+        if (snapshotId) input.snapshotId = snapshotId;
+      }
       if (cursor) input.cursor = cursor;
       return input;
     },

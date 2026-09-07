@@ -390,6 +390,23 @@ media rows hide from non-followers at the query layer (`privatePostHidden`,
 gated by the pair's relationship lock — `block` severs pending requests both
 directions like the edges themselves.
 
+**Ranked snapshots store IDs, never content.** A `feedRankSnapshot` row holds
+ordered post IDs with repost attribution and the event instant — no text, no
+media, no scores. Every ranked page re-reads its slice live through the
+shared projection and re-applies the full visibility treatment (banned,
+blocked, private) plus live follow state and scope/filter membership, so a
+row hidden since the build drops instead of rendering; removed or deleted
+posts drop rather than stubbing. Ranked reads are signed-in only — an
+anonymous ranked call is refused UNAUTHORIZED, and the snapshot binds the
+viewer's id. Resuming with an unknown, foreign, mismatched-scope,
+mismatched-filter or expired id is an explicit error asking for a Refresh,
+never a silent restart under a fresh ordering. Expiry is enforced at
+authorization time (an expired row is refused immediately); physical deletion
+is opportunistic request-time maintenance, not a guarantee — a row past its
+30-minute TTL is already unservable whether or not it has been reaped. No
+impressions are recorded and no Redis is involved, so there is no
+view-history store to leak.
+
 ## Moderation authority
 
 - The hierarchy is `user` → `moderator` → `staff` → `admin`

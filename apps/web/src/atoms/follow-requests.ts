@@ -1,6 +1,7 @@
 import { atomWithInfiniteQuery, atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { followRequestListQueryOptions } from "@/lib/query-definitions";
+import { withdrawSuggestionRequest } from "@/lib/follow-cache";
 import { orpc } from "@/lib/orpc";
 
 /**
@@ -41,13 +42,16 @@ export const rejectFollowRequestAtom = atomWithMutation((get) => {
 export const cancelFollowRequestAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
   return orpc.user.followRequest.cancel.mutationOptions({
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       invalidateRequestCaches(queryClient);
       // The cancelled row was outgoing — the target's profile button flips
       // back to Follow, which lives under the same profile/list keys above.
       // The requester's own Following feed is unaffected (a request was never
       // a membership), so no feed invalidation is needed.
       void queryClient.invalidateQueries({ queryKey: orpc.search.users.key() });
+      // A requested suggestion row flips back to Follow in place — patched,
+      // not refetched, so the pinned Discover snapshot never moves.
+      withdrawSuggestionRequest(queryClient, variables.targetId);
     },
   });
 });
