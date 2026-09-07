@@ -23,9 +23,13 @@ test.describe("composing a post", () => {
 
     await page.goto("/");
 
+    await expect(page.getByText(older.content, { exact: true })).toBeVisible();
+
     const fresh = `Brand new feed post ${Date.now().toString()}`;
     await page.getByPlaceholder(COMPOSER_PLACEHOLDER).fill(fresh);
     await page.getByRole("button", { name: "Post", exact: true }).click();
+    // The draft clears only after publishing succeeds; Refresh must not race it.
+    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toHaveValue("");
 
     // Issue #305: the home feed is ranked from a frozen per-viewer snapshot,
     // and the composer mutation's auto-refetch hydrates that SAME snapshot —
@@ -89,6 +93,7 @@ test.describe("composing a post", () => {
     const accepted = `${prefix} @alice`;
     await expect(textarea).toHaveValue(accepted);
     await page.getByRole("button", { name: "Post", exact: true }).click();
+    await expect(textarea).toHaveValue("");
 
     // Ranked home (issue #305): the composer refetch hydrates the same
     // snapshot, so the new post joins only after an explicit Refresh.
@@ -147,6 +152,7 @@ test.describe("post image attachments", () => {
     await expect(page.getByRole("img", { name: "post.png" })).toBeVisible();
 
     await page.getByRole("button", { name: "Post", exact: true }).click();
+    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toHaveValue("");
 
     // Ranked home (issue #305): the new candidate joins only after Refresh.
     await page.getByRole("button", { name: "Refresh" }).first().click();
@@ -208,6 +214,7 @@ test.describe("post image attachments", () => {
     await expect(page.getByRole("img", { name: "gps-photo.jpg" })).toBeVisible();
 
     await page.getByRole("button", { name: "Post", exact: true }).click();
+    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toHaveValue("");
 
     // Ranked home (issue #305): the new candidate joins only after Refresh.
     await page.getByRole("button", { name: "Refresh" }).first().click();
