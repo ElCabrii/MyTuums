@@ -217,12 +217,12 @@ one provider deadline rather than one deadline per batch.
 URLs, mentions, hashtags, emoji and line breaks are replaced with markers
 before translation and restored afterward; a missing or duplicated marker
 rejects that result. The Google adapter fixes the endpoint to
-`translate-eu.googleapis.com`, parent location to `eu`, model to the pre-trained
-NMT resource, and omits `sourceLanguageCode` for provider detection. Its
-five-second deadline and every provider or cache-read error degrade to original
-text. A cache-write error keeps the validated result for the current response
-but records no reusable row. The Context-threaded observer emits counts and
-timing only, never text or credentials.
+`translate-eu.googleapis.com`, parent location to `europe-west1`, model to the
+pre-trained NMT resource, and omits `sourceLanguageCode` for provider detection.
+Its five-second deadline and every provider or cache-read error degrade to
+original text. A cache-write error keeps the validated result for the current
+response but records no reusable row. The Context-threaded observer emits
+counts and timing only, never text or credentials.
 
 ## Client state ownership — Jotai and TanStack Query
 
