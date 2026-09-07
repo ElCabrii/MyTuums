@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, ilike, inArray, isNull, not, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, not, or, sql } from "drizzle-orm";
 import { alias, type PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "@my-tuums/db";
 import {
@@ -15,6 +15,7 @@ import {
   user,
   userBlock,
 } from "@my-tuums/db/schema";
+import type { FeedRankSnapshotItem } from "@my-tuums/db/schema";
 import { z } from "zod";
 import { postLikeBadgeTierFor, POST_LIKE_BADGE_TIERS } from "./badges.js";
 import { stampBadgeTier } from "./badge-stamping.js";
@@ -34,8 +35,17 @@ import {
   LINK_CARD_URL_MAX_LENGTH,
   SEARCH_QUERY_MAX_LENGTH,
   GAME_SLUG_MAX_LENGTH,
+  RANK_SNAPSHOT_INVALID_MESSAGE,
 } from "./constants.js";
-import { createCursorCodec, createEventCursorCodec } from "./cursor.js";
+import { createCursorCodec, createEventCursorCodec, createRankCursorCodec } from "./cursor.js";
+import {
+  buildRankSnapshot,
+  extractRankHashtagKeys,
+  loadRankSnapshot,
+  suggestRankAuthorIds,
+  type LoadedRankSnapshot,
+  type RankScope,
+} from "./feed-rank.js";
 import { gameMentionsFor } from "./games.js";
 import { resolveLinkCard } from "./link-card.js";
 import { insertNotification } from "./notifications.js";
@@ -69,6 +79,7 @@ import {
 } from "./post-media.js";
 import { requireStorage } from "./profile-media.js";
 import { selectReplyBranch, type ReplyBranchNode } from "./reply-branch.js";
+import { viewerHasRequested, viewerIsFollowing } from "./users.js";
 
 /**
  * Feeds are keyset-paginated on `(post.created_at, post.id) DESC`; see
@@ -87,6 +98,14 @@ const postCursor = createCursorCodec(z.uuid());
  * `(event_at, post_id, reposter_key)` comparison a total order.
  */
 const postFeedCursor = createEventCursorCodec(z.uuid());
+
+/**
+ * The ranked-feed cursor (issue #305): the snapshot id plus the offset into
+ * its frozen order the next page starts at. Offset-based because the snapshot
+ * freezes the order — a score cursor could skip or repeat rows sharing a
+ * score, while an offset cannot. See `createRankCursorCodec` in ./cursor.ts.
+ */
+const postRankCursor = createRankCursorCodec();
 
 /**
  * Like counts are derived on read rather than denormalised onto a
@@ -1209,6 +1228,238 @@ async function feedEventPage(
   };
 }
 
+/**
+ * A Discover ranked page's follow suggestion: a followable user summary. The
+ * name/handle nullability mirrors `publicUserColumns` — `name` is never
+ * null, the handle and image are.
+ */
+export interface RankSuggestion {
+  id: string;
+  name: string;
+  username: string | null;
+  displayUsername: string | null;
+  image: string | null;
+  viewerIsFollowing: boolean;
+  hasRequested: boolean;
+}
+
+/** The `ranking` metadata every `post.list` branch carries (issue #305). */
+export interface RankingMetadata {
+  snapshotId: string;
+  /** ISO instant the frozen ordering stops being resumable. */
+  expiresAt: string;
+  /** False marks a cold start — the client prompts for game interests. */
+  hasInterests: boolean;
+  /** Follow suggestions; empty unless a Discover ranked page. */
+  suggestions: RankSuggestion[];
+}
+
+/**
+ * Hydrates one slice of a ranked snapshot through the shared `postSelection`
+ * — the same projection every other reader gets — then re-checks liveness
+ * per item. Ranked feeds never serve tombstones: a removed or deleted row
+ * drops, it never renders a stub.
+ *
+ * - visibility (banned/blocked/private), live: a row hidden since the build
+ *   drops instead of rendering;
+ * - source membership, live: a repost-attributed item keeps its attribution
+ *   only while the amplification row still exists and its reposter is still
+ *   visible and followed-or-self (a private reposter is never revealed after
+ *   an unfollow). A withdrawn amplification downgrades to the original post
+ *   in place — same position — when the original is scope-eligible, else the
+ *   item drops;
+ * - scope membership, live: Following keeps authored items by
+ *   followed-or-self authors; Discover drops items whose author is now
+ *   followed or self;
+ * - filter membership, live: edited-away query text or hashtag tokens drop.
+ *
+ * Nothing but IDs and attribution is ever read off the snapshot — never
+ * content — so a mutation between the build and this page cannot serve stale
+ * or newly-invisible text.
+ */
+async function hydrateRankedSlice(args: {
+  db: Database;
+  viewerId: string;
+  scope: RankScope;
+  slice: readonly FeedRankSnapshotItem[];
+  q: string | undefined;
+  gameHashtagKey: string | null;
+}) {
+  if (args.slice.length === 0) return [];
+  const postIds = [...new Set(args.slice.map((item) => item.postId))];
+  const selection = {
+    ...postSelection(args.viewerId),
+    authorId: post.authorId,
+    rawContent: post.content,
+    removedAt: post.removedAt,
+    deletedAt: post.deletedAt,
+  };
+  const rows = await args.db
+    .select(selection)
+    .from(post)
+    .innerJoin(user, eq(user.id, post.authorId))
+    .where(
+      and(
+        inArray(post.id, postIds),
+        not(invisibleAuthor(args.viewerId)),
+        not(privatePostHidden(args.viewerId)),
+      ),
+    );
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+
+  const authorIds = [...new Set(rows.map((row) => row.authorId))];
+  const reposterIds = [
+    ...new Set(args.slice.map((item) => item.reposterId).filter((id): id is string => id !== null)),
+  ];
+  const followedOf = async (ids: readonly string[]): Promise<Set<string>> => {
+    if (ids.length === 0) return new Set<string>();
+    const found = await args.db
+      .select({ followingId: follow.followingId })
+      .from(follow)
+      .where(and(eq(follow.followerId, args.viewerId), inArray(follow.followingId, [...ids])));
+    return new Set(found.map((row) => row.followingId));
+  };
+  const repostPairs = args.slice.filter(
+    (item): item is FeedRankSnapshotItem & { reposterId: string } => item.reposterId !== null,
+  );
+  const [followedAuthors, followedReposters, liveReposts] = await Promise.all([
+    followedOf(authorIds),
+    followedOf(reposterIds),
+    repostPairs.length === 0
+      ? Promise.resolve(new Set<string>())
+      : args.db
+          .select({ postId: postRepost.postId, userId: postRepost.userId })
+          .from(postRepost)
+          .where(
+            or(
+              ...repostPairs.map((item) =>
+                and(eq(postRepost.postId, item.postId), eq(postRepost.userId, item.reposterId)),
+              ),
+            ),
+          )
+          .then((found) => new Set(found.map((row) => `${row.postId}:${row.userId}`))),
+  ]);
+
+  const reposterRows =
+    reposterIds.length === 0
+      ? []
+      : await args.db
+          .select({
+            id: user.id,
+            name: user.name,
+            username: user.username,
+            displayUsername: user.displayUsername,
+            image: user.image,
+          })
+          .from(user)
+          .where(
+            and(
+              inArray(user.id, reposterIds),
+              visibleUser(args.viewerId),
+              not(privateUserHidden(args.viewerId)),
+            ),
+          );
+  const reposterById = new Map(reposterRows.map((row) => [row.id, row]));
+
+  const matchesFilters = (rawContent: string | null, removedAt: Date | null): boolean => {
+    if (args.q !== undefined) {
+      if (removedAt) return false;
+      if (!rawContent || !rawContent.toLowerCase().includes(args.q.toLowerCase())) return false;
+    }
+    if (args.gameHashtagKey) {
+      const key: string = args.gameHashtagKey;
+      if (!rawContent || !extractRankHashtagKeys([rawContent]).includes(key)) return false;
+    }
+    return true;
+  };
+  const authorEligible = (authorId: string): boolean => {
+    if (args.scope === "following")
+      return authorId === args.viewerId || followedAuthors.has(authorId);
+    if (args.scope === "discover")
+      return authorId !== args.viewerId && !followedAuthors.has(authorId);
+    return true;
+  };
+
+  const items: Array<
+    Omit<(typeof rows)[number], "authorId" | "rawContent" | "removedAt" | "deletedAt">
+  > = [];
+  for (const entry of args.slice) {
+    const row = rowById.get(entry.postId);
+    // The row vanished between the build and this page (a hard delete raced
+    // us) or became invisible: drop the event rather than 500 on a missing row.
+    if (!row) continue;
+    // Ranked feeds never render tombstone stubs — removal or deletion since
+    // the build drops the item (candidates already exclude both).
+    if (row.deletedAt || row.removedAt) continue;
+    const { authorId, rawContent, removedAt, deletedAt, ...visibleRow } = row;
+    void deletedAt;
+    void removedAt;
+
+    if (!matchesFilters(rawContent, row.removedAt)) continue;
+
+    if (entry.reposterId) {
+      const reposter = reposterById.get(entry.reposterId);
+      const amplificationLive =
+        liveReposts.has(`${entry.postId}:${entry.reposterId}`) &&
+        reposter !== undefined &&
+        (args.scope !== "following" ||
+          entry.reposterId === args.viewerId ||
+          followedReposters.has(entry.reposterId));
+      if (amplificationLive && reposter) {
+        if (!authorEligible(authorId) && args.scope !== "global") {
+          // The repost arm's original-author rule (Discover) still binds a
+          // live amplification: a followed-since-build original drops.
+          if (args.scope === "discover") continue;
+        }
+        items.push({
+          ...visibleRow,
+          repostedBy: { ...reposter, repostedAt: new Date(entry.eventAt) },
+        });
+        continue;
+      }
+      // The amplification is gone: downgrade to the original in place when
+      // scope-eligible, else drop — order never moves for a withdrawn repost.
+      if (!authorEligible(authorId)) continue;
+      items.push({ ...visibleRow, repostedBy: null });
+      continue;
+    }
+
+    if (!authorEligible(authorId)) continue;
+    items.push({ ...visibleRow, repostedBy: null });
+  }
+  return items;
+}
+
+/**
+ * Hydrates Discover's follow suggestions: the snapshot-derived author ids in
+ * rank order, resolved to followable user summaries with the viewer's live
+ * follow/request state. Order follows the input ids — snapshot position IS
+ * the rank, there is no second ranker.
+ */
+async function hydrateRankSuggestions(
+  db: Database,
+  viewerId: string,
+  authorIds: readonly string[],
+): Promise<RankSuggestion[]> {
+  if (authorIds.length === 0) return [];
+  const rows = await db
+    .select({
+      id: user.id,
+      name: user.name,
+      username: user.username,
+      displayUsername: user.displayUsername,
+      image: user.image,
+      viewerIsFollowing: viewerIsFollowing(viewerId),
+      hasRequested: viewerHasRequested(viewerId),
+    })
+    .from(user)
+    .where(inArray(user.id, [...authorIds]));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return authorIds
+    .map((id) => byId.get(id))
+    .filter((row): row is NonNullable<typeof row> => row !== undefined);
+}
+
 async function countLikes(db: Pick<Database, "select">, postId: string): Promise<number> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -1803,8 +2054,9 @@ export const postRouter = {
 
   /**
    * Lists posts, keyset-paginated: the global feed, one author's posts, the
-   * following feed, the caller's bookmarks, one post's direct replies, or a
-   * selected inline reply continuation.
+   * following feed, the caller's bookmarks, one post's direct replies, a
+   * selected inline reply continuation, or — with `ranked: true` — the ranked
+   * global, following, or discover feed served from a frozen snapshot.
    *
    * Session-optional since 0.4.0, for the public post permalink ONLY: an
    * anonymous caller may use the two reply modes (`parentId`,
@@ -1835,8 +2087,32 @@ export const postRouter = {
            * selects posts joined to their own `post_bookmark` rows and pages
            * on the *bookmark's* creation time (see the handler branch), which
            * is why it cannot compose with the scoping filters below.
+           *
+           * `discover` (issue #305) is the ranked-only outside-network feed:
+           * originals by authors the viewer neither follows nor is. It has no
+           * chronological mode — the UI never offers one — so a non-ranked
+           * `discover` call is refused below.
            */
-          feed: z.enum(["global", "following", "bookmarks"]).default("global"),
+          feed: z.enum(["global", "following", "bookmarks", "discover"]).default("global"),
+          /**
+           * Serves the feed ranked (issue #305) instead of reverse-chronological:
+           * the first page freezes the scope's scored order into a snapshot and
+           * later pages resume it. Applies to the `global` (For you),
+           * `following`, and `discover` feeds only; profile feeds, replies,
+           * search, and bookmarks stay strictly chronological. `q`/`gameSlug`
+           * compose as candidate filters. Defaults off so every existing
+           * caller keeps its chronological feed byte-for-byte.
+           */
+          ranked: z.boolean().default(false),
+          /**
+           * Resumes the SAME snapshot from its first page — what the client
+           * sends on refetch to keep the order stable instead of building a
+           * fresh one. Without a cursor the page starts at offset zero; with
+           * one the cursor's snapshot must match this id. Unknown, foreign,
+           * differently-scoped, differently-filtered, or expired ids are an
+           * explicit error, never a silent restart.
+           */
+          snapshotId: z.uuid().optional(),
           /**
            * Set to list one post's direct replies. This is deliberately a mode
            * of `list` rather than its own `post.replies` procedure: the web
@@ -1945,6 +2221,27 @@ export const postRouter = {
               message: "The bookmarks feed cannot be combined with scoping filters.",
             });
           }
+          if (
+            input.ranked &&
+            (input.authorId ||
+              input.parentId ||
+              input.continuationRootId ||
+              input.feed === "bookmarks" ||
+              input.includeReplies ||
+              input.includeReposts ||
+              input.kind)
+          ) {
+            refinement.addIssue({
+              code: "custom",
+              message: "Ranked feeds cannot be combined with scoping filters.",
+            });
+          }
+          if (!input.ranked && input.feed === "discover") {
+            refinement.addIssue({
+              code: "custom",
+              message: "The discover feed is ranked-only.",
+            });
+          }
         }),
     )
     .handler(async ({ input, context }) => {
@@ -1956,6 +2253,110 @@ export const postRouter = {
         throw new ORPCError("UNAUTHORIZED");
       }
       const viewerId = context.user?.id ?? null;
+
+      // The ranked feeds (issue #305): the home For you (global) and
+      // Following tabs and Discover serve from the one scorer, each over its
+      // own candidate set, paged through a frozen per-viewer snapshot. Ranked
+      // is a signed-in surface — the mode guard above already refused the
+      // anonymous reader, restated here so the snapshot below binds a string.
+      if (input.ranked) {
+        if (!viewerId) throw new ORPCError("UNAUTHORIZED");
+        // SAFETY: the input refinement refuses ranked `bookmarks` and every
+        // scoping filter, and non-ranked `discover` — only the three ranked
+        // scopes reach the snapshot calls below.
+        const scope = input.feed as RankScope;
+        const q = input.q;
+        const gameSlug = input.gameSlug;
+
+        let snapshot: LoadedRankSnapshot;
+        let offset = 0;
+        if (input.cursor) {
+          const decoded = postRankCursor.decode(input.cursor);
+          if (input.snapshotId && input.snapshotId !== decoded.snapshotId) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: RANK_SNAPSHOT_INVALID_MESSAGE,
+            });
+          }
+          snapshot = await loadRankSnapshot(context.db, {
+            viewerId,
+            snapshotId: decoded.snapshotId,
+            scope,
+            q,
+            gameSlug,
+          });
+          offset = decoded.offset;
+        } else if (input.snapshotId) {
+          // A refetch resuming the SAME snapshot from its first page.
+          snapshot = await loadRankSnapshot(context.db, {
+            viewerId,
+            snapshotId: input.snapshotId,
+            scope,
+            q,
+            gameSlug,
+          });
+        } else {
+          const built = await buildRankSnapshot(context.db, { viewerId, scope, q, gameSlug });
+          snapshot = {
+            id: built.id,
+            scope,
+            q: q ?? null,
+            gameSlug: gameSlug ?? null,
+            gameHashtagKey: built.gameHashtagKey,
+            items: built.items,
+            hasInterests: built.hasInterests,
+            expiresAt: built.expiresAt,
+          };
+        }
+        const items: Awaited<ReturnType<typeof hydrateRankedSlice>> = [];
+        // Advance over hidden entries too, so an empty slice cannot strand
+        // the reader before eligible posts later in the frozen sequence.
+        while (items.length < input.limit && offset < snapshot.items.length) {
+          const slice = snapshot.items.slice(offset, offset + POST_PAGE_SIZE_MAX);
+          const hydrated = await hydrateRankedSlice({
+            db: context.db,
+            viewerId,
+            scope,
+            slice,
+            q,
+            gameHashtagKey: snapshot.gameHashtagKey,
+          });
+          const selected = hydrated.slice(0, input.limit - items.length);
+          items.push(...selected);
+          const last = selected.at(-1);
+          // A full page stops at its last returned ID, not the overfetch's
+          // end; otherwise eligible rows in that lookahead would be skipped.
+          offset +=
+            items.length === input.limit && last
+              ? slice.findIndex((entry) => entry.postId === last.id) + 1
+              : slice.length;
+        }
+        const hasMore = offset < snapshot.items.length;
+        const rankedPage = {
+          items,
+          nextCursor: hasMore ? postRankCursor.encode(snapshot.id, offset) : null,
+        };
+        const suggestions =
+          scope === "discover"
+            ? await hydrateRankSuggestions(
+                context.db,
+                viewerId,
+                await suggestRankAuthorIds(context.db, viewerId, snapshot.items, {
+                  q,
+                  gameHashtagKey: snapshot.gameHashtagKey,
+                }),
+              )
+            : [];
+        return {
+          ...rankedPage,
+          gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(rankedPage)),
+          ranking: {
+            snapshotId: snapshot.id,
+            expiresAt: snapshot.expiresAt.toISOString(),
+            hasInterests: snapshot.hasInterests,
+            suggestions,
+          } satisfies RankingMetadata,
+        };
+      }
 
       if (input.continuationRootId) {
         const [rootReply] = await context.db
@@ -1996,8 +2397,12 @@ export const postRouter = {
               items: continuation.items,
               nextCursor: continuation.nextCursor,
               gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(continuation)),
+              // Chronological modes carry no ranking: the `ranking` key stays
+              // present on every branch so the output shape is one coherent
+              // union, with the ranked branch filling it.
+              ranking: null,
             }
-          : { items: [], nextCursor: null, gameMentions: {} };
+          : { items: [], nextCursor: null, gameMentions: {}, ranking: null };
       }
 
       // The caller's private bookmarks page (issue #262): posts joined to
@@ -2062,6 +2467,7 @@ export const postRouter = {
         return {
           ...bookmarkPage,
           gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(bookmarkPage)),
+          ranking: null,
         };
       }
 
@@ -2081,7 +2487,7 @@ export const postRouter = {
             .from(game)
             .where(eq(game.slug, input.gameSlug))
             .limit(1);
-          if (!matched) return { items: [], nextCursor: null, gameMentions: {} };
+          if (!matched) return { items: [], nextCursor: null, gameMentions: {}, ranking: null };
           gameHashtagKey = matched.hashtagKey;
         }
         const page = await feedEventPage(context.db, {
@@ -2089,7 +2495,10 @@ export const postRouter = {
           cursor: input.cursor,
           limit: input.limit,
           authorId: input.authorId,
-          feed: input.feed,
+          // SAFETY: the ranked branch returned above, the input refinement
+          // refuses non-ranked `discover`, and the bookmarks branch returned
+          // too — only the two chronological home feeds reach this call.
+          feed: input.feed as "global" | "following",
           kind,
           includeReposts: input.includeReposts,
           q: input.q,
@@ -2098,6 +2507,7 @@ export const postRouter = {
         return {
           ...page,
           gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(page)),
+          ranking: null,
         };
       }
 
@@ -2139,10 +2549,10 @@ export const postRouter = {
             .limit(input.limit + 1),
       });
 
-      if (page.items.length === 0) return { ...page, gameMentions: {} };
+      if (page.items.length === 0) return { ...page, gameMentions: {}, ranking: null };
 
       const focusedAuthorId = await visiblePostAuthorId(context.db, viewerId, input.parentId);
-      if (!focusedAuthorId) return { ...page, continuations: [], gameMentions: {} };
+      if (!focusedAuthorId) return { ...page, continuations: [], gameMentions: {}, ranking: null };
 
       const continuations = await replyContinuationPages({
         db: context.db,
@@ -2156,6 +2566,7 @@ export const postRouter = {
       return {
         ...response,
         gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(response)),
+        ranking: null,
       };
     }),
 

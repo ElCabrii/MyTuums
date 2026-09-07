@@ -7,15 +7,18 @@ import { PaginatedState } from "@/components/paginated-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { userListAtom, type FollowDirection } from "@/atoms/user-list";
 import type { SearchUser, UserSummary } from "@/lib/orpc";
+import type { RankingSuggestion } from "@/lib/ranking";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
 /**
  * One row in a people list — avatar, profile link and follow button. Shared
- * by the follower/following dialogs and the search results page; `SearchUser`
- * and `UserSummary` differ only in fields the row never touches.
+ * by the follower/following dialogs, the search results page, and the
+ * ranked-feed Who-to-Follow module (issue #305); `SearchUser`,
+ * `UserSummary` and `RankingSuggestion` differ only in fields the row never
+ * touches.
  */
-export function UserRow({ user }: { user: UserSummary | SearchUser }) {
+export function UserRow({ user }: { user: UserSummary | SearchUser | RankingSuggestion }) {
   const handle = handleOf(user);
   const displayName = user.name || handle || m.user_unknown();
 

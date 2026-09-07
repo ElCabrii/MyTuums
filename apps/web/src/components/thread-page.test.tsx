@@ -70,10 +70,13 @@ describe("ThreadPage query states", () => {
     fakeClient.post.thread.mockResolvedValue(recovered);
     const queryClient = createTestQueryClient();
     await queryFixtures(queryClient).thread.error("network-post", new Error("network unavailable"));
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
-      feed: "global",
-      parentId: post.id,
-    });
+    queryFixtures(queryClient).postList.data(
+      [{ items: [], nextCursor: null, gameMentions: {}, ranking: null }],
+      {
+        feed: "global",
+        parentId: post.id,
+      },
+    );
     await renderWithProviders(<ThreadPage />, {
       queryClient,
       initialPath: "/post/network-post",
@@ -99,10 +102,13 @@ describe("ThreadPage successful rendering", () => {
     const focused = makePost({ id: "head-post", content });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).thread.data(focused.id, makeThread({ post: focused }));
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
-      feed: "global",
-      parentId: focused.id,
-    });
+    queryFixtures(queryClient).postList.data(
+      [{ items: [], nextCursor: null, gameMentions: {}, ranking: null }],
+      {
+        feed: "global",
+        parentId: focused.id,
+      },
+    );
 
     await renderWithProviders(<ThreadPage />, {
       queryClient,
@@ -134,7 +140,7 @@ describe("ThreadPage successful rendering", () => {
       makeThread({ post: focused, ancestors: [ancestorA, ancestorB], truncated: true }),
     );
     queryFixtures(queryClient).postList.data(
-      [{ items: [reply], nextCursor: null, gameMentions: {} }],
+      [{ items: [reply], nextCursor: null, gameMentions: {}, ranking: null }],
       {
         feed: "global",
         parentId: focused.id,
@@ -161,10 +167,13 @@ describe("ThreadPage successful rendering", () => {
     const focused = makePost({ id: "single-reply-post", replyCount: 1 });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).thread.data(focused.id, makeThread({ post: focused }));
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
-      feed: "global",
-      parentId: focused.id,
-    });
+    queryFixtures(queryClient).postList.data(
+      [{ items: [], nextCursor: null, gameMentions: {}, ranking: null }],
+      {
+        feed: "global",
+        parentId: focused.id,
+      },
+    );
 
     await renderWithProviders(<ThreadPage />, {
       queryClient,
@@ -212,6 +221,7 @@ describe("ThreadPage successful rendering", () => {
           items: [directReply, unrelatedDirectReply],
           nextCursor: null,
           gameMentions: {},
+          ranking: null,
           continuations: [
             {
               rootPostId: directReply.id,
@@ -245,7 +255,12 @@ describe("ThreadPage successful rendering", () => {
       parentId: embedded.id,
       content: "Loaded in place",
     });
-    fakeClient.post.list.mockResolvedValue({ items: [loaded], nextCursor: null, gameMentions: {} });
+    fakeClient.post.list.mockResolvedValue({
+      items: [loaded],
+      nextCursor: null,
+      gameMentions: {},
+      ranking: null,
+    });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).thread.data(focused.id, makeThread({ post: focused }));
     queryFixtures(queryClient).postList.data(
@@ -254,6 +269,7 @@ describe("ThreadPage successful rendering", () => {
           items: [directReply],
           nextCursor: null,
           gameMentions: {},
+          ranking: null,
           continuations: [
             {
               rootPostId: directReply.id,

@@ -18,15 +18,16 @@ databases. It serves data only — no HTTP, no business logic.
 
 ## Change map
 
-| Intent                            | Primary                      | Also touch                                                                                                                                       |
-| --------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Add or change an app table        | `src/schema/app.ts`          | `pnpm db:generate`, then commit `drizzle/`; an index if a cursor reads it                                                                        |
-| Change an auth table              | `packages/auth/src/index.ts` | `pnpm --filter @my-tuums/db db:generate:auth`, then `pnpm db:generate`                                                                           |
-| Add an index for a new list       | `src/schema/app.ts`          | the `keysetPage` call in `packages/api` it must mirror                                                                                           |
-| Change how migrations are applied | `src/migrate.ts`             | `apps/server/src/migrate.ts`, `docker-compose.yml`                                                                                               |
-| Change test-database handling     | `src/testing.ts`             | `scripts/setup-test-db.ts`, `e2e/global-setup.ts`                                                                                                |
-| Add a maintenance script          | `scripts/`                   | the `scripts` entry in `package.json`                                                                                                            |
-| Edit the games fixture            | `fixtures/games.json`        | hand-authored seed data (never generated); `packages/api`'s `games-fixture.test.ts` pins its contract, and its seeder uploads `fixtures/covers/` |
+| Intent                                     | Primary                                                          | Also touch                                                                                                                                       |
+| ------------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Add or change an app table                 | `src/schema/app.ts`                                              | `pnpm db:generate`, then commit `drizzle/`; an index if a cursor reads it                                                                        |
+| Change an auth table                       | `packages/auth/src/index.ts`                                     | `pnpm --filter @my-tuums/db db:generate:auth`, then `pnpm db:generate`                                                                           |
+| Add an index for a new list                | `src/schema/app.ts`                                              | the `keysetPage` call in `packages/api` it must mirror                                                                                           |
+| Add or change a ranked-feed snapshot field | `src/schema/app.ts` (`feedRankSnapshot`, `FeedRankSnapshotItem`) | migration `0035_charming_sandman`; `packages/api/src/feed-rank.ts` (the only reader/writer); `docs/operations.md` Migrations                     |
+| Change how migrations are applied          | `src/migrate.ts`                                                 | `apps/server/src/migrate.ts`, `docker-compose.yml`                                                                                               |
+| Change test-database handling              | `src/testing.ts`                                                 | `scripts/setup-test-db.ts`, `e2e/global-setup.ts`                                                                                                |
+| Add a maintenance script                   | `scripts/`                                                       | the `scripts` entry in `package.json`                                                                                                            |
+| Edit the games fixture                     | `fixtures/games.json`                                            | hand-authored seed data (never generated); `packages/api`'s `games-fixture.test.ts` pins its contract, and its seeder uploads `fixtures/covers/` |
 
 ## Invariants
 
@@ -77,6 +78,15 @@ databases. It serves data only — no HTTP, no business logic.
 - **Destructive helpers refuse anything not ending in `_test`**
   (`assertTestDatabase`, `scripts/setup-test-db.ts`). This is the guard
   standing between a test run and the development database.
+- **A rank snapshot is viewer-owned, scope-bound, and content-free (issue
+  #305).** `feedRankSnapshot` holds ordered IDs with repost attribution
+  (`FeedRankSnapshotItem[]`), never post text; the scope check constraint pins
+  `global`/`following`/`discover`, and `q`/`gameSlug`/`gameHashtagKey` pin the
+  filters the order was built under. The two indexes serve the two maintenance
+  reads — the viewer's rows by expiry (per-viewer trim) and all rows by expiry
+  (bounded global sweep) — and `viewerId` cascades with the account. Expiry is
+  enforced by the reader, not the schema: the row stays servable until
+  `expiresAt`, then is refused and reaped opportunistically.
 - **One pool per process.** `db` is a singleton; integration suites share it,
   which is why the API suite runs `fileParallelism: false`.
 

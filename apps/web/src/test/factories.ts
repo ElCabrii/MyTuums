@@ -7,11 +7,13 @@ import {
   type ModerationCaseDetail,
   type NotificationItem,
   type Post,
+  type PostListPage,
   type Profile,
   type TeamMember,
   type Thread,
   type UserSummary,
 } from "@/lib/orpc";
+import type { RankingMetadata, RankingSuggestion } from "@/lib/ranking";
 
 /**
  * Domain fixtures and QueryClient tuning, with no side effects. Importing this
@@ -383,6 +385,48 @@ export function makeNotification(overrides: Partial<NotificationItem> = {}): Not
     targetPostDeletedAt: null,
     ...overrides,
   };
+}
+
+/** One ranked-feed follow suggestion — a `post.list` ranking row (issue #305). */
+export function makeRankSuggestion(overrides: Partial<RankingSuggestion> = {}): RankingSuggestion {
+  return {
+    id: crypto.randomUUID(),
+    name: "Jamie Rivera",
+    username: "jamierivera",
+    displayUsername: "JamieRivera",
+    image: null,
+    viewerIsFollowing: false,
+    hasRequested: false,
+    ...overrides,
+  };
+}
+
+/** One ranked page's metadata block — the frozen snapshot plus its suggestions. */
+export function makeRanking(overrides: Partial<RankingMetadata> = {}): RankingMetadata {
+  return {
+    snapshotId: crypto.randomUUID(),
+    expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    hasInterests: true,
+    suggestions: [],
+    ...overrides,
+  };
+}
+
+/**
+ * One `post.list` page — chronological by default (`ranking: null`, no
+ * continuations), so existing feed fixtures keep reading as the
+ * chronological contract they always pinned.
+ */
+export function makePostListPage(overrides: Partial<PostListPage> = {}): PostListPage {
+  const page: PostListPage = {
+    items: [],
+    nextCursor: null,
+    gameMentions: {},
+    continuations: [],
+    ranking: null,
+    ...overrides,
+  };
+  return page;
 }
 
 /** One game directory card — `game.list`'s row. */

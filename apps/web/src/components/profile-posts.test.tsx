@@ -22,12 +22,15 @@ describe("ProfilePosts", () => {
     const profile = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data("alex", profile);
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
-      authorId: profile.id,
-      feed: "global",
-      includeReplies: true,
-      includeReposts: true,
-    });
+    queryFixtures(queryClient).postList.data(
+      [{ items: [], nextCursor: null, gameMentions: {}, ranking: null }],
+      {
+        authorId: profile.id,
+        feed: "global",
+        includeReplies: true,
+        includeReposts: true,
+      },
+    );
 
     await renderWithProviders(<ProfilePosts />, {
       queryClient,
@@ -44,12 +47,15 @@ describe("ProfilePosts", () => {
     const profile = makeProfile({ id: "other-1", username: "other", displayUsername: "Other" });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data("other", profile);
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
-      authorId: profile.id,
-      feed: "global",
-      includeReplies: true,
-      includeReposts: true,
-    });
+    queryFixtures(queryClient).postList.data(
+      [{ items: [], nextCursor: null, gameMentions: {}, ranking: null }],
+      {
+        authorId: profile.id,
+        feed: "global",
+        includeReplies: true,
+        includeReposts: true,
+      },
+    );
 
     await renderWithProviders(<ProfilePosts />, {
       queryClient,
@@ -66,11 +72,14 @@ describe("ProfilePosts", () => {
     const profile = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data("alex", profile);
-    queryFixtures(queryClient).postList.data([{ items: [], nextCursor: null, gameMentions: {} }], {
-      authorId: profile.id,
-      feed: "global",
-      kind: "replies",
-    });
+    queryFixtures(queryClient).postList.data(
+      [{ items: [], nextCursor: null, gameMentions: {}, ranking: null }],
+      {
+        authorId: profile.id,
+        feed: "global",
+        kind: "replies",
+      },
+    );
 
     const { router } = await renderWithProviders(<ProfilePosts />, {
       queryClient,

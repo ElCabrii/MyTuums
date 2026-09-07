@@ -136,6 +136,38 @@ export function createEventCursorCodec(firstSchema: z.ZodType<string>) {
 export type GameSort = "popularity" | "name" | "year" | "favorites" | "upcoming";
 
 /**
+ * A ranked-feed cursor (issue #305): the snapshot the page was served from
+ * plus the offset into its frozen order the next page starts at. Offset
+ * rather than score-keyed on purpose — the snapshot freezes the order, so an
+ * offset cannot skip or repeat a row the way a score cursor would when two
+ * posts share a score. The snapshot id rides both the cursor AND the
+ * `snapshotId` query param; the handler refuses the page when the two
+ * disagree, when the snapshot is unknown, foreign, differently-scoped or
+ * expired — explicitly, never by silently restarting.
+ */
+export interface DecodedRankCursor {
+  snapshotId: string;
+  offset: number;
+}
+
+const rankCursorPayload = z.object({
+  snapshotId: z.uuid(),
+  offset: z.number().int().min(0).max(100000),
+});
+
+export function createRankCursorCodec() {
+  return {
+    encode(snapshotId: string, offset: number): string {
+      return Buffer.from(JSON.stringify({ snapshotId, offset })).toString("base64url");
+    },
+
+    decode(raw: string): DecodedRankCursor {
+      return decodeCursorPayload(raw, rankCursorPayload);
+    },
+  };
+}
+
+/**
  * A decoded `game.list` cursor: the sort it was minted under, that sort's key
  * value, and the `igdb_id` tie-breaker.
  *

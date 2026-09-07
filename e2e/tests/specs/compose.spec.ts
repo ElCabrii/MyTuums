@@ -14,7 +14,7 @@ function storageBucketConfigured(): boolean {
 }
 
 test.describe("composing a post", () => {
-  test("posting from / adds the new post to the top of the feed", async ({ page, db }) => {
+  test("posting from / appears in the ranked feed only after Refresh", async ({ page, db }) => {
     const aliceId = await db.getUserId(ALICE.username);
     const [older] = await db.seedPosts(aliceId, 1, {
       content: () => `Existing feed post ${Date.now().toString()}`,
@@ -23,21 +23,30 @@ test.describe("composing a post", () => {
 
     await page.goto("/");
 
+    await expect(page.getByText(older.content, { exact: true })).toBeVisible();
+
     const fresh = `Brand new feed post ${Date.now().toString()}`;
     await page.getByPlaceholder(COMPOSER_PLACEHOLDER).fill(fresh);
     await page.getByRole("button", { name: "Post", exact: true }).click();
+    // The draft clears only after publishing succeeds; Refresh must not race it.
+    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toHaveValue("");
 
+    // Issue #305: the home feed is ranked from a frozen per-viewer snapshot,
+    // and the composer mutation's auto-refetch hydrates that SAME snapshot —
+    // a new candidate never joins the order until an explicit Refresh mints
+    // a new one. The fresh post is therefore absent before Refresh, even
+    // though the mutation already succeeded.
+    await expect(page.getByText(fresh, { exact: true })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Refresh" }).first().click();
+
+    // Ranked order is score-based, not chronological — assert presence after
+    // Refresh, never position. (The old "new post lands on top" held only
+    // for the chronological feed.)
     const freshLocator = page.getByText(fresh, { exact: true });
     const olderLocator = page.getByText(older.content, { exact: true });
     await expect(freshLocator).toBeVisible();
     await expect(olderLocator).toBeVisible();
-
-    const [freshBox, olderBox] = await Promise.all([
-      freshLocator.boundingBox(),
-      olderLocator.boundingBox(),
-    ]);
-    if (!freshBox || !olderBox) throw new Error("expected both posts to have a layout box");
-    expect(freshBox.y).toBeLessThan(olderBox.y);
   });
 
   test("long multiline drafts grow without horizontal overflow on a mobile viewport", async ({
@@ -84,6 +93,11 @@ test.describe("composing a post", () => {
     const accepted = `${prefix} @alice`;
     await expect(textarea).toHaveValue(accepted);
     await page.getByRole("button", { name: "Post", exact: true }).click();
+    await expect(textarea).toHaveValue("");
+
+    // Ranked home (issue #305): the composer refetch hydrates the same
+    // snapshot, so the new post joins only after an explicit Refresh.
+    await page.getByRole("button", { name: "Refresh" }).first().click();
 
     const post = page.getByText(accepted, { exact: true });
     await expect(post).toBeVisible();
@@ -138,6 +152,10 @@ test.describe("post image attachments", () => {
     await expect(page.getByRole("img", { name: "post.png" })).toBeVisible();
 
     await page.getByRole("button", { name: "Post", exact: true }).click();
+    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toHaveValue("");
+
+    // Ranked home (issue #305): the new candidate joins only after Refresh.
+    await page.getByRole("button", { name: "Refresh" }).first().click();
 
     const card = postCardWithText(page, content);
     const image = card.getByRole("img", { name: "Attached image 1" });
@@ -196,6 +214,10 @@ test.describe("post image attachments", () => {
     await expect(page.getByRole("img", { name: "gps-photo.jpg" })).toBeVisible();
 
     await page.getByRole("button", { name: "Post", exact: true }).click();
+    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toHaveValue("");
+
+    // Ranked home (issue #305): the new candidate joins only after Refresh.
+    await page.getByRole("button", { name: "Refresh" }).first().click();
 
     const card = postCardWithText(page, content);
     const image = card.getByRole("img", { name: "Attached image 1" });

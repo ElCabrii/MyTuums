@@ -443,6 +443,78 @@ sides by CI. See [operations.md](operations.md).
    does not add an `appeal_resolved` row because no appeal review occurred;
    the inverse action's audit row and post-commit email record what happened.
 
+## Ranked feeds
+
+**Source of truth:** `packages/api/src/feed-rank.ts`,
+`packages/api/src/posts.ts` (`post.list`'s ranked branch), `packages/api/src/cursor.ts`
+(`createRankCursorCodec`), `packages/db/src/schema/app.ts` (`feedRankSnapshot`)
+
+The home **For you** (`global`), **Following**, and **Discover** feeds are
+ranked by one scorer over three candidate sets — no ML, no model serving, no
+separate infrastructure. The issue's framing cited X's public ranking code as
+inspiration; this implementation does not reproduce it. The
+[2023 release](https://github.com/twitter/the-algorithm) described a roughly
+48-million-parameter MaskNet ranker, not 48 engagement features. The newer
+[2026 release](https://github.com/xai-org/x-algorithm) describes Phoenix,
+a transformer-based ranker. Those models predict viewer actions rather than
+multiply raw engagement counts; public code does not reproduce the complete
+live service. What carries over is the broad shape of sourcing, scoring and
+filtering candidates. MyTuums adds a frozen serving
+order — at this app's scale: bounded SQL queries source the candidates, one
+pure JS function scores them, and a snapshot freezes the order for paging.
+
+1. **Candidate sourcing (bounded SQL).** Two arms per scope: authored
+   top-level posts, plus repost events scored on the original's features with
+   the event's timestamp for freshness. Following carries only the viewer's
+   and followed accounts' amplifications; global and Discover take any visible
+   reposter. Discover additionally excludes the viewer's and followed authors'
+   originals. Candidates are top-level, non-tombstoned posts inside a 7-day
+   window, widened to 30 days only when the 7-day pool holds fewer than
+   `FEED_RANK_SPARSE_THRESHOLD` rankable candidates; the pool is capped at
+   `FEED_RANK_POOL_LIMIT` (500, across both arms — never per arm), and each
+   history signal is bounded by `FEED_RANK_HISTORY_LIMIT` (200) so an old
+   account costs the same as a new one. Tombstoned (removed or deleted) rows
+   never rank, and every history input is filtered to currently visible rows —
+   hidden content lends no affinity and no topics, and bookmarks are never
+   read. The hashtag scan mirrors the client's linkifier charset and
+   boundaries, and the game filter's SQL prefilter is a superset re-checked
+   exactly in JS. Scoring is pure JS over these candidates, never a duplicated
+   SQL formula: one `scorePost` owns the weights.
+2. **Scoring (one pure function).** `scorePost` weights capped categories in
+   priority order — favorite-game overlap (12), like affinity (7), the follow
+   edge (5), repost affinity and reply-topic interest (3 each), log-scaled and
+   capped popularity (3 total) — with exponential freshness decay off an
+   hourly-bucketed clock so scores stay identical across pages. Replying
+   anywhere in a thread counts as topic interest via a depth-bounded thread
+   walk (root plus immediate parent per thread); the thread's author earns no
+   endorsement from it. The repeated-author penalty (`1 / (1 + n * 0.12)`)
+   applies after the pure score orders the pool: mild, deterministic, never a
+   hard cap — the pure score never knows about it.
+3. **Serving (frozen snapshot).** The first ranked page builds and persists a
+   `feedRankSnapshot` row — ordered IDs with repost attribution and the event
+   instant, never content — bound to viewer, scope and filters with a 30-minute
+   expiry. Pages resume it by an offset cursor carrying the snapshot id; an
+   unknown, foreign, differently-scoped, differently-filtered or expired id is
+   an explicit `BAD_REQUEST` asking for a Refresh, and a cursor naming a
+   different snapshot than the query param is refused the same way. Every page
+   hydrates its slice live through the shared `postSelection` and re-checks
+   visibility, follow/privacy state, scope and filter membership per item:
+   tombstoned rows drop (ranked pages never stub), withdrawn amplifications
+   downgrade to the original in place or drop, and Discover drops
+   followed-since-build authors. Discover's page also carries the first three
+   snapshot-derived follow suggestions, filtered live with no refill until
+   Refresh. Chronological branches of `post.list` (profiles, bookmarks,
+   search, replies, continuations) carry `ranking: null` and are untouched;
+   `discover` has no chronological mode and a non-ranked `discover` call is
+   refused.
+4. **Bounded maintenance, no cron.** Expiry is enforced at read time
+   (`loadRankSnapshot` refuses an expired row immediately); physical cleanup
+   is opportunistic and request-time only. Each build sweeps at most 100
+   globally-expired rows and trims the viewer past
+   `FEED_RANK_MAX_SNAPSHOTS_PER_VIEWER` (10) under a per-viewer advisory
+   transaction lock. Resume paths only read and validate the snapshot. There
+   is no impressions table, no Redis, no background job.
+
 ## Schemas and migrations
 
 **Source of truth:** `packages/db/src/schema`, `packages/db/drizzle.config.ts`,
