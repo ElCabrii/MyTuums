@@ -391,6 +391,7 @@ jobs:
             test -d apps/server/node_modules/better-auth || { echo "the server production dependencies are missing from the runner"; exit 1; }
             test -d apps/server/node_modules/@sentry/node || { echo "@sentry/node is missing from the runner"; exit 1; }
             test -d apps/server/node_modules/@opentelemetry/core || { echo "@opentelemetry/core is missing from the runner"; exit 1; }
+            test -d apps/server/node_modules/@google-cloud/translate || { echo "@google-cloud/translate is missing from the runner"; exit 1; }
           ' || { echo "::error::image contents assertion failed - see the message above"; exit 1; }
           echo "Migration runner, promote CLI and the server prod deps are present; apps/web is not."
 

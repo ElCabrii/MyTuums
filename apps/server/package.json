@@ -17,6 +17,7 @@
     "games:sync": "dotenv -e ../../.env -- tsx src/games-sync.ts"
   },
   "dependencies": {
+    "@google-cloud/translate": "^10.0.1",
     "@my-tuums/api": "workspace:*",
     "@my-tuums/auth": "workspace:*",
     "@my-tuums/db": "workspace:*",

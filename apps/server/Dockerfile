@@ -8,8 +8,8 @@
 # the `.js` specifiers those packages ship, so importing the unbundled
 # source directly (the naive approach) fails at runtime. Only the packages
 # apps/server itself declares in `dependencies` (better-auth, @orpc/server,
-# zod, @sentry/node, @opentelemetry/core) stay external; everything else
-# tsup reaches - including the transitive
+# zod, @sentry/node, @opentelemetry/core, @google-cloud/translate) stay
+# external; everything else tsup reaches - including the transitive
 # npm deps of the inlined workspace packages, such as drizzle-orm and postgres
 # - is bundled into dist/ (grep the external `from "..."` imports in
 # dist/index.js to re-verify). The runner therefore needs nothing more than
