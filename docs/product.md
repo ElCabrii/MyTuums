@@ -193,9 +193,11 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   followers; everyone else walks the same timeline without them. A repost of
   a private original keeps the reposter's event but redacts the original to
   the private treatment ("This post is private").
-- Authors can mark individual posts followers-only at creation from the toggle
-  inside the composer; a private account's posts are private by default and its
-  composer toggle is locked on with an explanatory note. Private posts never
+- Authors choose Public or Followers only from the visibility popover beside
+  Add images in the home and own-profile composers. The trigger identifies the
+  effective audience; private accounts always show Followers only, with Public
+  unavailable and an explanatory note. The draft choice survives publication
+  errors and resets to the account default on success. Private posts never
   surface in Discover, post search, hashtag matches or anonymous permalinks —
   those return NOT_FOUND for non-viewers — and their `/media/` attachments 404
   the same way except for the author, approved followers and moderators

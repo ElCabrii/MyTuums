@@ -1,5 +1,5 @@
 import { useAtom, useAtomValue } from "jotai";
-import { Lock } from "lucide-react";
+import { Globe, Lock } from "lucide-react";
 import { ComposerForm } from "@/components/composer-form";
 import {
   composerAttachmentsAtom,
@@ -8,17 +8,21 @@ import {
   createPostAtom,
 } from "@/atoms/composer";
 import { viewerAtom } from "@/atoms/session";
-import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { m } from "@/paraglide/messages.js";
 
 /**
  * The composer on the home feed and one's own profile — a `ComposerForm` bound
- * to `composerDraftAtom` and `createPostAtom`, plus the followers-only toggle
- * (issue #328) rendered *inside* the form via `footerExtra`. The toggle
- * defaults from the account's `isPrivate` — private accounts post private by
- * default — and can be flipped per post for public accounts. A private
- * account's posts are always followers-only, so its toggle is locked on with
- * an explanatory note rather than offering an off state that changes nothing.
+ * to the shared draft and mutation. Only top-level posts expose an audience
+ * choice; private accounts always use followers-only, even with a draft override.
  */
 export function PostComposer() {
   const user = useAtomValue(viewerAtom);
@@ -32,7 +36,8 @@ export function PostComposer() {
   if (!user) return null;
 
   const accountDefault = user.isPrivate ?? false;
-  const effectivePrivate = isPrivate ?? accountDefault;
+  const effectivePrivate = accountDefault || (isPrivate ?? false);
+  const audience = effectivePrivate ? m.composer_private_label() : m.composer_public_label();
 
   return (
     <ComposerForm
@@ -53,22 +58,43 @@ export function PostComposer() {
       mentionScope="post"
       attachments={attachments}
       onAttachmentsChange={setAttachments}
-      footerExtra={
-        <div className="border-border/60 rounded-lg border border-dashed px-3 py-2">
-          <label className="text-muted-foreground flex cursor-pointer items-center gap-2 text-xs">
-            <Switch
-              checked={accountDefault ? true : effectivePrivate}
-              disabled={createPost.isPending || accountDefault}
-              aria-label={m.composer_private_label()}
-              onCheckedChange={setIsPrivate}
-            />
-            <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />
-            <span className="font-medium">{m.composer_private_label()}</span>
-          </label>
-          <p className="text-muted-foreground mt-1 pl-8 text-xs">
-            {accountDefault ? m.composer_private_account_default() : m.composer_private_hint()}
-          </p>
-        </div>
+      toolbarExtra={
+        <Popover>
+          <PopoverTrigger
+            render={<Button variant="outline" size="sm" />}
+            type="button"
+            disabled={createPost.isPending}
+            aria-label={m.composer_visibility_trigger({ audience })}
+            title={m.composer_visibility_trigger({ audience })}
+            className="text-muted-foreground h-8 gap-1.5 rounded-full px-3"
+          >
+            {effectivePrivate ? <Lock aria-hidden="true" /> : <Globe aria-hidden="true" />}
+            <span className="hidden sm:inline">{audience}</span>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="max-w-[calc(100vw-2rem)]">
+            <PopoverTitle>{m.composer_visibility_label()}</PopoverTitle>
+            <PopoverDescription>
+              {accountDefault ? m.composer_private_account_default() : m.composer_private_hint()}
+            </PopoverDescription>
+            <RadioGroup
+              aria-label={m.composer_visibility_label()}
+              value={effectivePrivate ? "private" : "public"}
+              disabled={createPost.isPending}
+              onValueChange={(value) => {
+                if (!createPost.isPending && !accountDefault) setIsPrivate(value === "private");
+              }}
+            >
+              <label className="flex items-center gap-3 py-1 has-data-disabled:opacity-50">
+                <RadioGroupItem value="public" disabled={accountDefault} />
+                {m.composer_public_label()}
+              </label>
+              <label className="flex items-center gap-3 py-1">
+                <RadioGroupItem value="private" />
+                {m.composer_private_label()}
+              </label>
+            </RadioGroup>
+          </PopoverContent>
+        </Popover>
       }
     />
   );
