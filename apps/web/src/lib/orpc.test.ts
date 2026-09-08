@@ -2,9 +2,27 @@ import { describe, expect, it } from "vitest";
 import { ORPCError } from "@orpc/client";
 import { partialMatchKey } from "@tanstack/react-query";
 import { orpc, retryUnlessClientError } from "@/lib/orpc";
-import { postListQueryOptions } from "@/lib/query-definitions";
+import {
+  postListQueryOptions,
+  unreadCountQueryOptions,
+  notificationsQueryOptions,
+  replyContinuationQueryOptions,
+} from "@/lib/query-definitions";
 
 describe("retryUnlessClientError", () => {
+  it.each([
+    () => postListQueryOptions({ feed: "global" }),
+    unreadCountQueryOptions,
+    notificationsQueryOptions,
+    () => replyContinuationQueryOptions("post-1", "cursor-1"),
+  ])("#353 product reads stop deterministic failures but bound transient retries", (options) => {
+    const { retry } = options();
+    expect(retry(0, new ORPCError("UNAUTHORIZED"))).toBe(false);
+    expect(retry(0, new ORPCError("FORBIDDEN"))).toBe(false);
+    expect(retry(0, new ORPCError("INTERNAL_SERVER_ERROR"))).toBe(true);
+    expect(retry(1, new Error("network down"))).toBe(true);
+    expect(retry(2, new Error("network down"))).toBe(false);
+  });
   it("does not retry a 4xx ORPCError — a handle that doesn't exist won't start existing", () => {
     expect(retryUnlessClientError(0, new ORPCError("NOT_FOUND"))).toBe(false);
     expect(retryUnlessClientError(0, new ORPCError("BAD_REQUEST"))).toBe(false);

@@ -2,6 +2,7 @@ import { atom } from "jotai";
 import { atomFamily } from "jotai-family";
 import { atomWithInfiniteQuery, atomWithQuery } from "jotai-tanstack-query";
 import { orpc, retryUnlessClientError, type SearchTypeahead } from "@/lib/orpc";
+import { protectedProductReadyAtom } from "@/atoms/query-readiness";
 import { searchPostsQueryOptions, searchUsersQueryOptions } from "@/lib/query-definitions";
 
 /** How long a keystroke may sit before its query fires, in milliseconds. */
@@ -72,9 +73,10 @@ export function typeaheadQueryOptions(q: string) {
  * The header's typeahead query for its debounced input. The input is one
  * string, so this surface remains a single atom for the existing SearchBox.
  */
-export const typeaheadAtom = atomWithQuery((get) =>
-  typeaheadQueryOptions(get(debouncedSearchQueryAtom)),
-);
+export const typeaheadAtom = atomWithQuery((get) => {
+  const base = typeaheadQueryOptions(get(debouncedSearchQueryAtom));
+  return { ...base, enabled: get(protectedProductReadyAtom) && (base.enabled ?? true) };
+});
 
 /**
  * Typeahead queries keyed by a composer token. Unlike the header's atom, this
@@ -82,7 +84,10 @@ export const typeaheadAtom = atomWithQuery((get) =>
  * sharing their draft text with the global search box.
  */
 export const typeaheadQueryAtomFamily = atomFamily((q: string) =>
-  atomWithQuery(() => typeaheadQueryOptions(q)),
+  atomWithQuery((get) => {
+    const base = typeaheadQueryOptions(q);
+    return { ...base, enabled: get(protectedProductReadyAtom) && (base.enabled ?? true) };
+  }),
 );
 
 /**
@@ -102,12 +107,18 @@ export const typeaheadQueryAtomFamily = atomFamily((q: string) =>
  * is mounted to split.
  */
 export const searchUsersFamily = atomFamily((q: string) =>
-  atomWithInfiniteQuery(() => searchUsersQueryOptions(q)),
+  atomWithInfiniteQuery((get) => {
+    const base = searchUsersQueryOptions(q);
+    return { ...base, enabled: get(protectedProductReadyAtom) && (base.enabled ?? true) };
+  }),
 );
 
 /** Same shape as {@link searchUsersFamily}, over `search.posts` results. */
 export const searchPostsFamily = atomFamily((q: string) =>
-  atomWithInfiniteQuery(() => searchPostsQueryOptions(q)),
+  atomWithInfiniteQuery((get) => {
+    const base = searchPostsQueryOptions(q);
+    return { ...base, enabled: get(protectedProductReadyAtom) && (base.enabled ?? true) };
+  }),
 );
 
 /** The infinite-query atom for one query's user results — components read this, not the family. */

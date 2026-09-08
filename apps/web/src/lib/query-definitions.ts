@@ -182,18 +182,21 @@ export function postListQueryOptions(
 
 /** Loads continuation pages after the branch slice embedded in a direct-reply page. */
 export function replyContinuationQueryOptions(rootPostId: string, initialCursor: string) {
-  return orpc.post.list.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PostListInput = {
-        limit: POST_PAGE_SIZE,
-        continuationRootId: rootPostId,
-      };
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam: initialCursor,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  return {
+    ...orpc.post.list.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PostListInput = {
+          limit: POST_PAGE_SIZE,
+          continuationRootId: rootPostId,
+        };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam: initialCursor,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 export function profileQueryOptions(username: string) {
@@ -251,18 +254,21 @@ export function gameFavoritesQueryOptions(username: string) {
  */
 export function gameListQueryOptions({ sort, q }: GameListParams) {
   const normalized = q?.trim();
-  return orpc.game.list.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PagedGameListInput = { sort, limit: GAMES_PAGE_SIZE };
-      if (normalized) input.q = normalized;
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam:
-      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
-      undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  return {
+    ...orpc.game.list.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedGameListInput = { sort, limit: GAMES_PAGE_SIZE };
+        if (normalized) input.q = normalized;
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 export function threadQueryOptions(postId: string) {
@@ -292,17 +298,20 @@ export function linkCardQueryOptions(url: string) {
 
 export function userListQueryOptions(username: string, direction: FollowDirection) {
   const procedure = direction === "followers" ? orpc.user.followers : orpc.user.following;
-  return procedure.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PagedUserListInput = { username, limit: FOLLOW_PAGE_SIZE };
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam:
-      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
-      undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  return {
+    ...procedure.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedUserListInput = { username, limit: FOLLOW_PAGE_SIZE };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 export function searchUsersQueryOptions(q: string) {
@@ -323,6 +332,7 @@ export function searchUsersQueryOptions(q: string) {
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     }),
     enabled: normalized.length > 0,
+    retry: retryUnlessClientError,
   };
 }
 
@@ -344,35 +354,42 @@ export function searchPostsQueryOptions(q: string) {
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     }),
     enabled: normalized.length > 0,
+    retry: retryUnlessClientError,
   };
 }
 
 export function moderationQueueQueryOptions() {
-  return orpc.moderation.queue.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PagedModerationInput = { limit: MODERATION_PAGE_SIZE };
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam:
-      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
-      undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  return {
+    ...orpc.moderation.queue.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedModerationInput = { limit: MODERATION_PAGE_SIZE };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 export function auditLogQueryOptions() {
-  return orpc.moderation.auditLog.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PagedModerationInput = { limit: MODERATION_PAGE_SIZE };
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam:
-      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
-      undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  return {
+    ...orpc.moderation.auditLog.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedModerationInput = { limit: MODERATION_PAGE_SIZE };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 export function moderationCaseQueryOptions(ref: CaseRef) {
@@ -380,41 +397,53 @@ export function moderationCaseQueryOptions(ref: CaseRef) {
     ref.targetType === "post"
       ? { targetType: "post", targetId: ref.targetId }
       : { targetType: "user", targetId: ref.targetId };
-  return orpc.moderation.case.queryOptions({ input });
+  return {
+    ...orpc.moderation.case.queryOptions({ input }),
+    retry: retryUnlessClientError,
+  };
 }
 
 export function teamQueryOptions() {
-  return orpc.moderation.team.queryOptions();
+  return {
+    ...orpc.moderation.team.queryOptions(),
+    retry: retryUnlessClientError,
+  };
 }
 
 /** The viewer's notifications, newest first — one feed, no scope parameters. */
 export function notificationsQueryOptions() {
-  return orpc.notification.list.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PagedNotificationInput = { limit: NOTIFICATION_PAGE_SIZE };
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam:
-      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
-      undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  return {
+    ...orpc.notification.list.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedNotificationInput = { limit: NOTIFICATION_PAGE_SIZE };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 /** Inbound follow requests against the viewer's private account (issue #328), newest first. */
 export function followRequestListQueryOptions() {
-  return orpc.user.followRequest.list.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PagedNotificationInput = { limit: FOLLOW_PAGE_SIZE };
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam:
-      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
-      undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  return {
+    ...orpc.user.followRequest.list.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedNotificationInput = { limit: FOLLOW_PAGE_SIZE };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 /**
@@ -424,7 +453,10 @@ export function followRequestListQueryOptions() {
  * when the reader next looks at the app, not on a timer.
  */
 export function unreadCountQueryOptions() {
-  return orpc.notification.unreadCount.queryOptions({ input: {} });
+  return {
+    ...orpc.notification.unreadCount.queryOptions({ input: {} }),
+    retry: retryUnlessClientError,
+  };
 }
 
 /**

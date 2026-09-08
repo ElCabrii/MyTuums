@@ -1,5 +1,6 @@
 import { atomWithInfiniteQuery, atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import type { QueryClient } from "@tanstack/react-query";
+import { protectedProductReadyAtom } from "@/atoms/query-readiness";
 import { followRequestListQueryOptions } from "@/lib/query-definitions";
 import { withdrawSuggestionRequest } from "@/lib/follow-cache";
 import { orpc } from "@/lib/orpc";
@@ -8,7 +9,10 @@ import { orpc } from "@/lib/orpc";
  * Inbound follow requests against the viewer's private account (issue #328),
  * newest first. One feed, no parameters — the viewer is the inbox.
  */
-export const followRequestListAtom = atomWithInfiniteQuery(() => followRequestListQueryOptions());
+export const followRequestListAtom = atomWithInfiniteQuery((get) => ({
+  ...followRequestListQueryOptions(),
+  enabled: get(protectedProductReadyAtom),
+}));
 
 function invalidateRequestCaches(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: orpc.user.followRequest.list.key() });

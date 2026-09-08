@@ -1,5 +1,6 @@
 import { atomFamily } from "jotai-family";
 import { atomWithQuery } from "jotai-tanstack-query";
+import { publicReadReadyAtom } from "@/atoms/query-readiness";
 import { linkCardQueryOptions } from "@/lib/query-definitions";
 
 /**
@@ -15,7 +16,9 @@ import { linkCardQueryOptions } from "@/lib/query-definitions";
  * QueryClient clear on sign-out already drops the cached rows; the family's
  * entries simply refill on the next signed-in view.
  */
-const linkCardFamily = atomFamily((url: string) => atomWithQuery(() => linkCardQueryOptions(url)));
+const linkCardFamily = atomFamily((url: string) =>
+  atomWithQuery((get) => ({ ...linkCardQueryOptions(url), enabled: get(publicReadReadyAtom) })),
+);
 
 /** The query state for one URL's preview card; components read this, not the family. */
 export const linkCardAtom = (url: string) => linkCardFamily(url);

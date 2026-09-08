@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
+import { createStore } from "jotai";
 import { createTestQueryClient, makeGamePageData } from "@/test/factories";
 import { queryFixtures } from "@/test/query-fixtures";
 import { renderWithProviders } from "@/test/render";
 import { GamePage } from "@/components/game-page";
 import { gameQueryOptions } from "@/lib/query-definitions";
+import { sessionAtom } from "@/atoms/session";
+import { setTestSession, signedInSession } from "@/test/auth-fixture";
 import { m } from "@/paraglide/messages.js";
 
 // The page is a straight read surface: this file pins that the payload
@@ -47,7 +50,21 @@ describe("GamePage", () => {
       })
       .catch(() => {});
 
-    await renderWithProviders(<GamePage slug="no-such-game" />, { queryClient, signedInAs: true });
+    // Public reads stay idle until the session settles (issue #353) — drive
+    // a signed-in session and pre-seed the store with it so the page mounts
+    // already-enabled and observes the seeded error instead of a skeleton.
+    const session = signedInSession();
+    setTestSession(session);
+    const store = createStore();
+    // SAFETY: the complete session the fake store holds — the game atoms
+    // read only whether the viewer may fire, never the store identity.
+    store.set(sessionAtom, session as never);
+
+    await renderWithProviders(<GamePage slug="no-such-game" />, {
+      queryClient,
+      store,
+      signedInAs: true,
+    });
 
     expect(screen.getByText(m.game_not_found())).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Hades" })).not.toBeInTheDocument();
