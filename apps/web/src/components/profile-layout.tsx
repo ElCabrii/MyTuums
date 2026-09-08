@@ -11,7 +11,8 @@ import {
 } from "@/lib/banner-frame";
 import { viewerAtom, isStaffAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
-import { blockDialogAtom, reportDialogAtom, unbanUserAtom } from "@/atoms/moderation";
+import { unbanUserAtom } from "@/atoms/moderation";
+import { blockDialogAtom, reportDialogAtom } from "@/atoms/dialog-targets";
 import {
   DropdownMenu,
   DropdownMenuContent,

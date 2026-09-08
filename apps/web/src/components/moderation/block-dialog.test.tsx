@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
-import { blockDialogAtom } from "@/atoms/moderation";
+import { blockDialogAtom } from "@/atoms/dialog-targets";
 
 import { renderWithProviders } from "@/test/render";
 import { BlockDialog } from "@/components/moderation/block-dialog";

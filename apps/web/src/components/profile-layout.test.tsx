@@ -3,7 +3,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { ORPCError } from "@orpc/client";
-import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
+import { blockDialogAtom, reportDialogAtom } from "@/atoms/dialog-targets";
 import { createTestQueryClient, makeProfile } from "@/test/factories";
 import { queryFixtures } from "@/test/query-fixtures";
 import { renderWithProviders } from "@/test/render";

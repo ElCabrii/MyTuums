@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
-import { editPostDialogAtom, type EditPostTarget } from "@/atoms/post-edit";
+import { editPostDialogAtom, type EditPostTarget } from "@/atoms/dialog-targets";
 import { renderWithProviders } from "@/test/render";
 import { EditPostDialog } from "@/components/edit-post-dialog";
 import { m } from "@/paraglide/messages.js";

@@ -1,12 +1,7 @@
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { POST_REPORT_REASONS, USER_REPORT_REASONS } from "@my-tuums/api/constants";
-import {
-  reportAtom,
-  reportDialogAtom,
-  reportReasonAtom,
-  resetReportFormEffect,
-  type ReportDialogTarget,
-} from "@/atoms/moderation";
+import { reportAtom, reportReasonAtom, resetReportFormEffect } from "@/atoms/moderation";
+import { reportDialogAtom, type ReportDialogTarget } from "@/atoms/dialog-targets";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
