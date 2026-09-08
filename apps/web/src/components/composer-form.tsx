@@ -62,7 +62,7 @@ export function ComposerForm({
   submitLabel,
   rows = 2,
   header,
-  footerExtra,
+  toolbarExtra,
   mentionScope = "composer",
   attachments = [],
   onAttachmentsChange,
@@ -81,8 +81,8 @@ export function ComposerForm({
   rows?: number;
   /** Rendered above the textarea — the reply box's "Replying to @x" line. */
   header?: ReactNode;
-  /** Rendered inside the form above the footer — e.g. the followers-only toggle. */
-  footerExtra?: ReactNode;
+  /** Additional draft actions beside the image picker, before the submit controls. */
+  toolbarExtra?: ReactNode;
   /** Primitive key for transient mention state owned beside each draft atom. */
   mentionScope?: string;
   /** Optional image state; omitted only by callers that intentionally disable attachments. */
@@ -323,37 +323,38 @@ export function ComposerForm({
         </div>
       )}
 
-      {footerExtra}
-
-      <div className="border-border flex items-center justify-between gap-3 border-t pt-3">
-        {/* The image picker rides the footer's action row like on every other
+      <div className="border-border flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+        <div className="flex items-center gap-2">
+          {/* The image picker rides the footer's action row like on every other
             platform: a pill button with a real hit target and focus ring,
             rather than the bare inline link this used to be. The hidden input
             stays inside the label so clicks and the accessible name keep
             working without JS wiring. */}
-        {onAttachmentsChange && (
-          <label className="border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring focus-visible:ring-ring/50 inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors outline-none select-none focus-visible:ring-[3px] has-[:disabled]:pointer-events-none has-[:disabled]:opacity-50">
-            <ImagePlus className="h-4 w-4" />
-            <span className="hidden sm:inline">{m.post_add_images()}</span>
-            <input
-              type="file"
-              accept={ALLOWED_IMAGE_TYPES.join(",")}
-              multiple
-              className="sr-only"
-              aria-label={m.post_add_images()}
-              disabled={
-                isPending ||
-                attachmentsAreValidating ||
-                attachments.length >= POST_ATTACHMENT_MAX_COUNT
-              }
-              onChange={(event) => {
-                void handleAttachmentSelection(event.target.files);
-                event.target.value = "";
-              }}
-            />
-          </label>
-        )}
-        <div className="flex items-center gap-3">
+          {onAttachmentsChange && (
+            <label className="border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring focus-visible:ring-ring/50 inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors outline-none select-none focus-visible:ring-[3px] has-[:disabled]:pointer-events-none has-[:disabled]:opacity-50">
+              <ImagePlus className="h-4 w-4" />
+              <span className="hidden sm:inline">{m.post_add_images()}</span>
+              <input
+                type="file"
+                accept={ALLOWED_IMAGE_TYPES.join(",")}
+                multiple
+                className="sr-only"
+                aria-label={m.post_add_images()}
+                disabled={
+                  isPending ||
+                  attachmentsAreValidating ||
+                  attachments.length >= POST_ATTACHMENT_MAX_COUNT
+                }
+                onChange={(event) => {
+                  void handleAttachmentSelection(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+            </label>
+          )}
+          {toolbarExtra}
+        </div>
+        <div className="ml-auto flex items-center gap-3">
           <span
             aria-live="polite"
             className={`text-xs tabular-nums ${

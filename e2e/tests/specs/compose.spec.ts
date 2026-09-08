@@ -1,4 +1,5 @@
 import { test, expect } from "../../support/fixtures";
+import type { Page } from "@playwright/test";
 import { postCardWithText } from "../../support/post-card";
 import { solidPng, jpegWithExif, EXIF_PROBE_STRING } from "../../support/image";
 import { ALICE } from "../../support/users";
@@ -235,5 +236,171 @@ test.describe("post image attachments", () => {
     expect(body.includes(EXIF_PROBE_STRING)).toBe(false);
     expect(body.includes("Exif")).toBe(false);
     expect(body.includes("GPS Spy Unit")).toBe(false);
+  });
+});
+
+test.describe("composer visibility layout (issue #350)", () => {
+  // Mirrored from apps/web/messages/{en,fr}.json by hand, so the spec
+  // disagrees with the code by construction when copy drifts (e2e/CONTEXT.md).
+  const EN = {
+    placeholder: COMPOSER_PLACEHOLDER,
+    addImages: "Add images",
+    triggerPattern: /Post visibility/,
+    triggerPublic: "Post visibility: Public",
+    title: "Post visibility",
+    audience: "Public",
+    publicOption: "Public",
+    followersOption: "Followers only",
+  } as const;
+  const FR = {
+    placeholder: "Partagez une actualité gaming, un clip ou un résultat de tournoi...",
+    addImages: "Ajouter des images",
+    triggerPattern: /Visibilité de la publication/,
+    triggerPublic: "Visibilité de la publication : Public",
+    title: "Visibilité de la publication",
+    audience: "Public",
+    publicOption: "Public",
+    followersOption: "Abonnés uniquement",
+  } as const;
+
+  // either side of Tailwind's sm breakpoint (640px), plus common phone widths.
+  const WIDTHS = [320, 360, 390, 639, 640, 641] as const;
+  const HEIGHT = 844;
+
+  async function switchToFrench(page: Page): Promise<void> {
+    await page.getByRole("button", { name: "Language" }).click();
+    await page.getByRole("menuitem", { name: "French" }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+    await expect(page.getByPlaceholder(FR.placeholder)).toBeVisible();
+  }
+
+  async function switchToEnglish(page: Page): Promise<void> {
+    await page.getByRole("button", { name: "Langue" }).click();
+    await page.getByRole("menuitem", { name: "English" }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  }
+
+  test("visibility trigger stays adjacent to Add images without overflow from 320 to 641px in EN and FR", async ({
+    page,
+  }) => {
+    test.slow();
+    // PostComposer mounts on both the home feed and one's own profile
+    // (components/profile-posts.tsx); the toolbar is the same component, so
+    // both routes pin the same geometry.
+    const routes = ["/", `/@${ALICE.username}`] as const;
+
+    for (const strings of [EN, FR]) {
+      if (strings === FR) await switchToFrench(page);
+
+      for (const route of routes) {
+        await page.goto(route);
+        const textarea = page.getByPlaceholder(strings.placeholder);
+        await expect(textarea).toBeVisible();
+        const form = page.locator("form", { has: textarea });
+        const trigger = form.getByRole("button", { name: strings.triggerPattern });
+        // The accessible name carries the audience at every width, even when
+        // the visible audience text hides below sm.
+        await expect(trigger).toHaveAccessibleName(strings.triggerPublic);
+        // The longer audience label is the tightest toolbar layout in both locales.
+        await trigger.click();
+        await page.getByRole("radio", { name: strings.followersOption }).click();
+        await page.keyboard.press("Escape");
+        const audience = trigger.getByText(strings.followersOption, { exact: true });
+        const addImagesPill = form.locator("label", {
+          has: page.getByLabel(strings.addImages, { exact: true }),
+        });
+        await expect(addImagesPill).toBeVisible();
+
+        for (const width of WIDTHS) {
+          await page.setViewportSize({ width, height: HEIGHT });
+          await expect(trigger).toBeVisible();
+
+          const [triggerBox, pillBox, submitBox, counterBox] = await Promise.all([
+            trigger.boundingBox(),
+            addImagesPill.boundingBox(),
+            form.locator('button[type="submit"]').boundingBox(),
+            form.locator('span[aria-live="polite"]').boundingBox(),
+          ]);
+          if (!triggerBox || !pillBox || !submitBox || !counterBox) {
+            throw new Error(`expected the composer toolbar to have layout boxes at ${width}px`);
+          }
+
+          // Same action row: vertical centers align and the two pills never overlap.
+          const centerDelta = Math.abs(
+            triggerBox.y + triggerBox.height / 2 - (pillBox.y + pillBox.height / 2),
+          );
+          expect(centerDelta).toBeLessThan(12);
+          const overlaps =
+            triggerBox.x < pillBox.x + pillBox.width &&
+            pillBox.x < triggerBox.x + triggerBox.width &&
+            triggerBox.y < pillBox.y + pillBox.height &&
+            pillBox.y < triggerBox.y + triggerBox.height;
+          expect(overlaps).toBe(false);
+
+          for (const box of [triggerBox, pillBox, submitBox, counterBox]) {
+            expect(box.x).toBeGreaterThanOrEqual(0);
+            expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
+          }
+          expect(counterBox.x + counterBox.width).toBeLessThanOrEqual(submitBox.x);
+          expect(
+            submitBox.y >= triggerBox.y + triggerBox.height ||
+              counterBox.x >= triggerBox.x + triggerBox.width,
+          ).toBe(true);
+
+          if (width < 640) await expect(audience).toBeHidden();
+          else await expect(audience).toBeVisible();
+
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          ).toBe(true);
+        }
+      }
+    }
+
+    await switchToEnglish(page);
+  });
+
+  test("visibility popover fits a 320px viewport and Escape returns focus", async ({ page }) => {
+    test.slow();
+    // Narrowest supported width is the worst case for a popover; the home
+    // composer is the same PostComposer as the profile one, so one route pins it.
+    await page.setViewportSize({ width: 320, height: HEIGHT });
+
+    for (const strings of [EN, FR]) {
+      if (strings === FR) await switchToFrench(page);
+
+      await page.goto("/");
+      const textarea = page.getByPlaceholder(strings.placeholder);
+      await expect(textarea).toBeVisible();
+      const form = page.locator("form", { has: textarea });
+      const trigger = form.getByRole("button", { name: strings.triggerPattern });
+      await expect(trigger).toHaveAccessibleName(strings.triggerPublic);
+
+      await trigger.click();
+      const title = page.getByText(strings.title, { exact: true });
+      const publicOption = page.getByRole("radio", { name: strings.publicOption });
+      const followersOption = page.getByRole("radio", { name: strings.followersOption });
+      await expect(title).toBeVisible();
+      await expect(publicOption).toBeVisible();
+      await expect(followersOption).toBeVisible();
+
+      for (const target of [title, publicOption, followersOption]) {
+        const box = await target.boundingBox();
+        if (!box) throw new Error("expected the visibility popover to have a layout box");
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(320 + 1);
+        expect(box.y).toBeGreaterThanOrEqual(0);
+        expect(box.y + box.height).toBeLessThanOrEqual(HEIGHT + 1);
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+
+      await page.keyboard.press("Escape");
+      await expect(title).toBeHidden();
+      await expect(trigger).toBeFocused();
+    }
+
+    await switchToEnglish(page);
   });
 });
