@@ -5,19 +5,12 @@ import { NONBLOCKING_STYLESHEET_ONLOAD_HANDLER } from "@my-tuums/api/constants";
 /**
  * Post-build surgery on `dist/index.html`, registered in vite.config.ts.
  *
- * Three things the *source* index.html cannot express, because none of them
- * are known until the bundle exists:
+ * Two things the source index.html cannot express before bundling:
  *
- * 1. A `modulepreload` for the lazy `/login` route chunk. Without it, the
- *    route chunk only starts downloading after the main chunk has been
- *    fetched, parsed and executed and the router has resolved the route — a
- *    serial dependency on the critical path of the login page. Preloading it
- *    (which fetches its module graph too — the paraglide message chunks it
- *    imports) lets it ride alongside the main chunk.
- * 2. A font `preload` for the Inter latin woff2, so the font swap after
+ * 1. A font `preload` for the Inter latin woff2, so the font swap after
  *    first paint doesn't wait for the stylesheet's @font-face to be parsed
  *    and the fetch to start from scratch.
- * 3. The stylesheet loaded non-blocking (`media="print"` + `onload` swap,
+ * 2. The stylesheet loaded non-blocking (`media="print"` + `onload` swap,
  *    with a `<noscript>` fallback). The sheet is the only render-blocking
  *    resource left; the cold-load splash is inline-styled, so it paints
  *    immediately regardless, and the sheet still starts downloading with the
@@ -25,9 +18,13 @@ import { NONBLOCKING_STYLESHEET_ONLOAD_HANDLER } from "@my-tuums/api/constants";
  *    cause is contained by the splash covering the document until the
  *    session settles (see #app-splash in index.html).
  *
- * Every lookup is a no-op when the asset is missing: if the login chunk is
- * renamed or the font subset changes, the build degrades to "no preload
- * hints" rather than failing.
+ * The HTML is shared by every route. Route-specific chunks must stay out of
+ * its hints: preloading login here downloaded it on legal pages and signed-in
+ * feeds, and also pulled it into the worker's shell precache (issue #354).
+ * Vite still preloads the entry's shared dependencies and each lazy route's
+ * dependencies when that route is requested.
+ *
+ * A missing font subset simply omits the font hint.
  *
  * `enforce: "post"` is load-bearing: Vite's own build-html plugin emits
  * `index.html` from *its* generateBundle, and only post-enforce user plugins
@@ -42,11 +39,7 @@ export function preloadInjectionPlugin(): Plugin {
       const html = bundle["index.html"];
       if (!html || html.type !== "asset" || html.source instanceof Uint8Array) return;
 
-      // A bundle entry's fileName already carries the `assets/` prefix
-      // (`assets/login-<hash>.js`); the URL in the HTML is that joined onto
-      // the base — the same join Vite's own build-html plugin performs when it
-      // emits the script and stylesheet tags, which is why those hrefs do not
-      // double the prefix.
+      // Bundle filenames already include assets/; only add the origin-root slash.
       const urlOf = (fileName: string): string => posix.join("/", fileName);
 
       // `NONBLOCKING_STYLESHEET_ONLOAD_HANDLER` is interpolated into a
@@ -66,16 +59,6 @@ export function preloadInjectionPlugin(): Plugin {
         value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 
       const tags: string[] = [];
-
-      // The TanStack Router route chunk. The fileName regex is the reliable
-      // matcher: the chunk's facadeModuleId carries a `?tsr-split=component`
-      // query suffix, so an `endsWith("src/routes/login.tsx")` check fails.
-      const loginChunk = Object.values(bundle).find(
-        (entry) => entry.type === "chunk" && /^assets\/login-.*\.js$/.test(entry.fileName),
-      );
-      if (loginChunk) {
-        tags.push(`<link rel="modulepreload" crossorigin href="${urlOf(loginChunk.fileName)}">`);
-      }
 
       // The latin subset of Inter — the one en/fr text actually renders with.
       // `crossorigin` is required: fonts are fetched in CORS mode even from

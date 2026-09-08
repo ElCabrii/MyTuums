@@ -381,6 +381,13 @@ carries no score weight.
 the code — links, cited paths, documented scripts, the router groups, and the
 Docker build arguments. It runs as part of `pnpm verify`.
 
+## Production preload diagnostics
+
+Shared HTML preloads only shared resources; lazy routes load on demand and enter
+the service worker runtime cache after use. The measured login-hint fix and the
+remaining warning investigation are recorded in
+[Production preload investigation](preload-investigation.md).
+
 ## Further reading
 
 - [architecture.md](architecture.md) — dev and production topology in detail.

@@ -145,6 +145,7 @@ describe("generated service worker subresource handling", () => {
     // the worker turns an img-src load into a connect-src one the CSP blocks.
     expect(harness.intercepts("/media/posts/42/photo.webp")).toBe(false);
     expect(harness.intercepts("/rpc/posts.feed")).toBe(false);
+    expect(harness.intercepts("/api/auth/get-session")).toBe(false);
   });
 
   it("runtime-caches a non-precached hashed asset — the on-demand half of the 0.4.0 split", () => {
