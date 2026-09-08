@@ -907,5 +907,7 @@
   "profile_favorites_browse": "Parcourir les jeux",
   "profile_favorites_see_more": "Voir plus",
   "profile_favorites_load_more": "Charger plus de jeux",
-  "profile_favorites_error": "Impossible de charger les jeux. Réessayez."
+  "profile_favorites_error": "Impossible de charger les jeux. Réessayez.",
+  "discover_filters": "Filtres",
+  "discover_filters_loading": "Chargement des jeux…"
 }

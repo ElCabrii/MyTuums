@@ -61,7 +61,10 @@ export function GamesPage() {
     <div className="mx-auto max-w-5xl space-y-4 px-4 py-8">
       <div className="border-border flex flex-wrap items-baseline justify-between gap-3 border-b pb-2">
         <h1 className="text-lg font-bold tracking-tight">{m.games_title()}</h1>
-        <SegmentedControl label={m.games_sort_label()} className="max-w-full flex-wrap rounded-2xl">
+        <SegmentedControl
+          label={m.games_sort_label()}
+          className="max-w-full overflow-x-auto overscroll-x-contain"
+        >
           {SORTS.map((option) => (
             <SegmentedControlItem
               key={option}

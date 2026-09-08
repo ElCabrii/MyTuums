@@ -1,7 +1,9 @@
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { useEffect, useRef, useState } from "react";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { Compass, Search, X } from "lucide-react";
+import { Compass, Search, SlidersHorizontal, X } from "lucide-react";
 import { RankedFeed } from "@/components/ranked-feed";
 import { GameCover } from "@/components/game-cover";
 import { Input } from "@/components/ui/input";
@@ -101,12 +103,12 @@ export function DiscoverPage() {
 
   function onGameInputChange(value: string) {
     setGameInput(value);
-    setGamePickerOpen(true);
     clearTimeout(gameTimer.current);
     gameTimer.current = setTimeout(() => setDebouncedGameInput(value.trim()), FILTER_DEBOUNCE_MS);
   }
 
   function selectGame(slug: string) {
+    clearTimeout(gameTimer.current);
     setGameInput("");
     setDebouncedGameInput("");
     setGamePickerOpen(false);
@@ -114,6 +116,8 @@ export function DiscoverPage() {
   }
 
   function clearFilters() {
+    clearTimeout(qTimer.current);
+    clearTimeout(gameTimer.current);
     setQInput("");
     setGameInput("");
     setDebouncedGameInput("");
@@ -140,45 +144,52 @@ export function DiscoverPage() {
         )}
       </div>
 
-      <div className="relative">
-        <Search className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
-        <Input
-          type="search"
-          aria-label={m.discover_search_aria()}
-          placeholder={m.discover_search_placeholder()}
-          className="pl-9"
-          value={qInput}
-          onChange={(event) => onQChange(event.target.value)}
-        />
-      </div>
-
-      <div className="relative">
-        {trimmedGame ? (
-          <ActiveGameChip slug={trimmedGame} onRemove={() => pushSearch({ q: trimmedQ })} />
-        ) : (
-          <>
-            <Search className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
-            <Input
-              type="search"
-              aria-label={m.discover_game_filter_aria()}
-              placeholder={m.discover_game_filter_placeholder()}
-              className="pl-9"
-              value={gameInput}
-              onChange={(event) => onGameInputChange(event.target.value)}
-              onFocus={() => {
-                if (gameInput.trim()) setGamePickerOpen(true);
-              }}
-              onBlur={() => {
-                // Let a picker click land before the blur closes it.
-                setTimeout(() => setGamePickerOpen(false), 120);
-              }}
-            />
-            {gamePickerOpen && debouncedGameInput && (
-              <GamePickerList query={debouncedGameInput} onSelect={selectGame} />
+      <div className="flex items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search className="text-muted-foreground absolute top-3.5 left-3 size-4" />
+          <Input
+            type="search"
+            aria-label={m.discover_search_aria()}
+            placeholder={m.discover_search_placeholder()}
+            className="h-11 pl-9"
+            value={qInput}
+            onChange={(event) => onQChange(event.target.value)}
+          />
+        </div>
+        <Popover open={gamePickerOpen} onOpenChange={setGamePickerOpen}>
+          <PopoverTrigger render={<Button variant="outline" className="h-11 shrink-0 gap-2" />}>
+            <SlidersHorizontal className="size-4" />
+            {m.discover_filters()}
+            {trimmedGame && (
+              <span className="bg-primary text-primary-foreground flex size-5 items-center justify-center rounded-full text-xs">
+                1
+              </span>
             )}
-          </>
-        )}
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            className="max-h-[min(32rem,var(--available-height))] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain"
+          >
+            <PopoverTitle>{m.discover_filters()}</PopoverTitle>
+            <div className="space-y-2">
+              <label htmlFor="discover-game-filter" className="text-sm font-medium">
+                {m.discover_game_filter_aria()}
+              </label>
+              <Input
+                id="discover-game-filter"
+                type="search"
+                placeholder={m.discover_game_filter_placeholder()}
+                value={gameInput}
+                onChange={(event) => onGameInputChange(event.target.value)}
+              />
+              <GamePickerList query={debouncedGameInput} onSelect={selectGame} />
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
+      {trimmedGame && (
+        <ActiveGameChip slug={trimmedGame} onRemove={() => pushSearch({ q: trimmedQ })} />
+      )}
 
       <RankedFeed
         params={feedParams}
@@ -221,20 +232,30 @@ function GamePickerList({ query, onSelect }: { query: string; onSelect: (slug: s
   const listing = useAtomValue(gameListAtom({ sort: "popularity", q: query }));
   const games = listing.data?.pages.flatMap((page) => page.items).slice(0, 5) ?? [];
 
-  if (listing.isPending || games.length === 0) return null;
+  if (listing.isPending)
+    return (
+      <p role="status" className="text-muted-foreground text-sm">
+        {m.discover_filters_loading()}
+      </p>
+    );
+  if (listing.isError)
+    return (
+      <p role="alert" className="text-destructive text-sm">
+        {m.search_load_error()}
+      </p>
+    );
+  if (games.length === 0)
+    return <p className="text-muted-foreground text-sm">{m.search_no_results({ query })}</p>;
 
   return (
-    <ul
-      aria-label={m.discover_game_filter_aria()}
-      className="border-border bg-card absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-lg border shadow-lg"
-    >
+    <ul aria-label={m.discover_game_filter_aria()} className="space-y-1">
       {games.map((game) => (
         <li key={game.igdbId}>
           <button
             type="button"
-            onMouseDown={(event) => event.preventDefault()}
+            aria-label={game.name}
             onClick={() => onSelect(game.slug)}
-            className="hover:bg-muted flex w-full items-center gap-3 px-3 py-2 text-left"
+            className="hover:bg-muted focus-visible:ring-ring flex min-h-11 w-full items-center gap-3 rounded-lg px-2 py-2 text-left outline-none focus-visible:ring-2"
           >
             <span className="bg-muted h-10 w-8 shrink-0 overflow-hidden rounded">
               <GameCover cover={game.coverMediaPath} name={game.name} sizes="32px" />

@@ -1,3 +1,4 @@
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import {
@@ -82,7 +83,7 @@ describe("DiscoverPage", () => {
     expect(screen.queryByRole("button", { name: m.feed_following() })).not.toBeInTheDocument();
   });
 
-  it("renders the search box and game filter controls", async () => {
+  it("opens game filtering from a Filters button and restores focus on dismissal", async () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).postList.data(
       [makePostListPage({ ranking: makeRanking({ suggestions: [] }) })],
@@ -97,8 +98,16 @@ describe("DiscoverPage", () => {
 
     expect(screen.getByRole("searchbox", { name: m.discover_search_aria() })).toBeInTheDocument();
     expect(
-      screen.getByRole("searchbox", { name: m.discover_game_filter_aria() }),
-    ).toBeInTheDocument();
+      screen.queryByRole("searchbox", { name: m.discover_game_filter_aria() }),
+    ).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    const filters = screen.getByRole("button", { name: m.discover_filters() });
+    await user.click(filters);
+    expect(
+      await screen.findByRole("searchbox", { name: m.discover_game_filter_aria() }),
+    ).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(filters).toHaveFocus();
   });
 
   it("renders the filtered empty state and a clear-filters control when the URL carries filters", async () => {

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Link, useLocation } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { Bell, Compass, Gamepad2, Home, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,8 +16,6 @@ const ModeToggle = lazy(() =>
 
 /** Signed-in chrome; mobile primary destinations live in MobileNavigation. */
 export function Header() {
-  const pathname = useLocation({ select: (location) => location.pathname });
-  const showMobileSearch = pathname === "/discover" || pathname === "/search";
   const user = useAtomValue(viewerAtom);
   const isModerator = useAtomValue(isModeratorAtom);
   const unread = useAtomValue(unreadCountAtom);
@@ -25,8 +23,8 @@ export function Header() {
   const unreadCount = unread.data?.unreadCount ?? 0;
   return (
     <header className="bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40 w-full border-b backdrop-blur">
-      <div className="flex min-h-16 w-full flex-wrap items-center justify-between gap-2 px-4 sm:gap-4 sm:px-8">
-        <div className="flex min-w-0 items-center gap-4 xl:min-w-fit xl:flex-1">
+      <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 px-4 sm:px-8 lg:grid-cols-[auto_minmax(0,1fr)_auto]">
+        <div className="flex min-h-16 min-w-0 items-center gap-4 xl:min-w-fit">
           <Link
             to="/"
             aria-label={m.nav_brand_home()}
@@ -59,16 +57,10 @@ export function Header() {
             </Button>
           </nav>
         </div>
-        <div
-          className={
-            showMobileSearch
-              ? "order-last basis-full pb-3 lg:order-none lg:mx-2 lg:max-w-md lg:min-w-0 lg:flex-1 lg:basis-auto lg:pb-0"
-              : "mx-2 hidden max-w-md min-w-0 flex-1 lg:block"
-          }
-        >
+        <div className="order-last col-span-2 min-w-0 pb-3 lg:order-none lg:col-span-1 lg:mx-auto lg:w-full lg:max-w-md lg:pb-0">
           <SearchBox />
         </div>
-        <div className="flex shrink-0 items-center gap-1 sm:gap-2 xl:flex-1 xl:justify-end">
+        <div className="flex min-h-16 shrink-0 items-center justify-end gap-1 sm:gap-2">
           <Button
             variant="ghost"
             size="icon"
