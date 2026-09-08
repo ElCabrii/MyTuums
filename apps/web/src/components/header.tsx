@@ -23,7 +23,7 @@ export function Header() {
   const unreadCount = unread.data?.unreadCount ?? 0;
   return (
     <header className="bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40 w-full border-b backdrop-blur">
-      <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 px-4 sm:px-8 lg:grid-cols-[auto_minmax(0,1fr)_auto]">
+      <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 px-4 sm:gap-x-4 sm:px-8 md:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[auto_minmax(0,1fr)_auto]">
         <div className="flex min-h-16 min-w-0 items-center gap-4 xl:min-w-fit">
           <Link
             to="/"
@@ -57,7 +57,7 @@ export function Header() {
             </Button>
           </nav>
         </div>
-        <div className="order-last col-span-2 min-w-0 pb-3 lg:order-none lg:col-span-1 lg:mx-auto lg:w-full lg:max-w-md lg:pb-0">
+        <div className="min-w-0 md:order-last md:col-span-2 md:pb-3 lg:order-none lg:col-span-1 lg:mx-auto lg:w-full lg:max-w-md lg:pb-0">
           <SearchBox />
         </div>
         <div className="flex min-h-16 shrink-0 items-center justify-end gap-1 sm:gap-2">
@@ -65,7 +65,6 @@ export function Header() {
             variant="ghost"
             size="icon"
             nativeButton={false}
-            className="size-11"
             render={
               <Link
                 to="/notifications"
@@ -81,11 +80,11 @@ export function Header() {
               />
             }
           >
-            <Bell className="size-5" />
+            <Bell className="h-5 w-5" />
             {unreadCount > 0 && (
               <span
                 aria-hidden="true"
-                className="bg-primary text-primary-foreground absolute top-0 right-0 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold"
+                className="bg-primary text-primary-foreground absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-bold"
               >
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>

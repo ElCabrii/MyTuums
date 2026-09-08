@@ -979,7 +979,7 @@ async function feedEventPage(
     limit: number;
     authorId?: string;
     feed: "global" | "following";
-    kind: "posts" | "replies" | "all";
+    kind: "posts" | "replies" | "all" | "shares";
     includeReposts: boolean;
     /** Free-text substring on the post's own text (the Discover search box). */
     q?: string;
@@ -1018,6 +1018,7 @@ async function feedEventPage(
       ? ilike(post.content, `%#${escapeFeedLikePattern(args.gameHashtagKey)}%`)
       : undefined,
     args.authorId ? eq(post.authorId, args.authorId) : undefined,
+    args.kind === "shares" ? not(isNull(post.quotedPostId)) : undefined,
     args.kind === "posts"
       ? isNull(post.parentId)
       : args.kind === "replies"
@@ -1081,10 +1082,10 @@ async function feedEventPage(
   ];
 
   // The arm drops for the reply axis (an amplification is not a reply) and
-  // for a profile feed that has not opted in — every existing `authorId`
-  // caller keeps the pre-#277 feed exactly.
+  // for a profile feed that has not opted in through includeReposts or the
+  // shares view — every existing `authorId` caller keeps the pre-#277 feed.
   const repostArm =
-    args.kind === "replies" || (args.authorId && !args.includeReposts)
+    args.kind === "replies" || (args.authorId && !args.includeReposts && args.kind !== "shares")
       ? undefined
       : sql`
     select ${postRepost.createdAt} as event_at, ${postRepost.postId} as post_id, ${postRepost.userId} as reposter_id, ${postRepost.userId} as reposter_key
@@ -2154,12 +2155,14 @@ export const postRouter = {
            */
           includeReposts: z.boolean().default(false),
           /**
-           * The profile feed's three-way activity filter. `includeReplies` is
-           * retained for existing clients and means `all` when true; `kind`
+           * The profile feed's activity filter. `shares` selects the owner's
+           * quotes and repost events, regardless of `includeReposts`.
+           * `includeReplies` is retained for existing clients and means
+           * `all` when true; `kind`
            * takes precedence when both are supplied. Keeping the legacy field
            * avoids changing existing query-key/input shapes during rollout.
            */
-          kind: z.enum(["posts", "replies", "all"]).optional(),
+          kind: z.enum(["posts", "replies", "all", "shares"]).optional(),
           /**
            * Free-text substring on the post's own text — the Discover search
            * box. Composes with `gameSlug` as AND. Top-level feeds only; the
@@ -2178,6 +2181,12 @@ export const postRouter = {
           gameSlug: z.string().trim().min(1).max(GAME_SLUG_MAX_LENGTH).optional(),
         })
         .superRefine((input, refinement) => {
+          if (input.kind === "shares" && (!input.authorId || input.parentId)) {
+            refinement.addIssue({
+              code: "custom",
+              message: "Quotes and reposts require a profile feed.",
+            });
+          }
           if (
             input.continuationRootId &&
             (input.parentId ||

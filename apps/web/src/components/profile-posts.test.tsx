@@ -39,6 +39,38 @@ function readyStore(viewer: { id: string; username?: string }) {
 }
 
 describe("ProfilePosts", () => {
+  it("selects the quotes and reposts feed through a shareable filter and hides the composer", async () => {
+    const profile = makeProfile({ id: "viewer-1", username: "alex" });
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data("alex", profile);
+    queryFixtures(queryClient).postList.data(
+      [{ items: [], nextCursor: null, gameMentions: {}, ranking: null }],
+      { authorId: profile.id, feed: "global", kind: "replies" },
+    );
+    queryFixtures(queryClient).postList.data(
+      [{ items: [], nextCursor: null, gameMentions: {}, ranking: null }],
+      { authorId: profile.id, feed: "global", kind: "shares" },
+    );
+
+    const { router } = await renderWithProviders(<ProfilePosts />, {
+      queryClient,
+      store: readyStore({ id: profile.id, username: "alex" }),
+      initialPath: "/@alex/?filter=reply",
+      signedInAs: { id: profile.id, username: "alex" },
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: m.profile_posts_filter_shares() }));
+
+    expect(router.state.location.search).toEqual({ filter: "shares" });
+    expect(await screen.findByText(m.profile_own_shares_empty())).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: m.profile_posts_filter_shares() })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.queryByPlaceholderText(m.post_placeholder())).not.toBeInTheDocument();
+  });
+
   it("shows the composer and owner-specific empty copy on the viewer's profile", async () => {
     const profile = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
     const queryClient = createTestQueryClient();

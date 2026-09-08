@@ -256,7 +256,7 @@ export function ProfileLayout() {
                 size="icon"
                 aria-label={m.profile_settings()}
                 title={m.profile_settings()}
-                className="border-muted-foreground/30 size-11 rounded-full"
+                className="border-muted-foreground/30 hidden size-11 rounded-full md:inline-flex"
                 nativeButton={false}
                 render={<Link to="/settings/account" />}
               >

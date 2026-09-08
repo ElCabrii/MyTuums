@@ -52,6 +52,7 @@ function encodeKind(p: PostFeedParams): string {
   if (p.kind === "posts") return "p";
   if (p.kind === "replies") return "q";
   if (p.kind === "both") return "a";
+  if (p.kind === "shares") return "s";
   return p.includeReplies ? "r" : "";
 }
 
@@ -86,6 +87,7 @@ export const decode = (key: string): PostFeedParams => {
   if (replies === "p") params.kind = "posts";
   if (replies === "q") params.kind = "replies";
   if (replies === "a") params.kind = "both";
+  if (replies === "s") params.kind = "shares";
   if (ranked === "k") params.ranked = true;
   return params;
 };

@@ -116,17 +116,8 @@ export function GamesPage() {
               />
             </div>
             <p className="text-foreground mt-1.5 truncate text-sm font-medium">{game.name}</p>
-            {sort === "upcoming" ? (
-              <p className="text-muted-foreground text-xs">
-                {game.hypeCount === 1
-                  ? m.game_hype_count_one({ count: game.hypeCount })
-                  : m.game_hype_count_many({ count: game.hypeCount })}
-                {game.firstReleaseYear !== null ? ` · ${game.firstReleaseYear}` : ""}
-              </p>
-            ) : (
-              game.firstReleaseYear !== null && (
-                <p className="text-muted-foreground text-xs">{game.firstReleaseYear}</p>
-              )
+            {game.firstReleaseYear !== null && (
+              <p className="text-muted-foreground text-xs">{game.firstReleaseYear}</p>
             )}
           </Link>
         ))}
