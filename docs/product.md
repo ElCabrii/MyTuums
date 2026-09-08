@@ -200,8 +200,8 @@ menu; the navigation bar has no standalone theme button.
   the edge (rejecting or cancelling deletes it). The profile button reads
   Follow / Requested / Following from `viewerIsFollowing` + `hasRequested`.
 - The home feeds are ranked, not chronological. **For you** (everyone),
-  **Following** (you and the people you follow), and **Discover** (people you
-  neither follow nor are) each serve the same scorer over their own candidate
+  **Following** (you and the people you follow), and **Discover** (other people,
+  including those you follow) each serve the same scorer over their own candidate
   set, frozen into a per-viewer snapshot that stays stable for 30 minutes and
   advances only through an explicit **Refresh**. There is deliberately no
   chronological toggle on these three surfaces. Interest outranks
@@ -228,17 +228,17 @@ menu; the navigation bar has no standalone theme button.
   Add images in the home and own-profile composers. The trigger identifies the
   effective audience; private accounts always show Followers only, with Public
   unavailable and an explanatory note. The draft choice survives publication
-  errors and resets to the account default on success. Private posts never
-  surface in Discover, post search, hashtag matches or anonymous permalinks —
-  those return NOT_FOUND for non-viewers — and their `/media/` attachments 404
+  errors and resets to the account default on success. Private posts stay
+  hidden from non-viewers in Discover, post search, hashtag matches and anonymous
+  permalinks — direct reads return NOT_FOUND for non-viewers — and their `/media/` attachments 404
   the same way except for the author, approved followers and moderators
   inspecting a report. Private accounts themselves stay discoverable in user
   search and the typeahead — only their posts are hidden.
-- Discover (`/discover`) is the ranked outside-network reading surface — no
+- Discover (`/discover`) is the ranked community reading surface — no
   composer, no scope tabs — with post search and a Filters button on top.
   Filters opens a popover containing the game picker; the selected game appears
   as a removable chip. It
-  shows original posts by authors the viewer neither follows nor is, with a
+  shows original posts by other authors, including people the viewer follows, with a
   **Who to follow** module above the posts: the first three distinct authors
   in the frozen order, filtered live against follows and follow requests, with
   no refill until the next Refresh. Both filters narrow the same ranked
@@ -592,8 +592,8 @@ added text or images. An event about the original, not a post of its own: the
 feed renders the original attributed to the reposter. Idempotent as a pair
 (`repost` / `unrepost`). _Avoid:_ retweet, boost, share.
 
-**Discover** — the ranked outside-network feed at `/discover`: top-level
-posts by authors the viewer neither follows nor is, ordered by the shared
+**Discover** — the ranked community feed at `/discover`: top-level
+posts by other authors, including people the viewer follows, ordered by the shared
 ranked scorer, with the search and game filters composing as candidate
 filters and a Who-to-Follow module above the posts. Ranked-only: it has no
 chronological mode. _Avoid:_ global feed, explore.

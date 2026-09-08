@@ -26,6 +26,35 @@ async function expectInsideViewport(locator: Locator, page: Page) {
     .toBe(true);
 }
 
+test("desktop header search stays centered despite unequal navigation and account widths", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const header = page.getByRole("banner");
+  const search = header.getByRole("combobox", { name: "Search", exact: true });
+  for (const width of [1920, 1536, 1440, 1280, 1024]) {
+    await page.setViewportSize({ width, height: 960 });
+    await expectInsideViewport(search, page);
+    const searchBox = await search.boundingBox();
+    const headerBox = await header.boundingBox();
+    const navigationBox = await header.getByRole("navigation").boundingBox();
+    const bellBox = await header.locator('a[href="/notifications"]').boundingBox();
+    if (!searchBox || !headerBox || !navigationBox || !bellBox)
+      throw new Error("Missing header control");
+    expect(
+      Math.abs(searchBox.x + searchBox.width / 2 - (headerBox.x + headerBox.width / 2)),
+    ).toBeLessThanOrEqual(1);
+    if (width >= 1536) {
+      expect(searchBox.x).toBeGreaterThanOrEqual(navigationBox.x + navigationBox.width);
+      expect(searchBox.x + searchBox.width).toBeLessThanOrEqual(bellBox.x);
+    } else {
+      expect(searchBox.y).toBeGreaterThanOrEqual(navigationBox.y + navigationBox.height);
+      expect(searchBox.y).toBeGreaterThanOrEqual(bellBox.y + bellBox.height);
+    }
+    await expectNoPageOverflow(page);
+  }
+});
+
 test("issue 352: Games sorts and privacy table stay inside a 320px document in both locales", async ({
   page,
 }) => {

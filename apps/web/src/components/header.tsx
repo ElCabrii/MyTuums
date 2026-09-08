@@ -18,7 +18,7 @@ export function Header() {
   const unreadCount = unread.data?.unreadCount ?? 0;
   return (
     <header className="bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40 w-full border-b backdrop-blur">
-      <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 px-4 sm:gap-x-4 sm:px-8 md:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[auto_minmax(0,1fr)_auto]">
+      <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 px-4 sm:gap-x-4 sm:px-8 md:grid-cols-[minmax(0,1fr)_auto] 2xl:grid-cols-[minmax(0,1fr)_28rem_minmax(0,1fr)]">
         <div className="flex min-h-16 min-w-0 items-center gap-4 xl:min-w-fit">
           <Link
             to="/"
@@ -52,7 +52,7 @@ export function Header() {
             </Button>
           </nav>
         </div>
-        <div className="min-w-0 md:order-last md:col-span-2 md:pb-3 lg:order-none lg:col-span-1 lg:mx-auto lg:w-full lg:max-w-md lg:pb-0">
+        <div className="min-w-0 md:order-last md:col-span-2 md:pb-3 2xl:order-none 2xl:col-span-1 2xl:mx-auto 2xl:w-full 2xl:max-w-md 2xl:pb-0">
           <SearchBox />
         </div>
         <div className="flex min-h-16 shrink-0 items-center justify-end gap-1 sm:gap-2">

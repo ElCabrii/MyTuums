@@ -327,9 +327,9 @@ describe("ranked global (For you)", () => {
     expect(snapshotId).toBeTruthy();
 
     // A post that would rank first in a fresh snapshot must not disturb this
-    // one. It is authored by the followed account so the Discover world's
-    // outside-network order stays undisturbed for the later tests.
-    await makePost(followed.id, "#doom breaking news", 0);
+    // one. The viewer authors it so Discover's candidate order stays
+    // undisturbed for the later tests.
+    await makePost(viewer.id, "#doom breaking news", 0);
     const second = await call(
       appRouter.post.list,
       { feed: "global", ranked: true, limit: 2, cursor: first.nextCursor ?? undefined },
@@ -494,7 +494,23 @@ describe("ranked Following", () => {
 });
 
 describe("ranked Discover", () => {
-  it("serves unfollowed originals with top-3 followable suggestions", async () => {
+  it("includes recent reposts of followed authors whose originals are outside the candidate window", async () => {
+    await db.insert(follow).values({ followerId: viewer.id, followingId: ancientAuthor.id });
+    try {
+      const page = await call(
+        appRouter.post.list,
+        { feed: "discover", ranked: true, limit: 20 },
+        { context: rankedContext(viewer) },
+      );
+      expect(page.items.find((item) => item.id === pAncient)?.repostedBy?.id).toBe(followed.id);
+    } finally {
+      await db
+        .delete(follow)
+        .where(and(eq(follow.followerId, viewer.id), eq(follow.followingId, ancientAuthor.id)));
+    }
+  });
+
+  it("serves followed and unfollowed originals with top-3 followable suggestions", async () => {
     const page = await call(
       appRouter.post.list,
       { feed: "discover", ranked: true, limit: 20 },
@@ -505,20 +521,16 @@ describe("ranked Discover", () => {
     expect(ids).toContain(pPlainNew);
     expect(ids).toContain(pAncient);
     expect(ids).not.toContain(pOwn);
-    expect(ids).not.toContain(pFollowOld);
-    expect(ids).not.toContain(pLikedAuthorNew);
+    expect(ids).toContain(pFollowOld);
+    expect(ids).toContain(pLikedAuthorNew);
 
     // The ancient original arrives only on its recent amplification.
     expect(page.items.find((item) => item.id === pAncient)?.repostedBy?.id).toBe(followed.id);
 
     const suggestions = page.ranking?.suggestions ?? [];
-    // The frozen top three are the requested author, B, and the newcomer;
-    // the requested author drops at live-filter time with no refill until a
-    // new snapshot.
-    expect(suggestions.map((suggestion) => suggestion.id)).toEqual([
-      strangerB.id,
-      topicNewcomer.id,
-    ]);
+    // The frozen top three include the requested and followed authors;
+    // both drop from suggestions without refilling from later authors.
+    expect(suggestions.map((suggestion) => suggestion.id)).toEqual([strangerB.id]);
     const suggestionIds = suggestions.map((suggestion) => suggestion.id);
     expect(new Set(suggestionIds).size).toBe(suggestionIds.length);
     for (const suggestion of suggestions) {
@@ -531,7 +543,7 @@ describe("ranked Discover", () => {
     }
   });
 
-  it("recomputes suggestions live without refilling: a fresh follow hides", async () => {
+  it("keeps posts after following their author while hiding the follow suggestion", async () => {
     const first = await call(
       appRouter.post.list,
       { feed: "discover", ranked: true, limit: 20 },
@@ -548,12 +560,8 @@ describe("ranked Discover", () => {
       );
       // No refill until a new snapshot: the followed author drops and the
       // frozen remainder stands.
-      expect((resumed.ranking?.suggestions ?? []).map((suggestion) => suggestion.id)).toEqual([
-        topicNewcomer.id,
-      ]);
-      expect(resumed.items.map((item) => item.id)).not.toContain(
-        first.items.find((item) => item.author.id === top?.id)?.id,
-      );
+      expect(resumed.ranking?.suggestions).toEqual([]);
+      expect(resumed.items.map((item) => item.id)).toEqual(first.items.map((item) => item.id));
     } finally {
       await db
         .delete(follow)
