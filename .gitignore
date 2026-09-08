@@ -41,4 +41,6 @@ e2e/blob-report/
 playwright/.cache/
 # Playwright MCP browser snapshots and console captures
 .playwright-mcp/
+# agent-browser saved sessions and inspection artifacts
+.agent-browser/
 lighthouse-reports/
