@@ -52,9 +52,7 @@ export default defineConfig({
       outdir: "./src/paraglide",
       emitTsDeclarations: true,
     }),
-    // Post-build HTML surgery: modulepreload for the lazy login chunk, font
-    // preload, non-blocking stylesheet. `enforce: "post"` inside the plugin
-    // is what lets it see the final index.html — see build-inject-plugin.ts.
+    // Shared font preload and non-blocking stylesheet, applied after Vite emits HTML.
     preloadInjectionPlugin(),
     // Emits a versioned, hashed-asset precache without adding a Workbox-sized
     // dependency for the app's intentionally small offline-shell policy.
