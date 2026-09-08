@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { postCardWithText } from "../../support/post-card";
+import { expectRankedPostText } from "../../support/ranked-feed";
 
 // The favorite journey (issue #314, stage 3), signed in as the project's
 // default fixture account (alice). The catalog comes from the committed
@@ -49,6 +50,10 @@ test.describe("hashtag resolution", () => {
     await expect(composer).toHaveValue("");
     await page.getByRole("button", { name: "Refresh" }).first().click();
 
+    // The home feed is ranked (issue #305): the new post has no first-page
+    // guarantee, so page forward until it lands before asserting on its tags.
+    await expectRankedPostText(page, content);
+
     const card = postCardWithText(page, content);
     const resolved = card.getByRole("link", { name: "#doom", exact: true });
     await expect(resolved).toHaveAttribute("href", "/discover?game=doom");
@@ -58,9 +63,11 @@ test.describe("hashtag resolution", () => {
     );
 
     // Hovering the resolved tag previews the game card, with links to the
-    // game's page inside it (cover + text share the destination).
+    // game's page inside it (cover + text share the destination). The card
+    // opens after a hover delay and fetches the game, so allow both under CI
+    // load rather than the default 5s.
     await resolved.hover();
-    await expect(page.getByText("Favorites: 0").first()).toBeVisible();
+    await expect(page.getByText("Favorites: 0").first()).toBeVisible({ timeout: 15_000 });
     const viewGame = page.getByRole("link", { name: "View game page" }).first();
     await expect(viewGame).toHaveAttribute("href", "/games/doom");
 

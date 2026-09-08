@@ -1,4 +1,5 @@
 import { test, expect } from "../../support/fixtures";
+import { expectRankedPostText } from "../../support/ranked-feed";
 import { ALICE, BOB } from "../../support/users";
 
 /**
@@ -119,9 +120,11 @@ test.describe("quoting a post", () => {
     // Success closes the dialog and the invalidated feed carries the new
     // quote with the original embedded inside it, linked to its permalink.
     // A quote is a top-level post: it lives on the home feed, not the
-    // quoted post's thread — which is still the page we are on.
+    // quoted post's thread — which is still the page we are on. That feed is
+    // ranked (issue #305), so page forward until the quote lands.
     await expect(dialog).not.toBeVisible();
     await page.goto("/");
+    await expectRankedPostText(page, quoteContent);
     const quoteCard = page.locator("div").filter({ hasText: quoteContent }).last();
     await expect(quoteCard.getByText(originalContent)).toBeVisible();
     // Two Alice links are correct here: the quote author's profile and the
