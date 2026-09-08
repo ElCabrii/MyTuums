@@ -1,24 +1,15 @@
-import { atom } from "jotai";
 import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import { orpc } from "@/lib/orpc";
 import { POST_CACHE_KEYS } from "@/lib/post-cache";
 
 /**
- * Deleting one's own post (issue #148) — the confirmation target and the
- * mutation behind it.
+ * Deleting one's own post (issue #148). The confirmation target lives in
+ * `dialog-targets.ts` so opening the dialog need not load this mutation.
  *
  * Deliberately not in `atoms/moderation.ts`: a self-delete is not a moderation
  * action. It writes no audit row, sends no email, and has nothing to appeal,
  * so it must not ride along on the moderation sweeps.
  */
-
-/**
- * Which delete-confirmation dialog is open: the post id, or null. One dialog
- * app-wide, the same identity-holding reasoning as `blockDialogAtom` — every
- * card's kebab only sets the target, so two cards for the same post cannot
- * stack two dialogs.
- */
-export const deletePostDialogAtom = atom<string | null>(null);
 
 /**
  * `post.delete` as a mutation atom. No optimistic patch and no rollback,

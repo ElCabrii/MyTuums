@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { editPostAtom, editPostDialogAtom, type EditPostTarget } from "@/atoms/post-edit";
+import { editPostAtom } from "@/atoms/post-edit";
+import { editPostDialogAtom, type EditPostTarget } from "@/atoms/dialog-targets";
 import { ComposerForm } from "@/components/composer-form";
 import {
   Dialog,
