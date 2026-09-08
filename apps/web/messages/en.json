@@ -907,5 +907,7 @@
   "profile_favorites_browse": "Browse games",
   "profile_favorites_see_more": "See more",
   "profile_favorites_load_more": "Load more games",
-  "profile_favorites_error": "Could not load more games. Try again."
+  "profile_favorites_error": "Could not load more games. Try again.",
+  "discover_filters": "Filters",
+  "discover_filters_loading": "Loading games…"
 }

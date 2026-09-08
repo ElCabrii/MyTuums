@@ -222,7 +222,9 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   inspecting a report. Private accounts themselves stay discoverable in user
   search and the typeahead — only their posts are hidden.
 - Discover (`/discover`) is the ranked outside-network reading surface — no
-  composer, no scope tabs — with a search box and a game filter on top. It
+  composer, no scope tabs — with post search and a Filters button on top.
+  Filters opens a popover containing the game picker; the selected game appears
+  as a removable chip. It
   shows original posts by authors the viewer neither follows nor is, with a
   **Who to follow** module above the posts: the first three distinct authors
   in the frozen order, filtered live against follows and follow requests, with
@@ -290,9 +292,10 @@ three events, not one collapsed one.
 
 Signed-in mobile pages use a fixed bottom navigation bar for Home, Discover,
 Games, and Profile. The header shows the logo image, notifications, and a compact
-moderation icon for authorized roles. Discover and Search expose global search
-below the header's icon row. The own-profile account menu provides bookmarks,
-settings, theme selection, and sign-out. Private messages remain hidden until
+moderation icon for authorized roles. All mobile pages expose global search
+below a consistent header icon row. The Profile tab uses the signed-in user’s
+avatar. The own-profile account menu provides bookmarks, theme selection, and
+sign-out; a separate cog button opens settings. Private messages remain hidden until
 implemented. Page content and consent notices clear the bottom navigation and
 safe-area inset.
 
@@ -385,13 +388,14 @@ notification when a badge is earned.
   accept `#worldofwarcraft`).
 - A signed-in user can favorite a game from its page — a public stamp, not a
   private save: the count on the game page is public, and the user's profile
-  carries a six-cover favorites grid (above the feed on mobile, beside it
-  on desktop). “See more” opens a scrollable popover with game links and
+  carries a compact, horizontally scrollable six-cover favorites strip
+  (above the feed on mobile, beside it on desktop). “See more” opens a scrollable popover with game links and
   pagination through the complete list, newest first. Empty profiles offer
   a link to `/games`, with an invitation to favorite games on your own profile.
   Favorites are visible to every signed-in viewer — except on a private
   profile, where the rail hides from non-followers like the follow lists do.
-  The directory's fourth sort orders games by that count.
+  The directory's fourth sort orders games by that count. Sort options stay on
+  one horizontally scrollable row.
 
 ## Media
 

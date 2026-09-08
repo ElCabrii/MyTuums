@@ -250,16 +250,17 @@ export function ProfileLayout() {
           )}
 
           {isOwnProfile ? (
-            <div className="mb-2 flex flex-wrap items-center gap-1">
+            <div className="mt-20 mb-2 flex flex-wrap items-center gap-2 self-start sm:mt-24">
               <Button
                 variant="outline"
-                size="sm"
-                className="border-muted-foreground/30 gap-2 rounded-full"
+                size="icon"
+                aria-label={m.profile_settings()}
+                title={m.profile_settings()}
+                className="border-muted-foreground/30 size-11 rounded-full"
                 nativeButton={false}
                 render={<Link to="/settings/account" />}
               >
                 <Settings className="h-4 w-4" />
-                <span>{m.profile_settings()}</span>
               </Button>
               <div className="md:hidden">
                 <AccountMenu compact />

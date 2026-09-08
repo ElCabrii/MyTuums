@@ -39,6 +39,15 @@ test("issue 352: Games sorts and privacy table stay inside a 320px document in b
       name: locale === "en" ? "Most favorited" : "Les plus favoris",
       exact: true,
     });
+    const sorts = page.locator('[data-slot="segmented-control"]');
+    await expect
+      .poll(() => sorts.evaluate((element) => element.scrollWidth > element.clientWidth))
+      .toBe(true);
+    const tops = await sorts
+      .getByRole("button")
+      .evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().top));
+    expect(new Set(tops).size).toBe(1);
+    await lastSort.scrollIntoViewIfNeeded();
     await expectInsideViewport(lastSort, page);
     await lastSort.click();
     await expect(page).toHaveURL(/sort=favorites/);
@@ -115,4 +124,18 @@ test("mobile navigation reaches all four destinations and exposes moderation onl
   await expect(
     bobPage.getByRole("banner").getByRole("link", { name: "Moderation", exact: true }),
   ).toHaveCount(0);
+});
+
+test("mobile header keeps search and consistent height across primary pages", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  let headerHeight: number | undefined;
+  for (const path of ["/", "/discover", "/games", `/@${ALICE.username}`]) {
+    await page.goto(path);
+    const header = page.getByRole("banner");
+    await expectInsideViewport(header.getByRole("combobox", { name: "Search", exact: true }), page);
+    const height = (await header.boundingBox())?.height;
+    if (headerHeight === undefined) headerHeight = height;
+    expect(height).toBe(headerHeight);
+    await expectNoPageOverflow(page);
+  }
 });

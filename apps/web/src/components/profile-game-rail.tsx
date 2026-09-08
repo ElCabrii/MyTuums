@@ -38,9 +38,9 @@ export function ProfileGameRail({
           </Link>
         </div>
       ) : (
-        <ol className="grid grid-cols-3 gap-2">
+        <ol className="flex gap-2 overflow-x-auto overscroll-x-contain pb-2">
           {games.slice(0, PREVIEW_COUNT).map((game) => (
-            <li key={game.slug} className="min-w-0">
+            <li key={game.slug} className="w-16 shrink-0 sm:w-20">
               <FavoriteGameLink game={game} />
             </li>
           ))}

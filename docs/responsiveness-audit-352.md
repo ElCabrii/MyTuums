@@ -220,3 +220,33 @@ all media flows, or every previously inventoried route/state. The original
 coverage table records the broader audit and its explicit gaps.
 
 Task-specific browser sessions and local API/Vite inspection servers are stopped.
+
+## UI refinements after review
+
+Discover now uses a Filters button with a game-picker popover and a removable
+active-game chip. Global search is visible in the header on every signed-in
+page; the mobile icon row retains a fixed 64 px minimum height. Bell and theme
+icons both render at 20 px and use the existing `lucide-react` library.
+
+Games sorting stays on one horizontally scrollable row. Profile favorites use
+a compact horizontal cover strip while retaining the six-game preview and
+full-list popover. Mobile Profile navigation renders the viewer’s avatar.
+The own-profile settings cog has space below the banner; its adjacent mobile
+menu omits View profile and Settings.
+
+Five Chromium responsiveness regressions passed (plus two setup tests), including
+single-row sort scrolling in EN/FR and consistent mobile header height on all
+four primary destinations. Twenty focused component tests passed, including
+filter-popover opening and keyboard focus restoration. agent-browser verified
+game selection, the trimmed account menu, profile spacing, and matching icon
+sizes. Browser error checks returned no JavaScript errors.
+
+Screenshots: [desktop Discover](artifacts/responsiveness-352/refined-discover-desktop.png),
+[mobile filters](artifacts/responsiveness-352/refined-filters-mobile.png),
+[mobile profile](artifacts/responsiveness-352/refined-profile-mobile.png),
+[mobile Games](artifacts/responsiveness-352/refined-games-mobile.png).
+
+Final refinement validation: `pnpm verify` passed, including all 1,436 unit tests
+and all 502 integration tests on the isolated `mytuums_ui_refine_test` database.
+The browser session and both inspection processes (ports 3102 and 5274) were
+stopped, and both listeners were confirmed closed.

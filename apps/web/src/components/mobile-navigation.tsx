@@ -1,7 +1,8 @@
+import { UserAvatar } from "@/components/user-avatar";
 import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { Compass, Gamepad2, Home, User } from "lucide-react";
-import { viewerHandleAtom } from "@/atoms/session";
+import { Compass, Gamepad2, Home } from "lucide-react";
+import { viewerHandleAtom, viewerAtom } from "@/atoms/session";
 import { m } from "@/paraglide/messages.js";
 
 const itemClassName =
@@ -9,6 +10,7 @@ const itemClassName =
 const activeProps = { className: "bg-primary/10 text-primary" };
 
 export function MobileNavigation() {
+  const user = useAtomValue(viewerAtom);
   const handle = useAtomValue(viewerHandleAtom);
   return (
     <nav
@@ -40,12 +42,16 @@ export function MobileNavigation() {
             activeProps={activeProps}
             className={itemClassName}
           >
-            <User className="size-5" />
+            <span aria-hidden="true">
+              <UserAvatar user={user} alt="" className="size-6" fallbackClassName="text-[10px]" />
+            </span>
             {m.nav_profile()}
           </Link>
         ) : (
           <Link to="/welcome" activeProps={activeProps} className={itemClassName}>
-            <User className="size-5" />
+            <span aria-hidden="true">
+              <UserAvatar user={user} alt="" className="size-6" fallbackClassName="text-[10px]" />
+            </span>
             {m.nav_profile()}
           </Link>
         )}

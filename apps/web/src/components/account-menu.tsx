@@ -75,21 +75,25 @@ export function AccountMenu({ compact = false }: { compact?: boolean }) {
         align="end"
         className="max-h-[var(--available-height)] min-w-48 overflow-y-auto"
       >
-        <DropdownMenuItem
-          className="cursor-pointer"
-          render={<Link to="/@{$username}" params={{ username: handle }} />}
-        >
-          <User />
-          {m.menu_view_profile()}
-        </DropdownMenuItem>
+        {!compact && (
+          <DropdownMenuItem
+            className="cursor-pointer"
+            render={<Link to="/@{$username}" params={{ username: handle }} />}
+          >
+            <User />
+            {m.menu_view_profile()}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem className="cursor-pointer" render={<Link to="/bookmarks" />}>
           <Bookmark />
           {m.nav_bookmarks()}
         </DropdownMenuItem>
-        <DropdownMenuItem className="cursor-pointer" render={<Link to="/settings/account" />}>
-          <Settings />
-          {m.profile_settings()}
-        </DropdownMenuItem>
+        {!compact && (
+          <DropdownMenuItem className="cursor-pointer" render={<Link to="/settings/account" />}>
+            <Settings />
+            {m.profile_settings()}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <Sun />
