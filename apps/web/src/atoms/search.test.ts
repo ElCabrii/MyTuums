@@ -20,10 +20,21 @@ import {
   setSearchQueryAtom,
   typeaheadAtom,
 } from "@/atoms/search";
+import { sessionAtom } from "@/atoms/session";
+import { setTestSession, signedInSession } from "@/test/auth-fixture";
 
 function freshStore() {
+  // Product queries stay idle until the session is ready (issue #353) — the
+  // typeahead tests drive a complete session and pre-seed the store with it
+  // so the atoms mount already-enabled. Harmless for the pure debounce
+  // tests, which never read the session.
+  const session = signedInSession();
+  setTestSession(session);
   const store = createStore();
   store.set(queryClientAtom, new QueryClient());
+  // SAFETY: the complete session the fake store holds — the search atoms
+  // read only whether the viewer may fire, never the store identity.
+  store.set(sessionAtom, session as never);
   return store;
 }
 

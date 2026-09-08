@@ -92,6 +92,15 @@ app's build from the same origin.
 - **Exactly one effect owns each redirect.** Auth pages call
   `useRedirectWhenSignedIn` and never navigate on success themselves;
   double-navigation races were real bugs.
+- **Product queries wait for account readiness without unmounting pages.**
+  `src/atoms/query-readiness.ts` combines the existing session, legal-consent,
+  and onboarding atoms for query `enabled` conditions. Public thread, reply,
+  link-card, and game reads also allow a settled, error-free anonymous session;
+  signed-in viewers still need consent and onboarding. Session confirmation
+  resumes queries, so accepting consent does not reset the whole QueryClient.
+  Query definitions use `retryUnlessClientError` to stop deterministic 4xx
+  retries while retaining bounded transient recovery. These client gates do
+  not replace server authorization or legal-version recovery.
 - **The legal consent gate decides everything itself.** `LegalConsentDialog`
   is mounted unconditionally in `__root.tsx`; it reads whether the viewer is
   signed in, whether their recorded `legalVersion` is current, and whether the

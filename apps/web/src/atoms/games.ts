@@ -7,6 +7,7 @@ import {
   queryClientAtom,
 } from "jotai-tanstack-query";
 import { store } from "@/lib/store";
+import { protectedProductReadyAtom, publicReadReadyAtom } from "@/atoms/query-readiness";
 import { orpc, type GamePageData } from "@/lib/orpc";
 import {
   gameFavoritesQueryOptions,
@@ -55,7 +56,10 @@ function decodeGameListParams(key: string): GameListParams {
 }
 
 const gameListFamily = atomFamily((key: string) =>
-  atomWithInfiniteQuery(() => gameListQueryOptions(decodeGameListParams(key))),
+  atomWithInfiniteQuery((get) => ({
+    ...gameListQueryOptions(decodeGameListParams(key)),
+    enabled: get(publicReadReadyAtom),
+  })),
 );
 
 /** The infinite-query atom for one (sort, query) directory listing. */
@@ -65,12 +69,15 @@ export function gameListAtom(params: GameListParams) {
 
 /** One game's public page, shared by every component reading that slug. */
 export const gamePageAtomFamily = atomFamily((slug: string) =>
-  atomWithQuery(() => gameQueryOptions(slug)),
+  atomWithQuery((get) => ({ ...gameQueryOptions(slug), enabled: get(publicReadReadyAtom) })),
 );
 
 /** One profile's favorites rail (Q25) — covers plus names, capped server-side. */
 export const gameFavoritesAtomFamily = atomFamily((username: string) =>
-  atomWithQuery(() => gameFavoritesQueryOptions(username)),
+  atomWithQuery((get) => ({
+    ...gameFavoritesQueryOptions(username),
+    enabled: get(protectedProductReadyAtom),
+  })),
 );
 
 /**

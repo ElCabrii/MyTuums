@@ -6,6 +6,7 @@ import {
 } from "jotai-tanstack-query";
 import { orpc } from "@/lib/orpc";
 import type { NotificationItem } from "@/lib/orpc";
+import { protectedProductReadyAtom } from "@/atoms/query-readiness";
 import { notificationsQueryOptions, unreadCountQueryOptions } from "@/lib/query-definitions";
 
 /**
@@ -16,13 +17,19 @@ import { notificationsQueryOptions, unreadCountQueryOptions } from "@/lib/query-
  * There is one list with no scope parameters. Sign-out clears its data with
  * the QueryClient, just like the unread-count query.
  */
-export const notificationsFeedAtom = atomWithInfiniteQuery(() => notificationsQueryOptions());
+export const notificationsFeedAtom = atomWithInfiniteQuery((get) => ({
+  ...notificationsQueryOptions(),
+  enabled: get(protectedProductReadyAtom),
+}));
 
 /**
  * The unread badge. Mounts with the header (signed-in chrome only), so the
  * query never fires for a signed-out visitor the server would refuse anyway.
  */
-export const unreadCountAtom = atomWithQuery(() => unreadCountQueryOptions());
+export const unreadCountAtom = atomWithQuery((get) => ({
+  ...unreadCountQueryOptions(),
+  enabled: get(protectedProductReadyAtom),
+}));
 
 /**
  * Marks every unread notification read. Fired once by the notifications page

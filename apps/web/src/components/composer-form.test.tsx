@@ -44,7 +44,10 @@ const VALID_PNG_BYTES = Uint8Array.from(
  * prop rather than simulated typing. That matches how the real callers
  * (the atoms backing the draft) drive it.
  */
-async function renderComposer(overrides: Partial<ComponentProps<typeof ComposerForm>> = {}) {
+async function renderComposer(
+  overrides: Partial<ComponentProps<typeof ComposerForm>> = {},
+  signedInAs: boolean = false,
+) {
   const onSubmit = overrides.onSubmit ?? vi.fn();
   const onValueChange = overrides.onValueChange ?? vi.fn();
 
@@ -60,6 +63,7 @@ async function renderComposer(overrides: Partial<ComponentProps<typeof ComposerF
       submitLabel="Post"
       {...overrides}
     />,
+    { signedInAs },
   );
 
   return { onSubmit, onValueChange, ...result };
@@ -550,11 +554,16 @@ describe("ComposerForm game tags (issue #314, Q4)", () => {
     };
     fakeClient.search.typeahead.mockResolvedValue(payload);
     const onValueChange = vi.fn();
-    const rendered = await renderComposer({
-      value: "raiding #wow tonight",
-      onValueChange,
-      mentionScope: "game-tag-accept",
-    });
+    // The typeahead procedure is session-gated, so its query stays idle
+    // until the session is ready (issue #353) — render signed in.
+    const rendered = await renderComposer(
+      {
+        value: "raiding #wow tonight",
+        onValueChange,
+        mentionScope: "game-tag-accept",
+      },
+      true,
+    );
     rendered.queryClient.setQueryData(
       orpc.search.typeahead.queryKey({ input: { q: "wow" } }),
       payload,

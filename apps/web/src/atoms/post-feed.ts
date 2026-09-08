@@ -3,6 +3,7 @@ import { atomFamily } from "jotai-family";
 import { atomWithInfiniteQuery, queryClientAtom } from "jotai-tanstack-query";
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import { isSignedInAtom, sessionPendingAtom } from "@/atoms/session";
+import { protectedProductReadyAtom, publicReadReadyAtom } from "@/atoms/query-readiness";
 import { feedScopeAtom, type FeedScope } from "@/lib/feed-scope";
 import {
   isRankableFeedParams,
@@ -132,13 +133,17 @@ function cachedSnapshotId(
 const postFeedFamily = atomFamily((key: string) =>
   atomWithInfiniteQuery((get) => {
     const params = decode(key);
-    if (!isRankableFeedParams(params)) return postListQueryOptions(params);
+    // Public threads use the reply mode of this otherwise protected feed.
+    // Reply scopes are already normalized to unranked by postFeedAtom.
+    const anonymousReplyList = Boolean(params.parentId) && params.feed !== "bookmarks";
+    const ready = anonymousReplyList ? get(publicReadReadyAtom) : get(protectedProductReadyAtom);
+    if (!isRankableFeedParams(params)) return { ...postListQueryOptions(params), enabled: ready };
     const queryClient = get(queryClientAtom);
     const stableKey = postListQueryOptions(params).queryKey;
     const aware = postListQueryOptions(params, {
       getSnapshotId: () => cachedSnapshotId(queryClient, stableKey),
     });
-    return { ...aware, queryKey: stableKey };
+    return { ...aware, queryKey: stableKey, enabled: ready };
   }),
 );
 

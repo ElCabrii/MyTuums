@@ -8,7 +8,7 @@ import {
   queryClientAtom,
 } from "jotai-tanstack-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { orpc, type Post } from "@/lib/orpc";
+import { orpc, retryUnlessClientError, type Post } from "@/lib/orpc";
 import { FOLLOW_CACHE_KEYS } from "@/lib/follow-cache";
 import { POST_CACHE_KEYS } from "@/lib/post-cache";
 import {
@@ -21,6 +21,7 @@ import {
   teamSearchQueryOptions,
 } from "@/lib/query-definitions";
 import { debounceMs } from "@/atoms/search";
+import { protectedProductReadyAtom } from "@/atoms/query-readiness";
 import { isSignedInAtom } from "@/atoms/session";
 
 /**
@@ -43,7 +44,10 @@ export const decodeCaseKey = (key: string): CaseRef => {
 };
 
 /** One moderation queue; its cached pages are cleared with the QueryClient at sign-out. */
-export const moderationQueueAtom = atomWithInfiniteQuery(() => moderationQueueQueryOptions());
+export const moderationQueueAtom = atomWithInfiniteQuery((get) => ({
+  ...moderationQueueQueryOptions(),
+  enabled: get(protectedProductReadyAtom),
+}));
 
 /**
  * What the queue's header reads: how many cases are loaded, how many of them
@@ -80,7 +84,10 @@ export const moderationQueueSummaryAtom = atom<QueueSummary>((get) => {
 });
 
 /** One audit log; its cached pages are cleared with the QueryClient at sign-out. */
-export const auditLogAtom = atomWithInfiniteQuery(() => auditLogQueryOptions());
+export const auditLogAtom = atomWithInfiniteQuery((get) => ({
+  ...auditLogQueryOptions(),
+  enabled: get(protectedProductReadyAtom),
+}));
 
 /**
  * One query atom per case. Keyed on the case ref (encoded) so the queue rows
@@ -89,14 +96,20 @@ export const auditLogAtom = atomWithInfiniteQuery(() => auditLogQueryOptions());
  * open case.
  */
 const caseFamily = atomFamily((key: string) =>
-  atomWithQuery(() => moderationCaseQueryOptions(decodeCaseKey(key))),
+  atomWithQuery((get) => ({
+    ...moderationCaseQueryOptions(decodeCaseKey(key)),
+    enabled: get(protectedProductReadyAtom),
+  })),
 );
 
 /** The query atom for one moderation case — components read this, not the family. */
 export const caseAtom = (ref: CaseRef) => caseFamily(encodeCaseKey(ref));
 
 /** The moderation team roster, for the staff-only Team tab. */
-export const teamAtom = atomWithQuery(() => teamQueryOptions());
+export const teamAtom = atomWithQuery((get) => ({
+  ...teamQueryOptions(),
+  enabled: get(protectedProductReadyAtom),
+}));
 
 /** The value shown in the Team tab's account-lookup field — written on every keystroke. */
 export const teamSearchInputAtom = atom("");
@@ -143,16 +156,21 @@ export const resetTeamSearchAtom = atom(null, (_get, set) => {
  * string, so there is nothing to key on, and `atomWithQuery` rebuilds the key
  * whenever the debounced value changes.
  */
-export const teamSearchAtom = atomWithQuery((get) =>
-  teamSearchQueryOptions(get(debouncedTeamSearchAtom)),
-);
+export const teamSearchAtom = atomWithQuery((get) => {
+  const base = teamSearchQueryOptions(get(debouncedTeamSearchAtom));
+  return { ...base, enabled: get(protectedProductReadyAtom) && (base.enabled ?? true) };
+});
 
 /**
  * The viewer's blocked users, newest block first — what the settings page's
  * "Blocked users" section renders. Not a family: one list per viewer, wiped
  * with the QueryClient on sign-out like every other non-family query.
  */
-export const blockedUsersAtom = atomWithQuery(() => orpc.moderation.listBlocked.queryOptions());
+export const blockedUsersAtom = atomWithQuery((get) => ({
+  ...orpc.moderation.listBlocked.queryOptions(),
+  retry: retryUnlessClientError,
+  enabled: get(protectedProductReadyAtom),
+}));
 
 /**
  * Which moderation case dialog is open, app-wide — at most one. Same
@@ -454,10 +472,11 @@ export const appealPreviewFamily = atomFamily((key: string) =>
     const separator = key.indexOf("|");
     const kind = key.slice(0, separator);
     const value = key.slice(separator + 1);
-    return appealPreviewQueryOptions(
+    const base = appealPreviewQueryOptions(
       kind === "token" ? { token: value } : { postId: value },
       get(isSignedInAtom),
     );
+    return { ...base, enabled: get(protectedProductReadyAtom) && (base.enabled ?? true) };
   }),
 );
 

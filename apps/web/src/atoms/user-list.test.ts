@@ -16,6 +16,8 @@ import {
   followListDialogAtom,
   userListAtom,
 } from "@/atoms/user-list";
+import { sessionAtom } from "@/atoms/session";
+import { setTestSession, signedInSession } from "@/test/auth-fixture";
 
 describe("user-list key encode/decode", () => {
   it("round-trips for both directions", () => {
@@ -55,6 +57,14 @@ describe("userListAtom", () => {
 
     const store = createStore();
     store.set(queryClientAtom, new QueryClient());
+    // Product queries stay idle until the session is ready (issue #353) —
+    // drive a complete session and pre-seed the store with it so the atom
+    // mounts already-enabled.
+    const session = signedInSession();
+    setTestSession(session);
+    // SAFETY: the complete session the fake store holds — the list atoms
+    // read only whether the viewer may fire, never the store identity.
+    store.set(sessionAtom, session as never);
     const atom = userListAtom("carol", "followers");
     const unsub = store.sub(atom, () => {});
 

@@ -1,5 +1,6 @@
 import { atomFamily } from "jotai-family";
 import { atomWithQuery } from "jotai-tanstack-query";
+import { protectedProductReadyAtom } from "@/atoms/query-readiness";
 import { profileQueryOptions } from "@/lib/query-definitions";
 
 /**
@@ -28,5 +29,8 @@ import { profileQueryOptions } from "@/lib/query-definitions";
  * instead happens at sign-out, where nothing is mounted to split.
  */
 export const profileAtomFamily = atomFamily((username: string) =>
-  atomWithQuery(() => profileQueryOptions(username)),
+  atomWithQuery((get) => ({
+    ...profileQueryOptions(username),
+    enabled: get(protectedProductReadyAtom),
+  })),
 );
