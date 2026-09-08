@@ -467,8 +467,8 @@ pure JS function scores them, and a snapshot freezes the order for paging.
    top-level posts, plus repost events scored on the original's features with
    the event's timestamp for freshness. Following carries only the viewer's
    and followed accounts' amplifications; global and Discover take any visible
-   reposter. Discover additionally excludes the viewer's and followed authors'
-   originals. Candidates are top-level, non-tombstoned posts inside a 7-day
+   reposter. Discover excludes the viewer's own originals but includes followed authors'
+   posts. Candidates are top-level, non-tombstoned posts inside a 7-day
    window, widened to 30 days only when the 7-day pool holds fewer than
    `FEED_RANK_SPARSE_THRESHOLD` rankable candidates; the pool is capped at
    `FEED_RANK_POOL_LIMIT` (500, across both arms — never per arm), and each
@@ -500,8 +500,8 @@ pure JS function scores them, and a snapshot freezes the order for paging.
    hydrates its slice live through the shared `postSelection` and re-checks
    visibility, follow/privacy state, scope and filter membership per item:
    tombstoned rows drop (ranked pages never stub), withdrawn amplifications
-   downgrade to the original in place or drop, and Discover drops
-   followed-since-build authors. Discover's page also carries the first three
+   downgrade to the original in place or drop. Following an author keeps their
+   posts in Discover; the viewer's own posts remain excluded. Discover's page also carries the first three
    snapshot-derived follow suggestions, filtered live with no refill until
    Refresh. Chronological branches of `post.list` (profiles, bookmarks,
    search, replies, continuations) carry `ranking: null` and are untouched;

@@ -152,7 +152,7 @@ const postFeedFamily = atomFamily((key: string) =>
 /**
  * The infinite-query atom for one (scope, author, parent) feed — components read this, not the family.
  *
- * `feed: "discover"` always ranks (it is the ranked out-of-network surface,
+ * `feed: "discover"` always ranks (it is the ranked community surface,
  * never a chronological one), and any `ranked` flag beside author, reply,
  * repost or activity scoping is dropped: the contract ranks only the three
  * top-level scopes, so keeping the flag in the key would fork a second cache

@@ -32,8 +32,8 @@ interface DiscoverSearch {
 const FILTER_DEBOUNCE_MS = 300;
 
 /**
- * The Discover page (route `/discover`): ranked top-level posts from everyone
- * (issue #305) — the out-of-network reading surface — plus the search box and
+ * The Discover page (route `/discover`): ranked top-level posts from other
+ * authors, including followed accounts, plus the search box and
  * game filter the feedback asked for, and the Who-to-Follow module above the
  * posts.
  *

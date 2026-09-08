@@ -1270,8 +1270,7 @@ export interface RankingMetadata {
  *   in place — same position — when the original is scope-eligible, else the
  *   item drops;
  * - scope membership, live: Following keeps authored items by
- *   followed-or-self authors; Discover drops items whose author is now
- *   followed or self;
+ *   followed-or-self authors; Discover excludes the viewer's own posts;
  * - filter membership, live: edited-away query text or hashtag tokens drop.
  *
  * Nothing but IDs and attribution is ever read off the snapshot — never
@@ -1376,8 +1375,7 @@ async function hydrateRankedSlice(args: {
   const authorEligible = (authorId: string): boolean => {
     if (args.scope === "following")
       return authorId === args.viewerId || followedAuthors.has(authorId);
-    if (args.scope === "discover")
-      return authorId !== args.viewerId && !followedAuthors.has(authorId);
+    if (args.scope === "discover") return authorId !== args.viewerId;
     return true;
   };
 
@@ -1407,11 +1405,7 @@ async function hydrateRankedSlice(args: {
           entry.reposterId === args.viewerId ||
           followedReposters.has(entry.reposterId));
       if (amplificationLive && reposter) {
-        if (!authorEligible(authorId) && args.scope !== "global") {
-          // The repost arm's original-author rule (Discover) still binds a
-          // live amplification: a followed-since-build original drops.
-          if (args.scope === "discover") continue;
-        }
+        if (args.scope === "discover" && !authorEligible(authorId)) continue;
         items.push({
           ...visibleRow,
           repostedBy: { ...reposter, repostedAt: new Date(entry.eventAt) },
@@ -2089,8 +2083,8 @@ export const postRouter = {
            * on the *bookmark's* creation time (see the handler branch), which
            * is why it cannot compose with the scoping filters below.
            *
-           * `discover` (issue #305) is the ranked-only outside-network feed:
-           * originals by authors the viewer neither follows nor is. It has no
+           * `discover` is the ranked-only community feed: originals by other
+           * authors, including accounts the viewer follows. It has no
            * chronological mode — the UI never offers one — so a non-ranked
            * `discover` call is refused below.
            */

@@ -446,15 +446,7 @@ async function fetchAuthoredCandidates(
             where ${follow.followingId} = ${post.authorId} and ${follow.followerId} = ${args.viewerId}
           ))`
       : args.scope === "discover"
-        ? and(
-            ne(post.authorId, args.viewerId),
-            not(
-              sql`exists (
-                select 1 from ${follow}
-                where ${follow.followingId} = ${post.authorId} and ${follow.followerId} = ${args.viewerId}
-              )`,
-            ),
-          )
+        ? ne(post.authorId, args.viewerId)
         : undefined;
   return collectRankCandidates(async (after) => {
     const rows = await db
@@ -513,7 +505,7 @@ async function fetchAuthoredCandidates(
  * Originals keep the full visibility treatment (banned/blocked authors out,
  * private originals out for non-followers) plus the tombstone exclusion —
  * ranked recommendations never score invisible text. Discover additionally
- * excludes originals by the viewer and followed authors.
+ * excludes originals by the viewer.
  */
 async function fetchRepostCandidates(
   db: RankStore,
@@ -535,17 +527,7 @@ async function fetchRepostCandidates(
   // The original joins un-aliased, so the shared visibility predicates read
   // it directly — the same ban/block/privacy treatment authored candidates get.
   const originalAuthorRule =
-    args.scope === "discover"
-      ? and(
-          ne(post.authorId, args.viewerId),
-          not(
-            sql`exists (
-              select 1 from ${follow}
-              where ${follow.followingId} = ${post.authorId} and ${follow.followerId} = ${args.viewerId}
-            )`,
-          ),
-        )
-      : undefined;
+    args.scope === "discover" ? ne(post.authorId, args.viewerId) : undefined;
   // Pick the latest visible amplification per original before limiting;
   // otherwise one viral post can consume the entire repost budget.
   const latestReposts = db

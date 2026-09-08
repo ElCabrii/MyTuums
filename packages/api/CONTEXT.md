@@ -528,7 +528,7 @@ reposter_key)` — so it hand-rolls the same three parts the skeleton owns
   slice live through the shared `postSelection` and re-checks visibility,
   follow/privacy, scope and filter membership per item: tombstoned rows drop
   (ranked pages never stub), withdrawn amplifications downgrade in place or
-  drop, and Discover drops followed-since-build authors. Chronological
+  drop, and Discover includes followed authors while excluding the viewer. Chronological
   branches carry `ranking: null`; `discover` is ranked-only and every other
   ranked/scoping combination is refused by the input refinement. Maintenance
   is request-time only (a bounded global sweep per build under a per-viewer
