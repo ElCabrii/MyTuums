@@ -217,7 +217,7 @@ describe("ProfileLayout role and ownership gates", () => {
     );
   });
 
-  it("shows settings, and no sign-out, on the viewer's own profile", async () => {
+  it("shows profile editing, and no sign-out, on the viewer's own profile", async () => {
     const own = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data("alex", own);
@@ -228,7 +228,7 @@ describe("ProfileLayout role and ownership gates", () => {
       signedInAs: { id: own.id, username: "alex", email: "owner@example.com" },
     });
 
-    expect(screen.getByRole("button", { name: m.profile_settings() })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: m.profile_edit() })).toBeInTheDocument();
     // Sign-out has no surface on the profile page (issue #282): the navbar
     // account menu is the always-visible affordance, and /settings/account
     // carries the card. The click paths themselves stay pinned in

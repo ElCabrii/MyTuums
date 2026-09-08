@@ -150,20 +150,38 @@ test("mobile header keeps search between the logo and bell across primary pages"
   }
 });
 
-test("profile settings stays a desktop button and moves into the mobile account menu", async ({
+test("profile editing stays available on desktop and mobile, with account settings in the menu", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/@${ALICE.username}`);
-  const settings = page.getByRole("button", { name: "Settings", exact: true });
+  const editProfile = page.getByRole("button", { name: "Edit profile", exact: true });
   const accountMenu = page.getByRole("button", { name: "Account menu", exact: true });
-  await expect(settings).toBeVisible();
+  await expect(editProfile).toBeVisible();
   await expect(accountMenu).toBeHidden();
+  await editProfile.click();
+  const editor = page.getByRole("dialog", { name: "Edit profile", exact: true });
+  await expectInsideViewport(editor, page);
+  await editor.getByRole("button", { name: "Close", exact: true }).click();
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(settings).toBeHidden();
+  await page.setViewportSize({ width: 320, height: 740 });
+  await expect(editProfile).toBeVisible();
+  await editProfile.click();
+  await expectInsideViewport(editor, page);
+  await editor.getByRole("button", { name: "Close", exact: true }).click();
   await accountMenu.click();
   await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/account$/);
+  const categories = page.getByRole("tablist", { name: "Account settings" });
+  await expectInsideViewport(categories, page);
+  for (const name of ["Account", "Security", "Privacy", "Preferences"]) {
+    await expectInsideViewport(page.getByRole("tab", { name, exact: true }), page);
+  }
+  const categoryBounds = await categories.boundingBox();
+  const contentBounds = await page
+    .getByRole("tabpanel", { name: "Account", exact: true })
+    .boundingBox();
+  if (!categoryBounds || !contentBounds) throw new Error("Missing settings navigation or content");
+  expect(contentBounds.y).toBeGreaterThanOrEqual(categoryBounds.y + categoryBounds.height);
   await expectNoPageOverflow(page);
 });

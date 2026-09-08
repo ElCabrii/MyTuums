@@ -43,6 +43,19 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
 - Sessions are revoked on password reset, and a revoked session stops
   authenticating immediately — there is no session cookie cache.
 
+### Profile customization and account settings
+
+The pencil on your own profile opens a modal for the banner, avatar, display
+name, and bio. Image changes save immediately; name and bio use Save. Closing
+with unsaved text asks whether to discard it. The handle stays in account settings.
+
+Settings groups existing controls into Account (email address, handle, linked
+accounts, sign-out), Security (password, two-factor authentication, passkeys),
+Privacy (private account, follow requests, blocked users, analytics consent),
+and Preferences (default theme and language). Switching categories preserves
+form drafts until leaving settings. The device theme selector is in the account
+menu; the navigation bar has no standalone theme button.
+
 ## Posts, replies, likes, follows
 
 - Posts are plain text, up to 500 characters, trimmed. A post or reply carries
@@ -295,7 +308,7 @@ Games, and Profile. The header shows the logo image, notifications, and a compac
 moderation icon for authorized roles. Global search sits between the logo and
 notification bell on the same mobile header row. The Profile tab uses the signed-in user’s
 avatar. The own-profile account menu provides settings, bookmarks, theme selection, and
-sign-out; desktop profiles retain their separate settings cog. Private messages remain hidden until
+sign-out; profiles provide a pencil button for customization. Private messages remain hidden until
 implemented. Page content and consent notices clear the bottom navigation and
 safe-area inset.
 

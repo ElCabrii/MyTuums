@@ -6,7 +6,7 @@ import { E2E } from "../../playwright.config";
 import { uniqueUser } from "../../support/users";
 
 /**
- * `/settings/account` — the editable profile, the handle, the password and the
+ * The profile editor and `/settings/account` — profile details, handle, password and
  * stored theme/language defaults.
  *
  * Every spec here signs up its own throwaway account rather than reusing
@@ -99,12 +99,13 @@ test.describe("profile details", () => {
   test("saves a display name and bio, and the profile page shows them", async ({ page }) => {
     const account = await signUpFresh(page, "settings");
 
-    await page.goto("/settings/account");
+    await page.getByRole("button", { name: "Edit profile", exact: true }).click();
     await page.getByLabel("Display Name").fill("Renamed Person");
     await page.getByLabel("Bio").fill("Collector of small stones.");
     await page.getByRole("button", { name: "Save" }).click();
 
-    await page.goto(`/@${account.username}`);
+    await expect(page.getByRole("dialog", { name: "Edit profile" })).toBeHidden();
+    await expect(page).toHaveURL(new RegExp(`/@${account.username}$`));
     await expect(page.getByRole("heading", { name: "Renamed Person" })).toBeVisible();
     await expect(page.getByText("Collector of small stones.")).toBeVisible();
   });
@@ -138,7 +139,7 @@ test.describe("images", () => {
   }) => {
     const account = await signUpFresh(page, "avatar");
 
-    await page.goto("/settings/account");
+    await page.getByRole("button", { name: "Edit profile", exact: true }).click();
     // Larger than the 512px avatar box, so the client actually downscales and
     // the server measures a re-encoded WebP rather than a pass-through.
     await page.getByLabel("Profile picture").setInputFiles({
@@ -168,7 +169,7 @@ test.describe("images", () => {
     // Removal shares this account rather than paying for a second sign-up: it
     // is the same lifecycle, and the profile falling back to initials is the
     // only browser-visible half `profile-media.int.test.ts` cannot assert.
-    await page.goto("/settings/account");
+    await page.getByRole("button", { name: "Edit profile", exact: true }).click();
     const remove = page.getByRole("button", { name: "Remove Profile picture" });
     await remove.click();
     await expect(remove).toBeHidden();
@@ -177,10 +178,10 @@ test.describe("images", () => {
     await expect(page.getByRole("img", { name: account.name })).toHaveCount(0);
   });
 
-  test("keeps one banner composition in Settings and across profile widths", async ({ page }) => {
+  test("keeps one banner composition in the editor and across profile widths", async ({ page }) => {
     const account = await signUpFresh(page, "banner");
 
-    await page.goto("/settings/account");
+    await page.getByRole("button", { name: "Edit profile", exact: true }).click();
     // A landscape banner, which is the shape a banner actually is — and the
     // shape that regressed. The display object encodes at 1500x500, so swapping
     // its axes produces a 500x1500 image beyond the 1280px height bound. A
@@ -198,7 +199,7 @@ test.describe("images", () => {
     // so a future regression reports the reason rather than a bare timeout.
     await expect(page.getByRole("alert")).toHaveCount(0);
 
-    // The Settings preview is the plain canonical composition: w-28 at exactly
+    // The editor preview is the plain canonical composition: w-28 at exactly
     // 3:1, no clamps.
     const preview = await bannerFrameBounds(page.getByRole("img", { name: "Banner" }));
     expect(preview.width / preview.height).toBeCloseTo(3, 2);
@@ -257,6 +258,7 @@ test.describe("password", () => {
     const replacementPassphrase = "correct-horse-battery-99";
 
     await page.goto("/settings/account");
+    await page.getByRole("tab", { name: "Security", exact: true }).click();
     await page.getByLabel("Current Password").fill(account.password);
     await page.getByLabel("New Password", { exact: true }).fill(replacementPassphrase);
     await page.getByLabel("Confirm New Password").fill(replacementPassphrase);
@@ -267,6 +269,7 @@ test.describe("password", () => {
     // Sign out from the section this page now carries again (issue #282
     // partially reverts #217) — no detour through the profile action row,
     // which no longer has a button.
+    await page.getByRole("tab", { name: "Account", exact: true }).click();
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/login/);
 

@@ -77,6 +77,7 @@ async function enableTwoFactor(
   account: ReturnType<typeof uniqueUser>,
 ) {
   await page.goto("/settings/account");
+  await page.getByRole("tab", { name: "Security", exact: true }).click();
 
   await page.getByRole("button", { name: "Turn on" }).click();
   await page.getByLabel("Password", { exact: true }).fill(account.password);
@@ -164,6 +165,7 @@ test.describe("passkeys", () => {
     const account = await signUpFresh(page, "passkey");
 
     await page.goto("/settings/account");
+    await page.getByRole("tab", { name: "Security", exact: true }).click();
     await page.getByLabel("Passkey name").fill("E2E key");
     await page.getByRole("button", { name: "Add" }).click();
     await expect(page.getByText("E2E key")).toBeVisible();
