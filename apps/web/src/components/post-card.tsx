@@ -11,12 +11,16 @@ import { PostLinkCard } from "@/components/post-link-card";
 import { QuotePostIcon } from "@/components/icons/quote-post-icon";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { toggleRepostAtomFamily } from "@/atoms/repost";
-import { quoteDialogAtom } from "@/atoms/quote-composer";
+import {
+  quoteDialogAtom,
+  blockDialogAtom,
+  reportDialogAtom,
+  deletePostDialogAtom,
+  editPostDialogAtom,
+} from "@/atoms/dialog-targets";
 import { shareDialogAtom } from "@/atoms/share-dialog";
 import { toggleBookmarkAtomFamily } from "@/atoms/bookmark";
-import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
-import { deletePostDialogAtom } from "@/atoms/post-delete";
-import { editPostDialogAtom } from "@/atoms/post-edit";
+
 import { isSignedInAtom, viewerIdAtom } from "@/atoms/session";
 import {
   DropdownMenu,

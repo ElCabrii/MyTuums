@@ -4,12 +4,8 @@ import { ComposerForm } from "@/components/composer-form";
 import { ProfileLink } from "@/components/profile-link";
 import { LinkedText } from "@/components/linked-text";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
-import {
-  createQuoteAtom,
-  quoteAttachmentsAtom,
-  quoteDialogAtom,
-  quoteDraftAtom,
-} from "@/atoms/quote-composer";
+import { createQuoteAtom, quoteAttachmentsAtom, quoteDraftAtom } from "@/atoms/quote-composer";
+import { quoteDialogAtom } from "@/atoms/dialog-targets";
 import { viewerAtom } from "@/atoms/session";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";

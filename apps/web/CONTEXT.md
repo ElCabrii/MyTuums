@@ -39,6 +39,15 @@ app's build from the same origin.
 
 ## Invariants
 
+- **Global action dialogs load on first request.** `src/components/global-dialogs.tsx`
+  hosts the single Report/Block/Delete/Edit/Quote/Share instances. It observes
+  lightweight identities in `src/atoms/dialog-targets.ts` and `src/atoms/share-dialog.ts`
+  without importing mutations or dialog implementations. Each lazy wrapper stays
+  mounted after its first request so the dialog retains ownership of closing,
+  focus restoration, and body/mutation cleanup. Consent, changelog, and analytics
+  controllers remain unconditional; service-worker precaching is independent of
+  this React loading policy.
+
 - **One Jotai store, one QueryClient, one router.** `src/lib/store.ts` is
   hydrated with `queryClientAtom` at module scope, never through
   `useHydrateAtoms` — that only applies on a component's first render, so any

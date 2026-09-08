@@ -7,10 +7,9 @@ import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { makeAuthor, makePost } from "@/test/factories";
 import { renderWithProviders } from "@/test/render";
 import { installTestOrpc, orpc } from "@/lib/orpc";
-import { quoteDialogAtom } from "@/atoms/quote-composer";
+import { quoteDialogAtom, deletePostDialogAtom, editPostDialogAtom } from "@/atoms/dialog-targets";
 import { shareDialogAtom } from "@/atoms/share-dialog";
-import { deletePostDialogAtom } from "@/atoms/post-delete";
-import { editPostDialogAtom } from "@/atoms/post-edit";
+
 import { PostCard } from "@/components/post-card";
 import { m } from "@/paraglide/messages.js";
 import { getLocale } from "@/paraglide/runtime.js";

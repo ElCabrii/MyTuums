@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { deletePostAtom, deletePostDialogAtom } from "@/atoms/post-delete";
+import { deletePostAtom } from "@/atoms/post-delete";
+import { deletePostDialogAtom } from "@/atoms/dialog-targets";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

@@ -1,5 +1,6 @@
 import { useAtomValue, useSetAtom } from "jotai";
-import { blockAtom, blockDialogAtom } from "@/atoms/moderation";
+import { blockAtom } from "@/atoms/moderation";
+import { blockDialogAtom } from "@/atoms/dialog-targets";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

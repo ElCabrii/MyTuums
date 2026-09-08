@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
-import { deletePostDialogAtom } from "@/atoms/post-delete";
+import { deletePostDialogAtom } from "@/atoms/dialog-targets";
 
 import { renderWithProviders } from "@/test/render";
 import { DeletePostDialog } from "@/components/delete-post-dialog";
