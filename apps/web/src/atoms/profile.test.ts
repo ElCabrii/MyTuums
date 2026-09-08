@@ -9,6 +9,8 @@ const fakeClient = { user: { byUsername: vi.fn() } };
 installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 import { profileAtomFamily } from "@/atoms/profile";
+import { sessionAtom } from "@/atoms/session";
+import { setTestSession, signedInSession } from "@/test/auth-fixture";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
 
@@ -28,8 +30,16 @@ describe("profileAtomFamily", () => {
   it("resolves data from the wired-up oRPC client", async () => {
     fakeClient.user.byUsername.mockResolvedValue({ id: "u1", username: "carol" });
 
+    // Product queries stay idle until the session is ready (issue #353) —
+    // drive a complete session and pre-seed the store with it so the atom
+    // mounts already-enabled instead of flipping mid-test and firing twice.
+    const session = signedInSession();
+    setTestSession(session);
     const store = createStore();
     store.set(queryClientAtom, new QueryClient());
+    // SAFETY: the complete session the fake store holds — the profile atoms
+    // read only whether the viewer may fire, never the store identity.
+    store.set(sessionAtom, session as never);
     const atom = profileAtomFamily("carol");
     const unsub = store.sub(atom, () => {});
 
@@ -45,8 +55,14 @@ describe("profileAtomFamily", () => {
   it("does not retry a 404 — a handle that doesn't exist won't start existing", async () => {
     fakeClient.user.byUsername.mockRejectedValue(new ORPCError("NOT_FOUND"));
 
+    // Same ready-session pre-seed as above — without it the query never
+    // fires; with a mid-test flip it would fire twice and read as a retry.
+    const session = signedInSession();
+    setTestSession(session);
     const store = createStore();
     store.set(queryClientAtom, new QueryClient());
+    // SAFETY: the complete session the fake store holds (see above).
+    store.set(sessionAtom, session as never);
     const atom = profileAtomFamily("missing");
     const unsub = store.sub(atom, () => {});
 

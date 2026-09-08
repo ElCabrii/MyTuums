@@ -1,6 +1,7 @@
 import { atom } from "jotai";
 import { atomFamily } from "jotai-family";
 import { atomWithInfiniteQuery } from "jotai-tanstack-query";
+import { protectedProductReadyAtom } from "@/atoms/query-readiness";
 import { type FollowDirection, userListQueryOptions } from "@/lib/query-definitions";
 
 export type { FollowDirection } from "@/lib/query-definitions";
@@ -48,9 +49,12 @@ interface DecodedUserListKey {
  * mounted to split.
  */
 const userListFamily = atomFamily((key: string) =>
-  atomWithInfiniteQuery(() => {
+  atomWithInfiniteQuery((get) => {
     const { username, direction } = decode(key);
-    return userListQueryOptions(username, direction);
+    return {
+      ...userListQueryOptions(username, direction),
+      enabled: get(protectedProductReadyAtom),
+    };
   }),
 );
 

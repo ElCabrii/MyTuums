@@ -108,7 +108,9 @@ describe("Header account menu", () => {
   });
 
   it("stays a plain link to /welcome while the session has no handle", async () => {
+    fakeClient.notification.unreadCount.mockClear();
     await renderWithProviders(<Header />, {
+      initialPath: "/welcome",
       // `handleOf` falls back to displayUsername, so a handle-less session
       // must null both — the default fixture's displayUsername would hand
       // the header a handle and open the menu.
@@ -119,6 +121,7 @@ describe("Header account menu", () => {
     expect(link).toHaveAttribute("href", "/welcome");
     // Not a button: there is no menu to open until a handle exists.
     expect(screen.queryByRole("button", { name: /Alex Mercer/ })).not.toBeInTheDocument();
+    expect(fakeClient.notification.unreadCount).not.toHaveBeenCalled();
   });
 });
 

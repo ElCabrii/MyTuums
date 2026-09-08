@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createStore } from "jotai";
 import { createTestQueryClient, makeProfile } from "@/test/factories";
 import { queryFixtures } from "@/test/query-fixtures";
 import { renderWithProviders } from "@/test/render";
 import { ProfilePosts } from "@/components/profile-posts";
+import { sessionAtom } from "@/atoms/session";
+import { setTestSession, signedInSession } from "@/test/auth-fixture";
 import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
@@ -16,6 +19,24 @@ const fakeClient = {
 };
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));
+
+/**
+ * A store pre-seeded with a complete session for the given viewer. Product
+ * queries stay idle until the session is ready (issue #353) — without this
+ * the first paint renders gated skeletons instead of the seeded cache, and a
+ * mid-test flip would refetch what the tests assert stays untouched.
+ */
+function readyStore(viewer: { id: string; username?: string }) {
+  // Omitted fields fall back to the fixture's complete defaults (handle and
+  // date of birth present), so the pre-seeded session reads as ready.
+  const session = signedInSession(viewer);
+  setTestSession(session);
+  const store = createStore();
+  // SAFETY: the complete session the fake store holds — the feed atoms read
+  // only whether the viewer may fire, never the store identity.
+  store.set(sessionAtom, session as never);
+  return store;
+}
 
 describe("ProfilePosts", () => {
   it("shows the composer and owner-specific empty copy on the viewer's profile", async () => {
@@ -34,6 +55,7 @@ describe("ProfilePosts", () => {
 
     await renderWithProviders(<ProfilePosts />, {
       queryClient,
+      store: readyStore({ id: profile.id, username: "alex" }),
       initialPath: "/@alex/",
       signedInAs: { id: profile.id, username: "alex" },
     });
@@ -59,6 +81,7 @@ describe("ProfilePosts", () => {
 
     await renderWithProviders(<ProfilePosts />, {
       queryClient,
+      store: readyStore({ id: "viewer-1" }),
       initialPath: "/@other/",
       signedInAs: { id: "viewer-1" },
     });

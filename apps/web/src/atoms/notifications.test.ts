@@ -18,7 +18,16 @@ import {
   deleteNotificationAtom,
   markAllReadAtom,
   notificationsFeedAtom,
+  unreadCountAtom,
 } from "@/atoms/notifications";
+import { createStore } from "jotai";
+import { queryClientAtom } from "jotai-tanstack-query";
+import { createTestQueryClient } from "@/test/factories";
+import { patchTestSessionUser, setTestSession, signedInSession } from "@/test/auth-fixture";
+import { focusManager } from "@tanstack/react-query";
+import { authClient } from "@/lib/auth-client";
+import { sessionAtom } from "@/atoms/session";
+import { acceptLegalConsentAtom, legalConsentCheckboxAtom } from "@/atoms/legal-consent";
 import { clearViewerState } from "@/atoms/session-teardown";
 import { makeNotification } from "@/test/factories";
 import type { NotificationItem } from "@/lib/orpc";
@@ -39,7 +48,80 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it.each([
+  { legalAcceptedAt: null, legalVersion: null },
+  { legalVersion: "stale" },
+  { dateOfBirth: null },
+])("#353 holds notification requests until session readiness: %o", async (missing) => {
+  setTestSession(signedInSession(missing));
+  const store = createStore();
+  const queryClient = createTestQueryClient();
+  queryClient.setDefaultOptions({ queries: { retryDelay: 0 } });
+  queryClient.mount();
+  store.set(queryClientAtom, queryClient);
+  const listSignals: AbortSignal[] = [];
+  const countSignals: AbortSignal[] = [];
+  fakeClient.notification.list
+    .mockReset()
+    .mockImplementation((_input, { signal }: { signal: AbortSignal }) => {
+      listSignals.push(signal);
+      return Promise.resolve({ items: [], nextCursor: null });
+    });
+  fakeClient.notification.unreadCount
+    .mockReset()
+    .mockImplementation((_input, { signal }: { signal: AbortSignal }) => {
+      countSignals.push(signal);
+      return Promise.resolve({ unreadCount: 2 });
+    });
+  const subscriptions = [
+    store.sub(notificationsFeedAtom, () => {}),
+    store.sub(unreadCountAtom, () => {}),
+  ];
+  try {
+    await queryClient.invalidateQueries();
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(fakeClient.notification.list).not.toHaveBeenCalled();
+    expect(fakeClient.notification.unreadCount).not.toHaveBeenCalled();
+
+    const ready = signedInSession().data;
+    if (!ready) throw new Error("Expected a signed-in fixture");
+    if ("legalVersion" in missing) {
+      store.set(legalConsentCheckboxAtom, true);
+      vi.mocked(authClient.updateUser).mockImplementationOnce(() => {
+        patchTestSessionUser(ready.user);
+        return Promise.resolve({ data: {}, error: null });
+      });
+      await expect(store.set(acceptLegalConsentAtom)).resolves.toBe(true);
+    } else {
+      patchTestSessionUser(ready.user);
+    }
+    await vi.waitFor(() => {
+      expect(store.get(unreadCountAtom).data).toEqual({ unreadCount: 2 });
+      expect(store.get(notificationsFeedAtom).isSuccess).toBe(true);
+    });
+    // The query adapter can abort its first attempt when enabling; only one
+    // surviving request should populate each cache, without a consent reset.
+    expect(listSignals.filter((signal) => !signal.aborted)).toHaveLength(1);
+    expect(countSignals.filter((signal) => !signal.aborted)).toHaveLength(1);
+    const count = fakeClient.notification.unreadCount.mock.calls.length;
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+    await vi.waitFor(() => {
+      expect(fakeClient.notification.unreadCount).toHaveBeenCalledTimes(count + 1);
+    });
+  } finally {
+    for (const unsubscribe of subscriptions) unsubscribe();
+    queryClient.unmount();
+    focusManager.setFocused(undefined);
+    queryClient.clear();
+  }
+});
+
 it("loads the next viewer's notifications after sign-out and remount", async () => {
+  setTestSession(signedInSession());
+  const unsubscribeSession = singletonStore.sub(sessionAtom, () => {});
   const previous = makeNotification({ id: "previous-viewer-notification" });
   const current = makeNotification({ id: "current-viewer-notification" });
   fakeClient.notification.list.mockResolvedValue({ items: [previous], nextCursor: null });
@@ -60,6 +142,7 @@ it("loads the next viewer's notifications after sign-out and remount", async () 
     });
   } finally {
     unsubscribe();
+    unsubscribeSession();
   }
 });
 

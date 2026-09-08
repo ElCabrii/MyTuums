@@ -1,5 +1,6 @@
 import { atomFamily } from "jotai-family";
 import { atomWithInfiniteQuery } from "jotai-tanstack-query";
+import { publicReadReadyAtom } from "@/atoms/query-readiness";
 import { replyContinuationQueryOptions } from "@/lib/query-definitions";
 
 function encode(rootPostId: string, cursor: string): string {
@@ -16,7 +17,10 @@ function decode(key: string) {
 
 const replyContinuationFamily = atomFamily((key: string) => {
   const { rootPostId, cursor } = decode(key);
-  return atomWithInfiniteQuery(() => replyContinuationQueryOptions(rootPostId, cursor));
+  return atomWithInfiniteQuery((get) => ({
+    ...replyContinuationQueryOptions(rootPostId, cursor),
+    enabled: get(publicReadReadyAtom),
+  }));
 });
 
 /** Additional pages for one inline original-author reply branch. */
