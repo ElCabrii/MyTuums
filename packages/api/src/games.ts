@@ -6,13 +6,13 @@ import { USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH, normalizeUsername } from "@my
 import { z } from "zod";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
-  GAME_RAIL_LIMIT,
+  GAME_FAVORITES_PAGE_SIZE,
   GAME_SLUG_MAX_LENGTH,
   GAMES_PAGE_SIZE,
   GAMES_PAGE_SIZE_MAX,
   SEARCH_QUERY_MAX_LENGTH,
 } from "./constants.js";
-import { createGameCursorCodec, type GameSort } from "./cursor.js";
+import { createCursorCodec, createGameCursorCodec, type GameSort } from "./cursor.js";
 import {
   protectedProcedure,
   publicRateLimit,
@@ -21,6 +21,13 @@ import {
 } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { visibleUser } from "./visibility.js";
+
+const favoriteCursor = createCursorCodec(
+  z
+    .string()
+    .regex(/^[1-9]\d{0,9}$/)
+    .refine((value) => Number(value) <= 2147483647),
+);
 
 /**
  * The public game directory and its favorites (issue #314, stages 2–3): the
@@ -462,7 +469,7 @@ export const gameRouter = {
 
   /**
    * One profile's favorites rail (Q11/Q25): the games a user has favorited,
-   * newest first, capped — a showcase strip, not a list page. Session-gated
+   * newest first, with bounded keyset pages. Session-gated
    * like every profile surface, and read through `visibleUser` so a banned
    * owner (or a blocked pair) answers NOT_FOUND exactly like their profile
    * does — the rail never outlives the page that carries it. A private
@@ -473,7 +480,10 @@ export const gameRouter = {
   favorites: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
     .input(
-      z.object({ username: z.string().trim().min(USERNAME_MIN_LENGTH).max(USERNAME_MAX_LENGTH) }),
+      z.object({
+        username: z.string().trim().min(USERNAME_MIN_LENGTH).max(USERNAME_MAX_LENGTH),
+        cursor: z.string().max(CURSOR_MAX_ENCODED_LENGTH).optional(),
+      }),
     )
     .handler(async ({ input, context }) => {
       // The owner resolves first, through the same predicate their profile
@@ -504,11 +514,14 @@ export const gameRouter = {
           .from(follow)
           .where(and(eq(follow.followerId, context.user.id), eq(follow.followingId, owner.id)))
           .limit(1);
-        if (!edge) return { items: [] };
+        if (!edge) return { items: [], nextCursor: null };
       }
 
+      const cursor = input.cursor ? favoriteCursor.decode(input.cursor) : undefined;
       const rows = await context.db
         .select({
+          createdAt: gameFavorite.createdAt,
+          gameId: gameFavorite.gameId,
           slug: game.slug,
           name: game.name,
           coverMediaPath: game.coverMediaPath,
@@ -516,10 +529,30 @@ export const gameRouter = {
         })
         .from(gameFavorite)
         .innerJoin(game, eq(game.igdbId, gameFavorite.gameId))
-        .where(eq(gameFavorite.userId, owner.id))
+        .where(
+          and(
+            eq(gameFavorite.userId, owner.id),
+            cursor
+              ? sql`(${gameFavorite.createdAt}, ${gameFavorite.gameId}) < (${sql.param(cursor.createdAt, gameFavorite.createdAt)}, ${Number(cursor.id)})`
+              : undefined,
+          ),
+        )
         .orderBy(desc(gameFavorite.createdAt), desc(gameFavorite.gameId))
-        .limit(GAME_RAIL_LIMIT);
+        .limit(GAME_FAVORITES_PAGE_SIZE + 1);
 
-      return { items: rows };
+      const page = rows.slice(0, GAME_FAVORITES_PAGE_SIZE);
+      const last = page.at(-1);
+      return {
+        items: page.map(({ slug, name, coverMediaPath, firstReleaseYear }) => ({
+          slug,
+          name,
+          coverMediaPath,
+          firstReleaseYear,
+        })),
+        nextCursor:
+          rows.length > GAME_FAVORITES_PAGE_SIZE && last
+            ? favoriteCursor.encode(last.createdAt, String(last.gameId))
+            : null,
+      };
     }),
 };

@@ -1,7 +1,7 @@
+import { ResponsiveDialogContent } from "@/components/responsive-dialog-content";
 import { useAtom } from "jotai";
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
@@ -61,7 +61,7 @@ export function FollowListDialog({
         <span className="text-muted-foreground">{label}</span>
       </DialogTrigger>
 
-      <DialogContent>
+      <ResponsiveDialogContent>
         <DialogHeader className="pb-4">
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
@@ -84,7 +84,7 @@ export function FollowListDialog({
             }
           />
         </div>
-      </DialogContent>
+      </ResponsiveDialogContent>
     </Dialog>
   );
 }

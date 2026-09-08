@@ -42,6 +42,7 @@ export function SearchPage() {
             Lighthouse's heading audit sees before any query is typed. The
             input's aria label is the page's own name for "Search". */}
         <h1 className="text-lg font-bold tracking-tight">{m.search_input_aria()}</h1>
+
         <div className="border-border bg-card/40 rounded-xl border border-dashed p-10 text-center">
           <Search className="text-muted-foreground/60 mx-auto mb-3 h-8 w-8" />
           <p className="text-muted-foreground text-sm">{m.search_empty_query()}</p>
@@ -66,7 +67,9 @@ function SearchResultsBody({ q }: { q: string }) {
 
   return (
     <div className="mx-auto max-w-2xl space-y-8 px-4 py-8">
-      <h1 className="text-lg font-bold tracking-tight">{m.search_results_for({ query: q })}</h1>
+      <h1 className="text-lg font-bold tracking-tight [overflow-wrap:anywhere]">
+        {m.search_results_for({ query: q })}
+      </h1>
 
       <SearchResultsSection
         feed={usersFeed}

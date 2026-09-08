@@ -1,3 +1,4 @@
+import { ResponsiveDialogContent } from "@/components/responsive-dialog-content";
 import { useEffect, useRef } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Search, SearchX, UserCog, Users, X } from "lucide-react";
@@ -16,13 +17,7 @@ import {
 import { viewerIdAtom, viewerRoleAtom } from "@/atoms/session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -224,7 +219,7 @@ function MemberRow({ member }: { member: TeamMember }) {
   const canManage = canManageRole(viewerRole, memberRole);
 
   return (
-    <Item variant="outline">
+    <Item variant="outline" className="grid grid-cols-[auto_minmax(0,1fr)] sm:flex">
       <ItemMedia>
         {memberHandle ? (
           <ProfileLink
@@ -239,11 +234,11 @@ function MemberRow({ member }: { member: TeamMember }) {
         )}
       </ItemMedia>
       <ItemContent className="min-w-0">
-        <ItemTitle className="flex-wrap">
+        <ItemTitle className="w-full min-w-0 flex-wrap">
           {memberHandle ? (
             <ProfileLink
               username={memberHandle}
-              className="focus-visible:ring-ring/50 min-w-0 truncate rounded-sm outline-none hover:underline focus-visible:ring-[3px]"
+              className="focus-visible:ring-ring/50 block max-w-full min-w-0 truncate rounded-sm outline-none hover:underline focus-visible:ring-[3px]"
             >
               {displayName}
             </ProfileLink>
@@ -260,10 +255,12 @@ function MemberRow({ member }: { member: TeamMember }) {
           </Badge>
           {isViewer && <Badge variant="secondary">{m.moderation_team_you()}</Badge>}
         </ItemTitle>
-        {memberHandle && <ItemDescription>@{memberHandle}</ItemDescription>}
+        {memberHandle && (
+          <ItemDescription className="[overflow-wrap:anywhere]">@{memberHandle}</ItemDescription>
+        )}
       </ItemContent>
       {canManage && (
-        <ItemActions>
+        <ItemActions className="col-start-2">
           <ChangeRoleButton member={member} handle={memberHandle} />
         </ItemActions>
       )}
@@ -345,7 +342,7 @@ function SetRoleDialog() {
         if (!next) setOpenTarget(null);
       }}
     >
-      <DialogContent className="max-w-md">
+      <ResponsiveDialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{m.moderation_set_role_title({ handle: target?.handle ?? "" })}</DialogTitle>
           <DialogDescription>{m.moderation_set_role_subtitle()}</DialogDescription>
@@ -391,7 +388,7 @@ function SetRoleDialog() {
             {m.moderation_set_role_submit()}
           </Button>
         </div>
-      </DialogContent>
+      </ResponsiveDialogContent>
     </Dialog>
   );
 }

@@ -1,57 +1,73 @@
 import { describe, expect, it } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createTestQueryClient } from "@/test/factories";
 import { renderWithProviders } from "@/test/render";
 import { ProfileGameRail } from "@/components/profile-game-rail";
 import { gameFavoritesQueryOptions } from "@/lib/query-definitions";
-import type { FavoriteRailItem } from "@/lib/orpc";
 import { m } from "@/paraglide/messages.js";
 
-// The rail is one read surface with two placements (the parent renders it
-// twice — mobile strip and desktop column). This file pins its own wiring:
-// covers render and link to their game pages, and an empty showcase renders
-// nothing at all — no heading over a hole.
-function railItem(overrides: Partial<FavoriteRailItem> & { slug: string }): FavoriteRailItem {
-  return {
-    name: `Game ${overrides.slug}`,
-    coverMediaPath: null,
-    firstReleaseYear: 2020,
-    ...overrides,
-  };
-}
-
 describe("ProfileGameRail", () => {
-  it("renders the profile's favorited games as links to their pages", async () => {
+  it("shows six favorites and opens the complete loaded list with real game links", async () => {
     const queryClient = createTestQueryClient();
     queryClient.setQueryData(gameFavoritesQueryOptions("alice").queryKey, {
-      items: [railItem({ slug: "hades", name: "Hades" }), railItem({ slug: "doom", name: "DOOM" })],
+      pages: [
+        {
+          items: Array.from({ length: 8 }, (_, i) => ({
+            slug: `game-${i}`,
+            name: `Game ${i}`,
+            coverMediaPath: null,
+            firstReleaseYear: 2020,
+          })),
+          nextCursor: null,
+        },
+      ],
+      pageParams: [undefined],
     });
-
     await renderWithProviders(<ProfileGameRail username="alice" />, {
       queryClient,
       signedInAs: true,
     });
-
-    expect(screen.getByRole("heading", { name: m.profile_favorite_games() })).toBeInTheDocument();
-    const hades = screen.getByRole("link", { name: "Hades" });
-    expect(hades).toHaveAttribute("href", "/games/hades");
-    expect(screen.getByRole("link", { name: "DOOM" })).toHaveAttribute("href", "/games/doom");
+    const preview = screen.getByRole("region", { name: m.profile_favorite_games() });
+    expect(within(preview).getAllByRole("link")).toHaveLength(6);
+    const user = userEvent.setup();
+    const trigger = screen.getByRole("button", { name: m.profile_favorites_see_more() });
+    await user.click(trigger);
+    const popover = await screen.findByRole("dialog", { name: m.profile_favorite_games() });
+    expect(within(popover).getAllByRole("link")).toHaveLength(8);
+    expect(within(popover).getByRole("link", { name: "Game 7" })).toHaveAttribute(
+      "href",
+      "/games/game-7",
+    );
+    await user.keyboard("{Escape}");
+    expect(
+      await screen.findByRole("button", { name: m.profile_favorites_see_more() }),
+    ).toHaveFocus();
   });
 
-  it("renders nothing when the profile has no favorites — pending, error or empty", async () => {
-    const empty = createTestQueryClient();
-    empty.setQueryData(gameFavoritesQueryOptions("alice").queryKey, { items: [] });
-    await renderWithProviders(<ProfileGameRail username="alice" />, {
-      queryClient: empty,
+  it("offers the owner a Games link only after an empty favorites response", async () => {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(gameFavoritesQueryOptions("alice").queryKey, {
+      pages: [{ items: [], nextCursor: null }],
+      pageParams: [undefined],
+    });
+    await renderWithProviders(<ProfileGameRail username="alice" isOwnProfile />, {
+      queryClient,
       signedInAs: true,
     });
+    expect(screen.getByText(m.profile_favorites_empty_own())).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: m.profile_favorites_browse() })).toHaveAttribute(
+      "href",
+      "/games",
+    );
     expect(
-      screen.queryByRole("region", { name: m.profile_favorite_games() }),
+      screen.queryByRole("button", { name: m.profile_favorites_see_more() }),
     ).not.toBeInTheDocument();
+  });
 
-    const never = createTestQueryClient();
-    await renderWithProviders(<ProfileGameRail username="bob" />, {
-      queryClient: never,
+  it("does not mistake pending favorites for an empty showcase", async () => {
+    await renderWithProviders(<ProfileGameRail username="bob" isOwnProfile />, {
+      queryClient: createTestQueryClient(),
       signedInAs: true,
     });
     expect(

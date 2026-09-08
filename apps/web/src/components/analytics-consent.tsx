@@ -131,7 +131,7 @@ function ConfiguredAnalyticsConsent({
     <aside
       role="region"
       aria-labelledby="analytics-consent-title"
-      className="border-border bg-card fixed right-4 bottom-4 left-4 z-40 mx-auto max-w-3xl rounded-3xl border p-5 shadow-xl"
+      className="border-border bg-card fixed right-4 bottom-[calc(var(--mobile-nav-height,0px)+1rem)] left-4 z-40 mx-auto max-w-3xl rounded-3xl border p-5 shadow-xl"
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-2">

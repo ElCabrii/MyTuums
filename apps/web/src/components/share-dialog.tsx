@@ -1,3 +1,4 @@
+import { ResponsiveDialogContent } from "@/components/responsive-dialog-content";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Copy } from "lucide-react";
 import type { Post } from "@/lib/orpc";
@@ -9,13 +10,7 @@ import { copyPostLink, postPermalinkUrl } from "@/lib/share";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 /**
  * The app-wide share dialog (issue #307), one instance mounted at the root —
@@ -47,7 +42,7 @@ function ShareDialogBody({ post }: { post: Post }) {
   const url = postPermalinkUrl(post.id);
 
   return (
-    <DialogContent className="max-w-lg">
+    <ResponsiveDialogContent className="max-w-lg">
       <DialogHeader>
         <DialogTitle>{m.post_share_dialog_title()}</DialogTitle>
         <DialogDescription>{m.post_share_dialog_description()}</DialogDescription>
@@ -94,6 +89,6 @@ function ShareDialogBody({ post }: { post: Post }) {
           {m.post_share_copy_link()}
         </Button>
       </div>
-    </DialogContent>
+    </ResponsiveDialogContent>
   );
 }

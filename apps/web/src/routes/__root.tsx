@@ -2,6 +2,7 @@ import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { GlobalDialogs } from "@/components/global-dialogs";
+import { MobileNavigation } from "@/components/mobile-navigation";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { NotFoundPage } from "@/components/not-found-page";
@@ -81,12 +82,15 @@ function RootLayout() {
   return (
     <>
       <HeadContent />
-      <div className="bg-background text-foreground flex min-h-screen flex-col antialiased">
+      <div
+        className={`bg-background text-foreground flex min-h-screen flex-col antialiased ${signedIn ? "signed-in-shell" : ""}`}
+      >
         {signedIn && <Header />}
         <main className="flex-1">
           <Outlet />
         </main>
         <Footer />
+        {signedIn && <MobileNavigation />}
         <GlobalDialogs />
         {/* Mounted unconditionally: the dialog owns the whole decision — signed
             in, consent missing or stale, and not currently on one of the legal
@@ -105,7 +109,11 @@ function RootLayout() {
             theme default — an app this one doesn't use — so the theme the
             app actually enforces is passed as a prop; the wrapper spreads
             its props last, which is what makes that win. */}
-        <Toaster theme={resolvedTheme} position="bottom-center" />
+        <Toaster
+          theme={resolvedTheme}
+          position="bottom-center"
+          mobileOffset={{ bottom: "calc(var(--mobile-nav-height, 0px) + 1rem)" }}
+        />
       </div>
     </>
   );

@@ -1,15 +1,10 @@
+import { ResponsiveDialogContent } from "@/components/responsive-dialog-content";
 import { useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { deletePostAtom } from "@/atoms/post-delete";
 import { deletePostDialogAtom } from "@/atoms/dialog-targets";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -52,7 +47,7 @@ function DeletePostDialogBody({ postId }: { postId: string }) {
   }, [deletePost.isSuccess, setPostId]);
 
   return (
-    <DialogContent className="max-w-md">
+    <ResponsiveDialogContent className="max-w-md">
       <DialogHeader>
         <DialogTitle>{m.post_delete_title()}</DialogTitle>
         <DialogDescription>{m.post_delete_body()}</DialogDescription>
@@ -74,6 +69,6 @@ function DeletePostDialogBody({ postId }: { postId: string }) {
           {m.post_delete_submit()}
         </Button>
       </div>
-    </DialogContent>
+    </ResponsiveDialogContent>
   );
 }

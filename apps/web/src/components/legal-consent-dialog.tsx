@@ -1,3 +1,4 @@
+import { ResponsiveDialogContent } from "@/components/responsive-dialog-content";
 import { useEffect } from "react";
 import { Link, useLocation } from "@tanstack/react-router";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
@@ -11,13 +12,7 @@ import {
   resetLegalConsentAtom,
 } from "@/atoms/legal-consent";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -52,7 +47,7 @@ export function LegalConsentDialog() {
 
   return (
     <Dialog open={required}>
-      <DialogContent showCloseButton={false} className="max-w-md">
+      <ResponsiveDialogContent showCloseButton={false} className="max-w-md">
         <DialogHeader>
           <DialogTitle>
             {mode === "missing" ? m.legal_consent_missing_title() : m.legal_consent_update_title()}
@@ -122,7 +117,7 @@ export function LegalConsentDialog() {
             {pending ? m.legal_consent_accepting() : m.legal_consent_accept()}
           </Button>
         </div>
-      </DialogContent>
+      </ResponsiveDialogContent>
     </Dialog>
   );
 }
