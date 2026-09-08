@@ -1,3 +1,4 @@
+import { ResponsiveDialogContent } from "@/components/responsive-dialog-content";
 import { useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { seenChangelogVersionAtom } from "@/atoms/changelog";
@@ -6,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogClose,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -43,7 +43,10 @@ export function ChangelogDialog({ content = currentChangelogHtml() }: { content?
         if (!nextOpen) markSeen(APP_VERSION);
       }}
     >
-      <DialogContent showCloseButton={false} className="max-h-[calc(100dvh-2rem)] max-w-lg p-0">
+      <ResponsiveDialogContent
+        showCloseButton={false}
+        className="max-h-[calc(100dvh-2rem)] max-w-lg p-0"
+      >
         <DialogHeader className="px-6 pt-6">
           <DialogTitle>{m.changelog_dialog_title({ version: APP_VERSION })}</DialogTitle>
           <DialogDescription>{m.changelog_dialog_description()}</DialogDescription>
@@ -63,7 +66,7 @@ export function ChangelogDialog({ content = currentChangelogHtml() }: { content?
             {m.changelog_dialog_dismiss()}
           </DialogClose>
         </DialogFooter>
-      </DialogContent>
+      </ResponsiveDialogContent>
     </Dialog>
   );
 }

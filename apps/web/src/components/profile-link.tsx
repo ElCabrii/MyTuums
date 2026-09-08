@@ -143,7 +143,7 @@ function ProfileHoverCardContent({ username }: { username: string }) {
           />
         </Link>
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-end gap-1.5">
             <Link
               to="/@{$username}"
               params={{ username: handle }}
@@ -153,7 +153,7 @@ function ProfileHoverCardContent({ username }: { username: string }) {
             </Link>
             {/* The same badge row the profile header renders (issue #308), at
                 the card's smaller scale. */}
-            <ProfileBadges badges={profile.badges} />
+            <ProfileBadges badges={profile.badges} className="shrink-0 pb-1" />
           </div>
           <p className="text-muted-foreground truncate text-xs">@{handle}</p>
         </div>

@@ -1,3 +1,4 @@
+import { ResponsiveDialogContent } from "@/components/responsive-dialog-content";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
@@ -14,13 +15,7 @@ import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatRelativeTime } from "@/lib/format";
 import type { NotificationItem } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
@@ -161,7 +156,7 @@ export function NotificationsPage() {
         ))}
       </PaginatedState>
       <Dialog open={clearOpen} onOpenChange={handleClearOpenChange}>
-        <DialogContent className="max-w-md">
+        <ResponsiveDialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{m.notifications_clear_all_title()}</DialogTitle>
             <DialogDescription>{m.notifications_clear_all_body()}</DialogDescription>
@@ -189,7 +184,7 @@ export function NotificationsPage() {
               {m.common_cancel()}
             </Button>
           </div>
-        </DialogContent>
+        </ResponsiveDialogContent>
       </Dialog>
     </div>
   );

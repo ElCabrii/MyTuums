@@ -236,12 +236,18 @@ export function gameQueryOptions(slug: string) {
 
 /**
  * One profile's favorites rail (issue Q25): the games a user has favorited,
- * newest first, capped server-side. Fresh on every profile view — a
+ * newest first, with cursor pagination. Fresh on every profile view — a
  * showcase, not a feed to keep warm.
  */
 export function gameFavoritesQueryOptions(username: string) {
   return {
-    ...orpc.game.favorites.queryOptions({ input: { username } }),
+    ...orpc.game.favorites.infiniteOptions({
+      input: (cursor: string | undefined) => ({ username, cursor }),
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
     retry: retryUnlessClientError,
   };
 }

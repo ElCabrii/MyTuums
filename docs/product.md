@@ -286,6 +286,16 @@ three events, not one collapsed one.
   on a person, and the purge audit trail lives on the link card itself, by
   design.
 
+## Mobile navigation
+
+Signed-in mobile pages use a fixed bottom navigation bar for Home, Discover,
+Games, and Profile. The header shows the logo image, notifications, and a compact
+moderation icon for authorized roles. Discover and Search expose global search
+below the header's icon row. The own-profile account menu provides bookmarks,
+settings, theme selection, and sign-out. Private messages remain hidden until
+implemented. Page content and consent notices clear the bottom navigation and
+safe-area inset.
+
 ## Profiles and search
 
 - A profile carries a display name, lowercase handle, bio (160 characters),
@@ -375,8 +385,11 @@ notification when a badge is earned.
   accept `#worldofwarcraft`).
 - A signed-in user can favorite a game from its page — a public stamp, not a
   private save: the count on the game page is public, and the user's profile
-  carries a favorites rail (a cover strip on mobile, a column beside the
-  feed on desktop) visible to every signed-in viewer — except on a private
+  carries a six-cover favorites grid (above the feed on mobile, beside it
+  on desktop). “See more” opens a scrollable popover with game links and
+  pagination through the complete list, newest first. Empty profiles offer
+  a link to `/games`, with an invitation to favorite games on your own profile.
+  Favorites are visible to every signed-in viewer — except on a private
   profile, where the rail hides from non-followers like the follow lists do.
   The directory's fourth sort orders games by that count.
 

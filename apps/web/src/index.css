@@ -178,3 +178,14 @@
     cursor: pointer;
   }
 }
+
+/* Fixed mobile navigation reserves the same space for content, consent, and toasts. */
+.signed-in-shell {
+  --mobile-nav-height: calc(4rem + env(safe-area-inset-bottom));
+  padding-bottom: var(--mobile-nav-height);
+}
+@media (min-width: 48rem) {
+  .signed-in-shell {
+    --mobile-nav-height: 0px;
+  }
+}

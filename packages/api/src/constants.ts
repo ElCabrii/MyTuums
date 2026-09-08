@@ -57,11 +57,10 @@ export const GAMES_PAGE_SIZE_MAX = 50;
 export const GAME_SLUG_MAX_LENGTH = 120;
 
 /**
- * How many games the profile favorites rail shows (issue Q11/Q25) — a
- * showcase strip, not a list page; everything past it is reachable through
- * the directory.
+ * Maximum favorites per response. The profile previews six; its popover
+ * requests subsequent pages to reach the complete list.
  */
-export const GAME_RAIL_LIMIT = 12;
+export const GAME_FAVORITES_PAGE_SIZE = 12;
 
 /** Default and maximum page sizes for `notification.list`. */
 export const NOTIFICATION_PAGE_SIZE = 20;

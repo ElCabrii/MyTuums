@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { getRouteApi, Link, Outlet } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
+import { AccountMenu } from "@/components/account-menu";
 import { ProfileGameRail } from "@/components/profile-game-rail";
 import { ORPCError } from "@orpc/client";
 import { BANNER_ASPECT_RATIO } from "@my-tuums/api/constants";
@@ -69,7 +70,7 @@ export function ProfileSkeleton() {
         }}
       />
       <div className="mx-auto max-w-[1500px] px-4 sm:px-8">
-        <div className="relative -mt-16 mb-4 flex items-end justify-between sm:-mt-20">
+        <div className="relative -mt-16 mb-4 flex flex-wrap items-end justify-between gap-3 sm:-mt-20">
           <Skeleton className="h-28 w-28 rounded-full motion-reduce:animate-none sm:h-36 sm:w-36" />
           <Skeleton className="h-9 w-24 rounded-full motion-reduce:animate-none" />
         </div>
@@ -219,7 +220,7 @@ export function ProfileLayout() {
 
       <div className="mx-auto max-w-[1500px] px-4 sm:px-8">
         {/* Avatar & Action buttons */}
-        <div className="relative -mt-16 mb-4 flex items-end justify-between sm:-mt-20">
+        <div className="relative -mt-16 mb-4 flex flex-wrap items-end justify-between gap-3 sm:-mt-20">
           {hasViewableAvatar && profile.image ? (
             <ImageViewer
               src={profile.image}
@@ -249,14 +250,7 @@ export function ProfileLayout() {
           )}
 
           {isOwnProfile ? (
-            <div className="mb-2 flex gap-2.5">
-              {/* Was a dead button — now the way into /settings/account, where
-                  two-factor and passkeys live. The header's account menu
-                  (header.tsx) is the other entry point; this one stays so the
-                  destination is visible on the page itself, not only behind a
-                  menu. Sign-out deliberately does not follow it here: the
-                  account menu is on every page, and /settings/account carries
-                  the card for it (issue #282). */}
+            <div className="mb-2 flex flex-wrap items-center gap-1">
               <Button
                 variant="outline"
                 size="sm"
@@ -267,9 +261,12 @@ export function ProfileLayout() {
                 <Settings className="h-4 w-4" />
                 <span>{m.profile_settings()}</span>
               </Button>
+              <div className="md:hidden">
+                <AccountMenu compact />
+              </div>
             </div>
           ) : (
-            <div className="mb-2 flex items-center gap-2">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
               <FollowButton
                 userId={profile.id}
                 isFollowing={profile.viewerIsFollowing}
@@ -318,12 +315,14 @@ export function ProfileLayout() {
         {/* Profile Info */}
         <div className="mb-6 space-y-3">
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{displayName}</h1>
+            <div className="flex flex-wrap items-end gap-2">
+              <h1 className="min-w-0 text-2xl font-bold tracking-tight [overflow-wrap:anywhere] sm:text-3xl">
+                {displayName}
+              </h1>
               {/* Earned badges (issue #308) — the API's display set, already
                   in canonical order; nothing renders for a badge-less
                   profile. */}
-              <ProfileBadges badges={profile.badges} iconClassName="size-5" />
+              <ProfileBadges badges={profile.badges} iconClassName="size-5" className="pb-1" />
             </div>
             <p className="text-muted-foreground text-sm font-medium">@{handle}</p>
           </div>
@@ -332,7 +331,7 @@ export function ProfileLayout() {
               emits React text children and profile links rather than HTML, so
               linkification does not create an escaping boundary. */}
           {profile.bio && (
-            <p className="max-w-2xl text-sm leading-relaxed whitespace-pre-line">
+            <p className="max-w-2xl text-sm leading-relaxed [overflow-wrap:anywhere] whitespace-pre-line">
               <LinkedText text={profile.bio} />
             </p>
           )}
@@ -383,22 +382,17 @@ export function ProfileLayout() {
           </div>
         </div>
 
-        {/* The favorites rail's mobile half (issue #314, Q25): a horizontal
-            cover strip between the profile header and the feed. Renders
-            nothing when the profile has no favorites — the rail decides, not
-            the layout. The desktop half is the aside below. */}
-        <div className="mb-6 lg:hidden">
-          <ProfileGameRail username={username} />
-        </div>
-
-        {/* Desktop: the feed and the rail's column half share one grid —
-            the feed keeps the left, the rail sits beside it (Q11's "a column
-            parallel to the feed on its right side"). */}
-        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-8">
-          <Outlet />
-          <aside className="hidden lg:block">
-            <ProfileGameRail username={username} />
-          </aside>
+        <div
+          className={`grid grid-cols-1 gap-6 ${!isLocked ? "lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-8" : ""}`}
+        >
+          <div className="order-last min-w-0 lg:order-first">
+            <Outlet />
+          </div>
+          {!isLocked && (
+            <aside className="min-w-0">
+              <ProfileGameRail username={username} isOwnProfile={isOwnProfile} />
+            </aside>
+          )}
         </div>
       </div>
     </div>

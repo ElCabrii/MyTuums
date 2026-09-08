@@ -72,9 +72,9 @@ export const gamePageAtomFamily = atomFamily((slug: string) =>
   atomWithQuery((get) => ({ ...gameQueryOptions(slug), enabled: get(publicReadReadyAtom) })),
 );
 
-/** One profile's favorites rail (Q25) — covers plus names, capped server-side. */
+/** One profile's favorites rail (Q25) — covers plus names, paginated for the full list. */
 export const gameFavoritesAtomFamily = atomFamily((username: string) =>
-  atomWithQuery((get) => ({
+  atomWithInfiniteQuery((get) => ({
     ...gameFavoritesQueryOptions(username),
     enabled: get(protectedProductReadyAtom),
   })),

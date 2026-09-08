@@ -198,7 +198,7 @@ describe("game.favorites (the profile rail)", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("caps the rail at GAME_RAIL_LIMIT — the rest lives in the directory", async () => {
+  it("pages through every favorite beyond the profile preview without repeats", async () => {
     const owner = await createTestUser();
     const games = Array.from({ length: 20 }, (_value, index) =>
       seedRow({ igdbId: 100 + index, name: `Rail ${index}` }),
@@ -216,6 +216,24 @@ describe("game.favorites (the profile rail)", () => {
     expect(rail.items).toHaveLength(12);
     // Newest first: the last-favorited game leads.
     expect(rail.items[0].slug).toBe(games.at(-1)?.slug);
+    expect(rail.nextCursor).toEqual(expect.any(String));
+    const rest = await call(
+      appRouter.game.favorites,
+      { username: owner.session.user.username!, cursor: rail.nextCursor! },
+      { context: contextFor(owner) },
+    );
+    expect([...rail.items, ...rest.items].map((item) => item.slug)).toEqual(
+      [...games].reverse().map((game) => game.slug),
+    );
+    expect(rest.nextCursor).toBeNull();
+    await db.update(user).set({ isPrivate: true }).where(eq(user.id, owner.id));
+    const visitor = await createTestUser();
+    const hidden = await call(
+      appRouter.game.favorites,
+      { username: owner.session.user.username!, cursor: rail.nextCursor! },
+      { context: contextFor(visitor) },
+    );
+    expect(hidden).toEqual({ items: [], nextCursor: null });
   });
 
   it("hides a private owner's rail from strangers but not from followers or the owner", async () => {

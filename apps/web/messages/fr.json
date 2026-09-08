@@ -898,5 +898,14 @@
   "game_unfavorite_action": "Retirer des favoris",
   "game_favorite_signed_out": "Connectez-vous pour ajouter des jeux en favoris.",
   "profile_favorite_games": "Jeux favoris",
-  "composer_game_suggestions_aria": "Jeux suggérés"
+  "composer_game_suggestions_aria": "Jeux suggérés",
+  "nav_primary": "Navigation principale",
+  "nav_brand_home": "MyTuums — Accueil",
+  "nav_account_menu": "Menu du compte",
+  "profile_favorites_empty_own": "Ajoutez des jeux à vos favoris depuis Jeux pour les afficher sur votre profil.",
+  "profile_favorites_empty_other": "Aucun jeu favori pour le moment.",
+  "profile_favorites_browse": "Parcourir les jeux",
+  "profile_favorites_see_more": "Voir plus",
+  "profile_favorites_load_more": "Charger plus de jeux",
+  "profile_favorites_error": "Impossible de charger les jeux. Réessayez."
 }

@@ -1,98 +1,36 @@
 import { lazy, Suspense } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import {
-  MessageSquare,
-  Bell,
-  Compass,
-  Gamepad2,
-  Home,
-  Settings,
-  LogOut,
-  Loader2,
-  User,
-  Shield,
-  Bookmark,
-} from "lucide-react";
+import { Bell, Compass, Gamepad2, Home, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { SearchBox } from "@/components/search-box";
+import { AccountMenu } from "@/components/account-menu";
 import { unreadCountAtom } from "@/atoms/notifications";
-import { isModeratorAtom, viewerAtom, viewerHandleAtom } from "@/atoms/session";
-import { authPendingAtom } from "@/atoms/auth";
-import { UserAvatar } from "@/components/user-avatar";
+import { isModeratorAtom, viewerAtom } from "@/atoms/session";
 import { VersionTag } from "@/components/version-tag";
-import { useSignOut } from "@/hooks/use-sign-out";
 import { m } from "@/paraglide/messages.js";
 
-// The theme dropdown ships its own popover machinery (floating-ui + focus
-// management); loading it on demand keeps that weight out of the first paint.
-// The account menu below stays in the header chunk on purpose — it is small
-// and holds the only sign-out affordance visible on every page. The named
-// export is mapped to `default` so the dynamic module can be rendered as a
-// lazy component.
 const ModeToggle = lazy(() =>
   import("@/components/mode-toggle").then((mod) => ({ default: mod.ModeToggle })),
 );
 
-/**
- * The signed-in chrome. Rendered by `__root.tsx` only when a session exists,
- * so it never shows Log in / Register buttons to anyone — the else branch
- * that used to sit here is gone, and there is deliberately no third view to
- * reintroduce it. The early return below is not a second gate; it is the
- * type narrowing that lets the rest of the component read `user` unguarded.
- *
- * `/welcome` keeps the header (the session exists, the handle doesn't) — the
- * avatar links there, and `useRequireHandle` is sending the session there
- * anyway, so the header agrees with the redirect rather than contradicting
- * it (see the regression pinned in `e2e/tests/specs/welcome.spec.ts`).
- */
+/** Signed-in chrome; mobile primary destinations live in MobileNavigation. */
 export function Header() {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const showMobileSearch = pathname === "/discover" || pathname === "/search";
   const user = useAtomValue(viewerAtom);
-  const handle = useAtomValue(viewerHandleAtom);
-  const isSigningOut = useAtomValue(authPendingAtom);
   const isModerator = useAtomValue(isModeratorAtom);
   const unread = useAtomValue(unreadCountAtom);
-  const handleSignOut = useSignOut();
   if (!user) return null;
-
-  // A pending or errored count reads as zero: the bell stays a plain link
-  // rather than flashing a badge on a guess.
   const unreadCount = unread.data?.unreadCount ?? 0;
-
-  const nameDisplay = user.name || user.displayUsername || user.username || m.nav_profile();
-
   return (
-    <header className="bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 w-full border-b backdrop-blur">
-      <div className="flex h-16 w-full items-center justify-between gap-2 px-4 sm:gap-4 sm:px-8">
-        {/* Left Section: Logo & Nav Links.
-            `min-w-0` is what keeps the header from overflowing the viewport
-            on narrow screens: the right-hand actions are the ones that must
-            stay reachable, so below `xl` the section may shrink and the
-            wordmark truncates as a last resort instead of pushing actions
-            off-screen and making the page scroll sideways. At `xl` and up
-            `min-w-fit` takes over — the section claims its full content width
-            even past its equal third, and the search box (already
-            `min-w-0 flex-1`) donates the difference. The search drifts
-            slightly off exact center exactly when the brand needs the room;
-            at wide viewports the thirds still agree and it stays centered. */}
-        {/* `xl:flex-1` gives the left and right sections the same flex share
-            as the search bar (all three grow from basis 0), so the middle
-            lands exactly on the viewport center instead of in the leftover
-            gap — a `justify-between` row centers the box only when the sides
-            happen to be equally wide, which they never are. Below `xl` the
-            bar keeps taking the leftover room, where the sides would not fit
-            in equal thirds anyway. */}
-        <div className="flex min-w-0 items-center gap-6 xl:min-w-fit xl:flex-1">
+    <header className="bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40 w-full border-b backdrop-blur">
+      <div className="flex min-h-16 w-full flex-wrap items-center justify-between gap-2 px-4 sm:gap-4 sm:px-8">
+        <div className="flex min-w-0 items-center gap-4 xl:min-w-fit xl:flex-1">
           <Link
             to="/"
-            className="text-primary dark:text-foreground flex min-w-0 items-center gap-2 text-xl font-bold tracking-tight"
+            aria-label={m.nav_brand_home()}
+            className="text-primary dark:text-foreground flex min-h-11 min-w-11 items-center gap-2 text-xl font-bold tracking-tight"
           >
             <img
               src="/mytuums.svg"
@@ -101,103 +39,48 @@ export function Header() {
               height={2048}
               className="h-7 w-auto shrink-0"
             />
-            {/* The desktop wordmark never truncates (issue #329): at `xl`
-                the section's `min-w-fit` guarantees the room, so the
-                ellipsis only ever engages below `xl` where yielding keeps
-                the actions reachable. */}
-            <span className="truncate xl:overflow-visible">MyTuums</span>
-            {/* Pre-1.0 builds are tagged next to the wordmark (alpha/beta);
-                stable builds render nothing. The `shrink-0` lives on the tag
-                so the wordmark's truncate can never swallow it. */}
-            <VersionTag />
+            <span className="hidden truncate md:inline xl:overflow-visible">MyTuums</span>
+            <span className="hidden md:inline-flex">
+              <VersionTag />
+            </span>
           </Link>
-          <nav className="hidden items-center gap-1 md:flex">
-            <Button
-              variant="ghost"
-              nativeButton={false}
-              render={<Link to="/" className="flex items-center gap-2" />}
-            >
-              <Home className="h-4 w-4" />
-              <span>{m.nav_home()}</span>
+          <nav aria-label={m.nav_primary()} className="hidden shrink-0 items-center gap-1 md:flex">
+            <Button variant="ghost" nativeButton={false} render={<Link to="/" />}>
+              <Home className="size-4" />
+              {m.nav_home()}
             </Button>
-            <Button
-              variant="ghost"
-              nativeButton={false}
-              render={<Link to="/discover" className="flex items-center gap-2" />}
-            >
-              <Compass className="h-4 w-4" />
-              <span>{m.nav_discover()}</span>
+            <Button variant="ghost" nativeButton={false} render={<Link to="/discover" />}>
+              <Compass className="size-4" />
+              {m.nav_discover()}
             </Button>
-            {/* The game directory (issue #314) — public, so the nav item is
-                always shown, never gated on a session. */}
-            <Button
-              variant="ghost"
-              nativeButton={false}
-              render={<Link to="/games" className="flex items-center gap-2" />}
-            >
-              <Gamepad2 className="h-4 w-4" />
-              <span>{m.nav_games()}</span>
+            <Button variant="ghost" nativeButton={false} render={<Link to="/games" />}>
+              <Gamepad2 className="size-4" />
+              {m.nav_games()}
             </Button>
-            {isModerator && (
-              <Button
-                variant="ghost"
-                nativeButton={false}
-                render={<Link to="/moderation" className="flex items-center gap-2" />}
-              >
-                <Shield className="h-4 w-4" />
-                <span>{m.moderation_nav()}</span>
-              </Button>
-            )}
           </nav>
         </div>
-
-        {/* Center Section: Search Bar. Held back until `lg`: between `md` and
-            `lg` the Home/Discover nav has already appeared, and squeezing the
-            search in alongside it collapsed the input to a stub and forced the
-            brand wordmark to truncate. `min-w-0` lets it shrink once shown (a
-            `flex-1` item defaults to `min-width: auto`, so without it the
-            input's intrinsic width becomes a hard floor). */}
-        <div className="mx-2 hidden max-w-md min-w-0 flex-1 sm:mx-4 lg:block">
+        <div
+          className={
+            showMobileSearch
+              ? "order-last basis-full pb-3 lg:order-none lg:mx-2 lg:max-w-md lg:min-w-0 lg:flex-1 lg:basis-auto lg:pb-0"
+              : "mx-2 hidden max-w-md min-w-0 flex-1 lg:block"
+          }
+        >
           <SearchBox />
         </div>
-
-        {/* Right Section: Messages, Notifications, Theme Toggle, Auth / Profile */}
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-3 xl:flex-1 xl:justify-end">
-          {/* Not shipped yet — kept as a disabled stub rather than an inert-looking
-              button so nobody mistakes it for a live control. */}
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled
-            title={m.nav_messages()}
-            aria-label={m.nav_messages()}
-            className="hidden sm:inline-flex"
-          >
-            <MessageSquare className="h-5 w-5" />
-          </Button>
-          {/* The notifications bell (issue #259): a live link to /notifications
-              carrying the unread count, visible at every width — below `sm` it
-              is the page's only entry point, and the header's own contract is
-              that actions stay reachable while the wordmark yields (`min-w-0`
-              plus `truncate`), so one more size-9 icon never overflows the
-              row. The badge renders only when the count is both loaded and
-              non-zero, so a pending or empty count reads as the plain bell
-              instead of a false "0". Capped at 99+ — the badge is a signal,
-              not an accountant. */}
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2 xl:flex-1 xl:justify-end">
           <Button
             variant="ghost"
             size="icon"
             nativeButton={false}
+            className="size-11"
             render={
               <Link
                 to="/notifications"
                 title={m.nav_notifications()}
                 aria-label={
                   unreadCount > 0
-                    ? // The keyed one/many pair, like every other count in
-                      // the messages: French agrees "non lue(s)" with the
-                      // count, and 1 is the badge's most common state.
-                      unreadCount === 1
+                    ? unreadCount === 1
                       ? m.nav_notifications_unread_one({ count: unreadCount })
                       : m.nav_notifications_unread_many({ count: unreadCount })
                     : m.nav_notifications()
@@ -206,111 +89,33 @@ export function Header() {
               />
             }
           >
-            <Bell className="h-5 w-5" />
+            <Bell className="size-5" />
             {unreadCount > 0 && (
               <span
                 aria-hidden="true"
-                className="bg-primary text-primary-foreground absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-bold"
+                className="bg-primary text-primary-foreground absolute top-0 right-0 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold"
               >
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>
             )}
           </Button>
-
-          {/* The fallback is a plain, non-focusable div sized to the icon
-              button (size-9) so the sticky header row doesn't shift while the
-              lazy chunk loads. */}
-          <Suspense fallback={<div className="h-9 w-9 shrink-0" aria-hidden="true" />}>
-            <ModeToggle />
-          </Suspense>
-
-          {/* The destination branches on the handle, not on `user` — `user`
-              exists by the early return above. An OAuth sign-up has no handle
-              until it claims one at /welcome: the avatar stays a plain link
-              to /welcome in that window, which is also where
-              `useRequireHandle` is sending the session, so the header agrees
-              with the redirect rather than contradicting it (see the
-              regression pinned in e2e/tests/specs/welcome.spec.ts). Once a
-              handle exists, the pill becomes the account menu — View profile,
-              Settings, Sign out — instead of a bare link. */}
-          {handle ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                title={m.user_view_profile({ name: nameDisplay })}
-                className="hover:bg-muted/60 focus-visible:ring-ring ml-1 flex cursor-pointer items-center gap-2.5 rounded-full p-1 transition-colors outline-none focus-visible:ring-2"
-              >
-                <UserAvatar
-                  user={user}
-                  alt={user.name || m.user_avatar_alt()}
-                  className="border-primary/20 h-8 w-8 border"
-                  fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
-                />
-                <span className="text-foreground hidden max-w-[140px] truncate pr-1 text-sm font-medium sm:inline">
-                  {nameDisplay}
-                </span>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-48">
-                {/* Menu items render real links, so the profile and settings
-                    destinations keep link semantics (middle-click, open in
-                    new tab) instead of going through a navigate() call. */}
-                {/* The preset styles menu rows `cursor-default` (base-ui's
-                    keyboard-first convention); these rows are links and an
-                    action the user will click with a mouse, so they get the
-                    pointer back per-item — `components/ui/**` is upstream. */}
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  render={<Link to="/@{$username}" params={{ username: handle }} />}
-                >
-                  <User />
-                  <span>{m.menu_view_profile()}</span>
-                </DropdownMenuItem>
-                {/* The private saved list (issue #262) — an account-menu item
-                    rather than a nav link: it belongs to the person, not to
-                    the shared timeline surfaces. */}
-                <DropdownMenuItem className="cursor-pointer" render={<Link to="/bookmarks" />}>
-                  <Bookmark />
-                  <span>{m.nav_bookmarks()}</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  render={<Link to="/settings/account" />}
-                >
-                  <Settings />
-                  <span>{m.profile_settings()}</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  variant="destructive"
-                  disabled={isSigningOut}
-                  onClick={() => void handleSignOut()}
-                >
-                  {isSigningOut ? (
-                    <Loader2 className="animate-spin motion-reduce:animate-none" />
-                  ) : (
-                    <LogOut />
-                  )}
-                  <span>{m.auth_sign_out()}</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
+          {isModerator && (
             <Link
-              to="/welcome"
-              className="hover:bg-muted/60 ml-1 flex items-center gap-2.5 rounded-full p-1 transition-colors"
-              title={m.welcome_finish_setup()}
+              to="/moderation"
+              title={m.moderation_nav()}
+              aria-label={m.moderation_nav()}
+              activeProps={{ className: "bg-muted text-primary" }}
+              className="hover:bg-muted focus-visible:ring-ring flex size-11 items-center justify-center rounded-full outline-none focus-visible:ring-2"
             >
-              <UserAvatar
-                user={user}
-                alt={user.name || m.user_avatar_alt()}
-                className="border-primary/20 h-8 w-8 border"
-                fallbackClassName="text-xs font-bold bg-primary text-primary-foreground"
-              />
-              <span className="text-foreground hidden max-w-[140px] truncate pr-1 text-sm font-medium sm:inline">
-                {nameDisplay}
-              </span>
+              <Shield className="size-5" />
             </Link>
           )}
+          <div className="hidden items-center gap-2 md:flex">
+            <Suspense fallback={<div className="size-9" aria-hidden="true" />}>
+              <ModeToggle />
+            </Suspense>
+            <AccountMenu />
+          </div>
         </div>
       </div>
     </header>

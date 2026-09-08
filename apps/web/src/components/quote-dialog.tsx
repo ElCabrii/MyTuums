@@ -1,3 +1,4 @@
+import { ResponsiveDialogContent } from "@/components/responsive-dialog-content";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import type { Post } from "@/lib/orpc";
 import { ComposerForm } from "@/components/composer-form";
@@ -9,13 +10,7 @@ import { quoteDialogAtom } from "@/atoms/dialog-targets";
 import { viewerAtom } from "@/atoms/session";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 /**
  * The app-wide quote composer (issue #261), one dialog mounted at the root —
@@ -62,12 +57,12 @@ function QuoteDialogBody({ quoted }: { quoted: Post }) {
   const quotedName = quoted.author.name || quotedHandle || m.user_unknown();
 
   return (
-    <DialogContent className="max-w-lg">
+    <ResponsiveDialogContent className="max-w-lg">
       <DialogHeader>
         <DialogTitle>{m.quote_dialog_title()}</DialogTitle>
         <DialogDescription>{m.quote_dialog_description()}</DialogDescription>
       </DialogHeader>
-      <div className="px-6 pb-6">
+      <div className="min-w-0 pb-2 sm:px-2">
         {/* The post being quoted, previewed as it will embed: the same card
             the feed renders inside the quote. Tombstoned originals stay
             quotable (removal is not invisibility), so preview what they are
@@ -89,17 +84,17 @@ function QuoteDialogBody({ quoted }: { quoted: Post }) {
               {quotedHandle ? (
                 <ProfileLink
                   username={quotedHandle}
-                  className="flex items-center gap-1.5 hover:underline"
+                  className="flex max-w-full min-w-0 items-center gap-1.5 hover:underline"
                 >
                   <span className="text-foreground truncate text-sm font-bold">{quotedName}</span>
-                  <span className="text-muted-foreground text-xs">@{quotedHandle}</span>
+                  <span className="text-muted-foreground shrink-0 text-xs">@{quotedHandle}</span>
                 </ProfileLink>
               ) : (
                 <span className="text-foreground truncate text-sm font-bold">{quotedName}</span>
               )}
             </div>
             {quoted.content && (
-              <p className="text-foreground/90 text-sm leading-relaxed break-words whitespace-pre-line">
+              <p className="text-foreground/90 text-sm leading-relaxed [overflow-wrap:anywhere] whitespace-pre-line">
                 <LinkedText text={quoted.content} />
               </p>
             )}
@@ -129,6 +124,6 @@ function QuoteDialogBody({ quoted }: { quoted: Post }) {
           onAttachmentsChange={setAttachments}
         />
       </div>
-    </DialogContent>
+    </ResponsiveDialogContent>
   );
 }
