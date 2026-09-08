@@ -84,6 +84,12 @@ function RootLayout() {
       <HeadContent />
       <div
         className={`bg-background text-foreground flex min-h-screen flex-col antialiased ${signedIn ? "signed-in-shell" : ""}`}
+        // React capture also covers media in portaled full-size viewers.
+        onDragStartCapture={(event) => {
+          if (event.target instanceof Element && event.target.closest("img, video, audio")) {
+            event.preventDefault();
+          }
+        }}
       >
         {signedIn && <Header />}
         <main className="flex-1">

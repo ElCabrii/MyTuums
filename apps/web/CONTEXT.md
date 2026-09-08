@@ -39,6 +39,11 @@ app's build from the same origin.
 
 ## Invariants
 
+- **Displayed media cannot start native browser drags.** `src/routes/__root.tsx`
+  cancels media drag starts at the app shell, including React portals such as
+  full-size image viewers. Pointer-based cropping and incoming file drops are
+  separate interactions.
+
 - **Global action dialogs load on first request.** `src/components/global-dialogs.tsx`
   hosts the single Report/Block/Delete/Edit/Quote/Share instances. It observes
   lightweight identities in `src/atoms/dialog-targets.ts` and `src/atoms/share-dialog.ts`
