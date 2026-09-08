@@ -96,6 +96,7 @@ describe("post-feed key encode/decode", () => {
     { feed: "global", kind: "posts" },
     { feed: "global", kind: "replies" },
     { feed: "global", kind: "both" },
+    { feed: "global", authorId: "author-1", kind: "shares" },
     { feed: "following", authorId: "author-1", parentId: "parent-1", includeReplies: true },
     { feed: "global", includeReposts: true },
     { feed: "global", authorId: "author-1", kind: "posts", includeReposts: true },

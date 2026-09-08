@@ -38,9 +38,9 @@ export function ProfileGameRail({
           </Link>
         </div>
       ) : (
-        <ol className="flex gap-2 overflow-x-auto overscroll-x-contain pb-2">
+        <ol className="flex gap-2 overflow-x-auto overscroll-x-contain pb-2 lg:grid lg:grid-cols-3 lg:overflow-visible lg:pb-0">
           {games.slice(0, PREVIEW_COUNT).map((game) => (
-            <li key={game.slug} className="w-16 shrink-0 sm:w-20">
+            <li key={game.slug} className="w-16 shrink-0 sm:w-20 lg:w-auto">
               <FavoriteGameLink game={game} />
             </li>
           ))}
@@ -48,7 +48,7 @@ export function ProfileGameRail({
       )}
       {games.length > PREVIEW_COUNT && (
         <Popover>
-          <PopoverTrigger render={<Button variant="outline" className="min-h-11 w-full" />}>
+          <PopoverTrigger render={<Button variant="outline" size="sm" />}>
             {m.profile_favorites_see_more()}
           </PopoverTrigger>
           <PopoverContent
@@ -71,7 +71,8 @@ export function ProfileGameRail({
             {favorites.hasNextPage && (
               <Button
                 variant="outline"
-                className="min-h-11 shrink-0"
+                size="sm"
+                className="shrink-0 self-start"
                 disabled={favorites.isFetchingNextPage}
                 onClick={() => void favorites.fetchNextPage()}
               >

@@ -16,7 +16,7 @@ interface PostListInput {
   continuationRootId?: string;
   includeReplies?: boolean;
   includeReposts?: boolean;
-  kind?: "posts" | "replies" | "all";
+  kind?: "posts" | "replies" | "all" | "shares";
   feed?: PostListScope;
   q?: string;
   gameSlug?: string;
@@ -48,7 +48,7 @@ export type CaseRef = { targetType: "post" | "user"; targetId: string };
 export type FollowDirection = "followers" | "following";
 
 /** The profile activity views; `both` preserves the legacy includeReplies input. */
-export type PostFeedKind = "posts" | "replies" | "both";
+export type PostFeedKind = "posts" | "replies" | "both" | "shares";
 
 /**
  * Which `post.list` scope a feed atom reads. The two home scopes are the
@@ -70,7 +70,7 @@ export type PostFeedParams = {
   includeReplies?: boolean;
   /** The author's own repost events join the profile feed when this is set. */
   includeReposts?: boolean;
-  /** Profile-only three-way filter; `both` is encoded as legacy includeReplies. */
+  /** Profile activity filter; `both` is encoded as legacy includeReplies. */
   kind?: PostFeedKind;
   /** Discover-only free-text filter on post text. */
   q?: string;
@@ -145,7 +145,8 @@ export function postListQueryOptions(
         const input: PostListInput = { limit: POST_PAGE_SIZE };
         if (authorId) input.authorId = authorId;
         if (parentId) input.parentId = parentId;
-        if (kind === "replies") input.kind = "replies";
+        if (kind === "shares") input.kind = "shares";
+        else if (kind === "replies") input.kind = "replies";
         else if (kind === "both" || includeReplies) input.includeReplies = true;
         // Same conditional-spread rule as the fields above: only a profile
         // feed sets this, so every other feed's key stays exactly as it was.

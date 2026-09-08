@@ -88,12 +88,10 @@ export function AccountMenu({ compact = false }: { compact?: boolean }) {
           <Bookmark />
           {m.nav_bookmarks()}
         </DropdownMenuItem>
-        {!compact && (
-          <DropdownMenuItem className="cursor-pointer" render={<Link to="/settings/account" />}>
-            <Settings />
-            {m.profile_settings()}
-          </DropdownMenuItem>
-        )}
+        <DropdownMenuItem className="cursor-pointer" render={<Link to="/settings/account" />}>
+          <Settings />
+          {m.profile_settings()}
+        </DropdownMenuItem>
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <Sun />

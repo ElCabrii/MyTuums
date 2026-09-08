@@ -126,16 +126,44 @@ test("mobile navigation reaches all four destinations and exposes moderation onl
   ).toHaveCount(0);
 });
 
-test("mobile header keeps search and consistent height across primary pages", async ({ page }) => {
+test("mobile header keeps search between the logo and bell across primary pages", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 320, height: 740 });
   let headerHeight: number | undefined;
   for (const path of ["/", "/discover", "/games", `/@${ALICE.username}`]) {
     await page.goto(path);
     const header = page.getByRole("banner");
-    await expectInsideViewport(header.getByRole("combobox", { name: "Search", exact: true }), page);
+    const search = header.getByRole("combobox", { name: "Search", exact: true });
+    await expectInsideViewport(search, page);
+    const logoBox = await header.getByRole("link", { name: "MyTuums — Home" }).boundingBox();
+    const searchBox = await search.boundingBox();
+    const bellBox = await header.locator('a[href="/notifications"]').boundingBox();
+    if (!logoBox || !searchBox || !bellBox) throw new Error("Missing header control");
+    expect(searchBox.x).toBeGreaterThanOrEqual(logoBox.x + logoBox.width);
+    expect(searchBox.x + searchBox.width).toBeLessThanOrEqual(bellBox.x);
+    expect(searchBox.y + searchBox.height / 2).toBeCloseTo(bellBox.y + bellBox.height / 2, 0);
     const height = (await header.boundingBox())?.height;
     if (headerHeight === undefined) headerHeight = height;
     expect(height).toBe(headerHeight);
     await expectNoPageOverflow(page);
   }
+});
+
+test("profile settings stays a desktop button and moves into the mobile account menu", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/@${ALICE.username}`);
+  const settings = page.getByRole("button", { name: "Settings", exact: true });
+  const accountMenu = page.getByRole("button", { name: "Account menu", exact: true });
+  await expect(settings).toBeVisible();
+  await expect(accountMenu).toBeHidden();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(settings).toBeHidden();
+  await accountMenu.click();
+  await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\/account$/);
+  await expectNoPageOverflow(page);
 });

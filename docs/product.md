@@ -292,15 +292,21 @@ three events, not one collapsed one.
 
 Signed-in mobile pages use a fixed bottom navigation bar for Home, Discover,
 Games, and Profile. The header shows the logo image, notifications, and a compact
-moderation icon for authorized roles. All mobile pages expose global search
-below a consistent header icon row. The Profile tab uses the signed-in user’s
-avatar. The own-profile account menu provides bookmarks, theme selection, and
-sign-out; a separate cog button opens settings. Private messages remain hidden until
+moderation icon for authorized roles. Global search sits between the logo and
+notification bell on the same mobile header row. The Profile tab uses the signed-in user’s
+avatar. The own-profile account menu provides settings, bookmarks, theme selection, and
+sign-out; desktop profiles retain their separate settings cog. Private messages remain hidden until
 implemented. Page content and consent notices clear the bottom navigation and
 safe-area inset.
 
 ## Profiles and search
 
+- The profile activity filters are All, Posts, Reply, and Quotes & reposts.
+  The last selects only quotes authored by the profile owner and their own
+  repost events, newest event first, with the same visibility rules and
+  pagination as the other profile views. It is shareable as `?filter=shares`
+  and reads `post.list({ authorId, kind: "shares" })`; this API mode requires
+  a profile and includes reposts without a separate `includeReposts` flag.
 - A profile carries a display name, lowercase handle, bio (160 characters),
   avatar, banner, join date, follower/following counts, and earned badges. Bios
   use the same safe linkification as posts and replies.
@@ -371,7 +377,8 @@ notification when a badge is earned.
 - The upcoming sort lists unreleased games only (TBA or future release),
   most-wanted first by IGDB hypes — the pre-release "want" count. The weekly
   job pulls the top hypes beside the Twitch snapshot, so the shelf stays
-  current without a second catalog.
+  current without a second catalog. That count is used for ordering only;
+  game cards show the name and available release year without the IGDB count.
 - Every game the catalog has ever tracked stays listed — a game that drops
   out of the popularity scan keeps its row and its last-known rank, so a
   page that once resolved always resolves.
@@ -388,8 +395,9 @@ notification when a badge is earned.
   accept `#worldofwarcraft`).
 - A signed-in user can favorite a game from its page — a public stamp, not a
   private save: the count on the game page is public, and the user's profile
-  carries a compact, horizontally scrollable six-cover favorites strip
-  (above the feed on mobile, beside it on desktop). “See more” opens a scrollable popover with game links and
+  carries six favorite covers: a compact horizontal strip above the feed on
+  mobile and a three-column, two-row grid beside it on desktop. A small
+  “See more” button opens a scrollable popover with game links and
   pagination through the complete list, newest first. Empty profiles offer
   a link to `/games`, with an invitation to favorite games on your own profile.
   Favorites are visible to every signed-in viewer — except on a private

@@ -38,11 +38,11 @@ test.describe("game directory", () => {
     await expect(page.getByRole("heading", { name: "Hades", exact: true })).toBeVisible();
   });
 
-  test("the upcoming sort lists unreleased games most-wanted first", async ({ page }) => {
+  test("the upcoming sort keeps its ordering without displaying IGDB wants", async ({ page }) => {
     await page.goto("/games?sort=upcoming");
 
-    // The fixture's upcoming shelf: The Elder Scrolls VI (5120 wants) leads.
-    await expect(page.getByText("The Elder Scrolls VI")).toBeVisible();
-    await expect(page.getByText("5120 wants")).toBeVisible();
+    const cards = page.locator('a[href^="/games/"]');
+    await expect(cards.first()).toContainText("The Elder Scrolls VI");
+    await expect(page.getByText(/\b\d+ wants?\b/)).toHaveCount(0);
   });
 });
