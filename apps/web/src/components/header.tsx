@@ -1,4 +1,3 @@
-import { lazy, Suspense } from "react";
 import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { Bell, Compass, Gamepad2, Home, Shield } from "lucide-react";
@@ -9,10 +8,6 @@ import { unreadCountAtom } from "@/atoms/notifications";
 import { isModeratorAtom, viewerAtom } from "@/atoms/session";
 import { VersionTag } from "@/components/version-tag";
 import { m } from "@/paraglide/messages.js";
-
-const ModeToggle = lazy(() =>
-  import("@/components/mode-toggle").then((mod) => ({ default: mod.ModeToggle })),
-);
 
 /** Signed-in chrome; mobile primary destinations live in MobileNavigation. */
 export function Header() {
@@ -102,9 +97,6 @@ export function Header() {
             </Link>
           )}
           <div className="hidden items-center gap-2 md:flex">
-            <Suspense fallback={<div className="size-9" aria-hidden="true" />}>
-              <ModeToggle />
-            </Suspense>
             <AccountMenu />
           </div>
         </div>

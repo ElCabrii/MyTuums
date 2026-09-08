@@ -25,7 +25,7 @@ const localeLabel = (locale: LocalePreference): string =>
 /**
  * The account's *default* theme and language.
  *
- * Deliberately not a second copy of the header's theme toggle and the footer's
+ * Deliberately not a second copy of the account menu’s theme selector and the footer's
  * language switcher — those change this device, right now, and keep doing so.
  * These change what a device that has never been told anything falls back to,
  * which is what makes a preference follow someone to a new browser. The

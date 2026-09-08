@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { getRouteApi, Link, Outlet } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
+import { ProfileEditDialog } from "@/components/profile-edit-dialog";
 import { AccountMenu } from "@/components/account-menu";
 import { ProfileGameRail } from "@/components/profile-game-rail";
 import { ORPCError } from "@orpc/client";
@@ -39,7 +40,6 @@ import {
   Calendar,
   Loader2,
   AlertCircle,
-  Settings,
   MoreHorizontal,
   ShieldAlert,
   ShieldCheck,
@@ -251,17 +251,7 @@ export function ProfileLayout() {
 
           {isOwnProfile ? (
             <div className="mt-20 mb-2 flex flex-wrap items-center gap-2 self-start sm:mt-24">
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label={m.profile_settings()}
-                title={m.profile_settings()}
-                className="border-muted-foreground/30 hidden size-11 rounded-full md:inline-flex"
-                nativeButton={false}
-                render={<Link to="/settings/account" />}
-              >
-                <Settings className="h-4 w-4" />
-              </Button>
+              <ProfileEditDialog />
               <div className="md:hidden">
                 <AccountMenu compact />
               </div>
