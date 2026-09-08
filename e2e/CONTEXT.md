@@ -30,14 +30,15 @@ re-proved here — see [../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
 
 ## Change map
 
-| Intent                              | Primary                                         | Also touch                                        |
-| ----------------------------------- | ----------------------------------------------- | ------------------------------------------------- |
-| Add a browser journey               | `tests/specs/<name>.spec.ts`                    | `support/db.ts` if it needs new seed data         |
-| Add a transport-level assertion     | `tests/api/<name>.spec.ts`                      | — (no browser, no auth state)                     |
-| Add a fixture account or seed shape | `support/users.ts`, `support/db.ts`             | `tests/auth.setup.ts` when it needs storage state |
-| Add a page-scoped locator helper    | `support/post-card.ts` or a new `support/` file | —                                                 |
-| Change ports or stack env           | `playwright.config.ts`                          | `../docs/operations.md`                           |
-| Add a shared browser context        | `support/fixtures.ts`                           | —                                                 |
+| Intent                              | Primary                                           | Also touch                                        |
+| ----------------------------------- | ------------------------------------------------- | ------------------------------------------------- |
+| Add a browser journey               | `tests/specs/<name>.spec.ts`                      | `support/db.ts` if it needs new seed data         |
+| Add a transport-level assertion     | `tests/api/<name>.spec.ts`                        | — (no browser, no auth state)                     |
+| Add a fixture account or seed shape | `support/users.ts`, `support/db.ts`               | `tests/auth.setup.ts` when it needs storage state |
+| Add a page-scoped locator helper    | `support/post-card.ts` or a new `support/` file   | —                                                 |
+| Wait for a post in a ranked feed    | `support/ranked-feed.ts` (`expectRankedPostText`) | — (ranked order has no first-page guarantee)      |
+| Change ports or stack env           | `playwright.config.ts`                            | `../docs/operations.md`                           |
+| Add a shared browser context        | `support/fixtures.ts`                             | —                                                 |
 
 ## Invariants
 
