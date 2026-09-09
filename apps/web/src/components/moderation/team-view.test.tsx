@@ -12,7 +12,16 @@ import { m } from "@/paraglide/messages.js";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
 
-const fakeClient = { moderation: { team: vi.fn(), setRole: vi.fn(), searchUsers: vi.fn() } };
+const fakeClient = {
+  moderation: {
+    team: vi.fn(),
+    setRole: vi.fn(),
+    searchUsers: vi.fn(),
+    queue: vi.fn(),
+    case: vi.fn(),
+    auditLog: vi.fn(),
+  },
+};
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));
 
@@ -121,6 +130,24 @@ describe("TeamView — rank gating on Change role", () => {
 });
 
 describe("TeamView — set-role dialog", () => {
+  it("keeps a failed role change visible for retry", async () => {
+    fakeClient.moderation.setRole.mockRejectedValue(new Error("Role change refused"));
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).moderation.team([
+      makeTeamMember({ id: "mod-1", username: "mod1", role: "moderator" }),
+    ]);
+    const { store } = await renderWithProviders(<TeamView />, {
+      queryClient,
+      signedInAs: { id: "admin-1", role: "admin" },
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: m.moderation_team_change_role() }));
+    act(() => store.set(roleSelectAtom, "staff"));
+    await user.click(screen.getByRole("button", { name: m.moderation_set_role_submit() }));
+    expect(await screen.findByText("Role change refused")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: m.moderation_set_role_submit() })).toBeEnabled();
+  });
+
   it("submits the picked role for the opened member and closes the dialog", async () => {
     fakeClient.moderation.setRole.mockResolvedValue({ userId: "mod-1", role: "staff" });
     // `setRole`'s `onSuccess` invalidates `moderation.team` (`atoms/moderation.ts`), and unlike
@@ -152,7 +179,7 @@ describe("TeamView — set-role dialog", () => {
     // doesn't drive by pointer elsewhere either — the pick is applied the
     // way the trigger's `onValueChange` would, and the assertions below pin
     // the dialog's REACTION to that pick (button enabling, submit payload,
-    // close-on-submit), not the picking gesture itself.
+    // close-on-success), not the picking gesture itself.
     act(() => store.set(roleSelectAtom, "staff"));
 
     const submit = screen.getByRole("button", { name: m.moderation_set_role_submit() });
@@ -165,9 +192,11 @@ describe("TeamView — set-role dialog", () => {
         expect.anything(),
       ),
     );
-    expect(
-      screen.queryByRole("heading", { name: m.moderation_set_role_title({ handle: "mod1" }) }),
-    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: m.moderation_set_role_title({ handle: "mod1" }) }),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   it("keeps Save role disabled with no role picked yet", async () => {

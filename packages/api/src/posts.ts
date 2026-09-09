@@ -2762,31 +2762,35 @@ export const postRouter = {
    * No private-visibility check (issue #328): the row is the caller's own, and
    * a like left on a private account's post must stay removable after
    * unfollowing — or after the author goes private — rather than strand.
-   * `unbookmark`'s comment applies verbatim. Ban/block visibility stays, the
-   * pre-existing behaviour for those surfaces.
+   * Counts are read only through full visibility. Hidden and missing posts
+   * return the same zero count, so removal cannot probe private activity.
    */
   unlike: protectedProcedure
     .use(rateLimit(RATE_LIMITS.like))
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
-      const [target] = await context.db
-        .select({ id: post.id })
-        .from(post)
-        .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
-        .limit(1);
-
-      if (!target) {
-        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
-      }
-
       await context.db
         .delete(postLike)
         .where(and(eq(postLike.postId, input.postId), eq(postLike.userId, context.user.id)));
 
+      const [target] = await context.db
+        .select({
+          likeCount: sql<number>`(select count(*)::int from ${postLike} where ${postLike.postId} = ${post.id})`,
+        })
+        .from(post)
+        .innerJoin(user, eq(user.id, post.authorId))
+        .where(
+          and(
+            eq(post.id, input.postId),
+            not(invisibleAuthor(context.user.id)),
+            not(privatePostHidden(context.user.id)),
+          ),
+        )
+        .limit(1);
+
       return {
         postId: input.postId,
-        likeCount: await countLikes(context.db, input.postId),
+        likeCount: target?.likeCount ?? 0,
         viewerHasLiked: false,
       };
     }),
@@ -2862,31 +2866,35 @@ export const postRouter = {
   /**
    * Removes the caller's repost. Requires a session; a no-op when the repost isn't there.
    *
-   * No private-visibility check, the same reason as `unlike` above: a repost
-   * of a private post must stay removable after unfollowing.
+   * Like `unlike`, removal stays possible after losing visibility, but the
+   * response reveals no counts or existence for hidden posts.
    */
   unrepost: protectedProcedure
     .use(rateLimit(RATE_LIMITS.repost))
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
-      const [target] = await context.db
-        .select({ id: post.id })
-        .from(post)
-        .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
-        .limit(1);
-
-      if (!target) {
-        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
-      }
-
       await context.db
         .delete(postRepost)
         .where(and(eq(postRepost.postId, input.postId), eq(postRepost.userId, context.user.id)));
 
+      const [target] = await context.db
+        .select({
+          repostCount: sql<number>`(select count(*)::int from ${postRepost} where ${postRepost.postId} = ${post.id})`,
+        })
+        .from(post)
+        .innerJoin(user, eq(user.id, post.authorId))
+        .where(
+          and(
+            eq(post.id, input.postId),
+            not(invisibleAuthor(context.user.id)),
+            not(privatePostHidden(context.user.id)),
+          ),
+        )
+        .limit(1);
+
       return {
         postId: input.postId,
-        repostCount: await countReposts(context.db, input.postId),
+        repostCount: target?.repostCount ?? 0,
         viewerHasReposted: false,
       };
     }),

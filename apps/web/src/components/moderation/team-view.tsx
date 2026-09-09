@@ -377,12 +377,19 @@ function SetRoleDialog() {
           <Button
             className="w-full"
             disabled={!role || setRole.isPending}
-            onClick={() => {
+            onClick={async () => {
               if (!target) return;
-              // SAFETY: the Select items are built off ALL_ROLES, so the value is
-              // one of its literals by construction.
-              setRole.mutate({ userId: target.userId, role: role as (typeof ALL_ROLES)[number] });
-              setOpenTarget(null);
+              try {
+                await setRole.mutateAsync({
+                  userId: target.userId,
+                  // SAFETY: the Select items come from ALL_ROLES.
+                  role: role as (typeof ALL_ROLES)[number],
+                });
+              } catch {
+                // FieldError renders the mutation failure while the dialog stays open.
+                return;
+              }
+              setOpenTarget((current) => (current === target ? null : current));
             }}
           >
             {m.moderation_set_role_submit()}

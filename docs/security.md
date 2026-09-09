@@ -418,6 +418,12 @@ media rows hide from non-followers at the query layer (`privatePostHidden`,
 gated by the pair's relationship lock — `block` severs pending requests both
 directions like the edges themselves.
 
+`post.unlike` and `post.unrepost` always allow removal of the caller's own
+interaction, including after losing visibility. Their count reads apply the
+full post visibility predicate in the same query as the aggregate. Hidden
+and nonexistent posts both return success with a zero count and a false
+viewer flag, preventing retained post IDs from exposing private activity.
+
 **Ranked snapshots store IDs, never content.** A `feedRankSnapshot` row holds
 ordered post IDs with repost attribution and the event instant — no text, no
 media, no scores. Every ranked page re-reads its slice live through the

@@ -53,9 +53,14 @@ function BlockDialogBody({ target }: { target: { userId: string; handle: string 
           variant="destructive"
           className="w-full"
           disabled={block.isPending}
-          onClick={() => {
-            block.mutate({ userId: target.userId });
-            setTarget(null);
+          onClick={async () => {
+            try {
+              await block.mutateAsync({ userId: target.userId });
+            } catch {
+              // The mutation's error state keeps the failure visible in this dialog.
+              return;
+            }
+            setTarget((current) => (current === target ? null : current));
           }}
         >
           {m.moderation_block_submit()}
