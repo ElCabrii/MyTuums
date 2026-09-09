@@ -937,6 +937,8 @@
   "video_pending_unavailable": "Pending videos could not be loaded. They will appear when the connection returns.",
   "video_cancel_error": "The pending post could not be cancelled. Please try again.",
   "notification_video_failed": "Your video couldn’t be processed, so your post wasn’t published. Please create a new post to try again.",
+  "video_preview_label": "Video preview",
+  "video_preview_unavailable": "Your browser can’t preview this file. You can still upload and post it for processing.",
   "video_player_label": "Post video",
   "video_play": "Play video",
   "video_pause": "Pause video",
