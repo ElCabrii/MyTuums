@@ -162,7 +162,7 @@ export async function processVideoJob(videoId: string, options: JobOptions): Pro
         terminal,
         reason:
           error instanceof InvalidVideoError
-            ? "invalid_media"
+            ? error.code
             : interrupted
               ? "interrupted"
               : "processing_error",

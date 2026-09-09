@@ -56,12 +56,49 @@ describe("issue #368 video input policy", () => {
 
   it("rejects a fast decoded burst hidden by a normal advertised frame rate", () => {
     const source = parseVideoProbe(probe(), 100, "mov");
-    const frames = [0, 0.008333, 0.016667].map((time) => ({
+    const frames = Array.from({ length: 120 }, (_, index) => index / 120).map((time) => ({
       best_effort_timestamp_time: String(time),
       width: 1920,
       height: 1080,
     }));
     expect(() => validateVideoFrames(JSON.stringify({ frames }), source)).toThrow("60 fps");
+  });
+
+  it.each([
+    ["screencast final frame", [16.716667, 16.75, 16.783333, 16.797]],
+    ["mid-recording jitter", [0, 0.033333, 0.047, 0.083333, 0.12]],
+    ["variable-rate footage", Array.from({ length: 180 }, (_, i) => i / 60 + (i % 2) * 0.003)],
+  ])("accepts isolated timing irregularities: %s", (_name, times) => {
+    const source = parseVideoProbe(probe({ ...video, time_base: "1/3000" }), 100, "mov");
+    const frames = times.map((time) => ({
+      best_effort_timestamp_time: String(time),
+      width: 1920,
+      height: 1080,
+    }));
+    expect(() => validateVideoFrames(JSON.stringify({ frames }), source)).not.toThrow();
+  });
+
+  it("rejects duplicate decoded timestamps even below the rolling rate limit", () => {
+    const source = parseVideoProbe(probe(), 100, "mov");
+    const frames = [0, 0.033333, 0.033333].map((time) => ({
+      best_effort_timestamp_time: String(time),
+      width: 1920,
+      height: 1080,
+    }));
+    expect(() => validateVideoFrames(JSON.stringify({ frames }), source)).toThrow();
+  });
+
+  it("keeps a rolling window after quiet footage and reports a safe rate failure code", () => {
+    const source = parseVideoProbe(probe(), 100, "mov");
+    const times = [0, 1, 2, ...Array.from({ length: 120 }, (_, i) => 3 + i / 120)];
+    const frames = times.map((time) => ({
+      best_effort_timestamp_time: String(time),
+      width: 1920,
+      height: 1080,
+    }));
+    expect(() => validateVideoFrames(JSON.stringify({ frames }), source)).toThrow(
+      expect.objectContaining({ code: "frame_rate_exceeded" }),
+    );
   });
 
   it("allows the millisecond timestamp quantization of a 60 fps WebM", () => {

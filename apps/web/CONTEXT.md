@@ -51,7 +51,9 @@ app's build from the same origin.
   all full players and the persisted autoplay preference. Autoplay is muted;
   sound requires explicit interaction. `src/components/video-player.tsx` loads
   HLS.js on demand and releases its source/buffers offscreen. Compact attachment
-  previews render the cover; full surfaces use the same custom player.
+  previews render the cover; full surfaces use the same custom player. In
+  fullscreen, the video fills the remaining height above the controls; the
+  feed height cap applies only outside fullscreen.
 
 - **Displayed media cannot start native browser drags.** `src/routes/__root.tsx`
   cancels media drag starts at the app shell, including React portals such as

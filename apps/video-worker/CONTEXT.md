@@ -39,6 +39,10 @@ and encoding belong here. Database transitions and permissions belong to
 - FFmpeg receives local filenames and explicit arguments, never shell commands
   or author-provided URLs. Its environment does not contain application secrets.
 - Validate input limits before scaling, including rotation and sample aspect ratio.
+- Decoded rate validation allows 61 frame timestamps in an inclusive rolling
+  second (plus one input tick), accommodating capture jitter while bounding
+  sustained rates. Timestamps must increase; total frame, duration and input
+  limits remain enforced. Encoded renditions are capped at 60 fps.
 - Never upscale. Higher renditions preserve source frame rates up to 60 fps.
 - Temporary files and subprocesses must be reclaimed on failure or cancellation.
 - The scratch directory belongs exclusively to video processing. Cleanup removes
