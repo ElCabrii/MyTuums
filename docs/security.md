@@ -48,8 +48,8 @@ Railway roll back a deploy whose process is up.
 
 | Surface                       | Notes                                                              |
 | ----------------------------- | ------------------------------------------------------------------ |
-| `GET /live`                    | deploy liveness for Railway's healthchecker; no DB, no session      |
-| `GET /health`                  | exact match, DB-backed, returns `{"status":"ok"}`                  |
+| `GET /live`                   | deploy liveness for Railway's healthchecker; no DB, no session     |
+| `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`                  |
 | `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`             |
 | Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`       |
 | `/post/<id>` permalinks       | the app's public read surface (0.4.0) — see below                  |

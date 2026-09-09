@@ -171,7 +171,8 @@ describe("createRequestHandler", () => {
     // 32+ chars, matching the env schema's floor — the Transform Rule and the
     // service env carry the real value; the gate only ever sees these.
     const SECRET = "test-edge-secret-0123456789abcdef";
-    const gated = (overrides: Partial<RequestHandlerDeps> = {}) => deps({ edgeSecret: SECRET, ...overrides });
+    const gated = (overrides: Partial<RequestHandlerDeps> = {}) =>
+      deps({ edgeSecret: SECRET, ...overrides });
 
     it("404s every request without the header, /health included, before any routing branch runs", async () => {
       // The gate's whole point is that a direct-to-origin request — one that

@@ -248,19 +248,26 @@ function drainRejectedRequest(req: IncomingMessage): void {
 }
 
 /**
- * Constant-time check of the `x-edge-secret` header against the expected
- * value, used by the edge gate at the top of the routing tree (see the
- * `edgeSecret` dep). Both sides are hashed first so the comparison leaks
+ * Parses the `x-edge-secret` header into the one value the edge gate can
+ * compare: `null` for absent, and for repeated — an array, which the proxy
+ * never produces since its rewrite is a `set`, so a client trying to smuggle
+ * its own half alongside a proxy-injected value is refused outright rather
+ * than given comma-join semantics the gate never agreed to.
+ */
+function edgeSecretOf(value: IncomingHttpHeaders["x-edge-secret"]): string | null {
+  if (Array.isArray(value) || value === undefined) return null;
+  return value;
+}
+
+/**
+ * Constant-time check of the parsed `x-edge-secret` header against the
+ * expected value, used by the edge gate at the top of the routing tree (see
+ * the `edgeSecret` dep). Both sides are hashed first so the comparison leaks
  * neither timing nor length, and `timingSafeEqual` never throws on a length
  * mismatch — both digests are SHA-256-sized by construction.
- *
- * A repeated header (an array — which the proxy never produces, since its
- * rewrite is a `set`) is refused outright rather than joined: joining would
- * let a client append a proxy-injected value with its own comma-separated
- * half and win the compare.
  */
-function edgeSecretMatches(presented: IncomingHttpHeaders["x-edge-secret"], expected: string): boolean {
-  if (typeof presented !== "string") return false;
+function edgeSecretMatches(presented: string | null, expected: string): boolean {
+  if (presented === null) return false;
 
   const digest = (value: string) => createHash("sha256").update(value).digest();
   return timingSafeEqual(digest(presented), digest(expected));
@@ -475,7 +482,10 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
     // a direct-to-origin probe should be indistinguishable from hitting a
     // Railway edge that serves nothing. See the `edgeSecret` dep for why the
     // header is a shared secret and not a proxy-presence check.
-    if (deps.edgeSecret !== undefined && !edgeSecretMatches(req.headers["x-edge-secret"], deps.edgeSecret)) {
+    if (
+      deps.edgeSecret !== undefined &&
+      !edgeSecretMatches(edgeSecretOf(req.headers["x-edge-secret"]), deps.edgeSecret)
+    ) {
       drainRejectedRequest(req);
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not found");
