@@ -48,6 +48,13 @@ Each of these is a deliberate, non-default setting. The inline comment in
   accounts whose provider returned an unverified email. Existing accounts were
   grandfathered by the `email_verified = true` backfill migration
   (`packages/db/drizzle`) so flipping this did not lock them out.
+- **A repeated email does not create another account (issue #380).** Better
+  Auth lowercases the submitted email and returns a synthetic user with no
+  session when that email already exists, verified or not. The generic
+  success response is not evidence of an insert. The existing
+  `user_email_unique` database constraint is the final
+  guard. `packages/api/src/auth.int.test.ts` checks persistence and unchanged
+  credentials for repeated emails, including case variants.
 - **`additionalFields` are optional and nullable.** OAuth sign-ups arrive with
   none of them. `imageOriginal` and `bannerImageOriginal` are `input: false` —
   only the upload procedure in `packages/api` writes them, via Drizzle,
@@ -91,8 +98,13 @@ Each of these is a deliberate, non-default setting. The inline comment in
   `[webOrigin]`.** The web client never calls One Tap without
   `VITE_GOOGLE_CLIENT_ID`.
 - **The `customRules` rate limits are security controls** — sign-in, the 2FA
-  challenge, the mail-sending endpoints. `AUTH_RATE_LIMIT=false` is the E2E
-  escape hatch only, because one IP drives that whole suite.
+  challenge, the mail-sending endpoints, and handle lookups. Sign-up allows
+  three attempts per 60 seconds; `/is-username-available` and `/update-user`
+  each allow ten. The latter's username hook runs before its session guard,
+  so anonymous requests count too. Actionable handle errors are deliberately
+  retained with bounded probing; see `docs/security.md` for the trade-off.
+  `AUTH_RATE_LIMIT=false` is the E2E escape hatch only, because one IP drives
+  that whole suite.
 - **`lastLoginMethod` is stored but deliberately not in `publicUserColumns`.**
   Sign-in provider is reconnaissance, not profile data.
 - **`src/env.ts` never throws.** This is the quiet reader;

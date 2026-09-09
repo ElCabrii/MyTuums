@@ -149,9 +149,36 @@ Anything else building on `baseProcedure` is a bug.
   an OAuth identity may attach to an existing account; twitch is deliberately
   not on it.
 - **Better-auth's own rate limits** are stored in Postgres and cover the
-  security-sensitive endpoints (sign-in, the 2FA challenge, mail-sending).
+  security-sensitive endpoints (sign-in, sign-up, handle lookups, the 2FA
+  challenge, mail-sending).
   `AUTH_RATE_LIMIT=false` disables them and exists only for the E2E suite,
   where one IP drives the whole run. Never set it in production.
+- **Handle availability is deliberately observable, with bounded probing
+  (issue #380).** Keep the actionable `USERNAME_IS_ALREADY_TAKEN` response
+  so someone registering or changing their handle can choose another.
+  `/sign-up/email` accepts three attempts per 60 seconds, including failures;
+  `/is-username-available` and `/update-user` each accept ten. The username
+  plugin's update hook checks uniqueness before the endpoint's session guard,
+  making that path an anonymous lookup too. Budgets are separate per path and
+  resolved client IP; a deployment proxy must provide trustworthy client IP
+  headers, and an unresolved IP shares a fallback bucket. These limits reduce
+  harvesting and sign-up email abuse; they do not make public handles secret
+  or prevent probing from distributed IPs.
+- **One email identifies one account, verified or not (issue #380).** Better
+  Auth lowercases sign-up emails before lookup and persistence, and the
+  `user_email_unique` constraint has enforced uniqueness since migration
+  `0000`. With email verification required, signing up again with that email
+  and a different free handle deliberately returns HTTP 200 with a synthetic
+  user and `token: null`. It creates no user or credential and does not replace
+  the existing account's fields or password. Do not turn this into an
+  email-taken error: that would reveal private email membership. The auth
+  integration suite checks the database after these responses, including
+  case variants and both verification states. A response object alone does
+  not establish duplicate persistence. This is not a blanket guarantee
+  against email enumeration: the existing-email branch skips creation hooks,
+  so invalid consent or date-of-birth fields can produce a different outcome
+  for a fresh email. That pre-existing distinction is separate from the
+  reported duplicate-persistence finding.
 - **The page gate must recognise the `__Secure-` cookie prefix** used over
   HTTPS. A mismatch redirects every signed-in visitor on every page.
 - **`hasValidSession` fails open.** A database blip degrades to "the client
