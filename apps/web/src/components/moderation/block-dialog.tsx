@@ -54,8 +54,10 @@ function BlockDialogBody({ target }: { target: { userId: string; handle: string 
           className="w-full"
           disabled={block.isPending}
           onClick={() => {
-            block.mutate({ userId: target.userId });
-            setTarget(null);
+            block.mutate(
+              { userId: target.userId },
+              { onSuccess: () => setTarget((current) => (current === target ? null : current)) },
+            );
           }}
         >
           {m.moderation_block_submit()}

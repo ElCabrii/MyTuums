@@ -446,7 +446,12 @@ export async function guardedLinkFetch(
       response.status === 308
     ) {
       if (!location) return { ok: false, reason: "network" };
-      const next = new URL(location, current);
+      let next: URL;
+      try {
+        next = new URL(location, current);
+      } catch {
+        return { ok: false, reason: "network" };
+      }
       // The next iteration re-runs every check on `next` — scheme, port,
       // DNS, ranges — which is the entire point of following redirects
       // manually.
@@ -545,6 +550,8 @@ async function readCappedBody(
       let read: Read | "timeout";
       try {
         read = await Promise.race([readPromise, timeoutPromise]);
+      } catch {
+        return "network";
       } finally {
         clearTimeout(timeoutId);
       }

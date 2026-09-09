@@ -379,10 +379,17 @@ function SetRoleDialog() {
             disabled={!role || setRole.isPending}
             onClick={() => {
               if (!target) return;
-              // SAFETY: the Select items are built off ALL_ROLES, so the value is
-              // one of its literals by construction.
-              setRole.mutate({ userId: target.userId, role: role as (typeof ALL_ROLES)[number] });
-              setOpenTarget(null);
+              setRole.mutate(
+                {
+                  userId: target.userId,
+                  // SAFETY: the Select items come from ALL_ROLES.
+                  role: role as (typeof ALL_ROLES)[number],
+                },
+                {
+                  onSuccess: () =>
+                    setOpenTarget((current) => (current === target ? null : current)),
+                },
+              );
             }}
           >
             {m.moderation_set_role_submit()}

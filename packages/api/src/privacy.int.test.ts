@@ -474,6 +474,10 @@ describe("account privacy (issue #328)", () => {
     await call(appRouter.post.like, { postId: target.id }, { context: contextFor(bob) });
     await call(appRouter.post.repost, { postId: target.id }, { context: contextFor(bob) });
 
+    // The author's remaining interactions must not become a count oracle for Bob.
+    await call(appRouter.post.like, { postId: target.id }, { context: contextFor(alice) });
+    await call(appRouter.post.repost, { postId: target.id }, { context: contextFor(alice) });
+
     // Bob unfollows: the post hides from him, but his own rows must not strand.
     await call(appRouter.user.unfollow, { userId: alice.id }, { context: contextFor(bob) });
 
@@ -489,6 +493,23 @@ describe("account privacy (issue #328)", () => {
       { context: contextFor(bob) },
     );
     expect(unreposted.viewerHasReposted).toBe(false);
+    expect(unliked.likeCount).toBe(0);
+    expect(unreposted.repostCount).toBe(0);
+    for (const postId of [target.id, crypto.randomUUID()]) {
+      await expect(
+        call(appRouter.post.unlike, { postId }, { context: contextFor(bob) }),
+      ).resolves.toEqual({ postId, viewerHasLiked: false, likeCount: 0 });
+      await expect(
+        call(appRouter.post.unrepost, { postId }, { context: contextFor(bob) }),
+      ).resolves.toEqual({ postId, viewerHasReposted: false, repostCount: 0 });
+    }
+    const thread = await call(
+      appRouter.post.thread,
+      { postId: target.id },
+      { context: contextFor(alice) },
+    );
+    expect(thread.post.likeCount).toBe(1);
+    expect(thread.post.repostCount).toBe(1);
   });
 
   it("your own followers list shows private followers you have not followed back", async () => {
