@@ -40,6 +40,13 @@ const envSchema = z
     // IP. See the comment on `authRateLimitEnabled` in packages/auth/src/env.ts.
     AUTH_RATE_LIMIT: z.enum(["true", "false"]).optional(),
 
+    // Shared secret between the edge proxy and this origin; see the
+    // `edgeSecret` dep in request-handler.ts for what it gates. Unset in dev,
+    // CI, and production: the deployments that need it (preview, behind
+    // Cloudflare) set it alongside the matching Transform Rule, and every
+    // other deployment must keep serving direct traffic.
+    EDGE_SECRET: z.string().min(32, "EDGE_SECRET must be at least 32 characters long").optional(),
+
     // Object storage for avatars and banners — a Railway Storage Bucket in every
     // environment, including dev and CI. All optional as a group: with none of
     // them set the server boots and everything except the two upload procedures

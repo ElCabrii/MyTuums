@@ -17,6 +17,29 @@ There are four, and only the first two carry untrusted input:
    disabled for loopback and single-label (Compose-internal) hosts.
 4. **The server → third parties** — the OAuth providers and Resend.
 
+### The edge gate (preview only)
+
+On preview, boundary 1 has a second half: **Cloudflare → the origin**, held
+by a shared secret rather than by network position. The origin's ingress is
+a public Railway hostname — the zone's CNAME is public DNS — so anyone can
+connect to it directly with the right SNI and skip Cloudflare entirely,
+Access included. When `EDGE_SECRET` is set (preview only), the server
+answers 404 to every request whose `x-edge-secret` header does not carry
+that exact value, before any routing branch runs — `/health` included. A
+Cloudflare Transform Rule scoped to `preview.mytuums.com` sets the header
+on every request it forwards, overwriting whatever the client sent, so the
+header is proof the request passed through the edge. It must be a shared
+secret and not a proxy-header presence check (`cf-connecting-ip` & co.):
+on a direct connection the client controls every header, so those can be
+forged. Unset in dev, CI, and production, which serve direct traffic by
+design — production is the public site and has no edge layer to prove.
+
+`GET /live` is the one route above the gate: Railway's healthchecker probes
+the deployment's ingress directly, through no edge proxy, so it can never
+carry the secret. It reports process liveness only — the DB-backed
+`/health` sits below the gate, and a blipping database must not make
+Railway roll back a deploy whose process is up.
+
 ## Exposed surfaces
 
 **Reachable without a session** (this list is exhaustive; verify against
@@ -25,7 +48,8 @@ There are four, and only the first two carry untrusted input:
 
 | Surface                       | Notes                                                              |
 | ----------------------------- | ------------------------------------------------------------------ |
-| `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`                  |
+| `GET /live`                    | deploy liveness for Railway's healthchecker; no DB, no session      |
+| `GET /health`                  | exact match, DB-backed, returns `{"status":"ok"}`                  |
 | `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`             |
 | Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`       |
 | `/post/<id>` permalinks       | the app's public read surface (0.4.0) — see below                  |
