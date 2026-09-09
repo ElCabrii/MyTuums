@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   POST_ATTACHMENT_MAX_BYTES,
@@ -13,6 +13,7 @@ import { makeUserSummary } from "@/test/factories";
 import { renderWithProviders } from "@/test/render";
 import { ComposerForm } from "@/components/composer-form";
 import { installTestPostAttachment } from "@/lib/media";
+import { videoDraftAtomFamily } from "@/atoms/video-upload";
 import { m } from "@/paraglide/messages.js";
 
 const fakeClient = { search: { typeahead: vi.fn() } };
@@ -67,6 +68,11 @@ async function renderComposer(
   );
 
   return { onSubmit, onValueChange, ...result };
+}
+
+async function openMediaPicker() {
+  await userEvent.setup().click(screen.getByRole("button", { name: m.post_add_media() }));
+  return screen.getByLabelText<HTMLInputElement>(m.post_media_choose());
 }
 
 describe("ComposerForm", () => {
@@ -353,11 +359,55 @@ describe("ComposerForm", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
+  it("opens one media picker and refuses mixed image/video selections", async () => {
+    const onAttachmentsChange = vi.fn();
+    const { store } = await renderComposer({ onAttachmentsChange });
+    expect(screen.queryByLabelText(m.post_media_choose())).not.toBeInTheDocument();
+    const picker = await openMediaPicker();
+    expect(screen.getByRole("dialog", { name: m.post_add_media() })).toBeInTheDocument();
+    expect(picker.accept).toContain("image/png");
+    expect(picker.accept).toContain("video/mp4");
+    fireEvent.change(picker, {
+      target: {
+        files: [
+          new File([VALID_PNG_BYTES], "image.png", { type: "image/png" }),
+          new File([new Uint8Array([1])], "video.mp4", { type: "video/mp4" }),
+        ],
+      },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(m.post_media_hint());
+    expect(onAttachmentsChange).not.toHaveBeenCalled();
+    expect(store.get(videoDraftAtomFamily("composer"))).toBeNull();
+  });
+
+  it("submits a ready video without a separate subtitle upload control", async () => {
+    const scope = "video-without-subtitles";
+    const { store, onSubmit } = await renderComposer({
+      onAttachmentsChange: vi.fn(),
+      mentionScope: scope,
+    });
+    const file = new File([new Uint8Array([1])], "video.mp4", { type: "video/mp4" });
+    act(() =>
+      store.set(videoDraftAtomFamily(scope), {
+        selectionId: "selected-video",
+        file,
+        videoId: "ready-video",
+        status: "uploaded",
+        bytes: file.size,
+        controller: new AbortController(),
+      }),
+    );
+    expect(screen.queryByText(/Optional captions/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: m.post_add_media() })).toBeDisabled();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Post" }));
+    expect(onSubmit).toHaveBeenCalledWith("", [], { videoId: "ready-video" });
+  });
+
   it("accepts image selections through the accessible file control", async () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
 
-    const input = screen.getByLabelText<HTMLInputElement>(m.post_add_images());
+    const input = await openMediaPicker();
     const first = new File([VALID_PNG_BYTES], "first.png", { type: "image/png" });
     const second = new File([VALID_PNG_BYTES], "second.png", { type: "image/png" });
     fireEvent.change(input, { target: { files: [first, second] } });
@@ -381,7 +431,7 @@ describe("ComposerForm", () => {
       attachments: [],
     });
 
-    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+    fireEvent.change(await openMediaPicker(), {
       target: { files: [file] },
     });
     expect(screen.getByRole("button", { name: "Post" })).toBeDisabled();
@@ -403,7 +453,7 @@ describe("ComposerForm", () => {
       ],
     });
 
-    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+    fireEvent.change(await openMediaPicker(), {
       target: { files: [selected] },
     });
 
@@ -426,7 +476,7 @@ describe("ComposerForm", () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
 
-    const input = screen.getByLabelText<HTMLInputElement>(m.post_add_images());
+    const input = await openMediaPicker();
     const malformed = new File([new Uint8Array([1, 2, 3])], "malformed.png", {
       type: "image/png",
     });
@@ -435,7 +485,7 @@ describe("ComposerForm", () => {
     expect(onAttachmentsChange).not.toHaveBeenCalled();
 
     const mismatch = new File([VALID_PNG_BYTES], "mismatch.jpg", { type: "image/jpeg" });
-    fireEvent.change(input, { target: { files: [mismatch] } });
+    fireEvent.change(await openMediaPicker(), { target: { files: [mismatch] } });
     expect(await screen.findByRole("alert")).toHaveTextContent(m.post_image_invalid());
     expect(onAttachmentsChange).not.toHaveBeenCalled();
   });
@@ -444,7 +494,7 @@ describe("ComposerForm", () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
 
-    const input = screen.getByLabelText<HTMLInputElement>(m.post_add_images());
+    const input = await openMediaPicker();
     fireEvent.change(input, {
       target: {
         files: [new File([new Uint8Array([1, 2, 3])], "bad.png", { type: "image/png" })],
@@ -453,7 +503,7 @@ describe("ComposerForm", () => {
     await screen.findByRole("alert");
 
     const valid = new File([VALID_PNG_BYTES], "valid.png", { type: "image/png" });
-    fireEvent.change(input, { target: { files: [valid] } });
+    fireEvent.change(await openMediaPicker(), { target: { files: [valid] } });
     await waitFor(() =>
       expect(onAttachmentsChange).toHaveBeenCalledWith([expect.objectContaining({ file: valid })]),
     );
@@ -470,7 +520,7 @@ describe("ComposerForm", () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
 
-    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+    fireEvent.change(await openMediaPicker(), {
       target: { files: [picked] },
     });
 
@@ -486,7 +536,7 @@ describe("ComposerForm", () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
 
-    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+    fireEvent.change(await openMediaPicker(), {
       target: { files: [new File([VALID_PNG_BYTES], "doomed.png", { type: "image/png" })] },
     });
 
@@ -516,7 +566,7 @@ describe("ComposerForm", () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
 
-    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+    fireEvent.change(await openMediaPicker(), {
       target: {
         files: [
           new File([VALID_PNG_BYTES], "a.png", { type: "image/png" }),

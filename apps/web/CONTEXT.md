@@ -39,6 +39,12 @@ app's build from the same origin.
 
 ## Invariants
 
+- **Composers share one media picker.** `src/components/composer-media-dialog.tsx`
+  opens from Add media; `src/components/composer-form.tsx` accepts either images
+  or one video and owns validation. Separate subtitle uploads are unavailable.
+  Selected media and video progress remain visible in the composer after the
+  dialog closes.
+
 - **Video upload state outlives its composer component, not the tab.**
   `src/atoms/video-upload.ts` owns scoped File/progress/cancellation state;
   `src/lib/video-upload.ts` sends sequential 8 MiB parts with XHR and resumes

@@ -49,7 +49,8 @@ test("video multipart recovery keeps explicit submission and durable pending UI 
     await composer.fill(content);
     // This fixture exercises direct browser multipart transport. Native format
     // validation and playable output are covered by the worker's media tests.
-    await page.getByLabel("Video", { exact: true }).setInputFiles({
+    await page.getByRole("button", { name: "Add media", exact: true }).click();
+    await page.getByLabel("Choose images or a video", { exact: true }).setInputFiles({
       name: "transport.mp4",
       mimeType: "video/mp4",
       buffer: Buffer.alloc(9 * 1024 * 1024),

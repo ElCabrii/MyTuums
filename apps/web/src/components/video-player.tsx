@@ -171,7 +171,7 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
   return (
     <div
       ref={containerRef}
-      className="border-border bg-card mb-3 overflow-hidden rounded-lg border"
+      className="border-border mb-3 overflow-hidden rounded-lg border"
       role="group"
       aria-label={m.video_player_label()}
       onClick={(event) => event.stopPropagation()}

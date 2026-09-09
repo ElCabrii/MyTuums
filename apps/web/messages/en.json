@@ -337,7 +337,6 @@
   "post_action": "Post",
   "post_placeholder": "Share a gaming update, clip, or tournament result...",
   "post_publish_error": "Could not publish your post. Please try again.",
-  "post_add_images": "Add images",
   "post_images_hint": "Up to 4 PNG, JPEG, WebP, or GIF images (5 MB each, 12 MB total).",
   "post_image_remove": "Remove image {name}",
   "post_image_move_left": "Move image {name} left",
@@ -925,7 +924,6 @@
   "profile_keep_editing": "Keep editing",
   "profile_discard": "Discard changes",
   "profile_editor_loading": "Loading profile editor",
-  "video_add": "Video",
   "video_remove": "Remove video",
   "video_input_hint": "One MP4, MOV or WebM video, up to 500 MB, 5 minutes, 1080p and 60 fps. Videos cannot be combined with images.",
   "video_uploaded": "Upload complete. Submit your post when you’re ready.",
@@ -933,10 +931,6 @@
   "video_upload_progress": "Uploading video… {percent}%",
   "video_upload_label": "Video upload progress",
   "video_resume": "Resume upload",
-  "video_captions_upload": "Optional captions (.vtt, up to 200 KB)",
-  "video_captions_invalid": "Choose a non-empty WebVTT file up to 200 KB.",
-  "video_captions_language": "Language code",
-  "video_captions_remove": "Remove captions",
   "video_pending_title": "Processing video",
   "video_pending_hint": "Only you can see this pending post. It will be published when your video is ready. You can leave this page.",
   "video_pending_cancel": "Cancel pending post",
@@ -960,5 +954,8 @@
   "video_playback_unsupported": "Your browser does not support this video. Try a recent browser.",
   "video_action_unavailable": "This playback action is unavailable in your browser right now.",
   "video_autoplay_label": "Autoplay videos",
-  "video_autoplay_hint": "Play visible videos without sound on this device."
+  "video_autoplay_hint": "Play visible videos without sound on this device.",
+  "post_add_media": "Add media",
+  "post_media_choose": "Choose images or a video",
+  "post_media_hint": "Add up to 4 images or one video. Images and videos cannot be combined in a post."
 }

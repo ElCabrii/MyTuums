@@ -337,7 +337,6 @@
   "post_action": "Publier",
   "post_placeholder": "Partagez une actualité gaming, un clip ou un résultat de tournoi...",
   "post_publish_error": "Impossible de publier votre publication. Veuillez réessayer.",
-  "post_add_images": "Ajouter des images",
   "post_images_hint": "Jusqu'à 4 images PNG, JPEG, WebP ou GIF (5 Mo chacune, 12 Mo au total).",
   "post_image_remove": "Supprimer l'image {name}",
   "post_image_move_left": "Déplacer l'image {name} vers la gauche",
@@ -925,7 +924,6 @@
   "profile_keep_editing": "Continuer à modifier",
   "profile_discard": "Abandonner les modifications",
   "profile_editor_loading": "Chargement de l’éditeur de profil",
-  "video_add": "Vidéo",
   "video_remove": "Retirer la vidéo",
   "video_input_hint": "Une vidéo MP4, MOV ou WebM, jusqu’à 500 Mo, 5 minutes, 1080p et 60 images/s. Les vidéos ne peuvent pas être combinées avec des images.",
   "video_uploaded": "Envoi terminé. Publiez votre post quand vous le souhaitez.",
@@ -933,10 +931,6 @@
   "video_upload_progress": "Envoi de la vidéo… {percent} %",
   "video_upload_label": "Progression de l’envoi de la vidéo",
   "video_resume": "Reprendre l’envoi",
-  "video_captions_upload": "Sous-titres facultatifs (.vtt, jusqu’à 200 Ko)",
-  "video_captions_invalid": "Choisissez un fichier WebVTT non vide de 200 Ko maximum.",
-  "video_captions_language": "Code de langue",
-  "video_captions_remove": "Retirer les sous-titres",
   "video_pending_title": "Traitement de la vidéo",
   "video_pending_hint": "Vous seul pouvez voir ce post en attente. Il sera publié lorsque votre vidéo sera prête. Vous pouvez quitter cette page.",
   "video_pending_cancel": "Annuler le post en attente",
@@ -960,5 +954,8 @@
   "video_playback_unsupported": "Votre navigateur ne prend pas en charge cette vidéo. Essayez un navigateur récent.",
   "video_action_unavailable": "Cette action de lecture est indisponible dans votre navigateur pour le moment.",
   "video_autoplay_label": "Lecture automatique des vidéos",
-  "video_autoplay_hint": "Lire les vidéos visibles sans son sur cet appareil."
+  "video_autoplay_hint": "Lire les vidéos visibles sans son sur cet appareil.",
+  "post_add_media": "Ajouter des médias",
+  "post_media_choose": "Choisir des images ou une vidéo",
+  "post_media_hint": "Ajoutez jusqu’à 4 images ou une vidéo. Les images et les vidéos ne peuvent pas être combinées dans une publication."
 }

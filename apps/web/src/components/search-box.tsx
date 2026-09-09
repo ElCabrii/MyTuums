@@ -391,7 +391,10 @@ export function SearchBox() {
   const navigate = useNavigate();
   const inputValue = useAtomValue(searchInputAtom);
   const setSearchQuery = useSetAtom(setSearchQueryAtom);
-  const [open, setOpen] = useAtom(searchPopoverOpenAtom);
+  const [popoverOpen, setOpen] = useAtom(searchPopoverOpenAtom);
+  // Clearing returns focus before React commits the new input value. That
+  // focus handler can request reopening with its previous, non-empty value.
+  const open = popoverOpen && inputValue.trim() !== "";
   const [highlight, setHighlight] = useAtom(searchHighlightAtom);
   const typeahead = useAtomValue(typeaheadAtom);
   const resetSearch = useSetAtom(resetSearchAtomsAtom);
@@ -475,14 +478,8 @@ export function SearchBox() {
 
   const handleChange = (value: string) => {
     setSearchQuery(value);
-    if (value.trim() !== "") {
-      setOpen(true);
-      setHighlight(-1);
-    } else {
-      // An emptied input has nothing to suggest — close rather than show a
-      // stale list (the typeahead atom is gated off for empty queries).
-      setOpen(false);
-    }
+    setOpen(value.trim() !== "");
+    setHighlight(-1);
   };
 
   const handleFocus = () => {
