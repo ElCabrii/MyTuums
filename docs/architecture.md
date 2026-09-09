@@ -393,6 +393,9 @@ sides by CI. See [operations.md](operations.md).
 1. Selection creates a durable upload owner before issuing signed multipart
    capabilities. The browser streams 8 MiB parts directly to the private bucket;
    progress/cancel/recovery do not buffer a video in the RPC server.
+   The composer previews the same original File through a temporary browser blob
+   URL, independent of upload completion. Unmount/replacement revokes that URL;
+   preview playback never queues processing or grants publication consent.
 2. Upload completion alone creates no post. Explicit submission stores text,
    target in `video_submission` and enqueues an IDs-only
    pg-boss job in the same transaction. Only the author can list pending rows.

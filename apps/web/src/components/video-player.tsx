@@ -1,11 +1,13 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
+import { Select as SelectPrimitive } from "@base-ui/react/select";
+import { useVideoVisibility } from "@/hooks/use-video-visibility";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Captions, Maximize, Pause, PictureInPicture2, Play, Volume2, VolumeX } from "lucide-react";
 import {
   activeVideoAtom,
   requestedVideoAtom,
   requestVideoPlaybackAtom,
-  updateVideoVisibilityAtom,
+  videoSourceOwnerAtom,
 } from "@/atoms/video-playback";
 import type { Post } from "@/lib/orpc";
 import { parseVideoPreviews, videoTime, type VideoPreview } from "@/lib/video-previews";
@@ -34,9 +36,11 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const positionRef = useRef(0);
   const active = useAtomValue(activeVideoAtom) === id;
+  const ownsSource = useAtomValue(videoSourceOwnerAtom) === id;
   const manual = useAtomValue(requestedVideoAtom) === id;
-  const visibility = useSetAtom(updateVideoVisibilityAtom);
   const requestPlayback = useSetAtom(requestVideoPlaybackAtom);
+  const [fullscreen, setFullscreen] = useState(false);
+  useVideoVisibility({ ref: containerRef, id });
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [volume, setVolume] = useState(1);
@@ -54,36 +58,29 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
     ? new URL(`${rendition.name}.m3u8`, new URL(attachment.url, window.location.origin)).href
     : attachment.url;
 
+  const onSourceReady = useEffectEvent(() => {
+    const video = videoRef.current;
+    if (!video) return Promise.resolve();
+    video.currentTime = positionRef.current;
+    return active ? video.play() : Promise.resolve();
+  });
+
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    let ratio = 0;
-    const update = () => visibility({ id, ratio: document.hidden ? 0 : ratio });
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        ratio = entry?.intersectionRatio ?? 0;
-        update();
-      },
-      { threshold: [0, 0.25, 0.5, 0.75, 1] },
-    );
-    observer.observe(container);
-    document.addEventListener("visibilitychange", update);
-    return () => {
-      observer.disconnect();
-      document.removeEventListener("visibilitychange", update);
-      visibility({ id, remove: true });
-    };
-  }, [id, visibility]);
+    const update = () => setFullscreen(document.fullscreenElement === containerRef.current);
+    document.addEventListener("fullscreenchange", update);
+    return () => document.removeEventListener("fullscreenchange", update);
+  }, []);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !active) return;
+    if (!video || !ownsSource) return;
     let disposed = false;
     let hls: import("hls.js").default | undefined;
     const start = () => {
       if (disposed) return;
-      video.currentTime = positionRef.current;
-      void video.play().catch(() => {
+      void onSourceReady().catch((error: DOMException) => {
+        // A pause or source change can abort an outstanding play() request.
+        if (error instanceof DOMException && error.name === "AbortError") return;
         if (!disposed) requestPlayback({ id, play: false });
       });
     };
@@ -104,7 +101,7 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
           hls.on(HlsPlayer.Events.ERROR, (_event, data) => {
             if (data.fatal) {
               setError(m.video_playback_error());
-              requestPlayback({ id, play: false });
+              requestPlayback({ id, play: false, releaseSource: true });
             }
           });
           hls.attachMedia(video);
@@ -114,24 +111,40 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
           video.load();
         } else {
           setError(m.video_playback_unsupported());
-          requestPlayback({ id, play: false });
+          requestPlayback({ id, play: false, releaseSource: true });
         }
       })
       .catch(() => {
         if (!disposed) {
           setError(m.video_playback_error());
-          requestPlayback({ id, play: false });
+          requestPlayback({ id, play: false, releaseSource: true });
         }
       });
     return () => {
       disposed = true;
+      if (video.readyState) positionRef.current = video.currentTime;
       video.pause();
       video.removeEventListener("loadedmetadata", start);
       hls?.destroy();
       video.removeAttribute("src");
       video.load();
     };
-  }, [active, id, source, quality, requestPlayback]);
+  }, [ownsSource, id, source, quality, requestPlayback]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    let disposed = false;
+    if (!active) video.pause();
+    else if (video.readyState)
+      void video.play().catch((error: DOMException) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (!disposed) requestPlayback({ id, play: false });
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [active, id, requestPlayback]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -188,6 +201,7 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
         aria-label={m.video_player_label()}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
+        onEmptied={() => setPlaying(false)}
         onTimeUpdate={(event) => {
           if (event.currentTarget.readyState) {
             positionRef.current = event.currentTarget.currentTime;
@@ -264,13 +278,13 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
             type="button"
             variant="ghost"
             size="icon-sm"
-            aria-label={playing ? m.video_pause() : m.video_play()}
+            aria-label={active ? m.video_pause() : m.video_play()}
             onClick={() => {
               if (position >= duration) positionRef.current = 0;
-              requestPlayback({ id, play: !playing });
+              requestPlayback({ id, play: !active });
             }}
           >
-            {playing ? <Pause /> : <Play />}
+            {active ? <Pause /> : <Play />}
           </Button>
           <span className="mr-auto text-xs tabular-nums">
             {videoTime(position)} / {videoTime(duration)}
@@ -335,15 +349,18 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
             <SelectTrigger size="sm" aria-label={m.video_quality()}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={-1}>{m.video_quality_auto()}</SelectItem>
-              {metadata.renditions.map((level, index) => (
-                <SelectItem
-                  key={level.name}
-                  value={index}
-                >{`${Math.min(level.width, level.height)}p${level.frameRate > 30 ? "60" : ""}`}</SelectItem>
-              ))}
-            </SelectContent>
+            {/* Nested portals inherit this container, keeping menus inside fullscreen. */}
+            <SelectPrimitive.Portal container={fullscreen ? containerRef : undefined}>
+              <SelectContent>
+                <SelectItem value={-1}>{m.video_quality_auto()}</SelectItem>
+                {metadata.renditions.map((level, index) => (
+                  <SelectItem
+                    key={level.name}
+                    value={index}
+                  >{`${Math.min(level.width, level.height)}p${level.frameRate > 30 ? "60" : ""}`}</SelectItem>
+                ))}
+              </SelectContent>
+            </SelectPrimitive.Portal>
           </Select>
           <Select
             value={speed}
@@ -355,13 +372,15 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
             <SelectTrigger size="sm" aria-label={m.video_speed()}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
-              {[0.5, 0.75, 1, 1.25, 1.5, 2].map((value) => (
-                <SelectItem key={value} value={value}>
-                  {value}×
-                </SelectItem>
-              ))}
-            </SelectContent>
+            <SelectPrimitive.Portal container={fullscreen ? containerRef : undefined}>
+              <SelectContent>
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {value}×
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </SelectPrimitive.Portal>
           </Select>
           {document.pictureInPictureEnabled && (
             <Button

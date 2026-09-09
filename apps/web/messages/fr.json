@@ -937,6 +937,8 @@
   "video_pending_unavailable": "Les vidéos en attente n’ont pas pu être chargées. Elles apparaîtront au retour de la connexion.",
   "video_cancel_error": "Le post en attente n’a pas pu être annulé. Veuillez réessayer.",
   "notification_video_failed": "Votre vidéo n’a pas pu être traitée, donc votre post n’a pas été publié. Veuillez créer un nouveau post pour réessayer.",
+  "video_preview_label": "Aperçu de la vidéo",
+  "video_preview_unavailable": "Votre navigateur ne peut pas afficher l’aperçu de ce fichier. Vous pouvez quand même le téléverser et le publier pour qu’il soit traité.",
   "video_player_label": "Vidéo du post",
   "video_play": "Lire la vidéo",
   "video_pause": "Mettre la vidéo en pause",

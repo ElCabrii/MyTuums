@@ -428,6 +428,10 @@ notification when a badge is earned.
 - The composer's Add media button opens one dialog for images or a video. A
   selection can contain up to four images or one video, never both. Separate
   subtitle files cannot be uploaded.
+- Selected videos have a local preview before posting, including while uploading.
+  Native controls provide play/pause, seeking and volume; previews never autoplay.
+  A browser that cannot play the original file shows a message without blocking
+  upload or submission. Previewing adds no server processing or media transfer.
 - Video selection uploads with progress, cancellation and recovery from brief network
   interruptions. Submission remains explicit. After submission, an author-only
   pending card survives navigation/reload; it has no public post link or counters.

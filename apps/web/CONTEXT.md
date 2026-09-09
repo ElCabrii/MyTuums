@@ -50,16 +50,26 @@ app's build from the same origin.
   `src/lib/video-upload.ts` sends sequential 8 MiB parts with XHR and resumes
   from server-confirmed parts. Selection/completion never submits a post.
   Successful submission clears the draft; explicit removal cancels the upload.
+- **Composer video previews use the original local file.**
+  `src/components/local-video-preview.tsx` owns the native player and its blob
+  URL, released on replacement or unmount. Previewing never uploads, encodes,
+  submits, or validates the video. Unsupported local playback does not block
+  submission. Previews require explicit play and share viewport/tab visibility
+  and playback ownership with feed players through `src/hooks/use-video-visibility.ts`.
 - **Pending videos are server state.** `src/atoms/pending-videos.ts` polls
   author-only submissions. When a pending item disappears, ranked feeds need a
   new snapshot (`resetQueries`), not a refetch of the old pinned snapshot.
 - **Playback has one visible owner.** `src/atoms/video-playback.ts` coordinates
   all full players and the persisted autoplay preference. Autoplay is muted;
   sound requires explicit interaction. `src/components/video-player.tsx` loads
-  HLS.js on demand and releases its source/buffers offscreen. Compact attachment
+  HLS.js on demand. Playback ownership and source ownership are separate: an
+  explicitly paused, visible player retains its source/buffers until another
+  player takes ownership or it leaves view. Pause/resume must not reload the
+  stream; the control reflects playback intent even while loading. Compact attachment
   previews render the cover; full surfaces use the same custom player. In
   fullscreen, the video fills the remaining height above the controls; the
-  feed height cap applies only outside fullscreen.
+  feed height cap applies only outside fullscreen. Quality and speed portals
+  render inside the fullscreen element so their menus remain visible and interactive.
 
 - **Displayed media cannot start native browser drags.** `src/routes/__root.tsx`
   cancels media drag starts at the app shell, including React portals such as

@@ -6,6 +6,7 @@ import {
   videoDraftAtomFamily,
 } from "@/atoms/video-upload";
 import { Button } from "@/components/ui/button";
+import { LocalVideoPreview } from "@/components/local-video-preview";
 import { m } from "@/paraglide/messages.js";
 
 export function ComposerVideo({ scope, disabled }: { scope: string; disabled: boolean }) {
@@ -28,6 +29,7 @@ export function ComposerVideo({ scope, disabled }: { scope: string; disabled: bo
           <X />
         </Button>
       </div>
+      <LocalVideoPreview key={draft.selectionId} file={draft.file} />
       <div role="status" className="text-muted-foreground text-xs">
         {draft.status === "uploaded"
           ? m.video_uploaded()

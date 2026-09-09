@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   POST_ATTACHMENT_MAX_BYTES,
@@ -30,6 +30,12 @@ const identityProcessor = (file: File) => Promise.resolve(file);
 
 beforeEach(() => {
   installTestPostAttachment(identityProcessor);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const VALID_PNG_BYTES = Uint8Array.from(
@@ -381,6 +387,17 @@ describe("ComposerForm", () => {
   });
 
   it("submits a ready video without a separate subtitle upload control", async () => {
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:video-preview");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     const scope = "video-without-subtitles";
     const { store, onSubmit } = await renderComposer({
       onAttachmentsChange: vi.fn(),
@@ -398,6 +415,9 @@ describe("ComposerForm", () => {
       }),
     );
     expect(screen.queryByText(/Optional captions/)).not.toBeInTheDocument();
+    fireEvent.error(screen.getByLabelText(m.video_preview_label()));
+    expect(screen.getByText(m.video_preview_unavailable())).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Post" })).toBeEnabled();
     expect(screen.getByRole("button", { name: m.post_add_media() })).toBeDisabled();
     await userEvent.setup().click(screen.getByRole("button", { name: "Post" }));
     expect(onSubmit).toHaveBeenCalledWith("", [], { videoId: "ready-video" });
