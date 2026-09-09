@@ -67,6 +67,10 @@ would produce a broken one.
 - **CI points at the `ci` bucket, never the dev or production one.** The E2E
   cleanup deletes objects by prefix, so a shared bucket lets two runs delete
   each other's uploads mid-test — against production, real users' avatars.
+  Before browser tests, the E2E job applies and verifies the exact
+  `http://localhost:5273` video CORS rule, preserving other rules. A bucket-name
+  guard refuses any bucket without a `ci` name segment; missing credentials
+  skip this setup along with the upload specs. This rule persists between runs.
 - **The `verify` and `e2e` jobs write a `.env` file.** Every `db:*` and `e2e`
   script runs through `dotenv -e .env`, which errors on a missing file.
   dotenv does not override variables that are already set, so the workflow's

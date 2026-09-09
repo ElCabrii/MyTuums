@@ -96,7 +96,11 @@ persist the rule and verify readback. Use `https://preview.mytuums.com` in
 Preview, `https://mytuums.com` in production, and `http://localhost:5273` in CI.
 The development bucket was explicitly approved for `5173`, `5273` and the
 temporary built-app inspection port `39101`; that rule persists after testing.
-No Preview, CI or production CORS setting was changed by this implementation.
+The E2E job applies and verifies the `http://localhost:5273` rule on its CI bucket
+before browser tests, preserving other rules. It refuses a configured bucket
+without a `ci` name segment and skips setup when bucket credentials are absent.
+That rule persists between runs. Preview and production CORS remain a deployment
+step.
 
 ## Migrations
 
