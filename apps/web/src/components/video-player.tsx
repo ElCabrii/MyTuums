@@ -181,6 +181,10 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
     setPosition(next);
     if (videoRef.current?.readyState) videoRef.current.currentTime = next;
   };
+  const togglePlayback = () => {
+    if (position >= duration) positionRef.current = 0;
+    requestPlayback({ id, play: !active });
+  };
   return (
     <div
       ref={containerRef}
@@ -198,7 +202,19 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
         preload="none"
         playsInline
         muted={muted || !manual}
+        tabIndex={0}
         aria-label={m.video_player_label()}
+        aria-keyshortcuts="Space"
+        onClick={(event) => {
+          event.currentTarget.focus({ preventScroll: true });
+          togglePlayback();
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== " " || event.altKey || event.ctrlKey || event.metaKey) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (!event.repeat) togglePlayback();
+        }}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEmptied={() => setPlaying(false)}
@@ -279,10 +295,7 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
             variant="ghost"
             size="icon-sm"
             aria-label={active ? m.video_pause() : m.video_play()}
-            onClick={() => {
-              if (position >= duration) positionRef.current = 0;
-              requestPlayback({ id, play: !active });
-            }}
+            onClick={togglePlayback}
           >
             {active ? <Pause /> : <Play />}
           </Button>

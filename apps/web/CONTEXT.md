@@ -65,8 +65,10 @@ app's build from the same origin.
   HLS.js on demand. Playback ownership and source ownership are separate: an
   explicitly paused, visible player retains its source/buffers until another
   player takes ownership or it leaves view. Pause/resume must not reload the
-  stream; the control reflects playback intent even while loading. Compact attachment
-  previews render the cover; full surfaces use the same custom player. In
+  stream; the control reflects playback intent even while loading.
+  Clicking the video surface or pressing Space while it has focus toggles the same
+  playback intent; keyboard events on other controls retain their own behavior.
+  Compact attachment previews render the cover; full surfaces use the same custom player. In
   fullscreen, the video fills the remaining height above the controls; the
   feed height cap applies only outside fullscreen. Quality and speed portals
   render inside the fullscreen element so their menus remain visible and interactive.
