@@ -12,6 +12,7 @@ import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
 
 const fakeClient = {
+  video: { pending: vi.fn().mockResolvedValue([]), cancel: vi.fn() },
   post: {
     thread: vi.fn(),
     list: vi.fn(),

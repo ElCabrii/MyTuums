@@ -1,0 +1,35 @@
+{
+  "name": "@my-tuums/video-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^24.15.0 || >=26.0.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:media": "vitest run --project media",
+    "benchmark": "tsx src/benchmark.ts",
+    "dev": "dotenv -e ../../.env -v PORT=3002 -- tsx watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@my-tuums/api": "workspace:*",
+    "@my-tuums/db": "workspace:*",
+    "pg-boss": "12.26.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@my-tuums/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
+    "@typescript/native": "catalog:",
+    "dotenv-cli": "^11.0.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
+    "vitest": "^4.1.10"
+  }
+}

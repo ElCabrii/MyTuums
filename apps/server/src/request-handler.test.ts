@@ -1028,6 +1028,27 @@ describe("createRequestHandler", () => {
     expect(smallCalls.statusCode).toBe(200);
   });
 
+  it.each(["GET", "HEAD"])(
+    "serves authorized video text assets with private caching for %s",
+    async (method) => {
+      const { res, calls } = resStub();
+      const session = signedIn();
+      const body = "#EXTM3U\n/media/videos/authorized/360.m3u8\n";
+      const handle = createRequestHandler(
+        deps({
+          resolveMediaUrl: () =>
+            Promise.resolve({ body, contentType: "application/vnd.apple.mpegurl" }),
+          resolveSession: session.resolveSession,
+        }),
+      );
+      await handle(reqStub("/media/videos/authorized/master.m3u8", method, session.headers), res);
+      expect(calls.statusCode).toBe(200);
+      expect(calls.headers?.["Cache-Control"]).toBe("private, no-store");
+      expect(calls.headers?.["Content-Type"]).toBe("application/vnd.apple.mpegurl");
+      expect(calls.body).toBe(method === "HEAD" ? "" : body);
+    },
+  );
+
   it("redirects a /media hit to the presigned URL without caching a viewer decision", async () => {
     const { res, calls } = resStub();
     const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);

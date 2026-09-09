@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useAtomValue } from "jotai";
 import { AlertCircle, ChevronLeft, ChevronRight, ImagePlus, Loader2, Send, X } from "lucide-react";
 import {
   ALLOWED_IMAGE_TYPES,
@@ -9,6 +10,8 @@ import {
 } from "@my-tuums/api/constants";
 import { acceptPostImage } from "@my-tuums/api/post-image";
 import type { ComposerAttachment } from "@/atoms/composer";
+import { videoDraftAtomFamily, type VideoAttachmentInput } from "@/atoms/video-upload";
+import { ComposerVideo } from "@/components/composer-video";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { MentionTextarea } from "@/components/mention-textarea";
@@ -72,7 +75,11 @@ export function ComposerForm({
   value: string;
   onValueChange: (next: string) => void;
   /** Called with the trimmed body, only when it is submittable. */
-  onSubmit: (content: string, attachments?: ComposerAttachment[]) => void;
+  onSubmit: (
+    content: string,
+    attachments?: ComposerAttachment[],
+    video?: VideoAttachmentInput,
+  ) => void;
   isPending: boolean;
   /** Null when the last attempt didn't fail. */
   errorMessage: string | null;
@@ -99,6 +106,8 @@ export function ComposerForm({
   const attachmentSelectionRef = useRef(0);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentsAreValidating, setAttachmentsAreValidating] = useState(false);
+  const videoDraft = useAtomValue(videoDraftAtomFamily(mentionScope));
+  const selectedVideo = onAttachmentsChange ? videoDraft : null;
   const trimmed = value.trim();
   const remaining = POST_MAX_LENGTH - value.length;
   const isTooLong = remaining < 0;
@@ -108,10 +117,16 @@ export function ComposerForm({
   // (`existingAttachmentCount`). Attachment validation/pending state still
   // blocks until the selected files are known-good.
   const canSubmit =
-    (trimmed.length > 0 || attachments.length > 0 || existingAttachmentCount > 0) &&
+    (trimmed.length > 0 ||
+      attachments.length > 0 ||
+      existingAttachmentCount > 0 ||
+      selectedVideo !== null) &&
     !isTooLong &&
     !isPending &&
-    !attachmentsAreValidating;
+    !attachmentsAreValidating &&
+    (!selectedVideo ||
+      (selectedVideo.status === "uploaded" &&
+        /^[a-zA-Z]{2,8}(?:-[a-zA-Z0-9]{1,8})*$/.test(selectedVideo.captionLanguage)));
   const previewUrls = useMemo(
     () =>
       attachments.map(({ id, file }) => ({
@@ -136,7 +151,7 @@ export function ComposerForm({
   };
 
   const handleAttachmentSelection = async (files: FileList | null) => {
-    if (!onAttachmentsChange || !files) return;
+    if (!onAttachmentsChange || !files || selectedVideo) return;
     const selectionId = attachmentSelectionRef.current + 1;
     attachmentSelectionRef.current = selectionId;
     setAttachmentError(null);
@@ -218,7 +233,13 @@ export function ComposerForm({
       onSubmit={(event) => {
         event.preventDefault();
         if (!canSubmit) return;
-        if (attachments.length > 0) onSubmit(trimmed, attachments);
+        if (selectedVideo?.status === "uploaded" && selectedVideo.videoId)
+          onSubmit(trimmed, [], {
+            videoId: selectedVideo.videoId,
+            captions: selectedVideo.captions,
+            captionLanguage: selectedVideo.captionLanguage,
+          });
+        else if (attachments.length > 0) onSubmit(trimmed, attachments);
         else onSubmit(trimmed);
       }}
       className="border-border bg-card space-y-3 rounded-xl border p-4 shadow-sm"
@@ -313,6 +334,10 @@ export function ComposerForm({
         </div>
       )}
 
+      {onAttachmentsChange && selectedVideo && (
+        <ComposerVideo scope={mentionScope} disabled={isPending} onError={setAttachmentError} />
+      )}
+
       {(attachmentError || errorMessage) && (
         <div
           role="alert"
@@ -342,6 +367,7 @@ export function ComposerForm({
                 aria-label={m.post_add_images()}
                 disabled={
                   isPending ||
+                  selectedVideo !== null ||
                   attachmentsAreValidating ||
                   attachments.length >= POST_ATTACHMENT_MAX_COUNT
                 }
@@ -351,6 +377,13 @@ export function ComposerForm({
                 }}
               />
             </label>
+          )}
+          {onAttachmentsChange && !selectedVideo && (
+            <ComposerVideo
+              scope={mentionScope}
+              disabled={isPending || attachmentsAreValidating || attachments.length > 0}
+              onError={setAttachmentError}
+            />
           )}
           {toolbarExtra}
         </div>

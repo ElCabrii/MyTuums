@@ -85,8 +85,8 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   none of which this app controls or should enumerate. Finally, the settings
  *   crop editor renders the selected local file through a short-lived `blob:`
  *   object URL (`apps/web/src/components/settings/image-crop-dialog.tsx`).
- *   `blob:` is limited to image loads; no bare-HTTP or `data:` source is
- *   allowed, and stored media remains behind the same-origin session gate.
+ *   Local previews use `blob:`; stored media remains behind the same-origin
+ *   session gate. Video adds its own separate media/worker directives below.
  * - `font-src 'self'`: `@fontsource-variable/inter` ships the font files
  *   through the build; nothing is fetched from a font CDN.
  * - `script-src 'self' https://accounts.google.com 'unsafe-hashes'
@@ -125,7 +125,8 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   documented path, since a CSP source with no path component matches every
  *   path on that origin.
  * - `connect-src 'self' https://accounts.google.com`: `'self'` covers `/rpc`,
- *   `/api/auth` and `/media`, the app's entire fetch surface. One Tap's
+ *   `/api/auth` and `/media`. Configured bucket origins additionally allow
+ *   signed multipart PUTs and HLS segment GETs. One Tap's
  *   loaded script makes its own requests (credential fetch, FedCM
  *   `.well-known` discovery) back to Google from the page's origin context,
  *   so it needs the same host as `script-src`.
@@ -136,9 +137,10 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   and always absent on the script-free branding host. `img-src https:`
  *   already covers GA's fallback beacons, so repeating narrower Google image
  *   origins would not tighten or widen that existing directive.
- * - `worker-src 'self'`: the production web build emits one same-origin
- *   service worker for the offline app shell. Keeping this explicit prevents
- *   a future widening of `default-src` from silently widening worker code.
+ * - `worker-src 'self' blob:` allows the same-origin offline service worker
+ *   and HLS.js's bundled transmuxing worker. Script sources remain restricted.
+ * - `media-src 'self' blob:` plus the configured bucket origins allows native
+ *   HLS and MediaSource playback without opening arbitrary media hosts.
  * - `frame-src https://accounts.google.com`: One Tap's prompt UI itself
  *   renders in a Google-hosted iframe the loaded script creates. Nothing
  *   else in this app frames anything.
@@ -172,11 +174,15 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  * `cacheHeaderFor` in ./static-files.ts). Do not treat that directive as a
  * cache tuning knob — it is what keeps this policy true. See docs/security.md.
  */
-function contentSecurityPolicy(googleAnalytics: boolean): string {
+function contentSecurityPolicy(
+  googleAnalytics: boolean,
+  mediaOrigins: readonly string[] = [],
+): string {
   const analyticsScript = googleAnalytics ? " https://www.googletagmanager.com" : "";
   const analyticsConnections = googleAnalytics
     ? " https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com"
     : "";
+  const bucketSources = mediaOrigins.map((origin) => ` ${new URL(origin).origin}`).join("");
 
   return [
     "default-src 'self'",
@@ -186,8 +192,9 @@ function contentSecurityPolicy(googleAnalytics: boolean): string {
     "font-src 'self'",
     `script-src 'self' https://accounts.google.com${analyticsScript} 'unsafe-hashes' '${STYLESHEET_SWAP_HANDLER_HASH}'`,
     "style-src 'self' 'unsafe-inline' https://accounts.google.com",
-    `connect-src 'self' https://accounts.google.com${analyticsConnections}`,
-    "worker-src 'self'",
+    `connect-src 'self' https://accounts.google.com${analyticsConnections}${bucketSources}`,
+    `media-src 'self' blob:${bucketSources}`,
+    "worker-src 'self' blob:",
     "frame-src https://accounts.google.com",
     "form-action 'self'",
     "frame-ancestors 'none'",
@@ -219,6 +226,8 @@ const SECURITY_HEADERS = {
 export interface ResponseDecoratorOptions {
   /** Whether the bundled SPA contains the consent-gated GA4 integration. */
   googleAnalytics?: boolean;
+  /** Exact bucket origins used for direct multipart uploads and HLS segments. */
+  mediaOrigins?: readonly string[];
 }
 
 /** Bodies smaller than this are sent identity — compressing them costs CPU for nothing. */
@@ -353,6 +362,7 @@ class DecoratedResponse {
       // analytics because that separate site loads no third-party script.
       "Content-Security-Policy": contentSecurityPolicy(
         Boolean(this.options.googleAnalytics) && !isBrandingHostRequest(this.req),
+        this.options.mediaOrigins,
       ),
     } satisfies OutgoingHttpHeaders;
 

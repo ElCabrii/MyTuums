@@ -389,6 +389,8 @@ function notificationText(item: NotificationItem, displayName: string): string {
       return m.notification_follow_request({ name: displayName });
     case "moderation":
       return moderationText(item.action?.code);
+    case "video_failed":
+      return m.notification_video_failed();
   }
 }
 

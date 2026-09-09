@@ -4,6 +4,7 @@ import { notificationRouter } from "./notifications.js";
 import { postRouter } from "./posts.js";
 import { searchRouter } from "./search.js";
 import { userRouter } from "./users.js";
+import { videoRouter } from "./videos.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 
@@ -28,6 +29,7 @@ export const appRouter = {
   search: searchRouter,
   notification: notificationRouter,
   moderation: moderationRouter,
+  video: videoRouter,
 };
 
 /** The inferred router type, for callers that import the contract (tests, the client). */

@@ -42,6 +42,17 @@ re-proved here — see [../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
 
 ## Invariants
 
+- **The video upload regression owns only its observed capabilities.**
+  `tests/specs/video-upload.spec.ts` interrupts one multipart PUT, proves recovery
+  without resending confirmed parts, and checks explicit submission, private
+  pending state, reload and cancellation. Its transport fixture is not an encoder
+  fixture; native validation/playable-output tests run in the worker image. It
+  cleans exact session keys rather than scanning a bucket shared with local data.
+  CI configures and verifies its bucket's exact `http://localhost:5273` CORS
+  rule before the suite; local development uses the separately configured dev
+  bucket. Transport-level CSP assertions include only the configured bucket
+  origins and keep `blob:` out of script execution.
+
 - **`workers: 1`.** Every spec shares one Postgres and one in-process server
   rate limiter; parallel workers 429 each other and fight over fixtures, and
   the failure surfaces three specs away from its cause. Consequence: the

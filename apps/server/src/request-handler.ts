@@ -76,7 +76,9 @@ export interface RequestHandlerDeps {
   resolveMediaUrl: (
     key: string,
     viewerId: string | null,
-  ) => Promise<{ url: string; cacheControl?: string } | null>;
+  ) => Promise<
+    { url: string; cacheControl?: string } | { body: string; contentType: string } | null
+  >;
   /**
    * Serves the built web app, when this deployment bundles it.
    *
@@ -643,6 +645,16 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         if (!media) {
           res.writeHead(404, { "Content-Type": "text/plain" });
           res.end("Not found");
+          return;
+        }
+
+        if ("body" in media) {
+          res.writeHead(200, {
+            "Content-Type": media.contentType,
+            "Content-Length": Buffer.byteLength(media.body, "utf8"),
+            "Cache-Control": "private, no-store",
+          });
+          res.end(req.method === "HEAD" ? undefined : media.body);
           return;
         }
 

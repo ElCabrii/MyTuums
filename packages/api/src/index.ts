@@ -5,6 +5,8 @@
  * ./constants.ts for why the root must never be imported from the web app.
  */
 export { appRouter, type AppRouter } from "./router.js";
+export { createVideoUploads } from "./video-uploads.js";
+export { resolveVideoMedia } from "./video-media.js";
 export { createContext, defaultStorage } from "./context.js";
 export { createMediaResolver, type MediaAuthorizer, type MediaResolver } from "./media.js";
 export { ensureMediaVariant } from "./media-variants.js";

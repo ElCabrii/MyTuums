@@ -9,7 +9,10 @@ import { installTestOrpc } from "@/lib/orpc";
 import { renderWithProviders } from "@/test/render";
 import { m } from "@/paraglide/messages.js";
 
-const fakeClient = { post: { create: vi.fn(), list: vi.fn() } };
+const fakeClient = {
+  video: { pending: vi.fn().mockResolvedValue([]), cancel: vi.fn() },
+  post: { create: vi.fn(), list: vi.fn() },
+};
 installTestOrpc(createTanstackQueryUtils(fakeClient));
 
 beforeEach(() => {

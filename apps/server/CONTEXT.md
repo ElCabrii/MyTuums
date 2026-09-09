@@ -5,7 +5,7 @@
 The Node HTTP server. A plain `node:http` server with no framework that
 terminates every request: health checks, better-auth at `/api/auth`, the oRPC
 API at `/rpc`, media redirects at `/media`, and — in production — the built
-SPA. It is the only process Railway runs.
+SPA. Native video processing runs independently in `apps/video-worker`.
 
 It owns transport concerns only: routing, gates, headers, compression, static
 files, env validation, observability, shutdown. Business rules live in
@@ -44,6 +44,14 @@ by the Playwright `api` project.
 | Add or change a one-shot entrypoint   | `src/<name>.ts` (e.g. `src/games-sync.ts`, the catalog-sync cron)        | `tsup.config.ts` entry list, `../../.github/workflows/ci.yml` image asserts, `../../docs/operations.md` Maintenance   |
 
 ## Invariants
+
+- **Video transport stays outside the RPC body buffer.** The server starts a
+  producer-only queue and injects the video upload service when S3 is configured.
+  Browsers PUT signed multipart parts directly to the bucket. `/media/videos/`
+  authorizes each asset, returns bounded HLS/VTT bodies or a private binary
+  redirect, and supports GET/HEAD. CSP permits the exact configured bucket
+  origins for transport, `blob:` media sources, and the HLS.js worker; it does
+  not add `blob:` to script execution. Encoding never runs in this process.
 
 - **`parseEnv` must never call `process.exit`.** Only `src/index.ts` may turn
   a bad environment into an exit. Otherwise merely importing the module kills

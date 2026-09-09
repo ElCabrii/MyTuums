@@ -789,3 +789,15 @@ export function mediaVariantKeys(key: string): string[] {
  * the same silent `media="print"` failure through the back door.
  */
 export const NONBLOCKING_STYLESHEET_ONLOAD_HANDLER = "this.media='all'";
+
+/** Issue #368: decimal MB, shared by server validation and localized UI copy. */
+export const VIDEO_MAX_BYTES = 500_000_000;
+export const VIDEO_MAX_DURATION_SECONDS = 300;
+export const VIDEO_MAX_LONG_EDGE = 1920;
+export const VIDEO_MAX_SHORT_EDGE = 1080;
+export const VIDEO_MAX_FPS = 60;
+export const VIDEO_SEGMENT_SECONDS = 4;
+export const VIDEO_PREVIEW_SECONDS = 2;
+export const VIDEO_RENDITION_HEIGHTS = [360, 720, 1080] as const;
+export const VIDEO_INPUT_TYPES = ["video/mp4", "video/quicktime", "video/webm"] as const;
+export const VIDEO_CAPTION_MAX_BYTES = 200_000;

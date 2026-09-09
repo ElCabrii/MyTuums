@@ -31,6 +31,17 @@ databases. It serves data only — no HTTP, no business logic.
 
 ## Invariants
 
+- **Video lifecycle state has a different lifetime from a post.** `video_submission`
+  holds author-only pending text/captions outside `post`; `video` tracks upload,
+  leased attempts and the successful playback inventory. A published video
+  requires confirmed source deletion. The attachment references the video once.
+  `video_cleanup` and a failure notification's `videoId` intentionally have no
+  foreign key to the video: cleanup and the one failure notice must survive
+  deletion of transient state and account cascades.
+- **The queue schema is committed DDL.** `0038_video_queue.sql` is generated
+  from pinned pg-boss 12.26.0. Application startup does not migrate it. See
+  [video migration instructions](../../docs/video-operations.md#migrations).
+
 - **`src/index.ts` reads `DATABASE_URL` at module scope and throws when it is
   unset.** That is precisely why `./testing` is a separate entry point: it must
   be importable before anything touches the root subpath, so a test runner can

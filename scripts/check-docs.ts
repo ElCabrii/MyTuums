@@ -493,8 +493,8 @@ const rootScripts = Object.keys(
   (JSON.parse(read("package.json")) as { scripts?: Record<string, string> }).scripts ?? {},
 );
 
-const FILTERED = /pnpm\s+--filter\s+(@?[\w/@.-]+)\s+([\w:]+)/g;
-const ROOT_SCRIPT = /pnpm\s+(?!--)([a-z][\w]*(?::[\w]+)*)/g;
+const FILTERED = /pnpm\s+--filter\s+(@?[\w/@.-]+)\s+([\w:-]+)/g;
+const ROOT_SCRIPT = /pnpm\s+(?!--)([a-z][\w-]*(?::[\w-]+)*)/g;
 const FENCE = /```[^\n]*\n([\s\S]*?)```/g;
 
 /**

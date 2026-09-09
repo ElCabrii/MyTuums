@@ -61,6 +61,30 @@ over HTTP and imports only its browser-safe subpaths.
 
 ## Invariants
 
+- **Video submissions are not posts.** `src/video-uploads.ts` owns multipart
+  sessions; `src/video-lifecycle.ts` owns submission, leases, publication,
+  cancellation and failure. Only explicit submission stores pending text and
+  queues work. Publication inserts the ordinary post/attachment/notifications
+  atomically after all assets exist and source deletion is confirmed.
+- **Video cleanup is durable and independent of retries.** `video_cleanup`
+  survives account cascades and stores identifiers/keys only. Terminal failure
+  erases pending text/captions and creates exactly one `video_failed` notice.
+  `src/video-maintenance.ts` reconciles both rows and actual objects to catch
+  stale writers after cleanup. Moderation removal retains successful assets;
+  author deletion schedules their removal.
+- **Every video asset passes the existing post authorizer.** `src/video-media.ts`
+  validates the published attempt and inventory before calling
+  `canViewPostMedia`. HLS and VTT are bounded, privately served text with rewritten
+  local references; binary assets use signed redirects. Raw input is never served.
+- **Queue enqueue participates in submission's transaction.** `src/video-queue.ts`
+  adapts pg-boss to the existing postgres-js/Drizzle pool, including JSON/array
+  binding and reserved transactions. `./video-worker` is a server-only leaf
+  export with no auth-instance construction; never import it from the SPA.
+
+Video regression checks: `src/video-lifecycle.int.test.ts`,
+`src/video-uploads.int.test.ts`, `src/video-media.int.test.ts` and
+`src/video-captions.test.ts`. Native validation belongs to `apps/video-worker`.
+
 - **The rate limiter, storage client, and email sender are threaded on `Context`,
   never module globals.** Tests substitute all three; one suite's limiter state
   must not bleed into another's, and moderation tests record delivery through

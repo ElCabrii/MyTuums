@@ -229,6 +229,34 @@ makes the server dial out (issue #260):
 
 ## Media
 
+**Video boundary** (`packages/api/src/video-uploads.ts`, `video-media.ts`,
+`apps/video-worker/src/probe.ts`): authenticated upload sessions own bounded
+signed multipart capabilities; browser declarations do not establish validity.
+Native probes validate actual container/codecs, oriented dimensions, timing and
+decoded frames before scaling. Processes receive local filenames, restricted
+input protocols and an environment without application credentials.
+
+Pending text/captions stay outside public posts and queue payloads contain only
+IDs. Attempt leases and database transactions fence publication, cancellation
+and duplicate delivery. Source deletion must be confirmed before publication.
+Terminal failure erases text/captions and creates one notice; content-free cleanup
+debt survives provider outages and account cascades. Raw video is never served.
+
+Every published asset passes the existing post authorizer and must belong to the
+current recorded inventory. HLS/VTT bodies are bounded and their asset references
+are rewritten through `/media/videos/`; arbitrary manifest destinations cannot
+escape the inventory. Binary assets redirect to signed URLs with a one-hour TTL;
+already-issued capabilities retain that bounded validity after access changes.
+Moderation removal retains successful evidence; author deletion schedules cleanup.
+
+Bucket CORS permits exact app origins for GET/HEAD/PUT and the required headers;
+it does not make objects public. The video CSP adds exact configured bucket
+origins to media/connect sources and allows blob media/HLS workers, without
+allowing blob scripts. Environment database/bucket pairing is mandatory because
+video reconciliation treats objects absent from its database as orphans.
+
+See [video operations](video-operations.md) for deployment and recovery controls.
+
 **Upload validation** (`packages/api/src/image.ts`):
 
 - The stored type is the **sniffed** type, never the declared one, and the two

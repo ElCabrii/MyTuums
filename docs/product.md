@@ -59,7 +59,7 @@ menu; the navigation bar has no standalone theme button.
 ## Posts, replies, likes, follows
 
 - Posts are plain text, up to 500 characters, trimmed. A post or reply carries
-  text, up to four images, or both — a submission with neither is refused, and
+  text, up to four images or one video, or text with that media — an empty submission is refused, and
   an image-only post stores an empty body rather than placeholder whitespace.
   Rendering recognizes
   three link shapes in that text and nothing else. Syntactically valid `@handles`
@@ -419,6 +419,25 @@ notification when a badge is earned.
   one horizontally scrollable row.
 
 ## Media
+
+- Posts, replies and quotes may contain one video or up to four images; mixing
+  them is refused. Videos accept MP4, MOV and WebM up to 500 decimal MB and five
+  minutes, at most 60 fps and oriented dimensions fitting 1920×1080 or 1080×1920.
+  Actual formats/codecs and decoded frames are validated; scaling cannot make
+  an oversized input acceptable.
+- Selection uploads with progress, cancellation and recovery from brief network
+  interruptions. Submission remains explicit. After submission, an author-only
+  pending card survives navigation/reload; it has no public post link or counters.
+  A ready video publishes automatically after its raw source is removed.
+- A terminal failure removes the pending draft and produces exactly one durable,
+  link-free notice: “Your video couldn’t be processed, so your post wasn’t
+  published. Please create a new post to try again.” There is no failed-post archive.
+- Playback provides adaptive 360p/720p/1080p where the source supports them,
+  without upscaling; higher renditions preserve source rates up to 60 fps.
+  The custom player includes play/pause, seek, mute/volume, quality, speed,
+  fullscreen and picture-in-picture where supported, optional uploaded WebVTT
+  captions and timeline previews. At most one visible video autoplays, always
+  muted; scrolling offscreen pauses it. Autoplay can be disabled in Preferences.
 
 _Configuration-dependent_: uploads require the `S3_*` group. Without it the
 app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.

@@ -35,6 +35,11 @@ real default (`auto`).
 
 ## Local development
 
+Native video processing is an optional separate process: `pnpm video:dev` uses
+health port `3002`. It requires FFmpeg/FFprobe and a matched database/bucket pair.
+The [video operations guide](video-operations.md) owns its settings, CORS,
+migrations, environment isolation, recovery and measurements.
+
 Two ways to run the stack. They both want ports 3001 and 5173, so run one.
 
 | Mode               | Command          | What you get                                                                  |
@@ -183,6 +188,12 @@ report: `@my-tuums/db` evaluates it at module scope and throws before
 `parseEnv` ever runs.
 
 ## Docker image
+
+The video worker has its own `apps/video-worker/Dockerfile`. It tests the actual
+encoder during build, runs without root privileges, and ships no SPA. The
+existing CI image job builds both images and boots the worker against a dedicated
+`_test` database and local empty storage stub, checking maintenance, health and
+queue acknowledgement without bucket credentials.
 
 `apps/server/Dockerfile` is a four-stage build from the monorepo root:
 

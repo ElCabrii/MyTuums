@@ -1,4 +1,6 @@
-import { useAtomValue, useSetAtom } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { videoAutoplayAtom } from "@/atoms/video-playback";
+import { Switch } from "@/components/ui/switch";
 import { Settings2 } from "lucide-react";
 import {
   LOCALE_PREFERENCES,
@@ -48,6 +50,7 @@ export function PreferencesSection() {
   const isBusy = useAtomValue(authPendingAtom);
   const saveTheme = useSetAtom(saveThemePreferenceAtom);
   const saveLocale = useSetAtom(saveLocalePreferenceAtom);
+  const [autoplay, setAutoplay] = useAtom(videoAutoplayAtom);
 
   const storedTheme = viewer?.themePreference ?? null;
   const storedLocale = viewer?.localePreference ?? null;
@@ -98,6 +101,13 @@ export function PreferencesSection() {
         </div>
 
         <p className="text-muted-foreground text-xs">{m.settings_prefs_hint()}</p>
+        <label className="flex items-center justify-between gap-4 border-t pt-4">
+          <span>
+            <span className="block text-sm font-medium">{m.video_autoplay_label()}</span>
+            <span className="text-muted-foreground block text-xs">{m.video_autoplay_hint()}</span>
+          </span>
+          <Switch checked={autoplay} onCheckedChange={setAutoplay} />
+        </label>
       </div>
     </Section>
   );

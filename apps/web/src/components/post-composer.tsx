@@ -1,5 +1,6 @@
 import { useAtom, useAtomValue } from "jotai";
 import { Globe, Lock } from "lucide-react";
+import { PendingVideos } from "@/components/pending-videos";
 import { ComposerForm } from "@/components/composer-form";
 import {
   composerAttachmentsAtom,
@@ -40,62 +41,68 @@ export function PostComposer() {
   const audience = effectivePrivate ? m.composer_private_label() : m.composer_public_label();
 
   return (
-    <ComposerForm
-      author={user}
-      value={content}
-      onValueChange={setContent}
-      onSubmit={(body, selectedAttachments) => {
-        createPost.mutate({
-          content: body,
-          attachments: selectedAttachments?.map(({ file }) => file) ?? [],
-          isPrivate: effectivePrivate,
-        });
-      }}
-      isPending={createPost.isPending}
-      errorMessage={createPost.isError ? createPost.error.message || m.post_publish_error() : null}
-      placeholder={m.post_placeholder()}
-      submitLabel={m.post_action()}
-      mentionScope="post"
-      attachments={attachments}
-      onAttachmentsChange={setAttachments}
-      toolbarExtra={
-        <Popover>
-          <PopoverTrigger
-            render={<Button variant="outline" size="sm" />}
-            type="button"
-            disabled={createPost.isPending}
-            aria-label={m.composer_visibility_trigger({ audience })}
-            title={m.composer_visibility_trigger({ audience })}
-            className="text-muted-foreground h-8 gap-1.5 rounded-full px-3"
-          >
-            {effectivePrivate ? <Lock aria-hidden="true" /> : <Globe aria-hidden="true" />}
-            <span className="hidden sm:inline">{audience}</span>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="max-w-[calc(100vw-2rem)]">
-            <PopoverTitle>{m.composer_visibility_label()}</PopoverTitle>
-            <PopoverDescription>
-              {accountDefault ? m.composer_private_account_default() : m.composer_private_hint()}
-            </PopoverDescription>
-            <RadioGroup
-              aria-label={m.composer_visibility_label()}
-              value={effectivePrivate ? "private" : "public"}
+    <div className="space-y-4">
+      <ComposerForm
+        author={user}
+        value={content}
+        onValueChange={setContent}
+        onSubmit={(body, selectedAttachments, video) => {
+          createPost.mutate({
+            content: body,
+            attachments: selectedAttachments?.map(({ file }) => file) ?? [],
+            isPrivate: effectivePrivate,
+            ...video,
+          });
+        }}
+        isPending={createPost.isPending}
+        errorMessage={
+          createPost.isError ? createPost.error.message || m.post_publish_error() : null
+        }
+        placeholder={m.post_placeholder()}
+        submitLabel={m.post_action()}
+        mentionScope="post"
+        attachments={attachments}
+        onAttachmentsChange={setAttachments}
+        toolbarExtra={
+          <Popover>
+            <PopoverTrigger
+              render={<Button variant="outline" size="sm" />}
+              type="button"
               disabled={createPost.isPending}
-              onValueChange={(value) => {
-                if (!createPost.isPending && !accountDefault) setIsPrivate(value === "private");
-              }}
+              aria-label={m.composer_visibility_trigger({ audience })}
+              title={m.composer_visibility_trigger({ audience })}
+              className="text-muted-foreground h-8 gap-1.5 rounded-full px-3"
             >
-              <label className="flex items-center gap-3 py-1 has-data-disabled:opacity-50">
-                <RadioGroupItem value="public" disabled={accountDefault} />
-                {m.composer_public_label()}
-              </label>
-              <label className="flex items-center gap-3 py-1">
-                <RadioGroupItem value="private" />
-                {m.composer_private_label()}
-              </label>
-            </RadioGroup>
-          </PopoverContent>
-        </Popover>
-      }
-    />
+              {effectivePrivate ? <Lock aria-hidden="true" /> : <Globe aria-hidden="true" />}
+              <span className="hidden sm:inline">{audience}</span>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="max-w-[calc(100vw-2rem)]">
+              <PopoverTitle>{m.composer_visibility_label()}</PopoverTitle>
+              <PopoverDescription>
+                {accountDefault ? m.composer_private_account_default() : m.composer_private_hint()}
+              </PopoverDescription>
+              <RadioGroup
+                aria-label={m.composer_visibility_label()}
+                value={effectivePrivate ? "private" : "public"}
+                disabled={createPost.isPending}
+                onValueChange={(value) => {
+                  if (!createPost.isPending && !accountDefault) setIsPrivate(value === "private");
+                }}
+              >
+                <label className="flex items-center gap-3 py-1 has-data-disabled:opacity-50">
+                  <RadioGroupItem value="public" disabled={accountDefault} />
+                  {m.composer_public_label()}
+                </label>
+                <label className="flex items-center gap-3 py-1">
+                  <RadioGroupItem value="private" />
+                  {m.composer_private_label()}
+                </label>
+              </RadioGroup>
+            </PopoverContent>
+          </Popover>
+        }
+      />
+      <PendingVideos />
+    </div>
   );
 }

@@ -9,7 +9,7 @@ behaviour and vocabulary, [product.md](product.md).
 **Source of truth:** `pnpm-workspace.yaml`, each package's `package.json`,
 `turbo.json`
 
-Dependencies point one way. `apps/web` and `apps/server` are leaves; nothing
+Dependencies point one way. `apps/web`, `apps/server` and `apps/video-worker` are leaves; nothing
 imports them.
 
 ```
@@ -18,6 +18,7 @@ apps/server ──▶ packages/api ──▶ packages/auth ──▶ packages/db
             └─▶ packages/auth ─────────────────────┘
             └─▶ packages/db
 e2e ──▶ packages/api, packages/auth, packages/db
+apps/video-worker ──▶ packages/api/video-worker, packages/db
 ```
 
 `packages/api`, `packages/auth` and `packages/db` are **source-only**: they
@@ -63,6 +64,10 @@ browser talks to Vite, which proxies three prefixes to the API:
 Vite's `envDir` is the monorepo root, so the single `.env` feeds Vite and every
 `dotenv -e ../../.env` script alike.
 
+`pnpm video:dev` runs the optional worker separately on health port `3002`.
+FFmpeg and the environment's database/bucket pair are required. Ordinary
+`pnpm dev` excludes it so image-only development does not require native tools.
+
 `pnpm docker:up` occupies the same two ports with the production image, so run
 one or the other. The E2E stack deliberately uses `:3101` / `:5273` so it can
 run beside a live dev stack.
@@ -75,6 +80,11 @@ run beside a live dev stack.
 In production there is no proxy and no second origin. The Docker image sets
 `WEB_DIST=/app/apps/web/dist` and the same Node process serves the SPA, the
 auth endpoints, the RPC API and media redirects.
+
+Video processing adds an independent worker service in the same environment and
+European region. It shares PostgreSQL and the bucket, has no browser-facing
+origin, and never handles a user's HTTP upload. Deployment settings are in
+[video operations](video-operations.md).
 
 The Vite build also emits `/service-worker.js`, whose generated precache list
 contains the hashed app-shell assets. The worker never caches RPC, auth, or
@@ -161,7 +171,7 @@ Ordering facts that are load-bearing:
 `packages/api/src/router.ts`
 
 `createContext` builds one `Context` per request carrying `db`, `session`,
-`rateLimiter`, `storage` and `requestId`. The rate limiter and the storage
+`rateLimiter`, `storage`, `videoUploads` and `requestId`. The rate limiter and the storage
 client are threaded on the context, never imported as module globals, so tests
 substitute fakes and one suite's limiter state cannot bleed into another's.
 
@@ -171,6 +181,7 @@ The router's top-level groups:
 
 - `me` — the caller's own session user
 - `post` — `create`, `delete`, `list`, `thread`, `like`, `unlike`
+- `video` — multipart begin/status/part/finish/cancel and author-only pending submissions
 - `user` — `byUsername`, `uploadImage`, `removeImage`, `follow`, `unfollow`, `followers`, `following`
 - `game` — `bySlug`, `list` (public: the `/games` directory, issue #314)
 - `search` — `typeahead`, `users`, `posts`
@@ -317,7 +328,7 @@ sides by CI. See [operations.md](operations.md).
   load-bearing one: a ~200 KB PNG declaring 400 MP allocates about a gigabyte
   on decode, so an editor that measured the source first would freeze the tab
   merely on selection.
-- **Post attachments are re-encoded in the browser and keep no original**
+- **Post image attachments are re-encoded in the browser and keep no original**
   (issue #207). The composer runs every picked file through
   `createPostAttachment` (`apps/web/src/lib/media.ts`) before it joins a
   draft: decode → canvas re-encode to WebP (PNG where a browser lacks that
@@ -372,6 +383,42 @@ sides by CI. See [operations.md](operations.md).
   every derivable variant key of each referenced base, so on-demand
   generation never orphans a survivor and a dead base's variants are reaped
   with it.
+
+### Video lifecycle and playback
+
+**Source of truth:** `packages/api/src/video-lifecycle.ts`,
+`packages/api/src/video-uploads.ts`, `packages/api/src/video-media.ts`,
+`apps/video-worker/src/job.ts`, `apps/web/src/components/video-player.tsx`.
+
+1. Selection creates a durable upload owner before issuing signed multipart
+   capabilities. The browser streams 8 MiB parts directly to the private bucket;
+   progress/cancel/recovery do not buffer a video in the RPC server.
+2. Upload completion alone creates no post. Explicit submission stores text,
+   target and optional captions in `video_submission` and enqueues an IDs-only
+   pg-boss job in the same transaction. Only the author can list pending rows.
+3. A leased attempt downloads to bounded scratch space, validates actual media
+   and decoded frames, then produces H.264/AAC fMP4 HLS, a cover and two-second
+   timeline sprites. Attempt-specific keys fence stale workers.
+4. Once every derivative is uploaded, the attempt records its inventory. It
+   deletes the raw source and confirms absence before publishing the normal
+   post, attachment, counters and notifications through shared publication rules
+   in one transaction. Retried delivery cannot publish twice.
+5. Failure erases pending text/captions, creates one link-free failure notice,
+   and retains content-free cleanup debt. Expiry, cancellation, deletion and
+   account cascades also owe cleanup. Maintenance compares rows and actual
+   storage to find abandoned multipart sessions and late stale writes.
+
+Every `/media/videos/` request verifies the current published attempt, asset
+inventory and existing post visibility. Bounded HLS/VTT bodies rewrite references
+back through that gate; binary segments, initialization files, covers and sprites
+redirect to short-lived signed URLs. Published media survives moderation removal
+for evidence/restoration; author deletion schedules removal.
+
+Full attachment surfaces use one custom player. HLS.js loads on demand, selects
+adaptive or explicit renditions and releases playback sources offscreen. Jotai
+coordinates a single visible player; autoplay is muted and can be disabled per
+device. Controls include seeking, volume, speed, captions, fullscreen/PiP where
+supported and timeline previews. Compact surfaces show the same video's cover.
 
 ## Moderation — report, action, audit, appeal
 

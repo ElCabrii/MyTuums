@@ -52,8 +52,11 @@ export async function publicPostHead(db: Database, postId: string): Promise<Publ
   const [row] = await db
     .select({
       content: post.content,
-      imagePath: sql<string | null>`(
-        select ${postAttachment.mediaPath}
+      image: sql<{ path: string; isVideo: boolean } | null>`(
+        select json_build_object(
+          'path', ${postAttachment.mediaPath},
+          'isVideo', ${postAttachment.videoId} is not null
+        )
         from ${postAttachment}
         where ${postAttachment.postId} = ${post.id}
         order by ${postAttachment.position}
@@ -82,6 +85,10 @@ export async function publicPostHead(db: Database, postId: string): Promise<Publ
     description: collapsed
       ? truncate(collapsed, DESCRIPTION_MAX_LENGTH)
       : "The social media, for gamers.",
-    imagePath: row.imagePath ? mediaVariantPath(row.imagePath, 1280) : null,
+    imagePath: row.image
+      ? row.image.isVideo
+        ? row.image.path.replace(/master\.m3u8$/, "cover.jpg")
+        : mediaVariantPath(row.image.path, 1280)
+      : null,
   };
 }
