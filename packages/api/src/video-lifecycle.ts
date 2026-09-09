@@ -331,7 +331,10 @@ export async function publishVideo(db: Database, work: VideoWork): Promise<boole
       return false;
     }
     const targets = await publicationTargets(tx, submission);
-    if (!targets) {
+    // The largest encoded rendition has integer square-pixel dimensions.
+    // Source display dimensions can be fractional for anamorphic input.
+    const rendition = row.playback.renditions.at(-1);
+    if (!targets || !rendition) {
       await terminateVideo(tx, row, "failed");
       return false;
     }
@@ -351,8 +354,8 @@ export async function publishVideo(db: Database, work: VideoWork): Promise<boole
           mediaPath: `/media/${work.prefix}master.m3u8`,
           contentType: "application/vnd.apple.mpegurl",
           byteSize: row.assets.reduce((sum, asset) => sum + asset.byteSize, 0),
-          width: row.playback.width,
-          height: row.playback.height,
+          width: rendition.width,
+          height: rendition.height,
         },
       ],
     });

@@ -62,14 +62,14 @@ async function submittedVideo(authorId: string, parentId: string | null = null) 
   return { upload, submission };
 }
 
-async function encodedVideo(work: VideoWork) {
+async function encodedVideo(work: VideoWork, width = 640, height = 360) {
   expect(
     await finishVideoEncoding(
       db,
       work,
       {
-        width: 640,
-        height: 360,
+        width,
+        height,
         duration: 6,
         frameRate: 30,
         renditions: [{ name: "360", width: 640, height: 360, frameRate: 30, bandwidth: 1_128_000 }],
@@ -80,6 +80,22 @@ async function encodedVideo(work: VideoWork) {
 }
 
 describe("video lifecycle (issue #368)", () => {
+  it("publishes anamorphic video with integer rendition dimensions (issue #368)", async () => {
+    const author = await createTestUser();
+    const { upload, submission } = await submittedVideo(author.id);
+    const work = await claimVideo(db, upload.id);
+    if (!work) throw new Error("Expected processing work.");
+    await encodedVideo(work, 720 * (32 / 27), 480);
+    await confirmVideoSourceDeleted(db, work);
+    expect(await publishVideo(db, work)).toBe(true);
+    const thread = await call(
+      appRouter.post.thread,
+      { postId: submission.id },
+      { context: contextFor(author) },
+    );
+    expect(thread.post.attachments).toMatchObject([{ width: 640, height: 360 }]);
+  });
+
   it("persists the recurring cleanup schedule through the application database adapter", async () => {
     await queue.schedule("video-maintenance", "* * * * *");
     expect(await queue.getSchedules("video-maintenance")).toMatchObject([

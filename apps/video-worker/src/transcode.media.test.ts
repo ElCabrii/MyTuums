@@ -45,6 +45,43 @@ afterAll(async () => {
 });
 
 describe("issue #368 native video processing", () => {
+  it.each([0.5, 50.1])(
+    "generates every advertised preview for a %s-second clip (issue #368)",
+    async (duration) => {
+      const filename = `preview-${duration}.mp4`;
+      await runMediaProcess(
+        "ffmpeg",
+        [
+          "-v",
+          "error",
+          "-f",
+          "lavfi",
+          "-i",
+          "testsrc2=size=160x90:rate=30",
+          "-t",
+          String(duration),
+          "-c:v",
+          "libx264",
+          "-threads",
+          "2",
+          "-preset",
+          "ultrafast",
+          filename,
+        ],
+        { cwd: directory, signal },
+      );
+      const result = await encodeVideo(join(directory, filename), {
+        signal,
+        temporaryDirectory: directory,
+      });
+      const previews = await readFile(join(result.directory, "previews.vtt"), "utf8");
+      const references = [...previews.matchAll(/(preview_\d+\.jpg)#xywh=/g)];
+      expect(references).toHaveLength(Math.ceil(duration / 2));
+      const names = result.assets.map((asset) => asset.name);
+      for (const reference of references) expect(names).toContain(reference[1]);
+    },
+  );
+
   it("produces complete decodable HLS, a cover, and two-second preview cues", async () => {
     const result = await encodeVideo(join(directory, "source.mp4"), {
       signal,

@@ -214,6 +214,8 @@ export async function encodeVideo(
     const previewScale = Math.min(1, 160 / source.width, 160 / source.height);
     const previewWidth = Math.max(2, Math.floor((source.width * previewScale) / 2) * 2);
     const previewHeight = Math.max(2, Math.floor((source.height * previewScale) / 2) * 2);
+    // Keep the final partial interval, including clips shorter than one sample.
+    // Default EOF rounding can drop a frame that the VTT below still advertises.
     await encode([
       "-map",
       `0:${source.videoStream}`,
@@ -223,7 +225,7 @@ export async function encodeVideo(
       "-map_metadata",
       "-1",
       "-vf",
-      `${colorFilter(source)}fps=1/${VIDEO_PREVIEW_SECONDS}:start_time=0,scale=${previewWidth}:${previewHeight},setsar=1,tile=5x5`,
+      `${colorFilter(source)}fps=1/${VIDEO_PREVIEW_SECONDS}:start_time=0:eof_action=pass,scale=${previewWidth}:${previewHeight},setsar=1,tile=5x5`,
       "-q:v",
       "4",
       "preview_%03d.jpg",
