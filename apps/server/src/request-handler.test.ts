@@ -167,6 +167,85 @@ describe("createRequestHandler", () => {
     expect(JSON.parse(calls.body)).toEqual({ status: "error", reason: "database unreachable" });
   });
 
+  describe("edge gate (EDGE_SECRET set)", () => {
+    // 32+ chars, matching the env schema's floor — the Transform Rule and the
+    // service env carry the real value; the gate only ever sees these.
+    const SECRET = "test-edge-secret-0123456789abcdef";
+    const gated = (overrides: Partial<RequestHandlerDeps> = {}) =>
+      deps({ edgeSecret: SECRET, ...overrides });
+
+    it("404s every request without the header, /health included, before any routing branch runs", async () => {
+      // The gate's whole point is that a direct-to-origin request — one that
+      // never met the Transform Rule — has no claim on ANY route. So the
+      // strongest test is the one route with no other gate in front of it,
+      // plus proof the DB was never asked.
+      const { res, calls } = resStub();
+      const pingDb = vi.fn();
+      const handle = createRequestHandler(gated({ pingDb }));
+
+      await handle(reqStub("/health"), res);
+
+      expect(calls.statusCode).toBe(404);
+      expect(calls.body).toBe("Not found");
+      expect(pingDb).not.toHaveBeenCalled();
+    });
+
+    it("404s a wrong value rather than a missing one only", async () => {
+      const { res, calls } = resStub();
+      const handle = createRequestHandler(gated());
+
+      await handle(reqStub("/health", "GET", { "x-edge-secret": "wrong" }), res);
+
+      expect(calls.statusCode).toBe(404);
+    });
+
+    it("404s a repeated header (array) rather than joining its values", async () => {
+      // The proxy's rewrite is a `set`, so it never produces two values. A
+      // client trying to smuggle one through alongside its own must not win
+      // by comma-join semantics the gate never agreed to.
+      const request = reqStub("/health");
+      request.headers["x-edge-secret"] = [SECRET, "attacker-controlled"];
+
+      const { res, calls } = resStub();
+      const handle = createRequestHandler(gated());
+
+      await handle(request, res);
+
+      expect(calls.statusCode).toBe(404);
+    });
+
+    it("lets a matching header through to the ordinary routing tree", async () => {
+      const { res, calls } = resStub();
+      const handle = createRequestHandler(gated());
+
+      await handle(reqStub("/health", "GET", { "x-edge-secret": SECRET }), res);
+
+      expect(calls.statusCode).toBe(200);
+      expect(JSON.parse(calls.body)).toEqual({ status: "ok" });
+    });
+
+    it("still serves /live without the header — Railway's healthchecker probes the ingress directly, through no edge proxy", async () => {
+      const { res, calls } = resStub();
+      const pingDb = vi.fn();
+      const handle = createRequestHandler(gated({ pingDb }));
+
+      await handle(reqStub("/live"), res);
+
+      expect(calls.statusCode).toBe(200);
+      expect(JSON.parse(calls.body)).toEqual({ status: "ok" });
+      expect(pingDb).not.toHaveBeenCalled();
+    });
+  });
+
+  it("serves /health without any edge header when EDGE_SECRET is unset — dev, CI, and production", async () => {
+    const { res, calls } = resStub();
+    const handle = createRequestHandler(deps());
+
+    await handle(reqStub("/health"), res);
+
+    expect(calls.statusCode).toBe(200);
+  });
+
   it("redirects a cookie-less GET to / to /login, skipping the whole SPA round trip and any session lookup", async () => {
     // The client-side gate (`useRequireSignedIn`) would land a signed-out
     // visitor on /login?redirect=%2F anyway, but only after the bundle, the
