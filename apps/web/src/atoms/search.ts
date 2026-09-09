@@ -36,6 +36,10 @@ export const setSearchQueryAtom = atom(null, (_get, set, q: string) => {
   // A later keystroke cancels the earlier one's timer, so a burst of typing
   // issues exactly one query, for the final value.
   clearTimeout(debounceTimer);
+  if (!normalized) {
+    set(debouncedSearchQueryAtom, "");
+    return;
+  }
   debounceTimer = setTimeout(() => set(debouncedSearchQueryAtom, normalized), debounceMs);
 });
 

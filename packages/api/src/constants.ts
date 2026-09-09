@@ -800,4 +800,3 @@ export const VIDEO_SEGMENT_SECONDS = 4;
 export const VIDEO_PREVIEW_SECONDS = 2;
 export const VIDEO_RENDITION_HEIGHTS = [360, 720, 1080] as const;
 export const VIDEO_INPUT_TYPES = ["video/mp4", "video/quicktime", "video/webm"] as const;
-export const VIDEO_CAPTION_MAX_BYTES = 200_000;

@@ -36,7 +36,6 @@ import {
   SEARCH_QUERY_MAX_LENGTH,
   GAME_SLUG_MAX_LENGTH,
   RANK_SNAPSHOT_INVALID_MESSAGE,
-  VIDEO_CAPTION_MAX_BYTES,
 } from "./constants.js";
 import { createCursorCodec, createEventCursorCodec, createRankCursorCodec } from "./cursor.js";
 import {
@@ -53,7 +52,6 @@ import { insertNotification } from "./notifications.js";
 import { publishPost, resolvePostTarget, type CreatedPost } from "./post-publication.js";
 import { deletePostVideo } from "./video-lifecycle.js";
 import { requireVideoUploads, videoAction } from "./videos.js";
-import { normalizeVideoCaptions } from "./video-captions.js";
 import { keysetPage } from "./pagination.js";
 import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";
 import {
@@ -1528,12 +1526,9 @@ export const postRouter = {
           /** The same ordered image capability is available to posts and replies. */
           attachments: z.array(z.file()).max(POST_ATTACHMENT_MAX_COUNT).default([]),
           videoId: z.uuid().optional(),
-          captions: z.file().max(VIDEO_CAPTION_MAX_BYTES).optional(),
-          captionLanguage: z
-            .string()
-            .regex(/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/)
-            .max(35)
-            .default("en"),
+          // Reject obsolete clients explicitly instead of silently dropping their subtitles.
+          captions: z.never().optional(),
+          captionLanguage: z.never().optional(),
           /**
            * Followers-only visibility (issue #328). Omitted inherits the
            * author's account default. The flag is one-way while the account
@@ -1565,10 +1560,6 @@ export const postRouter = {
         .refine(({ videoId, attachments }) => !videoId || attachments.length === 0, {
           error: "A post can contain one video or up to four images.",
           path: ["attachments"],
-        })
-        .refine(({ captions, videoId }) => !captions || Boolean(videoId), {
-          error: "Captions require a video.",
-          path: ["captions"],
         }),
     )
     .handler(async ({ input, context }) => {
@@ -1660,16 +1651,6 @@ export const postRouter = {
 
       const videoId = input.videoId;
       if (videoId) {
-        let caption: string | null = null;
-        if (input.captions) {
-          try {
-            caption = normalizeVideoCaptions(await input.captions.text());
-          } catch {
-            throw new ORPCError("BAD_REQUEST", {
-              message: "Please choose a valid WebVTT caption file.",
-            });
-          }
-        }
         const submitted = await videoAction(() =>
           requireVideoUploads(context).submit({
             videoId,
@@ -1678,8 +1659,8 @@ export const postRouter = {
             parentId: input.parentId ?? null,
             quotedPostId: input.quotedPostId ?? null,
             isPrivate,
-            caption,
-            captionLanguage: caption ? input.captionLanguage : null,
+            caption: null,
+            captionLanguage: null,
           }),
         );
         return {

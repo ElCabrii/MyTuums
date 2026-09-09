@@ -83,7 +83,9 @@ over HTTP and imports only its browser-safe subpaths.
 
 Video regression checks: `src/video-lifecycle.int.test.ts`,
 `src/video-uploads.int.test.ts`, `src/video-media.int.test.ts` and
-`src/video-captions.test.ts`. Native validation belongs to `apps/video-worker`.
+`src/posts.int.test.ts`. New post submissions reject separate subtitle files;
+existing stored captions remain readable and processable. Native validation
+belongs to `apps/video-worker`.
 
 - **The rate limiter, storage client, and email sender are threaded on `Context`,
   never module globals.** Tests substitute all three; one suite's limiter state

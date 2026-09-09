@@ -171,7 +171,7 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
   return (
     <div
       ref={containerRef}
-      className="group/video border-border bg-card mb-3 overflow-hidden rounded-lg border [&:fullscreen]:m-0 [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen]:rounded-none [&:fullscreen]:border-0 [&:fullscreen]:bg-black"
+      className="group/video border-border mb-3 overflow-hidden rounded-lg border [&:fullscreen]:m-0 [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen]:rounded-none [&:fullscreen]:border-0 [&:fullscreen]:bg-black [&:fullscreen]:text-white [&:fullscreen]:scheme-dark"
       role="group"
       aria-label={m.video_player_label()}
       onClick={(event) => event.stopPropagation()}
@@ -214,7 +214,7 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
           />
         )}
       </video>
-      <div className="bg-card shrink-0 space-y-2 p-3">
+      <div className="shrink-0 space-y-2 p-3">
         <div
           className="relative pt-1"
           onPointerMove={(event) => {

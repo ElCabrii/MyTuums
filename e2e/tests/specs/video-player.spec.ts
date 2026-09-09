@@ -73,6 +73,9 @@ for (const [orientation, width, height] of [
       )
       .toBeLessThanOrEqual(1);
     await expect(player.getByRole("button", { name: "Toggle fullscreen" })).toBeInViewport();
+    const controls = player.locator(":scope > div");
+    await expect(controls).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(controls).toHaveCSS("color", "rgb(255, 255, 255)");
     await player.getByRole("button", { name: "Toggle fullscreen" }).click();
     await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
     await expect

@@ -145,7 +145,8 @@ test.describe("post image attachments", () => {
     const content = `Post with image ${Date.now().toString()}`;
 
     await page.getByPlaceholder(COMPOSER_PLACEHOLDER).fill(content);
-    await page.getByLabel("Add images", { exact: true }).setInputFiles({
+    await page.getByRole("button", { name: "Add media", exact: true }).click();
+    await page.getByLabel("Choose images or a video", { exact: true }).setInputFiles({
       name: "post.png",
       mimeType: "image/png",
       buffer: solidPng(800, 600),
@@ -178,7 +179,8 @@ test.describe("post image attachments", () => {
     await page.goto(`/post/${parent.id}`);
     const content = `Reply with image ${Date.now().toString()}`;
     await page.getByPlaceholder(REPLY_PLACEHOLDER).fill(content);
-    await page.getByLabel("Add images", { exact: true }).setInputFiles({
+    await page.getByRole("button", { name: "Add media", exact: true }).click();
+    await page.getByLabel("Choose images or a video", { exact: true }).setInputFiles({
       name: "reply.png",
       mimeType: "image/png",
       buffer: solidPng(640, 480),
@@ -207,7 +209,8 @@ test.describe("post image attachments", () => {
     const content = `Metadata strip ${Date.now().toString()}`;
 
     await page.getByPlaceholder(COMPOSER_PLACEHOLDER).fill(content);
-    await page.getByLabel("Add images", { exact: true }).setInputFiles({
+    await page.getByRole("button", { name: "Add media", exact: true }).click();
+    await page.getByLabel("Choose images or a video", { exact: true }).setInputFiles({
       name: "gps-photo.jpg",
       mimeType: "image/jpeg",
       buffer: jpegWithExif(320, 240),
@@ -244,7 +247,7 @@ test.describe("composer visibility layout (issue #350)", () => {
   // disagrees with the code by construction when copy drifts (e2e/CONTEXT.md).
   const EN = {
     placeholder: COMPOSER_PLACEHOLDER,
-    addImages: "Add images",
+    addMedia: "Add media",
     triggerPattern: /Post visibility/,
     triggerPublic: "Post visibility: Public",
     title: "Post visibility",
@@ -254,7 +257,7 @@ test.describe("composer visibility layout (issue #350)", () => {
   } as const;
   const FR = {
     placeholder: "Partagez une actualité gaming, un clip ou un résultat de tournoi...",
-    addImages: "Ajouter des images",
+    addMedia: "Ajouter des médias",
     triggerPattern: /Visibilité de la publication/,
     triggerPublic: "Visibilité de la publication : Public",
     title: "Visibilité de la publication",
@@ -280,7 +283,7 @@ test.describe("composer visibility layout (issue #350)", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
   }
 
-  test("visibility trigger stays adjacent to Add images without overflow from 320 to 641px in EN and FR", async ({
+  test("visibility trigger stays adjacent to Add media without overflow from 320 to 641px in EN and FR", async ({
     page,
   }) => {
     test.slow();
@@ -306,10 +309,8 @@ test.describe("composer visibility layout (issue #350)", () => {
         await page.getByRole("radio", { name: strings.followersOption }).click();
         await page.keyboard.press("Escape");
         const audience = trigger.getByText(strings.followersOption, { exact: true });
-        const addImagesPill = form.locator("label", {
-          has: page.getByLabel(strings.addImages, { exact: true }),
-        });
-        await expect(addImagesPill).toBeVisible();
+        const addMediaPill = form.getByRole("button", { name: strings.addMedia, exact: true });
+        await expect(addMediaPill).toBeVisible();
 
         for (const width of WIDTHS) {
           await page.setViewportSize({ width, height: HEIGHT });
@@ -317,7 +318,7 @@ test.describe("composer visibility layout (issue #350)", () => {
 
           const [triggerBox, pillBox, submitBox, counterBox] = await Promise.all([
             trigger.boundingBox(),
-            addImagesPill.boundingBox(),
+            addMediaPill.boundingBox(),
             form.locator('button[type="submit"]').boundingBox(),
             form.locator('span[aria-live="polite"]').boundingBox(),
           ]);

@@ -7,8 +7,6 @@ import { uploadVideo } from "@/lib/video-upload";
 
 export interface VideoAttachmentInput {
   videoId: string;
-  captions?: File;
-  captionLanguage: string;
 }
 interface VideoDraft {
   selectionId: string;
@@ -17,8 +15,6 @@ interface VideoDraft {
   status: "uploading" | "paused" | "uploaded";
   bytes: number;
   controller: AbortController;
-  captions?: File;
-  captionLanguage: string;
 }
 export const videoDraftAtomFamily = atomFamily<string, PrimitiveAtom<VideoDraft | null>>(() =>
   atom<VideoDraft | null>(null),
@@ -85,7 +81,6 @@ export const selectVideoAtomFamily = atomFamily((scope: string) =>
       bytes: 0,
       status: "uploading",
       controller: new AbortController(),
-      captionLanguage: "en",
     });
     void set(resumeVideoUploadAtomFamily(scope));
     return true;

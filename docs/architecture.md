@@ -394,7 +394,7 @@ sides by CI. See [operations.md](operations.md).
    capabilities. The browser streams 8 MiB parts directly to the private bucket;
    progress/cancel/recovery do not buffer a video in the RPC server.
 2. Upload completion alone creates no post. Explicit submission stores text,
-   target and optional captions in `video_submission` and enqueues an IDs-only
+   target in `video_submission` and enqueues an IDs-only
    pg-boss job in the same transaction. Only the author can list pending rows.
 3. A leased attempt downloads to bounded scratch space, validates actual media
    and decoded frames, then produces H.264/AAC fMP4 HLS, a cover and two-second

@@ -130,6 +130,14 @@ describe("SearchBox suggestions", () => {
     expect(input).toHaveValue("");
     expect(input).toHaveFocus();
     expect(store.get(searchInputAtom)).toBe("");
+    expect(input).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await waitFor(() => expect(store.get(debouncedSearchQueryAtom)).toBe(""));
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+
+    await user.keyboard("hello");
+    expect(input).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByRole("option", { name: /Alex Mercer/ })).toBeInTheDocument();
   });
 });
 

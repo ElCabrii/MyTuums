@@ -95,6 +95,18 @@ describe("search input debounce", () => {
     expect(store.get(debouncedSearchQueryAtom)).toBe("");
   });
 
+  it.each(["", "   "])("clearing search to %j immediately stops the previous query", (value) => {
+    const store = freshStore();
+    store.set(setSearchQueryAtom, "alice");
+    vi.advanceTimersByTime(debounceMs);
+    store.set(setSearchQueryAtom, "alicia");
+    store.set(setSearchQueryAtom, value);
+
+    expect(store.get(debouncedSearchQueryAtom)).toBe("");
+    vi.advanceTimersByTime(debounceMs);
+    expect(store.get(debouncedSearchQueryAtom)).toBe("");
+  });
+
   it("resetSearchAtomsAtom clears a pending timer and both values", () => {
     const store = freshStore();
     store.set(setSearchQueryAtom, "a");

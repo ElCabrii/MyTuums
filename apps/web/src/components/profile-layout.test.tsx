@@ -19,9 +19,7 @@ const fakeClient = {
     unfollow: vi.fn(),
   },
   moderation: { unbanUser: vi.fn() },
-  // The favorites rail the layout now renders reads through this group; an
-  // empty answer keeps the rail hidden in every profile test here.
-  game: { favorites: vi.fn().mockResolvedValue({ items: [] }) },
+  game: { favorites: vi.fn().mockResolvedValue({ items: [], nextCursor: null }) },
 };
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));
@@ -229,6 +227,12 @@ describe("ProfileLayout role and ownership gates", () => {
     });
 
     expect(screen.getByRole("button", { name: m.profile_edit() })).toBeInTheDocument();
+    // Release 0.5.0: a profile with no favorites must still show its invitation.
+    const favorites = await screen.findByRole("region", { name: m.profile_favorite_games() });
+    expect(within(favorites).getByText(m.profile_favorites_empty_own())).toBeInTheDocument();
+    expect(
+      within(favorites).getByRole("link", { name: m.profile_favorites_browse() }),
+    ).toHaveAttribute("href", "/games");
     // Sign-out has no surface on the profile page (issue #282): the navbar
     // account menu is the always-visible affordance, and /settings/account
     // carries the card. The click paths themselves stay pinned in
