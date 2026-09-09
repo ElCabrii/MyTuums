@@ -375,6 +375,14 @@ export const auth = betterAuth({
     // abuse protection: each one either lets an attacker test a secret, or
     // makes this server send mail on request.
     customRules: {
+      // Keep actionable handle errors, but bound anonymous probing and the
+      // verification emails from successful sign-ups (issue #380). The core
+      // sign-up default only pauses three attempts for ten seconds. The
+      // username plugin's availability endpoint and its update-user hook
+      // expose the same lookup, the latter before the session guard runs.
+      "/sign-up/email": { window: 60, max: 3 },
+      "/is-username-available": { window: 60, max: 10 },
+      "/update-user": { window: 60, max: 10 },
       "/sign-in/email": { window: 60, max: 10 },
       "/sign-in/username": { window: 60, max: 10 },
       // The plugin's own account lockout (10 consecutive failures) is the real
