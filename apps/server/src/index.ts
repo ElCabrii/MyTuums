@@ -180,6 +180,10 @@ const resolveImageMedia = createMediaResolver(
 // configured bucket (or one that always 404s, when no bucket is configured),
 // and a real session check for the page gate.
 const handleRequest = createRequestHandler({
+  // Set only on preview, paired with the Cloudflare Transform Rule that
+  // injects the matching `x-edge-secret` on preview.mytuums.com — see the
+  // dep's own comment for the direct-to-origin bypass this closes.
+  edgeSecret: env.EDGE_SECRET,
   pingDb,
   authNodeHandler: (req, res) =>
     // SAFETY: node:http's createServer callback always hands the real
