@@ -121,3 +121,35 @@ it("keeps quality and speed options within the fullscreen player", async () => {
     await user.keyboard("{Escape}");
   }
 });
+
+it("toggles playback by clicking the video and pressing Space without repeating or bubbling", async () => {
+  const user = userEvent.setup();
+  const outerClick = vi.fn();
+  const { container } = render(
+    <div onClick={outerClick}>
+      <Provider store={createStore()}>
+        <VideoPlayer attachment={attachment} />
+      </Provider>
+    </div>,
+  );
+  const video = container.querySelector("video");
+  if (!video) throw new Error("Missing video");
+  await user.click(video);
+  expect(screen.getByRole("button", { name: "Pause video" })).toBeVisible();
+  expect(video).toHaveFocus();
+  await user.keyboard(" ");
+  expect(screen.getByRole("button", { name: "Play video" })).toBeVisible();
+  fireEvent.keyDown(video, { key: " ", repeat: true });
+  expect(screen.getByRole("button", { name: "Play video" })).toBeVisible();
+  await user.keyboard(" ");
+  expect(screen.getByRole("button", { name: "Pause video" })).toBeVisible();
+  await user.click(video);
+  expect(screen.getByRole("button", { name: "Play video" })).toBeVisible();
+  expect(outerClick).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Play video" }));
+  await user.keyboard(" ");
+  expect(screen.getByRole("button", { name: "Play video" })).toBeVisible();
+  await user.click(screen.getByRole("combobox", { name: "Playback speed" }));
+  await user.keyboard(" ");
+  expect(screen.getByRole("button", { name: "Play video" })).toBeVisible();
+});
