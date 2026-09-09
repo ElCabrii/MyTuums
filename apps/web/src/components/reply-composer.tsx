@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useAtom, useAtomValue } from "jotai";
+import { PendingVideos } from "@/components/pending-videos";
 import { ComposerForm } from "@/components/composer-form";
 import {
   createReplyAtomFamily,
@@ -29,40 +30,44 @@ export function ReplyComposer({
   if (!user) return null;
 
   return (
-    <ComposerForm
-      author={user}
-      value={content}
-      onValueChange={setContent}
-      onSubmit={(body, selectedAttachments) => {
-        createReply.mutate({
-          content: body,
-          parentId,
-          attachments: selectedAttachments?.map(({ file }) => file) ?? [],
-        });
-      }}
-      isPending={createReply.isPending}
-      errorMessage={
-        createReply.isError ? createReply.error.message || m.reply_publish_error() : null
-      }
-      placeholder={m.reply_placeholder()}
-      submitLabel={m.reply_action()}
-      mentionScope={`reply:${parentId}`}
-      attachments={attachments}
-      onAttachmentsChange={setAttachments}
-      header={
-        replyingTo ? (
-          <p className="text-muted-foreground text-xs">
-            {m.reply_replying_to()}{" "}
-            <Link
-              to="/@{$username}"
-              params={{ username: replyingTo }}
-              className="text-link font-medium hover:underline"
-            >
-              @{replyingTo}
-            </Link>
-          </p>
-        ) : undefined
-      }
-    />
+    <div className="space-y-4">
+      <ComposerForm
+        author={user}
+        value={content}
+        onValueChange={setContent}
+        onSubmit={(body, selectedAttachments, video) => {
+          createReply.mutate({
+            content: body,
+            parentId,
+            ...video,
+            attachments: selectedAttachments?.map(({ file }) => file) ?? [],
+          });
+        }}
+        isPending={createReply.isPending}
+        errorMessage={
+          createReply.isError ? createReply.error.message || m.reply_publish_error() : null
+        }
+        placeholder={m.reply_placeholder()}
+        submitLabel={m.reply_action()}
+        mentionScope={`reply:${parentId}`}
+        attachments={attachments}
+        onAttachmentsChange={setAttachments}
+        header={
+          replyingTo ? (
+            <p className="text-muted-foreground text-xs">
+              {m.reply_replying_to()}{" "}
+              <Link
+                to="/@{$username}"
+                params={{ username: replyingTo }}
+                className="text-link font-medium hover:underline"
+              >
+                @{replyingTo}
+              </Link>
+            </p>
+          ) : undefined
+        }
+      />
+      <PendingVideos parentId={parentId} />
+    </div>
   );
 }

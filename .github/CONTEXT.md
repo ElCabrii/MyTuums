@@ -28,6 +28,12 @@ would produce a broken one.
 
 ## Invariants
 
+- **The image job proves both executable applications.** The video worker's
+  Docker build runs native FFmpeg tests. Its bundled `smoke.js` uses the same
+  migrated disposable `_test` database and a local empty storage stub to check
+  readiness, maintenance and queue delivery. No real bucket credentials enter
+  this job; the browser upload regression stays in `e2e`.
+
 - **Pin every third-party action to a full commit SHA, with the tag in a
   trailing comment.** A mutable tag can be repointed at attacker code after
   review (the trivy-action and kics-github-action compromises did exactly

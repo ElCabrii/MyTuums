@@ -5,6 +5,7 @@ import { z } from "zod";
 import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import { orpc } from "@/lib/orpc";
 import { store } from "@/lib/store";
+import { clearVideoDraft } from "@/atoms/video-upload";
 
 const STORAGE_KEY = "my-tuums.composer-draft";
 
@@ -78,11 +79,15 @@ export const createPostAtom = atomWithMutation((get) => {
     onSuccess: async () => {
       store.set(composerDraftAtom, "");
       clearComposerAttachments();
+      clearVideoDraft("post");
       store.set(composerPrivacyAtom, null);
       // A new post belongs at the top of every feed it qualifies for, and
       // its position depends on server ordering — refetch rather than
       // guess where to splice it in.
-      await queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: orpc.post.list.key() }),
+        queryClient.invalidateQueries({ queryKey: orpc.video.pending.key() }),
+      ]);
     },
   });
 });

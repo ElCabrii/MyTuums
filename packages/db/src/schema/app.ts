@@ -178,8 +178,141 @@ export const postEdit = pgTable(
   ],
 );
 
+/** Published derivatives are immutable within one processing attempt. */
+export interface VideoPlayback {
+  width: number;
+  height: number;
+  duration: number;
+  frameRate: number;
+  captionLanguage?: string | null;
+  renditions: {
+    name: string;
+    width: number;
+    height: number;
+    frameRate: number;
+    bandwidth: number;
+  }[];
+}
+
+export interface VideoAsset {
+  name: string;
+  contentType: string;
+  byteSize: number;
+}
+
 /**
- * A raster image attached to a post or reply. The object itself lives in the
+ * Durable media ownership exists BEFORE any upload or worker writes to storage.
+ * An account/post cascade nulls its reference so cleanup can still find every
+ * object. Submitted text lives separately and cascades with its author.
+ */
+export const video = pgTable(
+  "video",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    authorId: text("author_id").references(() => user.id, { onDelete: "set null" }),
+    postId: uuid("post_id").references(() => post.id, { onDelete: "set null" }),
+    state: text("state")
+      .$type<
+        | "uploading"
+        | "uploaded"
+        | "queued"
+        | "processing"
+        | "ready"
+        | "published"
+        | "failed"
+        | "cancelled"
+        | "deleted"
+      >()
+      .notNull()
+      .default("uploading"),
+    byteSize: integer("byte_size").notNull(),
+    sourceKey: text("source_key").notNull(),
+    multipartId: text("multipart_id"),
+    attemptId: uuid("attempt_id"),
+    attempts: integer("attempts").notNull().default(0),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true, precision: 3 }),
+    sourceDeletedAt: timestamp("source_deleted_at", { withTimezone: true, precision: 3 }),
+    playback: jsonb("playback").$type<VideoPlayback>(),
+    assets: jsonb("assets").$type<VideoAsset[]>().notNull().default([]),
+    expiresAt: timestamp("expires_at", { withTimezone: true, precision: 3 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("video_post_idx").on(t.postId),
+    uniqueIndex("video_source_idx").on(t.sourceKey),
+    index("video_state_expiry_idx").on(t.state, t.expiresAt),
+    index("video_author_created_idx").on(t.authorId, t.createdAt.desc(), t.id.desc()),
+    check(
+      "video_state",
+      sql`${t.state} in ('uploading', 'uploaded', 'queued', 'processing', 'ready', 'published', 'failed', 'cancelled', 'deleted')`,
+    ),
+    check("video_byte_size", sql`${t.byteSize} > 0 and ${t.byteSize} <= 500000000`),
+    check("video_attempts", sql`${t.attempts} >= 0`),
+    check(
+      "video_ready_assets",
+      sql`${t.state} not in ('ready', 'published') or (${t.playback} is not null and ${t.attemptId} is not null and jsonb_array_length(${t.assets}) > 0)`,
+    ),
+    check(
+      "video_published_source",
+      sql`${t.state} <> 'published' or ${t.sourceDeletedAt} is not null`,
+    ),
+  ],
+);
+
+/** A pending post is absent from the published post table and all its readers. */
+export const videoSubmission = pgTable(
+  "video_submission",
+  {
+    videoId: uuid("video_id")
+      .primaryKey()
+      .references(() => video.id, { onDelete: "cascade" }),
+    authorId: text("author_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    postId: uuid("post_id").notNull().defaultRandom(),
+    content: text("content").notNull(),
+    // Resolve these again when publishing. Cascading them would silently erase a
+    // pending reply without leaving the worker a chance to notify its author.
+    parentId: uuid("parent_id"),
+    quotedPostId: uuid("quoted_post_id"),
+    isPrivate: boolean("is_private").notNull(),
+    caption: text("caption"),
+    captionLanguage: text("caption_language"),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("video_submission_post_idx").on(t.postId),
+    index("video_submission_author_idx").on(t.authorId, t.createdAt.desc()),
+    check("video_submission_target", sql`${t.parentId} is null or ${t.quotedPostId} is null`),
+  ],
+);
+
+/**
+ * Storage deletion is not transactional. These obligations survive every FK
+ * cascade and retain only opaque keys, never failed post text or captions.
+ */
+export const videoCleanup = pgTable(
+  "video_cleanup",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    videoId: uuid("video_id").notNull(),
+    prefix: text("prefix").notNull(),
+    sourceKey: text("source_key"),
+    multipartId: text("multipart_id"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, precision: 3 })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("video_cleanup_prefix_idx").on(t.prefix),
+    index("video_cleanup_next_attempt_idx").on(t.nextAttemptAt),
+  ],
+);
+
+/**
+ * An image or processed video attached to a post or reply. The object itself lives in the
  * private media bucket; this relation is the authoritative projection used by
  * every post reader and by the media authorization gate.
  *
@@ -199,6 +332,7 @@ export const postAttachment = pgTable(
     position: integer("position").notNull(),
     mediaPath: text("media_path").notNull(),
     contentType: text("content_type").notNull(),
+    videoId: uuid("video_id").references(() => video.id),
     byteSize: integer("byte_size").notNull(),
     width: integer("width").notNull(),
     height: integer("height").notNull(),
@@ -211,8 +345,9 @@ export const postAttachment = pgTable(
     check("post_attachment_dimensions", sql`${t.width} > 0 and ${t.height} > 0`),
     check(
       "post_attachment_content_type",
-      sql`${t.contentType} in ('image/png', 'image/jpeg', 'image/webp', 'image/gif')`,
+      sql`(${t.videoId} is null and ${t.contentType} in ('image/png', 'image/jpeg', 'image/webp', 'image/gif')) or (${t.videoId} is not null and ${t.contentType} = 'application/vnd.apple.mpegurl' and ${t.position} = 0)`,
     ),
+    uniqueIndex("post_attachment_video_idx").on(t.videoId),
   ],
 );
 
@@ -793,7 +928,16 @@ export const notification = pgTable(
     // TypeScript consumers — the same mirroring `MODERATION_ACTION_CODES` in
     // packages/api does for `moderation_action`.
     type: text("type")
-      .$type<"like" | "reply" | "repost" | "quote" | "follow" | "follow_request" | "moderation">()
+      .$type<
+        | "like"
+        | "reply"
+        | "repost"
+        | "quote"
+        | "follow"
+        | "follow_request"
+        | "moderation"
+        | "video_failed"
+      >()
       .notNull(),
     // The like's or repost's post / the reply or quote itself (the thing the
     // recipient clicks through to). Null for follow and moderation.
@@ -801,6 +945,9 @@ export const notification = pgTable(
     // The moderation action the notification mirrors — carries the code,
     // reason and target the page renders. Null for user-caused types.
     actionId: uuid("action_id").references(() => moderationAction.id, { onDelete: "cascade" }),
+    // No FK: the notice must outlive the failed video and submission. Uniqueness
+    // makes terminal redelivery harmless even after cleanup removes those rows.
+    videoId: uuid("video_id"),
     // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above — and because the list is keyset-paginated on
     // (created_at, id), the precision is load-bearing here too.
@@ -809,7 +956,7 @@ export const notification = pgTable(
   (t) => [
     check(
       "notification_type",
-      sql`${t.type} in ('like', 'reply', 'repost', 'quote', 'follow', 'follow_request', 'moderation')`,
+      sql`${t.type} in ('like', 'reply', 'repost', 'quote', 'follow', 'follow_request', 'moderation', 'video_failed')`,
     ),
     // Like, reply, repost and quote rows name the post they are about; follow,
     // follow_request and moderation rows carry no post reference. An equality
@@ -821,6 +968,9 @@ export const notification = pgTable(
     ),
     // Moderation rows mirror one audit action; every other type has none.
     check("notification_action_ref", sql`(${t.type} = 'moderation') = (${t.actionId} is not null)`),
+    check("notification_video_ref", sql`(${t.type} = 'video_failed') = (${t.videoId} is not null)`),
+    check("notification_video_actor", sql`${t.type} <> 'video_failed' or ${t.actorId} is null`),
+    uniqueIndex("notification_video_idx").on(t.videoId),
     // Self-caused events never notify — the check behind the handler-side
     // guard, so no other write path can reintroduce it. Null (moderation
     // system rows) stays legal: the check is only about the actor when there

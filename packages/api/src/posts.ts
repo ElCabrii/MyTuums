@@ -36,6 +36,7 @@ import {
   SEARCH_QUERY_MAX_LENGTH,
   GAME_SLUG_MAX_LENGTH,
   RANK_SNAPSHOT_INVALID_MESSAGE,
+  VIDEO_CAPTION_MAX_BYTES,
 } from "./constants.js";
 import { createCursorCodec, createEventCursorCodec, createRankCursorCodec } from "./cursor.js";
 import {
@@ -49,6 +50,10 @@ import {
 import { gameMentionsFor } from "./games.js";
 import { resolveLinkCard } from "./link-card.js";
 import { insertNotification } from "./notifications.js";
+import { publishPost, resolvePostTarget, type CreatedPost } from "./post-publication.js";
+import { deletePostVideo } from "./video-lifecycle.js";
+import { requireVideoUploads, videoAction } from "./videos.js";
+import { normalizeVideoCaptions } from "./video-captions.js";
 import { keysetPage } from "./pagination.js";
 import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";
 import {
@@ -1473,51 +1478,6 @@ async function countReposts(db: Database, postId: string): Promise<number> {
   return row?.count ?? 0;
 }
 
-type CreatedPost = {
-  id: string;
-  content: string;
-  createdAt: Date;
-  parentId: string | null;
-  quotedPostId: string | null;
-};
-
-/** Inserts the post and its already-prepared attachment rows atomically. */
-async function insertPost(
-  tx: Pick<Database, "insert">,
-  args: {
-    postId: string;
-    authorId: string;
-    content: string;
-    parentId: string | undefined;
-    quotedPostId: string | undefined;
-    isPrivate: boolean;
-    prepared: ReturnType<typeof preparePostAttachments>;
-  },
-): Promise<CreatedPost | undefined> {
-  const [inserted] = await tx
-    .insert(post)
-    .values({
-      id: args.postId,
-      authorId: args.authorId,
-      content: args.content,
-      parentId: args.parentId ?? null,
-      quotedPostId: args.quotedPostId ?? null,
-      isPrivate: args.isPrivate,
-    })
-    .returning({
-      id: post.id,
-      content: post.content,
-      createdAt: post.createdAt,
-      parentId: post.parentId,
-      quotedPostId: post.quotedPostId,
-    });
-
-  if (!inserted) return undefined;
-  if (args.prepared.length > 0)
-    await tx.insert(postAttachment).values(postAttachmentRows(args.prepared));
-  return inserted;
-}
-
 /**
  * The text of a post, shared by `post.create` and `post.edit` (issue #264) so
  * the trim and the length bound have exactly one definition. Trimming first
@@ -1567,6 +1527,13 @@ export const postRouter = {
           quotedPostId: z.uuid().optional(),
           /** The same ordered image capability is available to posts and replies. */
           attachments: z.array(z.file()).max(POST_ATTACHMENT_MAX_COUNT).default([]),
+          videoId: z.uuid().optional(),
+          captions: z.file().max(VIDEO_CAPTION_MAX_BYTES).optional(),
+          captionLanguage: z
+            .string()
+            .regex(/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/)
+            .max(35)
+            .default("en"),
           /**
            * Followers-only visibility (issue #328). Omitted inherits the
            * author's account default. The flag is one-way while the account
@@ -1583,13 +1550,25 @@ export const postRouter = {
         // must carry text, images, or both. Keeping `content` string-shaped
         // and non-null means every reader stays a plain string — no nullable
         // column, no null handling spread across the projections.
-        .refine(({ content, attachments }) => content.length > 0 || attachments.length > 0, {
-          error: "Post cannot be empty.",
-          path: ["content"],
-        })
+        .refine(
+          ({ content, attachments, videoId }) =>
+            content.length > 0 || attachments.length > 0 || Boolean(videoId),
+          {
+            error: "Post cannot be empty.",
+            path: ["content"],
+          },
+        )
         .refine(({ parentId, quotedPostId }) => !(parentId && quotedPostId), {
           error: "A reply cannot also be a quote.",
           path: ["quotedPostId"],
+        })
+        .refine(({ videoId, attachments }) => !videoId || attachments.length === 0, {
+          error: "A post can contain one video or up to four images.",
+          path: ["attachments"],
+        })
+        .refine(({ captions, videoId }) => !captions || Boolean(videoId), {
+          error: "Captions require a video.",
+          path: ["captions"],
         }),
     )
     .handler(async ({ input, context }) => {
@@ -1606,27 +1585,13 @@ export const postRouter = {
       // exactly the same rule, for the same reasons: quoting a removed post
       // is allowed (the embedded card renders the removal stub), quoting one
       // whose author is hidden reads as "no such post".
-      const resolveVisiblePost = async (postId: string) => {
-        const [visible] = await context.db
-          .select({ id: post.id, authorId: post.authorId })
-          .from(post)
-          .innerJoin(user, eq(user.id, post.authorId))
-          .where(
-            and(
-              eq(post.id, postId),
-              not(invisibleAuthor(context.user.id)),
-              not(privatePostHidden(context.user.id)),
-            ),
-          )
-          .limit(1);
-        return visible;
-      };
-
       // The reply's notification (below) needs the parent's author, so the
       // resolution selects `authorId` alongside `id`: one lookup keeps the
       // existence check and the notification recipient in step, instead of
       // re-reading the row inside the insert's transaction.
-      const parent = input.parentId ? await resolveVisiblePost(input.parentId) : undefined;
+      const parent = input.parentId
+        ? await resolvePostTarget(context.db, context.user.id, input.parentId)
+        : undefined;
       const parentAuthorId = parent?.authorId;
       if (input.parentId && !parent) {
         throw new ORPCError("NOT_FOUND", {
@@ -1637,7 +1602,9 @@ export const postRouter = {
       // The quote's notification needs the quoted post's author for the same
       // reason the reply's needs the parent's, so this resolution keeps the
       // author too — one lookup serves the existence check and the recipient.
-      const quoted = input.quotedPostId ? await resolveVisiblePost(input.quotedPostId) : undefined;
+      const quoted = input.quotedPostId
+        ? await resolvePostTarget(context.db, context.user.id, input.quotedPostId)
+        : undefined;
       const quotedAuthorId = quoted?.authorId;
       if (input.quotedPostId && !quoted) {
         throw new ORPCError("NOT_FOUND", {
@@ -1660,79 +1627,7 @@ export const postRouter = {
         .limit(1);
       const isPrivate = input.isPrivate ?? authorRow?.isPrivate ?? false;
 
-      let created: CreatedPost | undefined;
-      try {
-        created = await context.db.transaction(async (tx) => {
-          if (storage) {
-            // The reconciler takes this same lock around its list/read/delete
-            // pass. Holding it until this transaction commits closes the
-            // upload-before-row window without adding lifecycle state to the
-            // attachment schema. Text-only posts skip the lock and storage
-            // work entirely.
-            await acquirePostMediaLifecycleLock(tx);
-            try {
-              await writePostAttachments(storage, prepared);
-            } catch {
-              // writePostAttachments already removes every attempted key,
-              // including a provider PUT that failed after committing.
-              throw new ORPCError("INTERNAL_SERVER_ERROR", {
-                message: "Failed to store post images.",
-              });
-            }
-          }
-
-          const inserted = await insertPost(tx, {
-            postId,
-            authorId: context.user.id,
-            content: input.content,
-            parentId: input.parentId,
-            quotedPostId: input.quotedPostId,
-            isPrivate,
-            prepared,
-          });
-          if (inserted && parentAuthorId) {
-            // The reply's notification rides the insert's transaction: a
-            // failure between the two leaves neither. The row points at the
-            // reply itself (not the parent) — that is the thing the
-            // recipient will click through to, and it is what makes the
-            // notification tombstone with the reply when the author deletes
-            // it, exactly like the reply's own feed presence.
-            await insertNotification(tx, {
-              recipientId: parentAuthorId,
-              actorId: context.user.id,
-              type: "reply",
-              postId: inserted.id,
-            });
-          }
-          if (inserted && quotedAuthorId) {
-            // The quote's notification is the reply's shape exactly: same
-            // transaction, and the row points at the quote itself — the
-            // thing the recipient will click through to is what the quoter
-            // said, not their own post back. A quote is a new post with no
-            // natural idempotency key of its own, so its exactly-once is the
-            // reply's too: the insert either commits (one post, one
-            // notification) or it does not.
-            await insertNotification(tx, {
-              recipientId: quotedAuthorId,
-              actorId: context.user.id,
-              type: "quote",
-              postId: inserted.id,
-            });
-          }
-          return inserted;
-        });
-      } catch (error) {
-        if (storage) await discardPostAttachments(storage, prepared);
-        throw error;
-      }
-
-      if (!created) {
-        if (storage) await discardPostAttachments(storage, prepared);
-        throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Failed to create post." });
-      }
-
-      return {
-        ...created,
+      const responseDefaults = {
         // Matches the additive tombstone fields of `postSelection` — a fresh
         // post is neither removed nor deleted, so these are constants rather
         // than columns. The same goes for `editedAt`: a fresh post has never
@@ -1761,6 +1656,89 @@ export const postRouter = {
         // resolving the embedded preview here would cost a query nothing
         // consumes.
         repostedBy: null,
+      };
+
+      const videoId = input.videoId;
+      if (videoId) {
+        let caption: string | null = null;
+        if (input.captions) {
+          try {
+            caption = normalizeVideoCaptions(await input.captions.text());
+          } catch {
+            throw new ORPCError("BAD_REQUEST", {
+              message: "Please choose a valid WebVTT caption file.",
+            });
+          }
+        }
+        const submitted = await videoAction(() =>
+          requireVideoUploads(context).submit({
+            videoId,
+            authorId: context.user.id,
+            content: input.content,
+            parentId: input.parentId ?? null,
+            quotedPostId: input.quotedPostId ?? null,
+            isPrivate,
+            caption,
+            captionLanguage: caption ? input.captionLanguage : null,
+          }),
+        );
+        return {
+          ...submitted,
+          content: input.content,
+          parentId: input.parentId ?? null,
+          quotedPostId: input.quotedPostId ?? null,
+          createdAt: new Date(),
+          ...responseDefaults,
+          attachments: [],
+        };
+      }
+
+      let created: CreatedPost | undefined;
+      try {
+        created = await context.db.transaction(async (tx) => {
+          if (storage) {
+            // The reconciler takes this same lock around its list/read/delete
+            // pass. Holding it until this transaction commits closes the
+            // upload-before-row window without adding lifecycle state to the
+            // attachment schema. Text-only posts skip the lock and storage
+            // work entirely.
+            await acquirePostMediaLifecycleLock(tx);
+            try {
+              await writePostAttachments(storage, prepared);
+            } catch {
+              // writePostAttachments already removes every attempted key,
+              // including a provider PUT that failed after committing.
+              throw new ORPCError("INTERNAL_SERVER_ERROR", {
+                message: "Failed to store post images.",
+              });
+            }
+          }
+
+          return publishPost(tx, {
+            postId,
+            authorId: context.user.id,
+            content: input.content,
+            parentId: input.parentId ?? null,
+            quotedPostId: input.quotedPostId ?? null,
+            isPrivate,
+            attachments: postAttachmentRows(prepared),
+            parentAuthorId,
+            quotedAuthorId,
+          });
+        });
+      } catch (error) {
+        if (storage) await discardPostAttachments(storage, prepared);
+        throw error;
+      }
+
+      if (!created) {
+        if (storage) await discardPostAttachments(storage, prepared);
+        throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Failed to create post." });
+      }
+
+      return {
+        ...created,
+        ...responseDefaults,
         attachments: prepared.map(
           ({ id, mediaPath, position, contentType, byteSize, width, height }) => ({
             id,
@@ -2013,11 +1991,15 @@ export const postRouter = {
         return { postId: input.postId, deletedAt: target.deletedAt };
       }
 
-      const [updated] = await context.db
-        .update(post)
-        .set({ deletedAt: new Date() })
-        .where(and(eq(post.id, input.postId), isNull(post.removedAt), isNull(post.deletedAt)))
-        .returning({ deletedAt: post.deletedAt });
+      const updated = await context.db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(post)
+          .set({ deletedAt: new Date() })
+          .where(and(eq(post.id, input.postId), isNull(post.removedAt), isNull(post.deletedAt)))
+          .returning({ deletedAt: post.deletedAt });
+        if (row) await deletePostVideo(tx, input.postId);
+        return row;
+      });
 
       if (updated?.deletedAt) {
         await cleanupDeletedPostAttachments(context.db, context.storage, input.postId);

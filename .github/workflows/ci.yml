@@ -285,17 +285,17 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: ci-postgres-password
-          POSTGRES_DB: mytuums
+          POSTGRES_DB: mytuums_test
         ports:
           - 5433:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d mytuums"
+          --health-cmd "pg_isready -U postgres -d mytuums_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums
+      DATABASE_URL: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums_test
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -320,6 +320,17 @@ jobs:
           tags: mytuums-server:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build and test the native video worker image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: apps/video-worker/Dockerfile
+          push: false
+          load: true
+          tags: mytuums-video-worker:ci
+          cache-from: type=gha,scope=video-worker
+          cache-to: type=gha,mode=max,scope=video-worker
 
       # The regression that motivated this job. Vite inlines VITE_* at build
       # time, so a missing `ARG` in the Dockerfile yields an image that starts
@@ -410,6 +421,15 @@ jobs:
           docker run --rm --add-host ci-host=host-gateway \
             -e "DATABASE_URL=${ci_database_url}" \
             mytuums-server:ci node apps/server/dist/migrate.js
+
+      # The worker uses the same migrated test DB and a local empty S3 stub.
+      # No bucket credentials enter this job. Native encoding runs in its build.
+      - name: Boot the video worker and acknowledge a queue delivery
+        run: |
+          ci_database_url=${DATABASE_URL/localhost/ci-host}
+          docker run --rm --add-host ci-host=host-gateway \
+            -e "DATABASE_URL=${ci_database_url}" \
+            mytuums-video-worker:ci node apps/video-worker/dist/smoke.js
 
       # The production smoke: boot the image (real CMD), then probe the same
       # three surfaces a deployed app must serve — the DB-backed health

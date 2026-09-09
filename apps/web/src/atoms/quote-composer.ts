@@ -3,6 +3,7 @@ import { atom } from "jotai";
 import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import { orpc } from "@/lib/orpc";
 import { store } from "@/lib/store";
+import { clearVideoDraft } from "@/atoms/video-upload";
 import type { ComposerAttachment } from "./composer.js";
 
 /**
@@ -38,11 +39,15 @@ export const createQuoteAtom = atomWithMutation((get) => {
     onSuccess: async () => {
       store.set(quoteDraftAtom, "");
       store.set(quoteAttachmentsAtom, []);
+      clearVideoDraft("quote-composer");
       store.set(quoteDialogAtom, null);
 
       // A new quote is a post in the home feeds and the author's profile;
       // its position depends on server ordering — refetch rather than splice.
-      await queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: orpc.post.list.key() }),
+        queryClient.invalidateQueries({ queryKey: orpc.video.pending.key() }),
+      ]);
     },
   });
 });

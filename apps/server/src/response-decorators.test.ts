@@ -104,7 +104,8 @@ function expectContentSecurityPolicy(headers: RawResponse["headers"]): void {
   expect(directives).toContain("font-src 'self'");
   expect(directives).toContain("style-src 'self' 'unsafe-inline' https://accounts.google.com");
   expect(directives).toContain("connect-src 'self' https://accounts.google.com");
-  expect(directives).toContain("worker-src 'self'");
+  expect(directives).toContain("worker-src 'self' blob:");
+  expect(directives).toContain("media-src 'self' blob:");
   expect(directives).toContain("frame-src https://accounts.google.com");
   expect(directives).toContain("form-action 'self'");
   expect(directives).toContain("frame-ancestors 'none'");
@@ -129,6 +130,24 @@ const BIG_JSON = JSON.stringify({ payload: "x".repeat(5000) });
 const SMALL_JSON = JSON.stringify({ ok: true });
 
 describe("decorateResponse", () => {
+  it("allows configured bucket transport and browser media workers without broadening script sources", async () => {
+    await withServer(
+      (_req, res) => res.end("ok"),
+      async (raw) => {
+        const { headers } = await raw("/");
+        const policy = z.string().parse(headers["content-security-policy"]);
+        expect(policy).toContain(
+          "connect-src 'self' https://accounts.google.com https://bucket.storage.example",
+        );
+        expect(policy).toContain("media-src 'self' blob: https://bucket.storage.example");
+        expect(policy).toContain("worker-src 'self' blob:");
+        expect(
+          policy.split("; ").find((directive) => directive.startsWith("script-src")),
+        ).not.toContain("blob:");
+      },
+      { mediaOrigins: ["https://bucket.storage.example"] },
+    );
+  });
   it("adds the five security headers to a plain JSON 200", async () => {
     await withServer(
       (_req, res) => {

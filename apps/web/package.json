@@ -32,6 +32,7 @@
     "cn": "^0.2.5",
     "gifenc": "^1.0.3",
     "gifuct-js": "^2.1.2",
+    "hls.js": "^1.7.2",
     "jotai": "^2.12.5",
     "jotai-effect": "^2.4.1",
     "jotai-family": "^1.1.0",

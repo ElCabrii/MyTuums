@@ -6,9 +6,9 @@
  * moderation tombstones and blocks), not just the signed-in state.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, getTableName, isNull, not, or, sql } from "drizzle-orm";
+import { and, eq, getTableName, isNull, not, or, sql, type AnyColumn } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
-import { post, postAttachment, user } from "@my-tuums/db/schema";
+import { post, postAttachment, user, video, type VideoPlayback } from "@my-tuums/db/schema";
 import { roleAtLeast } from "./roles.js";
 import { invisibleAuthor, privatePostHidden } from "./visibility.js";
 import { mediaPathFor, objectKeyFromMediaPath } from "./image.js";
@@ -192,6 +192,15 @@ export type PostAttachment = {
   byteSize: number;
   width: number;
   height: number;
+  video?: {
+    duration: number;
+    frameRate: number;
+    renditions: VideoPlayback["renditions"];
+    posterUrl: string;
+    previewUrl: string;
+    captionUrl: string | null;
+    captionLanguage: string | null;
+  };
 };
 
 /**
@@ -211,6 +220,11 @@ export function outerPost(column: "id" | "removed_at" | "deleted_at" | "quoted_p
   return sql`${sql.identifier(getTableName(post))}.${sql.identifier(column)}`;
 }
 
+/** Join-less outer queries also strip inner column qualifiers (issue #368). */
+function attachmentColumn(column: AnyColumn) {
+  return sql`${sql.identifier(getTableName(column.table))}.${sql.identifier(column.name)}`;
+}
+
 /**
  * Attachments are ordered in one correlated aggregate so every post surface
  * shares the same shape. Lives here rather than in `posts.ts` so surfaces
@@ -222,17 +236,28 @@ export function postAttachmentsSelection(includeTombstones = false) {
   return sql<PostAttachment[]>`coalesce((
     select jsonb_agg(
       jsonb_build_object(
-        'id', ${postAttachment.id},
-        'url', ${postAttachment.mediaPath},
-        'position', ${postAttachment.position},
-        'contentType', ${postAttachment.contentType},
-        'byteSize', ${postAttachment.byteSize},
-        'width', ${postAttachment.width},
-        'height', ${postAttachment.height}
-      ) order by ${postAttachment.position}
+        'id', ${attachmentColumn(postAttachment.id)},
+        'url', ${attachmentColumn(postAttachment.mediaPath)},
+        'position', ${attachmentColumn(postAttachment.position)},
+        'contentType', ${attachmentColumn(postAttachment.contentType)},
+        'byteSize', ${attachmentColumn(postAttachment.byteSize)},
+        'width', ${attachmentColumn(postAttachment.width)},
+        'height', ${attachmentColumn(postAttachment.height)}
+      ) || case when ${attachmentColumn(postAttachment.videoId)} is null then '{}'::jsonb else
+        jsonb_build_object('video', jsonb_build_object(
+          'duration', ${attachmentColumn(video.playback)}->'duration',
+          'frameRate', ${attachmentColumn(video.playback)}->'frameRate',
+          'renditions', ${attachmentColumn(video.playback)}->'renditions',
+          'posterUrl', replace(${attachmentColumn(postAttachment.mediaPath)}, 'master.m3u8', 'cover.jpg'),
+          'previewUrl', replace(${attachmentColumn(postAttachment.mediaPath)}, 'master.m3u8', 'previews.vtt'),
+          'captionUrl', case when ${attachmentColumn(video.assets)} @> '[{"name":"captions.vtt"}]'::jsonb
+            then replace(${attachmentColumn(postAttachment.mediaPath)}, 'master.m3u8', 'captions.vtt') else null end,
+          'captionLanguage', ${attachmentColumn(video.playback)}->'captionLanguage'
+        )) end order by ${attachmentColumn(postAttachment.position)}
     )
     from ${postAttachment}
-    where ${postAttachment.postId} = ${outerPost("id")}
+    left join ${video} on ${attachmentColumn(video.id)} = ${attachmentColumn(postAttachment.videoId)}
+    where ${attachmentColumn(postAttachment.postId)} = ${outerPost("id")}
       ${
         includeTombstones
           ? sql``

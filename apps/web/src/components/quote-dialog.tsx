@@ -7,6 +7,7 @@ import { LinkedText } from "@/components/linked-text";
 import { PostAttachmentGrid } from "@/components/post-attachment-grid";
 import { createQuoteAtom, quoteAttachmentsAtom, quoteDraftAtom } from "@/atoms/quote-composer";
 import { quoteDialogAtom } from "@/atoms/dialog-targets";
+import { clearVideoDraft } from "@/atoms/video-upload";
 import { viewerAtom } from "@/atoms/session";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
@@ -36,6 +37,7 @@ export function QuoteDialog() {
           // draft or its selected files appearing against a different post.
           setDraft("");
           setAttachments([]);
+          clearVideoDraft("quote-composer", true);
           setQuoted(null);
         }
       }}
@@ -106,10 +108,11 @@ function QuoteDialogBody({ quoted }: { quoted: Post }) {
           author={user}
           value={content}
           onValueChange={setContent}
-          onSubmit={(body, selectedAttachments) => {
+          onSubmit={(body, selectedAttachments, video) => {
             createQuote.mutate({
               content: body,
               quotedPostId: quoted.id,
+              ...video,
               attachments: selectedAttachments?.map(({ file }) => file) ?? [],
             });
           }}

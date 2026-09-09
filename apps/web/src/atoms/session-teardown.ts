@@ -77,6 +77,14 @@ export function clearViewerState(queryClient: QueryClient): void {
   queryClient.clear();
 
   sweepFamily(
+    "video upload",
+    () => import("@/atoms/video-upload"),
+    ({ clearVideoUploadFamilies }) => {
+      clearVideoUploadFamilies();
+    },
+  );
+
+  sweepFamily(
     "profile",
     () => import("@/atoms/profile"),
     ({ profileAtomFamily }) => {

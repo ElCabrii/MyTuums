@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 
-const fakeClient = { post: { create: vi.fn(), list: vi.fn() } };
+const fakeClient = {
+  video: { pending: vi.fn().mockResolvedValue([]), cancel: vi.fn() },
+  post: { create: vi.fn(), list: vi.fn() },
+};
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));
 

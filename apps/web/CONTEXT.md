@@ -39,6 +39,20 @@ app's build from the same origin.
 
 ## Invariants
 
+- **Video upload state outlives its composer component, not the tab.**
+  `src/atoms/video-upload.ts` owns scoped File/progress/cancellation state;
+  `src/lib/video-upload.ts` sends sequential 8 MiB parts with XHR and resumes
+  from server-confirmed parts. Selection/completion never submits a post.
+  Successful submission clears the draft; explicit removal cancels the upload.
+- **Pending videos are server state.** `src/atoms/pending-videos.ts` polls
+  author-only submissions. When a pending item disappears, ranked feeds need a
+  new snapshot (`resetQueries`), not a refetch of the old pinned snapshot.
+- **Playback has one visible owner.** `src/atoms/video-playback.ts` coordinates
+  all full players and the persisted autoplay preference. Autoplay is muted;
+  sound requires explicit interaction. `src/components/video-player.tsx` loads
+  HLS.js on demand and releases its source/buffers offscreen. Compact attachment
+  previews render the cover; full surfaces use the same custom player.
+
 - **Displayed media cannot start native browser drags.** `src/routes/__root.tsx`
   cancels media drag starts at the app shell, including React portals such as
   full-size image viewers. Pointer-based cropping and incoming file drops are
