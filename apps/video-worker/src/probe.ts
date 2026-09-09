@@ -54,7 +54,10 @@ function readProbe<T>(text: string, schema: z.ZodType<T>): T {
 }
 
 export class InvalidVideoError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly code: "invalid_media" | "frame_rate_exceeded" = "invalid_media",
+  ) {
     super(message);
     this.name = "InvalidVideoError";
   }
@@ -155,14 +158,14 @@ export function parseVideoProbe(
     fraction(video.r_frame_rate, "/", 0),
   );
   if (frameRate <= 0 || frameRate > VIDEO_MAX_FPS + 0.001)
-    throw new InvalidVideoError("Video must be at most 60 fps.");
+    throw new InvalidVideoError("Video must be at most 60 fps.", "frame_rate_exceeded");
   return {
     ...dimensions,
     codedWidth: video.width,
     codedHeight: video.height,
     rotation,
     duration,
-    frameRate,
+    frameRate: Math.min(frameRate, VIDEO_MAX_FPS),
     timestampPrecision: fraction(video.time_base, "/", 0.000001),
     videoStream: video.index,
     audioStream: audio?.index ?? null,
@@ -171,25 +174,27 @@ export function parseVideoProbe(
   };
 }
 
-/** A low average rate or forged header cannot hide over-limit decoded frames. */
+/** Bound sustained decoded rates while allowing isolated capture timestamp jitter. */
 export function validateVideoFrames(json: string, source: VideoSource): void {
   const { frames } = readProbe(json, frameDocument);
   let previous: number | null = null;
+  let windowStart = 0;
+  const timestamps: number[] = [];
   const first = Number(frames[0].best_effort_timestamp_time);
   for (const frame of frames) {
     const timestamp = Number(frame.best_effort_timestamp_time);
     const duration = Number(frame.duration_time ?? 0);
     if (!Number.isFinite(timestamp) || !Number.isFinite(duration) || duration < 0)
       throw new InvalidVideoError("Invalid video timestamps.");
-    // WebM commonly uses millisecond ticks, so 60 fps alternates 16/17 ms.
-    // Allow one input tick of quantization, while refusing duplicate times.
-    if (
-      previous !== null &&
-      (timestamp <= previous ||
-        timestamp - previous < 1 / VIDEO_MAX_FPS - source.timestampPrecision - 0.000001)
-    ) {
-      throw new InvalidVideoError("Video must be at most 60 fps.");
-    }
+    if (previous !== null && timestamp <= previous)
+      throw new InvalidVideoError("Invalid video timestamps.");
+    timestamps.push(timestamp);
+    // An inclusive one-second window holds 61 timestamps at exactly 60 fps.
+    // One input tick also accommodates WebM's millisecond quantization.
+    while (timestamp - timestamps[windowStart] > 1 + source.timestampPrecision + 0.000001)
+      windowStart += 1;
+    if (timestamps.length - windowStart > VIDEO_MAX_FPS + 1)
+      throw new InvalidVideoError("Video must be at most 60 fps.", "frame_rate_exceeded");
     if (timestamp - first + duration > VIDEO_MAX_DURATION_SECONDS + 0.000002) {
       throw new InvalidVideoError("Video must be at most 5 minutes.");
     }

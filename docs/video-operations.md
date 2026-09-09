@@ -140,7 +140,8 @@ disabled and does not create statistics partitions.
 - `video_worker_ready`, `video_processed`, `video_processing_failed`,
   `video_cleanup`, `video_queue_error` and shutdown/start failures are structured,
   content-free logs. Processing reports elapsed time, encoder CPU/RSS and output
-  bytes. Cleanup reports completed/deferred obligations and removed scratch dirs.
+  bytes. Validation failures use a safe reason code; `frame_rate_exceeded`
+  identifies a rejected frame rate without exposing source metadata. Cleanup reports completed/deferred obligations and removed scratch dirs.
 - `/health` is healthy only after tools, database, queues and consumers initialize;
   queue/maintenance failures make it unhealthy. Monitor queue age, pending age,
   cleanup debt age, retry/failure counts, disk usage and process-tree RSS.
