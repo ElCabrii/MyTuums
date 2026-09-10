@@ -8,6 +8,7 @@ import {
   integer,
   uuid,
   timestamp,
+  boolean,
   index,
   uniqueIndex,
   primaryKey,
@@ -90,6 +91,13 @@ export const post = pgTable(
     // the recorded history so a moderator judges what was written, not only
     // what currently stands.
     editedAt: timestamp("edited_at", { withTimezone: true, precision: 3 }),
+    // Followers-only visibility (issue #328): when true, the post is visible
+    // only to its author and the author's approved followers (plus moderators
+    // inspecting reported content). A private account's posts are private by
+    // default — `post.create` fills this from the author's `isPrivate` when
+    // the caller omits it. NOT NULL DEFAULT false so every pre-privacy row
+    // reads public without a backfill.
+    isPrivate: boolean("is_private").default(false).notNull(),
     // `withTimezone` is not cosmetic. On a bare `timestamp` (no time zone),
     // Postgres resolves `now()` to the *database session's* local wall clock,
     // while Drizzle's `mapFromDriverValue` reads the column back by appending
@@ -170,8 +178,141 @@ export const postEdit = pgTable(
   ],
 );
 
+/** Published derivatives are immutable within one processing attempt. */
+export interface VideoPlayback {
+  width: number;
+  height: number;
+  duration: number;
+  frameRate: number;
+  captionLanguage?: string | null;
+  renditions: {
+    name: string;
+    width: number;
+    height: number;
+    frameRate: number;
+    bandwidth: number;
+  }[];
+}
+
+export interface VideoAsset {
+  name: string;
+  contentType: string;
+  byteSize: number;
+}
+
 /**
- * A raster image attached to a post or reply. The object itself lives in the
+ * Durable media ownership exists BEFORE any upload or worker writes to storage.
+ * An account/post cascade nulls its reference so cleanup can still find every
+ * object. Submitted text lives separately and cascades with its author.
+ */
+export const video = pgTable(
+  "video",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    authorId: text("author_id").references(() => user.id, { onDelete: "set null" }),
+    postId: uuid("post_id").references(() => post.id, { onDelete: "set null" }),
+    state: text("state")
+      .$type<
+        | "uploading"
+        | "uploaded"
+        | "queued"
+        | "processing"
+        | "ready"
+        | "published"
+        | "failed"
+        | "cancelled"
+        | "deleted"
+      >()
+      .notNull()
+      .default("uploading"),
+    byteSize: integer("byte_size").notNull(),
+    sourceKey: text("source_key").notNull(),
+    multipartId: text("multipart_id"),
+    attemptId: uuid("attempt_id"),
+    attempts: integer("attempts").notNull().default(0),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true, precision: 3 }),
+    sourceDeletedAt: timestamp("source_deleted_at", { withTimezone: true, precision: 3 }),
+    playback: jsonb("playback").$type<VideoPlayback>(),
+    assets: jsonb("assets").$type<VideoAsset[]>().notNull().default([]),
+    expiresAt: timestamp("expires_at", { withTimezone: true, precision: 3 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("video_post_idx").on(t.postId),
+    uniqueIndex("video_source_idx").on(t.sourceKey),
+    index("video_state_expiry_idx").on(t.state, t.expiresAt),
+    index("video_author_created_idx").on(t.authorId, t.createdAt.desc(), t.id.desc()),
+    check(
+      "video_state",
+      sql`${t.state} in ('uploading', 'uploaded', 'queued', 'processing', 'ready', 'published', 'failed', 'cancelled', 'deleted')`,
+    ),
+    check("video_byte_size", sql`${t.byteSize} > 0 and ${t.byteSize} <= 500000000`),
+    check("video_attempts", sql`${t.attempts} >= 0`),
+    check(
+      "video_ready_assets",
+      sql`${t.state} not in ('ready', 'published') or (${t.playback} is not null and ${t.attemptId} is not null and jsonb_array_length(${t.assets}) > 0)`,
+    ),
+    check(
+      "video_published_source",
+      sql`${t.state} <> 'published' or ${t.sourceDeletedAt} is not null`,
+    ),
+  ],
+);
+
+/** A pending post is absent from the published post table and all its readers. */
+export const videoSubmission = pgTable(
+  "video_submission",
+  {
+    videoId: uuid("video_id")
+      .primaryKey()
+      .references(() => video.id, { onDelete: "cascade" }),
+    authorId: text("author_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    postId: uuid("post_id").notNull().defaultRandom(),
+    content: text("content").notNull(),
+    // Resolve these again when publishing. Cascading them would silently erase a
+    // pending reply without leaving the worker a chance to notify its author.
+    parentId: uuid("parent_id"),
+    quotedPostId: uuid("quoted_post_id"),
+    isPrivate: boolean("is_private").notNull(),
+    caption: text("caption"),
+    captionLanguage: text("caption_language"),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("video_submission_post_idx").on(t.postId),
+    index("video_submission_author_idx").on(t.authorId, t.createdAt.desc()),
+    check("video_submission_target", sql`${t.parentId} is null or ${t.quotedPostId} is null`),
+  ],
+);
+
+/**
+ * Storage deletion is not transactional. These obligations survive every FK
+ * cascade and retain only opaque keys, never failed post text or captions.
+ */
+export const videoCleanup = pgTable(
+  "video_cleanup",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    videoId: uuid("video_id").notNull(),
+    prefix: text("prefix").notNull(),
+    sourceKey: text("source_key"),
+    multipartId: text("multipart_id"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, precision: 3 })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("video_cleanup_prefix_idx").on(t.prefix),
+    index("video_cleanup_next_attempt_idx").on(t.nextAttemptAt),
+  ],
+);
+
+/**
+ * An image or processed video attached to a post or reply. The object itself lives in the
  * private media bucket; this relation is the authoritative projection used by
  * every post reader and by the media authorization gate.
  *
@@ -191,6 +332,7 @@ export const postAttachment = pgTable(
     position: integer("position").notNull(),
     mediaPath: text("media_path").notNull(),
     contentType: text("content_type").notNull(),
+    videoId: uuid("video_id").references(() => video.id),
     byteSize: integer("byte_size").notNull(),
     width: integer("width").notNull(),
     height: integer("height").notNull(),
@@ -203,8 +345,9 @@ export const postAttachment = pgTable(
     check("post_attachment_dimensions", sql`${t.width} > 0 and ${t.height} > 0`),
     check(
       "post_attachment_content_type",
-      sql`${t.contentType} in ('image/png', 'image/jpeg', 'image/webp', 'image/gif')`,
+      sql`(${t.videoId} is null and ${t.contentType} in ('image/png', 'image/jpeg', 'image/webp', 'image/gif')) or (${t.videoId} is not null and ${t.contentType} = 'application/vnd.apple.mpegurl' and ${t.position} = 0)`,
     ),
+    uniqueIndex("post_attachment_video_idx").on(t.videoId),
   ],
 );
 
@@ -232,8 +375,14 @@ export const postLike = pgTable(
     // simply say `onConflictDoNothing` instead of read-then-write racing.
     primaryKey({ columns: [t.postId, t.userId] }),
     // The PK already covers (post_id, user_id) lookups; this covers the
-    // other direction — "has the viewer liked these posts".
-    index("post_like_user_idx").on(t.userId),
+    // other direction — the viewer's recent likes, newest first. The
+    // `fetchViewerHistory` read in packages/api/src/feed-rank.ts orders by
+    // (created_at DESC, post_id DESC) with FEED_RANK_HISTORY_LIMIT, so the
+    // index mirrors exactly that ordering, `post_id` breaking ties between
+    // likes sharing a timestamp. Same shape as
+    // `post_bookmark_user_created_idx`: once `user_id` is bound,
+    // (created_at, post_id) is the rest of the comparison.
+    index("post_like_user_created_idx").on(t.userId, t.createdAt.desc(), t.postId.desc()),
   ],
 );
 
@@ -376,6 +525,50 @@ export const follow = pgTable(
 );
 
 /**
+ * A pending follow request against a private account (issue #328) — the rows
+ * the follow-request inbox is built from.
+ *
+ * `user.follow` inserts here instead of `follow` when the target's `isPrivate`
+ * is true; accepting converts the row into a `follow` edge, rejecting/cancelling
+ * deletes it. The composite primary key *is* the "one pending request per
+ * (requester, target) pair" rule, so requesting twice is idempotent via
+ * `onConflictDoNothing`, exactly like `follow` itself.
+ */
+export const followRequest = pgTable(
+  "follow_request",
+  {
+    // Both sides are `text` for the same reason follow's are: `user.id` is
+    // BetterAuth's own id format, not a uuid.
+    requesterId: text("requester_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    targetId: text("target_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // follow.created_at above — requests are routinely listed newest-first.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.requesterId, t.targetId] }),
+    // Requesting yourself is meaningless, same as following yourself.
+    check("follow_request_not_self", sql`${t.requesterId} <> ${t.targetId}`),
+    // Both indexes mirror the keyset pagination the request inbox will use:
+    // newest first, with the *other* party's id breaking ties.
+    index("follow_request_target_created_idx").on(
+      t.targetId,
+      t.createdAt.desc(),
+      t.requesterId.desc(),
+    ),
+    index("follow_request_requester_created_idx").on(
+      t.requesterId,
+      t.createdAt.desc(),
+      t.targetId.desc(),
+    ),
+  ],
+);
+
+/**
  * A report of a post or user (issue #38) — the raw material of the
  * moderation queue.
  *
@@ -456,6 +649,56 @@ export const report = pgTable(
     // (resolved rows included) and the queue's GROUP BY both lead with the
     // target key. Non-partial on purpose: the case view reads all history.
     index("report_target_idx").on(t.targetType, t.targetId, t.createdAt.desc()),
+  ],
+);
+
+/**
+ * A stamped profile badge (issue #308) — one row per (user, badge), written
+ * the moment the badge is earned. Every badge is an achievement: once the
+ * row exists it is never withdrawn, so an earned distinction survives the
+ * count that earned it receding (followers unfollowing, likes unliking).
+ * Tiered families hold one row per account that only moves up: crossing the
+ * next threshold upgrades the row (packages/api/src/badge-stamping.ts).
+ *
+ * The writers, one per family: the post-like tiers stamp inside
+ * `post.like`'s transaction when a post's like count first passes a
+ * threshold; the follower tiers stamp inside `user.follow`'s transaction
+ * the same way; the join badges stamp at account creation
+ * (packages/db/src/stamp-join-badges.ts — the higher of whatever tiers the
+ * creation rank earns, called by the auth instance's create hook, with
+ * migration 0028's backfill covering accounts that predate it); and
+ * `founder` is granted out of band to the three founder accounts by the
+ * committed bootstrap script (packages/db/src/grant-founder-badge.ts).
+ *
+ * The `badge` check constraint's list is BADGE_IDS from
+ * `@my-tuums/api/badges` (packages/api/src/badges.ts), duplicated here as a
+ * SQL literal because this package cannot import from the API (the dependency
+ * points the other way). Keep the two in step — badges.ts's unit test pins
+ * its half.
+ */
+export const userBadge = pgTable(
+  "user_badge",
+  {
+    // `user.id` is text (BetterAuth's own id format), so the FK must be too.
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    badge: text("badge").notNull(),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above.
+    earnedAt: timestamp("earned_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    // This composite primary key *is* the "a badge is stamped at most once per
+    // account" rule, the same idempotency mechanism post_like uses: the
+    // stamping insert says `onConflictDoNothing`, so a threshold re-crossed
+    // after a recede (likes falling below a tier and climbing back over it)
+    // mints no second row and no writer can race one.
+    primaryKey({ columns: [t.userId, t.badge] }),
+    check(
+      "user_badge_badge",
+      sql`${t.badge} in ('popular', 'rising_star', 'star', 'superstar', 'supernova', 'noticed', 'trendy', 'big', 'exploding', 'giant', 'founder', 'super_early_access', 'early_access')`,
+    ),
   ],
 );
 
@@ -679,13 +922,22 @@ export const notification = pgTable(
     // matching the branded email that never names the moderator); set null on
     // actor deletion, see the table comment.
     actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
-    // `'like'`, `'reply'`, `'repost'`, `'quote'`, `'follow'` or
-    // `'moderation'` (checked below). The `$type` union mirrors that check
-    // constraint so selects carry the six codes to TypeScript consumers —
-    // the same mirroring `MODERATION_ACTION_CODES` in packages/api does for
-    // `moderation_action`.
+    // `'like'`, `'reply'`, `'repost'`, `'quote'`, `'follow'`,
+    // `'follow_request'` or `'moderation'` (checked below). The `$type` union
+    // mirrors that check constraint so selects carry the seven codes to
+    // TypeScript consumers — the same mirroring `MODERATION_ACTION_CODES` in
+    // packages/api does for `moderation_action`.
     type: text("type")
-      .$type<"like" | "reply" | "repost" | "quote" | "follow" | "moderation">()
+      .$type<
+        | "like"
+        | "reply"
+        | "repost"
+        | "quote"
+        | "follow"
+        | "follow_request"
+        | "moderation"
+        | "video_failed"
+      >()
       .notNull(),
     // The like's or repost's post / the reply or quote itself (the thing the
     // recipient clicks through to). Null for follow and moderation.
@@ -693,6 +945,9 @@ export const notification = pgTable(
     // The moderation action the notification mirrors — carries the code,
     // reason and target the page renders. Null for user-caused types.
     actionId: uuid("action_id").references(() => moderationAction.id, { onDelete: "cascade" }),
+    // No FK: the notice must outlive the failed video and submission. Uniqueness
+    // makes terminal redelivery harmless even after cleanup removes those rows.
+    videoId: uuid("video_id"),
     // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above — and because the list is keyset-paginated on
     // (created_at, id), the precision is load-bearing here too.
@@ -701,18 +956,21 @@ export const notification = pgTable(
   (t) => [
     check(
       "notification_type",
-      sql`${t.type} in ('like', 'reply', 'repost', 'quote', 'follow', 'moderation')`,
+      sql`${t.type} in ('like', 'reply', 'repost', 'quote', 'follow', 'follow_request', 'moderation', 'video_failed')`,
     ),
-    // Like, reply, repost and quote rows name the post they are about; follow
-    // and moderation rows carry no post reference. An equality of booleans
-    // rather than a bare `is not null`, so neither type can smuggle the
-    // other's target.
+    // Like, reply, repost and quote rows name the post they are about; follow,
+    // follow_request and moderation rows carry no post reference. An equality
+    // of booleans rather than a bare `is not null`, so neither type can
+    // smuggle the other's target.
     check(
       "notification_post_ref",
       sql`(${t.type} in ('like', 'reply', 'repost', 'quote')) = (${t.postId} is not null)`,
     ),
     // Moderation rows mirror one audit action; every other type has none.
     check("notification_action_ref", sql`(${t.type} = 'moderation') = (${t.actionId} is not null)`),
+    check("notification_video_ref", sql`(${t.type} = 'video_failed') = (${t.videoId} is not null)`),
+    check("notification_video_actor", sql`${t.type} <> 'video_failed' or ${t.actorId} is null`),
+    uniqueIndex("notification_video_idx").on(t.videoId),
     // Self-caused events never notify — the check behind the handler-side
     // guard, so no other write path can reintroduce it. Null (moderation
     // system rows) stays legal: the check is only about the actor when there
@@ -801,6 +1059,135 @@ export const linkCard = pgTable(
   ],
 );
 
+/**
+ * A game in the catalog the IGDB sync maintains (issue #314): our row, our
+ * media, IGDB touched only during sync. Keyed by IGDB's own id — the catalog
+ * has no life outside IGDB, so a surrogate uuid would only add a join.
+ *
+ * Two identifiers by design (issue Q7): `slug` is IGDB's hyphenated slug and
+ * the URL-facing key of `/games/{slug}`; `hashtagKey` is the lowercase name
+ * with every `[^a-z0-9]` stripped, and the key post hashtags resolve against.
+ * `hashtagKey` is assigned once and never rewritten — the sync's upsert
+ * omits it from its `set` clause, so an existing assignment is an input to
+ * collision resolution, never an output (issue Q29's "collision assignments
+ * stay permanently stable").
+ *
+ * Covers are re-hosted in the media bucket under `games/<igdbId>-<imageId>.<ext>`
+ * (issue Q9), never hot-linked from IGDB; `coverImageId` doubles as the
+ * incremental-download compare key so repeat syncs only fetch changed covers.
+ *
+ * Rows are never deleted and never frozen (issue Q29): a game that drops out
+ * of the popularity scan keeps its row, is re-hydrated from IGDB on every
+ * sync alongside the current top set, and keeps its last-known
+ * `popularityRank` so the `/games` index can order dropouts by where they
+ * last placed.
+ */
+export const game = pgTable(
+  "game",
+  {
+    igdbId: integer("igdb_id").primaryKey(),
+    slug: text("slug").notNull().unique(),
+    hashtagKey: text("hashtag_key").notNull().unique(),
+    name: text("name").notNull(),
+    summary: text("summary"),
+    // A stored `/media/games/...` path, like `link_card.image_media_path`.
+    coverMediaPath: text("cover_media_path"),
+    coverImageId: text("cover_image_id"),
+    firstReleaseYear: integer("first_release_year"),
+    // Display labels, replaced wholesale by each sync. A flat `text[]` rather
+    // than jsonb or FK catalog tables: no read ever queries by genre or
+    // platform (the page renders them as labels), so normalization would add
+    // join and sync-ordering cost for zero reads.
+    genres: text("genres")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    platforms: text("platforms")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    // Rank in the most recent popularity scan that included this game. Null
+    // only for rows that have never been ranked (fixture-only games before
+    // the first real sync).
+    popularityRank: integer("popularity_rank"),
+    // Denormalized count of `game_favorite` rows — the showcase divergence
+    // (Q26): unlike `post_bookmark`'s no-count rule, a game's favorite count
+    // is public data. Maintained transactionally by the favorite/unfavorite
+    // procedures only; the sync's upsert deliberately omits it from its set
+    // clause so a catalog refresh can never zero anyone's counts.
+    favoriteCount: integer("favorite_count").notNull().default(0),
+    // IGDB `hypes` — the "want" count before release. Hydrated on every sync
+    // alongside the release date below; the `/games` upcoming sort orders
+    // unreleased games by this, most-wanted first. NOT NULL with a 0 default
+    // so its keyset stays total without a coalesce, like `favorite_count`.
+    hypeCount: integer("hype_count").notNull().default(0),
+    // IGDB `first_release_date` as unix seconds, the full instant behind
+    // `firstReleaseYear`. Null means TBA — treated as unreleased for the
+    // upcoming sort, alongside dates in the future. Kept beside the year
+    // (rather than replacing it) so the existing year sort and its index
+    // keep their shape.
+    firstReleaseDate: integer("first_release_date"),
+    // Advanced for every row on every successful sync — including dropouts
+    // re-staged from their existing row when IGDB no longer hydrates them.
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, precision: 3 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  // The `/games` index cursors (issue Q23), one index per sort, each
+  // mirroring the exact expression the query in packages/api/src/games.ts
+  // orders and cursor-compares by. The `coalesce` is not cosmetic: it pins
+  // null keys to the deterministic end of each order AND keeps the row-value
+  // cursor comparison total (a bare NULL key would make the comparison NULL
+  // and silently strand every row past it). All ASC — the DESC orders read
+  // these backwards, which a btree serves natively. The favorites sort's
+  // key is never null (the column defaults to 0), so its index needs no
+  // coalesce.
+  (t) => [
+    index("game_name_idx").on(t.name, t.igdbId),
+    index("game_popularity_idx").on(sql`coalesce(${t.popularityRank}, 2147483647)`, t.igdbId),
+    index("game_year_idx").on(sql`coalesce(${t.firstReleaseYear}, 0)`, t.igdbId),
+    index("game_favorite_count_idx").on(t.favoriteCount, t.igdbId),
+    index("game_hype_idx").on(t.hypeCount, t.igdbId),
+  ],
+);
+
+/**
+ * A game favorite — a user's public stamp on a game (issue #314). Mirrors
+ * `post_bookmark` exactly in shape, and diverges from it exactly once, on
+ * purpose: a bookmark is private state (no count, no other reader), while a
+ * favorite is a *showcase* — the count is public on the game page and the
+ * profile rail is visible to every signed-in viewer (issue Q26). That
+ * divergence lives in the read model of packages/api, not in this table:
+ * the composite primary key is still the "one favorite per user per game"
+ * rule, `onConflictDoNothing` still makes favorite idempotent under a
+ * double-click, and the index below still mirrors the profile rail's
+ * newest-first walk.
+ */
+export const gameFavorite = pgTable(
+  "game_favorite",
+  {
+    gameId: integer("game_id")
+      .notNull()
+      .references(() => game.igdbId, { onDelete: "cascade" }),
+    // `text` because `user.id` is BetterAuth's own id format, like every
+    // other user reference in this file.
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // `timestamptz` + `precision: 3` for the same reasons as
+    // post_bookmark.created_at — the profile rail keyset-paginates on
+    // (created_at, game_id), so the precision is load-bearing here too.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.gameId, t.userId] }),
+    // The profile rail: a user's favorited games newest-first, `game_id`
+    // breaking ties between favorites sharing a timestamp. The primary key
+    // already covers the other direction — "has the viewer favorited this
+    // game".
+    index("game_favorite_user_created_idx").on(t.userId, t.createdAt.desc(), t.gameId.desc()),
+  ],
+);
+
 /** Drizzle relations for `post` — the joins `with` queries can reach: author, likes, bookmarks, parent, and replies. */
 export const postRelations = relations(post, ({ one, many }) => ({
   author: one(user, { fields: [post.authorId], references: [user.id] }),
@@ -874,6 +1261,20 @@ export const followRelations = relations(follow, ({ one }) => ({
   }),
 }));
 
+/** Drizzle relations for `followRequest` — the requester and the private target. */
+export const followRequestRelations = relations(followRequest, ({ one }) => ({
+  requester: one(user, {
+    fields: [followRequest.requesterId],
+    references: [user.id],
+    relationName: "followRequester",
+  }),
+  target: one(user, {
+    fields: [followRequest.targetId],
+    references: [user.id],
+    relationName: "followRequestTarget",
+  }),
+}));
+
 /** Drizzle relations for `report` — the reporter and the resolving moderator. */
 export const reportRelations = relations(report, ({ one }) => ({
   reporter: one(user, {
@@ -886,6 +1287,11 @@ export const reportRelations = relations(report, ({ one }) => ({
     references: [user.id],
     relationName: "resolvedBy",
   }),
+}));
+
+/** Drizzle relations for `userBadge` — the account whose profile displays it. */
+export const userBadgeRelations = relations(userBadge, ({ one }) => ({
+  user: one(user, { fields: [userBadge.userId], references: [user.id] }),
 }));
 
 /** Drizzle relations for `userBlock` — the `user` rows on both sides of the edge. */
@@ -958,4 +1364,87 @@ export const notificationRelations = relations(notification, ({ one }) => ({
     fields: [notification.actionId],
     references: [moderationAction.id],
   }),
+}));
+
+/** Drizzle relations for `game` — the favorites users have stamped on it. */
+export const gameRelations = relations(game, ({ many }) => ({
+  favorites: many(gameFavorite),
+}));
+
+/** Drizzle relations for `gameFavorite` — the `game` and `user` a favorite references. */
+export const gameFavoriteRelations = relations(gameFavorite, ({ one }) => ({
+  game: one(game, { fields: [gameFavorite.gameId], references: [game.igdbId] }),
+  user: one(user, { fields: [gameFavorite.userId], references: [user.id] }),
+}));
+
+/**
+ * One ordered entry of a ranked-feed snapshot: the post, the repost event
+ * that surfaced it (null for an authored-post event), and the event instant
+ * the freshness component was scored from. IDs and attribution only — never
+ * content: every page re-reads the posts live through `postSelection` and
+ * re-applies visibility and scope-membership, so a snapshot cannot serve a
+ * post the viewer may no longer see.
+ */
+export interface FeedRankSnapshotItem {
+  postId: string;
+  reposterId: string | null;
+  /** ISO instant of the event (the post's or the repost's `created_at`). */
+  eventAt: string;
+}
+
+/**
+ * A frozen ranked-feed ordering (issue #305) — one viewer's snapshot of a
+ * ranked feed, so pages stay stable while new posts land.
+ *
+ * A snapshot is viewer-owned (`viewerId`), scope-bound (`scope` plus the
+ * `q`/`gameSlug` filters it was built under) and short-lived (`expiresAt`,
+ * 30 minutes). Resuming with an unknown, foreign, differently-scoped or
+ * expired id is an explicit error, never a silent restart. Request-time
+ * maintenance runs on snapshot creation: a bounded global expiry sweep and
+ * a per-viewer live-row cap, both by indexed predicates.
+ */
+export const feedRankSnapshot = pgTable(
+  "feed_rank_snapshot",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // `user.id` is text (BetterAuth's own id format), so the FK must be too.
+    viewerId: text("viewer_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // The ranked feed scope: 'global' (For you), 'following', or 'discover'.
+    scope: text("scope").notNull(),
+    // The candidate filters the snapshot was built under — null when the
+    // page was unfiltered. Part of the resume contract: a snapshot resumes
+    // only under the same scope AND filters.
+    q: text("q"),
+    gameSlug: text("game_slug"),
+    // The catalog hashtag key `gameSlug` resolved to at build time, so pages
+    // re-check membership against the same key even if the catalog moves.
+    gameHashtagKey: text("game_hashtag_key"),
+    // The frozen rank order: `FeedRankSnapshotItem[]`, best first.
+    items: jsonb("items").$type<FeedRankSnapshotItem[]>().notNull().default([]),
+    // Whether the viewer had any interest history at build time (favorites,
+    // follows, likes, reposts, reply-thread topics). False marks a cold
+    // start — freshness/popularity/diversity ordering — and tells the client
+    // to prompt for game interests.
+    hasInterests: boolean("has_interests").default(false).notNull(),
+    // `timestamptz` and `precision: 3` for the same reasons as
+    // post.created_at above.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, precision: 3 }).notNull(),
+  },
+  (t) => [
+    check("feed_rank_snapshot_scope", sql`${t.scope} in ('global', 'following', 'discover')`),
+    // The request-time maintenance path: the viewer's rows by expiry, so
+    // deleting their expired snapshots and enforcing the per-viewer live cap
+    // are index scans, not table scans.
+    index("feed_rank_snapshot_viewer_expires_idx").on(t.viewerId, t.expiresAt.desc()),
+    // The expiry read: rows past their TTL, for bounded cleanup.
+    index("feed_rank_snapshot_expires_idx").on(t.expiresAt),
+  ],
+);
+
+/** Drizzle relations for `feedRankSnapshot` — the viewer whose ordering it freezes. */
+export const feedRankSnapshotRelations = relations(feedRankSnapshot, ({ one }) => ({
+  viewer: one(user, { fields: [feedRankSnapshot.viewerId], references: [user.id] }),
 }));

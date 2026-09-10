@@ -1,7 +1,7 @@
 import type { MouseEvent } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Bookmark, Heart, MessageCircle, MoreHorizontal, Repeat2 } from "lucide-react";
+import { Bookmark, Heart, MessageCircle, MoreHorizontal, Repeat2, Share } from "lucide-react";
 import { UserAvatar } from "@/components/user-avatar";
 import { ProfileLink } from "@/components/profile-link";
 import { firstLinkUrl, LinkedText } from "@/components/linked-text";
@@ -11,11 +11,16 @@ import { PostLinkCard } from "@/components/post-link-card";
 import { QuotePostIcon } from "@/components/icons/quote-post-icon";
 import { toggleLikeAtomFamily } from "@/atoms/like";
 import { toggleRepostAtomFamily } from "@/atoms/repost";
-import { quoteDialogAtom } from "@/atoms/quote-composer";
+import {
+  quoteDialogAtom,
+  blockDialogAtom,
+  reportDialogAtom,
+  deletePostDialogAtom,
+  editPostDialogAtom,
+} from "@/atoms/dialog-targets";
+import { shareDialogAtom } from "@/atoms/share-dialog";
 import { toggleBookmarkAtomFamily } from "@/atoms/bookmark";
-import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
-import { deletePostDialogAtom } from "@/atoms/post-delete";
-import { editPostDialogAtom } from "@/atoms/post-edit";
+
 import { isSignedInAtom, viewerIdAtom } from "@/atoms/session";
 import {
   DropdownMenu,
@@ -58,7 +63,14 @@ function quotedAuthorName(quoted: NonNullable<Post["quoted"]>): string {
  * hidden from the viewer. Kept non-interactive apart from its link so it
  * cannot nest action rows inside the outer card's shell.
  */
-function QuotedPostCard({ quoted }: { quoted: NonNullable<Post["quoted"]> }) {
+function QuotedPostCard({
+  quoted,
+  gameMentions,
+}: {
+  quoted: NonNullable<Post["quoted"]>;
+  /** The outer card's batch map — the quoted text linkifies with the same answers. */
+  gameMentions?: Record<string, string>;
+}) {
   const quotedHandle = handleOf(quoted.author);
   const authorName = quotedAuthorName(quoted);
 
@@ -112,7 +124,7 @@ function QuotedPostCard({ quoted }: { quoted: NonNullable<Post["quoted"]> }) {
       </Link>
       {quoted.content && (
         <p className="text-foreground/90 text-sm leading-relaxed break-words whitespace-pre-line">
-          <LinkedText text={quoted.content} />
+          <LinkedText text={quoted.content} gameMentions={gameMentions} />
         </p>
       )}
       <PostAttachmentGrid attachments={quoted.attachments} />
@@ -151,11 +163,20 @@ export function PostCard({
   variant = "feed",
   showParentContext = true,
   priorityImages = false,
+  gameMentions,
 }: {
   post: Post;
   variant?: PostCardVariant;
   /** Whether to render the immediate-parent preview; feed lists choose their surface explicitly. */
   showParentContext?: boolean;
+  /**
+   * The batch's hashtag→slug map the server computed beside this post's
+   * page: resolved tags render as links to their game pages, unresolved
+   * ones keep their search links. Optional because surfaces without a
+   * batch (none today render post text, but the type stays honest) still
+   * render every tag the original way.
+   */
+  gameMentions?: Record<string, string>;
   /**
    * Load this card's images eagerly at display width — for the post a cold
    * visitor's LCP actually lands on (the first feed card, a thread's focused
@@ -173,6 +194,7 @@ export function PostCard({
   const toggleLike = useSetAtom(toggleLikeAtomFamily(post.id));
   const toggleRepost = useSetAtom(toggleRepostAtomFamily(post.id));
   const setQuoteDialog = useSetAtom(quoteDialogAtom);
+  const setShareDialog = useSetAtom(shareDialogAtom);
   const toggleBookmark = useSetAtom(toggleBookmarkAtomFamily(post.id));
   const setReportDialog = useSetAtom(reportDialogAtom);
   const setBlockDialog = useSetAtom(blockDialogAtom);
@@ -321,6 +343,8 @@ export function PostCard({
                 </span>
               )}
             </>
+          ) : post.parentPrivate ? (
+            m.reply_parent_private()
           ) : (
             m.reply_parent_unavailable()
           )}
@@ -474,7 +498,9 @@ export function PostCard({
 
           {post.unavailable ? (
             <div className="border-border/60 bg-muted/30 mb-3 rounded-lg border p-3">
-              <p className="text-muted-foreground text-sm">{m.post_quoted_unavailable()}</p>
+              <p className="text-muted-foreground text-sm">
+                {post.private ? m.post_private_stub() : m.post_quoted_unavailable()}
+              </p>
             </div>
           ) : post.removed ? (
             /* The removal stub. `removedReason` is author-only (the server
@@ -516,7 +542,7 @@ export function PostCard({
                     isFocused ? "text-base" : "text-sm"
                   }`}
                 >
-                  <LinkedText text={post.content} />
+                  <LinkedText text={post.content} gameMentions={gameMentions} />
                 </p>
               )}
               {/* The card belongs to the first URL of the text (issue #260),
@@ -532,10 +558,12 @@ export function PostCard({
                   the projection (stub or unavailable) rather than hidden. */}
               {post.quotedPostId &&
                 (post.quoted ? (
-                  <QuotedPostCard quoted={post.quoted} />
+                  <QuotedPostCard quoted={post.quoted} gameMentions={gameMentions} />
                 ) : (
                   <div className="border-border/60 bg-muted/30 mb-3 rounded-lg border p-3">
-                    <p className="text-muted-foreground text-sm">{m.post_quoted_unavailable()}</p>
+                    <p className="text-muted-foreground text-sm">
+                      {post.quotedPrivate ? m.post_quoted_private() : m.post_quoted_unavailable()}
+                    </p>
                   </div>
                 ))}
             </>
@@ -655,6 +683,25 @@ export function PostCard({
                   className={bookmarkButtonClass}
                 >
                   {bookmarkContent}
+                </button>
+
+                {/* Sharing out (issue #307): opens the root-mounted share
+                    dialog — the post previewed, its canonical permalink
+                    offered for copy (see `components/share-dialog.tsx`).
+                    Like the bookmark, a count-less circle control. Offered
+                    wherever the action bar renders, including the post's own
+                    focused variant on the permalink page. */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShareDialog(post);
+                  }}
+                  aria-label={m.post_share()}
+                  title={m.post_share()}
+                  className={`${actionIconButtonClass} hover:text-primary`}
+                >
+                  <Share className="h-4 w-4" />
                 </button>
               </div>
             ) : (

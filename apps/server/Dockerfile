@@ -26,6 +26,11 @@
 # compute the pruned subset.
 
 FROM node:24-alpine AS base
+# Unlike the other VITE_* values, this public flag is also needed by the
+# runtime server to select the matching CSP. Defining it on the shared base
+# makes the exact build argument available to both the web builder and runner.
+ARG VITE_GA_MEASUREMENT_ID
+ENV VITE_GA_MEASUREMENT_ID=$VITE_GA_MEASUREMENT_ID
 RUN corepack enable
 
 # ---- Prune the monorepo down to what @my-tuums/server needs to build ----
@@ -40,8 +45,27 @@ COPY . .
 # any of it — Vite already bundled both sites into their dist/ at build time.
 # Pruning to @my-tuums/server alone keeps the web trees out of the runtime
 # image structurally, not by install-time luck.
-RUN npx -y turbo@^2 prune @my-tuums/server @my-tuums/web @my-tuums/branding --docker && \
-    npx -y turbo@^2 prune @my-tuums/server --docker --out-dir out-runner
+#
+# turbo is resolved to the exact version the lockfile pins for the root
+# devDependency, never floated (`npx -y turbo@^2` could silently run a
+# different turbo than every local `pnpm build`). The `test` guard fails
+# the build rather than letting a lockfile-format change collapse the pin
+# into a bare `npx -y turbo@` — which would fetch latest.
+#
+# No BuildKit cache mount here, on purpose. Standard BuildKit (CI, local
+# Docker) would cache /root/.npm across builds, but Railway's builder only
+# accepts cache mounts whose id embeds the deploying service's own UUID
+# (`id=s/<service id>-<target>` — see docs.railway.com/builds/dockerfiles),
+# and this one Dockerfile builds two different Railway services (preview
+# and production), so no single id can be valid for both. The pin keeps
+# the correctness half of the fix; the per-build registry download of
+# turbo (~90s on a healthy route) is the accepted cost. If it hurts again,
+# the fix belongs on the runner (a registry mirror) or in per-service
+# Dockerfiles — not in a mount id this file cannot own.
+RUN TURBO_VERSION="$(sed -n 's/^  turbo@\([0-9.]*\):$/\1/p' pnpm-lock.yaml | head -n 1)" && \
+    test -n "$TURBO_VERSION" && \
+    npx -y "turbo@${TURBO_VERSION}" prune @my-tuums/server @my-tuums/web @my-tuums/branding --docker && \
+    npx -y "turbo@${TURBO_VERSION}" prune @my-tuums/server --docker --out-dir out-runner
 
 # ---- Install full (dev+prod) deps and build the pruned subset ----
 FROM base AS builder
@@ -55,10 +79,10 @@ RUN pnpm --filter @my-tuums/server run build
 #
 # Vite bakes every `import.meta.env.VITE_*` into the bundle AT BUILD TIME, and
 # Railway only makes service variables visible to a Docker build when the
-# Dockerfile declares them with ARG in the stage that needs them — so these two
-# are the app's only VITE_* reads (grep `import.meta.env.VITE_` in apps/web/src)
-# and they must be listed here or the OAuth buttons and One Tap silently never
-# render in production while working fine in dev.
+# Dockerfile declares them with ARG in the stage that needs them. The two auth
+# values are builder-only; VITE_GA_MEASUREMENT_ID is declared on `base` above
+# because the runner also needs the flag for CSP. Miss any of the three and the
+# corresponding browser feature silently disappears in production.
 ARG VITE_SOCIAL_PROVIDERS
 ARG VITE_GOOGLE_CLIENT_ID
 # The self-hosted CI Docker VM has about 956 MiB available. Node derives an

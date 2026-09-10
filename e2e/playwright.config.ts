@@ -179,11 +179,24 @@ export default defineConfig({
     {
       name: "chromium",
       testMatch: /tests\/specs\/.*\.spec\.ts/,
+      testIgnore: /analytics-consent\.spec\.ts/,
       use: {
         ...devices["Desktop Chrome"],
         storageState: E2E.storageStateFor("alice"),
       },
       dependencies: ["setup"],
+    },
+    // Runs only the analytics gate against the same app, without the refusal
+    // seed the normal browser project installs. The Vite process below has a
+    // placeholder measurement id; every other browser spec explicitly starts
+    // denied so the new banner cannot perturb unrelated journeys.
+    {
+      name: "analytics",
+      testMatch: /analytics-consent\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: { cookies: [], origins: [] },
+      },
     },
   ],
 
@@ -218,7 +231,10 @@ export default defineConfig({
       command: `node_modules/.bin/vite --host --port ${String(WEB_PORT)} --strictPort`,
       cwd: path.join(repoRoot, "apps", "web"),
       url: webUrl,
-      env: { RPC_TARGET: nodeServerUrl },
+      env: {
+        RPC_TARGET: nodeServerUrl,
+        VITE_GA_MEASUREMENT_ID: "G-E2E306TEST",
+      },
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
       stdout: "pipe",

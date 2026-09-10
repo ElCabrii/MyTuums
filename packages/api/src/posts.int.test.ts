@@ -53,6 +53,32 @@ function postImage(name: string): File {
   return new File([POST_PNG], name, { type: "image/png" });
 }
 
+it.each([
+  {
+    field: "captions",
+    value: new File(["WEBVTT\n\n00:00.000 --> 00:01.000\nHello\n"], "captions.vtt", {
+      type: "text/vtt",
+    }),
+  },
+  { field: "captionLanguage", value: "en" },
+])(
+  "rejects obsolete subtitle field $field from older video composers (release 0.5.0)",
+  async ({ field, value }) => {
+    const author = await createTestUser();
+    await expect(
+      call(
+        appRouter.post.create,
+        {
+          content: "",
+          videoId: randomUUID(),
+          [field]: value,
+        },
+        { context: contextFor(author) },
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  },
+);
+
 /**
  * A user promoted to moderator through the row, re-fetched so the session
  * carries the role — the same helper moderation.int.test.ts uses, local to

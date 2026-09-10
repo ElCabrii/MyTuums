@@ -80,6 +80,15 @@ export type SearchUser = SearchUsersPage["items"][number];
 /** One page of `search.posts` — a keyset-paginated slice of post matches. */
 export type SearchPostsPage = Awaited<ReturnType<typeof client.search.posts>>;
 
+/** One game's public page — `game.bySlug`'s payload. */
+export type GamePageData = Awaited<ReturnType<typeof client.game.bySlug>>;
+/** One cover card in the game directory — `game.list`'s row. */
+export type GameCard = Awaited<ReturnType<typeof client.game.list>>["items"][number];
+/** One game in a profile's favorites rail — `game.favorites`'s row. */
+export type FavoriteRailItem = Awaited<ReturnType<typeof client.game.favorites>>["items"][number];
+/** A game as the search dropdown suggests it. */
+export type TypeaheadGame = SearchTypeahead["games"][number];
+
 /** One page of `moderation.queue` — unresolved report groups merged with open appeals. */
 export type ModerationQueuePage = Awaited<ReturnType<typeof client.moderation.queue>>;
 /** One case in the queue: reports and/or an open appeal against one target. */
@@ -103,8 +112,6 @@ export type BlockedUser = Awaited<
 export type NotificationListPage = Awaited<ReturnType<typeof client.notification.list>>;
 /** One notification row: its type, read state, actor summary, and the post or moderation action it references. */
 export type NotificationItem = NotificationListPage["items"][number];
-/** The `notification.unreadCount` payload — what the header badge renders. */
-export type NotificationUnreadCount = Awaited<ReturnType<typeof client.notification.unreadCount>>;
 
 /**
  * A handle that doesn't exist won't start existing on the second attempt, and

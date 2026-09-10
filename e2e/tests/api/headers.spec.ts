@@ -38,13 +38,25 @@ function expectContentSecurityPolicy(headers: Record<string, string | string[] |
   expect(csp).toEqual(expect.any(String));
   // SAFETY: The runtime assertion above establishes the Node header value as a string.
   const directives = (csp as string).split("; ");
+  const mediaOrigins: string[] = [];
+  if (process.env.S3_ENDPOINT && process.env.S3_BUCKET) {
+    const endpoint = new URL(process.env.S3_ENDPOINT);
+    mediaOrigins.push(endpoint.origin);
+    endpoint.hostname = `${process.env.S3_BUCKET}.${endpoint.hostname}`;
+    mediaOrigins.push(endpoint.origin);
+  }
 
   expect(directives).toContain("default-src 'self'");
   expect(directives).toContain("base-uri 'self'");
   expect(directives).toContain("object-src 'none'");
   expect(directives).toContain("img-src 'self' https: blob:");
   expect(directives).toContain("style-src 'self' 'unsafe-inline' https://accounts.google.com");
-  expect(directives).toContain("connect-src 'self' https://accounts.google.com");
+  // Issue #368: direct video transport adds only the configured bucket origins.
+  expect(directives).toContain(
+    ["connect-src 'self' https://accounts.google.com", ...mediaOrigins].join(" "),
+  );
+  expect(directives).toContain(["media-src 'self' blob:", ...mediaOrigins].join(" "));
+  expect(directives).toContain("worker-src 'self' blob:");
   expect(directives).toContain("frame-src https://accounts.google.com");
   expect(directives).toContain("frame-ancestors 'none'");
 
@@ -53,6 +65,11 @@ function expectContentSecurityPolicy(headers: Record<string, string | string[] |
   expect(scriptSrc).toContain("https://accounts.google.com");
   expect(scriptSrc).toContain("'unsafe-hashes'");
   expect(scriptSrc).toMatch(/'sha256-[\w+/]+=*'/);
+  expect(scriptSrc).not.toContain("blob:");
+  // The default E2E stack carries no GA measurement id, so its policy must
+  // stay free of analytics-specific third-party origins.
+  expect(scriptSrc).not.toContain("googletagmanager.com");
+  expect(csp).not.toContain("google-analytics.com");
 
   expect(headers["content-security-policy-report-only"]).toBeUndefined();
 }

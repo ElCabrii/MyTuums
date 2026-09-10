@@ -19,45 +19,82 @@ over HTTP and imports only its browser-safe subpaths.
 | `src/context.ts`            | What every handler is handed, and why nothing is a module global.                                                                                                                        |
 | `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                                                                                                                                  |
 | `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                                                                                                                       |
-| `src/notifications.ts`      | The notification read side (list, unread count, mark-read) and `insertNotification`, the single mint point every cause's transaction calls.                                              |
+| `src/notifications.ts`      | The notification inbox (list, unread count, mark-read, delete, clear-all) and `insertNotification`, the single mint point every cause's transaction calls.                               |
 | `src/moderation-actions.ts` | The forward and inverse moderation effects: transaction, guards, audit, owed notices. The one entry point (`applyModerationEffect`) and the per-action wrappers own "commit, then send". |
 | `src/appeal-intake.ts`      | The appeal intake lifecycle: the two sources, the budgets, the gates, the replay policy.                                                                                                 |
 | `src/profile-media.ts`      | The avatar/banner lifecycle: replace/remove, the locked swap, best-effort cleanup.                                                                                                       |
 
 ## Change map
 
-| Intent                                | Primary                                                                                           | Also touch                                                                                                    |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Add a procedure                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`)          | `src/router.ts` if it is a new group; an `.int.test.ts`                                                       |
-| Add a paginated list                  | `src/pagination.ts` (`keysetPage`) at the call site                                               | a matching index in `packages/db/src/schema/app.ts`                                                           |
-| Change a rate limit                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                               | `src/rate-limit.test.ts`                                                                                      |
-| Change the public profile shape       | `src/users.ts` (`publicUserColumns`)                                                              | `src/users.int.test.ts` pins the invariant first                                                              |
-| Add a moderation action               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)                  | `src/constants.ts` (action code), `docs/product.md` glossary                                                  |
-| Change the queue or a case view       | `src/moderation-queue.ts`                                                                         | `src/moderation-inputs.ts` if the input shape moves                                                           |
-| Change how a user is matched by text  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                             | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking      |
-| Change how an appeal is opened        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                                      | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface                       |
-| Change how an appeal is reviewed      | `src/moderation-appeals.ts` (`appealReview`)                                                      | `src/moderation-actions.ts` if the inverse effect changes                                                     |
-| Change what an appellant is shown     | `src/moderation-appeals.ts` (`appealPreview`), `src/post-media.ts` (`canViewPostMedia`)           | `src/appeal-preview.int.test.ts`, `src/post-media.int.test.ts`; `docs/security.md` — media retrieval          |
-| Change profile-image upload rules     | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                               | `src/image.test.ts`; `src/dimensions.ts` for a new format                                                     |
-| Change post-attachment upload rules   | `src/post-image.ts`, `src/constants.ts` (`POST_ATTACHMENT_*`)                                     | `src/image.test.ts`; `src/posts.int.test.ts`                                                                  |
-| Change the profile upload lifecycle   | `src/profile-media.ts`                                                                            | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                           |
-| Change the post attachment lifecycle  | `src/post-media.ts`, `src/post-media-lock.ts`                                                     | `src/posts.int.test.ts`; `src/reconcile-media.ts`; `scripts/reconcile-media.ts`                               |
-| Change follow, block or unblock       | `src/users.ts`, `src/moderation.ts`                                                               | `src/relationship-lock.ts` — every relationship writer must take the pair lock                                |
-| Change the notifications read side    | `src/notifications.ts`                                                                            | `src/notifications.int.test.ts`; the read-time filters live with the table in `packages/db`                   |
-| Change when an event notifies         | the cause's own file (`src/posts.ts`, `src/users.ts`, `logAction` in `src/moderation-actions.ts`) | `insertNotification` is the only mint point, and it rides the cause's transaction                             |
-| Change media URLs or caching          | `src/media.ts`, `src/storage.ts`                                                                  | `apps/server/src/request-handler.ts`                                                                          |
-| Change image variant widths           | `src/constants.ts` (`MEDIA_VARIANT_WIDTHS`)                                                       | `src/media-variants.ts`, `src/reconcile-media.ts`, the web app's `srcset` builders, `reconcile-media.test.ts` |
-| Change the link-card wire rules       | `src/link-card-http.ts`                                                                           | `src/link-card-http.test.ts`                                                                                  |
-| Purge or re-serve link cards          | `src/link-card.ts` (`resolveLinkCard`, `purgeLinkCard`)                                           | `src/moderation.ts` (the procedure); `link-card.int.test.ts`                                                  |
-| Add a shared constant for the web app | `src/constants.ts`                                                                                | must stay free of `@my-tuums/db`                                                                              |
-| Change an account rule                | `../auth/src/rules.ts`                                                                            | not `src/constants.ts` — see the invariant below                                                              |
+| Intent                                                                | Primary                                                                                                    | Also touch                                                                                                                                                                                                         |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Add a procedure                                                       | the group's file (`src/posts.ts`, `src/users.ts`, `src/search.ts`, `src/moderation*.ts`)                   | `src/router.ts` if it is a new group; an `.int.test.ts`                                                                                                                                                            |
+| Add a paginated list                                                  | `src/pagination.ts` (`keysetPage`) at the call site                                                        | a matching index in `packages/db/src/schema/app.ts`                                                                                                                                                                |
+| Change a rate limit                                                   | `src/rate-limit.ts` (`RATE_LIMITS`)                                                                        | `src/rate-limit.test.ts`                                                                                                                                                                                           |
+| Change the public profile shape                                       | `src/users.ts` (`publicUserColumns`)                                                                       | `src/users.int.test.ts` pins the invariant first                                                                                                                                                                   |
+| Add or change a badge                                                 | `src/badges.ts` (the catalog — one definition, server and browser)                                         | `src/badges.test.ts`; the `user_badge` check constraint and the family's stamping site (`post.like`, `user.follow`, the auth create hook) keep in step                                                             |
+| Add a moderation action                                               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)                           | `src/constants.ts` (action code), `docs/product.md` glossary                                                                                                                                                       |
+| Change the queue or a case view                                       | `src/moderation-queue.ts`                                                                                  | `src/moderation-inputs.ts` if the input shape moves                                                                                                                                                                |
+| Change how a user is matched by text                                  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                                      | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking                                                                                                           |
+| Change the IGDB wire rules                                            | `src/igdb.ts` (the client — transport, retry, pacing)                                                      | `src/igdb.test.ts`; the IGDB_* constants in `src/constants.ts`                                                                                                                                                     |
+| Change the catalog sync                                               | `src/games-sync.ts` (stage → validate → covers → one transaction)                                          | `src/games-sync.int.test.ts`; `apps/server/src/games-sync.ts`; `docs/operations.md` Maintenance                                                                                                                    |
+| Change a game read (page, listing, matcher)                           | `src/games.ts` — the public directory's two procedures, its per-sort keysets and `matchesGameQuery`        | `src/games.int.test.ts`; the typeahead's games half in `src/search.ts` shares the matcher; a new sort needs its cursor-mirroring index in `packages/db/src/schema/app.ts`                                          |
+| Change hashtag-key derivation                                         | `src/games-hashtag.ts` (the only definition; keys are sticky once written)                                 | `src/games-hashtag.test.ts`                                                                                                                                                                                        |
+| Add or change the games fixture                                       | `packages/db/fixtures/games.json` (hand-authored)                                                          | `src/games-fixture.test.ts` pins its contract; the `games:seed` script uploads its covers                                                                                                                          |
+| Change how an appeal is opened                                        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                                               | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface                                                                                                                            |
+| Change how an appeal is reviewed                                      | `src/moderation-appeals.ts` (`appealReview`)                                                               | `src/moderation-actions.ts` if the inverse effect changes                                                                                                                                                          |
+| Change what an appellant is shown                                     | `src/moderation-appeals.ts` (`appealPreview`), `src/post-media.ts` (`canViewPostMedia`)                    | `src/appeal-preview.int.test.ts`, `src/post-media.int.test.ts`; `docs/security.md` — media retrieval                                                                                                               |
+| Change profile-image upload rules                                     | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                                        | `src/image.test.ts`; `src/dimensions.ts` for a new format                                                                                                                                                          |
+| Change post-attachment upload rules                                   | `src/post-image.ts`, `src/constants.ts` (`POST_ATTACHMENT_*`)                                              | `src/image.test.ts`; `src/posts.int.test.ts`                                                                                                                                                                       |
+| Change the profile upload lifecycle                                   | `src/profile-media.ts`                                                                                     | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                                                                                                                                |
+| Change the post attachment lifecycle                                  | `src/post-media.ts`, `src/post-media-lock.ts`                                                              | `src/posts.int.test.ts`; `src/reconcile-media.ts`; `scripts/reconcile-media.ts`                                                                                                                                    |
+| Change the ranked feeds (candidate set, score, snapshot, suggestions) | `src/feed-rank.ts` (the pipeline — sourcing, `scorePost`, snapshot persist/resume, `suggestRankAuthorIds`) | `src/posts.ts` (the ranked `post.list` branch, hydration, `ranking` metadata); `src/cursor.ts` (`createRankCursorCodec`); `src/constants.ts` (`FEED_RANK_*`); `src/feed-rank.test.ts`, `src/feed-rank.int.test.ts` |
+| Change follow, block or unblock                                       | `src/users.ts`, `src/moderation.ts`                                                                        | `src/relationship-lock.ts` — every relationship writer must take the pair lock                                                                                                                                     |
+| Change the notifications inbox                                        | `src/notifications.ts`                                                                                     | `src/notifications.int.test.ts`; the read-time filters live with the table in `packages/db`                                                                                                                        |
+| Change when an event notifies                                         | the cause's own file (`src/posts.ts`, `src/users.ts`, `logAction` in `src/moderation-actions.ts`)          | `insertNotification` is the only mint point, and it rides the cause's transaction                                                                                                                                  |
+| Change media URLs or caching                                          | `src/media.ts`, `src/storage.ts`                                                                           | `apps/server/src/request-handler.ts`                                                                                                                                                                               |
+| Change image variant widths                                           | `src/constants.ts` (`MEDIA_VARIANT_WIDTHS`)                                                                | `src/media-variants.ts`, `src/reconcile-media.ts`, the web app's `srcset` builders, `reconcile-media.test.ts`                                                                                                      |
+| Change the link-card wire rules                                       | `src/link-card-http.ts`                                                                                    | `src/link-card-http.test.ts`                                                                                                                                                                                       |
+| Purge or re-serve link cards                                          | `src/link-card.ts` (`resolveLinkCard`, `purgeLinkCard`)                                                    | `src/moderation.ts` (the procedure); `link-card.int.test.ts`                                                                                                                                                       |
+| Add a shared constant for the web app                                 | `src/constants.ts`                                                                                         | must stay free of `@my-tuums/db`                                                                                                                                                                                   |
+| Change an account rule                                                | `../auth/src/rules.ts`                                                                                     | not `src/constants.ts` — see the invariant below                                                                                                                                                                   |
 
 ## Invariants
+
+- **Video submissions are not posts.** `src/video-uploads.ts` owns multipart
+  sessions; `src/video-lifecycle.ts` owns submission, leases, publication,
+  cancellation and failure. Only explicit submission stores pending text and
+  queues work. Publication inserts the ordinary post/attachment/notifications
+  atomically after all assets exist and source deletion is confirmed.
+- **Video cleanup is durable and independent of retries.** `video_cleanup`
+  survives account cascades and stores identifiers/keys only. Terminal failure
+  erases pending text/captions and creates exactly one `video_failed` notice.
+  `src/video-maintenance.ts` reconciles both rows and actual objects to catch
+  stale writers after cleanup. Moderation removal retains successful assets;
+  author deletion schedules their removal.
+- **Every video asset passes the existing post authorizer.** `src/video-media.ts`
+  validates the published attempt and inventory before calling
+  `canViewPostMedia`. HLS and VTT are bounded, privately served text with rewritten
+  local references; binary assets use signed redirects. Raw input is never served.
+- **Queue enqueue participates in submission's transaction.** `src/video-queue.ts`
+  adapts pg-boss to the existing postgres-js/Drizzle pool, including JSON/array
+  binding and reserved transactions. `./video-worker` is a server-only leaf
+  export with no auth-instance construction; never import it from the SPA.
+
+Video regression checks: `src/video-lifecycle.int.test.ts`,
+`src/video-uploads.int.test.ts`, `src/video-media.int.test.ts` and
+`src/posts.int.test.ts`. New post submissions reject separate subtitle files;
+existing stored captions remain readable and processable. Native validation
+belongs to `apps/video-worker`.
 
 - **The rate limiter, storage client, and email sender are threaded on `Context`,
   never module globals.** Tests substitute all three; one suite's limiter state
   must not bleed into another's, and moderation tests record delivery through
   the same sender interface production uses.
+- **Anonymous reads use the HTTP boundary's validated client identity.**
+  `publicRateLimit` reads it through `@my-tuums/auth/client-ip`, reusing Better
+  Auth's IP normalization rather than interpreting `X-Forwarded-For` itself.
+  The signed-in branch still follows the user ID.
 - **`rateLimit` keys on `user:<id>`; `rateLimitCapability` keys on a
   capability.** Do not describe limiting here as uniformly per-user.
   `rateLimitCapability` is what throttles `moderation.appealOpen`
@@ -125,6 +162,29 @@ over HTTP and imports only its browser-safe subpaths.
   staff surface that has to reach a banned or blocked account, and it returns
   `role` for the same reason `team` does — the caller cannot tell whether it
   may manage a target without it.
+- **The badge catalog has one definition, and every badge is a stamped,
+  permanent achievement (issue #308).** `src/badges.ts`
+  (`@my-tuums/api/badges`, dependency-free like `src/constants.ts`) owns the
+  ids, families and thresholds that the server stamps and selects from and
+  the browser renders from; display names are Paraglide messages keyed by
+  badge id, never API data. Nothing is derived from live state on a profile
+  read — a count receding below its threshold takes no badge with it. Tiered
+  badges upgrade rather than combine: `src/badge-stamping.ts` is the single
+  mint point both tiered families write through, deleting the family's lower
+  tiers so an account holds one row per family that only moves up. The
+  writers, one per family: follower tiers stamp inside `user.follow`'s
+  transaction (one index-only count per successful follow, `unfollow` never
+  unstamps) and post-like tiers inside `post.like`'s the same way; join
+  badges stamp at account creation (`@my-tuums/db/stamp-join-badges`, wired
+  to the auth create hook, granting only the higher of the tiers the rank
+  earned — this package never touches them); Founder is granted by the
+  one-off committed script (`@my-tuums/db/grant-founder-badge`), which
+  refuses a re-grant and refuses once the three founder accounts hold it.
+  `user.byUsername` selects the display set from the stamped rows alone —
+  highest tier per family, canonical order, the authority even where a rare
+  upgrade race leaves a superseded row — and the suspended stub redacts it
+  to `[]` like every authored field; `src/badges.int.test.ts` pins all of
+  it.
 - **`publicUserColumns` is a privacy boundary.** Never add `email`,
   `twoFactorEnabled`, `lastLoginMethod`, `role` or a preference column; sign-in
   method is reconnaissance, not profile data. `src/users.int.test.ts` pins the
@@ -483,6 +543,27 @@ reposter_key)` — so it hand-rolls the same three parts the skeleton owns
   no longer carries a `BIO_MAX_LENGTH` copy — that copy existed only because
   the browser had no other dependency-free module to read, and it needed a
   drift test to stay honest. Re-adding one here re-creates the drift.
+- **The ranked feeds score in JS over bounded SQL candidates, and serve from
+  frozen snapshots (issue #305).** `src/feed-rank.ts` owns the pipeline:
+  two-arm candidate sourcing (authored posts plus repost events) inside a 7-day
+  window widened to 30 days when sparse, capped at `FEED_RANK_POOL_LIMIT` with
+  per-signal history bounded by `FEED_RANK_HISTORY_LIMIT`; one pure `scorePost`
+  (interest first, then discovery, then popularity; freshness off an
+  hourly-bucketed clock) with a post-hoc repeated-author penalty the pure
+  score never sees; snapshot persist/resume binding viewer, scope and filters
+  with a 30-minute TTL, where every resume refusal (unknown, foreign,
+  scope/filter mismatch, expired) is the same explicit error. The module never
+  renders a post and never imports `posts.ts`/`users.ts` (both import it — a
+  cycle fails at evaluation). `post.list`'s ranked branch hydrates each page's
+  slice live through the shared `postSelection` and re-checks visibility,
+  follow/privacy, scope and filter membership per item: tombstoned rows drop
+  (ranked pages never stub), withdrawn amplifications downgrade in place or
+  drop, and Discover includes followed authors while excluding the viewer. Chronological
+  branches carry `ranking: null`; `discover` is ranked-only and every other
+  ranked/scoping combination is refused by the input refinement. Maintenance
+  is request-time only (a bounded global sweep per build under a per-viewer
+  advisory lock, per-viewer trim on resume): no impressions, no Redis, no
+  cron.
 - **`src/moderation-inputs.ts` is a leaf on purpose.** The moderation router
   files must never import each other — a cycle fails at module evaluation.
 

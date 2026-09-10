@@ -11,7 +11,12 @@
      deliberately unlisted: there is no enumerable index of post ids to build
      a sitemap from, and one would be a stale snapshot the moment it was
      written. Crawlers reach permalinks the way people do — links off-site
-     and from the app itself. -->
+     and from the app itself.
+
+     The game directory hub (/games) is listed; the game pages under it are
+     deliberately not (issue #314, Q20): the catalog turns over weekly with
+     the IGDB sync, so a slug list here would be a snapshot too — crawlers
+     discover game pages from the hub, which links every one of them. -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://mytuums.com/login</loc>
@@ -21,6 +26,11 @@
   <url>
     <loc>https://mytuums.com/register</loc>
     <changefreq>yearly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://mytuums.com/games</loc>
+    <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>

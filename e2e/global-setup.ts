@@ -47,14 +47,42 @@ export default async function globalSetup(): Promise<void> {
   // reads `DATABASE_URL` at module scope — either one evaluated earlier
   // would hit the dev database. `closeDb` drains the pool `truncateAll`
   // opened, the same drain the inline truncate used to do here.
-  const [{ truncateAll }, { closeDb }] = await Promise.all([
+  const [{ truncateAll }, { db, closeDb }] = await Promise.all([
     import("./support/db"),
     import("@my-tuums/db"),
   ]);
 
   try {
     await truncateAll();
+    // Then the game catalog from the committed fixture (issue #314): the
+    // truncate above emptied `game` with everything else, and specs that
+    // assert against game data (pages, search, hashtag resolution) read
+    // THIS catalog, not one they seeded themselves — it is reference data,
+    // stable across the whole run by construction. Covers upload only when
+    // the S3_* group is present (fork PRs and bucket-less dev machines seed
+    // a bare catalog; the upload specs are skipped in that configuration
+    // anyway).
+    const { seedGamesFixture } = await import("@my-tuums/api/games-sync");
+    const storage = s3Configured()
+      ? (await import("@my-tuums/api/storage")).createStorage({
+          endpoint: process.env.S3_ENDPOINT!,
+          bucket: process.env.S3_BUCKET!,
+          accessKeyId: process.env.S3_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
+        })
+      : null;
+    await seedGamesFixture({ db, storage });
   } finally {
     await closeDb();
   }
+}
+
+/** The whole S3_* group or none of it — the same rule `context.ts` applies. */
+function s3Configured(): boolean {
+  return Boolean(
+    process.env.S3_ENDPOINT &&
+    process.env.S3_BUCKET &&
+    process.env.S3_ACCESS_KEY_ID &&
+    process.env.S3_SECRET_ACCESS_KEY,
+  );
 }

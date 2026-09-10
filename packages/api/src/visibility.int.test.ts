@@ -79,7 +79,7 @@ describe("a live suspension makes the author invisible everywhere", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Post not found." });
     await expect(
       call(appRouter.post.unlike, { postId: alicePosts[0].id }, { context: contextFor(bob) }),
-    ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Post not found." });
+    ).resolves.toMatchObject({ viewerHasLiked: false, likeCount: 0 });
 
     const searchPosts = await call(
       appRouter.search.posts,

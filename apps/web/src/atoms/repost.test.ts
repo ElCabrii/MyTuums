@@ -52,13 +52,19 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     removedReason: null,
     editedAt: null,
     unavailable: false,
+    private: false,
+    parentPrivate: false,
+    quotedPrivate: false,
     attachments: [],
     ...overrides,
   };
 }
 
 function feedPage(posts: Post[]): InfiniteData<PostListPage> {
-  return { pages: [{ items: posts, nextCursor: null }], pageParams: [undefined] };
+  return {
+    pages: [{ items: posts, nextCursor: null, gameMentions: {}, ranking: null }],
+    pageParams: [undefined],
+  };
 }
 
 function freshStoreWithPost(post: Post) {

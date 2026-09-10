@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { post, user, userBlock } from "@my-tuums/db/schema";
+import { follow, post, user, userBlock } from "@my-tuums/db/schema";
 
 /**
  * The visibility predicate (issue #38): the one filter every surface applies
@@ -85,4 +85,59 @@ export function invisibleUser(viewerId: string | null) {
  */
 export function visibleUser(viewerId: string | null) {
   return sql<boolean>`(not ${effectivelyBanned} and not ${invisibleUser(viewerId)})`;
+}
+
+/**
+ * True when the `post` row an outer query is over is private to the viewer
+ * (issue #328) and must be hidden: the post itself is followers-only, or its
+ * author has a private account — and the viewer is neither the author nor an
+ * approved follower.
+ *
+ * Null `user.is_private` (pre-privacy rows) reads as public: `is true` is
+ * false for null, so no backfill can lock anyone out. A null viewer (the
+ * anonymous permalink reader) sees every private row as hidden — there is no
+ * anonymous follower.
+ *
+ * Bound to the un-aliased `post`/`user` tables like `invisibleAuthor`; the
+ * authored feed arm joins both, so this composes as one more entry in its
+ * filter array. Moderators get no bypass here — moderation surfaces read
+ * through their own case/appeal procedures, and feeds stay viewer-shaped.
+ */
+export function privatePostHidden(viewerId: string | null) {
+  if (viewerId === null) {
+    return sql<boolean>`(
+      ${user.isPrivate} is true or ${post.isPrivate} is true
+    )`;
+  }
+  return sql<boolean>`(
+    (${user.isPrivate} is true or ${post.isPrivate} is true)
+    and ${post.authorId} <> ${viewerId}
+    and not exists (
+      select 1 from ${follow}
+      where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${post.authorId}
+    )
+  )`;
+}
+
+/**
+ * True when the `user` row an outer query is over is a private account the
+ * viewer may not enumerate (issue #328): `isPrivate` set, viewer neither the
+ * account nor an approved follower. Null reads as public, like above.
+ *
+ * User lists (search, typeahead, followers/following) AND this with
+ * `visibleUser`; profile and post surfaces use `privatePostHidden` instead,
+ * which also covers the per-post flag.
+ */
+export function privateUserHidden(viewerId: string | null) {
+  if (viewerId === null) {
+    return sql<boolean>`${user.isPrivate} is true`;
+  }
+  return sql<boolean>`(
+    ${user.isPrivate} is true
+    and ${user.id} <> ${viewerId}
+    and not exists (
+      select 1 from ${follow}
+      where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${user.id}
+    )
+  )`;
 }

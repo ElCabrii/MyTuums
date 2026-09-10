@@ -46,14 +46,27 @@ describe("user.byUsername", () => {
         "bio",
         "bannerImage",
         "createdAt",
+        // Visibility descriptor (issue #328): what the client's locked-account
+        // branch reads. Like the counts, it describes the profile rather than
+        // its owner's settings.
+        "isPrivate",
         "followerCount",
         "followingCount",
         "viewerIsFollowing",
+        // Follow-request state (issue #328): whether the viewer has a pending
+        // request against this profile — the FollowButton tri-state reads it
+        // alongside `viewerIsFollowing` and `isPrivate`.
+        "hasRequested",
         // Computed, never a stored column: the profile stub for a suspended
         // author (issue #38). Not part of publicUserColumns — the boolean is
         // derived at query time, so a real widening of that boundary still
         // fails this test.
         "suspended",
+        // Public profile data like the counts (issue #308): the badge display
+        // set in canonical order, selected at query time from the stamped
+        // `user_badge` rows. Computed for the same reason as `suspended` —
+        // not a stored column.
+        "badges",
       ].sort(),
     );
     expect(result).not.toHaveProperty("email");
@@ -253,6 +266,11 @@ describe("user.followers / user.following target visibility", () => {
     );
     expect(profile.suspended).toBe(true);
     expect(profile.followerCount).toBe(0);
+    // Authored-field redaction applies to badges like everything else
+    // (issue #308): the stub carries none. (The seeded graph gives the hub
+    // one follower, under every tier — an unstamped profile has no badge to
+    // redact, so this pins the field's presence on the stub, not a tier.)
+    expect(profile.badges).toEqual([]);
 
     const followers = await call(
       appRouter.user.followers,

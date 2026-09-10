@@ -2,8 +2,27 @@ import { describe, expect, it } from "vitest";
 import { ORPCError } from "@orpc/client";
 import { partialMatchKey } from "@tanstack/react-query";
 import { orpc, retryUnlessClientError } from "@/lib/orpc";
+import {
+  postListQueryOptions,
+  unreadCountQueryOptions,
+  notificationsQueryOptions,
+  replyContinuationQueryOptions,
+} from "@/lib/query-definitions";
 
 describe("retryUnlessClientError", () => {
+  it.each([
+    () => postListQueryOptions({ feed: "global" }),
+    unreadCountQueryOptions,
+    notificationsQueryOptions,
+    () => replyContinuationQueryOptions("post-1", "cursor-1"),
+  ])("#353 product reads stop deterministic failures but bound transient retries", (options) => {
+    const { retry } = options();
+    expect(retry(0, new ORPCError("UNAUTHORIZED"))).toBe(false);
+    expect(retry(0, new ORPCError("FORBIDDEN"))).toBe(false);
+    expect(retry(0, new ORPCError("INTERNAL_SERVER_ERROR"))).toBe(true);
+    expect(retry(1, new Error("network down"))).toBe(true);
+    expect(retry(2, new Error("network down"))).toBe(false);
+  });
   it("does not retry a 4xx ORPCError — a handle that doesn't exist won't start existing", () => {
     expect(retryUnlessClientError(0, new ORPCError("NOT_FOUND"))).toBe(false);
     expect(retryUnlessClientError(0, new ORPCError("BAD_REQUEST"))).toBe(false);
@@ -72,5 +91,23 @@ describe("query key shapes", () => {
     const prefix = orpc.user.followers.key();
     const scoped = orpc.user.followers.key({ input: { username: "alice" } });
     expect(partialMatchKey(scoped, prefix)).toBe(true);
+  });
+
+  // Issue #305: ranked keys discriminate from their chronological twins (a
+  // ranked global feed never shares a cache entry with the bare global
+  // feed), and Discover carries its own feed value. The snapshot id is a
+  // fetch-time concern — `postFeedAtom` pins the query key to the
+  // snapshot-free input (see atoms/post-feed.ts), so resuming never forks
+  // the entry the optimistic sweeps match on.
+  it("ranked feeds key apart from their chronological twins", () => {
+    const chrono = postListQueryOptions({ feed: "global" }).queryKey;
+    const ranked = postListQueryOptions({ feed: "global", ranked: true }).queryKey;
+    expect(ranked).not.toEqual(chrono);
+  });
+
+  it("Discover keys apart from the global feed", () => {
+    const global = postListQueryOptions({ feed: "global", ranked: true }).queryKey;
+    const discover = postListQueryOptions({ feed: "discover", ranked: true }).queryKey;
+    expect(discover).not.toEqual(global);
   });
 });

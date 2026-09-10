@@ -18,16 +18,29 @@ databases. It serves data only — no HTTP, no business logic.
 
 ## Change map
 
-| Intent                            | Primary                      | Also touch                                                                |
-| --------------------------------- | ---------------------------- | ------------------------------------------------------------------------- |
-| Add or change an app table        | `src/schema/app.ts`          | `pnpm db:generate`, then commit `drizzle/`; an index if a cursor reads it |
-| Change an auth table              | `packages/auth/src/index.ts` | `pnpm --filter @my-tuums/db db:generate:auth`, then `pnpm db:generate`    |
-| Add an index for a new list       | `src/schema/app.ts`          | the `keysetPage` call in `packages/api` it must mirror                    |
-| Change how migrations are applied | `src/migrate.ts`             | `apps/server/src/migrate.ts`, `docker-compose.yml`                        |
-| Change test-database handling     | `src/testing.ts`             | `scripts/setup-test-db.ts`, `e2e/global-setup.ts`                         |
-| Add a maintenance script          | `scripts/`                   | the `scripts` entry in `package.json`                                     |
+| Intent                                     | Primary                                                          | Also touch                                                                                                                                       |
+| ------------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Add or change an app table                 | `src/schema/app.ts`                                              | `pnpm db:generate`, then commit `drizzle/`; an index if a cursor reads it                                                                        |
+| Change an auth table                       | `packages/auth/src/index.ts`                                     | `pnpm --filter @my-tuums/db db:generate:auth`, then `pnpm db:generate`                                                                           |
+| Add an index for a new list                | `src/schema/app.ts`                                              | the `keysetPage` call in `packages/api` it must mirror                                                                                           |
+| Add or change a ranked-feed snapshot field | `src/schema/app.ts` (`feedRankSnapshot`, `FeedRankSnapshotItem`) | migration `0035_charming_sandman`; `packages/api/src/feed-rank.ts` (the only reader/writer); `docs/operations.md` Migrations                     |
+| Change how migrations are applied          | `src/migrate.ts`                                                 | `apps/server/src/migrate.ts`, `docker-compose.yml`                                                                                               |
+| Change test-database handling              | `src/testing.ts`                                                 | `scripts/setup-test-db.ts`, `e2e/global-setup.ts`                                                                                                |
+| Add a maintenance script                   | `scripts/`                                                       | the `scripts` entry in `package.json`                                                                                                            |
+| Edit the games fixture                     | `fixtures/games.json`                                            | hand-authored seed data (never generated); `packages/api`'s `games-fixture.test.ts` pins its contract, and its seeder uploads `fixtures/covers/` |
 
 ## Invariants
+
+- **Video lifecycle state has a different lifetime from a post.** `video_submission`
+  holds author-only pending text/captions outside `post`; `video` tracks upload,
+  leased attempts and the successful playback inventory. A published video
+  requires confirmed source deletion. The attachment references the video once.
+  `video_cleanup` and a failure notification's `videoId` intentionally have no
+  foreign key to the video: cleanup and the one failure notice must survive
+  deletion of transient state and account cascades.
+- **The queue schema is committed DDL.** `0038_video_queue.sql` is generated
+  from pinned pg-boss 12.26.0. Application startup does not migrate it. See
+  [video migration instructions](../../docs/video-operations.md#migrations).
 
 - **`src/index.ts` reads `DATABASE_URL` at module scope and throws when it is
   unset.** That is precisely why `./testing` is a separate entry point: it must
@@ -42,8 +55,16 @@ databases. It serves data only — no HTTP, no business logic.
   and then `scripts/patch-auth-schema.ts`. That script's header explains what
   it patches and why.
 - **Composite primary keys are the idempotency mechanism.** Uniqueness for
-  likes, reposts, follows, reports and blocks lives in the PK, so handlers use
-  `onConflictDoNothing` instead of a read-then-write race.
+  likes, reposts, follows, reports, blocks and stamped badges lives in the
+  PK, so handlers use `onConflictDoNothing` instead of a read-then-write
+  race. Badge stamps additionally upgrade in place — one row per tiered
+  family, the crossing that earns a higher tier deleting the lower one
+  (packages/api/src/badge-stamping.ts) — and the join badges are stamped
+  exclusively (the higher of the tiers the rank earned). The
+  `user_badge.badge` check constraint repeats the badge catalog
+  (`BADGE_IDS` in `@my-tuums/api/badges`) as a SQL literal, and
+  `src/stamp-join-badges.ts` repeats the join family's ranks and ids — the
+  dependency points one way, so keep the copies in step.
 - **A quote reference is deliberately FK-less.** `post.quoted_post_id` names
   another post, but a hard delete of that row (today, through its author's
   account cascade) must not delete the quoting author's own post. Readers
@@ -68,20 +89,31 @@ databases. It serves data only — no HTTP, no business logic.
 - **Destructive helpers refuse anything not ending in `_test`**
   (`assertTestDatabase`, `scripts/setup-test-db.ts`). This is the guard
   standing between a test run and the development database.
+- **A rank snapshot is viewer-owned, scope-bound, and content-free (issue
+  #305).** `feedRankSnapshot` holds ordered IDs with repost attribution
+  (`FeedRankSnapshotItem[]`), never post text; the scope check constraint pins
+  `global`/`following`/`discover`, and `q`/`gameSlug`/`gameHashtagKey` pin the
+  filters the order was built under. The two indexes serve the two maintenance
+  reads — the viewer's rows by expiry (per-viewer trim) and all rows by expiry
+  (bounded global sweep) — and `viewerId` cascades with the account. Expiry is
+  enforced by the reader, not the schema: the row stays servable until
+  `expiresAt`, then is refused and reaped opportunistically.
 - **One pool per process.** `db` is a singleton; integration suites share it,
   which is why the API suite runs `fileParallelism: false`.
 
 ## Dependencies and boundaries
 
-Five subpath exports, all source `.ts` — consumers compile or inline them:
+Seven subpath exports, all source `.ts` — consumers compile or inline them:
 
-| Subpath     | Exports                                    | Consumers                                               |
-| ----------- | ------------------------------------------ | ------------------------------------------------------- |
-| `.`         | `db`, `Database`, `closeDb`, `pingDb`      | `packages/api`, `packages/auth`, `apps/server`          |
-| `./schema`  | tables and relations                       | `packages/api`, `e2e`                                   |
-| `./testing` | test-URL helpers and the destructive guard | vitest configs, `e2e`                                   |
-| `./migrate` | `runMigrations`                            | `apps/server/src/migrate.ts`                            |
-| `./promote` | `promoteUser`                              | `scripts/promote-user.ts`, `apps/server/src/promote.ts` |
+| Subpath                 | Exports                                    | Consumers                                                                  |
+| ----------------------- | ------------------------------------------ | -------------------------------------------------------------------------- |
+| `.`                     | `db`, `Database`, `closeDb`, `pingDb`      | `packages/api`, `packages/auth`, `apps/server`                             |
+| `./schema`              | tables and relations                       | `packages/api`, `e2e`                                                      |
+| `./testing`             | test-URL helpers and the destructive guard | vitest configs, `e2e`                                                      |
+| `./migrate`             | `runMigrations`                            | `apps/server/src/migrate.ts`                                               |
+| `./promote`             | `promoteUser`                              | `scripts/promote-user.ts`, `apps/server/src/promote.ts`                    |
+| `./grant-founder-badge` | `grantFounderBadge`                        | `scripts/grant-founder-badge.ts`, `apps/server/src/grant-founder-badge.ts` |
+| `./stamp-join-badges`   | `stampJoinBadges`                          | `packages/auth` (the user-create hook)                                     |
 
 This package must not import `packages/api` or `packages/auth` — the
 dependency direction is one way.

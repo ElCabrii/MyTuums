@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { z } from "zod";
 import { bestEncoding, type Compression } from "./compression.js";
+import { isBrandingHostRequest } from "./branding-host.js";
 import { NONBLOCKING_STYLESHEET_ONLOAD_HANDLER } from "@my-tuums/api/constants";
 
 /**
@@ -84,8 +85,8 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   none of which this app controls or should enumerate. Finally, the settings
  *   crop editor renders the selected local file through a short-lived `blob:`
  *   object URL (`apps/web/src/components/settings/image-crop-dialog.tsx`).
- *   `blob:` is limited to image loads; no bare-HTTP or `data:` source is
- *   allowed, and stored media remains behind the same-origin session gate.
+ *   Local previews use `blob:`; stored media remains behind the same-origin
+ *   session gate. Video adds its own separate media/worker directives below.
  * - `font-src 'self'`: `@fontsource-variable/inter` ships the font files
  *   through the build; nothing is fetched from a font CDN.
  * - `script-src 'self' https://accounts.google.com 'unsafe-hashes'
@@ -124,13 +125,22 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   documented path, since a CSP source with no path component matches every
  *   path on that origin.
  * - `connect-src 'self' https://accounts.google.com`: `'self'` covers `/rpc`,
- *   `/api/auth` and `/media`, the app's entire fetch surface. One Tap's
+ *   `/api/auth` and `/media`. Configured bucket origins additionally allow
+ *   signed multipart PUTs and HLS segment GETs. One Tap's
  *   loaded script makes its own requests (credential fetch, FedCM
  *   `.well-known` discovery) back to Google from the page's origin context,
  *   so it needs the same host as `script-src`.
- * - `worker-src 'self'`: the production web build emits one same-origin
- *   service worker for the offline app shell. Keeping this explicit prevents
- *   a future widening of `default-src` from silently widening worker code.
+ * - When `VITE_GA_MEASUREMENT_ID` was baked into the bundled app, the app
+ *   host's policy additionally permits `www.googletagmanager.com` for the
+ *   external tag and Google's documented GA4 collection origins in
+ *   `connect-src`. Those sources are absent when analytics is unconfigured
+ *   and always absent on the script-free branding host. `img-src https:`
+ *   already covers GA's fallback beacons, so repeating narrower Google image
+ *   origins would not tighten or widen that existing directive.
+ * - `worker-src 'self' blob:` allows the same-origin offline service worker
+ *   and HLS.js's bundled transmuxing worker. Script sources remain restricted.
+ * - `media-src 'self' blob:` plus the configured bucket origins allows native
+ *   HLS and MediaSource playback without opening arbitrary media hosts.
  * - `frame-src https://accounts.google.com`: One Tap's prompt UI itself
  *   renders in a Google-hosted iframe the loaded script creates. Nothing
  *   else in this app frames anything.
@@ -164,20 +174,32 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  * `cacheHeaderFor` in ./static-files.ts). Do not treat that directive as a
  * cache tuning knob — it is what keeps this policy true. See docs/security.md.
  */
-const CONTENT_SECURITY_POLICY = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-  "img-src 'self' https: blob:",
-  "font-src 'self'",
-  `script-src 'self' https://accounts.google.com 'unsafe-hashes' '${STYLESHEET_SWAP_HANDLER_HASH}'`,
-  "style-src 'self' 'unsafe-inline' https://accounts.google.com",
-  "connect-src 'self' https://accounts.google.com",
-  "worker-src 'self'",
-  "frame-src https://accounts.google.com",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-].join("; ");
+function contentSecurityPolicy(
+  googleAnalytics: boolean,
+  mediaOrigins: readonly string[] = [],
+): string {
+  const analyticsScript = googleAnalytics ? " https://www.googletagmanager.com" : "";
+  const analyticsConnections = googleAnalytics
+    ? " https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com"
+    : "";
+  const bucketSources = mediaOrigins.map((origin) => ` ${new URL(origin).origin}`).join("");
+
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "img-src 'self' https: blob:",
+    "font-src 'self'",
+    `script-src 'self' https://accounts.google.com${analyticsScript} 'unsafe-hashes' '${STYLESHEET_SWAP_HANDLER_HASH}'`,
+    "style-src 'self' 'unsafe-inline' https://accounts.google.com",
+    `connect-src 'self' https://accounts.google.com${analyticsConnections}${bucketSources}`,
+    `media-src 'self' blob:${bucketSources}`,
+    "worker-src 'self' blob:",
+    "frame-src https://accounts.google.com",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
 
 /**
  * The per-response security headers, applied to every response that does not
@@ -199,16 +221,14 @@ const SECURITY_HEADERS = {
   // localhost and the e2e suite, and effective once the Railway edge (which
   // terminates TLS) forwards it to a browser.
   "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-  // Applied unconditionally, not just in production: this server never serves
-  // HTML except when `WEB_DIST` is set (`index.ts`), and every other response
-  // it ever sends — JSON, redirects, plain-text errors — is fetched via
-  // XHR/fetch or followed as a subresource, contexts CSP response headers do
-  // not police. Sending it in dev too (where Vite proxies `/rpc`, `/api/auth`
-  // and `/media` here, but serves the actual document itself) is inert, not
-  // risky, and keeps this module's output identical across environments —
-  // see the directive-by-directive reasoning above.
-  "Content-Security-Policy": CONTENT_SECURITY_POLICY,
 } satisfies OutgoingHttpHeaders;
+
+export interface ResponseDecoratorOptions {
+  /** Whether the bundled SPA contains the consent-gated GA4 integration. */
+  googleAnalytics?: boolean;
+  /** Exact bucket origins used for direct multipart uploads and HLS segments. */
+  mediaOrigins?: readonly string[];
+}
 
 /** Bodies smaller than this are sent identity — compressing them costs CPU for nothing. */
 const MIN_COMPRESS_BODY_BYTES = 1024;
@@ -314,6 +334,7 @@ class DecoratedResponse {
   constructor(
     private readonly req: IncomingMessage,
     private readonly res: ServerResponse,
+    private readonly options: ResponseDecoratorOptions,
   ) {
     this.originalWriteHead = res.writeHead.bind(res);
     this.originalWrite = res.write.bind(res);
@@ -333,7 +354,19 @@ class DecoratedResponse {
   private applyDefaults(): void {
     if (this.defaultsApplied) return;
     this.defaultsApplied = true;
-    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+    const headers = {
+      ...SECURITY_HEADERS,
+      // Applied on every response, as before. Non-document response policies
+      // are inert; using one decision everywhere keeps the choke point honest.
+      // The branding document stays on the base policy even when the SPA has
+      // analytics because that separate site loads no third-party script.
+      "Content-Security-Policy": contentSecurityPolicy(
+        Boolean(this.options.googleAnalytics) && !isBrandingHostRequest(this.req),
+        this.options.mediaOrigins,
+      ),
+    } satisfies OutgoingHttpHeaders;
+
+    for (const [name, value] of Object.entries(headers)) {
       // Inner wins: a handler that sets one of these deliberately keeps its
       // value, for both the setHeader path (better-auth) and the writeHead
       // headers-argument path (everything else) — Node merges writeHead-arg
@@ -577,6 +610,10 @@ class DecoratedResponse {
  * per-response state lives in `DecoratedResponse`; this factory wires its
  * overrides onto `res` and hands the real object back.
  */
-export function decorateResponse(req: IncomingMessage, res: ServerResponse): ServerResponse {
-  return new DecoratedResponse(req, res).attach();
+export function decorateResponse(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: ResponseDecoratorOptions = {},
+): ServerResponse {
+  return new DecoratedResponse(req, res, options).attach();
 }

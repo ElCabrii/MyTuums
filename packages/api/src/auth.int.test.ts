@@ -20,8 +20,8 @@ import {
 } from "@my-tuums/auth/rules";
 import { authTest, testHelpers } from "@my-tuums/auth/testing";
 import { closeDb, db } from "@my-tuums/db";
-import { twoFactor, user, verification } from "@my-tuums/db/schema";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { account, twoFactor, user, verification } from "@my-tuums/db/schema";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { truncateAll } from "./testing/harness.js";
 
 // Fixture passphrases for the throwaway accounts this suite mints on the
@@ -355,6 +355,114 @@ describe("email verification", () => {
       result.headers.getSetCookie().some((c) => c.startsWith("better-auth.session_token=")),
     ).toBe(false);
   });
+});
+
+describe("sign-up security (issue #380)", () => {
+  function request(
+    path: string,
+    body: ReturnType<typeof signUpBody>["body"] | { username: string },
+    ip: string,
+  ) {
+    return auth.handler(
+      new Request(`http://localhost:3001/api/auth${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-mytuums-client-ip": ip },
+        body: JSON.stringify(body),
+      }),
+    );
+  }
+
+  it.each([false, true])(
+    "keeps one account for a repeated email when emailVerified=%s",
+    async (emailVerified) => {
+      const ip = emailVerified ? "198.51.100.38" : "198.51.100.39";
+      const original = signUpBody({});
+      const created = await request("/sign-up/email", original.body, ip);
+      expect(created.status).toBe(200);
+      if (emailVerified) await markEmailVerified(original.email);
+
+      const [before] = await db.select().from(user).where(eq(user.email, original.email));
+      expect(before).toBeDefined();
+      if (!before) throw new Error("expected the original sign-up to persist");
+      const credentials = await db.select().from(account).where(eq(account.userId, before.id));
+      expect(credentials).toHaveLength(1);
+
+      for (const email of [original.email, original.email.toUpperCase()]) {
+        const duplicate = signUpBody({ email, password: REPLACEMENT_PASSPHRASE });
+        const response = await request("/sign-up/email", duplicate.body, ip);
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({
+          token: null,
+          user: { email: original.email, username: duplicate.username },
+        });
+        expect(
+          response.headers.getSetCookie().some((cookie) => cookie.includes("session_token=")),
+        ).toBe(false);
+        await expect(db.select().from(user).where(eq(user.email, original.email))).resolves.toEqual(
+          [before],
+        );
+        await expect(
+          db.select().from(user).where(eq(user.username, duplicate.username)),
+        ).resolves.toEqual([]);
+        await expect(
+          db.select().from(account).where(eq(account.userId, before.id)),
+        ).resolves.toEqual(credentials);
+      }
+    },
+  );
+
+  it("limits occupied-handle sign-up probes for a full minute and recovers afterward", async () => {
+    const { username } = await signUpUnverified();
+    const ip = "198.51.100.40";
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      for (const handle of [username, username.toUpperCase(), username]) {
+        const response = await request("/sign-up/email", signUpBody({ username: handle }).body, ip);
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toMatchObject({ code: "USERNAME_IS_ALREADY_TAKEN" });
+      }
+
+      // The inherited three-per-ten-seconds budget used to reopen here.
+      vi.setSystemTime(now + 11_000);
+      const fresh = signUpBody({});
+      const blocked = await request("/sign-up/email", fresh.body, ip);
+      expect(blocked.status).toBe(429);
+      expect(Number(blocked.headers.get("x-retry-after"))).toBeGreaterThan(0);
+      await expect(
+        db.select({ id: user.id }).from(user).where(eq(user.email, fresh.email)),
+      ).resolves.toEqual([]);
+
+      vi.setSystemTime(now + 61_000);
+      const allowed = await request("/sign-up/email", fresh.body, ip);
+      expect(allowed.status).toBe(200);
+      await expect(
+        db.select({ id: user.id }).from(user).where(eq(user.email, fresh.email)),
+      ).resolves.toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["/is-username-available", "/update-user"])(
+    "limits the alternate %s handle probe",
+    async (path) => {
+      const { username } = await signUpUnverified();
+      const ip = "198.51.100.41";
+      const available = await request(path, { username: signUpBody({}).username }, ip);
+      expect(available.status).toBe(path === "/update-user" ? 401 : 200);
+
+      for (let i = 0; i < 9; i++) {
+        const response = await request(path, { username: username.toUpperCase() }, ip);
+        expect(response.status).toBe(path === "/update-user" ? 400 : 200);
+        await expect(response.json()).resolves.toMatchObject(
+          path === "/update-user" ? { code: "USERNAME_IS_ALREADY_TAKEN" } : { available: false },
+        );
+      }
+      const blocked = await request(path, { username }, ip);
+      expect(blocked.status).toBe(429);
+    },
+  );
 });
 
 describe("two-factor enrolment", () => {

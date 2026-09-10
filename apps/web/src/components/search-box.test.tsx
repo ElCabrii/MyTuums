@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { createStore } from "jotai";
 import { SearchBox } from "@/components/search-box";
 import {
@@ -40,6 +40,7 @@ describe("SearchBox suggestions", () => {
   it("renders profile and see-all rows from the typeahead cache", async () => {
     await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
 
@@ -53,6 +54,7 @@ describe("SearchBox suggestions", () => {
   it("navigates to the profile on a user-row click and dismisses the list", async () => {
     const { router, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
     const input = screen.getByRole("combobox");
@@ -75,6 +77,7 @@ describe("SearchBox suggestions", () => {
   it("dismisses the list when the user clicks outside", async () => {
     const { user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
 
@@ -84,7 +87,7 @@ describe("SearchBox suggestions", () => {
   });
 
   it("shows the no-results line instead of a lone see-all row for an empty payload", async () => {
-    const { router } = await openSuggestions("hello", { users: [], posts: [] });
+    const { router } = await openSuggestions("hello", { users: [], games: [], posts: [] });
 
     expect(screen.getByRole("option", { name: "No results for “hello”." })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "See all results" })).not.toBeInTheDocument();
@@ -94,6 +97,7 @@ describe("SearchBox suggestions", () => {
   it("see-all row appears with results and carries the query into /search", async () => {
     const { router, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
 
@@ -106,6 +110,7 @@ describe("SearchBox suggestions", () => {
   it("clear empties the input and hands the caret back", async () => {
     const { store, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
     const input = screen.getByRole("combobox");
@@ -125,6 +130,14 @@ describe("SearchBox suggestions", () => {
     expect(input).toHaveValue("");
     expect(input).toHaveFocus();
     expect(store.get(searchInputAtom)).toBe("");
+    expect(input).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await waitFor(() => expect(store.get(debouncedSearchQueryAtom)).toBe(""));
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+
+    await user.keyboard("hello");
+    expect(input).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByRole("option", { name: /Alex Mercer/ })).toBeInTheDocument();
   });
 });
 
@@ -133,11 +146,43 @@ describe("SearchBox debounce and keyboard contract", () => {
     vi.useRealTimers();
   });
 
+  it("inserts typed spaces with the popover open and closed, and debounces the full phrase (issue #335)", async () => {
+    const store = createStore();
+    const queryClient = createTestQueryClient();
+    // Seed the multi-word typeahead so the debounced query resolves from the
+    // cache instead of hitting the network once the debounce lands.
+    queryClient.setQueryData(orpc.search.typeahead.queryKey({ input: { q: "hello world" } }), {
+      users: [],
+      games: [],
+      posts: [],
+    });
+    await renderWithProviders(<SearchBox />, { store, queryClient });
+    const user = userEvent.setup();
+    const input = screen.getByRole("combobox");
+    act(() => input.focus());
+
+    // The first Space lands while the popover is still closed; the rest land
+    // with it open. Base-ui's trigger emulates a button Space press on
+    // non-native triggers and preventDefaults the keydown, which used to
+    // swallow the character in both states.
+    await user.keyboard(" ");
+    expect(input).toHaveValue(" ");
+
+    await user.keyboard("hello world");
+    expect(input).toHaveValue(" hello world");
+    expect(store.get(searchInputAtom)).toBe(" hello world");
+
+    // The debounced copy is trimmed, so the full phrase is what queries run
+    // against and what Enter carries into /search.
+    await waitFor(() => expect(store.get(debouncedSearchQueryAtom)).toBe("hello world"));
+  });
+
   it("updates the input immediately but lands only the final debounced query after 300 ms", async () => {
     const store = createStore();
     const queryClient = createTestQueryClient();
     queryClient.setQueryData(orpc.search.typeahead.queryKey({ input: { q: "ab" } }), {
       users: [makeUserSummary({ name: "Able User", username: "able" })],
+      games: [],
       posts: [],
     });
     await renderWithProviders(<SearchBox />, { store, queryClient });
@@ -171,6 +216,7 @@ describe("SearchBox debounce and keyboard contract", () => {
   it("wraps the shared highlight and exposes it through combobox ARIA state", async () => {
     const { store } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
     const press = (key: "ArrowDown" | "ArrowUp") => {
@@ -212,6 +258,7 @@ describe("SearchBox debounce and keyboard contract", () => {
   ])("Enter follows the highlighted $label row", async ({ arrows, pathname }) => {
     const { router, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
 
@@ -230,6 +277,7 @@ describe("SearchBox debounce and keyboard contract", () => {
   it("Enter without a highlight opens the full search page", async () => {
     const { router, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
 
@@ -243,6 +291,7 @@ describe("SearchBox debounce and keyboard contract", () => {
   it("reopens suggestions on the first real focus after Enter navigation", async () => {
     const { user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
     const input = screen.getByRole("combobox");
@@ -258,6 +307,7 @@ describe("SearchBox debounce and keyboard contract", () => {
   it("Escape preserves the query, clears the highlight, and stays dismissed through focus return", async () => {
     const { store, user } = await openSuggestions("hello", {
       users: [makeUserSummary({ name: "Alex Mercer", username: "alexmercer" })],
+      games: [],
       posts: [],
     });
     const input = screen.getByRole("combobox");

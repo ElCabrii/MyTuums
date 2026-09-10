@@ -321,6 +321,6 @@ describe("rejection messages", () => {
   });
 
   it("pins the legal version to the legal pages' last-updated date", () => {
-    expect(LEGAL_VERSION).toBe("2026-08-02");
+    expect(LEGAL_VERSION).toBe("2026-09-06");
   });
 });

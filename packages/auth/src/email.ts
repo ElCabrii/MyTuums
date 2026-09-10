@@ -18,6 +18,7 @@
  *   never receives anything.
  */
 import { Resend } from "resend";
+import { type EmailAction, renderBrandedEmail } from "./email-templates/shell.js";
 import { emailFrom, isProduction, resendApiKey, webOrigin } from "./env.js";
 
 /**
@@ -101,18 +102,6 @@ export type EmailLocale = "en" | "fr";
 
 type EmailCopy = Pick<OutgoingEmail, "subject" | "text">;
 
-const EMAIL_PRIMARY_COLOR = "#c6005c";
-const EMAIL_TEXT_COLOR = "#2d282b";
-const EMAIL_MUTED_COLOR = "#746b70";
-const EMAIL_BORDER_COLOR = "#e7e0e4";
-const EMAIL_BACKGROUND_COLOR = "#f6f3f5";
-const EMAIL_FONT = "Arial,Helvetica,sans-serif";
-
-type EmailAction = {
-  url: string;
-  label: string;
-};
-
 interface EmailRenderOptions {
   action?: EmailAction;
   otp?: string;
@@ -132,179 +121,33 @@ function emailLogoUrl(): string {
   }
 }
 
-/** Escapes all copy before it enters the HTML part, including moderator-supplied reasons and notes. */
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-type HtmlToken = {
-  start: number;
-  end: number;
-  value: string;
-  kind: "url" | "otp";
-};
-
-/** Turns non-action URLs into safe links and gives the OTP a quiet visual emphasis. */
-function renderHtmlLine(line: string, otp?: string): string {
-  const urlTokens: HtmlToken[] = [...line.matchAll(/https?:\/\/[^\s<>"']+/g)].map((match) => ({
-    start: match.index,
-    end: match.index + match[0].length,
-    value: match[0],
-    kind: "url",
-  }));
-  const tokens = [...urlTokens];
-
-  if (otp) {
-    let searchStart = 0;
-    while (searchStart < line.length) {
-      const start = line.indexOf(otp, searchStart);
-      if (start === -1) break;
-
-      const end = start + otp.length;
-      const overlapsUrl = urlTokens.some((token) => start < token.end && end > token.start);
-      if (!overlapsUrl) {
-        tokens.push({ start, end, value: otp, kind: "otp" });
-      }
-      searchStart = end;
-    }
-  }
-
-  tokens.sort((left, right) => left.start - right.start || right.end - left.end);
-
-  let rendered = "";
-  let previousEnd = 0;
-
-  for (const token of tokens) {
-    if (token.start < previousEnd) continue;
-
-    rendered += escapeHtml(line.slice(previousEnd, token.start));
-    if (token.kind === "otp") {
-      rendered +=
-        `<strong style="display:inline-block;padding:3px 9px;border:1px solid ${EMAIL_BORDER_COLOR};` +
-        `border-radius:4px;background-color:#fbf4f7;color:${EMAIL_TEXT_COLOR};font-family:Courier New,Courier,monospace;` +
-        `font-size:20px;font-weight:700;letter-spacing:3px;line-height:1.2;">${escapeHtml(token.value)}</strong>`;
-    } else {
-      rendered +=
-        `<a href="${escapeHtml(token.value)}" ` +
-        `style="color:${EMAIL_PRIMARY_COLOR};font-weight:600;text-decoration:underline;word-break:break-all;">` +
-        `${escapeHtml(token.value)}</a>`;
-    }
-    previousEnd = token.end;
-  }
-
-  return rendered + escapeHtml(line.slice(previousEnd));
-}
-
-/**
- * Preserves the plain-text copy's paragraph structure while keeping the
- * primary action URL out of visible HTML. Other URLs in quoted content stay
- * safe and useful as ordinary text links.
- */
-function renderHtmlCopy(text: string, options: EmailRenderOptions = {}): string {
-  const actionUrl = options.action?.url;
-  let actionRendered = false;
-
-  return text
-    .split(/\n{2,}/)
-    .map((paragraph) => {
-      const lines = paragraph.split("\n");
-      const containsAction =
-        !actionRendered &&
-        actionUrl !== undefined &&
-        lines.some((line) => line.trim() === actionUrl);
-      const renderedLines = lines
-        .filter((line) => line.trim().length > 0 && line.trim() !== actionUrl)
-        .map((line) => renderHtmlLine(line, options.otp));
-
-      if (containsAction) actionRendered = true;
-
-      const renderedCopy =
-        renderedLines.length === 0
-          ? ""
-          : `<p style="margin:0 0 18px;color:${EMAIL_TEXT_COLOR};font-family:${EMAIL_FONT};` +
-            `font-size:15px;line-height:1.65;">${renderedLines.join("<br>")}</p>`;
-      const renderedAction =
-        containsAction && options.action ? renderActionButton(options.action) : "";
-
-      return renderedCopy + renderedAction;
-    })
-    .filter(Boolean)
-    .join("");
-}
-
-/** A table-backed button keeps the action dependable in Outlook and webmail. */
-function renderActionButton(action: EmailAction): string {
-  return (
-    `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:separate;margin:4px 0 8px;">` +
-    `<tr><td align="left" bgcolor="${EMAIL_PRIMARY_COLOR}" style="border-radius:5px;background-color:${EMAIL_PRIMARY_COLOR};">` +
-    `<a href="${escapeHtml(action.url)}" ` +
-    `style="display:inline-block;padding:12px 18px;border:1px solid ${EMAIL_PRIMARY_COLOR};border-radius:5px;` +
-    `background-color:${EMAIL_PRIMARY_COLOR};color:#ffffff;font-family:${EMAIL_FONT};font-size:14px;` +
-    `font-weight:700;line-height:1.2;text-decoration:none;">${escapeHtml(action.label)}</a>` +
-    `</td></tr></table>`
-  );
-}
-
 /**
  * Gives every auth and moderation message one branded HTML family while the
  * locale-specific copy remains the source of truth for both multipart parts.
+ *
+ * The HTML renders through the owned emailcn-style templates in
+ * `./email-templates/` (a custom `theme-mytuums` over `react-email`
+ * primitives): the action URL survives only as the CTA button's `href`,
+ * quoted URLs stay visible safe links, and moderator- and author-supplied
+ * copy is escaped structurally — every string reaches the client as a React
+ * text child, so there is no hand-rolled escaper left to drift. Async
+ * because `react-email`'s `render` inlines styles asynchronously.
  */
-function brandedEmail(
+async function brandedEmail(
   copy: EmailCopy,
   locale: EmailLocale,
   options: EmailRenderOptions = {},
-): Omit<OutgoingEmail, "to"> {
-  const subject = escapeHtml(copy.subject);
-  const logoUrl = escapeHtml(emailLogoUrl());
-
+): Promise<Omit<OutgoingEmail, "to">> {
   return {
     ...copy,
-    html: `<!doctype html>
-<html lang="${locale}">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light">
-    <meta name="supported-color-schemes" content="light">
-    <title>${subject}</title>
-  </head>
-  <body style="margin:0;padding:0;background-color:${EMAIL_BACKGROUND_COLOR};color:${EMAIL_TEXT_COLOR};">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="${EMAIL_BACKGROUND_COLOR}" style="width:100%;border-collapse:collapse;background-color:${EMAIL_BACKGROUND_COLOR};">
-      <tr>
-        <td align="center" style="padding:24px 12px;">
-          <table role="article" aria-labelledby="email-title" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:600px;border-collapse:separate;border-spacing:0;background-color:#ffffff;border:1px solid ${EMAIL_BORDER_COLOR};border-top:3px solid ${EMAIL_PRIMARY_COLOR};">
-            <tr>
-              <td style="padding:22px 32px 18px;border-bottom:1px solid ${EMAIL_BORDER_COLOR};">
-                <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;">
-                  <tr>
-                    <td style="padding-right:10px;vertical-align:middle;">
-                      <img src="${logoUrl}" width="32" height="32" alt="MyTuums logo" style="display:block;width:32px;height:32px;border:0;border-radius:7px;outline:none;text-decoration:none;">
-                    </td>
-                    <td style="color:${EMAIL_TEXT_COLOR};font-family:${EMAIL_FONT};font-size:17px;font-weight:700;letter-spacing:-0.2px;vertical-align:middle;">MyTuums</td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:30px 32px 26px;">
-                <h1 id="email-title" style="margin:0 0 22px;color:${EMAIL_TEXT_COLOR};font-family:${EMAIL_FONT};font-size:24px;font-weight:700;line-height:1.25;">${subject}</h1>
-                ${renderHtmlCopy(copy.text, options)}
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:16px 32px 20px;border-top:1px solid ${EMAIL_BORDER_COLOR};color:${EMAIL_MUTED_COLOR};font-family:${EMAIL_FONT};font-size:12px;line-height:1.5;">MyTuums</td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`,
+    html: await renderBrandedEmail({
+      subject: copy.subject,
+      text: copy.text,
+      locale,
+      logoUrl: emailLogoUrl(),
+      action: options.action,
+      otp: options.otp,
+    }),
   };
 }
 
@@ -592,89 +435,104 @@ const copy = {
 } as const;
 
 /** Builds the two-factor OTP email copy for the given locale. */
-export function otpEmail(otp: string, locale: EmailLocale): Omit<OutgoingEmail, "to"> {
+export async function otpEmail(
+  otp: string,
+  locale: EmailLocale,
+): Promise<Omit<OutgoingEmail, "to">> {
   return brandedEmail(copy.otp[locale](otp), locale, { otp });
 }
 
 /** Builds the email-verification email copy for the given locale. */
-export function verificationEmail(url: string, locale: EmailLocale): Omit<OutgoingEmail, "to"> {
+export async function verificationEmail(
+  url: string,
+  locale: EmailLocale,
+): Promise<Omit<OutgoingEmail, "to">> {
   return brandedEmail(copy.verify[locale](url), locale, {
     action: { url, label: ACTION_LABELS.verify[locale] },
   });
 }
 
 /** Builds the password-reset email copy for the given locale. */
-export function passwordResetEmail(url: string, locale: EmailLocale): Omit<OutgoingEmail, "to"> {
+export async function passwordResetEmail(
+  url: string,
+  locale: EmailLocale,
+): Promise<Omit<OutgoingEmail, "to">> {
   return brandedEmail(copy.reset[locale](url), locale, {
     action: { url, label: ACTION_LABELS.reset[locale] },
   });
 }
 
 /** Builds the post-removal notice copy — describes the post and links the appeal. */
-export function moderationRemovalEmail(
+export async function moderationRemovalEmail(
   args: RemovalArgs,
   locale: EmailLocale,
-): Omit<OutgoingEmail, "to"> {
+): Promise<Omit<OutgoingEmail, "to">> {
   return brandedEmail(copy.moderation.removal[locale](args), locale, {
     action: { url: args.appealUrl, label: ACTION_LABELS.appeal[locale] },
   });
 }
 
 /** Builds the post-restored notice copy. */
-export function moderationRestoreEmail(locale: EmailLocale): Omit<OutgoingEmail, "to"> {
+export async function moderationRestoreEmail(
+  locale: EmailLocale,
+): Promise<Omit<OutgoingEmail, "to">> {
   return brandedEmail(copy.moderation.restore[locale](), locale);
 }
 
 /** Builds the suspension notice copy — names the expiry time and links the appeal. */
-export function moderationSuspensionEmail(
+export async function moderationSuspensionEmail(
   args: { reason: string; expiresAt: Date; appealUrl: string },
   locale: EmailLocale,
-): Omit<OutgoingEmail, "to"> {
+): Promise<Omit<OutgoingEmail, "to">> {
   return brandedEmail(copy.moderation.suspension[locale](args), locale, {
     action: { url: args.appealUrl, label: ACTION_LABELS.appeal[locale] },
   });
 }
 
 /** Builds the suspension-lifted notice copy. */
-export function moderationUnsuspensionEmail(locale: EmailLocale): Omit<OutgoingEmail, "to"> {
+export async function moderationUnsuspensionEmail(
+  locale: EmailLocale,
+): Promise<Omit<OutgoingEmail, "to">> {
   return brandedEmail(copy.moderation.unsuspension[locale](), locale);
 }
 
 /** Builds the ban notice copy — states the reason and links the appeal. */
-export function moderationBanEmail(
+export async function moderationBanEmail(
   args: { reason: string; appealUrl: string },
   locale: EmailLocale,
-): Omit<OutgoingEmail, "to"> {
+): Promise<Omit<OutgoingEmail, "to">> {
   return brandedEmail(copy.moderation.ban[locale](args), locale, {
     action: { url: args.appealUrl, label: ACTION_LABELS.appeal[locale] },
   });
 }
 
 /** Builds the ban-lifted notice copy. */
-export function moderationUnbanEmail(locale: EmailLocale): Omit<OutgoingEmail, "to"> {
+export async function moderationUnbanEmail(
+  locale: EmailLocale,
+): Promise<Omit<OutgoingEmail, "to">> {
   return brandedEmail(copy.moderation.unban[locale](), locale);
 }
 
 /** Builds the role-change notice copy — the reason is optional (a setRole without one). */
-export function moderationRoleEmail(
+export async function moderationRoleEmail(
   args: { role: string; reason?: string },
   locale: EmailLocale,
-): Omit<OutgoingEmail, "to"> {
+): Promise<Omit<OutgoingEmail, "to">> {
   return brandedEmail(copy.moderation.role[locale](args), locale);
 }
 
 /** Builds the report-resolution notice for reporters — the case's outcome, not the appeal's. */
-export function moderationCaseResolutionEmail(
+export async function moderationCaseResolutionEmail(
   args: { outcome: "actioned" | "dismissed"; note?: string },
   locale: EmailLocale,
-): Omit<OutgoingEmail, "to"> {
+): Promise<Omit<OutgoingEmail, "to">> {
   return brandedEmail(copy.moderation.caseResolution[locale](args), locale);
 }
 
 /** Builds the appeal-review notice copy for the given outcome. */
-export function moderationResolutionEmail(
+export async function moderationResolutionEmail(
   args: { outcome: "upheld" | "overturned"; note?: string },
   locale: EmailLocale,
-): Omit<OutgoingEmail, "to"> {
+): Promise<Omit<OutgoingEmail, "to">> {
   return brandedEmail(copy.moderation.resolution[locale](args), locale);
 }

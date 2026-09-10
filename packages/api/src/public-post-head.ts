@@ -21,7 +21,7 @@ import { and, eq, isNull, not, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import { post, postAttachment, user } from "@my-tuums/db/schema";
 import { mediaVariantPath } from "./constants.js";
-import { invisibleAuthor } from "./visibility.js";
+import { invisibleAuthor, privatePostHidden } from "./visibility.js";
 
 /** Mirrors `POST_TITLE_MAX_LENGTH` in apps/web's document-head.ts. */
 const TITLE_MAX_LENGTH = 68;
@@ -52,8 +52,11 @@ export async function publicPostHead(db: Database, postId: string): Promise<Publ
   const [row] = await db
     .select({
       content: post.content,
-      imagePath: sql<string | null>`(
-        select ${postAttachment.mediaPath}
+      image: sql<{ path: string; isVideo: boolean } | null>`(
+        select json_build_object(
+          'path', ${postAttachment.mediaPath},
+          'isVideo', ${postAttachment.videoId} is not null
+        )
         from ${postAttachment}
         where ${postAttachment.postId} = ${post.id}
         order by ${postAttachment.position}
@@ -68,6 +71,8 @@ export async function publicPostHead(db: Database, postId: string): Promise<Publ
         isNull(post.removedAt),
         isNull(post.deletedAt),
         not(invisibleAuthor(null)),
+        // Private posts never unfurl for anonymous crawlers (issue #328).
+        not(privatePostHidden(null)),
       ),
     )
     .limit(1);
@@ -80,6 +85,10 @@ export async function publicPostHead(db: Database, postId: string): Promise<Publ
     description: collapsed
       ? truncate(collapsed, DESCRIPTION_MAX_LENGTH)
       : "The social media, for gamers.",
-    imagePath: row.imagePath ? mediaVariantPath(row.imagePath, 1280) : null,
+    imagePath: row.image
+      ? row.image.isVideo
+        ? row.image.path.replace(/master\.m3u8$/, "cover.jpg")
+        : mediaVariantPath(row.image.path, 1280)
+      : null,
   };
 }

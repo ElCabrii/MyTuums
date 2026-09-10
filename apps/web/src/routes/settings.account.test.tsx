@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createTestQueryClient } from "@/test/factories";
 import { renderWithProviders } from "@/test/render";
+import userEvent from "@testing-library/user-event";
 import { act, screen } from "@testing-library/react";
 import { createStore } from "jotai";
 import { authErrorAtom } from "@/atoms/auth";
@@ -42,33 +43,27 @@ describe("AccountSettingsPage", () => {
     });
 
     expect(screen.getByRole("heading", { level: 1, name: m.settings_title() })).toBeInTheDocument();
-    // Two group landmarks head the page; each card's own title nests below as
-    // an h3 (see components/settings/section.tsx).
-    expect(
-      screen.getByRole("heading", { level: 2, name: m.settings_group_profile() }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { level: 2, name: m.settings_group_account() }),
-    ).toBeInTheDocument();
+    const user = userEvent.setup();
+    expect(screen.queryByLabelText(m.auth_field_display_name())).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(m.auth_field_bio())).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: m.settings_handle_title() })).toBeVisible();
+    expect(screen.getByRole("heading", { name: m.auth_sign_out() })).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: m.settings_group_security() }));
     for (const title of [
-      m.settings_profile_title(),
-      m.settings_handle_title(),
       m.settings_password_title(),
-      m.settings_prefs_title(),
       m.twofa_section_title(),
       m.passkey_section_title(),
-      m.settings_blocked_title(),
     ]) {
-      expect(screen.getByRole("heading", { level: 3, name: title })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: title })).toBeVisible();
     }
-    expect(
-      screen.queryByRole("heading", { name: m.settings_linked_title() }),
-    ).not.toBeInTheDocument();
-    // Sign-out is a section on this page again — issue #282 partially reverts
-    // #217: the navbar account menu (header.tsx) stays the always-visible
-    // affordance, and the profile page no longer carries its own button. The
-    // click path itself is pinned in use-sign-out.test.tsx, not restated here.
-    expect(screen.getByRole("heading", { level: 3, name: m.auth_sign_out() })).toBeInTheDocument();
+    const password = screen.getByLabelText(m.auth_field_current_password());
+    await user.type(password, "draft-password");
+    await user.click(screen.getByRole("tab", { name: m.settings_group_privacy() }));
+    expect(screen.getByRole("heading", { name: m.settings_blocked_title() })).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: m.settings_group_preferences() }));
+    expect(screen.getByRole("heading", { name: m.settings_prefs_title() })).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: m.settings_group_security() }));
+    expect(screen.getByLabelText(m.auth_field_current_password())).toHaveValue("draft-password");
 
     act(() => store.set(authErrorAtom, "One shared failure"));
     expect(screen.getAllByRole("alert")).toHaveLength(1);

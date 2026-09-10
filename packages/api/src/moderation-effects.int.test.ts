@@ -95,7 +95,10 @@ describe("forward moderation effects", () => {
         actorId: mod.id,
         reason: "spam content",
       });
-      return { en: pending[0].build("en").text, fr: pending[0].build("fr").text };
+      return {
+        en: (await pending[0].build("en")).text,
+        fr: (await pending[0].build("fr")).text,
+      };
     }
 
     // Issue #202: an image-only post stores `content` as "", which quoted
@@ -136,10 +139,10 @@ describe("forward moderation effects", () => {
     expect(vi.mocked(testEmailSender.send)).not.toHaveBeenCalled();
     expect(pending).toHaveLength(1);
     expect(pending[0].userId).toBe(author.id);
-    expect(pending[0].build("en").subject).toBe("Your post was removed from MyTuums");
+    expect((await pending[0].build("en")).subject).toBe("Your post was removed from MyTuums");
     // A text-only post is quoted with no image count at all.
-    expect(pending[0].build("en").text).toContain('Your post:\n"remove me"');
-    expect(pending[0].build("fr").text).toContain("Votre publication :\n« remove me »");
+    expect((await pending[0].build("en")).text).toContain('Your post:\n"remove me"');
+    expect((await pending[0].build("fr")).text).toContain("Votre publication :\n« remove me »");
 
     const [row] = await anonContext.db
       .select({
@@ -296,7 +299,7 @@ describe("forward moderation effects", () => {
 
     expect(pending.pending).toHaveLength(1);
     expect(pending.pending[0].userId).toBe(bob.id);
-    expect(pending.pending[0].build("en").subject).toBe("Your MyTuums role changed");
+    expect((await pending.pending[0].build("en")).subject).toBe("Your MyTuums role changed");
 
     const [row] = await anonContext.db
       .select({ role: user.role })
@@ -368,7 +371,7 @@ describe("forward moderation effects", () => {
     expect(row?.banned).toBe(true);
     expect(row?.banExpires).toBeNull();
     expect(pending).toHaveLength(1);
-    expect(pending[0].build("en").subject).toBe("Your account was banned");
+    expect((await pending[0].build("en")).subject).toBe("Your account was banned");
   });
 });
 
@@ -477,7 +480,7 @@ describe("the moderation entry points deliver their notices", () => {
     // expected origin comes from the same `webOrigin` the email builder reads,
     // so the assertion holds whatever `WEB_ORIGIN` is set to.
     expect(email.html).toContain(`${webOrigin}/mytuums-192.png`);
-    expect(email.html).toContain("remove &lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
+    expect(email.html).toContain("remove &lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;");
     expect(email.html).not.toContain("<script>alert('x')</script>");
     expect(email.text).toContain("spam & scams");
   });
@@ -495,7 +498,7 @@ describe("the moderation entry points deliver their notices", () => {
     if (!email) throw new Error("expected the French removal email to be delivered");
     expect(email.subject).toBe("Votre publication a été retirée de MyTuums");
     expect(email.text).toContain("Motif : contenu indésirable");
-    expect(email.html).toContain('<html lang="fr">');
+    expect(email.html).toContain('lang="fr"');
     expect(email.html).toContain("Un modérateur a retiré votre publication.");
   });
 

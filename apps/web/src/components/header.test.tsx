@@ -108,7 +108,9 @@ describe("Header account menu", () => {
   });
 
   it("stays a plain link to /welcome while the session has no handle", async () => {
+    fakeClient.notification.unreadCount.mockClear();
     await renderWithProviders(<Header />, {
+      initialPath: "/welcome",
       // `handleOf` falls back to displayUsername, so a handle-less session
       // must null both — the default fixture's displayUsername would hand
       // the header a handle and open the menu.
@@ -119,6 +121,24 @@ describe("Header account menu", () => {
     expect(link).toHaveAttribute("href", "/welcome");
     // Not a button: there is no menu to open until a handle exists.
     expect(screen.queryByRole("button", { name: /Alex Mercer/ })).not.toBeInTheDocument();
+    expect(fakeClient.notification.unreadCount).not.toHaveBeenCalled();
+  });
+});
+
+describe("Header brand wordmark", () => {
+  it("never truncates the wordmark on desktop widths (issue #329)", async () => {
+    await renderWithProviders(<Header />, { signedInAs: { username: "alexmercer" } });
+
+    // jsdom has no layout, so this pins the classes that carry the
+    // invariant rather than measuring pixels: the left section claims its
+    // content width from `xl` up (`xl:min-w-fit`, donating search width
+    // instead of squeezing the brand), and the wordmark's ellipsis only
+    // engages below `xl` (`xl:overflow-visible` defeats `truncate` there,
+    // whose `text-overflow` needs a non-visible overflow to bite).
+    const wordmark = screen.getByText("MyTuums");
+    expect(wordmark).toHaveClass("xl:overflow-visible");
+    const section = wordmark.closest("div");
+    expect(section?.className).toMatch(/xl:min-w-fit/);
   });
 });
 

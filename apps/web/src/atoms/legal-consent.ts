@@ -1,5 +1,4 @@
 import { atom } from "jotai";
-import { queryClientAtom } from "jotai-tanstack-query";
 import { atomWithReset, RESET } from "jotai/utils";
 import { hasCurrentLegalConsent, LEGAL_VERSION } from "@my-tuums/auth/rules";
 import { authClient } from "@/lib/auth-client";
@@ -79,14 +78,9 @@ export const acceptLegalConsentAtom = atom(null, async (get, set): Promise<boole
 
     await waitForSession((value) => value.data?.user.legalVersion === LEGAL_VERSION);
 
-    // Every procedure is behind the same gate server-side (the consent
-    // middleware in packages/api/src/procedures.ts), so whatever the pages
-    // behind this dialog tried to load while consent was owed is sitting in
-    // an error state. Resetting clears those failures and refetches what is
-    // still mounted, so accepting lands on a working page instead of one the
-    // reader has to reload by hand.
-    await get(queryClientAtom).resetQueries();
-
+    // No blanket `resetQueries` here (issue #353): every product query is
+    // `enabled`-gated on this consent, so acceptance flips the readiness
+    // atoms and the still-mounted queries start themselves.
     set(legalConsentCheckboxAtom, RESET);
     return true;
   } catch (err) {

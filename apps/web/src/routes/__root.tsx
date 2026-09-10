@@ -1,40 +1,21 @@
 import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
-import { lazy, Suspense, useEffect } from "react";
+import { useEffect } from "react";
 import { useAtomValue } from "jotai";
+import { GlobalDialogs } from "@/components/global-dialogs";
+import { MobileNavigation } from "@/components/mobile-navigation";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { NotFoundPage } from "@/components/not-found-page";
 import { LegalConsentDialog } from "@/components/legal-consent-dialog";
-import { themeClassEffect } from "@/atoms/theme";
+import { AnalyticsConsent } from "@/components/analytics-consent";
+import { ChangelogDialog } from "@/components/changelog-dialog";
+import { Toaster } from "@/components/ui/sonner";
+import { resolvedThemeAtom, themeClassEffect } from "@/atoms/theme";
 import { localeDocumentEffect, localePreferenceEffect } from "@/atoms/locale";
 import { isSignedInAtom, sessionSettledAtom, sessionSettledEffect } from "@/atoms/session";
 import { useRequireHandle } from "@/hooks/use-require-handle";
 import { useRequireSignedIn } from "@/hooks/use-require-signed-in";
 import { fallbackHead } from "@/lib/document-head";
-
-// The kebab dialogs open from a card anywhere (feeds, threads, profile
-// pages) yet must exist in exactly one place: they are bound to shared
-// identity atoms, so a second mounted instance would stack a second dialog
-// on top of the first. Lazy, like the ModeToggle in the header — the dialogs
-// are only ever useful to someone who clicks Report, Block, Delete or Edit,
-// so their chunk (the Select, the mutations, the reason-code labels) stays
-// out of first paint. The named exports are mapped to `default` so the
-// dynamic modules can render as lazy components.
-const ReportDialog = lazy(() =>
-  import("@/components/moderation/report-dialog").then((mod) => ({ default: mod.ReportDialog })),
-);
-const BlockDialog = lazy(() =>
-  import("@/components/moderation/block-dialog").then((mod) => ({ default: mod.BlockDialog })),
-);
-const DeletePostDialog = lazy(() =>
-  import("@/components/delete-post-dialog").then((mod) => ({ default: mod.DeletePostDialog })),
-);
-const EditPostDialog = lazy(() =>
-  import("@/components/edit-post-dialog").then((mod) => ({ default: mod.EditPostDialog })),
-);
-const QuoteDialog = lazy(() =>
-  import("@/components/quote-dialog").then((mod) => ({ default: mod.QuoteDialog })),
-);
 
 export const Route = createRootRoute({
   head: fallbackHead,
@@ -84,6 +65,7 @@ function RootLayout() {
   // splash unmounts.
   const settled = useAtomValue(sessionSettledAtom);
   const signedIn = useAtomValue(isSignedInAtom);
+  const resolvedTheme = useAtomValue(resolvedThemeAtom);
 
   // While the first /get-session is in flight this renders nothing: the
   // splash is static markup in index.html (`#app-splash`), already painted
@@ -100,29 +82,44 @@ function RootLayout() {
   return (
     <>
       <HeadContent />
-      <div className="bg-background text-foreground flex min-h-screen flex-col antialiased">
+      <div
+        className={`bg-background text-foreground flex min-h-screen flex-col antialiased ${signedIn ? "signed-in-shell" : ""}`}
+        // React capture also covers media in portaled full-size viewers.
+        onDragStartCapture={(event) => {
+          if (event.target instanceof Element && event.target.closest("img, video, audio")) {
+            event.preventDefault();
+          }
+        }}
+      >
         {signedIn && <Header />}
         <main className="flex-1">
           <Outlet />
         </main>
         <Footer />
-        {/* Mounted here, not per-call-site: the dialogs own the shared
-            `reportDialogAtom`/`blockDialogAtom`/`deletePostDialogAtom`
-            identities, and every kebab and profile menu only sets the target.
-            The Suspense fallback is null — the dialogs are closed until a target
-            lands, so there is nothing to flash. */}
-        <Suspense fallback={null}>
-          <ReportDialog />
-          <BlockDialog />
-          <DeletePostDialog />
-          <EditPostDialog />
-          <QuoteDialog />
-        </Suspense>
+        {signedIn && <MobileNavigation />}
+        <GlobalDialogs />
         {/* Mounted unconditionally: the dialog owns the whole decision — signed
             in, consent missing or stale, and not currently on one of the legal
             documents itself. Duplicating half of that here would let the two
             drift. */}
         <LegalConsentDialog />
+        {/* Informational release notes yield to the mandatory legal gate, then
+            remember dismissal per device. The dialog owns that decision. */}
+        <ChangelogDialog />
+        {/* This controller owns both the non-blocking consent banner and GA's
+            lifecycle. With no build-time measurement id it renders nothing
+            and performs no storage or network work. */}
+        <AnalyticsConsent />
+        {/* The app's toast surface (issue #307), mounted once like the root
+            dialogs above. The generated wrapper reads next-themes for its
+            theme default — an app this one doesn't use — so the theme the
+            app actually enforces is passed as a prop; the wrapper spreads
+            its props last, which is what makes that win. */}
+        <Toaster
+          theme={resolvedTheme}
+          position="bottom-center"
+          mobileOffset={{ bottom: "calc(var(--mobile-nav-height, 0px) + 1rem)" }}
+        />
       </div>
     </>
   );

@@ -4,17 +4,21 @@ import { UserAvatar } from "@/components/user-avatar";
 import { ProfileLink } from "@/components/profile-link";
 import { FollowButton } from "@/components/follow-button";
 import { PaginatedState } from "@/components/paginated-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { userListAtom, type FollowDirection } from "@/atoms/user-list";
 import type { SearchUser, UserSummary } from "@/lib/orpc";
+import type { RankingSuggestion } from "@/lib/ranking";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
 /**
  * One row in a people list — avatar, profile link and follow button. Shared
- * by the follower/following dialogs and the search results page; `SearchUser`
- * and `UserSummary` differ only in fields the row never touches.
+ * by the follower/following dialogs, the search results page, and the
+ * ranked-feed Who-to-Follow module (issue #305); `SearchUser`,
+ * `UserSummary` and `RankingSuggestion` differ only in fields the row never
+ * touches.
  */
-export function UserRow({ user }: { user: UserSummary | SearchUser }) {
+export function UserRow({ user }: { user: UserSummary | SearchUser | RankingSuggestion }) {
   const handle = handleOf(user);
   const displayName = user.name || handle || m.user_unknown();
 
@@ -49,7 +53,11 @@ export function UserRow({ user }: { user: UserSummary | SearchUser }) {
         )}
       </div>
 
-      <FollowButton userId={user.id} isFollowing={user.viewerIsFollowing} />
+      <FollowButton
+        userId={user.id}
+        isFollowing={user.viewerIsFollowing}
+        hasRequested={user.hasRequested}
+      />
     </div>
   );
 }
@@ -84,10 +92,39 @@ export function UserList({
       emptyMessage={emptyMessage}
       isEmpty={people.length === 0}
       listClassName="space-y-3"
+      loadingFallback={<UserListSkeleton />}
     >
       {people.map((person) => (
         <UserRow key={person.id} user={person} />
       ))}
     </PaginatedState>
+  );
+}
+
+/**
+ * Three placeholder rows that mirror `UserRow` (avatar + name/handle +
+ * follow button) while the list loads. Exported for the other people-shaped
+ * surfaces (search users, follow requests) so every list of people holds the
+ * same shape.
+ *
+ * `aria-hidden`: it paints structure, not information.
+ */
+export function UserListSkeleton() {
+  return (
+    <div className="space-y-3" aria-hidden>
+      {[0, 1, 2].map((row) => (
+        <div
+          key={row}
+          className="border-border bg-card flex items-center gap-3 rounded-xl border p-4"
+        >
+          <Skeleton className="h-11 w-11 shrink-0 rounded-full motion-reduce:animate-none" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-32 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-24 motion-reduce:animate-none" />
+          </div>
+          <Skeleton className="h-9 w-20 shrink-0 rounded-full motion-reduce:animate-none" />
+        </div>
+      ))}
+    </div>
   );
 }

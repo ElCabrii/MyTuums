@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, ChevronLeft, ChevronRight, ImagePlus, Loader2, Send, X } from "lucide-react";
+import { useAtomValue, useSetAtom } from "jotai";
+import { AlertCircle, ChevronLeft, ChevronRight, Loader2, Send, X } from "lucide-react";
 import {
-  ALLOWED_IMAGE_TYPES,
   POST_ATTACHMENT_MAX_BYTES,
   POST_ATTACHMENT_MAX_COUNT,
   POST_ATTACHMENT_MAX_TOTAL_BYTES,
@@ -9,6 +9,13 @@ import {
 } from "@my-tuums/api/constants";
 import { acceptPostImage } from "@my-tuums/api/post-image";
 import type { ComposerAttachment } from "@/atoms/composer";
+import {
+  selectVideoAtomFamily,
+  videoDraftAtomFamily,
+  type VideoAttachmentInput,
+} from "@/atoms/video-upload";
+import { ComposerMediaDialog } from "@/components/composer-media-dialog";
+import { ComposerVideo } from "@/components/composer-video";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { MentionTextarea } from "@/components/mention-textarea";
@@ -41,7 +48,7 @@ function previewUrlFor(file: File): string {
  * The composer chrome — avatar, textarea, remaining-character counter, error
  * and submit — shared by the home composer and the thread page's reply box.
  *
- * It owns no state: the draft and the mutation both live in atoms, and which
+ * Drafts and mutations live in atoms; this form owns transient validation. Which
  * atoms differ per caller (`composerDraftAtom` is one persisted draft, while
  * replies are an in-memory family keyed by parent). Passing them in keeps the
  * one thing that genuinely differs — where the text goes — at the call site,
@@ -62,6 +69,7 @@ export function ComposerForm({
   submitLabel,
   rows = 2,
   header,
+  toolbarExtra,
   mentionScope = "composer",
   attachments = [],
   onAttachmentsChange,
@@ -71,7 +79,11 @@ export function ComposerForm({
   value: string;
   onValueChange: (next: string) => void;
   /** Called with the trimmed body, only when it is submittable. */
-  onSubmit: (content: string, attachments?: ComposerAttachment[]) => void;
+  onSubmit: (
+    content: string,
+    attachments?: ComposerAttachment[],
+    video?: VideoAttachmentInput,
+  ) => void;
   isPending: boolean;
   /** Null when the last attempt didn't fail. */
   errorMessage: string | null;
@@ -80,6 +92,8 @@ export function ComposerForm({
   rows?: number;
   /** Rendered above the textarea — the reply box's "Replying to @x" line. */
   header?: ReactNode;
+  /** Additional draft actions beside the media picker, before the submit controls. */
+  toolbarExtra?: ReactNode;
   /** Primitive key for transient mention state owned beside each draft atom. */
   mentionScope?: string;
   /** Optional image state; omitted only by callers that intentionally disable attachments. */
@@ -96,6 +110,9 @@ export function ComposerForm({
   const attachmentSelectionRef = useRef(0);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentsAreValidating, setAttachmentsAreValidating] = useState(false);
+  const videoDraft = useAtomValue(videoDraftAtomFamily(mentionScope));
+  const selectedVideo = onAttachmentsChange ? videoDraft : null;
+  const selectVideo = useSetAtom(selectVideoAtomFamily(mentionScope));
   const trimmed = value.trim();
   const remaining = POST_MAX_LENGTH - value.length;
   const isTooLong = remaining < 0;
@@ -105,10 +122,14 @@ export function ComposerForm({
   // (`existingAttachmentCount`). Attachment validation/pending state still
   // blocks until the selected files are known-good.
   const canSubmit =
-    (trimmed.length > 0 || attachments.length > 0 || existingAttachmentCount > 0) &&
+    (trimmed.length > 0 ||
+      attachments.length > 0 ||
+      existingAttachmentCount > 0 ||
+      selectedVideo !== null) &&
     !isTooLong &&
     !isPending &&
-    !attachmentsAreValidating;
+    !attachmentsAreValidating &&
+    (!selectedVideo || selectedVideo.status === "uploaded");
   const previewUrls = useMemo(
     () =>
       attachments.map(({ id, file }) => ({
@@ -132,8 +153,17 @@ export function ComposerForm({
     setAttachmentError(null);
   };
 
-  const handleAttachmentSelection = async (files: FileList | null) => {
-    if (!onAttachmentsChange || !files) return;
+  const handleAttachmentSelection = async (files: File[]) => {
+    if (!onAttachmentsChange || selectedVideo || isPending || attachmentsAreValidating) return;
+    const video = files.find((file) => file.type.startsWith("video/"));
+    if (video) {
+      if (files.length !== 1 || attachments.length > 0) {
+        setAttachmentError(m.post_media_hint());
+        return;
+      }
+      setAttachmentError(selectVideo(video) ? null : m.video_input_hint());
+      return;
+    }
     const selectionId = attachmentSelectionRef.current + 1;
     attachmentSelectionRef.current = selectionId;
     setAttachmentError(null);
@@ -215,7 +245,11 @@ export function ComposerForm({
       onSubmit={(event) => {
         event.preventDefault();
         if (!canSubmit) return;
-        if (attachments.length > 0) onSubmit(trimmed, attachments);
+        if (selectedVideo?.status === "uploaded" && selectedVideo.videoId)
+          onSubmit(trimmed, [], {
+            videoId: selectedVideo.videoId,
+          });
+        else if (attachments.length > 0) onSubmit(trimmed, attachments);
         else onSubmit(trimmed);
       }}
       className="border-border bg-card space-y-3 rounded-xl border p-4 shadow-sm"
@@ -232,6 +266,7 @@ export function ComposerForm({
           value={value}
           onValueChange={onValueChange}
           mentionScope={mentionScope}
+          enableGameSuggestions
           placeholder={placeholder}
           rows={rows}
           disabled={isPending}
@@ -309,6 +344,10 @@ export function ComposerForm({
         </div>
       )}
 
+      {onAttachmentsChange && selectedVideo && (
+        <ComposerVideo scope={mentionScope} disabled={isPending} />
+      )}
+
       {(attachmentError || errorMessage) && (
         <div
           role="alert"
@@ -319,35 +358,22 @@ export function ComposerForm({
         </div>
       )}
 
-      <div className="border-border flex items-center justify-between gap-3 border-t pt-3">
-        {/* The image picker rides the footer's action row like on every other
-            platform: a pill button with a real hit target and focus ring,
-            rather than the bare inline link this used to be. The hidden input
-            stays inside the label so clicks and the accessible name keep
-            working without JS wiring. */}
-        {onAttachmentsChange && (
-          <label className="border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring focus-visible:ring-ring/50 inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors outline-none select-none focus-visible:ring-[3px] has-[:disabled]:pointer-events-none has-[:disabled]:opacity-50">
-            <ImagePlus className="h-4 w-4" />
-            <span className="hidden sm:inline">{m.post_add_images()}</span>
-            <input
-              type="file"
-              accept={ALLOWED_IMAGE_TYPES.join(",")}
-              multiple
-              className="sr-only"
-              aria-label={m.post_add_images()}
+      <div className="border-border flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+        <div className="flex items-center gap-2">
+          {onAttachmentsChange && (
+            <ComposerMediaDialog
               disabled={
                 isPending ||
+                selectedVideo !== null ||
                 attachmentsAreValidating ||
                 attachments.length >= POST_ATTACHMENT_MAX_COUNT
               }
-              onChange={(event) => {
-                void handleAttachmentSelection(event.target.files);
-                event.target.value = "";
-              }}
+              onSelect={(files) => void handleAttachmentSelection(files)}
             />
-          </label>
-        )}
-        <div className="flex items-center gap-3">
+          )}
+          {toolbarExtra}
+        </div>
+        <div className="ml-auto flex items-center gap-3">
           <span
             aria-live="polite"
             className={`text-xs tabular-nums ${

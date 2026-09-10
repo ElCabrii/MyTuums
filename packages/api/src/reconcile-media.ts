@@ -69,6 +69,12 @@ export interface ReconcileMediaResult {
   deleted: number;
 }
 
+// `games/` (issue #314's covers) is deliberately absent: the sync writes
+// covers BEFORE its commit transaction under no advisory lock, so this
+// reconciler — whose `withPostMediaLifecycleLock` covers the post/link-card
+// writers only — would race a running sync and reap objects a commit is
+// about to reference. Cover keys are content-addressed and idempotent, so
+// the sync itself leaves no orphans for a reconciler to clean.
 const PREFIXES = ["avatars/", "banners/", "posts/", "link-cards/"] as const;
 
 export async function reconcileMedia({

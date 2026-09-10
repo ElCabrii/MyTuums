@@ -28,6 +28,12 @@ would produce a broken one.
 
 ## Invariants
 
+- **The image job proves both executable applications.** The video worker's
+  Docker build runs native FFmpeg tests. Its bundled `smoke.js` uses the same
+  migrated disposable `_test` database and a local empty storage stub to check
+  readiness, maintenance and queue delivery. No real bucket credentials enter
+  this job; the browser upload regression stays in `e2e`.
+
 - **Pin every third-party action to a full commit SHA, with the tag in a
   trailing comment.** A mutable tag can be repointed at attacker code after
   review (the trivy-action and kics-github-action compromises did exactly
@@ -61,6 +67,10 @@ would produce a broken one.
 - **CI points at the `ci` bucket, never the dev or production one.** The E2E
   cleanup deletes objects by prefix, so a shared bucket lets two runs delete
   each other's uploads mid-test — against production, real users' avatars.
+  Before browser tests, the E2E job applies and verifies the exact
+  `http://localhost:5273` video CORS rule, preserving other rules. A bucket-name
+  guard refuses any bucket without a `ci` name segment; missing credentials
+  skip this setup along with the upload specs. This rule persists between runs.
 - **The `verify` and `e2e` jobs write a `.env` file.** Every `db:*` and `e2e`
   script runs through `dotenv -e .env`, which errors on a missing file.
   dotenv does not override variables that are already set, so the workflow's

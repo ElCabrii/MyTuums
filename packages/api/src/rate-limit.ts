@@ -203,6 +203,13 @@ export const RATE_LIMITS = {
    */
   bookmark: { name: "bookmark", limit: 120, windowMs: MINUTE },
   /**
+   * Game favorites (issue #314, Q17). Bookmark parity: the same single
+   * indexed insert plus one count update, own namespace so curating a
+   * favorites showcase in one sitting can't burn through any other budget —
+   * and no other budget can lock out favoriting.
+   */
+  favoriteGame: { name: "favoriteGame", limit: 120, windowMs: MINUTE },
+  /**
    * Follows and unfollows. The same single indexed insert a like costs, so by
    * cost alone it would share the `like` budget — but `name` is what
    * namespaces the counter, and mass-following is a spam vector in a way

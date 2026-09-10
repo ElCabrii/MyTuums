@@ -3,7 +3,15 @@ import { alias } from "drizzle-orm/pg-core";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import type { Database } from "@my-tuums/db";
-import { follow, moderationAction, post, report, user, userBlock } from "@my-tuums/db/schema";
+import {
+  follow,
+  followRequest,
+  moderationAction,
+  post,
+  report,
+  user,
+  userBlock,
+} from "@my-tuums/db/schema";
 import {
   LINK_CARD_URL_MAX_LENGTH,
   MODERATION_NOTE_MAX_LENGTH,
@@ -232,6 +240,13 @@ export const moderationRouter = {
         await tx.delete(follow).where(
           sql`(${follow.followerId} = ${context.user.id} and ${follow.followingId} = ${input.userId})
                  or (${follow.followerId} = ${input.userId} and ${follow.followingId} = ${context.user.id})`,
+        );
+        // Pending follow requests (issue #328) sever the same way: a block
+        // must leave neither an edge nor a request that an unblock would put
+        // back in view.
+        await tx.delete(followRequest).where(
+          sql`(${followRequest.requesterId} = ${context.user.id} and ${followRequest.targetId} = ${input.userId})
+                 or (${followRequest.requesterId} = ${input.userId} and ${followRequest.targetId} = ${context.user.id})`,
         );
         await tx
           .insert(userBlock)

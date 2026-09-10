@@ -42,6 +42,8 @@ import {
 // wiring — same reasoning as reply-composer.test.ts.
 import { store as singletonStore } from "@/lib/store";
 import { queryClient as singletonQueryClient } from "@/lib/query-client";
+import { sessionAtom } from "@/atoms/session";
+import { setTestSession, signedInSession } from "@/test/auth-fixture";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc } from "@/lib/orpc";
 
@@ -54,6 +56,7 @@ function makeBlockedUser(overrides: Partial<BlockedUser> & { id: string }): Bloc
     bio: null,
     bannerImage: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    isPrivate: false,
     blockedAt: new Date("2026-02-01T00:00:00.000Z"),
     ...overrides,
   };
@@ -71,6 +74,18 @@ afterEach(() => {
 });
 
 describe("blockedUsersAtom", () => {
+  beforeEach(() => {
+    // The blocked list stays idle until the session is ready (issue #353) —
+    // drive a complete session and pre-seed the singleton store with it so
+    // the atom mounts already-enabled instead of flipping mid-test (a flip
+    // would refetch and break the exact call counts below).
+    const session = signedInSession();
+    setTestSession(session);
+    // SAFETY: the complete session the fake store holds — the moderation
+    // atoms read only whether the viewer may fire, never the store identity.
+    singletonStore.set(sessionAtom, session as never);
+  });
+
   it("loads the viewer's blocked users through the shared query client", async () => {
     fakeClient.moderation.listBlocked.mockResolvedValue({
       items: [makeBlockedUser({ id: "blocked-1" })],

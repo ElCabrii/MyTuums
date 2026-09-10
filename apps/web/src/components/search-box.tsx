@@ -4,6 +4,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Loader2, Search, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
+import { GameCover } from "@/components/game-cover";
 import { UserAvatar } from "@/components/user-avatar";
 import {
   resetSearchAtomsAtom,
@@ -40,7 +41,9 @@ function destinationOf(
   row: SuggestionRowData,
   query: string,
 ):
-  { to: "/@{$username}"; params: { username: string } } | { to: "/search"; search: { q: string } } {
+  | { to: "/@{$username}"; params: { username: string } }
+  | { to: "/games/$slug"; params: { slug: string } }
+  | { to: "/search"; search: { q: string } } {
   switch (row.kind) {
     case "user": {
       const handle = handleOf(row.user);
@@ -48,6 +51,8 @@ function destinationOf(
         ? { to: "/@{$username}", params: { username: handle } }
         : { to: "/search", search: { q: query } };
     }
+    case "game":
+      return { to: "/games/$slug", params: { slug: row.game.slug } };
     case "see-all":
       return { to: "/search", search: { q: query } };
   }
@@ -63,6 +68,8 @@ function suggestionRowKey(row: SuggestionRowData): string {
   switch (row.kind) {
     case "user":
       return row.user.id;
+    case "game":
+      return `game-${row.game.slug}`;
     case "see-all":
       return "search-see-all";
   }
@@ -141,6 +148,32 @@ function SuggestionRow({
         />
         <span className="text-foreground block truncate text-sm font-medium">{displayName}</span>
       </div>
+    );
+  }
+
+  if (row.kind === "game") {
+    return (
+      <Link
+        to="/games/$slug"
+        params={{ slug: row.game.slug }}
+        {...rowProps}
+        onMouseEnter={() => onSelect(index)}
+        onClick={onDismiss}
+      >
+        <div className="bg-muted h-8 w-6 shrink-0 overflow-hidden rounded-sm">
+          <GameCover cover={row.game.coverMediaPath} name={row.game.name} sizes="32px" />
+        </div>
+        <span className="min-w-0">
+          <span className="text-foreground block truncate text-sm font-medium">
+            {row.game.name}
+          </span>
+          {row.game.firstReleaseYear !== null && (
+            <span className="text-muted-foreground block truncate text-xs">
+              {row.game.firstReleaseYear}
+            </span>
+          )}
+        </span>
+      </Link>
     );
   }
 
@@ -358,7 +391,10 @@ export function SearchBox() {
   const navigate = useNavigate();
   const inputValue = useAtomValue(searchInputAtom);
   const setSearchQuery = useSetAtom(setSearchQueryAtom);
-  const [open, setOpen] = useAtom(searchPopoverOpenAtom);
+  const [popoverOpen, setOpen] = useAtom(searchPopoverOpenAtom);
+  // Clearing returns focus before React commits the new input value. That
+  // focus handler can request reopening with its previous, non-empty value.
+  const open = popoverOpen && inputValue.trim() !== "";
   const [highlight, setHighlight] = useAtom(searchHighlightAtom);
   const typeahead = useAtomValue(typeaheadAtom);
   const resetSearch = useSetAtom(resetSearchAtomsAtom);
@@ -389,6 +425,18 @@ export function SearchBox() {
   const rows = suggestionRows(typeahead.data);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    // The trigger renders as an `<Input>` through base-ui's `PopoverTrigger`
+    // (`nativeButton={false}`), so base-ui's button emulation treats Space as
+    // an activation key and preventDefaults the keydown — the character never
+    // reaches the input and multi-word queries cannot be typed. The escape
+    // hatch stops the library's handler the same way `handleTriggerClick`
+    // does for clicks; no preventDefault of our own, so insertion proceeds.
+    if (event.key === " ") {
+      // SAFETY: base-ui merges its trigger keydown handler onto the synthetic
+      // event; this optional field is the documented escape hatch (see comment above).
+      (event as BaseUiMergedEvent).preventBaseUIHandler?.();
+      return;
+    }
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -430,14 +478,8 @@ export function SearchBox() {
 
   const handleChange = (value: string) => {
     setSearchQuery(value);
-    if (value.trim() !== "") {
-      setOpen(true);
-      setHighlight(-1);
-    } else {
-      // An emptied input has nothing to suggest — close rather than show a
-      // stale list (the typeahead atom is gated off for empty queries).
-      setOpen(false);
-    }
+    setOpen(value.trim() !== "");
+    setHighlight(-1);
   };
 
   const handleFocus = () => {

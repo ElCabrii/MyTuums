@@ -41,6 +41,15 @@ routing live in [CONTEXT.md](CONTEXT.md).
   migrations in the pre-deploy step.
 - Keep credentials and `.env` contents out of source, logs, and reports.
 
+## Browser inspection
+
+For UI changes and browser bug reproduction, use `agent-browser` against the
+local app. Read [the browser skill](.agents/skills/agent-browser/SKILL.md)
+and [local setup](README.md#agent-browser) first. Verify the affected flow,
+inspect a screenshot for visual changes, and check browser errors. Use a
+task-specific named session and close it when finished. Browser inspection
+complements the tests and verification below.
+
 ## Tests
 
 Full rules and the reasoning: [TESTING_STRATEGY.md](TESTING_STRATEGY.md).

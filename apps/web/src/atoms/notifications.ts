@@ -1,4 +1,3 @@
-import { atomFamily } from "jotai-family";
 import {
   atomWithInfiniteQuery,
   atomWithMutation,
@@ -7,6 +6,7 @@ import {
 } from "jotai-tanstack-query";
 import { orpc } from "@/lib/orpc";
 import type { NotificationItem } from "@/lib/orpc";
+import { protectedProductReadyAtom } from "@/atoms/query-readiness";
 import { notificationsQueryOptions, unreadCountQueryOptions } from "@/lib/query-definitions";
 
 /**
@@ -14,24 +14,22 @@ import { notificationsQueryOptions, unreadCountQueryOptions } from "@/lib/query-
  * `/notifications` page, one count atom for the header badge, one mutation
  * that stamps everything the page just showed as read.
  *
- * There is exactly one list per viewer and no scope parameters, so the feed
- * is a family keyed on `""` rather than a bare `atomWithInfiniteQuery` — the
- * same single-entry shape `auditLogFamily` uses — purely so sign-out can
- * `remove()` it through the same sweep every other viewer-owned family goes
- * through (`atoms/session-teardown.ts`).
+ * There is one list with no scope parameters. Sign-out clears its data with
+ * the QueryClient, just like the unread-count query.
  */
-const notificationsFamily = atomFamily(() =>
-  atomWithInfiniteQuery(() => notificationsQueryOptions()),
-);
-
-/** The viewer's notifications, newest first — the `/notifications` page reads this. */
-export const notificationsFeedAtom = notificationsFamily("");
+export const notificationsFeedAtom = atomWithInfiniteQuery((get) => ({
+  ...notificationsQueryOptions(),
+  enabled: get(protectedProductReadyAtom),
+}));
 
 /**
  * The unread badge. Mounts with the header (signed-in chrome only), so the
  * query never fires for a signed-out visitor the server would refuse anyway.
  */
-export const unreadCountAtom = atomWithQuery(() => unreadCountQueryOptions());
+export const unreadCountAtom = atomWithQuery((get) => ({
+  ...unreadCountQueryOptions(),
+  enabled: get(protectedProductReadyAtom),
+}));
 
 /**
  * Marks every unread notification read. Fired once by the notifications page
@@ -42,15 +40,20 @@ export const unreadCountAtom = atomWithQuery(() => unreadCountQueryOptions());
  * own answer is authoritative for exactly the state those caches hold — every
  * loaded row is now read, and the unread count is now zero — so refetching
  * both (what invalidation did, 0.4.0's audit finding) duplicated the page's
- * traffic for data the client can derive. Rows a block or deletion has since
- * hidden stay hidden: patching a row's read flag does not resurrect it.
+ * traffic for data the client can derive. In-flight reads are cancelled before
+ * patching so an older response cannot restore unread state. An initial list
+ * with no cached data restarts after cancellation so it can still load.
  */
 export const markAllReadAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
 
   return {
     ...orpc.notification.markRead.mutationOptions(),
-    onSuccess: () => {
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: orpc.notification.list.key() }),
+        queryClient.cancelQueries({ queryKey: unreadCountQueryOptions().queryKey }),
+      ]);
       // `setQueriesData` (plural) so every infinite-query page count under
       // the bare prefix — however many pages are loaded — flips in one pass.
       queryClient.setQueriesData<{ pages: Array<{ items: NotificationItem[] }> }>(
@@ -71,15 +74,129 @@ export const markAllReadAtom = atomWithMutation((get) => {
       // component the bare key lacks, and `setQueryData` writes only the
       // exact entry the badge observes.
       queryClient.setQueryData(unreadCountQueryOptions().queryKey, { unreadCount: 0 });
+      await queryClient.refetchQueries({
+        queryKey: orpc.notification.list.key(),
+        type: "active",
+        predicate: (query) => query.state.data === undefined,
+      });
+    },
+  };
+});
+
+type NotificationListPage = {
+  items: NotificationItem[];
+  nextCursor: string | null;
+};
+
+type NotificationListCache = {
+  pages: NotificationListPage[];
+  pageParams: unknown[];
+};
+
+type NotificationListSnapshot = Array<[readonly unknown[], NotificationListCache | undefined]>;
+
+interface DeleteNotificationVariables {
+  id: string;
+}
+
+/**
+ * Removes one notification row from every loaded list page (issue #330).
+ *
+ * Optimistic: the row leaves the page on click and returns only if the
+ * server refuses. The badge is NOT patched optimistically — its damped tick
+ * count cannot be derived from one row (two same-actor rows can share one
+ * tick), so success invalidates it and the header refetches the truth.
+ * Rollback rides on mutation-level `onError` (see `src/atoms/like.ts`): the
+ * action below is write-only, so per-call callbacks would never fire.
+ */
+export const deleteNotificationAtom = atomWithMutation<
+  { success: true; id: string },
+  DeleteNotificationVariables,
+  Error,
+  { snapshot: NotificationListSnapshot }
+>((get) => {
+  const queryClient = get(queryClientAtom);
+
+  return {
+    ...orpc.notification.delete.mutationOptions(),
+    onMutate: (variables) => {
+      const key = orpc.notification.list.key();
+      // Cancel before snapshotting, like `beginPostPatch`: an in-flight
+      // refetch landing after the patch would overwrite the removal with
+      // pre-click server state.
+      void queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueriesData<NotificationListCache>({ queryKey: key });
+      const snapshot: NotificationListSnapshot = previous.map(([queryKey, data]) => [
+        queryKey,
+        data,
+      ]);
+      queryClient.setQueriesData<NotificationListCache>({ queryKey: key }, (data) =>
+        data
+          ? {
+              ...data,
+              pages: data.pages.map((page) => ({
+                ...page,
+                items: page.items.filter((item) => item.id !== variables.id),
+              })),
+            }
+          : data,
+      );
+      return { snapshot };
+    },
+    onError: (_error, _variables, context) => {
+      if (!context) return;
+      for (const [queryKey, data] of context.snapshot) {
+        queryClient.setQueryData(queryKey, data);
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: unreadCountQueryOptions().queryKey });
     },
   };
 });
 
 /**
- * Removes the feed family's single entry. See `clearPostFeedFamily` in
- * `atoms/post-feed.ts` for why the family stays private behind an
- * all-or-nothing sweep; `clearViewerState` is the only caller.
+ * Empties the inbox (issue #330). The list clears optimistically; the badge
+ * is authoritative at zero on success — an empty inbox has no ticks under any
+ * damping. Same mutation-level rollback contract as the single delete above.
  */
-export function clearNotificationsFamily(): void {
-  for (const key of notificationsFamily.getParams()) notificationsFamily.remove(key);
-}
+export const clearAllNotificationsAtom = atomWithMutation<
+  { deletedCount: number },
+  Record<string, never>,
+  Error,
+  { snapshot: NotificationListSnapshot }
+>((get) => {
+  const queryClient = get(queryClientAtom);
+
+  return {
+    ...orpc.notification.clearAll.mutationOptions(),
+    onMutate: () => {
+      const key = orpc.notification.list.key();
+      // Same cancel-before-snapshot as the single delete above.
+      void queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueriesData<NotificationListCache>({ queryKey: key });
+      const snapshot: NotificationListSnapshot = previous.map(([queryKey, data]) => [
+        queryKey,
+        data,
+      ]);
+      // Collapse to one empty page with no cursor: keeping each page's
+      // `nextCursor` would offer "load more" on an empty inbox.
+      queryClient.setQueriesData<NotificationListCache>({ queryKey: key }, (data) =>
+        data ? { pages: [{ items: [], nextCursor: null }], pageParams: [undefined] } : data,
+      );
+      return { snapshot };
+    },
+    onError: (_error, _variables, context) => {
+      if (!context) return;
+      for (const [queryKey, data] of context.snapshot) {
+        queryClient.setQueryData(queryKey, data);
+      }
+    },
+    onSuccess: () => {
+      queryClient.setQueryData(unreadCountQueryOptions().queryKey, { unreadCount: 0 });
+      // Refetch the emptied list so post-clear arrivals appear without a
+      // remount — the optimistic collapse above is the instant feedback.
+      void queryClient.invalidateQueries({ queryKey: orpc.notification.list.key() });
+    },
+  };
+});

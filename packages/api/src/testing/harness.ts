@@ -258,6 +258,7 @@ export async function createTestUser(overrides?: {
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
+      videoUploads: null,
       linkTransport: defaultTestLinkTransport,
       emailSender: testEmailSender,
     },
@@ -335,6 +336,7 @@ export async function createPasswordTestUser(): Promise<
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
+      videoUploads: null,
       linkTransport: defaultTestLinkTransport,
       emailSender: testEmailSender,
     },
@@ -348,6 +350,7 @@ export const anonContext: Context = {
   requestId: "test-request-id",
   rateLimiter: forwardingRateLimiter,
   storage: testStorage,
+  videoUploads: null,
   linkTransport: defaultTestLinkTransport,
   emailSender: testEmailSender,
 };
@@ -370,6 +373,7 @@ export function contextFor(
     requestId: "test-request-id",
     rateLimiter,
     storage,
+    videoUploads: null,
     linkTransport: defaultTestLinkTransport,
     emailSender,
   };
@@ -387,7 +391,7 @@ export async function truncateAll(): Promise<void> {
   assertTestDatabase();
   await runSql(
     db,
-    sql`TRUNCATE TABLE "post_like", "post_repost", "post_bookmark", "post_edit", "follow", "report", "user_block", "appeal", "moderation_action", "notification", "notification_last_seen", "post", "link_card", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE "video_cleanup", "post_like", "post_repost", "post_bookmark", "post_edit", "follow", "report", "user_block", "appeal", "moderation_action", "notification", "notification_last_seen", "post", "link_card", "game_favorite", "game", "feed_rank_snapshot", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
   );
 }
 
@@ -483,6 +487,7 @@ export async function freshSessionFor(testUser: TestUser): Promise<TestUser> {
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
       storage: testStorage,
+      videoUploads: null,
       linkTransport: defaultTestLinkTransport,
       emailSender: testEmailSender,
     },

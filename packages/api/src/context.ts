@@ -3,6 +3,7 @@ import { db, type Database } from "@my-tuums/db";
 import { createLinkFetchTransport, type LinkFetchTransport } from "./link-card-http.js";
 import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { createStorage, type Storage } from "./storage.js";
+import type { VideoUploads } from "./video-uploads.js";
 
 type Session = Awaited<ReturnType<typeof auth.api.getSession>>;
 
@@ -69,6 +70,7 @@ export interface Context {
    * unconfigured OAuth provider is simply absent rather than fatal.
    */
   storage: Storage | null;
+  videoUploads: VideoUploads | null;
   /**
    * The outbound HTTP + DNS transport link preview cards fetch through
    * (`packages/api/src/link-card-http.ts`). Threading it here rather than
@@ -81,10 +83,10 @@ export interface Context {
   /** Email delivery is explicit so tests can record sends without replacing the auth module. */
   emailSender: EmailSender;
   /**
-   * The raw request headers, for the one thing that still needs them after
-   * session resolution: the moderation emails' locale fallback
+   * Request headers after the HTTP boundary has established client identity.
+   * Anonymous rate limits read that identity; moderation emails use the locale fallback
    * (`localeFromRequest` in packages/auth/src/email.ts), used only when the
-   * recipient has no stored `localePreference`. Absent in tests, which build
+   * recipient has no stored `localePreference`. Optional in tests, which build
    * `Context` objects directly and always fall back to the base locale.
    */
   headers?: Headers;
@@ -143,6 +145,7 @@ export async function createContext({
   requestId,
   rateLimiter = defaultRateLimiter,
   storage = defaultStorage,
+  videoUploads = null,
   emailSender = defaultEmailSender,
   linkTransport = defaultLinkTransport,
 }: {
@@ -153,13 +156,24 @@ export async function createContext({
   rateLimiter?: RateLimiter;
   /** Override so a test can supply a fake bucket instead of reaching a real one. */
   storage?: Storage | null;
+  videoUploads?: VideoUploads | null;
   /** Override for tests; production uses the auth package's sender. */
   emailSender?: EmailSender;
   /** Override so a test can drive the card fetch guard with a fake network. */
   linkTransport?: LinkFetchTransport;
 }): Promise<Context> {
   const session = await auth.api.getSession({ headers });
-  return { db, session, requestId, rateLimiter, storage, linkTransport, emailSender, headers };
+  return {
+    db,
+    session,
+    requestId,
+    rateLimiter,
+    storage,
+    videoUploads,
+    linkTransport,
+    emailSender,
+    headers,
+  };
 }
 
 /** The process-wide storage client, for callers outside a procedure (the `/media` route). */

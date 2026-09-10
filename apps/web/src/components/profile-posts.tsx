@@ -1,6 +1,6 @@
 import { getRouteApi } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { MessageSquare } from "lucide-react";
+import { Lock, MessageSquare } from "lucide-react";
 import { viewerIdAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
 import { postFeedAtom, type PostFeedParams } from "@/atoms/post-feed";
@@ -12,7 +12,7 @@ import { m } from "@/paraglide/messages.js";
 
 const routeApi = getRouteApi("/@{$username}/");
 
-type ProfilePostsFilter = "all" | "posts" | "reply";
+type ProfilePostsFilter = "all" | "posts" | "reply" | "shares";
 
 /**
  * The default profile tab. The surrounding header lives in the layout route
@@ -37,24 +37,51 @@ export function ProfilePosts() {
 
   const isOwnProfile = viewerId === profile.id;
   const handle = handleOf(profile) ?? username;
+  // Private accounts (issue #328) show a locked notice to non-followers
+  // instead of the feed — the API already returns empty (security), this is
+  // the UX that says why. The author and approved followers walk the normal
+  // tabs below.
+  const isLocked = (profile.isPrivate ?? false) && !isOwnProfile && !profile.viewerIsFollowing;
+  if (isLocked) {
+    return (
+      <div className="space-y-4">
+        <div className="border-border flex items-center gap-2 border-b pb-2">
+          <MessageSquare className="text-foreground h-4 w-4" />
+          <h2 className="text-foreground text-sm font-bold">{m.profile_posts_heading()}</h2>
+        </div>
+        <div className="border-border bg-card flex flex-col items-center gap-2 rounded-xl border p-8 text-center shadow-sm">
+          <Lock className="text-muted-foreground h-8 w-8" aria-hidden="true" />
+          <p className="text-foreground text-sm font-bold">{m.profile_locked_title()}</p>
+          <p className="text-muted-foreground text-sm">{m.profile_locked_body()}</p>
+        </div>
+      </div>
+    );
+  }
   // Reposts interleave on the All and Posts tabs (issue #277) — the profile
   // carries the events its owner caused, so the reposter's own amplifications
-  // render like X's profile does. The Replies tab stays replies-only, and no
-  // tab ever shows other people's reposts of this author's posts.
+  // render like X's profile does. Shares narrows that stream to quotes and
+  // reposts; Replies stays replies-only. No tab shows other people's reposts
+  // of this author's posts.
   const feedParams: PostFeedParams =
-    filter === "posts"
-      ? { authorId: profile.id, feed: "global", kind: "posts", includeReposts: true }
-      : filter === "reply"
-        ? { authorId: profile.id, feed: "global", kind: "replies" }
-        : { authorId: profile.id, feed: "global", includeReplies: true, includeReposts: true };
+    filter === "shares"
+      ? { authorId: profile.id, feed: "global", kind: "shares" }
+      : filter === "posts"
+        ? { authorId: profile.id, feed: "global", kind: "posts", includeReposts: true }
+        : filter === "reply"
+          ? { authorId: profile.id, feed: "global", kind: "replies" }
+          : { authorId: profile.id, feed: "global", includeReplies: true, includeReposts: true };
   const emptyMessage =
-    filter === "reply"
+    filter === "shares"
       ? isOwnProfile
-        ? m.profile_own_replies_empty()
-        : m.profile_replies_empty({ handle })
-      : isOwnProfile
-        ? m.profile_own_empty()
-        : m.profile_empty({ handle });
+        ? m.profile_own_shares_empty()
+        : m.profile_shares_empty({ handle })
+      : filter === "reply"
+        ? isOwnProfile
+          ? m.profile_own_replies_empty()
+          : m.profile_replies_empty({ handle })
+        : isOwnProfile
+          ? m.profile_own_empty()
+          : m.profile_empty({ handle });
 
   const selectFilter = (next: ProfilePostsFilter) => {
     void navigate({
@@ -70,7 +97,10 @@ export function ProfilePosts() {
         <h2 className="text-foreground text-sm font-bold">{m.profile_posts_heading()}</h2>
       </div>
 
-      <SegmentedControl label={m.profile_posts_filter_label()}>
+      <SegmentedControl
+        label={m.profile_posts_filter_label()}
+        className="max-w-full overflow-x-auto overscroll-x-contain"
+      >
         <SegmentedControlItem active={filter === "all"} onClick={() => selectFilter("all")}>
           {m.profile_posts_filter_all()}
         </SegmentedControlItem>
@@ -80,9 +110,12 @@ export function ProfilePosts() {
         <SegmentedControlItem active={filter === "reply"} onClick={() => selectFilter("reply")}>
           {m.profile_posts_filter_reply()}
         </SegmentedControlItem>
+        <SegmentedControlItem active={filter === "shares"} onClick={() => selectFilter("shares")}>
+          {m.profile_posts_filter_shares()}
+        </SegmentedControlItem>
       </SegmentedControl>
 
-      {isOwnProfile && filter !== "reply" && <PostComposer />}
+      {isOwnProfile && (filter === "all" || filter === "posts") && <PostComposer />}
 
       {/*
         The selected profile view maps to the corresponding `post.list` mode;

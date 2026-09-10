@@ -53,6 +53,7 @@ describe("SearchPage", () => {
           makePost({ content: "Hello, world!", author: makeAuthor({ name: "Dana Scully" }) }),
         ],
         nextCursor: null,
+        gameMentions: {},
       },
     ]);
 

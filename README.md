@@ -24,6 +24,8 @@ This README is about developing it. What the product _does_ is
 
 - Node 24 (`.nvmrc`) and pnpm 12
 - Docker, for Postgres and for running the production image locally
+- FFmpeg/FFprobe with libx264 and zscale support when running the optional video
+  worker on the host; the worker Docker image includes them.
 
 ## Setup
 
@@ -44,7 +46,50 @@ both. `.env.example` explains every variable and what happens when it is
 unset; the traps worth knowing are collected in
 [docs/operations.md](docs/operations.md).
 
+## Agent browser
+
+Agents use [agent-browser](https://agent-browser.dev/) for local UI inspection
+and browser bug reproduction. The discovery skill lives in
+`.agents/skills/agent-browser`; usage instructions come from the installed CLI.
+Install the machine-level tooling (validated with version 0.37.0):
+
+```bash
+npm install -g agent-browser@0.37.0 --allow-scripts=agent-browser
+agent-browser install
+agent-browser skills get core
+```
+
+On Linux, use `agent-browser install --with-deps` if browser libraries are
+missing. On Ubuntu, a downloaded Chrome may report "No usable sandbox".
+Install official Google Chrome and set `executablePath` to
+`/opt/google/chrome/chrome` in `~/.agent-browser/config.json` so it uses
+Ubuntu's existing Chrome sandbox policy. Keep this machine-specific path out
+of project configuration and keep the browser sandbox enabled.
+
+After starting the local app using the setup above, use a unique
+session name for your task and pass it on every command:
+
+```bash
+agent-browser --session mytuums-example open http://localhost:5173
+agent-browser --session mytuums-example snapshot -i
+agent-browser --session mytuums-example screenshot /tmp/mytuums-example.png
+agent-browser --session mytuums-example errors
+agent-browser --session mytuums-example close
+```
+
+For the Docker-served app, use `http://localhost:3001`. Keep the hostname
+`localhost` consistent for auth cookies and passkeys. Use development accounts
+and non-production data; keep saved auth state and captures in the ignored
+`.agent-browser/` directory or outside the repository. Inspect changed flows
+with fresh snapshots after page changes. Repeatable regression checks remain
+in the existing test suites; see [E2E context](e2e/CONTEXT.md).
+
 ## Common commands
+
+Video processing runs separately: `pnpm video:dev` starts the worker on health
+port `3002` alongside `pnpm dev`. It requires the complete development bucket
+configuration. See [video operations](docs/video-operations.md) for bucket CORS,
+environment pairing, Docker/Railway settings and recovery.
 
 Three levels of validation, widening. Use the narrowest one that can see your
 change while you work, and `pnpm verify` before you push.
@@ -75,6 +120,9 @@ The rest of the Drizzle toolbox is package-level:
 `db:generate:auth`.
 
 ## Repository layout
+
+`apps/video-worker` is the native video processing application; it shares the
+API's lifecycle rules and database while running independently of HTTP requests.
 
 | Path            | What lives there                                                                     |
 | --------------- | ------------------------------------------------------------------------------------ |

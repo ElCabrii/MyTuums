@@ -22,6 +22,7 @@ describe("parseEnv", () => {
     expect(env.GOOGLE_CLIENT_ID).toBeUndefined();
     expect(env.RESEND_API_KEY).toBeUndefined();
     expect(env.PASSKEY_RP_ID).toBeUndefined();
+    expect(env.VITE_GA_MEASUREMENT_ID).toBeUndefined();
     expect(env.WEB_ORIGIN).toBe("http://localhost:5173");
   });
 
@@ -34,6 +35,32 @@ describe("parseEnv", () => {
 
     expect(env.GOOGLE_CLIENT_ID).toBe("id");
     expect(env.GOOGLE_CLIENT_SECRET).toBe("secret");
+  });
+
+  /**
+   * The game-catalog sync's IGDB pair (issue #314) follows the provider rule
+   * without being one: same portal as TWITCH_*, but a different pair with a
+   * different consumer, so an id without a secret must be refused on its own
+   * message — not silently accepted and not conflated with the sign-in pair.
+   */
+  describe("half-configured IGDB pair", () => {
+    it("rejects an id without a secret, naming the missing half", () => {
+      expect(() => parseEnv({ ...required, IGDB_CLIENT_ID: "id" })).toThrow(/IGDB_CLIENT_SECRET/);
+    });
+
+    it("rejects a secret without an id", () => {
+      expect(() => parseEnv({ ...required, IGDB_CLIENT_SECRET: "secret" })).toThrow(
+        /IGDB_CLIENT_ID/,
+      );
+    });
+
+    it("accepts the whole pair, and none of it", () => {
+      expect(
+        parseEnv({ ...required, IGDB_CLIENT_ID: "id", IGDB_CLIENT_SECRET: "secret" })
+          .IGDB_CLIENT_ID,
+      ).toBe("id");
+      expect(parseEnv({ ...required }).IGDB_CLIENT_ID).toBeUndefined();
+    });
   });
 
   /**
@@ -101,6 +128,15 @@ describe("parseEnv", () => {
       expect(
         parseEnv({ ...required, SENTRY_DSN: "https://abc@example.ingest.sentry.io/1" }).SENTRY_DSN,
       ).toBe("https://abc@example.ingest.sentry.io/1");
+    });
+  });
+
+  describe("VITE_GA_MEASUREMENT_ID", () => {
+    it("is optional and exposes the public build flag to the server", () => {
+      expect(parseEnv({ ...required }).VITE_GA_MEASUREMENT_ID).toBeUndefined();
+      expect(
+        parseEnv({ ...required, VITE_GA_MEASUREMENT_ID: "G-EXAMPLE" }).VITE_GA_MEASUREMENT_ID,
+      ).toBe("G-EXAMPLE");
     });
   });
 

@@ -5,7 +5,7 @@
 The Node HTTP server. A plain `node:http` server with no framework that
 terminates every request: health checks, better-auth at `/api/auth`, the oRPC
 API at `/rpc`, media redirects at `/media`, and — in production — the built
-SPA. It is the only process Railway runs.
+SPA. Native video processing runs independently in `apps/video-worker`.
 
 It owns transport concerns only: routing, gates, headers, compression, static
 files, env validation, observability, shutdown. Business rules live in
@@ -41,8 +41,33 @@ by the Playwright `api` project.
 | Change error classification/reporting | `src/error-observation.ts`, `src/sentry.ts`                              | `src/index.ts`                                                                                                        |
 | Change what ships in the image        | `Dockerfile`                                                             | `.github/workflows/ci.yml` (`docker` job asserts it)                                                                  |
 | Change the migration runner           | `src/migrate.ts`                                                         | `../../docker-compose.yml`                                                                                            |
+| Add or change a one-shot entrypoint   | `src/<name>.ts` (e.g. `src/games-sync.ts`, the catalog-sync cron)        | `tsup.config.ts` entry list, `../../.github/workflows/ci.yml` image asserts, `../../docs/operations.md` Maintenance   |
 
 ## Invariants
+
+- **Client identity is established after the edge gate, before dispatch.**
+  `request-handler.ts` overwrites `x-mytuums-client-ip`: verified Cloudflare
+  traffic uses `CF-Connecting-IP`, direct Railway ingress uses `X-Real-IP`
+  when its runtime supplies `RAILWAY_ENVIRONMENT_ID`, and local requests use
+  the socket address. Missing/malformed proxy identities return 400 except on
+  health probes. Never fall back to client-supplied forwarding headers. Both
+  downstream limiters consume this identity through `@my-tuums/auth/client-ip`.
+  Deployment requirements and validation are in `docs/security.md`.
+
+- **The ESM bundle provides Node's `require` through `createRequire`.** Bundled
+  CommonJS dependencies such as React DOM's email renderer still require Node
+  built-ins. Without the banner in `tsup.config.ts`, auth emails fail before
+  reaching Resend even though password reset returns HTTP 200.
+  `src/email-bundle.test.ts` runs the bundled email builders in production mode
+  with plain Node, without sending mail or accessing a database.
+
+- **Video transport stays outside the RPC body buffer.** The server starts a
+  producer-only queue and injects the video upload service when S3 is configured.
+  Browsers PUT signed multipart parts directly to the bucket. `/media/videos/`
+  authorizes each asset, returns bounded HLS/VTT bodies or a private binary
+  redirect, and supports GET/HEAD. CSP permits the exact configured bucket
+  origins for transport, `blob:` media sources, and the HLS.js worker; it does
+  not add `blob:` to script execution. Encoding never runs in this process.
 
 - **`parseEnv` must never call `process.exit`.** Only `src/index.ts` may turn
   a bad environment into an exit. Otherwise merely importing the module kills
@@ -144,8 +169,10 @@ by the Playwright `api` project.
   The web tree is already bundled into `dist`; a second, server-only
   `turbo prune` keeps it out structurally rather than by install-time luck
   (issue #58). CI asserts both directions.
-- **`VITE_SOCIAL_PROVIDERS` and `VITE_GOOGLE_CLIENT_ID` must stay declared as
-  `ARG` in the builder stage**, or the OAuth buttons silently do not ship.
+- **Every web `VITE_*` read must stay a Docker build argument.** The two auth
+  values are declared in the builder stage; `VITE_GA_MEASUREMENT_ID` is
+  declared on the shared base because both the web build and runtime server
+  need the same public flag for bundle/CSP agreement.
 
 ## Dependencies and boundaries
 

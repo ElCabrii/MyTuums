@@ -77,10 +77,27 @@ export function clearViewerState(queryClient: QueryClient): void {
   queryClient.clear();
 
   sweepFamily(
+    "video upload",
+    () => import("@/atoms/video-upload"),
+    ({ clearVideoUploadFamilies }) => {
+      clearVideoUploadFamilies();
+    },
+  );
+
+  sweepFamily(
     "profile",
     () => import("@/atoms/profile"),
     ({ profileAtomFamily }) => {
       clearFamily(profileAtomFamily);
+    },
+  );
+  // Only the game PAGE atoms — they carry `viewerHasFavoritedGame`. The
+  // directory's list family is viewer-free and deliberately not swept.
+  sweepFamily(
+    "game page",
+    () => import("@/atoms/games"),
+    ({ clearGameFamilies }) => {
+      clearGameFamilies();
     },
   );
   sweepFamily(
@@ -123,8 +140,9 @@ export function clearViewerState(queryClient: QueryClient): void {
   sweepFamily(
     "post composer",
     () => import("@/atoms/composer"),
-    ({ clearComposerAttachments }) => {
+    ({ clearComposerAttachments, clearComposerPrivacy }) => {
       clearComposerAttachments();
+      clearComposerPrivacy();
     },
   );
   sweepFamily(
@@ -170,15 +188,6 @@ export function clearViewerState(queryClient: QueryClient): void {
     () => import("@/atoms/moderation"),
     ({ clearModerationFamilies }) => {
       clearModerationFamilies();
-    },
-  );
-  // The notifications feed and the read state its rows carry belong to the
-  // person who earned them; the count dies with the QueryClient clear above.
-  sweepFamily(
-    "notifications",
-    () => import("@/atoms/notifications"),
-    ({ clearNotificationsFamily }) => {
-      clearNotificationsFamily();
     },
   );
   // Results keyed on the previous session's queries shouldn't outlive it. The

@@ -141,11 +141,11 @@ function QueueSkeleton() {
       {[0, 1, 2].map((row) => (
         <Item key={row} variant="outline">
           <ItemMedia variant="icon" className="bg-muted size-9 rounded-full">
-            <Skeleton className="size-4 rounded-full" />
+            <Skeleton className="size-4 rounded-full motion-reduce:animate-none" />
           </ItemMedia>
           <ItemContent className="gap-2">
-            <Skeleton className="h-4 w-40" />
-            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-4 w-40 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-24 motion-reduce:animate-none" />
           </ItemContent>
         </Item>
       ))}

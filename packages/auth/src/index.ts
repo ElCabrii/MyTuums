@@ -1,3 +1,4 @@
+import { clientIpOptions } from "./client-ip.js";
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -5,6 +6,7 @@ import { admin, lastLoginMethod, oneTap, twoFactor, username } from "better-auth
 import { passkey } from "@better-auth/passkey";
 import { i18n } from "@better-auth/i18n";
 import { db } from "@my-tuums/db";
+import { stampJoinBadges } from "@my-tuums/db/stamp-join-badges";
 import { authRateLimitEnabled, passkeyRpId, webOrigin } from "./env.js";
 import { validateDateOfBirthHook } from "./dob.js";
 import { validateProfileFieldsHook } from "./profile.js";
@@ -140,7 +142,7 @@ export const auth = betterAuth({
     sendResetPassword: async ({ user, url }, request) => {
       await sendEmail({
         to: user.email,
-        ...passwordResetEmail(url, localeFromRequest(request?.headers)),
+        ...(await passwordResetEmail(url, localeFromRequest(request?.headers))),
       });
     },
   },
@@ -157,7 +159,7 @@ export const auth = betterAuth({
     sendVerificationEmail: async ({ user, url }, request) => {
       await sendEmail({
         to: user.email,
-        ...verificationEmail(url, localeFromRequest(request?.headers)),
+        ...(await verificationEmail(url, localeFromRequest(request?.headers))),
       });
     },
   },
@@ -219,6 +221,14 @@ export const auth = betterAuth({
       // legal consent dialog records them.
       legalAcceptedAt: { type: "date", required: false },
       legalVersion: { type: "string", required: false },
+
+      // Account privacy (issue #328): when true, posts/replies/follow lists
+      // are visible only to the author and approved followers. Nullable for
+      // the same OAuth reason as every other field here — null reads as
+      // public (false) everywhere, so no backfill can lock anyone out.
+      // Writable via `updateUser` (settings toggle); no hook validation
+      // needed beyond the boolean type.
+      isPrivate: { type: "boolean", required: false, defaultValue: false },
     },
   },
 
@@ -229,7 +239,21 @@ export const auth = betterAuth({
       // sign-up that supplies none of those fields passes through untouched;
       // legal acceptance is the exception and is required, on `/sign-up/email`
       // only (see ./legal.ts and validateUserCreate above).
-      create: { before: validateUserCreate },
+      create: {
+        before: validateUserCreate,
+        // Join badges are stamped the moment the account exists (issue #308):
+        // creation rank is fixed at that instant and no later event can earn
+        // or change it (see @my-tuums/db/stamp-join-badges). A failure here
+        // fails the sign-up loudly on purpose — pre-deploy migrations
+        // guarantee `user_badge` exists before this code takes traffic, so
+        // anything thrown is a deployment error, not a cosmetic badge worth
+        // swallowing while accounts silently earn nothing. The test instance
+        // (./testing.ts) deliberately carries no hooks at all, so fixtures
+        // never carry join badges.
+        after: async (created) => {
+          await stampJoinBadges(created.id);
+        },
+      },
       // updateUser is how the /welcome claim and every settings edit arrive;
       // the same field rules, and this is the only place they actually hold —
       // the columns are bare `text` and the client's checks are skippable.
@@ -287,7 +311,7 @@ export const auth = betterAuth({
         sendOTP: async ({ user, otp }, ctx) => {
           await sendEmail({
             to: user.email,
-            ...otpEmail(otp, localeFromRequest(ctx?.request?.headers ?? ctx?.headers)),
+            ...(await otpEmail(otp, localeFromRequest(ctx?.request?.headers ?? ctx?.headers))),
           });
         },
       },
@@ -343,6 +367,7 @@ export const auth = betterAuth({
   ],
 
   trustedOrigins: [webOrigin],
+  advanced: { ipAddress: clientIpOptions },
 
   rateLimit: {
     enabled: authRateLimitEnabled,
@@ -352,6 +377,14 @@ export const auth = betterAuth({
     // abuse protection: each one either lets an attacker test a secret, or
     // makes this server send mail on request.
     customRules: {
+      // Keep actionable handle errors, but bound anonymous probing and the
+      // verification emails from successful sign-ups (issue #380). The core
+      // sign-up default only pauses three attempts for ten seconds. The
+      // username plugin's availability endpoint and its update-user hook
+      // expose the same lookup, the latter before the session guard runs.
+      "/sign-up/email": { window: 60, max: 3 },
+      "/is-username-available": { window: 60, max: 10 },
+      "/update-user": { window: 60, max: 10 },
       "/sign-in/email": { window: 60, max: 10 },
       "/sign-in/username": { window: 60, max: 10 },
       // The plugin's own account lockout (10 consecutive failures) is the real
@@ -377,7 +410,7 @@ export const auth = betterAuth({
 // router (packages/api/src/moderation-actions.ts) builds its email copy here
 // and sends through the same `sendEmail` pipe as the auth flows, reads the
 // locale the same way, and points appeal links at `webOrigin`. The package's
-// exports map exposes only `.`, `./testing` and `./rules`, so the public
+// exports map also exposes `./testing`, `./rules` and `./client-ip`; the public
 // surface is whatever this file names — plus the browser-safe account rules,
 // which are the one part of this package `apps/web` may import.
 export {

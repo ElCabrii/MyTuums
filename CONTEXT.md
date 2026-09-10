@@ -10,29 +10,31 @@ MyTuums — a Twitter-style social app (posts, replies, likes, bookmarks,
 follows, profiles, moderation) with real authentication. pnpm 12 + Turborepo
 on Node 24, TypeScript strict everywhere.
 
-| Workspace       | Package              | Owns                                                |
-| --------------- | -------------------- | --------------------------------------------------- |
-| `apps/web`      | `@my-tuums/web`      | React 19 + Vite SPA, TanStack Router, Jotai         |
-| `apps/branding` | `@my-tuums/branding` | the public landing site served at about.mytuums.com |
-| `apps/server`   | `@my-tuums/server`   | `node:http` server, the only deployed process       |
-| `packages/api`  | `@my-tuums/api`      | oRPC procedures, business rules, media, moderation  |
-| `packages/auth` | `@my-tuums/auth`     | the single better-auth instance                     |
-| `packages/db`   | `@my-tuums/db`       | Drizzle schema, migrations, test-database guards    |
-| `e2e`           | `@my-tuums/e2e`      | Playwright journeys over the real stack             |
+| Workspace           | Package                  | Owns                                                            |
+| ------------------- | ------------------------ | --------------------------------------------------------------- |
+| `apps/web`          | `@my-tuums/web`          | React 19 + Vite SPA, TanStack Router, Jotai                     |
+| `apps/branding`     | `@my-tuums/branding`     | the public landing site served at about.mytuums.com             |
+| `apps/server`       | `@my-tuums/server`       | `node:http` application server and server maintenance commands  |
+| `apps/video-worker` | `@my-tuums/video-worker` | video queue consumers, native encoding, publication and cleanup |
+| `packages/api`      | `@my-tuums/api`          | oRPC procedures, business rules, media, moderation              |
+| `packages/auth`     | `@my-tuums/auth`         | the single better-auth instance                                 |
+| `packages/db`       | `@my-tuums/db`           | Drizzle schema, migrations, test-database guards                |
+| `e2e`               | `@my-tuums/e2e`          | Playwright journeys over the real stack                         |
 
 ## Context routing
 
-| If the change is about                                    | Go to                                                |
-| --------------------------------------------------------- | ---------------------------------------------------- |
-| UI, routes, client state, i18n copy, theme                | [apps/web/CONTEXT.md](apps/web/CONTEXT.md)           |
-| The public landing site at `about.mytuums.com`            | [apps/branding/CONTEXT.md](apps/branding/CONTEXT.md) |
-| HTTP routing, env validation, headers, runtime, Docker    | [apps/server/CONTEXT.md](apps/server/CONTEXT.md)     |
-| Business rules, RPC procedures, moderation, media/storage | [packages/api/CONTEXT.md](packages/api/CONTEXT.md)   |
-| Sign-in, OAuth providers, sessions, auth email            | [packages/auth/CONTEXT.md](packages/auth/CONTEXT.md) |
-| Schema, migrations, test databases                        | [packages/db/CONTEXT.md](packages/db/CONTEXT.md)     |
-| End-to-end journeys                                       | [e2e/CONTEXT.md](e2e/CONTEXT.md)                     |
-| Workflows, CI jobs                                        | [.github/CONTEXT.md](.github/CONTEXT.md)             |
-| Repository lint and TypeScript tooling                    | root configs, `package.json`, `tools/oxlint/`        |
+| If the change is about                                         | Go to                                                        |
+| -------------------------------------------------------------- | ------------------------------------------------------------ |
+| UI, routes, client state, i18n copy, theme                     | [apps/web/CONTEXT.md](apps/web/CONTEXT.md)                   |
+| The public landing site at `about.mytuums.com`                 | [apps/branding/CONTEXT.md](apps/branding/CONTEXT.md)         |
+| HTTP routing, env validation, headers, runtime, Docker         | [apps/server/CONTEXT.md](apps/server/CONTEXT.md)             |
+| Video probing, encoding, worker runtime, processing benchmarks | [apps/video-worker/CONTEXT.md](apps/video-worker/CONTEXT.md) |
+| Business rules, RPC procedures, moderation, media/storage      | [packages/api/CONTEXT.md](packages/api/CONTEXT.md)           |
+| Sign-in, OAuth providers, sessions, auth email                 | [packages/auth/CONTEXT.md](packages/auth/CONTEXT.md)         |
+| Schema, migrations, test databases                             | [packages/db/CONTEXT.md](packages/db/CONTEXT.md)             |
+| End-to-end journeys                                            | [e2e/CONTEXT.md](e2e/CONTEXT.md)                             |
+| Workflows, CI jobs                                             | [.github/CONTEXT.md](.github/CONTEXT.md)                     |
+| Repository lint and TypeScript tooling                         | root configs, `package.json`, `tools/oxlint/`                |
 
 Cross-package questions — how the pieces fit, what a request does end to end —
 are answered in [docs/architecture.md](docs/architecture.md).
@@ -58,11 +60,12 @@ to the owning context.
   and the client's `useRequireSignedIn` both read that. Duplicating it lets
   the two gates disagree and bounce a visitor between them forever.
 - **The browser-safe subpaths stay dependency-free.**
-  `@my-tuums/api/constants`, `@my-tuums/api/dimensions`,
-  `@my-tuums/api/post-image`, `@my-tuums/api/roles`
-  and `@my-tuums/auth/rules` must never import `@my-tuums/db`; the web app
-  imports them, and a database import throws at module load in a browser.
-  Those five are the _only_ workspace modules in the SPA bundle, and they are
+  `@my-tuums/api/constants`, `@my-tuums/api/badges`,
+  `@my-tuums/api/dimensions`, `@my-tuums/api/post-image`,
+  `@my-tuums/api/roles` and `@my-tuums/auth/rules` must never import
+  `@my-tuums/db`; the web app imports them, and a database import throws at
+  module load in a browser.
+  Those six are the _only_ workspace modules in the SPA bundle, and they are
   the only ones `apps/web` may import from either package.
 - **Auth-owned user fields are written through the auth client only.**
   `packages/auth`'s database hooks enforce their user-field rules; an oRPC
@@ -79,6 +82,9 @@ to the owning context.
 - **Destructive database helpers refuse any database not ending in `_test`.**
 - **Migrations run as a pre-deploy step, never at server boot.** N replicas
   would race the same DDL.
+- **A video worker's database owns its whole video bucket namespace.** Keep
+  database/bucket pairs isolated by environment. An orphan scan against a
+  different database can delete another environment's videos.
 - **The account rules have exactly one definition.**
   `packages/auth/src/rules.ts` (`@my-tuums/auth/rules`) owns the handle bounds,
   charset and lowercase normalization, the date-of-birth parse and age
@@ -104,6 +110,9 @@ These artifacts are generator-owned. Run the generator and commit its output
 The two git-ignored web artefacts are why `lint` and `typecheck` depend on
 `build` in `turbo.json`: `tsc` cannot resolve a route target or a message
 function until one build has run.
+
+The pinned pg-boss schema uses a committed custom migration; its generation
+workflow is in [video operations](docs/video-operations.md#migrations).
 
 ## Verification matrix
 

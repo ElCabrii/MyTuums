@@ -1,3 +1,4 @@
+import { reportDialogAtom } from "@/atoms/dialog-targets";
 import { atom } from "jotai";
 import { atomFamily } from "jotai-family";
 import { atomEffect } from "jotai-effect";
@@ -8,7 +9,7 @@ import {
   queryClientAtom,
 } from "jotai-tanstack-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { orpc, type Post } from "@/lib/orpc";
+import { orpc, retryUnlessClientError } from "@/lib/orpc";
 import { FOLLOW_CACHE_KEYS } from "@/lib/follow-cache";
 import { POST_CACHE_KEYS } from "@/lib/post-cache";
 import {
@@ -21,6 +22,7 @@ import {
   teamSearchQueryOptions,
 } from "@/lib/query-definitions";
 import { debounceMs } from "@/atoms/search";
+import { protectedProductReadyAtom } from "@/atoms/query-readiness";
 import { isSignedInAtom } from "@/atoms/session";
 
 /**
@@ -42,17 +44,11 @@ export const decodeCaseKey = (key: string): CaseRef => {
   };
 };
 
-/**
- * One infinite-query atom per queue scope, shared by every component that
- * reads that scope — the same structural-dedup reasoning as `postFeedFamily`
- * in `atoms/post-feed.ts`. There is exactly one queue today, so the key is
- * always `""`; the family exists so the sign-out sweep and a future filter
- * (post vs user cases) do not require a migration.
- */
-const queueFamily = atomFamily(() => atomWithInfiniteQuery(() => moderationQueueQueryOptions()));
-
-/** The infinite-query atom for the moderation queue — components read this, not the family. */
-export const moderationQueueAtom = queueFamily("");
+/** One moderation queue; its cached pages are cleared with the QueryClient at sign-out. */
+export const moderationQueueAtom = atomWithInfiniteQuery((get) => ({
+  ...moderationQueueQueryOptions(),
+  enabled: get(protectedProductReadyAtom),
+}));
 
 /**
  * What the queue's header reads: how many cases are loaded, how many of them
@@ -88,14 +84,11 @@ export const moderationQueueSummaryAtom = atom<QueueSummary>((get) => {
   };
 });
 
-/**
- * One infinite-query atom per audit-log scope — same reasoning as
- * `queueFamily`; the key is always `""` today.
- */
-const auditLogFamily = atomFamily(() => atomWithInfiniteQuery(() => auditLogQueryOptions()));
-
-/** The infinite-query atom for the audit log — components read this, not the family. */
-export const auditLogAtom = auditLogFamily("");
+/** One audit log; its cached pages are cleared with the QueryClient at sign-out. */
+export const auditLogAtom = atomWithInfiniteQuery((get) => ({
+  ...auditLogQueryOptions(),
+  enabled: get(protectedProductReadyAtom),
+}));
 
 /**
  * One query atom per case. Keyed on the case ref (encoded) so the queue rows
@@ -104,14 +97,20 @@ export const auditLogAtom = auditLogFamily("");
  * open case.
  */
 const caseFamily = atomFamily((key: string) =>
-  atomWithQuery(() => moderationCaseQueryOptions(decodeCaseKey(key))),
+  atomWithQuery((get) => ({
+    ...moderationCaseQueryOptions(decodeCaseKey(key)),
+    enabled: get(protectedProductReadyAtom),
+  })),
 );
 
 /** The query atom for one moderation case — components read this, not the family. */
 export const caseAtom = (ref: CaseRef) => caseFamily(encodeCaseKey(ref));
 
 /** The moderation team roster, for the staff-only Team tab. */
-export const teamAtom = atomWithQuery(() => teamQueryOptions());
+export const teamAtom = atomWithQuery((get) => ({
+  ...teamQueryOptions(),
+  enabled: get(protectedProductReadyAtom),
+}));
 
 /** The value shown in the Team tab's account-lookup field — written on every keystroke. */
 export const teamSearchInputAtom = atom("");
@@ -158,16 +157,21 @@ export const resetTeamSearchAtom = atom(null, (_get, set) => {
  * string, so there is nothing to key on, and `atomWithQuery` rebuilds the key
  * whenever the debounced value changes.
  */
-export const teamSearchAtom = atomWithQuery((get) =>
-  teamSearchQueryOptions(get(debouncedTeamSearchAtom)),
-);
+export const teamSearchAtom = atomWithQuery((get) => {
+  const base = teamSearchQueryOptions(get(debouncedTeamSearchAtom));
+  return { ...base, enabled: get(protectedProductReadyAtom) && (base.enabled ?? true) };
+});
 
 /**
  * The viewer's blocked users, newest block first — what the settings page's
  * "Blocked users" section renders. Not a family: one list per viewer, wiped
  * with the QueryClient on sign-out like every other non-family query.
  */
-export const blockedUsersAtom = atomWithQuery(() => orpc.moderation.listBlocked.queryOptions());
+export const blockedUsersAtom = atomWithQuery((get) => ({
+  ...orpc.moderation.listBlocked.queryOptions(),
+  retry: retryUnlessClientError,
+  enabled: get(protectedProductReadyAtom),
+}));
 
 /**
  * Which moderation case dialog is open, app-wide — at most one. Same
@@ -176,22 +180,6 @@ export const blockedUsersAtom = atomWithQuery(() => orpc.moderation.listBlocked.
  * no per-instance boolean to reconcile.
  */
 export const caseDialogAtom = atom<CaseRef | null>(null);
-
-/**
- * The target a report dialog is open on. A post report carries the post
- * itself — already loaded in the feed cache when the kebab opened the dialog
- * — so the dialog can preview what is being flagged without a second fetch,
- * and without a fetch race against a post being removed between the card and
- * the dialog. A user report carries no post; there is nothing to preview.
- */
-export type ReportDialogTarget =
-  { targetType: "post"; targetId: string; post: Post } | { targetType: "user"; targetId: string };
-
-/** Which report dialog is open: the target being reported, or null. */
-export const reportDialogAtom = atom<ReportDialogTarget | null>(null);
-
-/** Which block-confirm dialog is open: the user to block, or null. */
-export const blockDialogAtom = atom<{ userId: string; handle: string } | null>(null);
 
 /** Which set-role dialog is open: the team member whose role is changing, or null. */
 export const setRoleDialogAtom = atom<{
@@ -458,7 +446,7 @@ export const encodeAppealKey = (identifier: { token?: string; postId?: string })
  * The removed post behind one appeal identifier — what the appeal page renders
  * above its form.
  *
- * A family rather than a single atom for the same reason the queue is one:
+ * A family rather than a single atom because each appeal has its own query:
  * module-scope atoms take no parameters, and the page can be navigated from
  * one identifier to another. Signed-in state is read inside the atom so the
  * query starts itself the moment a session resolves, rather than staying
@@ -469,10 +457,11 @@ export const appealPreviewFamily = atomFamily((key: string) =>
     const separator = key.indexOf("|");
     const kind = key.slice(0, separator);
     const value = key.slice(separator + 1);
-    return appealPreviewQueryOptions(
+    const base = appealPreviewQueryOptions(
       kind === "token" ? { token: value } : { postId: value },
       get(isSignedInAtom),
     );
+    return { ...base, enabled: get(protectedProductReadyAtom) && (base.enabled ?? true) };
   }),
 );
 
@@ -540,8 +529,6 @@ export const appealReviewFamily = atomFamily((appealId: string) =>
  * mounted against them.
  */
 export function clearModerationFamilies(): void {
-  for (const key of queueFamily.getParams()) queueFamily.remove(key);
-  for (const key of auditLogFamily.getParams()) auditLogFamily.remove(key);
   for (const key of caseFamily.getParams()) caseFamily.remove(key);
   for (const key of caseReviewNoteFamily.getParams()) caseReviewNoteFamily.remove(key);
   for (const key of appealReviewFamily.getParams()) appealReviewFamily.remove(key);

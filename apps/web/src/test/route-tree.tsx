@@ -140,6 +140,10 @@ function createTestRouteTree(ui: ReactNode) {
     stubRoute("/forgot-password"),
     stubRoute("/reset-password"),
     stubRoute("/discover"),
+    // The public game directory (issue #314): the hub index and the
+    // `/games/$slug` pages the grid and search rows link into.
+    stubRoute("/games/"),
+    stubRoute("/games/$slug"),
     // search-page.test.tsx navigates the real `SearchPage` between `/search`
     // and `/search?q=...` — `getRouteApi("/search")` needs the route to
     // exist in the tree even though the stub never renders it (the page is

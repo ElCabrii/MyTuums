@@ -11,13 +11,15 @@ function makeUser(overrides: Partial<SearchUser> & { id: string }): SearchUser {
     bio: null,
     bannerImage: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    isPrivate: false,
     viewerIsFollowing: false,
+    hasRequested: false,
     ...overrides,
   };
 }
 
-function typeahead(users: SearchUser[]): SearchTypeahead {
-  return { users, posts: [] };
+function typeahead(users: SearchUser[], games: SearchTypeahead["games"] = []): SearchTypeahead {
+  return { users, games, posts: [] };
 }
 
 describe("suggestionRows", () => {
@@ -51,6 +53,30 @@ describe("suggestionRows", () => {
 
     expect(suggestionRows(typeahead([alice]))).toEqual([
       { kind: "user", user: alice },
+      { kind: "see-all" },
+    ]);
+  });
+
+  // The issue-#314 widening: games suggest after profiles, in the API's
+  // popularity order, still ahead of the see-all terminal — and games alone
+  // are enough to keep the dropdown (and its see-all) alive.
+  it("places game rows between the profiles and the see-all row", () => {
+    const alice = makeUser({ id: "u-alice" });
+    const hades = {
+      slug: "hades",
+      hashtagKey: "hades",
+      name: "Hades",
+      coverMediaPath: null,
+      firstReleaseYear: 2020,
+    };
+
+    expect(suggestionRows(typeahead([alice], [hades]))).toEqual([
+      { kind: "user", user: alice },
+      { kind: "game", game: hades },
+      { kind: "see-all" },
+    ]);
+    expect(suggestionRows(typeahead([], [hades]))).toEqual([
+      { kind: "game", game: hades },
       { kind: "see-all" },
     ]);
   });

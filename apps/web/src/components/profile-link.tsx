@@ -13,6 +13,7 @@ import { FollowButton } from "@/components/follow-button";
 // hover preview by design, and both modules export hoisted functions with no
 // top-level cross-references, so the cycle is initialization-safe.
 import { LinkedText } from "@/components/linked-text";
+import { ProfileBadges } from "@/components/profile-badges";
 import { UserAvatar } from "@/components/user-avatar";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { handleOf } from "@/lib/user";
@@ -81,14 +82,14 @@ function ProfileHoverCardContent({ username }: { username: string }) {
     return (
       <div className="space-y-3" aria-label={m.profile_hover_loading()}>
         <div className="flex items-center gap-3">
-          <Skeleton className="size-12 rounded-full" />
+          <Skeleton className="size-12 rounded-full motion-reduce:animate-none" />
           <div className="flex-1 space-y-2">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-4 w-28 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-20 motion-reduce:animate-none" />
           </div>
         </div>
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-8 w-24" />
+        <Skeleton className="h-10 w-full motion-reduce:animate-none" />
+        <Skeleton className="h-8 w-24 motion-reduce:animate-none" />
       </div>
     );
   }
@@ -142,13 +143,18 @@ function ProfileHoverCardContent({ username }: { username: string }) {
           />
         </Link>
         <div className="min-w-0">
-          <Link
-            to="/@{$username}"
-            params={{ username: handle }}
-            className="text-foreground block truncate font-bold hover:underline"
-          >
-            {displayName}
-          </Link>
+          <div className="flex items-end gap-1.5">
+            <Link
+              to="/@{$username}"
+              params={{ username: handle }}
+              className="text-foreground block truncate font-bold hover:underline"
+            >
+              {displayName}
+            </Link>
+            {/* The same badge row the profile header renders (issue #308), at
+                the card's smaller scale. */}
+            <ProfileBadges badges={profile.badges} className="shrink-0 pb-1" />
+          </div>
           <p className="text-muted-foreground truncate text-xs">@{handle}</p>
         </div>
       </div>
@@ -169,6 +175,7 @@ function ProfileHoverCardContent({ username }: { username: string }) {
         <FollowButton
           userId={profile.id}
           isFollowing={profile.viewerIsFollowing}
+          hasRequested={profile.hasRequested}
           className="shrink-0"
         />
       </div>

@@ -18,8 +18,8 @@ describe("PostFeed", () => {
     const first = makePost({ content: "First post" });
     const second = makePost({ content: "Second post" });
     queryFixtures(queryClient).postList.data([
-      { items: [first], nextCursor: "cursor-1" },
-      { items: [second], nextCursor: null },
+      { items: [first], nextCursor: "cursor-1", gameMentions: {}, ranking: null },
+      { items: [second], nextCursor: null, gameMentions: {}, ranking: null },
     ]);
 
     await renderWithProviders(

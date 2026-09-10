@@ -35,6 +35,11 @@ real default (`auto`).
 
 ## Local development
 
+Native video processing is an optional separate process: `pnpm video:dev` uses
+health port `3002`. It requires FFmpeg/FFprobe and a matched database/bucket pair.
+The [video operations guide](video-operations.md) owns its settings, CORS,
+migrations, environment isolation, recovery and measurements.
+
 Two ways to run the stack. They both want ports 3001 and 5173, so run one.
 
 | Mode               | Command          | What you get                                                                  |
@@ -105,6 +110,12 @@ and storage and auto-deploys the active release branch. When a new release
 branch is opened, update the Preview service's Railway deployment trigger to
 that branch. Production continues to auto-deploy `main` only.
 
+Release notes live in [the web changelog directory](../apps/web/changelog).
+Add English and French Markdown files named for the version in
+`apps/web/package.json`. Vite compiles only that matching pair into the bundle;
+if neither file exists, the release ships without a popup. Preview is where to
+verify the final copy after the version bump and before merging to `main`.
+
 Keep production third-party credentials out of Preview. OAuth, transactional
 email, and error-reporting integrations remain disabled there until dedicated
 non-production credentials are configured.
@@ -145,12 +156,31 @@ in the stage that needs it. The declared build arguments are:
 
 - `VITE_SOCIAL_PROVIDERS`
 - `VITE_GOOGLE_CLIENT_ID`
+- `VITE_GA_MEASUREMENT_ID`
 
-Miss one and the image starts cleanly, serves everything, and silently renders
-no sign-in buttons. CI greps the built bundle for both, and separately probes
-the booted container's `/api/auth/sign-in/social` so the server's registered
-providers and the client's offered providers are asserted against each other
-from both sides.
+Miss one and the image starts cleanly, serves everything, and silently omits
+the corresponding browser integration. CI greps the built bundle for all
+three; it separately probes the booted container's `/api/auth/sign-in/social`
+so the server's registered providers and the client's offered providers are
+asserted against each other from both sides.
+
+When `VITE_GA_MEASUREMENT_ID` is set, configure that GA4 property under
+**Admin → Data collection and modification → Data retention** for 14 months.
+The app limits both its consent record and GA cookies to six months, disables
+Google signals and advertising-personalization signals, and never loads the
+tag before consent; the property setting is the remaining deployment-side
+retention control and cannot be enforced from this repository.
+
+The app sends SPA page views manually (`send_page_view: false` plus one
+`page_view` per TanStack Router navigation, with only the origin and pathname
+so capability tokens in query strings never leave the device). That flag alone
+does not stop Enhanced Measurement from also emitting a `page_view` on every
+browser-history change, so disable **Admin → Data collection and modification
+→ Data streams → Web → Enhanced measurement → Page views → Show advanced
+settings → Page changes based on browser history events** for the same
+property. Otherwise each navigation is counted twice — once automatically,
+once manually. See
+https://developers.google.com/analytics/devguides/collection/ga4/views#disable_page_changes_based_on_browser_history_events.
 
 **Runtime.** Everything else is read from the process environment at boot and
 validated by `apps/server/src/env.ts`. Only `DATABASE_URL` escapes that
@@ -159,10 +189,21 @@ report: `@my-tuums/db` evaluates it at module scope and throws before
 
 ## Docker image
 
+The video worker has its own `apps/video-worker/Dockerfile`. It tests the actual
+encoder during build, runs without root privileges, and ships no SPA. The
+existing CI image job builds both images and boots the worker against a dedicated
+`_test` database and local empty storage stub, checking maintenance, health and
+queue acknowledgement without bucket credentials.
+
 `apps/server/Dockerfile` is a four-stage build from the monorepo root:
 
 1. **pruner** — `turbo prune` twice: once for server _and_ web (what gets
-   built), once for the server alone (what the runner installs).
+   built), once for the server alone (what the runner installs). turbo is
+   run at the exact version the lockfile pins for the root devDependency
+   (extracted at build time, so the two cannot drift); its registry
+   download is re-paid per build, because Railway's cache-mount ids embed
+   the deploying service's UUID and this one Dockerfile builds two Railway
+   services.
 2. **builder** — full install, tsup-bundle the server, then `vite build` with
    the `VITE_*` args declared.
 3. **runner** — `pnpm install --prod` over the _server-only_ prune, then copy
@@ -206,6 +247,14 @@ already exists, so every later role change goes through the moderation desk
 migrations run as a **pre-deploy step** (`apps/server/dist/migrate.js`), which
 exits non-zero so a failed migration aborts the deploy. Never at server boot —
 N replicas would race the same DDL.
+
+The ranked-feeds change (issue #305) ships as migration
+`0035_charming_sandman` (`packages/db/drizzle/0035_charming_sandman.sql`),
+which creates the `feed_rank_snapshot` table and its two indexes. It deploys
+through that same standard pre-deploy step — no environment variables, no new
+services, no separate cron or migration deployment. Snapshot expiry needs no
+scheduler either: expired rows are refused at read time and reaped by bounded
+request-time maintenance on ranked calls.
 
 The `_test` database is a separate database whose name ends in `_test`;
 `DATABASE_URL_TEST` is optional and derived from `DATABASE_URL` when unset.
@@ -288,6 +337,45 @@ repo, `DATABASE_URL` referencing the production Postgres) fires the command
 above every Monday at 04:00 UTC. The manual command remains for other
 environments, dry-run reports, and out-of-band prunes.
 
+**Game catalog sync.** The `game` table's catalog of the current Twitch top
+1000 plus the most-wanted unreleased games (issue #314) is refreshed by:
+
+```bash
+pnpm games:sync
+```
+
+Fail-closed by construction: the run stages and validates everything, then
+commits in a single transaction, so any failure (bad credentials, a Twitch or
+IGDB outage that survives its one retry, a validation violation, a snapshot
+short of 1000 unique games) leaves the previous catalog byte-identical and
+exits non-zero. Rows are never deleted — games that drop out of the snapshot
+keep their row and last-known rank. Ranking comes from Twitch Helix
+`games/top` (ordered by current viewer count); the upcoming shelf comes from
+IGDB's `hypes` (the pre-release want count, TBA or future release only, top
+100); hydration and covers still come from IGDB, and only the `igdb_id` is
+ever stored — never Twitch's category id or box art. Covers are re-hosted
+into the environment's bucket under `games`, content-addressed, so repeat
+runs upload only what changed. Needs `IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET`
+(a pair, see `.env.example`) plus `DATABASE_URL` and, for covers, the `S3_*`
+group. Production runs it automatically: the `mytuums-games-sync` Railway
+cron service (the production Docker image, start command
+`node apps/server/dist/games-sync.js`, weekly Sunday 05:00 UTC) reads the
+production Postgres, bucket and IGDB pair. A weekly cron means a weekly
+snapshot: the ranks capture Twitch's order at run time, not a rolling
+window, so a catalog closer to real-time would need a more frequent
+schedule.
+
+Dev, CI and e2e never need IGDB credentials — they seed the committed
+fixture instead:
+
+```bash
+pnpm games:seed --database <target-db-name>
+```
+
+The `--database` retype is deliberate (the `reconcile:media` `--bucket`
+instinct): nothing in the environment distinguishes a dev database from
+production, so the target must be named explicitly.
+
 It lists the bucket before reading the `user` rows, so an upload landing
 between the two steps is never mistaken for an orphan. Point it at the same
 bucket as the environment whose rows you are reading, never across
@@ -303,6 +391,13 @@ carries no score weight.
 **Documentation.** `pnpm docs:check` validates the agent-facing docs against
 the code — links, cited paths, documented scripts, the router groups, and the
 Docker build arguments. It runs as part of `pnpm verify`.
+
+## Production preload diagnostics
+
+Shared HTML preloads only shared resources; lazy routes load on demand and enter
+the service worker runtime cache after use. The measured login-hint fix and the
+remaining warning investigation are recorded in
+[Production preload investigation](preload-investigation.md).
 
 ## Further reading
 

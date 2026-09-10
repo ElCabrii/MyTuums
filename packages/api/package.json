@@ -12,6 +12,10 @@
       "types": "./src/constants.ts",
       "default": "./src/constants.ts"
     },
+    "./badges": {
+      "types": "./src/badges.ts",
+      "default": "./src/badges.ts"
+    },
     "./storage": {
       "types": "./src/storage.ts",
       "default": "./src/storage.ts"
@@ -19,6 +23,10 @@
     "./public-post-head": {
       "types": "./src/public-post-head.ts",
       "default": "./src/public-post-head.ts"
+    },
+    "./public-game-head": {
+      "types": "./src/public-game-head.ts",
+      "default": "./src/public-game-head.ts"
     },
     "./dimensions": {
       "types": "./src/dimensions.ts",
@@ -35,6 +43,14 @@
     "./sql": {
       "types": "./src/sql.ts",
       "default": "./src/sql.ts"
+    },
+    "./games-sync": {
+      "types": "./src/games-sync.ts",
+      "default": "./src/games-sync.ts"
+    },
+    "./video-worker": {
+      "types": "./src/video-worker.ts",
+      "default": "./src/video-worker.ts"
     }
   },
   "scripts": {
@@ -44,7 +60,9 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "reconcile:media": "dotenv -e ../../.env -- tsx scripts/reconcile-media.ts",
-    "prune:notifications": "dotenv -e ../../.env -- tsx scripts/prune-notifications.ts"
+    "prune:notifications": "dotenv -e ../../.env -- tsx scripts/prune-notifications.ts",
+    "games:seed": "dotenv -e ../../.env -- tsx scripts/seed-games.ts",
+    "storage:video-cors": "dotenv -e ../../.env -- tsx scripts/configure-video-cors.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1101.0",
@@ -53,6 +71,7 @@
     "@my-tuums/db": "workspace:*",
     "@orpc/server": "^1.5.0",
     "drizzle-orm": "^0.45.2",
+    "pg-boss": "12.26.0",
     "sharp": "^0.35.4",
     "undici": "^7.29.0",
     "zod": "catalog:"

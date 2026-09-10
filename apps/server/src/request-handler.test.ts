@@ -167,6 +167,85 @@ describe("createRequestHandler", () => {
     expect(JSON.parse(calls.body)).toEqual({ status: "error", reason: "database unreachable" });
   });
 
+  describe("edge gate (EDGE_SECRET set)", () => {
+    // 32+ chars, matching the env schema's floor — the Transform Rule and the
+    // service env carry the real value; the gate only ever sees these.
+    const SECRET = "test-edge-secret-0123456789abcdef";
+    const gated = (overrides: Partial<RequestHandlerDeps> = {}) =>
+      deps({ edgeSecret: SECRET, ...overrides });
+
+    it("404s every request without the header, /health included, before any routing branch runs", async () => {
+      // The gate's whole point is that a direct-to-origin request — one that
+      // never met the Transform Rule — has no claim on ANY route. So the
+      // strongest test is the one route with no other gate in front of it,
+      // plus proof the DB was never asked.
+      const { res, calls } = resStub();
+      const pingDb = vi.fn();
+      const handle = createRequestHandler(gated({ pingDb }));
+
+      await handle(reqStub("/health"), res);
+
+      expect(calls.statusCode).toBe(404);
+      expect(calls.body).toBe("Not found");
+      expect(pingDb).not.toHaveBeenCalled();
+    });
+
+    it("404s a wrong value rather than a missing one only", async () => {
+      const { res, calls } = resStub();
+      const handle = createRequestHandler(gated());
+
+      await handle(reqStub("/health", "GET", { "x-edge-secret": "wrong" }), res);
+
+      expect(calls.statusCode).toBe(404);
+    });
+
+    it("404s a repeated header (array) rather than joining its values", async () => {
+      // The proxy's rewrite is a `set`, so it never produces two values. A
+      // client trying to smuggle one through alongside its own must not win
+      // by comma-join semantics the gate never agreed to.
+      const request = reqStub("/health");
+      request.headers["x-edge-secret"] = [SECRET, "attacker-controlled"];
+
+      const { res, calls } = resStub();
+      const handle = createRequestHandler(gated());
+
+      await handle(request, res);
+
+      expect(calls.statusCode).toBe(404);
+    });
+
+    it("lets a matching header through to the ordinary routing tree", async () => {
+      const { res, calls } = resStub();
+      const handle = createRequestHandler(gated());
+
+      await handle(reqStub("/health", "GET", { "x-edge-secret": SECRET }), res);
+
+      expect(calls.statusCode).toBe(200);
+      expect(JSON.parse(calls.body)).toEqual({ status: "ok" });
+    });
+
+    it("still serves /live without the header — Railway's healthchecker probes the ingress directly, through no edge proxy", async () => {
+      const { res, calls } = resStub();
+      const pingDb = vi.fn();
+      const handle = createRequestHandler(gated({ pingDb }));
+
+      await handle(reqStub("/live"), res);
+
+      expect(calls.statusCode).toBe(200);
+      expect(JSON.parse(calls.body)).toEqual({ status: "ok" });
+      expect(pingDb).not.toHaveBeenCalled();
+    });
+  });
+
+  it("serves /health without any edge header when EDGE_SECRET is unset — dev, CI, and production", async () => {
+    const { res, calls } = resStub();
+    const handle = createRequestHandler(deps());
+
+    await handle(reqStub("/health"), res);
+
+    expect(calls.statusCode).toBe(200);
+  });
+
   it("redirects a cookie-less GET to / to /login, skipping the whole SPA round trip and any session lookup", async () => {
     // The client-side gate (`useRequireSignedIn`) would land a signed-out
     // visitor on /login?redirect=%2F anyway, but only after the bundle, the
@@ -339,6 +418,33 @@ describe("createRequestHandler", () => {
     expect(calls.headers).toMatchObject({
       Location: "/login?redirect=%2F%2570ost%2F0d97ee29-7896-4c53-9161-c54fc1ca1b51",
     });
+  });
+
+  it("does not gate /games or a /games/<slug> page for a signed-out visitor — the public directory", async () => {
+    // Issue #314 (Q6): the game directory is the app's second public page
+    // family. The hub is an exact member of SIGNED_OUT_PATHS; the slugs ride
+    // the /games/ prefix exactly like post permalinks ride /post/.
+    const serveStatic = vi.fn().mockResolvedValue({ served: true });
+    const handle = createRequestHandler(deps({ serveStatic }));
+
+    for (const pathname of ["/games", "/games/doom-2016"]) {
+      const { res, calls } = resStub();
+      await handle(reqStub(pathname), res);
+      expect(serveStatic, pathname).toHaveBeenCalled();
+      expect(calls.statusCode, pathname).not.toBe(302);
+    }
+  });
+
+  it("still gates an encoded /games spelling — the prefix rule fails closed", async () => {
+    // `/%67ames/...` decodes to /games/... but is not the literal prefix.
+    const { res, calls } = resStub();
+    const serveStatic = vi.fn().mockResolvedValue({ served: true });
+    const handle = createRequestHandler(deps({ serveStatic }));
+
+    await handle(reqStub("/%67ames/doom-2016"), res);
+
+    expect(serveStatic).not.toHaveBeenCalled();
+    expect(calls.statusCode).toBe(302);
   });
 
   it("still gates the bare /post path — only the /post/ prefix is public", async () => {
@@ -1001,6 +1107,27 @@ describe("createRequestHandler", () => {
     expect(smallCalls.statusCode).toBe(200);
   });
 
+  it.each(["GET", "HEAD"])(
+    "serves authorized video text assets with private caching for %s",
+    async (method) => {
+      const { res, calls } = resStub();
+      const session = signedIn();
+      const body = "#EXTM3U\n/media/videos/authorized/360.m3u8\n";
+      const handle = createRequestHandler(
+        deps({
+          resolveMediaUrl: () =>
+            Promise.resolve({ body, contentType: "application/vnd.apple.mpegurl" }),
+          resolveSession: session.resolveSession,
+        }),
+      );
+      await handle(reqStub("/media/videos/authorized/master.m3u8", method, session.headers), res);
+      expect(calls.statusCode).toBe(200);
+      expect(calls.headers?.["Cache-Control"]).toBe("private, no-store");
+      expect(calls.headers?.["Content-Type"]).toBe("application/vnd.apple.mpegurl");
+      expect(calls.body).toBe(method === "HEAD" ? "" : body);
+    },
+  );
+
   it("redirects a /media hit to the presigned URL without caching a viewer decision", async () => {
     const { res, calls } = resStub();
     const resolveMediaUrl = vi.fn().mockResolvedValue(MEDIA_HIT);
@@ -1305,4 +1432,97 @@ describe("createRequestHandler", () => {
 
     expect(isDestroyed()).toBe(true);
   });
+});
+
+describe("client identity at the HTTP boundary", () => {
+  const secret = "test-edge-secret-0123456789abcdef";
+  const identityHeader = "x-mytuums-client-ip";
+  function identityDeps(overrides: Partial<RequestHandlerDeps> = {}) {
+    return deps({
+      authNodeHandler: (req, res) => {
+        res.end(String(req.headers[identityHeader] ?? "missing"));
+      },
+      handleRpc: (req, res) => {
+        res.end(String(req.headers[identityHeader] ?? "missing"));
+        return Promise.resolve({ matched: true });
+      },
+      ...overrides,
+    });
+  }
+
+  it.each(["/api/auth/get-session", "/rpc/me"])(
+    "%s receives only the verified edge address",
+    async (url) => {
+      const request = reqStub(url, "POST", {
+        "x-edge-secret": secret,
+        "cf-connecting-ip": "198.51.100.81",
+        "x-real-ip": "203.0.113.1",
+        "x-forwarded-for": "192.0.2.99, 203.0.113.1",
+        [identityHeader]: "192.0.2.99",
+      });
+      const { res, calls } = resStub();
+      await createRequestHandler(identityDeps({ edgeSecret: secret, railwayProxy: true }))(
+        request,
+        res,
+      );
+      expect(calls.body).toBe("198.51.100.81");
+    },
+  );
+
+  it("preserves verified identity through chunked auth-body replay", async () => {
+    const request = streamReqStub("/api/auth/update-user", Buffer.from("{}"), "POST", {
+      "x-edge-secret": secret,
+      "cf-connecting-ip": "198.51.100.82",
+    });
+    const { res, calls } = resStub();
+    await createRequestHandler(identityDeps({ edgeSecret: secret }))(request, res);
+    expect(calls.body).toBe("198.51.100.82");
+  });
+
+  it("uses Railway's address rather than unverified Cloudflare or forwarded headers on direct ingress", async () => {
+    const request = reqStub("/rpc/me", "POST", {
+      "x-real-ip": "198.51.100.82",
+      "cf-connecting-ip": "192.0.2.99",
+      "x-forwarded-for": "192.0.2.99, 203.0.113.1",
+      [identityHeader]: "192.0.2.99",
+    });
+    const { res, calls } = resStub();
+    await createRequestHandler(identityDeps({ railwayProxy: true }))(request, res);
+    expect(calls.body).toBe("198.51.100.82");
+  });
+
+  it("uses the socket on a direct local server despite all forged IP headers", async () => {
+    const request = reqStub("/rpc/me", "POST", {
+      "x-real-ip": "192.0.2.99",
+      "cf-connecting-ip": "192.0.2.99",
+      "x-forwarded-for": "192.0.2.99",
+      [identityHeader]: "192.0.2.99",
+    });
+    Object.defineProperty(request.socket, "remoteAddress", { value: "127.0.0.1" });
+    const { res, calls } = resStub();
+    await createRequestHandler(identityDeps())(request, res);
+    expect(calls.body).toBe("127.0.0.1");
+  });
+
+  it.each([undefined, "invalid", "198.51.100.1, 198.51.100.2", ["198.51.100.1", "198.51.100.2"]])(
+    "rejects a missing or ambiguous proxy address (%s) rather than sharing the auth budget",
+    async (value) => {
+      for (const cloudflare of [true, false]) {
+        const request = reqStub("/api/auth/get-session", "GET", {
+          "x-edge-secret": secret,
+          [identityHeader]: "192.0.2.99",
+        });
+        request.headers[cloudflare ? "cf-connecting-ip" : "x-real-ip"] = value;
+        const { res, calls } = resStub();
+        await createRequestHandler(
+          identityDeps({
+            edgeSecret: cloudflare ? secret : undefined,
+            railwayProxy: true,
+          }),
+        )(request, res);
+        expect(calls.statusCode).toBe(400);
+        expect(calls.body).toBe("Invalid client address");
+      }
+    },
+  );
 });

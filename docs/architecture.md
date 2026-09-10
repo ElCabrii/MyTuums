@@ -9,7 +9,7 @@ behaviour and vocabulary, [product.md](product.md).
 **Source of truth:** `pnpm-workspace.yaml`, each package's `package.json`,
 `turbo.json`
 
-Dependencies point one way. `apps/web` and `apps/server` are leaves; nothing
+Dependencies point one way. `apps/web`, `apps/server` and `apps/video-worker` are leaves; nothing
 imports them.
 
 ```
@@ -18,6 +18,7 @@ apps/server ──▶ packages/api ──▶ packages/auth ──▶ packages/db
             └─▶ packages/auth ─────────────────────┘
             └─▶ packages/db
 e2e ──▶ packages/api, packages/auth, packages/db
+apps/video-worker ──▶ packages/api/video-worker, packages/db
 ```
 
 `packages/api`, `packages/auth` and `packages/db` are **source-only**: they
@@ -63,6 +64,10 @@ browser talks to Vite, which proxies three prefixes to the API:
 Vite's `envDir` is the monorepo root, so the single `.env` feeds Vite and every
 `dotenv -e ../../.env` script alike.
 
+`pnpm video:dev` runs the optional worker separately on health port `3002`.
+FFmpeg and the environment's database/bucket pair are required. Ordinary
+`pnpm dev` excludes it so image-only development does not require native tools.
+
 `pnpm docker:up` occupies the same two ports with the production image, so run
 one or the other. The E2E stack deliberately uses `:3101` / `:5273` so it can
 run beside a live dev stack.
@@ -75,6 +80,11 @@ run beside a live dev stack.
 In production there is no proxy and no second origin. The Docker image sets
 `WEB_DIST=/app/apps/web/dist` and the same Node process serves the SPA, the
 auth endpoints, the RPC API and media redirects.
+
+Video processing adds an independent worker service in the same environment and
+European region. It shares PostgreSQL and the bucket, has no browser-facing
+origin, and never handles a user's HTTP upload. Deployment settings are in
+[video operations](video-operations.md).
 
 The Vite build also emits `/service-worker.js`, whose generated precache list
 contains the hashed app-shell assets. The worker never caches RPC, auth, or
@@ -161,7 +171,7 @@ Ordering facts that are load-bearing:
 `packages/api/src/router.ts`
 
 `createContext` builds one `Context` per request carrying `db`, `session`,
-`rateLimiter`, `storage` and `requestId`. The rate limiter and the storage
+`rateLimiter`, `storage`, `videoUploads` and `requestId`. The rate limiter and the storage
 client are threaded on the context, never imported as module globals, so tests
 substitute fakes and one suite's limiter state cannot bleed into another's.
 
@@ -171,7 +181,9 @@ The router's top-level groups:
 
 - `me` — the caller's own session user
 - `post` — `create`, `delete`, `list`, `thread`, `like`, `unlike`
+- `video` — multipart begin/status/part/finish/cancel and author-only pending submissions
 - `user` — `byUsername`, `uploadImage`, `removeImage`, `follow`, `unfollow`, `followers`, `following`
+- `game` — `bySlug`, `list` (public: the `/games` directory, issue #314)
 - `search` — `typeahead`, `users`, `posts`
 - `notification` — `list`, `unreadCount`, `markRead`
 - `moderation` — reports, blocks, the queue, the staff actions, the audit log, appeals
@@ -316,7 +328,7 @@ sides by CI. See [operations.md](operations.md).
   load-bearing one: a ~200 KB PNG declaring 400 MP allocates about a gigabyte
   on decode, so an editor that measured the source first would freeze the tab
   merely on selection.
-- **Post attachments are re-encoded in the browser and keep no original**
+- **Post image attachments are re-encoded in the browser and keep no original**
   (issue #207). The composer runs every picked file through
   `createPostAttachment` (`apps/web/src/lib/media.ts`) before it joins a
   draft: decode → canvas re-encode to WebP (PNG where a browser lacks that
@@ -371,6 +383,45 @@ sides by CI. See [operations.md](operations.md).
   every derivable variant key of each referenced base, so on-demand
   generation never orphans a survivor and a dead base's variants are reaped
   with it.
+
+### Video lifecycle and playback
+
+**Source of truth:** `packages/api/src/video-lifecycle.ts`,
+`packages/api/src/video-uploads.ts`, `packages/api/src/video-media.ts`,
+`apps/video-worker/src/job.ts`, `apps/web/src/components/video-player.tsx`.
+
+1. Selection creates a durable upload owner before issuing signed multipart
+   capabilities. The browser streams 8 MiB parts directly to the private bucket;
+   progress/cancel/recovery do not buffer a video in the RPC server.
+   The composer previews the same original File through a temporary browser blob
+   URL, independent of upload completion. Unmount/replacement revokes that URL;
+   preview playback never queues processing or grants publication consent.
+2. Upload completion alone creates no post. Explicit submission stores text,
+   target in `video_submission` and enqueues an IDs-only
+   pg-boss job in the same transaction. Only the author can list pending rows.
+3. A leased attempt downloads to bounded scratch space, validates actual media
+   and decoded frames, then produces H.264/AAC fMP4 HLS, a cover and two-second
+   timeline sprites. Attempt-specific keys fence stale workers.
+4. Once every derivative is uploaded, the attempt records its inventory. It
+   deletes the raw source and confirms absence before publishing the normal
+   post, attachment, counters and notifications through shared publication rules
+   in one transaction. Retried delivery cannot publish twice.
+5. Failure erases pending text/captions, creates one link-free failure notice,
+   and retains content-free cleanup debt. Expiry, cancellation, deletion and
+   account cascades also owe cleanup. Maintenance compares rows and actual
+   storage to find abandoned multipart sessions and late stale writes.
+
+Every `/media/videos/` request verifies the current published attempt, asset
+inventory and existing post visibility. Bounded HLS/VTT bodies rewrite references
+back through that gate; binary segments, initialization files, covers and sprites
+redirect to short-lived signed URLs. Published media survives moderation removal
+for evidence/restoration; author deletion schedules removal.
+
+Full attachment surfaces use one custom player. HLS.js loads on demand, selects
+adaptive or explicit renditions and releases playback sources offscreen. Jotai
+coordinates a single visible player; autoplay is muted and can be disabled per
+device. Controls include seeking, volume, speed, captions, fullscreen/PiP where
+supported and timeline previews. Compact surfaces show the same video's cover.
 
 ## Moderation — report, action, audit, appeal
 
@@ -441,6 +492,78 @@ sides by CI. See [operations.md](operations.md).
    insert — then the appeal and target. It leaves the review fields empty and
    does not add an `appeal_resolved` row because no appeal review occurred;
    the inverse action's audit row and post-commit email record what happened.
+
+## Ranked feeds
+
+**Source of truth:** `packages/api/src/feed-rank.ts`,
+`packages/api/src/posts.ts` (`post.list`'s ranked branch), `packages/api/src/cursor.ts`
+(`createRankCursorCodec`), `packages/db/src/schema/app.ts` (`feedRankSnapshot`)
+
+The home **For you** (`global`), **Following**, and **Discover** feeds are
+ranked by one scorer over three candidate sets — no ML, no model serving, no
+separate infrastructure. The issue's framing cited X's public ranking code as
+inspiration; this implementation does not reproduce it. The
+[2023 release](https://github.com/twitter/the-algorithm) described a roughly
+48-million-parameter MaskNet ranker, not 48 engagement features. The newer
+[2026 release](https://github.com/xai-org/x-algorithm) describes Phoenix,
+a transformer-based ranker. Those models predict viewer actions rather than
+multiply raw engagement counts; public code does not reproduce the complete
+live service. What carries over is the broad shape of sourcing, scoring and
+filtering candidates. MyTuums adds a frozen serving
+order — at this app's scale: bounded SQL queries source the candidates, one
+pure JS function scores them, and a snapshot freezes the order for paging.
+
+1. **Candidate sourcing (bounded SQL).** Two arms per scope: authored
+   top-level posts, plus repost events scored on the original's features with
+   the event's timestamp for freshness. Following carries only the viewer's
+   and followed accounts' amplifications; global and Discover take any visible
+   reposter. Discover excludes the viewer's own originals but includes followed authors'
+   posts. Candidates are top-level, non-tombstoned posts inside a 7-day
+   window, widened to 30 days only when the 7-day pool holds fewer than
+   `FEED_RANK_SPARSE_THRESHOLD` rankable candidates; the pool is capped at
+   `FEED_RANK_POOL_LIMIT` (500, across both arms — never per arm), and each
+   history signal is bounded by `FEED_RANK_HISTORY_LIMIT` (200) so an old
+   account costs the same as a new one. Tombstoned (removed or deleted) rows
+   never rank, and every history input is filtered to currently visible rows —
+   hidden content lends no affinity and no topics, and bookmarks are never
+   read. The hashtag scan mirrors the client's linkifier charset and
+   boundaries, and the game filter's SQL prefilter is a superset re-checked
+   exactly in JS. Scoring is pure JS over these candidates, never a duplicated
+   SQL formula: one `scorePost` owns the weights.
+2. **Scoring (one pure function).** `scorePost` weights capped categories in
+   priority order — favorite-game overlap (12), like affinity (7), the follow
+   edge (5), repost affinity and reply-topic interest (3 each), log-scaled and
+   capped popularity (3 total) — with exponential freshness decay off an
+   hourly-bucketed clock so scores stay identical across pages. Replying
+   anywhere in a thread counts as topic interest via a depth-bounded thread
+   walk (root plus immediate parent per thread); the thread's author earns no
+   endorsement from it. The repeated-author penalty (`1 / (1 + n * 0.12)`)
+   applies after the pure score orders the pool: mild, deterministic, never a
+   hard cap — the pure score never knows about it.
+3. **Serving (frozen snapshot).** The first ranked page builds and persists a
+   `feedRankSnapshot` row — ordered IDs with repost attribution and the event
+   instant, never content — bound to viewer, scope and filters with a 30-minute
+   expiry. Pages resume it by an offset cursor carrying the snapshot id; an
+   unknown, foreign, differently-scoped, differently-filtered or expired id is
+   an explicit `BAD_REQUEST` asking for a Refresh, and a cursor naming a
+   different snapshot than the query param is refused the same way. Every page
+   hydrates its slice live through the shared `postSelection` and re-checks
+   visibility, follow/privacy state, scope and filter membership per item:
+   tombstoned rows drop (ranked pages never stub), withdrawn amplifications
+   downgrade to the original in place or drop. Following an author keeps their
+   posts in Discover; the viewer's own posts remain excluded. Discover's page also carries the first three
+   snapshot-derived follow suggestions, filtered live with no refill until
+   Refresh. Chronological branches of `post.list` (profiles, bookmarks,
+   search, replies, continuations) carry `ranking: null` and are untouched;
+   `discover` has no chronological mode and a non-ranked `discover` call is
+   refused.
+4. **Bounded maintenance, no cron.** Expiry is enforced at read time
+   (`loadRankSnapshot` refuses an expired row immediately); physical cleanup
+   is opportunistic and request-time only. Each build sweeps at most 100
+   globally-expired rows and trims the viewer past
+   `FEED_RANK_MAX_SNAPSHOTS_PER_VIEWER` (10) under a per-viewer advisory
+   transaction lock. Resume paths only read and validate the snapshot. There
+   is no impressions table, no Redis, no background job.
 
 ## Schemas and migrations
 

@@ -9,18 +9,27 @@ import { CORSPlugin, SimpleCsrfProtectionHandlerPlugin } from "@orpc/server/plug
 import { ORPCError, onError } from "@orpc/server";
 import {
   appRouter,
+  canViewGameCoverMedia,
   canViewLinkCardMedia,
   canViewPostMedia,
   canViewProfileMedia,
   createContext,
+  createVideoUploads,
+  resolveVideoMedia,
   createMediaResolver,
   defaultStorage,
+  gameCoverRedirectCacheControl,
   profileDisplayRedirectCacheControl,
 } from "@my-tuums/api";
 import { RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "@my-tuums/auth";
 import { closeDb, db, pingDb } from "@my-tuums/db";
+import {
+  createVideoQueue,
+  createVideoStorage,
+  configureVideoQueues,
+} from "@my-tuums/api/video-worker";
 import { createErrorObserver, normalizeObservedError } from "./error-observation.js";
 import { attachAccessLog, responseHeaderText } from "./observability.js";
 import { flushSentry, initSentry, reportError } from "./sentry.js";
@@ -38,6 +47,13 @@ try {
 }
 
 const PORT = env.PORT;
+const mediaOrigins: string[] = [];
+if (env.S3_ENDPOINT && env.S3_BUCKET) {
+  const endpoint = new URL(env.S3_ENDPOINT);
+  mediaOrigins.push(endpoint.origin);
+  endpoint.hostname = `${env.S3_BUCKET}.${endpoint.hostname}`;
+  mediaOrigins.push(endpoint.origin);
+}
 
 // Sentry is wired only when a DSN exists — the unset state (dev, CI) keeps
 // the no-op client, so every `reportError`/`flushSentry` call below is safe
@@ -115,6 +131,48 @@ const brandingStaticHandler = env.BRANDING_DIST
   ? createStaticFileHandler(env.BRANDING_DIST)
   : noStaticFiles;
 
+const videoQueue =
+  env.S3_ENDPOINT && env.S3_BUCKET && env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY
+    ? createVideoQueue(db, false)
+    : null;
+videoQueue?.on("error", () => {
+  console.error("Video queue is unavailable.");
+});
+const videoUploads =
+  videoQueue && env.S3_ENDPOINT && env.S3_BUCKET && env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY
+    ? createVideoUploads(
+        db,
+        createVideoStorage({
+          endpoint: env.S3_ENDPOINT,
+          bucket: env.S3_BUCKET,
+          accessKeyId: env.S3_ACCESS_KEY_ID,
+          secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+          region: env.S3_REGION,
+        }),
+        videoQueue,
+      )
+    : null;
+if (videoQueue) {
+  await videoQueue.start();
+  await configureVideoQueues(videoQueue);
+}
+
+const resolveImageMedia = createMediaResolver(
+  defaultStorage,
+  (key, viewerId) =>
+    key.startsWith("posts/")
+      ? canViewPostMedia(db, key, viewerId)
+      : key.startsWith("link-cards/")
+        ? canViewLinkCardMedia()
+        : key.startsWith("games/")
+          ? canViewGameCoverMedia()
+          : canViewProfileMedia(db, key, viewerId),
+  // The games arm runs first because it is the one public-cache class;
+  // everything else keeps the profile policy, which declines non-profile
+  // keys (post and link-card redirects stay unstored).
+  (key) => gameCoverRedirectCacheControl(key) ?? profileDisplayRedirectCacheControl(key),
+);
+
 // The routing decision tree itself lives in request-handler.ts, unit-tested
 // there against stand-ins for these six dependencies. This is the only
 // place they become real: a live DB ping, BetterAuth's actual node handler,
@@ -122,6 +180,11 @@ const brandingStaticHandler = env.BRANDING_DIST
 // configured bucket (or one that always 404s, when no bucket is configured),
 // and a real session check for the page gate.
 const handleRequest = createRequestHandler({
+  // Set only on preview, paired with the Cloudflare Transform Rule that
+  // injects the matching `x-edge-secret` on preview.mytuums.com — see the
+  // dep's own comment for the direct-to-origin bypass this closes.
+  edgeSecret: env.EDGE_SECRET,
+  railwayProxy: env.RAILWAY_ENVIRONMENT_ID !== undefined,
   pingDb,
   authNodeHandler: (req, res) =>
     // SAFETY: node:http's createServer callback always hands the real
@@ -130,6 +193,7 @@ const handleRequest = createRequestHandler({
     authNodeHandler(req as IncomingMessage, nodeResponse(res)),
   handleRpc: async (req, res) => {
     const context = await createContext({
+      videoUploads,
       headers: fromNodeHeaders(req.headers),
       // The routing tree set this before dispatching here (request-handler.ts
       // generates the id at the top of every request), so the header is the
@@ -142,24 +206,19 @@ const handleRequest = createRequestHandler({
 
     return handler.handle(req, nodeResponse(res), { prefix: "/rpc", context });
   },
-  // One resolver, three authorizers: post attachments follow the post's
+  // One resolver, four authorizers: post attachments follow the post's
   // visibility (moderation tombstones, author blocks), profile images follow
   // the owner's visibility and the owner-only rule for `.orig` originals, and
-  // a stored link preview image is public web content this app mirrored.
-  // A null viewer — the anonymous post-permalink reader — is answered by the
-  // same authorizers, which keep the owner-only rules owner-only. Display-
-  // object redirects are the one class whose caching is worth its staleness
-  // budget — window-bounded, private, per-viewer on every miss.
-  resolveMediaUrl: createMediaResolver(
-    defaultStorage,
-    (key, viewerId) =>
-      key.startsWith("posts/")
-        ? canViewPostMedia(db, key, viewerId)
-        : key.startsWith("link-cards/")
-          ? canViewLinkCardMedia()
-          : canViewProfileMedia(db, key, viewerId),
-    profileDisplayRedirectCacheControl,
-  ),
+  // a stored link preview image or a re-hosted game cover is public web
+  // content this app mirrored. A null viewer — the anonymous post-permalink
+  // and public-games-page reader — is answered by the same authorizers, which
+  // keep the owner-only rules owner-only. Display-object redirects are the
+  // one class whose caching is worth its staleness budget — window-bounded,
+  // private for per-viewer decisions, public for the content-addressed covers.
+  resolveMediaUrl: (key, viewerId) =>
+    key.startsWith("videos/")
+      ? resolveVideoMedia(db, defaultStorage, key, viewerId)
+      : resolveImageMedia(key, viewerId),
   // Only when this deployment bundles the built web app — see the
   // `webStaticHandler` note above.
   serveStatic: async (req, res) => webStaticHandler(req, nodeResponse(res)),
@@ -198,7 +257,16 @@ const handleRequest = createRequestHandler({
 // the requestId the routing tree generated. It composes with the decorator
 // because both wrap the same object and each only adds what it owns.
 const server = createServer((req, res) => {
-  void handleRequest(req, attachAccessLog(req, decorateResponse(req, res)));
+  void handleRequest(
+    req,
+    attachAccessLog(
+      req,
+      decorateResponse(req, res, {
+        googleAnalytics: Boolean(env.VITE_GA_MEASUREMENT_ID?.trim()),
+        mediaOrigins,
+      }),
+    ),
+  );
 });
 
 /**
@@ -211,6 +279,7 @@ const server = createServer((req, res) => {
  */
 async function drainAndExit(code: number, forceExitTimer: NodeJS.Timeout) {
   try {
+    await videoQueue?.stop();
     await closeDb();
     console.error("Database pool drained.");
   } catch (error) {

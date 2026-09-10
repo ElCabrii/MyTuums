@@ -1,6 +1,7 @@
 import { test, expect } from "../../support/fixtures";
 import { ALICE } from "../../support/users";
 import { likeButtonFor } from "../../support/post-card";
+import { expectRankedPostText } from "../../support/ranked-feed";
 
 /**
  * The most valuable spec in the suite: it proves the mutation `scope`
@@ -100,6 +101,7 @@ test.describe("liking a post", () => {
     if (!seeded) throw new Error("seedPosts returned no row");
 
     await page.goto("/");
+    await expectRankedPostText(page, seeded.content);
     const homeLike = likeButtonFor(page, seeded.content);
     await expect(homeLike).toHaveAttribute("aria-pressed", "false");
     await homeLike.click();

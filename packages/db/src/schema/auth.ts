@@ -35,6 +35,7 @@ export const user = pgTable("user", {
   localePreference: text("locale_preference"),
   legalAcceptedAt: timestamp("legal_accepted_at", { withTimezone: true }),
   legalVersion: text("legal_version"),
+  isPrivate: boolean("is_private").default(false),
 });
 
 export const session = pgTable(

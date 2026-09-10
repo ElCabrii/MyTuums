@@ -46,6 +46,40 @@ test.describe("home feed scope", () => {
   // redirect — this one would just be racing it.
 });
 
+test.describe("ranked home snapshot (issue #305)", () => {
+  test("a post created after the snapshot stays out until Refresh, then joins without losing the old order", async ({
+    page,
+    db,
+  }) => {
+    // Seeded BEFORE the first page builds its snapshot, so it is in it.
+    const author = await db.createUser(uniqueUser("snapshot"));
+    const marker = Date.now().toString();
+    const [before] = await db.seedPosts(author.id, 1, {
+      content: () => `Snapshot before ${marker}`,
+    });
+    if (!before) throw new Error("seedPosts returned no row");
+
+    await page.goto("/");
+    await expect(page.getByText(before.content, { exact: true })).toBeVisible();
+
+    // Created AFTER the snapshot froze: the composer's and any background
+    // auto-refetch hydrate the SAME snapshot, so this candidate is absent
+    // until an explicit Refresh mints a new sequence.
+    const [after] = await db.seedPosts(author.id, 1, {
+      content: () => `Snapshot after ${marker}`,
+    });
+    if (!after) throw new Error("seedPosts returned no row");
+    await expect(page.getByText(after.content, { exact: true })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Refresh" }).first().click();
+
+    // Live visibility after Refresh: the new candidate joins and the old one
+    // survives — the fixed sequence grows rather than restarting empty.
+    await expect(page.getByText(after.content, { exact: true })).toBeVisible();
+    await expect(page.getByText(before.content, { exact: true })).toBeVisible();
+  });
+});
+
 test.describe("home feed pagination", () => {
   test("load more fetches page 2 without duplicating any post", async ({ page, db }) => {
     // A throwaway author, and their own profile feed rather than the global

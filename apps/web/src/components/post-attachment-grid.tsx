@@ -1,16 +1,11 @@
 import { ImageViewer } from "@/components/image-viewer";
+import { VideoPlayer } from "@/components/video-player";
+import { Play } from "lucide-react";
+import type { Post } from "@/lib/orpc";
 import { MEDIA_VARIANT_WIDTHS, mediaVariantPath } from "@my-tuums/api/constants";
 import { m } from "@/paraglide/messages.js";
 
-export interface PostAttachmentView {
-  id: string;
-  url: string;
-  position: number;
-  contentType: string;
-  byteSize: number;
-  width: number;
-  height: number;
-}
+export type PostAttachmentView = Post["attachments"][number];
 
 /**
  * Builds the `srcset` for one attachment: every derivable variant narrower
@@ -53,6 +48,30 @@ export function PostAttachmentGrid({
   priority?: boolean;
 }) {
   if (attachments.length === 0) return null;
+
+  const video = attachments.find((attachment) => attachment.video);
+  if (video?.video) {
+    if (!compact) return <VideoPlayer attachment={video} />;
+    return (
+      <div
+        className="relative size-14 overflow-hidden rounded-md"
+        aria-label={m.video_player_label()}
+      >
+        <img
+          src={video.video.posterUrl}
+          alt={m.video_player_label()}
+          width={56}
+          height={56}
+          loading="lazy"
+          className="size-full object-cover"
+        />
+        <Play
+          aria-hidden="true"
+          className="absolute inset-0 m-auto size-5 fill-white text-white drop-shadow"
+        />
+      </div>
+    );
+  }
 
   if (compact) {
     return (

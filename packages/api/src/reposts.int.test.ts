@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { closeDb, db } from "@my-tuums/db";
-import { post, postRepost } from "@my-tuums/db/schema";
+import { post, postRepost, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";
 import {
@@ -147,6 +147,62 @@ describe("post.repost / post.unrepost", () => {
 });
 
 describe("reposts in feeds", () => {
+  it("paginates only a profile owner's quotes and reposts while respecting profile visibility", async () => {
+    const author = await createTestUser();
+    const owner = await createTestUser();
+    const viewer = await createTestUser();
+    const base = Date.UTC(2026, 0, 2, 9);
+    const [original] = await seedPosts(author.id, 1, { createdAt: new Date(base) });
+    const [quote] = await seedPosts(owner.id, 1, {
+      createdAt: new Date(base + 10_000),
+    });
+    await db.update(post).set({ quotedPostId: original.id }).where(eq(post.id, quote.id));
+    const [ordinary] = await seedPosts(owner.id, 1, { createdAt: new Date(base + 20_000) });
+    await seedPosts(owner.id, 1, {
+      parentId: original.id,
+      createdAt: new Date(base + 30_000),
+    });
+    await seedRepost(original.id, owner.id, new Date(base + 40_000));
+    await seedRepost(ordinary.id, viewer.id, new Date(base + 50_000));
+
+    const input = { authorId: owner.id, kind: "shares", limit: 1 } as const;
+    const first = await call(appRouter.post.list, input, { context: contextFor(viewer) });
+    expect(first.items).toMatchObject([{ id: original.id, repostedBy: { id: owner.id } }]);
+    expect(first.nextCursor).toEqual(expect.any(String));
+    const second = await call(
+      appRouter.post.list,
+      {
+        ...input,
+        cursor: first.nextCursor!,
+      },
+      { context: contextFor(viewer) },
+    );
+    expect(second.items).toMatchObject([{ id: quote.id, repostedBy: null }]);
+    expect(second.nextCursor).toBeNull();
+
+    await db.update(user).set({ isPrivate: true }).where(eq(user.id, owner.id));
+    const hidden = await call(appRouter.post.list, input, { context: contextFor(viewer) });
+    expect(hidden.items).toEqual([]);
+    const own = await call(
+      appRouter.post.list,
+      { ...input, limit: 10 },
+      { context: contextFor(owner) },
+    );
+    expect(own.items.map((item) => item.id)).toEqual([original.id, quote.id]);
+  });
+
+  it("rejects the quotes and reposts filter outside a profile feed", async () => {
+    const owner = await createTestUser();
+    for (const input of [
+      { kind: "shares" },
+      { kind: "shares", authorId: owner.id, parentId: randomUUID() },
+    ] as const) {
+      await expect(
+        call(appRouter.post.list, input, { context: contextFor(owner) }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+  });
+
   it("a repost places the original at the repost's timestamp in the global feed, attributed to the reposter and showing the original author", async () => {
     const author = await createTestUser();
     const reposter = await createTestUser();

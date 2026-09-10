@@ -5,6 +5,11 @@
     "lib": ["ES2022"],
     "types": ["node"],
     "module": "NodeNext",
-    "moduleResolution": "NodeNext"
+    "moduleResolution": "NodeNext",
+    // Workspace packages are source-only (exported `.ts` is inlined by tsup),
+    // so one package's `tsc` typechecks another's sources — including
+    // `@my-tuums/auth`'s `.tsx` email templates. JSX must therefore be set
+    // here, not only where the templates live.
+    "jsx": "react-jsx"
   }
 }

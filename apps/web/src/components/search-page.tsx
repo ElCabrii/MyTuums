@@ -1,10 +1,15 @@
 import type { ReactNode } from "react";
-import { getRouteApi } from "@tanstack/react-router";
+import { Link, getRouteApi } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { MessageSquare, Search, Users } from "lucide-react";
+import { Gamepad2, MessageSquare, Search, Users } from "lucide-react";
+import { GameCover } from "@/components/game-cover";
 import { PostCard } from "@/components/post-card";
+import { FeedSkeleton } from "@/components/post-feed";
 import { PaginatedState, type PaginatedStateQuery } from "@/components/paginated-state";
-import { UserRow } from "@/components/user-list";
+import { Skeleton } from "@/components/ui/skeleton";
+import { UserRow, UserListSkeleton } from "@/components/user-list";
+import { mergedGameMentions } from "@/lib/game-mentions";
+import { gameListAtom } from "@/atoms/games";
 import { searchPostsAtom, searchUsersAtom } from "@/atoms/search";
 import { m } from "@/paraglide/messages.js";
 
@@ -37,6 +42,7 @@ export function SearchPage() {
             Lighthouse's heading audit sees before any query is typed. The
             input's aria label is the page's own name for "Search". */}
         <h1 className="text-lg font-bold tracking-tight">{m.search_input_aria()}</h1>
+
         <div className="border-border bg-card/40 rounded-xl border border-dashed p-10 text-center">
           <Search className="text-muted-foreground/60 mx-auto mb-3 h-8 w-8" />
           <p className="text-muted-foreground text-sm">{m.search_empty_query()}</p>
@@ -55,11 +61,15 @@ export function SearchPage() {
  */
 function SearchResultsBody({ q }: { q: string }) {
   const usersFeed = useAtomValue(searchUsersAtom(q));
+  const gamesFeed = useAtomValue(gameListAtom({ sort: "popularity", q }));
   const postsFeed = useAtomValue(searchPostsAtom(q));
+  const gameMentions = mergedGameMentions(postsFeed.data?.pages ?? []);
 
   return (
     <div className="mx-auto max-w-2xl space-y-8 px-4 py-8">
-      <h1 className="text-lg font-bold tracking-tight">{m.search_results_for({ query: q })}</h1>
+      <h1 className="text-lg font-bold tracking-tight [overflow-wrap:anywhere]">
+        {m.search_results_for({ query: q })}
+      </h1>
 
       <SearchResultsSection
         feed={usersFeed}
@@ -68,7 +78,26 @@ function SearchResultsBody({ q }: { q: string }) {
         emptyIcon={Users}
         emptyMessage={m.search_no_users({ query: q })}
         listClassName="space-y-3"
+        loadingFallback={<UserListSkeleton />}
         renderItem={(user) => <UserRow key={user.id} user={user} />}
+      />
+      <SearchResultsSection
+        feed={gamesFeed}
+        headingId="search-games-heading"
+        headingLabel={m.search_section_games()}
+        emptyIcon={Gamepad2}
+        emptyMessage={m.search_no_games({ query: q })}
+        listClassName="space-y-3"
+        loadingFallback={<SearchGameRowSkeleton />}
+        renderItem={(game) => (
+          <GameResultRow
+            key={game.igdbId}
+            slug={game.slug}
+            name={game.name}
+            cover={game.coverMediaPath}
+            year={game.firstReleaseYear}
+          />
+        )}
       />
       <SearchResultsSection
         feed={postsFeed}
@@ -77,19 +106,71 @@ function SearchResultsBody({ q }: { q: string }) {
         emptyIcon={MessageSquare}
         emptyMessage={m.search_no_posts({ query: q })}
         listClassName="space-y-4"
-        renderItem={(post) => <PostCard key={post.id} post={post} />}
+        loadingFallback={<FeedSkeleton />}
+        renderItem={(post) => <PostCard key={post.id} post={post} gameMentions={gameMentions} />}
       />
+    </div>
+  );
+}
+
+/** One game hit: cover thumb, name, year — the directory's card, row-shaped. */
+function GameResultRow({
+  slug,
+  name,
+  cover,
+  year,
+}: {
+  slug: string;
+  name: string;
+  cover: string | null;
+  year: number | null;
+}) {
+  return (
+    <Link
+      to="/games/$slug"
+      params={{ slug }}
+      className="focus-visible:ring-ring flex items-center gap-3 rounded-lg px-2 py-1.5 focus-visible:ring-2 focus-visible:outline-none"
+    >
+      <div className="bg-muted h-14 w-10 shrink-0 overflow-hidden rounded-md">
+        <GameCover cover={cover} name={name} sizes="56px" />
+      </div>
+      <span className="min-w-0">
+        <span className="text-foreground block truncate text-sm font-medium">{name}</span>
+        {year !== null && <span className="text-muted-foreground block text-xs">{year}</span>}
+      </span>
+    </Link>
+  );
+}
+
+/**
+ * Three placeholder rows that mirror `GameResultRow` (cover thumb + name +
+ * year) while game search loads.
+ *
+ * `aria-hidden`: it paints structure, not information.
+ */
+function SearchGameRowSkeleton() {
+  return (
+    <div className="space-y-1" aria-hidden>
+      {[0, 1, 2].map((row) => (
+        <div key={row} className="flex items-center gap-3 px-2 py-1.5">
+          <Skeleton className="h-14 w-10 shrink-0 rounded-md motion-reduce:animate-none" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-40 motion-reduce:animate-none" />
+            <Skeleton className="h-3 w-16 motion-reduce:animate-none" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
 /**
  * The data-shaped half of a results section — the same four states the shared
- * `PaginatedState` renders (spinner, retryable error, dashed empty, "Load
- * more" rows), fed by either the users or the posts atom. The heading is
+ * `PaginatedState` renders (skeleton, retryable error, dashed empty, "Load
+ * more" rows), fed by the users, posts or games atom. The heading is
  * hoisted because it must stay mounted in every state: the `aria-labelledby`
  * pair gives the region its accessible name, so a section that swapped its
- * heading for a spinner would lose it.
+ * heading for a skeleton would lose it.
  */
 function SearchResultsSection<T>({
   feed,
@@ -98,6 +179,7 @@ function SearchResultsSection<T>({
   emptyIcon,
   emptyMessage,
   listClassName,
+  loadingFallback,
   renderItem,
 }: {
   feed: PaginatedStateQuery & { data?: { pages: Array<{ items: T[] }> } };
@@ -106,6 +188,7 @@ function SearchResultsSection<T>({
   emptyIcon: typeof Users;
   emptyMessage: string;
   listClassName: string;
+  loadingFallback?: ReactNode;
   renderItem: (item: T) => ReactNode;
 }) {
   const items = feed.data?.pages.flatMap((page) => page.items) ?? [];
@@ -122,6 +205,7 @@ function SearchResultsSection<T>({
         emptyMessage={emptyMessage}
         isEmpty={items.length === 0}
         listClassName={listClassName}
+        loadingFallback={loadingFallback}
       >
         {items.map(renderItem)}
       </PaginatedState>

@@ -1,10 +1,11 @@
 import { ORPCError } from "@orpc/server";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, isNull, not, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, not, or, sql } from "drizzle-orm";
 import { alias, type PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "@my-tuums/db";
 import {
   follow,
+  game,
   post,
   postAttachment,
   postBookmark,
@@ -14,7 +15,10 @@ import {
   user,
   userBlock,
 } from "@my-tuums/db/schema";
+import type { FeedRankSnapshotItem } from "@my-tuums/db/schema";
 import { z } from "zod";
+import { postLikeBadgeTierFor, POST_LIKE_BADGE_TIERS } from "./badges.js";
+import { stampBadgeTier } from "./badge-stamping.js";
 import {
   POST_MAX_LENGTH,
   POST_ATTACHMENT_MAX_BYTES,
@@ -29,10 +33,25 @@ import {
   THREAD_REPLY_BRANCH_CHILD_FANOUT,
   THREAD_REPLY_BRANCH_DESCENDANT_BUDGET,
   LINK_CARD_URL_MAX_LENGTH,
+  SEARCH_QUERY_MAX_LENGTH,
+  GAME_SLUG_MAX_LENGTH,
+  RANK_SNAPSHOT_INVALID_MESSAGE,
 } from "./constants.js";
-import { createCursorCodec, createEventCursorCodec } from "./cursor.js";
+import { createCursorCodec, createEventCursorCodec, createRankCursorCodec } from "./cursor.js";
+import {
+  buildRankSnapshot,
+  extractRankHashtagKeys,
+  loadRankSnapshot,
+  suggestRankAuthorIds,
+  type LoadedRankSnapshot,
+  type RankScope,
+} from "./feed-rank.js";
+import { gameMentionsFor } from "./games.js";
 import { resolveLinkCard } from "./link-card.js";
 import { insertNotification } from "./notifications.js";
+import { publishPost, resolvePostTarget, type CreatedPost } from "./post-publication.js";
+import { deletePostVideo } from "./video-lifecycle.js";
+import { requireVideoUploads, videoAction } from "./videos.js";
 import { keysetPage } from "./pagination.js";
 import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";
 import {
@@ -43,7 +62,12 @@ import {
 } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { runSql } from "./sql.js";
-import { invisibleAuthor, visibleUser } from "./visibility.js";
+import {
+  invisibleAuthor,
+  privatePostHidden,
+  privateUserHidden,
+  visibleUser,
+} from "./visibility.js";
 import { acceptPostImage, type ImageRejection } from "./post-image.js";
 import {
   discardPostAttachments,
@@ -58,6 +82,7 @@ import {
 } from "./post-media.js";
 import { requireStorage } from "./profile-media.js";
 import { selectReplyBranch, type ReplyBranchNode } from "./reply-branch.js";
+import { viewerHasRequested, viewerIsFollowing } from "./users.js";
 
 /**
  * Feeds are keyset-paginated on `(post.created_at, post.id) DESC`; see
@@ -76,6 +101,14 @@ const postCursor = createCursorCodec(z.uuid());
  * `(event_at, post_id, reposter_key)` comparison a total order.
  */
 const postFeedCursor = createEventCursorCodec(z.uuid());
+
+/**
+ * The ranked-feed cursor (issue #305): the snapshot id plus the offset into
+ * its frozen order the next page starts at. Offset-based because the snapshot
+ * freezes the order — a score cursor could skip or repeat rows sharing a
+ * score, while an offset cannot. See `createRankCursorCodec` in ./cursor.ts.
+ */
+const postRankCursor = createRankCursorCodec();
 
 /**
  * Like counts are derived on read rather than denormalised onto a
@@ -211,6 +244,17 @@ async function readPostAttachments(files: readonly File[]): Promise<PostAttachme
  * rendering.
  */
 function parentPreview(viewerId: string | null) {
+  const privateHidden =
+    viewerId === null
+      ? sql`(${parentAuthor.isPrivate} is true or ${parentPost.isPrivate} is true)`
+      : sql`(
+          (${parentAuthor.isPrivate} is true or ${parentPost.isPrivate} is true)
+          and ${parentPost.authorId} <> ${viewerId}
+          and not exists (
+            select 1 from ${follow}
+            where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${parentPost.authorId}
+          )
+        )`;
   return sql<ParentPreview | null>`(
     select jsonb_build_object(
       'id', ${parentPost.id},
@@ -251,7 +295,38 @@ function parentPreview(viewerId: string | null) {
             and ${userBlock.blockedId} = ${parentPost.authorId}
         )
       )
+      and not (${privateHidden})
     limit 1
+  )`;
+}
+
+/**
+ * True when the immediate parent is hidden from the viewer specifically by
+ * privacy (followers-only post or private account) rather than by a block,
+ * ban, or delete. The `parent` preview above yields null for all of those;
+ * this flag is what lets the client render "This post is private" instead of
+ * the generic unavailable line. Null parent ids yield false — there is no
+ * parent to be private.
+ */
+function parentPrivateFlag(viewerId: string | null) {
+  if (viewerId === null) {
+    return sql<boolean>`exists (
+      select 1 from ${post} as "parent_post"
+      inner join ${user} as "parent_author" on ${parentAuthor.id} = ${parentPost.authorId}
+      where ${parentPost.id} = ${post.parentId}
+        and (${parentAuthor.isPrivate} is true or ${parentPost.isPrivate} is true)
+    )`;
+  }
+  return sql<boolean>`exists (
+    select 1 from ${post} as "parent_post"
+    inner join ${user} as "parent_author" on ${parentAuthor.id} = ${parentPost.authorId}
+    where ${parentPost.id} = ${post.parentId}
+      and ((${parentAuthor.isPrivate} is true or ${parentPost.isPrivate} is true)
+        and ${parentPost.authorId} <> ${viewerId}
+        and not exists (
+          select 1 from ${follow}
+          where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${parentPost.authorId}
+        ))
   )`;
 }
 
@@ -309,6 +384,17 @@ export type QuotedPostPreview = {
  *   but they must not render).
  */
 function quotedPreview(viewerId: string | null) {
+  const privateHidden =
+    viewerId === null
+      ? sql`(${quotedAuthor.isPrivate} is true or ${quotedPostTable.isPrivate} is true)`
+      : sql`(
+          (${quotedAuthor.isPrivate} is true or ${quotedPostTable.isPrivate} is true)
+          and ${quotedPostTable.authorId} <> ${viewerId}
+          and not exists (
+            select 1 from ${follow}
+            where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${quotedPostTable.authorId}
+          )
+        )`;
   return sql<QuotedPostPreview | null>`(
     select jsonb_build_object(
       'id', ${quotedPostTable.id},
@@ -367,7 +453,37 @@ function quotedPreview(viewerId: string | null) {
             and ${userBlock.blockedId} = ${quotedPostTable.authorId}
         )
       )
+      and not (${privateHidden})
     limit 1
+  )`;
+}
+
+/**
+ * True when the quoted post is hidden from the viewer specifically by privacy
+ * rather than by a block, ban, or missing row. Mirrors `parentPrivateFlag`
+ * above: the `quoted` preview yields null for all of those, and this flag is
+ * what lets the client render "This post is private" instead of the generic
+ * unavailable card. Null `quotedPostId` rows yield false.
+ */
+function quotedPrivateFlag(viewerId: string | null) {
+  if (viewerId === null) {
+    return sql<boolean>`exists (
+      select 1 from ${post} as "quoted_post"
+      inner join ${user} as "quoted_author" on ${quotedAuthor.id} = ${quotedPostTable.authorId}
+      where ${quotedPostTable.id} = ${outerPost("quoted_post_id")}
+        and (${quotedAuthor.isPrivate} is true or ${quotedPostTable.isPrivate} is true)
+    )`;
+  }
+  return sql<boolean>`exists (
+    select 1 from ${post} as "quoted_post"
+    inner join ${user} as "quoted_author" on ${quotedAuthor.id} = ${quotedPostTable.authorId}
+    where ${quotedPostTable.id} = ${outerPost("quoted_post_id")}
+      and ((${quotedAuthor.isPrivate} is true or ${quotedPostTable.isPrivate} is true)
+        and ${quotedPostTable.authorId} <> ${viewerId}
+        and not exists (
+          select 1 from ${follow}
+          where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${quotedPostTable.authorId}
+        ))
   )`;
 }
 
@@ -477,6 +593,13 @@ export const postSelection = (viewerId: string | null) => ({
   // redaction in `feedEventPage`): read `unavailable` before ever reading
   // `author` off a feed item.
   unavailable: sql<boolean>`false`,
+  // True when this row is hidden from the viewer specifically by privacy
+  // (followers-only post or private account). Direct readers filter such rows
+  // before this projection, so it is always false there; the merged feed's
+  // second query reads without that filter and re-evaluates, so a repost of a
+  // private original keeps the event with `unavailable` + `private` both true
+  // — the client renders "This post is private" instead of "unavailable".
+  private: privatePostHidden(viewerId),
   createdAt: post.createdAt,
   // Null until the author edits the text (issue #264); carries the LAST edit
   // time, which is what the "Edited" marker renders. `createdAt` above stays
@@ -487,6 +610,9 @@ export const postSelection = (viewerId: string | null) => ({
   // than only in the thread payload.
   parentId: post.parentId,
   parent: parentPreview(viewerId),
+  // Null for every reason `parent` is null except privacy — when true the
+  // client renders the private copy instead of the generic unavailable line.
+  parentPrivate: parentPrivateFlag(viewerId),
   // The quote reference (issue #261): `quotedPostId` names the quoted post,
   // `quoted` is its embedded preview — full content and attachments, or the
   // tombstone flags, or null when the quoted author is hidden from this
@@ -494,6 +620,9 @@ export const postSelection = (viewerId: string | null) => ({
   // in the shared selection: every reader renders the same quote card.
   quotedPostId: post.quotedPostId,
   quoted: quotedPreview(viewerId),
+  // Like `parentPrivate` above: true when the quoted post is hidden
+  // specifically by privacy, so the client renders the private copy.
+  quotedPrivate: quotedPrivateFlag(viewerId),
   attachments: postAttachments,
   author: {
     id: user.id,
@@ -536,7 +665,9 @@ async function visiblePostAuthorId(
     .select({ authorId: post.authorId })
     .from(post)
     .innerJoin(user, eq(user.id, post.authorId))
-    .where(and(eq(post.id, postId), not(invisibleAuthor(viewerId))))
+    .where(
+      and(eq(post.id, postId), not(invisibleAuthor(viewerId)), not(privatePostHidden(viewerId))),
+    )
     .limit(1);
 
   return visiblePost?.authorId;
@@ -635,7 +766,13 @@ async function replyContinuationPages(args: ReplyContinuationPageArgs) {
     .select(postSelection(args.viewerId))
     .from(post)
     .innerJoin(user, eq(user.id, post.authorId))
-    .where(and(inArray(post.id, selectedIds), not(invisibleAuthor(args.viewerId))));
+    .where(
+      and(
+        inArray(post.id, selectedIds),
+        not(invisibleAuthor(args.viewerId)),
+        not(privatePostHidden(args.viewerId)),
+      ),
+    );
   const visibleById = new Map(visibleRows.map((row) => [row.id, row]));
 
   return args.rootPostIds.flatMap((rootPostId) => {
@@ -677,8 +814,13 @@ const feedOriginal = alias(post, "feed_original");
 const feedReposter = alias(user, "feed_reposter");
 const feedOriginalAuthor = alias(user, "feed_original_author");
 
-/** The three columns the per-alias visibility predicate reads — any `alias(user, …)` provides them. */
-type UserVisibilityColumns = { id: PgColumn; banned: PgColumn; banExpires: PgColumn };
+/** The columns the per-alias visibility predicates read — any `alias(user, …)` provides them. */
+type UserVisibilityColumns = {
+  id: PgColumn;
+  banned: PgColumn;
+  banExpires: PgColumn;
+  isPrivate: PgColumn;
+};
 
 /**
  * The block/ban visibility half of `invisibleAuthor` (./visibility.ts),
@@ -696,6 +838,59 @@ function aliasVisibleTo(viewerId: string | null, u: UserVisibilityColumns) {
     or exists (
       select 1 from ${userBlock}
       where ${userBlock.blockerId} = ${viewerId} and ${userBlock.blockedId} = ${u.id}
+    )
+  )`;
+}
+
+/**
+ * The private-account half of visibility (issue #328), restated over an
+ * aliased `user` row: true when the aliased account is private and the viewer
+ * is neither the account nor an approved follower. Null `is_private`
+ * reads as public. Composed alongside `aliasVisibleTo` wherever a reposter
+ * or preview author is filtered.
+ */
+function aliasPrivateUserHidden(viewerId: string | null, u: UserVisibilityColumns) {
+  if (viewerId === null) {
+    return sql<boolean>`${u.isPrivate} is true`;
+  }
+  return sql<boolean>`(
+    ${u.isPrivate} is true
+    and ${u.id} <> ${viewerId}
+    and not exists (
+      select 1 from ${follow}
+      where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${u.id}
+    )
+  )`;
+}
+
+/** The columns the aliased post-privacy predicate reads — any `alias(post, …)` provides them. */
+type PostVisibilityColumns = {
+  isPrivate: PgColumn;
+  authorId: PgColumn;
+};
+
+/**
+ * The private-post half of visibility (issue #328), restated over an aliased
+ * post row and its aliased author: true when the original is followers-only
+ * (its own flag or its author's) and the viewer is neither the author nor an
+ * approved follower. The repost arm uses it to exclude private originals from
+ * text-filtered reads, where matching their raw text while redacting the event
+ * would otherwise be a one-bit oracle for the hidden words.
+ */
+function aliasPrivatePostHidden(
+  viewerId: string | null,
+  p: PostVisibilityColumns,
+  u: UserVisibilityColumns,
+) {
+  if (viewerId === null) {
+    return sql<boolean>`(${u.isPrivate} is true or ${p.isPrivate} is true)`;
+  }
+  return sql<boolean>`(
+    (${u.isPrivate} is true or ${p.isPrivate} is true)
+    and ${p.authorId} <> ${viewerId}
+    and not exists (
+      select 1 from ${follow}
+      where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${u.id}
     )
   )`;
 }
@@ -744,6 +939,41 @@ type FeedEventRow = {
  *   not offer the repost control on replies rather than sell an action
  *   whose result never renders anywhere.
  */
+
+/**
+ * The texts a page's renderer linkifies — every surface that renders post
+ * text through the web's linkifier reads the response's `gameMentions`
+ * map, which is built from exactly these: each item's own content, its
+ * quoted preview's content, and any inline continuation slices the reply
+ * mode embedded (issue #314, Q16).
+ */
+function pageTextsForMentions(page: {
+  items: ReadonlyArray<{ content: string | null; quoted: { content: string | null } | null }>;
+  continuations?: ReadonlyArray<{
+    items: ReadonlyArray<{ content: string | null; quoted: { content: string | null } | null }>;
+  }>;
+}): Array<string | null> {
+  const texts: Array<string | null> = [];
+  for (const item of page.items) {
+    texts.push(item.content, item.quoted?.content ?? null);
+  }
+  for (const continuation of page.continuations ?? []) {
+    for (const item of continuation.items) {
+      texts.push(item.content, item.quoted?.content ?? null);
+    }
+  }
+  return texts;
+}
+
+/**
+ * Escapes LIKE metacharacters so a caller's `%`, `_` and `\` match literally.
+ * Local to this module (search.ts and games.ts carry their own three-line
+ * copy) because importing either would cycle through `postSelection`.
+ */
+function escapeFeedLikePattern(pattern: string): string {
+  return pattern.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
 async function feedEventPage(
   db: Database,
   args: {
@@ -752,8 +982,12 @@ async function feedEventPage(
     limit: number;
     authorId?: string;
     feed: "global" | "following";
-    kind: "posts" | "replies" | "all";
+    kind: "posts" | "replies" | "all" | "shares";
     includeReposts: boolean;
+    /** Free-text substring on the post's own text (the Discover search box). */
+    q?: string;
+    /** A game's hashtag key, resolved from `gameSlug` — the Discover game filter. */
+    gameHashtagKey?: string;
   },
 ) {
   const decoded = args.cursor ? postFeedCursor.decode(args.cursor) : undefined;
@@ -775,7 +1009,19 @@ async function feedEventPage(
   const authoredArmFilters = [
     // Author-deleted posts drop from a fresh feed read, as before the merge.
     isNull(post.deletedAt),
+    // A text-filtered feed matches the raw content column, which no
+    // projection touches — the same leak search.posts closes by excluding
+    // both tombstones outright. Without this, a filtered Discover could
+    // surface a removed post's hidden text via its query. The game filter
+    // keeps the feed's normal stub rules (removed stays as a stub); only `q`
+    // needs the exclusion.
+    args.q ? isNull(post.removedAt) : undefined,
+    args.q ? ilike(post.content, `%${escapeFeedLikePattern(args.q)}%`) : undefined,
+    args.gameHashtagKey
+      ? ilike(post.content, `%#${escapeFeedLikePattern(args.gameHashtagKey)}%`)
+      : undefined,
     args.authorId ? eq(post.authorId, args.authorId) : undefined,
+    args.kind === "shares" ? not(isNull(post.quotedPostId)) : undefined,
     args.kind === "posts"
       ? isNull(post.parentId)
       : args.kind === "replies"
@@ -794,6 +1040,10 @@ async function feedEventPage(
           ))`
       : undefined,
     not(invisibleAuthor(args.viewerId)),
+    // Private posts and private-account posts (issue #328) drop from feeds
+    // for non-followers, like banned/blocked authors above — the author and
+    // approved followers still walk the same timeline.
+    not(privatePostHidden(args.viewerId)),
   ];
 
   const repostArmFilters = [
@@ -801,7 +1051,26 @@ async function feedEventPage(
     // ORIGINAL author is deliberately not a filter — a hidden original keeps
     // the reposter's event and is redacted to the unavailable treatment below,
     // which is the same "the author is gone" result blocked profiles use.
+    // Private reposters (issue #328) hide the same way: a private account's
+    // amplifications are visible only to their followers.
     aliasVisibleTo(args.viewerId, feedReposter),
+    not(aliasPrivateUserHidden(args.viewerId, feedReposter)),
+    // The text and game filters read the ORIGINAL's text on the repost arm —
+    // a repost amplifies the original, so a filtered feed matches what the
+    // event is about, not who amplified it. The `q` tombstone exclusion
+    // mirrors the authored arm: the original's hidden text must not be
+    // probeable through the filter. A private original is excluded outright
+    // under either text filter — matching its raw words while redacting the
+    // event to `unavailable` would be a one-bit oracle for the hidden text.
+    args.q ? isNull(feedOriginal.deletedAt) : undefined,
+    args.q ? isNull(feedOriginal.removedAt) : undefined,
+    args.q || args.gameHashtagKey
+      ? not(aliasPrivatePostHidden(args.viewerId, feedOriginal, feedOriginalAuthor))
+      : undefined,
+    args.q ? ilike(feedOriginal.content, `%${escapeFeedLikePattern(args.q)}%`) : undefined,
+    args.gameHashtagKey
+      ? ilike(feedOriginal.content, `%#${escapeFeedLikePattern(args.gameHashtagKey)}%`)
+      : undefined,
     // The profile feed's mirror of the authored arm's author filter: a
     // profile that opts into repost events carries the ones its owner
     // caused, never other people's amplifications of the owner's posts.
@@ -816,10 +1085,10 @@ async function feedEventPage(
   ];
 
   // The arm drops for the reply axis (an amplification is not a reply) and
-  // for a profile feed that has not opted in — every existing `authorId`
-  // caller keeps the pre-#277 feed exactly.
+  // for a profile feed that has not opted in through includeReposts or the
+  // shares view — every existing `authorId` caller keeps the pre-#277 feed.
   const repostArm =
-    args.kind === "replies" || (args.authorId && !args.includeReposts)
+    args.kind === "replies" || (args.authorId && !args.includeReposts && args.kind !== "shares")
       ? undefined
       : sql`
     select ${postRepost.createdAt} as event_at, ${postRepost.postId} as post_id, ${postRepost.userId} as reposter_id, ${postRepost.userId} as reposter_key
@@ -865,8 +1134,10 @@ async function feedEventPage(
       // Re-evaluated in the projection phase, closing a block/ban race between
       // the event query and this read without throwing the reposter's event
       // away. Only repost events consume a hidden row; authored events below
-      // still disappear exactly like every other feed surface.
-      originalUnavailable: invisibleAuthor(args.viewerId),
+      // still disappear exactly like every other feed surface. Private
+      // originals (issue #328) redact the same way — the event stays, the
+      // content does not cross to non-followers.
+      originalUnavailable: sql<boolean>`${invisibleAuthor(args.viewerId)} or ${privatePostHidden(args.viewerId)}`,
     })
     .from(post)
     .innerJoin(user, eq(user.id, post.authorId))
@@ -886,7 +1157,13 @@ async function feedEventPage(
           image: user.image,
         })
         .from(user)
-        .where(and(inArray(user.id, reposterIds), visibleUser(args.viewerId)))
+        .where(
+          and(
+            inArray(user.id, reposterIds),
+            visibleUser(args.viewerId),
+            not(privateUserHidden(args.viewerId)),
+          ),
+        )
     : [];
   const reposterById = new Map(reposters.map((rep) => [rep.id, rep]));
 
@@ -955,7 +1232,233 @@ async function feedEventPage(
   };
 }
 
-async function countLikes(db: Database, postId: string): Promise<number> {
+/**
+ * A Discover ranked page's follow suggestion: a followable user summary. The
+ * name/handle nullability mirrors `publicUserColumns` — `name` is never
+ * null, the handle and image are.
+ */
+export interface RankSuggestion {
+  id: string;
+  name: string;
+  username: string | null;
+  displayUsername: string | null;
+  image: string | null;
+  viewerIsFollowing: boolean;
+  hasRequested: boolean;
+}
+
+/** The `ranking` metadata every `post.list` branch carries (issue #305). */
+export interface RankingMetadata {
+  snapshotId: string;
+  /** ISO instant the frozen ordering stops being resumable. */
+  expiresAt: string;
+  /** False marks a cold start — the client prompts for game interests. */
+  hasInterests: boolean;
+  /** Follow suggestions; empty unless a Discover ranked page. */
+  suggestions: RankSuggestion[];
+}
+
+/**
+ * Hydrates one slice of a ranked snapshot through the shared `postSelection`
+ * — the same projection every other reader gets — then re-checks liveness
+ * per item. Ranked feeds never serve tombstones: a removed or deleted row
+ * drops, it never renders a stub.
+ *
+ * - visibility (banned/blocked/private), live: a row hidden since the build
+ *   drops instead of rendering;
+ * - source membership, live: a repost-attributed item keeps its attribution
+ *   only while the amplification row still exists and its reposter is still
+ *   visible and followed-or-self (a private reposter is never revealed after
+ *   an unfollow). A withdrawn amplification downgrades to the original post
+ *   in place — same position — when the original is scope-eligible, else the
+ *   item drops;
+ * - scope membership, live: Following keeps authored items by
+ *   followed-or-self authors; Discover excludes the viewer's own posts;
+ * - filter membership, live: edited-away query text or hashtag tokens drop.
+ *
+ * Nothing but IDs and attribution is ever read off the snapshot — never
+ * content — so a mutation between the build and this page cannot serve stale
+ * or newly-invisible text.
+ */
+async function hydrateRankedSlice(args: {
+  db: Database;
+  viewerId: string;
+  scope: RankScope;
+  slice: readonly FeedRankSnapshotItem[];
+  q: string | undefined;
+  gameHashtagKey: string | null;
+}) {
+  if (args.slice.length === 0) return [];
+  const postIds = [...new Set(args.slice.map((item) => item.postId))];
+  const selection = {
+    ...postSelection(args.viewerId),
+    authorId: post.authorId,
+    rawContent: post.content,
+    removedAt: post.removedAt,
+    deletedAt: post.deletedAt,
+  };
+  const rows = await args.db
+    .select(selection)
+    .from(post)
+    .innerJoin(user, eq(user.id, post.authorId))
+    .where(
+      and(
+        inArray(post.id, postIds),
+        not(invisibleAuthor(args.viewerId)),
+        not(privatePostHidden(args.viewerId)),
+      ),
+    );
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+
+  const authorIds = [...new Set(rows.map((row) => row.authorId))];
+  const reposterIds = [
+    ...new Set(args.slice.map((item) => item.reposterId).filter((id): id is string => id !== null)),
+  ];
+  const followedOf = async (ids: readonly string[]): Promise<Set<string>> => {
+    if (ids.length === 0) return new Set<string>();
+    const found = await args.db
+      .select({ followingId: follow.followingId })
+      .from(follow)
+      .where(and(eq(follow.followerId, args.viewerId), inArray(follow.followingId, [...ids])));
+    return new Set(found.map((row) => row.followingId));
+  };
+  const repostPairs = args.slice.filter(
+    (item): item is FeedRankSnapshotItem & { reposterId: string } => item.reposterId !== null,
+  );
+  const [followedAuthors, followedReposters, liveReposts] = await Promise.all([
+    followedOf(authorIds),
+    followedOf(reposterIds),
+    repostPairs.length === 0
+      ? Promise.resolve(new Set<string>())
+      : args.db
+          .select({ postId: postRepost.postId, userId: postRepost.userId })
+          .from(postRepost)
+          .where(
+            or(
+              ...repostPairs.map((item) =>
+                and(eq(postRepost.postId, item.postId), eq(postRepost.userId, item.reposterId)),
+              ),
+            ),
+          )
+          .then((found) => new Set(found.map((row) => `${row.postId}:${row.userId}`))),
+  ]);
+
+  const reposterRows =
+    reposterIds.length === 0
+      ? []
+      : await args.db
+          .select({
+            id: user.id,
+            name: user.name,
+            username: user.username,
+            displayUsername: user.displayUsername,
+            image: user.image,
+          })
+          .from(user)
+          .where(
+            and(
+              inArray(user.id, reposterIds),
+              visibleUser(args.viewerId),
+              not(privateUserHidden(args.viewerId)),
+            ),
+          );
+  const reposterById = new Map(reposterRows.map((row) => [row.id, row]));
+
+  const matchesFilters = (rawContent: string | null, removedAt: Date | null): boolean => {
+    if (args.q !== undefined) {
+      if (removedAt) return false;
+      if (!rawContent || !rawContent.toLowerCase().includes(args.q.toLowerCase())) return false;
+    }
+    if (args.gameHashtagKey) {
+      const key: string = args.gameHashtagKey;
+      if (!rawContent || !extractRankHashtagKeys([rawContent]).includes(key)) return false;
+    }
+    return true;
+  };
+  const authorEligible = (authorId: string): boolean => {
+    if (args.scope === "following")
+      return authorId === args.viewerId || followedAuthors.has(authorId);
+    if (args.scope === "discover") return authorId !== args.viewerId;
+    return true;
+  };
+
+  const items: Array<
+    Omit<(typeof rows)[number], "authorId" | "rawContent" | "removedAt" | "deletedAt">
+  > = [];
+  for (const entry of args.slice) {
+    const row = rowById.get(entry.postId);
+    // The row vanished between the build and this page (a hard delete raced
+    // us) or became invisible: drop the event rather than 500 on a missing row.
+    if (!row) continue;
+    // Ranked feeds never render tombstone stubs — removal or deletion since
+    // the build drops the item (candidates already exclude both).
+    if (row.deletedAt || row.removedAt) continue;
+    const { authorId, rawContent, removedAt, deletedAt, ...visibleRow } = row;
+    void deletedAt;
+    void removedAt;
+
+    if (!matchesFilters(rawContent, row.removedAt)) continue;
+
+    if (entry.reposterId) {
+      const reposter = reposterById.get(entry.reposterId);
+      const amplificationLive =
+        liveReposts.has(`${entry.postId}:${entry.reposterId}`) &&
+        reposter !== undefined &&
+        (args.scope !== "following" ||
+          entry.reposterId === args.viewerId ||
+          followedReposters.has(entry.reposterId));
+      if (amplificationLive && reposter) {
+        if (args.scope === "discover" && !authorEligible(authorId)) continue;
+        items.push({
+          ...visibleRow,
+          repostedBy: { ...reposter, repostedAt: new Date(entry.eventAt) },
+        });
+        continue;
+      }
+      // The amplification is gone: downgrade to the original in place when
+      // scope-eligible, else drop — order never moves for a withdrawn repost.
+      if (!authorEligible(authorId)) continue;
+      items.push({ ...visibleRow, repostedBy: null });
+      continue;
+    }
+
+    if (!authorEligible(authorId)) continue;
+    items.push({ ...visibleRow, repostedBy: null });
+  }
+  return items;
+}
+
+/**
+ * Hydrates Discover's follow suggestions: the snapshot-derived author ids in
+ * rank order, resolved to followable user summaries with the viewer's live
+ * follow/request state. Order follows the input ids — snapshot position IS
+ * the rank, there is no second ranker.
+ */
+async function hydrateRankSuggestions(
+  db: Database,
+  viewerId: string,
+  authorIds: readonly string[],
+): Promise<RankSuggestion[]> {
+  if (authorIds.length === 0) return [];
+  const rows = await db
+    .select({
+      id: user.id,
+      name: user.name,
+      username: user.username,
+      displayUsername: user.displayUsername,
+      image: user.image,
+      viewerIsFollowing: viewerIsFollowing(viewerId),
+      hasRequested: viewerHasRequested(viewerId),
+    })
+    .from(user)
+    .where(inArray(user.id, [...authorIds]));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return authorIds
+    .map((id) => byId.get(id))
+    .filter((row): row is NonNullable<typeof row> => row !== undefined);
+}
+
+async function countLikes(db: Pick<Database, "select">, postId: string): Promise<number> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(postLike)
@@ -971,49 +1474,6 @@ async function countReposts(db: Database, postId: string): Promise<number> {
     .where(eq(postRepost.postId, postId));
 
   return row?.count ?? 0;
-}
-
-type CreatedPost = {
-  id: string;
-  content: string;
-  createdAt: Date;
-  parentId: string | null;
-  quotedPostId: string | null;
-};
-
-/** Inserts the post and its already-prepared attachment rows atomically. */
-async function insertPost(
-  tx: Pick<Database, "insert">,
-  args: {
-    postId: string;
-    authorId: string;
-    content: string;
-    parentId: string | undefined;
-    quotedPostId: string | undefined;
-    prepared: ReturnType<typeof preparePostAttachments>;
-  },
-): Promise<CreatedPost | undefined> {
-  const [inserted] = await tx
-    .insert(post)
-    .values({
-      id: args.postId,
-      authorId: args.authorId,
-      content: args.content,
-      parentId: args.parentId ?? null,
-      quotedPostId: args.quotedPostId ?? null,
-    })
-    .returning({
-      id: post.id,
-      content: post.content,
-      createdAt: post.createdAt,
-      parentId: post.parentId,
-      quotedPostId: post.quotedPostId,
-    });
-
-  if (!inserted) return undefined;
-  if (args.prepared.length > 0)
-    await tx.insert(postAttachment).values(postAttachmentRows(args.prepared));
-  return inserted;
 }
 
 /**
@@ -1065,18 +1525,41 @@ export const postRouter = {
           quotedPostId: z.uuid().optional(),
           /** The same ordered image capability is available to posts and replies. */
           attachments: z.array(z.file()).max(POST_ATTACHMENT_MAX_COUNT).default([]),
+          videoId: z.uuid().optional(),
+          // Reject obsolete clients explicitly instead of silently dropping their subtitles.
+          captions: z.never().optional(),
+          captionLanguage: z.never().optional(),
+          /**
+           * Followers-only visibility (issue #328). Omitted inherits the
+           * author's account default. The flag is one-way while the account
+           * is private: an explicitly opened post from a private account is
+           * still gated by the author flag — only followers see it. The stored
+           * value matters if the account later goes public, at which point old
+           * private-by-default posts stay followers-only. Replies may carry it
+           * like top-level posts; the thread gates on both the focused post
+           * and each reply independently.
+           */
+          isPrivate: z.boolean().optional(),
         })
         // The one invariant neither field can hold alone (issue #202): a post
         // must carry text, images, or both. Keeping `content` string-shaped
         // and non-null means every reader stays a plain string — no nullable
         // column, no null handling spread across the projections.
-        .refine(({ content, attachments }) => content.length > 0 || attachments.length > 0, {
-          error: "Post cannot be empty.",
-          path: ["content"],
-        })
+        .refine(
+          ({ content, attachments, videoId }) =>
+            content.length > 0 || attachments.length > 0 || Boolean(videoId),
+          {
+            error: "Post cannot be empty.",
+            path: ["content"],
+          },
+        )
         .refine(({ parentId, quotedPostId }) => !(parentId && quotedPostId), {
           error: "A reply cannot also be a quote.",
           path: ["quotedPostId"],
+        })
+        .refine(({ videoId, attachments }) => !videoId || attachments.length === 0, {
+          error: "A post can contain one video or up to four images.",
+          path: ["attachments"],
         }),
     )
     .handler(async ({ input, context }) => {
@@ -1093,21 +1576,13 @@ export const postRouter = {
       // exactly the same rule, for the same reasons: quoting a removed post
       // is allowed (the embedded card renders the removal stub), quoting one
       // whose author is hidden reads as "no such post".
-      const resolveVisiblePost = async (postId: string) => {
-        const [visible] = await context.db
-          .select({ id: post.id, authorId: post.authorId })
-          .from(post)
-          .innerJoin(user, eq(user.id, post.authorId))
-          .where(and(eq(post.id, postId), not(invisibleAuthor(context.user.id))))
-          .limit(1);
-        return visible;
-      };
-
       // The reply's notification (below) needs the parent's author, so the
       // resolution selects `authorId` alongside `id`: one lookup keeps the
       // existence check and the notification recipient in step, instead of
       // re-reading the row inside the insert's transaction.
-      const parent = input.parentId ? await resolveVisiblePost(input.parentId) : undefined;
+      const parent = input.parentId
+        ? await resolvePostTarget(context.db, context.user.id, input.parentId)
+        : undefined;
       const parentAuthorId = parent?.authorId;
       if (input.parentId && !parent) {
         throw new ORPCError("NOT_FOUND", {
@@ -1118,7 +1593,9 @@ export const postRouter = {
       // The quote's notification needs the quoted post's author for the same
       // reason the reply's needs the parent's, so this resolution keeps the
       // author too — one lookup serves the existence check and the recipient.
-      const quoted = input.quotedPostId ? await resolveVisiblePost(input.quotedPostId) : undefined;
+      const quoted = input.quotedPostId
+        ? await resolvePostTarget(context.db, context.user.id, input.quotedPostId)
+        : undefined;
       const quotedAuthorId = quoted?.authorId;
       if (input.quotedPostId && !quoted) {
         throw new ORPCError("NOT_FOUND", {
@@ -1130,6 +1607,72 @@ export const postRouter = {
       const postId = randomUUID();
       const prepared = preparePostAttachments(context.user.id, postId, mediaInputs);
       const storage = prepared.length > 0 ? requireStorage(context) : null;
+
+      // Account-default privacy (issue #328): an omitted `isPrivate` inherits
+      // the author's `isPrivate` — private accounts post private by default.
+      // Null (pre-privacy rows) reads as public.
+      const [authorRow] = await context.db
+        .select({ isPrivate: user.isPrivate })
+        .from(user)
+        .where(eq(user.id, context.user.id))
+        .limit(1);
+      const isPrivate = input.isPrivate ?? authorRow?.isPrivate ?? false;
+
+      const responseDefaults = {
+        // Matches the additive tombstone fields of `postSelection` — a fresh
+        // post is neither removed nor deleted, so these are constants rather
+        // than columns. The same goes for `editedAt`: a fresh post has never
+        // been edited.
+        removed: false,
+        deleted: false,
+        removedReason: null,
+        editedAt: null,
+        unavailable: false,
+        private: false,
+        author: {
+          id: context.user.id,
+          name: context.user.name,
+          username: context.user.username ?? null,
+          displayUsername: context.user.displayUsername ?? null,
+          image: context.user.image ?? null,
+        },
+        likeCount: 0,
+        replyCount: 0,
+        repostCount: 0,
+        viewerHasLiked: false,
+        viewerHasReposted: false,
+        viewerHasBookmarked: false,
+        // `quoted` is deliberately absent, like `parent` above: the response
+        // is not a render source (the web invalidates and refetches), and
+        // resolving the embedded preview here would cost a query nothing
+        // consumes.
+        repostedBy: null,
+      };
+
+      const videoId = input.videoId;
+      if (videoId) {
+        const submitted = await videoAction(() =>
+          requireVideoUploads(context).submit({
+            videoId,
+            authorId: context.user.id,
+            content: input.content,
+            parentId: input.parentId ?? null,
+            quotedPostId: input.quotedPostId ?? null,
+            isPrivate,
+            caption: null,
+            captionLanguage: null,
+          }),
+        );
+        return {
+          ...submitted,
+          content: input.content,
+          parentId: input.parentId ?? null,
+          quotedPostId: input.quotedPostId ?? null,
+          createdAt: new Date(),
+          ...responseDefaults,
+          attachments: [],
+        };
+      }
 
       let created: CreatedPost | undefined;
       try {
@@ -1152,44 +1695,17 @@ export const postRouter = {
             }
           }
 
-          const inserted = await insertPost(tx, {
+          return publishPost(tx, {
             postId,
             authorId: context.user.id,
             content: input.content,
-            parentId: input.parentId,
-            quotedPostId: input.quotedPostId,
-            prepared,
+            parentId: input.parentId ?? null,
+            quotedPostId: input.quotedPostId ?? null,
+            isPrivate,
+            attachments: postAttachmentRows(prepared),
+            parentAuthorId,
+            quotedAuthorId,
           });
-          if (inserted && parentAuthorId) {
-            // The reply's notification rides the insert's transaction: a
-            // failure between the two leaves neither. The row points at the
-            // reply itself (not the parent) — that is the thing the
-            // recipient will click through to, and it is what makes the
-            // notification tombstone with the reply when the author deletes
-            // it, exactly like the reply's own feed presence.
-            await insertNotification(tx, {
-              recipientId: parentAuthorId,
-              actorId: context.user.id,
-              type: "reply",
-              postId: inserted.id,
-            });
-          }
-          if (inserted && quotedAuthorId) {
-            // The quote's notification is the reply's shape exactly: same
-            // transaction, and the row points at the quote itself — the
-            // thing the recipient will click through to is what the quoter
-            // said, not their own post back. A quote is a new post with no
-            // natural idempotency key of its own, so its exactly-once is the
-            // reply's too: the insert either commits (one post, one
-            // notification) or it does not.
-            await insertNotification(tx, {
-              recipientId: quotedAuthorId,
-              actorId: context.user.id,
-              type: "quote",
-              postId: inserted.id,
-            });
-          }
-          return inserted;
         });
       } catch (error) {
         if (storage) await discardPostAttachments(storage, prepared);
@@ -1203,33 +1719,7 @@ export const postRouter = {
 
       return {
         ...created,
-        // Matches the additive tombstone fields of `postSelection` — a fresh
-        // post is neither removed nor deleted, so these are constants rather
-        // than columns. The same goes for `editedAt`: a fresh post has never
-        // been edited.
-        removed: false,
-        deleted: false,
-        removedReason: null,
-        editedAt: null,
-        unavailable: false,
-        author: {
-          id: context.user.id,
-          name: context.user.name,
-          username: context.user.username ?? null,
-          displayUsername: context.user.displayUsername ?? null,
-          image: context.user.image ?? null,
-        },
-        likeCount: 0,
-        replyCount: 0,
-        repostCount: 0,
-        viewerHasLiked: false,
-        viewerHasReposted: false,
-        viewerHasBookmarked: false,
-        // `quoted` is deliberately absent, like `parent` above: the response
-        // is not a render source (the web invalidates and refetches), and
-        // resolving the embedded preview here would cost a query nothing
-        // consumes.
-        repostedBy: null,
+        ...responseDefaults,
         attachments: prepared.map(
           ({ id, mediaPath, position, contentType, byteSize, width, height }) => ({
             id,
@@ -1482,11 +1972,15 @@ export const postRouter = {
         return { postId: input.postId, deletedAt: target.deletedAt };
       }
 
-      const [updated] = await context.db
-        .update(post)
-        .set({ deletedAt: new Date() })
-        .where(and(eq(post.id, input.postId), isNull(post.removedAt), isNull(post.deletedAt)))
-        .returning({ deletedAt: post.deletedAt });
+      const updated = await context.db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(post)
+          .set({ deletedAt: new Date() })
+          .where(and(eq(post.id, input.postId), isNull(post.removedAt), isNull(post.deletedAt)))
+          .returning({ deletedAt: post.deletedAt });
+        if (row) await deletePostVideo(tx, input.postId);
+        return row;
+      });
 
       if (updated?.deletedAt) {
         await cleanupDeletedPostAttachments(context.db, context.storage, input.postId);
@@ -1518,8 +2012,9 @@ export const postRouter = {
 
   /**
    * Lists posts, keyset-paginated: the global feed, one author's posts, the
-   * following feed, the caller's bookmarks, one post's direct replies, or a
-   * selected inline reply continuation.
+   * following feed, the caller's bookmarks, one post's direct replies, a
+   * selected inline reply continuation, or — with `ranked: true` — the ranked
+   * global, following, or discover feed served from a frozen snapshot.
    *
    * Session-optional since 0.4.0, for the public post permalink ONLY: an
    * anonymous caller may use the two reply modes (`parentId`,
@@ -1550,8 +2045,32 @@ export const postRouter = {
            * selects posts joined to their own `post_bookmark` rows and pages
            * on the *bookmark's* creation time (see the handler branch), which
            * is why it cannot compose with the scoping filters below.
+           *
+           * `discover` is the ranked-only community feed: originals by other
+           * authors, including accounts the viewer follows. It has no
+           * chronological mode — the UI never offers one — so a non-ranked
+           * `discover` call is refused below.
            */
-          feed: z.enum(["global", "following", "bookmarks"]).default("global"),
+          feed: z.enum(["global", "following", "bookmarks", "discover"]).default("global"),
+          /**
+           * Serves the feed ranked (issue #305) instead of reverse-chronological:
+           * the first page freezes the scope's scored order into a snapshot and
+           * later pages resume it. Applies to the `global` (For you),
+           * `following`, and `discover` feeds only; profile feeds, replies,
+           * search, and bookmarks stay strictly chronological. `q`/`gameSlug`
+           * compose as candidate filters. Defaults off so every existing
+           * caller keeps its chronological feed byte-for-byte.
+           */
+          ranked: z.boolean().default(false),
+          /**
+           * Resumes the SAME snapshot from its first page — what the client
+           * sends on refetch to keep the order stable instead of building a
+           * fresh one. Without a cursor the page starts at offset zero; with
+           * one the cursor's snapshot must match this id. Unknown, foreign,
+           * differently-scoped, differently-filtered, or expired ids are an
+           * explicit error, never a silent restart.
+           */
+          snapshotId: z.uuid().optional(),
           /**
            * Set to list one post's direct replies. This is deliberately a mode
            * of `list` rather than its own `post.replies` procedure: the web
@@ -1593,14 +2112,38 @@ export const postRouter = {
            */
           includeReposts: z.boolean().default(false),
           /**
-           * The profile feed's three-way activity filter. `includeReplies` is
-           * retained for existing clients and means `all` when true; `kind`
+           * The profile feed's activity filter. `shares` selects the owner's
+           * quotes and repost events, regardless of `includeReposts`.
+           * `includeReplies` is retained for existing clients and means
+           * `all` when true; `kind`
            * takes precedence when both are supplied. Keeping the legacy field
            * avoids changing existing query-key/input shapes during rollout.
            */
-          kind: z.enum(["posts", "replies", "all"]).optional(),
+          kind: z.enum(["posts", "replies", "all", "shares"]).optional(),
+          /**
+           * Free-text substring on the post's own text — the Discover search
+           * box. Composes with `gameSlug` as AND. Top-level feeds only; the
+           * refine below refuses it beside reply, profile and bookmarks modes
+           * so a filtered Discover stays one surface with one ordering.
+           */
+          q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH).optional(),
+          /**
+           * A game's URL slug — the Discover game filter and the hashtag's
+           * click target (`/discover?game=slug`). Resolved server-side to the
+           * catalog's hashtag key, then matched as `#key` against post text,
+           * the same substring rule the `#tag` search link uses. Unknown slugs
+           * answer an empty page, never NOT_FOUND, so a stale shared URL
+           * renders Discover's empty state instead of an error card.
+           */
+          gameSlug: z.string().trim().min(1).max(GAME_SLUG_MAX_LENGTH).optional(),
         })
         .superRefine((input, refinement) => {
+          if (input.kind === "shares" && (!input.authorId || input.parentId)) {
+            refinement.addIssue({
+              code: "custom",
+              message: "Quotes and reposts require a profile feed.",
+            });
+          }
           if (
             input.continuationRootId &&
             (input.parentId ||
@@ -1613,6 +2156,21 @@ export const postRouter = {
             refinement.addIssue({
               code: "custom",
               message: "A continuation cannot be combined with feed filters.",
+            });
+          }
+          if (
+            (input.q || input.gameSlug) &&
+            (input.parentId ||
+              input.continuationRootId ||
+              input.authorId ||
+              input.feed === "bookmarks" ||
+              input.includeReplies ||
+              input.includeReposts ||
+              input.kind)
+          ) {
+            refinement.addIssue({
+              code: "custom",
+              message: "Discover filters apply to the top-level feeds only.",
             });
           }
           if (
@@ -1629,6 +2187,27 @@ export const postRouter = {
               message: "The bookmarks feed cannot be combined with scoping filters.",
             });
           }
+          if (
+            input.ranked &&
+            (input.authorId ||
+              input.parentId ||
+              input.continuationRootId ||
+              input.feed === "bookmarks" ||
+              input.includeReplies ||
+              input.includeReposts ||
+              input.kind)
+          ) {
+            refinement.addIssue({
+              code: "custom",
+              message: "Ranked feeds cannot be combined with scoping filters.",
+            });
+          }
+          if (!input.ranked && input.feed === "discover") {
+            refinement.addIssue({
+              code: "custom",
+              message: "The discover feed is ranked-only.",
+            });
+          }
         }),
     )
     .handler(async ({ input, context }) => {
@@ -1641,12 +2220,122 @@ export const postRouter = {
       }
       const viewerId = context.user?.id ?? null;
 
+      // The ranked feeds (issue #305): the home For you (global) and
+      // Following tabs and Discover serve from the one scorer, each over its
+      // own candidate set, paged through a frozen per-viewer snapshot. Ranked
+      // is a signed-in surface — the mode guard above already refused the
+      // anonymous reader, restated here so the snapshot below binds a string.
+      if (input.ranked) {
+        if (!viewerId) throw new ORPCError("UNAUTHORIZED");
+        // SAFETY: the input refinement refuses ranked `bookmarks` and every
+        // scoping filter, and non-ranked `discover` — only the three ranked
+        // scopes reach the snapshot calls below.
+        const scope = input.feed as RankScope;
+        const q = input.q;
+        const gameSlug = input.gameSlug;
+
+        let snapshot: LoadedRankSnapshot;
+        let offset = 0;
+        if (input.cursor) {
+          const decoded = postRankCursor.decode(input.cursor);
+          if (input.snapshotId && input.snapshotId !== decoded.snapshotId) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: RANK_SNAPSHOT_INVALID_MESSAGE,
+            });
+          }
+          snapshot = await loadRankSnapshot(context.db, {
+            viewerId,
+            snapshotId: decoded.snapshotId,
+            scope,
+            q,
+            gameSlug,
+          });
+          offset = decoded.offset;
+        } else if (input.snapshotId) {
+          // A refetch resuming the SAME snapshot from its first page.
+          snapshot = await loadRankSnapshot(context.db, {
+            viewerId,
+            snapshotId: input.snapshotId,
+            scope,
+            q,
+            gameSlug,
+          });
+        } else {
+          const built = await buildRankSnapshot(context.db, { viewerId, scope, q, gameSlug });
+          snapshot = {
+            id: built.id,
+            scope,
+            q: q ?? null,
+            gameSlug: gameSlug ?? null,
+            gameHashtagKey: built.gameHashtagKey,
+            items: built.items,
+            hasInterests: built.hasInterests,
+            expiresAt: built.expiresAt,
+          };
+        }
+        const items: Awaited<ReturnType<typeof hydrateRankedSlice>> = [];
+        // Advance over hidden entries too, so an empty slice cannot strand
+        // the reader before eligible posts later in the frozen sequence.
+        while (items.length < input.limit && offset < snapshot.items.length) {
+          const slice = snapshot.items.slice(offset, offset + POST_PAGE_SIZE_MAX);
+          const hydrated = await hydrateRankedSlice({
+            db: context.db,
+            viewerId,
+            scope,
+            slice,
+            q,
+            gameHashtagKey: snapshot.gameHashtagKey,
+          });
+          const selected = hydrated.slice(0, input.limit - items.length);
+          items.push(...selected);
+          const last = selected.at(-1);
+          // A full page stops at its last returned ID, not the overfetch's
+          // end; otherwise eligible rows in that lookahead would be skipped.
+          offset +=
+            items.length === input.limit && last
+              ? slice.findIndex((entry) => entry.postId === last.id) + 1
+              : slice.length;
+        }
+        const hasMore = offset < snapshot.items.length;
+        const rankedPage = {
+          items,
+          nextCursor: hasMore ? postRankCursor.encode(snapshot.id, offset) : null,
+        };
+        const suggestions =
+          scope === "discover"
+            ? await hydrateRankSuggestions(
+                context.db,
+                viewerId,
+                await suggestRankAuthorIds(context.db, viewerId, snapshot.items, {
+                  q,
+                  gameHashtagKey: snapshot.gameHashtagKey,
+                }),
+              )
+            : [];
+        return {
+          ...rankedPage,
+          gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(rankedPage)),
+          ranking: {
+            snapshotId: snapshot.id,
+            expiresAt: snapshot.expiresAt.toISOString(),
+            hasInterests: snapshot.hasInterests,
+            suggestions,
+          } satisfies RankingMetadata,
+        };
+      }
+
       if (input.continuationRootId) {
         const [rootReply] = await context.db
           .select({ parentId: post.parentId })
           .from(post)
           .innerJoin(user, eq(user.id, post.authorId))
-          .where(and(eq(post.id, input.continuationRootId), not(invisibleAuthor(viewerId))))
+          .where(
+            and(
+              eq(post.id, input.continuationRootId),
+              not(invisibleAuthor(viewerId)),
+              not(privatePostHidden(viewerId)),
+            ),
+          )
           .limit(1);
         if (!rootReply?.parentId) {
           throw new ORPCError("NOT_FOUND", { message: "Reply not found." });
@@ -1670,8 +2359,16 @@ export const postRouter = {
         const [continuation] = await replyContinuationPages(continuationArgs);
 
         return continuation
-          ? { items: continuation.items, nextCursor: continuation.nextCursor }
-          : { items: [], nextCursor: null };
+          ? {
+              items: continuation.items,
+              nextCursor: continuation.nextCursor,
+              gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(continuation)),
+              // Chronological modes carry no ranking: the `ranking` key stays
+              // present on every branch so the output shape is one coherent
+              // union, with the ranked branch filling it.
+              ranking: null,
+            }
+          : { items: [], nextCursor: null, gameMentions: {}, ranking: null };
       }
 
       // The caller's private bookmarks page (issue #262): posts joined to
@@ -1698,7 +2395,7 @@ export const postRouter = {
           bookmarkedAt: postBookmark.createdAt,
         };
 
-        return keysetPage({
+        const bookmarkPage = await keysetPage({
           codec: postCursor,
           cursor: input.cursor,
           limit: input.limit,
@@ -1725,12 +2422,19 @@ export const postRouter = {
                   // filter.
                   isNull(post.deletedAt),
                   not(invisibleAuthor(viewerId)),
+                  not(privatePostHidden(viewerId)),
                   cursorFilter,
                 ),
               )
               .orderBy(desc(postBookmark.createdAt), desc(post.id))
               .limit(input.limit + 1),
         });
+
+        return {
+          ...bookmarkPage,
+          gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(bookmarkPage)),
+          ranking: null,
+        };
       }
 
       const kind = input.kind ?? (input.includeReplies ? "all" : "posts");
@@ -1742,15 +2446,35 @@ export const postRouter = {
       // query — it lists the parent's direct replies by their own event time,
       // and an amplification is not a reply.
       if (!input.parentId) {
-        return feedEventPage(context.db, {
+        let gameHashtagKey: string | undefined;
+        if (input.gameSlug) {
+          const [matched] = await context.db
+            .select({ hashtagKey: game.hashtagKey })
+            .from(game)
+            .where(eq(game.slug, input.gameSlug))
+            .limit(1);
+          if (!matched) return { items: [], nextCursor: null, gameMentions: {}, ranking: null };
+          gameHashtagKey = matched.hashtagKey;
+        }
+        const page = await feedEventPage(context.db, {
           viewerId,
           cursor: input.cursor,
           limit: input.limit,
           authorId: input.authorId,
-          feed: input.feed,
+          // SAFETY: the ranked branch returned above, the input refinement
+          // refuses non-ranked `discover`, and the bookmarks branch returned
+          // too — only the two chronological home feeds reach this call.
+          feed: input.feed as "global" | "following",
           kind,
           includeReposts: input.includeReposts,
+          q: input.q,
+          gameHashtagKey,
         });
+        return {
+          ...page,
+          gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(page)),
+          ranking: null,
+        };
       }
 
       const filters = [
@@ -1764,6 +2488,7 @@ export const postRouter = {
         // someone blocked in either direction drop out of every feed. This
         // does NOT drop removed posts — removal is not invisibility.
         not(invisibleAuthor(viewerId)),
+        not(privatePostHidden(viewerId)),
       ];
 
       // The cursor filter, the hasMore decision and the next-cursor anchor
@@ -1790,10 +2515,10 @@ export const postRouter = {
             .limit(input.limit + 1),
       });
 
-      if (page.items.length === 0) return page;
+      if (page.items.length === 0) return { ...page, gameMentions: {}, ranking: null };
 
       const focusedAuthorId = await visiblePostAuthorId(context.db, viewerId, input.parentId);
-      if (!focusedAuthorId) return { ...page, continuations: [] };
+      if (!focusedAuthorId) return { ...page, continuations: [], gameMentions: {}, ranking: null };
 
       const continuations = await replyContinuationPages({
         db: context.db,
@@ -1803,7 +2528,12 @@ export const postRouter = {
         limit: THREAD_REPLY_BRANCH_INITIAL_SIZE,
       });
 
-      return { ...page, continuations };
+      const response = { ...page, continuations };
+      return {
+        ...response,
+        gameMentions: await gameMentionsFor(context.db, pageTextsForMentions(response)),
+        ranking: null,
+      };
     }),
 
   /**
@@ -1837,7 +2567,13 @@ export const postRouter = {
         .select(postSelection(viewerId))
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(viewerId))))
+        .where(
+          and(
+            eq(post.id, input.postId),
+            not(invisibleAuthor(viewerId)),
+            not(privatePostHidden(viewerId)),
+          ),
+        )
         .limit(1);
 
       if (!focused) {
@@ -1847,7 +2583,15 @@ export const postRouter = {
       // The common case by a wide margin: most posts are top-level, and
       // there is no chain to walk for those.
       if (!focused.parentId) {
-        return { post: focused, ancestors: [], truncated: false };
+        return {
+          post: focused,
+          ancestors: [],
+          truncated: false,
+          gameMentions: await gameMentionsFor(
+            context.db,
+            pageTextsForMentions({ items: [focused] }),
+          ),
+        };
       }
 
       const chain = await runSql<{ id: string; depth: number }>(
@@ -1879,12 +2623,25 @@ export const postRouter = {
         .select(postSelection(viewerId))
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(inArray(post.id, ancestorIds), not(invisibleAuthor(viewerId))));
+        .where(
+          and(
+            inArray(post.id, ancestorIds),
+            not(invisibleAuthor(viewerId)),
+            not(privatePostHidden(viewerId)),
+          ),
+        );
 
       // `inArray` has no ordering of its own, so the CTE's depth ordering is
       // reapplied here rather than trusted from the second query.
       const byId = new Map(rows.map((row) => [row.id, row]));
       const ancestors = ancestorIds.map((id) => byId.get(id)).filter((row) => row !== undefined);
+
+      // The focused post AND every ancestor render their text through the
+      // same linkifier, so the map covers both.
+      const texts = [focused, ...ancestors].flatMap((row) => [
+        row.content,
+        row.quoted?.content ?? null,
+      ]);
 
       return {
         post: focused,
@@ -1893,6 +2650,7 @@ export const postRouter = {
         // cut off by THREAD_ANCESTOR_MAX, not that we reached the top. Read
         // off the rows we already have rather than costing another query.
         truncated: ancestors[0]?.parentId != null,
+        gameMentions: await gameMentionsFor(context.db, texts),
       };
     }),
 
@@ -1941,7 +2699,13 @@ export const postRouter = {
         .select({ id: post.id, authorId: post.authorId })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
+        .where(
+          and(
+            eq(post.id, input.postId),
+            not(invisibleAuthor(context.user.id)),
+            not(privatePostHidden(context.user.id)),
+          ),
+        )
         .limit(1);
 
       if (!target) {
@@ -1970,6 +2734,18 @@ export const postRouter = {
             type: "like",
             postId: input.postId,
           });
+
+          // Like-tier badge stamping (issue #308). A successful like is the
+          // only moment a threshold can first be passed, so the stamping cost
+          // is one index-only count per new like and nothing anywhere else —
+          // a retried like never reaches this branch. The count read and the
+          // stamp ride the like's own transaction, so a rollback leaves
+          // neither half; the tier upgrades in place (see ./badge-stamping.ts
+          // — one row per family, kept on a recede, `unlike` never unstamps).
+          const badge = postLikeBadgeTierFor(await countLikes(tx, input.postId));
+          if (badge) {
+            await stampBadgeTier(tx, target.authorId, POST_LIKE_BADGE_TIERS, badge);
+          }
         }
       });
 
@@ -1980,29 +2756,41 @@ export const postRouter = {
       };
     }),
 
-  /** Removes the caller's like from a post. Requires a session; a no-op when the like isn't there. */
+  /**
+   * Removes the caller's like from a post. Requires a session; a no-op when the like isn't there.
+   *
+   * No private-visibility check (issue #328): the row is the caller's own, and
+   * a like left on a private account's post must stay removable after
+   * unfollowing — or after the author goes private — rather than strand.
+   * Counts are read only through full visibility. Hidden and missing posts
+   * return the same zero count, so removal cannot probe private activity.
+   */
   unlike: protectedProcedure
     .use(rateLimit(RATE_LIMITS.like))
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
-      const [target] = await context.db
-        .select({ id: post.id })
-        .from(post)
-        .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
-        .limit(1);
-
-      if (!target) {
-        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
-      }
-
       await context.db
         .delete(postLike)
         .where(and(eq(postLike.postId, input.postId), eq(postLike.userId, context.user.id)));
 
+      const [target] = await context.db
+        .select({
+          likeCount: sql<number>`(select count(*)::int from ${postLike} where ${postLike.postId} = ${post.id})`,
+        })
+        .from(post)
+        .innerJoin(user, eq(user.id, post.authorId))
+        .where(
+          and(
+            eq(post.id, input.postId),
+            not(invisibleAuthor(context.user.id)),
+            not(privatePostHidden(context.user.id)),
+          ),
+        )
+        .limit(1);
+
       return {
         postId: input.postId,
-        likeCount: await countLikes(context.db, input.postId),
+        likeCount: target?.likeCount ?? 0,
         viewerHasLiked: false,
       };
     }),
@@ -2030,7 +2818,13 @@ export const postRouter = {
         .select({ id: post.id, authorId: post.authorId })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
+        .where(
+          and(
+            eq(post.id, input.postId),
+            not(invisibleAuthor(context.user.id)),
+            not(privatePostHidden(context.user.id)),
+          ),
+        )
         .limit(1);
 
       if (!target) {
@@ -2069,29 +2863,38 @@ export const postRouter = {
       };
     }),
 
-  /** Removes the caller's repost. Requires a session; a no-op when the repost isn't there. */
+  /**
+   * Removes the caller's repost. Requires a session; a no-op when the repost isn't there.
+   *
+   * Like `unlike`, removal stays possible after losing visibility, but the
+   * response reveals no counts or existence for hidden posts.
+   */
   unrepost: protectedProcedure
     .use(rateLimit(RATE_LIMITS.repost))
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
-      const [target] = await context.db
-        .select({ id: post.id })
-        .from(post)
-        .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
-        .limit(1);
-
-      if (!target) {
-        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
-      }
-
       await context.db
         .delete(postRepost)
         .where(and(eq(postRepost.postId, input.postId), eq(postRepost.userId, context.user.id)));
 
+      const [target] = await context.db
+        .select({
+          repostCount: sql<number>`(select count(*)::int from ${postRepost} where ${postRepost.postId} = ${post.id})`,
+        })
+        .from(post)
+        .innerJoin(user, eq(user.id, post.authorId))
+        .where(
+          and(
+            eq(post.id, input.postId),
+            not(invisibleAuthor(context.user.id)),
+            not(privatePostHidden(context.user.id)),
+          ),
+        )
+        .limit(1);
+
       return {
         postId: input.postId,
-        repostCount: await countReposts(context.db, input.postId),
+        repostCount: target?.repostCount ?? 0,
         viewerHasReposted: false,
       };
     }),
@@ -2122,7 +2925,13 @@ export const postRouter = {
         .select({ id: post.id })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
-        .where(and(eq(post.id, input.postId), not(invisibleAuthor(context.user.id))))
+        .where(
+          and(
+            eq(post.id, input.postId),
+            not(invisibleAuthor(context.user.id)),
+            not(privatePostHidden(context.user.id)),
+          ),
+        )
         .limit(1);
 
       if (!target) {

@@ -1,13 +1,14 @@
+import { quoteDialogAtom } from "@/atoms/dialog-targets";
 import { atom } from "jotai";
 import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import { orpc } from "@/lib/orpc";
 import { store } from "@/lib/store";
+import { clearVideoDraft } from "@/atoms/video-upload";
 import type { ComposerAttachment } from "./composer.js";
-import type { Post } from "@/lib/orpc";
 
 /**
- * The quote composer (issue #261): which post the open quote dialog is
- * quoting, the in-memory draft, and the `post.create` mutation behind it.
+ * The quote composer (issue #261): the in-memory draft and `post.create`
+ * mutation. Its lightweight target lives in `dialog-targets.ts`.
  *
  * The dialog target holds the whole `Post` row, not just an id, because the
  * dialog renders the embedded quoted card — the same `quoted`-less shape the
@@ -16,9 +17,6 @@ import type { Post } from "@/lib/orpc";
  * dialog, its lifetime is bounded by the dialog being open, and a persisted
  * quote draft would outlive the post it quotes with nothing to evict it.
  */
-
-/** Which post the quote dialog is quoting: the full row, or null when closed. */
-export const quoteDialogAtom = atom<Post | null>(null);
 
 /** The quote dialog's half-typed text — one draft, one dialog. */
 export const quoteDraftAtom = atom("");
@@ -41,11 +39,15 @@ export const createQuoteAtom = atomWithMutation((get) => {
     onSuccess: async () => {
       store.set(quoteDraftAtom, "");
       store.set(quoteAttachmentsAtom, []);
+      clearVideoDraft("quote-composer");
       store.set(quoteDialogAtom, null);
 
       // A new quote is a post in the home feeds and the author's profile;
       // its position depends on server ordering — refetch rather than splice.
-      await queryClient.invalidateQueries({ queryKey: orpc.post.list.key() });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: orpc.post.list.key() }),
+        queryClient.invalidateQueries({ queryKey: orpc.video.pending.key() }),
+      ]);
     },
   });
 });

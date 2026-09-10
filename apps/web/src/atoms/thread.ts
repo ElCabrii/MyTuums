@@ -1,5 +1,6 @@
 import { atomFamily } from "jotai-family";
 import { atomWithQuery } from "jotai-tanstack-query";
+import { publicReadReadyAtom } from "@/atoms/query-readiness";
 import { threadQueryOptions } from "@/lib/query-definitions";
 
 /**
@@ -17,7 +18,7 @@ import { threadQueryOptions } from "@/lib/query-definitions";
  * feed cache the optimistic-like sweep already covers.
  */
 export const threadAtomFamily = atomFamily((postId: string) =>
-  atomWithQuery(() => threadQueryOptions(postId)),
+  atomWithQuery((get) => ({ ...threadQueryOptions(postId), enabled: get(publicReadReadyAtom) })),
 );
 
 /**

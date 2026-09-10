@@ -493,6 +493,7 @@ export async function truncateAll(): Promise<void> {
       ${schema.userBlock}, ${schema.appeal}, ${schema.moderationAction},
       ${schema.notification}, ${schema.notificationLastSeen},
       ${schema.post}, ${schema.linkCard},
+      ${schema.gameFavorite}, ${schema.game},
       ${schema.session}, ${schema.account}, ${schema.verification},
       ${schema.rateLimit}, ${schema.twoFactor}, ${schema.passkey},
       ${schema.user}

@@ -1,7 +1,16 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "lsp": true,
+  "lsp": {
+    "typescript": {
+      "command": ["pnpm", "exec", "tsc", "--lsp", "--stdio"]
+    },
+    "oxlint": {
+      "command": ["pnpm", "exec", "oxlint", "--lsp"]
+    }
+  },
   "formatter": {
-    "prettier": {}
+    "prettier": {
+      "command": ["pnpm", "exec", "prettier", "--write", "$FILE"]
+    }
   }
 }

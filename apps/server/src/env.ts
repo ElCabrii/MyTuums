@@ -10,6 +10,8 @@ const envSchema = z
     WEB_ORIGIN: z.string().default("http://localhost:5173"),
     PORT: z.coerce.number().default(3001),
     HOST: z.string().default("127.0.0.1"),
+    // Railway injects this at runtime; selects its documented public-ingress IP header.
+    RAILWAY_ENVIRONMENT_ID: z.string().min(1).optional(),
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 
     // Everything below is optional, and `packages/auth/src/env.ts` reads it
@@ -27,10 +29,23 @@ const envSchema = z
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
 
+    // The game-catalog sync's IGDB credentials (issue #314). Same Twitch
+    // developer portal as the TWITCH_* sign-in pair above, but a DIFFERENT
+    // pair with a different purpose — one must never satisfy the other's
+    // check. Only the sync entrypoint (`src/games-sync.ts`) reads them; the
+    // serving app never does, so unset is the normal serving state.
+    IGDB_CLIENT_ID: z.string().optional(),
+    IGDB_CLIENT_SECRET: z.string().optional(),
+
     // Sentry error tracking (apps/server/src/sentry.ts). Optional: without it
     // the server runs with no error-tracking client — the dev/CI state. The
     // SDK's capture calls are no-ops then, so nothing gates on this.
     SENTRY_DSN: z.string().optional(),
+
+    // Public GA4 measurement id. Vite reads the same value at build time; the
+    // Dockerfile retains it in the runner so this server can emit the matching
+    // conditional CSP. Empty and unset both mean analytics is absent.
+    VITE_GA_MEASUREMENT_ID: z.string().optional(),
 
     // Defaults to WEB_ORIGIN's hostname in packages/auth. Only set this when the
     // browser origin and the intended WebAuthn Relying Party differ.
@@ -39,6 +54,13 @@ const envSchema = z
     // Escape hatch for the Playwright suite, which drives every sign-in from one
     // IP. See the comment on `authRateLimitEnabled` in packages/auth/src/env.ts.
     AUTH_RATE_LIMIT: z.enum(["true", "false"]).optional(),
+
+    // Shared secret between the edge proxy and this origin; see the
+    // `edgeSecret` dep in request-handler.ts for what it gates. Unset in dev,
+    // CI, and production: the deployments that need it (preview, behind
+    // Cloudflare) set it alongside the matching Transform Rule, and every
+    // other deployment must keep serving direct traffic.
+    EDGE_SECRET: z.string().min(32, "EDGE_SECRET must be at least 32 characters long").optional(),
 
     // Object storage for avatars and banners — a Railway Storage Bucket in every
     // environment, including dev and CI. All optional as a group: with none of
@@ -117,6 +139,21 @@ const envSchema = z
           } set — image uploads need the whole S3_* group or none of it`,
         });
       }
+    }
+
+    // The IGDB pair, same all-or-nothing rule as a provider: a sync run with
+    // only one half would spend its token request on credentials that can
+    // never authenticate.
+    const igdbBothOrNeither = !env.IGDB_CLIENT_ID === !env.IGDB_CLIENT_SECRET;
+    if (!igdbBothOrNeither) {
+      const missing = env.IGDB_CLIENT_ID ? "IGDB_CLIENT_SECRET" : "IGDB_CLIENT_ID";
+      ctx.addIssue({
+        code: "custom",
+        path: [missing],
+        message: `is required because ${
+          env.IGDB_CLIENT_ID ? "IGDB_CLIENT_ID" : "IGDB_CLIENT_SECRET"
+        } is set — the game-catalog sync needs both or neither`,
+      });
     }
   });
 

@@ -608,6 +608,20 @@ describe("isSafeObjectKey", () => {
       [`posts/user-1/${UUID}/${UUID}.png`, true],
       [`avatars/user-1/${UUID}.gif`, true],
       [`posts/user-1/${UUID}/${UUID}.gif`, true],
+      // A re-hosted game cover (issue #314): `games/<igdbId>-<imageId>.<ext>`,
+      // both components IGDB's own, so the key is content-addressed.
+      [`games/123-co1r7e.jpg`, true],
+      [`games/1-co1q2r.webp`, true],
+    ]);
+  });
+
+  it("accepts a game cover's derived variant (width digits are structural here)", () => {
+    expectKeys([
+      [`games/123-co1r7e.jpg.w320.webp`, true],
+      [`games/123-co1r7e.jpg.w640.webp`, true],
+      // Any `.w<N>.webp` parses structurally — which widths this app actually
+      // mints is `parseMediaVariantKey`'s to say (pinned in media.test.ts).
+      [`games/123-co1r7e.jpg.w1280.webp`, true],
     ]);
   });
 

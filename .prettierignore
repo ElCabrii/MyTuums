@@ -30,3 +30,6 @@ lighthouse-reports/
 e2e/blob-report/
 playwright/.cache/
 .pi-lens/
+
+# Upstream discovery skill; update from vercel-labs/agent-browser
+.agents/skills/agent-browser/

@@ -56,7 +56,7 @@ export function SegmentedControlItem({
       variant={active ? "secondary" : "ghost"}
       size="sm"
       data-slot="segmented-control-item"
-      className="rounded-full"
+      className="aria-pressed:border-border rounded-full dark:aria-pressed:border-transparent"
       // `aria-pressed` is what actually communicates the selection; the variant
       // swap above is only the visual half of it.
       aria-pressed={active}

@@ -3,6 +3,7 @@ import { atomFamily } from "jotai-family";
 import { atomWithMutation, queryClientAtom } from "jotai-tanstack-query";
 import { orpc } from "@/lib/orpc";
 import { store } from "@/lib/store";
+import { clearVideoDraft } from "@/atoms/video-upload";
 import type { ComposerAttachment } from "./composer.js";
 
 /**
@@ -44,6 +45,7 @@ export const createReplyAtomFamily = atomFamily((parentId: string) =>
       onSuccess: async () => {
         store.set(replyDraftAtomFamily(parentId), "");
         store.set(replyAttachmentsAtomFamily(parentId), []);
+        clearVideoDraft(`reply:${parentId}`);
 
         // Two prefixes, because a reply lands in two different caches:
         //
@@ -58,6 +60,7 @@ export const createReplyAtomFamily = atomFamily((parentId: string) =>
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: orpc.post.list.key() }),
           queryClient.invalidateQueries({ queryKey: orpc.post.thread.key() }),
+          queryClient.invalidateQueries({ queryKey: orpc.video.pending.key() }),
         ]);
       },
     });

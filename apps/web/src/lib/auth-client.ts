@@ -112,6 +112,10 @@ type SessionWithDeclaredFields = ReturnType<typeof useSession> & {
       localePreference: string | null;
       legalAcceptedAt: Date | string | null;
       legalVersion: string | null;
+      // Account privacy (issue #328): nullable like every other additionalField
+      // — null (pre-privacy rows, OAuth sign-ups that never toggled) reads as
+      // public. The settings toggle writes it via `updateUser`.
+      isPrivate: boolean | null;
       // The moderation system's role and ban fields (issue #38), typed off
       // the wire exactly like the additionalFields above: the admin plugin's
       // schema reaches this client only as JSON. `role` defaults to "user"

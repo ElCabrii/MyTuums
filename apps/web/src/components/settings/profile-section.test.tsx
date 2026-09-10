@@ -155,6 +155,7 @@ describe("ProfileSection", () => {
           displayUsername: "Alice",
         }),
       ],
+      games: [],
       posts: [],
     };
     fakeClient.search.typeahead.mockResolvedValue(payload);

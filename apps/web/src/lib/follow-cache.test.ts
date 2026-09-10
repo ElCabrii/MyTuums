@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import {
   orpc,
+  type PostListPage,
   type Profile,
   type SearchUser,
   type SearchUsersPage,
@@ -10,12 +11,21 @@ import {
 } from "@/lib/orpc";
 import {
   patchFollowState,
+  queryHoldsSuggestions,
   readCachedIsFollowing,
   reconcileFollow,
   restoreFollowCaches,
   snapshotFollowCaches,
+  withdrawSuggestionRequest,
 } from "@/lib/follow-cache";
-import { makeProfile, makeUserSummary } from "@/test/factories";
+import {
+  makePostListPage,
+  makeProfile,
+  makeRanking,
+  makeRankSuggestion,
+  makeUserSummary,
+} from "@/test/factories";
+import type { RankingSuggestion } from "@/lib/ranking";
 
 function makeSummary(
   overrides: Partial<UserSummary> & { id: string; username: string },
@@ -41,13 +51,22 @@ function makeSearchUser(
     bio: null,
     bannerImage: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    isPrivate: false,
     viewerIsFollowing: false,
+    hasRequested: false,
     ...overrides,
   };
 }
 
 function searchUsersPage(items: SearchUser[]): InfiniteData<SearchUsersPage> {
   return { pages: [{ items, nextCursor: null }], pageParams: [undefined] };
+}
+
+function suggestionPages(items: RankingSuggestion[]): InfiniteData<PostListPage> {
+  return {
+    pages: [makePostListPage({ ranking: makeRanking({ suggestions: items }) })],
+    pageParams: [undefined],
+  };
 }
 
 const profileKey = (username: string) => orpc.user.byUsername.key({ input: { username } });
@@ -121,6 +140,25 @@ describe("patchFollowState", () => {
     expect(queryClient.getQueryData<Profile>(profileKey("viewer"))?.followingCount).toBe(0);
   });
 
+  it("flips viewerIsFollowing on matching ranked suggestion rows, leaving the post items alone", () => {
+    const queryClient = new QueryClient();
+    const rankedKey = orpc.post.list.key({ input: { limit: 20, feed: "discover", ranked: true } });
+    queryClient.setQueryData<InfiniteData<PostListPage>>(
+      rankedKey,
+      suggestionPages([
+        makeRankSuggestion({ id: "target-1", username: "target", viewerIsFollowing: false }),
+        makeRankSuggestion({ id: "other-1", username: "other", viewerIsFollowing: true }),
+      ]),
+    );
+
+    patchFollowState(queryClient, { userId: "target-1", viewerId: "viewer-1", following: true });
+
+    const data = queryClient.getQueryData<InfiniteData<PostListPage>>(rankedKey);
+    const suggestions = data?.pages[0]?.ranking?.suggestions ?? [];
+    expect(suggestions.find((i) => i.id === "target-1")?.viewerIsFollowing).toBe(true);
+    expect(suggestions.find((i) => i.id === "other-1")?.viewerIsFollowing).toBe(true);
+  });
+
   it("patches the matching item in both follower and following list caches, leaving other items alone", () => {
     const queryClient = new QueryClient();
     const target = makeSummary({ id: "target-1", username: "target", viewerIsFollowing: false });
@@ -188,6 +226,23 @@ describe("readCachedIsFollowing", () => {
       orpc.search.users.key({ input: { q: "target", limit: 20 } }),
       searchUsersPage([
         makeSearchUser({ id: "target-1", username: "target", viewerIsFollowing: true }),
+      ]),
+    );
+
+    expect(readCachedIsFollowing(queryClient, "target-1")).toBe(true);
+  });
+
+  // The ranked Discover feed renders live follow buttons off its suggestion
+  // rows (who-to-follow.tsx), and a candidate who appears ONLY there has no
+  // profile, list or search cache entry yet. The direction must come from
+  // that row or every click on a suggestion button would be treated as
+  // "follow" — making unfollow from suggestions impossible.
+  it("falls back to the ranked suggestion rows when the person appears only there", () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData<InfiniteData<PostListPage>>(
+      orpc.post.list.key({ input: { limit: 20, feed: "discover", ranked: true } }),
+      suggestionPages([
+        makeRankSuggestion({ id: "target-1", username: "target", viewerIsFollowing: true }),
       ]),
     );
 
@@ -325,5 +380,141 @@ describe("reconcileFollow", () => {
     expect(profile?.viewerIsFollowing).toBe(true);
 
     expect(queryClient.getQueryData(followersKey("someone"))).toEqual(listBefore);
+  });
+
+  // Rollback for one person leaves another person's confirmed state
+  // untouched, even in the same list entry (see above) — and the same holds
+  // across shapes: a stale search row saying "following" must not leak into
+  // a suggestion row that said "not following" with a pending request.
+  it("rollback restores each suggestion row's own values, preserving hasRequested", () => {
+    const queryClient = new QueryClient();
+    const rankedKey = orpc.post.list.key({ input: { limit: 20, feed: "discover", ranked: true } });
+    queryClient.setQueryData<InfiniteData<PostListPage>>(
+      rankedKey,
+      suggestionPages([
+        makeRankSuggestion({
+          id: "target-1",
+          username: "target",
+          viewerIsFollowing: false,
+          hasRequested: true,
+        }),
+      ]),
+    );
+    // A stale, contradictory search entry — the suggestion row must win its
+    // own rollback.
+    queryClient.setQueryData(
+      orpc.search.users.key({ input: { q: "target", limit: 20 } }),
+      searchUsersPage([
+        makeSearchUser({ id: "target-1", username: "target", viewerIsFollowing: true }),
+      ]),
+    );
+
+    const snapshot = snapshotFollowCaches(queryClient, {
+      userId: "target-1",
+      viewerId: undefined,
+      following: true,
+    });
+    patchFollowState(queryClient, { userId: "target-1", viewerId: undefined, following: true });
+
+    const patched =
+      queryClient.getQueryData<InfiniteData<PostListPage>>(rankedKey)?.pages[0]?.ranking
+        ?.suggestions ?? [];
+    expect(patched.find((i) => i.id === "target-1")?.viewerIsFollowing).toBe(true);
+
+    restoreFollowCaches(queryClient, snapshot);
+
+    const restored =
+      queryClient.getQueryData<InfiniteData<PostListPage>>(rankedKey)?.pages[0]?.ranking
+        ?.suggestions ?? [];
+    expect(restored.find((i) => i.id === "target-1")?.viewerIsFollowing).toBe(false);
+    expect(restored.find((i) => i.id === "target-1")?.hasRequested).toBe(true);
+  });
+
+  it("flips a suggestion row to Requested on a private-target response", () => {
+    const queryClient = new QueryClient();
+    const rankedKey = orpc.post.list.key({ input: { limit: 20, feed: "discover", ranked: true } });
+    queryClient.setQueryData<InfiniteData<PostListPage>>(
+      rankedKey,
+      suggestionPages([
+        makeRankSuggestion({
+          id: "target-1",
+          username: "target",
+          viewerIsFollowing: true,
+          hasRequested: false,
+        }),
+      ]),
+    );
+
+    reconcileFollow(queryClient, {
+      userId: "target-1",
+      followerCount: 5,
+      viewerIsFollowing: false,
+      requested: true,
+    });
+
+    const suggestions =
+      queryClient.getQueryData<InfiniteData<PostListPage>>(rankedKey)?.pages[0]?.ranking
+        ?.suggestions ?? [];
+    expect(suggestions.find((i) => i.id === "target-1")?.viewerIsFollowing).toBe(false);
+    expect(suggestions.find((i) => i.id === "target-1")?.hasRequested).toBe(true);
+  });
+});
+
+describe("queryHoldsSuggestions", () => {
+  it("matches a feed entry carrying suggestion rows", () => {
+    const queryClient = new QueryClient();
+    const rankedKey = orpc.post.list.key({ input: { limit: 20, feed: "discover", ranked: true } });
+    queryClient.setQueryData<InfiniteData<PostListPage>>(
+      rankedKey,
+      suggestionPages([makeRankSuggestion({ id: "target-1", username: "target" })]),
+    );
+
+    const query = queryClient.getQueryCache().find({ queryKey: rankedKey });
+    if (!query) throw new Error("Missing seeded suggestion query");
+    expect(queryHoldsSuggestions(query)).toBe(true);
+  });
+
+  it("ignores chronological feeds and empty suggestion blocks", () => {
+    const queryClient = new QueryClient();
+    const chronoKey = orpc.post.list.key({ input: { limit: 20 } });
+    queryClient.setQueryData<InfiniteData<PostListPage>>(chronoKey, {
+      pages: [makePostListPage()],
+      pageParams: [undefined],
+    });
+    const rankedKey = orpc.post.list.key({ input: { limit: 20, feed: "discover", ranked: true } });
+    queryClient.setQueryData<InfiniteData<PostListPage>>(rankedKey, suggestionPages([]));
+
+    const chrono = queryClient.getQueryCache().find({ queryKey: chronoKey });
+    if (!chrono) throw new Error("Missing seeded chronological query");
+    expect(queryHoldsSuggestions(chrono)).toBe(false);
+    const ranked = queryClient.getQueryCache().find({ queryKey: rankedKey });
+    if (!ranked) throw new Error("Missing seeded ranked query");
+    expect(queryHoldsSuggestions(ranked)).toBe(false);
+  });
+});
+
+describe("withdrawSuggestionRequest", () => {
+  it("flips a requested suggestion row back to Follow without touching the feed order", () => {
+    const queryClient = new QueryClient();
+    const rankedKey = orpc.post.list.key({ input: { limit: 20, feed: "discover", ranked: true } });
+    queryClient.setQueryData<InfiniteData<PostListPage>>(
+      rankedKey,
+      suggestionPages([
+        makeRankSuggestion({
+          id: "target-1",
+          username: "target",
+          viewerIsFollowing: false,
+          hasRequested: true,
+        }),
+      ]),
+    );
+
+    withdrawSuggestionRequest(queryClient, "target-1");
+
+    const suggestions =
+      queryClient.getQueryData<InfiniteData<PostListPage>>(rankedKey)?.pages[0]?.ranking
+        ?.suggestions ?? [];
+    expect(suggestions.find((i) => i.id === "target-1")?.viewerIsFollowing).toBe(false);
+    expect(suggestions.find((i) => i.id === "target-1")?.hasRequested).toBe(false);
   });
 });

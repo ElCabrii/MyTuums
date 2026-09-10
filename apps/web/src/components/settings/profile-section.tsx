@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { Check, Image as ImageIcon, Loader2, Trash2, Upload, UserRound } from "lucide-react";
+import { Check, Image as ImageIcon, Loader2, Trash2, Upload } from "lucide-react";
 import { BANNER_ASPECT_RATIO, type ImageKind } from "@my-tuums/api/constants";
 import { authErrorAtom, authPendingAtom } from "@/atoms/auth";
 import { viewerAtom } from "@/atoms/session";
@@ -21,7 +21,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserAvatar } from "@/components/user-avatar";
 import { MentionTextarea } from "@/components/mention-textarea";
-import { Section } from "@/components/settings/section";
 import { ImageCropDialog } from "@/components/settings/image-crop-dialog";
 import { m } from "@/paraglide/messages.js";
 
@@ -35,12 +34,14 @@ import { m } from "@/paraglide/messages.js";
  * every save or holding a File in an atom until one, and both make the failure
  * modes worse than the mild inconsistency of two controls.
  */
-export function ProfileSection() {
+export function ProfileSection({ onSaved }: { onSaved?: () => void }) {
   const viewer = useAtomValue(viewerAtom);
   const [name, setName] = useAtom(profileNameDraftAtom);
   const [bio, setBio] = useAtom(profileBioDraftAtom);
   const bioRemaining = useAtomValue(bioRemainingAtom);
-  const isBusy = useAtomValue(authPendingAtom);
+  const authPending = useAtomValue(authPendingAtom);
+  const imageUploading = useAtomValue(imageUploadingAtom);
+  const isBusy = authPending || imageUploading !== null;
 
   const hydrate = useSetAtom(hydrateProfileEditAtom);
   const reset = useSetAtom(resetProfileEditAtom);
@@ -60,11 +61,7 @@ export function ProfileSection() {
   }, [hydrate, reset]);
 
   return (
-    <Section
-      title={m.settings_profile_title()}
-      description={m.settings_profile_description()}
-      icon={<UserRound className="h-5 w-5" />}
-    >
+    <div className="space-y-5">
       <div className="space-y-4">
         <ImageRow
           kind="avatar"
@@ -87,7 +84,7 @@ export function ProfileSection() {
           hasImage={Boolean(viewer?.bannerImage)}
           preview={
             <div
-              className="border-border/50 bg-muted w-28 shrink-0 overflow-hidden rounded-xl border"
+              className="border-border/50 bg-muted w-28 max-w-full shrink-0 overflow-hidden rounded-xl border"
               style={{ aspectRatio: BANNER_ASPECT_RATIO }}
             >
               {viewer?.bannerImage && (
@@ -102,11 +99,15 @@ export function ProfileSection() {
         />
       </div>
 
+      <p className="text-muted-foreground text-xs">{m.profile_images_save_hint()}</p>
+
       <form
         className="border-border/50 space-y-4 border-t pt-4"
         onSubmit={(e) => {
           e.preventDefault();
-          void save();
+          void save().then((saved) => {
+            if (saved) onSaved?.();
+          });
         }}
       >
         <div className="space-y-2">
@@ -118,6 +119,7 @@ export function ProfileSection() {
           </label>
           <Input
             id="profile-name"
+            disabled={isBusy}
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -144,6 +146,7 @@ export function ProfileSection() {
               primitive's `field-sizing-content` on CSS source order. */}
           <MentionTextarea
             id="profile-bio"
+            disabled={isBusy}
             value={bio}
             onValueChange={setBio}
             mentionScope="bio"
@@ -163,7 +166,7 @@ export function ProfileSection() {
           </p>
         </div>
 
-        <Button type="submit" size="sm" className="gap-2 rounded-full" disabled={isBusy}>
+        <Button type="submit" size="sm" className="w-full gap-2 sm:w-auto" disabled={isBusy}>
           {isBusy ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
@@ -172,7 +175,7 @@ export function ProfileSection() {
           {m.common_save()}
         </Button>
       </form>
-    </Section>
+    </div>
   );
 }
 
@@ -243,10 +246,11 @@ function ImageRow({
   // Both controls lock while *either* slot is uploading: they write the same
   // session, and letting a banner upload land mid-avatar-upload would make the
   // refresh order decide which one appears to have won.
-  const isBusy = uploading !== null;
+  const authPending = useAtomValue(authPendingAtom);
+  const isBusy = authPending || uploading !== null;
 
   return (
-    <div className="flex items-center gap-4">
+    <div className="bg-muted/30 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-2xl border p-3">
       {pending && (
         <ImageCropDialog
           kind={kind}
@@ -259,19 +263,21 @@ function ImageRow({
         />
       )}
 
-      {preview}
+      <div className="row-span-2 flex w-20 items-center justify-center sm:w-28">{preview}</div>
 
-      <div className="min-w-0 flex-1 space-y-1">
+      <div className="min-w-0 space-y-1">
         <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
           {label}
         </p>
         <p className="text-muted-foreground text-xs">{hint}</p>
       </div>
 
-      <div className="flex shrink-0 gap-1.5">
+      <div className="col-start-2 flex flex-wrap gap-1.5">
         <input
           ref={inputRef}
           type="file"
+          disabled={isBusy}
+          tabIndex={-1}
           accept={IMAGE_ACCEPT}
           aria-label={label}
           className="sr-only"

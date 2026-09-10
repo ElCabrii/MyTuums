@@ -273,6 +273,36 @@ describe("guardedLinkFetch", () => {
     },
   );
 
+  it.each(["malformed redirect", "body stream error"])(
+    "degrades %s to a network refusal",
+    async (failure) => {
+      const transport = scriptableTransport({
+        addresses: GLOBAL,
+        responses: () =>
+          failure === "malformed redirect"
+            ? new Response(null, { status: 302, headers: { location: "http://[invalid/" } })
+            : new Response(
+                new ReadableStream<Uint8Array>({
+                  start(controller) {
+                    controller.enqueue(new Uint8Array([65]));
+                  },
+                  pull(controller) {
+                    controller.error(new Error("connection reset"));
+                  },
+                }),
+                { headers: { "content-type": "text/html" } },
+              ),
+      });
+      await expect(
+        guardedLinkFetch(new URL("https://example.com/"), {
+          transport,
+          maxBytes: 1024,
+          acceptContentType: () => true,
+        }),
+      ).resolves.toEqual({ ok: false, reason: "network" });
+    },
+  );
+
   it("refuses a redirect whose target is a non-standard port", async () => {
     const transport = scriptableTransport({
       addresses: GLOBAL,

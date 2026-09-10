@@ -131,3 +131,131 @@ export function createEventCursorCodec(firstSchema: z.ZodType<string>) {
     },
   };
 }
+
+/** The sort keys `game.list` orders its catalog by (see ./games.ts). */
+export type GameSort = "popularity" | "name" | "year" | "favorites" | "upcoming";
+
+/**
+ * A ranked-feed cursor (issue #305): the snapshot the page was served from
+ * plus the offset into its frozen order the next page starts at. Offset
+ * rather than score-keyed on purpose — the snapshot freezes the order, so an
+ * offset cannot skip or repeat a row the way a score cursor would when two
+ * posts share a score. The snapshot id rides both the cursor AND the
+ * `snapshotId` query param; the handler refuses the page when the two
+ * disagree, when the snapshot is unknown, foreign, differently-scoped or
+ * expired — explicitly, never by silently restarting.
+ */
+export interface DecodedRankCursor {
+  snapshotId: string;
+  offset: number;
+}
+
+const rankCursorPayload = z.object({
+  snapshotId: z.uuid(),
+  offset: z.number().int().min(0).max(100000),
+});
+
+export function createRankCursorCodec() {
+  return {
+    encode(snapshotId: string, offset: number): string {
+      return Buffer.from(JSON.stringify({ snapshotId, offset })).toString("base64url");
+    },
+
+    decode(raw: string): DecodedRankCursor {
+      return decodeCursorPayload(raw, rankCursorPayload);
+    },
+  };
+}
+
+/**
+ * A decoded `game.list` cursor: the sort it was minted under, that sort's key
+ * value, and the `igdb_id` tie-breaker.
+ *
+ * The games list is the first in this package whose keyset is not
+ * `(created_at, id)` DESC: the catalog's three sorts key on rank, name and
+ * release year, each with its own column type and nullability — so the
+ * cursor carries the sort's own key rather than a timestamp, and `decode`
+ * takes the sort the CALLER is listing under: a cursor minted by one sort is
+ * meaningless in another and is refused as malformed, the same
+ * one-list-one-cursor intent as every codec above.
+ */
+export interface DecodedGameCursor {
+  sort: GameSort;
+  /** `popularity` → the rank, `name` → the name, `year` → the year. */
+  key: number | string | null;
+  igdbId: number;
+}
+
+const gameCursorPayload = z.discriminatedUnion("sort", [
+  z.object({
+    sort: z.literal("popularity"),
+    rank: z.number().int().nullable(),
+    igdbId: z.number().int(),
+  }),
+  z.object({ sort: z.literal("name"), name: z.string().min(1).max(300), igdbId: z.number().int() }),
+  z.object({
+    sort: z.literal("year"),
+    year: z.number().int().nullable(),
+    igdbId: z.number().int(),
+  }),
+  // The favorites sort's key is never null — `favorite_count` defaults 0.
+  z.object({
+    sort: z.literal("favorites"),
+    count: z.number().int().min(0),
+    igdbId: z.number().int(),
+  }),
+  // The upcoming sort's key is never null either — `hype_count` defaults 0,
+  // and the unreleased filter (see ./games.ts) lives in the WHERE, not the key.
+  z.object({
+    sort: z.literal("upcoming"),
+    hypes: z.number().int().min(0),
+    igdbId: z.number().int(),
+  }),
+]);
+
+/**
+ * The cursor codec for `game.list` — see `DecodedGameCursor` for why this
+ * one departs from the `(createdAt, id)` shape every other codec shares.
+ */
+export function createGameCursorCodec() {
+  return {
+    encode(sort: GameSort, key: number | string | null, igdbId: number): string {
+      // SAFETY: the key's type is the one `keyOf` of THIS sort produced —
+      // the caller is `gameKeysetPage`, which pairs each sort with its own
+      // `keyOf`, and `decode` validates the payload against the same
+      // discriminated union below on the way back out.
+      const payload =
+        sort === "popularity"
+          ? { sort, rank: key as number | null, igdbId }
+          : sort === "name"
+            ? { sort, name: key as string, igdbId }
+            : sort === "favorites"
+              ? { sort, count: key as number, igdbId }
+              : sort === "upcoming"
+                ? { sort, hypes: key as number, igdbId }
+                : { sort, year: key as number | null, igdbId };
+      return Buffer.from(JSON.stringify(payload)).toString("base64url");
+    },
+
+    decode(raw: string, sort: GameSort): DecodedGameCursor {
+      const data = decodeCursorPayload(raw, gameCursorPayload);
+      if (data.sort !== sort) {
+        throw new ORPCError("BAD_REQUEST", { message: "Malformed pagination cursor." });
+      }
+      return {
+        sort,
+        key:
+          data.sort === "name"
+            ? data.name
+            : data.sort === "popularity"
+              ? data.rank
+              : data.sort === "favorites"
+                ? data.count
+                : data.sort === "upcoming"
+                  ? data.hypes
+                  : data.year,
+        igdbId: data.igdbId,
+      };
+    },
+  };
+}

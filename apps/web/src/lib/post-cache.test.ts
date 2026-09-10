@@ -39,6 +39,9 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     removedReason: null,
     editedAt: null,
     unavailable: false,
+    private: false,
+    parentPrivate: false,
+    quotedPrivate: false,
     attachments: [],
     ...overrides,
   };
@@ -46,7 +49,7 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
 
 function feedPage(posts: Post[]): InfiniteData<PostListPage> {
   return {
-    pages: [{ items: posts, nextCursor: null }],
+    pages: [{ items: posts, nextCursor: null, gameMentions: {}, ranking: null }],
     pageParams: [undefined],
   };
 }
@@ -57,6 +60,8 @@ function replyPage(directReply: Post, continuation: Post): InfiniteData<PostList
       {
         items: [directReply],
         nextCursor: null,
+        gameMentions: {},
+        ranking: null,
         continuations: [
           {
             rootPostId: directReply.id,
@@ -72,7 +77,7 @@ function replyPage(directReply: Post, continuation: Post): InfiniteData<PostList
 
 function searchPage(posts: Post[]): InfiniteData<SearchPostsPage> {
   return {
-    pages: [{ items: posts, nextCursor: null }],
+    pages: [{ items: posts, nextCursor: null, gameMentions: {} }],
     pageParams: [undefined],
   };
 }
@@ -199,6 +204,32 @@ describe("post-cache", () => {
       });
     });
 
+    it("leaves a ranked page's snapshot block untouched while reconciling a like in place", () => {
+      const queryClient = new QueryClient();
+      const target = makePost({ id: "ranked-1", likeCount: 3, viewerHasLiked: false });
+      const key = orpc.post.list.key({ input: { limit: 20, feed: "discover", ranked: true } });
+      const ranking = {
+        snapshotId: "snapshot-1",
+        expiresAt: new Date("2026-09-07T00:00:00.000Z").toISOString(),
+        hasInterests: true,
+        suggestions: [],
+      };
+      queryClient.setQueryData<InfiniteData<PostListPage>>(key, {
+        pages: [{ items: [target], nextCursor: null, gameMentions: {}, ranking }],
+        pageParams: [undefined],
+      });
+
+      updatePostEverywhere(queryClient, "ranked-1", (post) => ({
+        ...post,
+        likeCount: post.likeCount + 1,
+        viewerHasLiked: true,
+      }));
+
+      const page = queryClient.getQueryData<InfiniteData<PostListPage>>(key)?.pages[0];
+      expect(page?.items[0]).toMatchObject({ likeCount: 4, viewerHasLiked: true });
+      expect(page?.ranking).toEqual(ranking);
+    });
+
     it("patches the same post inside a post.thread entry as both data.post and an ancestor", () => {
       const queryClient = new QueryClient();
       const shared = makePost({ id: "shared-1", likeCount: 1, viewerHasLiked: false });
@@ -210,6 +241,7 @@ describe("post-cache", () => {
         post: shared,
         ancestors: [],
         truncated: false,
+        gameMentions: {},
       });
 
       // Thread B: "shared-1" shows up as an ancestor of a different focused post.
@@ -218,6 +250,7 @@ describe("post-cache", () => {
         post: reply,
         ancestors: [shared],
         truncated: false,
+        gameMentions: {},
       });
 
       updatePostEverywhere(queryClient, "shared-1", (post) => ({
@@ -248,7 +281,12 @@ describe("post-cache", () => {
       const queryClient = new QueryClient();
       const post = makePost({ id: "cold-1" });
       const key = orpc.post.thread.key({ input: { postId: "cold-1" } });
-      queryClient.setQueryData<Thread>(key, { post, ancestors: [], truncated: false });
+      queryClient.setQueryData<Thread>(key, {
+        post,
+        ancestors: [],
+        truncated: false,
+        gameMentions: {},
+      });
 
       expect(readCachedPost(queryClient, "cold-1")).toEqual(post);
     });
@@ -343,7 +381,12 @@ describe("post-cache", () => {
       const threadKey = orpc.post.thread.key({ input: { postId: "round-trip-1" } });
 
       queryClient.setQueryData(feedKey, feedPage([post]));
-      queryClient.setQueryData<Thread>(threadKey, { post, ancestors: [], truncated: false });
+      queryClient.setQueryData<Thread>(threadKey, {
+        post,
+        ancestors: [],
+        truncated: false,
+        gameMentions: {},
+      });
 
       const before = {
         feed: queryClient.getQueryData(feedKey),
@@ -647,7 +690,7 @@ describe("post-cache", () => {
       const searchKey = orpc.search.posts.key({ input: { q: "hello", limit: 20 } });
 
       queryClient.setQueryData(bookmarksKey, {
-        pages: [{ items: [target, neighbour], nextCursor: null }],
+        pages: [{ items: [target, neighbour], nextCursor: null, gameMentions: {}, ranking: null }],
         pageParams: [undefined],
       });
       queryClient.setQueryData(homeKey, feedPage([target]));
@@ -687,8 +730,8 @@ describe("post-cache", () => {
 
       queryClient.setQueryData(bookmarksKey, {
         pages: [
-          { items: [first], nextCursor: "cursor-1" },
-          { items: [second], nextCursor: null },
+          { items: [first], nextCursor: "cursor-1", gameMentions: {}, ranking: null },
+          { items: [second], nextCursor: null, gameMentions: {}, ranking: null },
         ],
         pageParams: [undefined, "cursor-1"],
       });

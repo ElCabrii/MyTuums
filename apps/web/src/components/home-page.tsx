@@ -1,19 +1,23 @@
 import { Link } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Compass, Loader2 } from "lucide-react";
+import { Compass } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PostComposer } from "@/components/post-composer";
-import { PostFeed } from "@/components/post-feed";
+import { FeedSkeleton } from "@/components/post-feed";
+import { RankedFeed } from "@/components/ranked-feed";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
-import { homeFeedScopeAtom, postFeedAtom } from "@/atoms/post-feed";
+import { homeFeedScopeAtom } from "@/atoms/post-feed";
 import { feedScopeAtom } from "@/lib/feed-scope";
 import { m } from "@/paraglide/messages.js";
 
 /**
  * The home feed page (route `/`): the For you|Following scope switch, the
- * composer, and the scoped feed. Signed-out visitors never get here — the
- * route is gated (see `use-require-signed-in.ts`), so the old sign-in CTA
- * branch is gone and there is deliberately no third view to reintroduce it.
+ * composer, and the scoped ranked feed (issue #305). Both scopes rank — there
+ * is deliberately no chronological toggle — and the order holds per browsing
+ * snapshot until an explicit Refresh starts a new one. Signed-out visitors
+ * never get here — the route is gated (see `use-require-signed-in.ts`), so
+ * the old sign-in CTA branch is gone and there is deliberately no third view
+ * to reintroduce it.
  */
 export function HomePage() {
   const setFeedScope = useSetAtom(feedScopeAtom);
@@ -45,17 +49,18 @@ export function HomePage() {
         `scope` is null exactly while the session is pending — see
         `homeFeedScopeAtom`. Rendering the feed straight away would mount the
         *global* one, fire a request, then flip to Following a tick later and
-        fire a second. This is the same spinner PostFeed shows while loading,
+        fire a second. This is the same skeleton PostFeed shows while loading,
         so it costs no visible state.
       */}
       {scope === null ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="text-primary dark:text-link h-6 w-6 animate-spin motion-reduce:animate-none" />
-        </div>
+        <FeedSkeleton />
       ) : (
-        <PostFeed
-          feedAtom={postFeedAtom({ feed: scope })}
+        <RankedFeed
+          params={{ feed: scope, ranked: true }}
           emptyMessage={scope === "following" ? m.feed_empty_following() : m.feed_empty()}
+          // The Following feed keeps its catch-up explanation — no interests
+          // nudge; For you shares Discover's cold-start prompt.
+          coldStartPrompt={scope !== "following"}
           emptyAction={
             scope === "following" ? (
               <Button

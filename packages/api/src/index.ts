@@ -5,15 +5,19 @@
  * ./constants.ts for why the root must never be imported from the web app.
  */
 export { appRouter, type AppRouter } from "./router.js";
+export { createVideoUploads } from "./video-uploads.js";
+export { resolveVideoMedia } from "./video-media.js";
 export { createContext, defaultStorage } from "./context.js";
 export { createMediaResolver, type MediaAuthorizer, type MediaResolver } from "./media.js";
 export { ensureMediaVariant } from "./media-variants.js";
 export { canViewPostMedia } from "./post-media.js";
 export { canViewLinkCardMedia } from "./link-card.js";
+export { canViewGameCoverMedia, gameCoverRedirectCacheControl } from "./game-media.js";
 export {
   canViewProfileMedia,
   profileDisplayRedirectCacheControl,
 } from "./profile-media-authorization.js";
 export { objectKeyFromMediaPath } from "./image.js";
 export { publicPostHead, type PublicPostHead } from "./public-post-head.js";
+export { publicGameHead, type PublicGameHead } from "./public-game-head.js";
 export type { Storage } from "./storage.js";

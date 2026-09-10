@@ -3,7 +3,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { ORPCError } from "@orpc/client";
-import { blockDialogAtom, reportDialogAtom } from "@/atoms/moderation";
+import { blockDialogAtom, reportDialogAtom } from "@/atoms/dialog-targets";
 import { createTestQueryClient, makeProfile } from "@/test/factories";
 import { queryFixtures } from "@/test/query-fixtures";
 import { renderWithProviders } from "@/test/render";
@@ -19,6 +19,7 @@ const fakeClient = {
     unfollow: vi.fn(),
   },
   moderation: { unbanUser: vi.fn() },
+  game: { favorites: vi.fn().mockResolvedValue({ items: [], nextCursor: null }) },
 };
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));
@@ -94,6 +95,79 @@ describe("ProfileLayout query states", () => {
 });
 
 describe("ProfileLayout role and ownership gates", () => {
+  it("renders the profile's badges beside the display name", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data(
+      "badged",
+      makeProfile({
+        username: "badged",
+        displayUsername: "Badged",
+        name: "Badged Person",
+        badges: ["popular", "founder"],
+      }),
+    );
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@badged",
+      signedInAs: true,
+    });
+
+    expect(screen.getByRole("heading", { name: "Badged Person" })).toBeInTheDocument();
+    expect(screen.getByTitle(m.badge_popular())).toBeInTheDocument();
+    expect(screen.getByTitle(m.badge_founder())).toBeInTheDocument();
+  });
+
+  it("renders locked counts as plain numbers with no list dialog for non-followers", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data(
+      "locked",
+      makeProfile({
+        username: "locked",
+        displayUsername: "Locked",
+        isPrivate: true,
+        followerCount: 5,
+        followingCount: 3,
+      }),
+    );
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@locked",
+      signedInAs: true,
+    });
+
+    // The counts read as text (issue #328) — no dialog trigger wraps them, so
+    // a non-follower can never open a list the server would only return empty.
+    expect(screen.getByText(m.follow_followers()).closest("button")).toBeNull();
+    expect(screen.getByText(m.follow_following()).closest("button")).toBeNull();
+  });
+
+  it("renders no badges on the suspended stub", async () => {
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).profile.data(
+      "suspbadged",
+      makeProfile({
+        username: "suspbadged",
+        displayUsername: "SuspBadged",
+        suspended: true,
+        badges: ["founder"],
+      }),
+    );
+
+    await renderWithProviders(<ProfileLayout />, {
+      queryClient,
+      initialPath: "/@suspbadged",
+      signedInAs: true,
+    });
+
+    // Authored-field redaction applies to badges like everything else
+    // (issue #308) — and the stub page never renders the header row at all.
+    expect(screen.getByText(m.profile_suspended_body())).toBeInTheDocument();
+    expect(screen.queryByTitle(m.badge_founder())).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: m.profile_badges_label() })).not.toBeInTheDocument();
+  });
+
   it("shows a suspended stub but no unban action to a plain user", async () => {
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data(
@@ -141,7 +215,7 @@ describe("ProfileLayout role and ownership gates", () => {
     );
   });
 
-  it("shows settings, and no sign-out, on the viewer's own profile", async () => {
+  it("shows profile editing, and no sign-out, on the viewer's own profile", async () => {
     const own = makeProfile({ id: "viewer-1", username: "alex", displayUsername: "Alex" });
     const queryClient = createTestQueryClient();
     queryFixtures(queryClient).profile.data("alex", own);
@@ -152,7 +226,13 @@ describe("ProfileLayout role and ownership gates", () => {
       signedInAs: { id: own.id, username: "alex", email: "owner@example.com" },
     });
 
-    expect(screen.getByRole("button", { name: m.profile_settings() })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: m.profile_edit() })).toBeInTheDocument();
+    // Release 0.5.0: a profile with no favorites must still show its invitation.
+    const favorites = await screen.findByRole("region", { name: m.profile_favorite_games() });
+    expect(within(favorites).getByText(m.profile_favorites_empty_own())).toBeInTheDocument();
+    expect(
+      within(favorites).getByRole("link", { name: m.profile_favorites_browse() }),
+    ).toHaveAttribute("href", "/games");
     // Sign-out has no surface on the profile page (issue #282): the navbar
     // account menu is the always-visible affordance, and /settings/account
     // carries the card. The click paths themselves stay pinned in

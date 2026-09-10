@@ -1,11 +1,20 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  // Three entry points: the server, the pre-deploy migration runner (see
-  // src/migrate.ts), and the promote-user CLI (see src/promote.ts). All are
-  // bundled the same way so the runtime image needs no dev dependencies to
-  // migrate or to appoint the first moderators.
-  entry: ["src/index.ts", "src/migrate.ts", "src/promote.ts"],
+  // Five entry points: the server, the pre-deploy migration runner (see
+  // src/migrate.ts), the promote-user CLI (see src/promote.ts), the one-off
+  // Founder-badge grant (see src/grant-founder-badge.ts), and the game-catalog
+  // sync the Railway cron service runs weekly (see src/games-sync.ts). All
+  // are bundled the same way so the runtime image needs no dev dependencies
+  // to migrate, appoint the first moderators, grant the Founder badge, or
+  // refresh the game catalog.
+  entry: [
+    "src/index.ts",
+    "src/migrate.ts",
+    "src/promote.ts",
+    "src/grant-founder-badge.ts",
+    "src/games-sync.ts",
+  ],
   format: ["esm"],
   platform: "node",
   target: "node24",
@@ -13,6 +22,11 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   splitting: false,
+  // Bundled CommonJS dependencies (React DOM's email renderer) still require
+  // Node built-ins at runtime. ESM has no require unless we provide it.
+  banner: {
+    js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);',
+  },
   // `packages/{db,auth,api}` are source-only internal packages: their
   // `exports` point straight at `.ts` files with `.js` specifiers. Node's
   // native type-stripping does not rewrite those specifiers, so importing

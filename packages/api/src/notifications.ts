@@ -1,7 +1,7 @@
+import { ORPCError } from "@orpc/server";
 import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import type { Database } from "@my-tuums/db";
 import {
   moderationAction,
   notification,
@@ -17,10 +17,10 @@ import {
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { keysetPage } from "./pagination.js";
-import { postAttachmentsSelection } from "./post-media.js";
+import { postAttachmentsSelection, type PostAttachment } from "./post-media.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
-import { effectivelyBanned, invisibleUser } from "./visibility.js";
+import { effectivelyBanned, invisibleUser, privatePostHidden } from "./visibility.js";
 
 /**
  * The notification surface (issue #259): the one place a like, reply,
@@ -36,7 +36,7 @@ import { effectivelyBanned, invisibleUser } from "./visibility.js";
  */
 
 /**
- * The six notification type codes — the `notification.type` check
+ * The seven notification type codes — the `notification.type` check
  * constraint's list (packages/db/src/schema/app.ts).
  *
  * Server-side only, unlike the moderation action codes in `./constants.ts`:
@@ -50,10 +50,12 @@ export const NOTIFICATION_TYPES = [
   "repost",
   "quote",
   "follow",
+  "follow_request",
   "moderation",
+  "video_failed",
 ] as const;
 
-/** One of the six notification type codes. */
+/** One of the seven notification type codes. */
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 /**
@@ -74,50 +76,8 @@ export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
  */
 const BURST_WINDOW_SECONDS = 60;
 
-/**
- * Mints one notification row — the single writer-side entry point.
- *
- * Called inside the transaction that writes the cause, so the pair commits or
- * rolls back together. The caller owns exactly-once: it calls this only when
- * the cause row was newly inserted (like, follow) or on the guarded path that
- * already guarantees one audit row (moderation, via `logAction`).
- *
- * Self-caused events are skipped here rather than left to each caller: the
- * `notification_not_self` check constraint would reject the insert and take
- * the whole cause transaction down with it, so the guard has to sit in front
- * of the write, and having it in one place is what keeps a new call site from
- * forgetting it.
- *
- * The mint itself is unconditional — no damper here. Read state is the
- * recipient's `notification_last_seen` cursor, and a row nobody has seen is
- * never anything but unread; `notification.unreadCount` is where a burst
- * collapses, so damping can never make history lie about what was shown.
- */
-export async function insertNotification(
-  db: Pick<Database, "insert">,
-  args: {
-    recipientId: string;
-    /** Null for moderation rows — the notice is from MyTuums, like the email. */
-    actorId: string | null;
-    type: NotificationType;
-    /**
-     * The like's or repost's post, or the reply/quote itself. Required for
-     * `like`/`reply`/`repost`/`quote`.
-     */
-    postId?: string;
-    /** The mirrored audit action. Required for `moderation`. */
-    actionId?: string;
-  },
-): Promise<void> {
-  if (args.actorId !== null && args.actorId === args.recipientId) return;
-  await db.insert(notification).values({
-    recipientId: args.recipientId,
-    actorId: args.actorId,
-    type: args.type,
-    postId: args.postId ?? null,
-    actionId: args.actionId ?? null,
-  });
-}
+// The worker shares the writer without loading the session-gated inbox router.
+export { insertNotification } from "./notification-writer.js";
 
 /**
  * Feeds are keyset-paginated on `(notification.created_at, notification.id)`
@@ -161,7 +121,7 @@ function withinRetention() {
  */
 function visibleNotification(viewerId: string) {
   return sql`(
-    ${notification.type} = 'moderation'
+    ${notification.type} in ('moderation', 'video_failed')
     or (not ${effectivelyBanned} and not ${invisibleUser(viewerId)})
   ) and (${notification.postId} is null or ${post.deletedAt} is null)`;
 }
@@ -170,20 +130,22 @@ function visibleNotification(viewerId: string) {
  * The rows the badge counts: the visible, retained, unread ones — collapsed
  * to one tick per user-caused `(actor, type, minute-bucket)` by the
  * `count(distinct (...))` below. Swapping the first composite slot to the row
- * id for moderation rows makes each of them distinct, which is the "never
- * damped" rule expressed in the same expression. The distinct row comparison
- * treats nulls as equal, so like/reply/follow rows from one actor collapse
- * exactly as intended.
+ * id for moderation and follow-request rows makes each of them distinct,
+ * which is the "never damped" rule expressed in the same expression: a
+ * follow request is actionable (issue #328) and must tick even in a burst,
+ * like a moderation notice. The distinct row comparison treats nulls as
+ * equal, so like/reply/follow rows from one actor collapse exactly as
+ * intended.
  */
 const BURST_BUCKET_SECONDS = sql`floor(extract(epoch from ${notification.createdAt}) / ${BURST_WINDOW_SECONDS})`;
 const badgeTickKey = sql`(
-  case when ${notification.type} = 'moderation' then ${notification.id} end,
+  case when ${notification.type} in ('moderation', 'follow_request', 'video_failed') then ${notification.id} end,
   ${notification.actorId},
   ${notification.type},
   ${BURST_BUCKET_SECONDS}
 )`;
 
-/** The `notification` procedure group: list, unreadCount, markRead. */
+/** The `notification` procedure group: list, unreadCount, markRead, delete, clearAll. */
 export const notificationRouter = {
   /**
    * Pages the caller's notifications, newest first. Requires a session.
@@ -228,11 +190,22 @@ export const notificationRouter = {
         // author-deleted post never reaches the page at all — the visibility
         // predicate above tombstones the row. Null/empty on follow and
         // moderation rows, whose `post_id` is null.
+        //
+        // A private post (issue #328) previews nothing either: its row still
+        // surfaces — the recipient should know someone replied — but the text
+        // and images redact. Here `user` is the actor and `post` the
+        // notified-about post, and for reply/quote rows the actor IS the post
+        // author, so `privatePostHidden` evaluates correctly; like/repost rows
+        // name the recipient's own post and correctly do not redact.
         postContent: sql<string | null>`case
           when ${post.removedAt} is not null or ${post.deletedAt} is not null then null
+          when ${privatePostHidden(context.user.id)} then null
           else ${post.content}
         end`,
-        postAttachments: postAttachmentsSelection(),
+        postAttachments: sql<PostAttachment[]>`case
+          when ${privatePostHidden(context.user.id)} then '[]'::jsonb
+          else ${postAttachmentsSelection()}
+        end`,
         actor: {
           id: user.id,
           name: user.name,
@@ -388,5 +361,47 @@ export const notificationRouter = {
         );
 
       return { read: row?.count ?? 0 };
+    }),
+
+  /**
+   * Deletes one of the caller's own notifications (issue #330).
+   *
+   * The row is the recipient's private inbox entry — deleting it affects no
+   * other user and no audit trail, unlike a moderation action row. The
+   * `and(id, recipientId)` predicate is the authorization: a row belonging
+   * to someone else reads as missing, so no existence oracle leaks across
+   * accounts. Deleting an unread row shrinks the badge through the same
+   * `unreadCount` query the header already reads — no cursor rewrite needed,
+   * the row is simply gone from the counted set.
+   */
+  delete: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.markRead))
+    .input(z.object({ id: z.uuid() }))
+    .handler(async ({ input, context }) => {
+      const deleted = await context.db
+        .delete(notification)
+        .where(and(eq(notification.id, input.id), eq(notification.recipientId, context.user.id)))
+        .returning({ id: notification.id });
+
+      if (deleted.length === 0) throw new ORPCError("NOT_FOUND");
+      return { success: true as const, id: input.id };
+    }),
+
+  /**
+   * Deletes every notification the caller owns (issue #330) — the inbox's
+   * "Clear all". One statement, no cursor involved: the read cursor
+   * (`notification_last_seen`) is left untouched, since a row that no longer
+   * exists needs no read state and a future row must still land unread.
+   */
+  clearAll: protectedProcedure
+    .use(rateLimit(RATE_LIMITS.markRead))
+    .input(z.object({}))
+    .handler(async ({ context }) => {
+      const deleted = await context.db
+        .delete(notification)
+        .where(eq(notification.recipientId, context.user.id))
+        .returning({ id: notification.id });
+
+      return { deletedCount: deleted.length };
     }),
 };

@@ -1,5 +1,6 @@
 import {
   FOLLOW_PAGE_SIZE,
+  GAMES_PAGE_SIZE,
   MODERATION_PAGE_SIZE,
   NOTIFICATION_PAGE_SIZE,
   POST_PAGE_SIZE,
@@ -15,9 +16,13 @@ interface PostListInput {
   continuationRootId?: string;
   includeReplies?: boolean;
   includeReposts?: boolean;
-  kind?: "posts" | "replies" | "all";
-  feed?: FeedScope | "bookmarks";
+  kind?: "posts" | "replies" | "all" | "shares";
+  feed?: PostListScope;
+  q?: string;
+  gameSlug?: string;
   cursor?: string;
+  ranked?: boolean;
+  snapshotId?: string;
 }
 interface PagedSearchInput {
   q: string;
@@ -43,15 +48,16 @@ export type CaseRef = { targetType: "post" | "user"; targetId: string };
 export type FollowDirection = "followers" | "following";
 
 /** The profile activity views; `both` preserves the legacy includeReplies input. */
-export type PostFeedKind = "posts" | "replies" | "both";
+export type PostFeedKind = "posts" | "replies" | "both" | "shares";
 
 /**
  * Which `post.list` scope a feed atom reads. The two home scopes are the
- * persisted `FeedScope`; `bookmarks` is the caller's private saved page and is
+ * persisted `FeedScope`; `discover` is the out-of-network reading surface
+ * (issue #305); `bookmarks` is the caller's private saved page and is
  * never a home-feed choice — it deliberately stays out of `feedScopeAtom`'s
  * enum so a hand-edited `localStorage` value can never select it.
  */
-export type PostListScope = FeedScope | "bookmarks";
+export type PostListScope = FeedScope | "bookmarks" | "discover";
 
 export type PostFeedParams = {
   /** Omit for the global timeline; set to scope the feed to one author. */
@@ -64,56 +70,134 @@ export type PostFeedParams = {
   includeReplies?: boolean;
   /** The author's own repost events join the profile feed when this is set. */
   includeReposts?: boolean;
-  /** Profile-only three-way filter; `both` is encoded as legacy includeReplies. */
+  /** Profile activity filter; `both` is encoded as legacy includeReplies. */
   kind?: PostFeedKind;
+  /** Discover-only free-text filter on post text. */
+  q?: string;
+  /** Discover-only game filter — a catalog slug, matched as `#hashtagKey`. */
+  gameSlug?: string;
+  /**
+   * Ranked (issue #305) rather than chronological. First-class for the home
+   * feeds and Discover only — profile, thread, search and bookmarks feeds
+   * never set it, so their keys and their chronological contract never move.
+   */
+  ranked?: boolean;
 };
 
+/**
+ * Whether these params may ride the ranked path (issue #305): the global,
+ * following and discover scopes with no author, reply, repost or activity
+ * scoping. `q`/`gameSlug` compose (filtered Discover stays ranked); every
+ * other combination stays chronological so the server never sees a ranked
+ * request it must refuse.
+ */
+export function isRankableFeedParams(params: PostFeedParams): boolean {
+  return (
+    params.ranked === true &&
+    (params.feed === "global" || params.feed === "following" || params.feed === "discover") &&
+    !params.authorId &&
+    !params.parentId &&
+    !params.includeReplies &&
+    !params.includeReposts &&
+    !params.kind
+  );
+}
+
 /** Authoritative query definitions shared by production atoms and test fixtures. */
-export function postListQueryOptions({
-  authorId,
-  feed: scope,
-  parentId,
-  includeReplies,
-  includeReposts,
-  kind,
-}: PostFeedParams) {
-  return orpc.post.list.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PostListInput = { limit: POST_PAGE_SIZE };
-      if (authorId) input.authorId = authorId;
-      if (parentId) input.parentId = parentId;
-      if (kind === "replies") input.kind = "replies";
-      else if (kind === "both" || includeReplies) input.includeReplies = true;
-      // Same conditional-spread rule as the fields above: only a profile
-      // feed sets this, so every other feed's key stays exactly as it was.
-      if (includeReposts) input.includeReposts = true;
-      // The global feed keeps a bare key (see the note on the conditional
-      // spreads above); the two scoped feeds carry their discriminator.
-      if (scope === "following" || scope === "bookmarks") input.feed = scope;
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam:
-      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
-      undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+export function postListQueryOptions(
+  {
+    authorId,
+    feed: scope,
+    parentId,
+    includeReplies,
+    includeReposts,
+    kind,
+    q,
+    gameSlug,
+    ranked,
+  }: PostFeedParams,
+  opts?: {
+    /**
+     * Resumes a ranked browsing snapshot (issue #305): read at fetch time
+     * per input build, so the first page and every cursor page carry the
+     * pinned id. This also runs once to derive the query key — callers that
+     * pass a reader MUST pin the key to the snapshot-free input (as
+     * `postFeedAtom` does), or the first resume forks a second cache entry
+     * the optimistic sweeps no longer match.
+     */
+    getSnapshotId?: () => string | undefined;
+  },
+) {
+  const rankable =
+    ranked === true &&
+    (scope === "global" || scope === "following" || scope === "discover") &&
+    !authorId &&
+    !parentId &&
+    !includeReplies &&
+    !includeReposts &&
+    !kind;
+  // An expired ranked snapshot is a BAD_REQUEST the server will refuse
+  // again — retrying resends the same id, so Refresh (a new snapshot) owns
+  // recovery, never the retryer.
+  return {
+    ...orpc.post.list.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PostListInput = { limit: POST_PAGE_SIZE };
+        if (authorId) input.authorId = authorId;
+        if (parentId) input.parentId = parentId;
+        if (kind === "shares") input.kind = "shares";
+        else if (kind === "replies") input.kind = "replies";
+        else if (kind === "both" || includeReplies) input.includeReplies = true;
+        // Same conditional-spread rule as the fields above: only a profile
+        // feed sets this, so every other feed's key stays exactly as it was.
+        if (includeReposts) input.includeReposts = true;
+        // Discover filters ride the same rule: absent means no key entry, so
+        // the unfiltered global feed keeps its bare key and its cache entry.
+        const trimmedQ = q?.trim();
+        if (trimmedQ) input.q = trimmedQ;
+        const trimmedGame = gameSlug?.trim();
+        if (trimmedGame) input.gameSlug = trimmedGame;
+        // The global feed keeps a bare key (see the note on the conditional
+        // spreads above); the scoped feeds carry their discriminator. Ranked
+        // is its own discriminator beside them: a ranked global feed never
+        // shares a cache entry with its chronological twin.
+        if (scope === "following" || scope === "bookmarks" || scope === "discover") {
+          input.feed = scope;
+        }
+        if (rankable) {
+          input.ranked = true;
+          const snapshotId = opts?.getSnapshotId?.();
+          if (snapshotId) input.snapshotId = snapshotId;
+        }
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 /** Loads continuation pages after the branch slice embedded in a direct-reply page. */
 export function replyContinuationQueryOptions(rootPostId: string, initialCursor: string) {
-  return orpc.post.list.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PostListInput = {
-        limit: POST_PAGE_SIZE,
-        continuationRootId: rootPostId,
-      };
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam: initialCursor,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  return {
+    ...orpc.post.list.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PostListInput = {
+          limit: POST_PAGE_SIZE,
+          continuationRootId: rootPostId,
+        };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam: initialCursor,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 export function profileQueryOptions(username: string) {
@@ -123,6 +207,74 @@ export function profileQueryOptions(username: string) {
     // Hover cards unmount when they close. Keep recently viewed profiles fresh
     // long enough that moving between links does not refetch the same person.
     staleTime: 60_000,
+  };
+}
+
+/** The `/games` index's list parameters — `q` is the page's filter bar. */
+export interface GameListParams {
+  sort: "popularity" | "name" | "year" | "favorites" | "upcoming";
+  q?: string;
+}
+
+interface PagedGameListInput {
+  sort: "popularity" | "name" | "year" | "favorites" | "upcoming";
+  limit: number;
+  q?: string;
+  cursor?: string;
+}
+
+/**
+ * One game's public page. `retryUnlessClientError` because a NOT_FOUND slug
+ * is a client error — retrying it would just ask again for a game that is
+ * not there.
+ */
+export function gameQueryOptions(slug: string) {
+  return {
+    ...orpc.game.bySlug.queryOptions({ input: { slug } }),
+    retry: retryUnlessClientError,
+  };
+}
+
+/**
+ * One profile's favorites rail (issue Q25): the games a user has favorited,
+ * newest first, with cursor pagination. Fresh on every profile view — a
+ * showcase, not a feed to keep warm.
+ */
+export function gameFavoritesQueryOptions(username: string) {
+  return {
+    ...orpc.game.favorites.infiniteOptions({
+      input: (cursor: string | undefined) => ({ username, cursor }),
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
+}
+
+/**
+ * The game directory's list, keyset-paginated per sort. The conditional `q`
+ * spread follows the same rule as `postListQueryOptions`' fields: a bare
+ * key for the unfiltered listing, a discriminated one the moment a filter
+ * exists, so the two never share a cache entry.
+ */
+export function gameListQueryOptions({ sort, q }: GameListParams) {
+  const normalized = q?.trim();
+  return {
+    ...orpc.game.list.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedGameListInput = { sort, limit: GAMES_PAGE_SIZE };
+        if (normalized) input.q = normalized;
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
   };
 }
 
@@ -153,17 +305,20 @@ export function linkCardQueryOptions(url: string) {
 
 export function userListQueryOptions(username: string, direction: FollowDirection) {
   const procedure = direction === "followers" ? orpc.user.followers : orpc.user.following;
-  return procedure.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PagedUserListInput = { username, limit: FOLLOW_PAGE_SIZE };
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam:
-      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
-      undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  return {
+    ...procedure.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedUserListInput = { username, limit: FOLLOW_PAGE_SIZE };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 export function searchUsersQueryOptions(q: string) {
@@ -184,6 +339,7 @@ export function searchUsersQueryOptions(q: string) {
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     }),
     enabled: normalized.length > 0,
+    retry: retryUnlessClientError,
   };
 }
 
@@ -205,35 +361,42 @@ export function searchPostsQueryOptions(q: string) {
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     }),
     enabled: normalized.length > 0,
+    retry: retryUnlessClientError,
   };
 }
 
 export function moderationQueueQueryOptions() {
-  return orpc.moderation.queue.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PagedModerationInput = { limit: MODERATION_PAGE_SIZE };
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam:
-      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
-      undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  return {
+    ...orpc.moderation.queue.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedModerationInput = { limit: MODERATION_PAGE_SIZE };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 export function auditLogQueryOptions() {
-  return orpc.moderation.auditLog.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PagedModerationInput = { limit: MODERATION_PAGE_SIZE };
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam:
-      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
-      undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  return {
+    ...orpc.moderation.auditLog.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedModerationInput = { limit: MODERATION_PAGE_SIZE };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 export function moderationCaseQueryOptions(ref: CaseRef) {
@@ -241,26 +404,53 @@ export function moderationCaseQueryOptions(ref: CaseRef) {
     ref.targetType === "post"
       ? { targetType: "post", targetId: ref.targetId }
       : { targetType: "user", targetId: ref.targetId };
-  return orpc.moderation.case.queryOptions({ input });
+  return {
+    ...orpc.moderation.case.queryOptions({ input }),
+    retry: retryUnlessClientError,
+  };
 }
 
 export function teamQueryOptions() {
-  return orpc.moderation.team.queryOptions();
+  return {
+    ...orpc.moderation.team.queryOptions(),
+    retry: retryUnlessClientError,
+  };
 }
 
 /** The viewer's notifications, newest first — one feed, no scope parameters. */
 export function notificationsQueryOptions() {
-  return orpc.notification.list.infiniteOptions({
-    input: (cursor: string | undefined) => {
-      const input: PagedNotificationInput = { limit: NOTIFICATION_PAGE_SIZE };
-      if (cursor) input.cursor = cursor;
-      return input;
-    },
-    initialPageParam:
-      // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
-      undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  return {
+    ...orpc.notification.list.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedNotificationInput = { limit: NOTIFICATION_PAGE_SIZE };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
+}
+
+/** Inbound follow requests against the viewer's private account (issue #328), newest first. */
+export function followRequestListQueryOptions() {
+  return {
+    ...orpc.user.followRequest.list.infiniteOptions({
+      input: (cursor: string | undefined) => {
+        const input: PagedNotificationInput = { limit: FOLLOW_PAGE_SIZE };
+        if (cursor) input.cursor = cursor;
+        return input;
+      },
+      initialPageParam:
+        // SAFETY: the first page has no cursor; the page-param type flows from the input getter.
+        undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    retry: retryUnlessClientError,
+  };
 }
 
 /**
@@ -270,7 +460,10 @@ export function notificationsQueryOptions() {
  * when the reader next looks at the app, not on a timer.
  */
 export function unreadCountQueryOptions() {
-  return orpc.notification.unreadCount.queryOptions({ input: {} });
+  return {
+    ...orpc.notification.unreadCount.queryOptions({ input: {} }),
+    retry: retryUnlessClientError,
+  };
 }
 
 /**

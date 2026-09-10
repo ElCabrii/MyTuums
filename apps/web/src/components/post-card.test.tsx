@@ -7,9 +7,9 @@ import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { makeAuthor, makePost } from "@/test/factories";
 import { renderWithProviders } from "@/test/render";
 import { installTestOrpc, orpc } from "@/lib/orpc";
-import { quoteDialogAtom } from "@/atoms/quote-composer";
-import { deletePostDialogAtom } from "@/atoms/post-delete";
-import { editPostDialogAtom } from "@/atoms/post-edit";
+import { quoteDialogAtom, deletePostDialogAtom, editPostDialogAtom } from "@/atoms/dialog-targets";
+import { shareDialogAtom } from "@/atoms/share-dialog";
+
 import { PostCard } from "@/components/post-card";
 import { m } from "@/paraglide/messages.js";
 import { getLocale } from "@/paraglide/runtime.js";
@@ -300,6 +300,14 @@ describe("PostCard", () => {
       const post = makePost({ parentId: null, parent: null });
       await renderWithProviders(<PostCard post={post} />);
 
+      expect(screen.queryByText(m.reply_parent_unavailable())).not.toBeInTheDocument();
+    });
+
+    it("renders the private parent line when the parent is followers-only", async () => {
+      const post = makePost({ parentId: "parent-1", parent: null, parentPrivate: true });
+      await renderWithProviders(<PostCard post={post} />);
+
+      expect(screen.getByText(m.reply_parent_private())).toBeInTheDocument();
       expect(screen.queryByText(m.reply_parent_unavailable())).not.toBeInTheDocument();
     });
   });
@@ -720,6 +728,35 @@ describe("PostCard", () => {
       expect(screen.getByText(m.post_quoted_unavailable())).toBeInTheDocument();
     });
 
+    it("renders the private copy when the quoted post is followers-only", async () => {
+      const post = makePost({ quotedPostId: "quoted-1", quoted: null, quotedPrivate: true });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(screen.getByText(m.post_quoted_private())).toBeInTheDocument();
+      expect(screen.queryByText(m.post_quoted_unavailable())).not.toBeInTheDocument();
+    });
+
+    it("renders the private copy for a repost of a followers-only original", async () => {
+      const post = makePost({
+        unavailable: true,
+        private: true,
+        content: null,
+        author: { id: "", name: "", username: null, displayUsername: null, image: null },
+        repostedBy: {
+          id: "reposter-1",
+          name: "Reposter Name",
+          username: "reposter",
+          displayUsername: "Reposter",
+          image: null,
+          repostedAt: new Date("2026-08-30T10:00:00Z"),
+        },
+      });
+      await renderWithProviders(<PostCard post={post} />, { signedInAs: true });
+
+      expect(screen.getByText(m.post_private_stub())).toBeInTheDocument();
+      expect(screen.queryByText(m.post_quoted_unavailable())).not.toBeInTheDocument();
+    });
+
     it("opens the quote dialog from the repost menu's quote item", async () => {
       const store = createStore();
       const post = makePost();
@@ -732,6 +769,31 @@ describe("PostCard", () => {
       await user.click(await screen.findByRole("menuitem", { name: m.post_repost_menu_quote() }));
 
       expect(store.get(quoteDialogAtom)?.id).toBe(post.id);
+    });
+  });
+
+  // Issue #307: the share control opens the root-mounted share dialog. The
+  // dialog's own suite pins what it renders and how it copies; these pin the
+  // card's wiring — the control's presence and accessible name, that a click
+  // targets this exact post, and that the signed-out permalink bar keeps its
+  // existing treatment.
+  describe("the share control", () => {
+    it("opens the share dialog targeted at the post", async () => {
+      const store = createStore();
+      const post = makePost();
+      await renderWithProviders(<PostCard post={post} />, { store, signedInAs: true });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: m.post_share() }));
+
+      expect(store.get(shareDialogAtom)?.id).toBe(post.id);
+    });
+
+    it("keeps the signed-out permalink bar as it was: counts and the sign-in link, no share control", async () => {
+      await renderWithProviders(<PostCard post={makePost()} />);
+
+      expect(screen.queryByRole("button", { name: m.post_share() })).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: m.auth_login_link() })).toBeInTheDocument();
     });
   });
 });

@@ -4,7 +4,10 @@ import {
   type OutgoingHttpHeader,
   type OutgoingHttpHeaders,
 } from "node:http";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { Socket } from "node:net";
+import { z } from "zod";
+import { CLIENT_IP_HEADER } from "@my-tuums/auth/client-ip";
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { RPC_MAX_BODY_BYTES, RPC_SMALL_BODY_BYTES, isSignedOutPath } from "@my-tuums/api/constants";
@@ -43,11 +46,41 @@ export type SessionLookup =
  */
 export const AUTH_MAX_BODY_BYTES = 1024 * 1024;
 
+const clientAddressSchema = z.union([z.ipv4(), z.ipv6()]);
+
 /**
  * The stand-ins `createRequestHandler` routes through, injected so the
  * routing tree can be unit-tested with none of them real.
  */
 export interface RequestHandlerDeps {
+  /**
+   * When set, every request must carry this exact value in the
+   * `x-edge-secret` header or the origin answers 404 — including `/health`,
+   * before any routing branch runs. The value is a shared secret between the
+   * edge proxy and this origin: the proxy (a Cloudflare Transform Rule) sets
+   * the header on every request it forwards, overwriting anything a client
+   * sent, so the header proves the request passed through the proxy.
+   *
+   * Why that proof is needed: the origin's ingress is a public Railway
+   * hostname (the zone's CNAME is public DNS), and anyone can connect to it
+   * directly with the right SNI — bypassing Cloudflare, and with it Access.
+   * Requests that skip the proxy carry no attacker-guessable secret, so they
+   * never reach a routing branch. A presence check on a proxy header
+   * (`cf-connecting-ip` and friends) would NOT work here: on a direct
+   * connection the client controls every header, so those can be forged.
+   *
+   * Optional and unset everywhere the origin is meant to be reached directly:
+   * dev, CI, and production (which has no edge layer in front of it — it is
+   * the public site). Only preview sets it, paired with the Transform Rule
+   * that injects the matching value on `preview.mytuums.com`.
+   *
+   * Injected rather than read from env here for the same reason as the rest
+   * of these deps: the unit tests exercise both the set and unset states
+   * without touching `process.env`.
+   */
+  edgeSecret?: string;
+  /** Direct Railway ingress supplies X-Real-IP; never enable for arbitrary proxies. */
+  railwayProxy?: boolean;
   /** `SELECT 1` — throws if Postgres is unreachable. */
   pingDb: () => Promise<void>;
   /** BetterAuth's node handler for everything under `/api/auth`. */
@@ -76,7 +109,9 @@ export interface RequestHandlerDeps {
   resolveMediaUrl: (
     key: string,
     viewerId: string | null,
-  ) => Promise<{ url: string; cacheControl?: string } | null>;
+  ) => Promise<
+    { url: string; cacheControl?: string } | { body: string; contentType: string } | null
+  >;
   /**
    * Serves the built web app, when this deployment bundles it.
    *
@@ -218,6 +253,32 @@ function drainRejectedRequest(req: IncomingMessage): void {
   if (!(req instanceof Readable)) return;
   req.once("error", () => undefined);
   req.resume();
+}
+
+/**
+ * Parses the `x-edge-secret` header into the one value the edge gate can
+ * compare: `null` for absent, and for repeated — an array, which the proxy
+ * never produces since its rewrite is a `set`, so a client trying to smuggle
+ * its own half alongside a proxy-injected value is refused outright rather
+ * than given comma-join semantics the gate never agreed to.
+ */
+function edgeSecretOf(value: IncomingHttpHeaders["x-edge-secret"]): string | null {
+  if (Array.isArray(value) || value === undefined) return null;
+  return value;
+}
+
+/**
+ * Constant-time check of the parsed `x-edge-secret` header against the
+ * expected value, used by the edge gate at the top of the routing tree (see
+ * the `edgeSecret` dep). Both sides are hashed first so the comparison leaks
+ * neither timing nor length, and `timingSafeEqual` never throws on a length
+ * mismatch — both digests are SHA-256-sized by construction.
+ */
+function edgeSecretMatches(presented: string | null, expected: string): boolean {
+  if (presented === null) return false;
+
+  const digest = (value: string) => createHash("sha256").update(value).digest();
+  return timingSafeEqual(digest(presented), digest(expected));
 }
 
 /**
@@ -408,6 +469,60 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
     // already set here, so it lands on theirs too.
     const requestId = createRequestId();
     res.setHeader("x-request-id", requestId);
+
+    // The deploy-liveness half of the health surface, and the one route that
+    // must stay ABOVE the edge gate: Railway's healthchecker probes the
+    // deployment's ingress directly, through no edge proxy, so it can never
+    // carry the edge secret — gating it would fail every deploy as unhealthy.
+    // Liveness only, on purpose: `/health` (below the gate) is the DB-backed
+    // probe, and a blipping database must not make Railway roll back a deploy
+    // whose process is up.
+    if (req.url === "/live") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok" }));
+      return;
+    }
+
+    // The edge gate runs before every other routing branch — health included —
+    // because its question is not "which route is this" but "did this
+    // request pass through the edge proxy at all"; a request that didn't has
+    // no claim on any route, not even the health check. 404 rather than 403:
+    // a direct-to-origin probe should be indistinguishable from hitting a
+    // Railway edge that serves nothing. See the `edgeSecret` dep for why the
+    // header is a shared secret and not a proxy-presence check.
+    if (
+      deps.edgeSecret !== undefined &&
+      !edgeSecretMatches(edgeSecretOf(req.headers["x-edge-secret"]), deps.edgeSecret)
+    ) {
+      drainRejectedRequest(req);
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Not found");
+      return;
+    }
+
+    // Never accept a caller's internal identity header. Cloudflare identity is
+    // trusted only after the secret gate above; direct Railway ingress supplies
+    // X-Real-IP. A local server uses the connection address and ignores both.
+    delete req.headers[CLIENT_IP_HEADER];
+    const proxyHeader =
+      deps.edgeSecret !== undefined
+        ? "cf-connecting-ip"
+        : deps.railwayProxy
+          ? "x-real-ip"
+          : undefined;
+    const clientIp = clientAddressSchema.safeParse(
+      proxyHeader ? req.headers[proxyHeader] : req.socket.remoteAddress,
+    );
+    if (clientIp.success) {
+      req.headers[CLIENT_IP_HEADER] = clientIp.data;
+    } else if (proxyHeader && req.url !== "/health") {
+      // A missing/ambiguous upstream identity must not collapse all visitors
+      // into one auth bucket. Health probes remain independent of client IPs.
+      drainRejectedRequest(req);
+      res.writeHead(400, { "Content-Type": "text/plain" });
+      res.end("Invalid client address");
+      return;
+    }
 
     try {
       // Checked first, above /rpc and /api/auth, so probes don't pay for
@@ -643,6 +758,16 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         if (!media) {
           res.writeHead(404, { "Content-Type": "text/plain" });
           res.end("Not found");
+          return;
+        }
+
+        if ("body" in media) {
+          res.writeHead(200, {
+            "Content-Type": media.contentType,
+            "Content-Length": Buffer.byteLength(media.body, "utf8"),
+            "Cache-Control": "private, no-store",
+          });
+          res.end(req.method === "HEAD" ? undefined : media.body);
           return;
         }
 

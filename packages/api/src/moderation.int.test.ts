@@ -2114,7 +2114,7 @@ describe("unbanEffect", () => {
     });
     expect(pending.pending).toHaveLength(1);
     expect(pending.pending[0].userId).toBe(target.id);
-    expect(pending.pending[0].build("en").subject).toBe("Your account is no longer banned");
+    expect((await pending.pending[0].build("en")).subject).toBe("Your account is no longer banned");
 
     const [row] = await anonContext.db
       .select({ banned: user.banned, banExpires: user.banExpires })

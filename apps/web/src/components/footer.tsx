@@ -2,12 +2,12 @@ import { lazy, Suspense } from "react";
 import { Link } from "@tanstack/react-router";
 import { m } from "@/paraglide/messages.js";
 import { APP_VERSION } from "@/lib/app-version";
+import { AnalyticsPreferencesButton } from "@/components/analytics-consent";
 
-// The locale switcher is the only interactive control in the footer and the
-// only one that pulls in popover machinery (floating-ui + focus management);
-// lazy-loading it keeps the wordmark and legal links static. The fallback
-// reserves the locale control's button footprint so the legal row does not
-// move when the chunk mounts.
+// The locale switcher is the only footer control that pulls in popover
+// machinery (floating-ui + focus management); lazy-loading it keeps the
+// wordmark and simple links/buttons static. The fallback reserves the locale
+// control's button footprint so the legal row does not move when it mounts.
 const FooterLocaleMenu = lazy(() =>
   import("@/components/footer-locale-menu").then((mod) => ({ default: mod.FooterLocaleMenu })),
 );
@@ -50,6 +50,7 @@ export function Footer() {
           <Link to="/mentions-legales" className="hover:text-foreground hover:underline">
             {m.legal_notice()}
           </Link>
+          <AnalyticsPreferencesButton className="hover:text-foreground hover:underline" />
           <Suspense fallback={<span aria-hidden="true" className="inline-flex h-8 min-w-32" />}>
             <FooterLocaleMenu />
           </Suspense>

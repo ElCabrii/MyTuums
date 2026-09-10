@@ -99,6 +99,11 @@ export function PrivacyPolicy() {
             <td>{m.legal_privacy_table_row_rate_limit_source()}</td>
             <td>{m.legal_privacy_table_row_rate_limit_why()}</td>
           </tr>
+          <tr>
+            <td>{m.legal_privacy_table_row_analytics_data()}</td>
+            <td>{m.legal_privacy_table_row_analytics_source()}</td>
+            <td>{m.legal_privacy_table_row_analytics_why()}</td>
+          </tr>
         </tbody>
       </table>
       <p>
@@ -125,6 +130,10 @@ export function PrivacyPolicy() {
           <strong>{m.legal_privacy_bases_li3_strong()}</strong>
           {m.legal_privacy_bases_li3_after()}
         </li>
+        <li>
+          <strong>{m.legal_privacy_bases_li4_strong()}</strong>
+          {m.legal_privacy_bases_li4_after()}
+        </li>
       </ul>
       <p>{m.legal_privacy_bases_tail()}</p>
 
@@ -143,6 +152,10 @@ export function PrivacyPolicy() {
           <a href="https://railway.com/legal/dpa">railway.com/legal/dpa</a>
           {m.legal_privacy_sharing_li1_tail()}
         </li>
+        <li>
+          <strong>{m.legal_privacy_sharing_google_strong()}</strong>
+          {m.legal_privacy_sharing_google_after()}
+        </li>
         <li>{m.legal_privacy_sharing_li2()}</li>
       </ul>
       <p>{m.legal_privacy_sharing_tail()}</p>
@@ -150,10 +163,13 @@ export function PrivacyPolicy() {
       <h2>{m.legal_privacy_transfers_title()}</h2>
       <p>{m.legal_privacy_transfers_p1()}</p>
       <p>{m.legal_privacy_transfers_p2()}</p>
+      <p>{m.legal_privacy_transfers_p3()}</p>
 
       <h2>{m.legal_privacy_cookies_title()}</h2>
       <p>{m.legal_privacy_cookies_p1()}</p>
       <p>{m.legal_privacy_cookies_p2()}</p>
+      <p>{m.legal_privacy_cookies_p3()}</p>
+      <p>{m.legal_privacy_cookies_p4()}</p>
 
       <h2>{m.legal_privacy_retention_title()}</h2>
       <ul>
@@ -176,6 +192,10 @@ export function PrivacyPolicy() {
         <li>
           <strong>{m.legal_privacy_retention_li5_strong()}</strong>
           {m.legal_privacy_retention_li5_after()}
+        </li>
+        <li>
+          <strong>{m.legal_privacy_retention_li6_strong()}</strong>
+          {m.legal_privacy_retention_li6_after()}
         </li>
       </ul>
 

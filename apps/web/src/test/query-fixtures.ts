@@ -1,6 +1,8 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type {
   AuditLogPage,
+  GameCard,
+  GamePageData,
   ModerationCaseDetail,
   ModerationQueuePage,
   NotificationListPage,
@@ -16,6 +18,8 @@ import {
   auditLogQueryOptions,
   type CaseRef,
   type FollowDirection,
+  gameListQueryOptions,
+  gameQueryOptions,
   moderationCaseQueryOptions,
   moderationQueueQueryOptions,
   notificationsQueryOptions,
@@ -99,6 +103,17 @@ export function queryFixtures(queryClient: QueryClient) {
     userList: {
       data(username: string, direction: FollowDirection, pages: UserListPage[]): void {
         seedPages(queryClient, userListQueryOptions(username, direction).queryKey, pages);
+      },
+    },
+    game: {
+      page(slug: string, data: GamePageData): void {
+        queryClient.setQueryData(gameQueryOptions(slug).queryKey, data);
+      },
+      list(
+        params: Parameters<typeof gameListQueryOptions>[0],
+        pages: { items: GameCard[]; nextCursor: string | null }[],
+      ): void {
+        seedPages(queryClient, gameListQueryOptions(params).queryKey, pages);
       },
     },
     search: {

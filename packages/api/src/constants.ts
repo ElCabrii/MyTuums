@@ -46,9 +46,124 @@ export const SEARCH_PAGE_SIZE_MAX = 50;
 export const MODERATION_PAGE_SIZE = 20;
 export const MODERATION_PAGE_SIZE_MAX = 50;
 
+/**
+ * Default and maximum page sizes for `game.list` and `search.games`
+ * (issue Q23: 20 games per page on the public index).
+ */
+export const GAMES_PAGE_SIZE = 20;
+export const GAMES_PAGE_SIZE_MAX = 50;
+
+/** Ceiling on a `/games/{slug}` lookup's slug input, in characters. */
+export const GAME_SLUG_MAX_LENGTH = 120;
+
+/**
+ * Maximum favorites per response. The profile previews six; its popover
+ * requests subsequent pages to reach the complete list.
+ */
+export const GAME_FAVORITES_PAGE_SIZE = 12;
+
 /** Default and maximum page sizes for `notification.list`. */
 export const NOTIFICATION_PAGE_SIZE = 20;
 export const NOTIFICATION_PAGE_SIZE_MAX = 50;
+
+/**
+ * The `post.list` ranked feeds' snapshot horizon (issue #305): a frozen
+ * ordering stays servable this long, then resumes are refused and the client
+ * builds a fresh one. Short enough that a feed never reads stale for long,
+ * long enough that paging through it never restarts mid-scroll.
+ */
+export const FEED_RANK_SNAPSHOT_TTL_MS = 30 * 60 * 1000;
+
+/** Shared with the web's explicit-refresh recovery for refused snapshot resumes. */
+export const RANK_SNAPSHOT_INVALID_MESSAGE =
+  "This ranking is no longer valid. Refresh the feed to build a new one.";
+
+/**
+ * How many live ranked snapshots one viewer may hold. Each snapshot build
+ * deletes expired rows and trims past this cap (oldest first), so the
+ * table stays bounded per viewer without a background job.
+ */
+export const FEED_RANK_MAX_SNAPSHOTS_PER_VIEWER = 10;
+
+/**
+ * The ranked candidate window (issue #305): candidates are top-level posts
+ * from the last 7 days, widened to 30 days only when the 7-day pool is
+ * sparse. Recency is a ranking signal, not just a filter — the window is
+ * what keeps a ranked feed from surfacing archaeology.
+ */
+export const FEED_RANK_WINDOW_DAYS = 7;
+export const FEED_RANK_WINDOW_MAX_DAYS = 30;
+
+/** Below this many 7-day candidates, the build widens to the 30-day window. */
+export const FEED_RANK_SPARSE_THRESHOLD = 50;
+
+/** Hard ceiling on candidates scored per snapshot build. */
+export const FEED_RANK_POOL_LIMIT = 500;
+
+/**
+ * How much of the viewer's recent history one snapshot build reads per
+ * signal (likes, reposts, replies, favorites). Bounded so a
+ * decade-old account costs the same as a new one.
+ */
+export const FEED_RANK_HISTORY_LIMIT = 200;
+
+/** How far up a reply chain the topic walk follows `parent_id` per reply. */
+export const FEED_RANK_THREAD_WALK_MAX_DEPTH = 25;
+
+/**
+ * The ranked scorer's weights (issue #305) — interest first, then
+ * outside-network discovery, then raw popularity. Each signal category is
+ * capped before weighting, so the maxima keep this order: one favorite-game
+ * match outranks the whole like category, which outranks the follow edge,
+ * which outranks the repost category, the reply-topic interest, and the
+ * popularity total. Popularity is log-scaled AND capped, so a viral post
+ * cannot outrun genuine interest; freshness decays exponentially off a
+ * time-bucketed clock so scores stay identical across pages within a snapshot.
+ */
+export const FEED_RANK_WEIGHT_FAVORITE_GAME = 12;
+export const FEED_RANK_WEIGHT_LIKE_AFFINITY = 7;
+export const FEED_RANK_WEIGHT_FOLLOW = 5;
+export const FEED_RANK_WEIGHT_REPOST_AFFINITY = 3;
+export const FEED_RANK_WEIGHT_REPLY_TOPIC = 3;
+export const FEED_RANK_WEIGHT_POPULARITY_LIKE = 1;
+export const FEED_RANK_WEIGHT_POPULARITY_REPOST = 0.8;
+export const FEED_RANK_WEIGHT_POPULARITY_REPLY = 0.6;
+export const FEED_RANK_WEIGHT_FRESHNESS = 6;
+/** Freshness half-life, in hours, of the exponential recency decay. */
+export const FEED_RANK_FRESHNESS_HALF_LIFE_HOURS = 48;
+/** The recency clock's bucket, in ms — scores bucketed here never shift mid-scroll. */
+export const FEED_RANK_FRESHNESS_BUCKET_MS = 60 * 60 * 1000;
+
+/**
+ * Affinity caps: the per-signal ceilings inside each category. Author and
+ * topic affinity share ONE category cap each (likes, reposts), so a post
+ * that matches both halves of a category earns no more than a post that
+ * saturates one. The favorite-game overlap caps at a single match — one
+ * favorited game named is the whole signal.
+ */
+export const FEED_RANK_CAP_FAVORITE_GAME = 1;
+export const FEED_RANK_CAP_REPLY_TOPIC = 3;
+export const FEED_RANK_CAP_AUTHOR_LIKES = 5;
+export const FEED_RANK_CAP_LIKE_TOPIC = 3;
+export const FEED_RANK_CAP_AUTHOR_REPOSTS = 3;
+export const FEED_RANK_CAP_REPOST_TOPIC = 3;
+/** Ceiling on the whole popularity component — tertiary, never decisive. */
+export const FEED_RANK_CAP_POPULARITY = 3;
+
+/**
+ * The repeated-author penalty (issue #305): after the pure score orders the
+ * pool, each further post by an already-placed author keeps
+ * `1 / (1 + n * PENALTY)` of its score, where n is how many of that author's
+ * posts already precede it. Mild and post-hoc — the pure score never knows
+ * about it — and never a hard cap: no author is excluded, however many posts
+ * they placed.
+ */
+export const FEED_RANK_AUTHOR_PENALTY = 0.12;
+
+/** How many follow suggestions a Discover ranked page carries. */
+export const FEED_RANK_SUGGESTION_LIMIT = 3;
+/** How far down the frozen order suggestions are sought. */
+export const FEED_RANK_SUGGESTION_SCAN_LIMIT = 100;
 
 /**
  * How many days of notifications exist for a recipient. The list and the
@@ -343,6 +458,80 @@ export const LINK_CARD_DESCRIPTION_MAX_LENGTH = 500;
 export const LINK_CARD_SITE_NAME_MAX_LENGTH = 300;
 
 /**
+ * The IGDB half of the game catalog (issue #314). IGDB's API is Twitch's:
+ * a client-credentials token from the Twitch developer portal, then Apicalypse
+ * POST bodies against `api.igdb.com`. The same token authenticates the Twitch
+ * Helix ranking source below — one credential pair, two hosts. The budget
+ * IGDB documents is roughly four requests a second, so the client paces
+ * itself under that by construction (see `igdb.ts`) rather than reacting to
+ * 429s it could have avoided.
+ *
+ * `IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET` are a SEPARATE pair from the
+ * `TWITCH_*` sign-in credentials — same portal, different purpose — and are
+ * only ever read by the sync entrypoint, never by the serving app.
+ */
+/** Origin of the IGDB API (Apicalypse POST endpoints under `/v4/`). */
+export const IGDB_API_ORIGIN = "https://api.igdb.com";
+/** Twitch's client-credentials token endpoint. */
+export const IGDB_TOKEN_URL = "https://id.twitch.tv/oauth2/token";
+/** Base of IGDB's CDN image URLs; `<size>/<imageId>.jpg` completes it. */
+export const IGDB_IMAGE_BASE_URL = "https://images.igdb.com/igdb/image/upload";
+/**
+ * The ranking source for the game catalog: Twitch Helix `GET /helix/games/top`
+ * (see `igdb.ts`), ordered by current viewer count — a current Twitch
+ * popularity snapshot, not a rolling window. Authenticated with the same
+ * `IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET` token as the IGDB half above: those
+ * are Twitch developer-app credentials, so no second pair exists. Only the
+ * `igdb_id` of each entry is ever stored or hydrated — never Twitch's
+ * category `id`, never the box art (IGDB covers remain the only artwork).
+ */
+/** Origin of the Twitch Helix API (the `games/top` ranking source). */
+export const TWITCH_HELIX_ORIGIN = "https://api.twitch.tv";
+/** Entries requested per `games/top` page — the endpoint's documented maximum. */
+export const TWITCH_TOP_GAMES_PAGE_SIZE = 100;
+/**
+ * How many games the Twitch popularity snapshot ranks, and therefore the
+ * catalog's steady-state size (issue Q2: "~top 1000, tune after seeing data" —
+ * the constant is the tuning point). Rows already known are never deleted when
+ * they fall out of it (Q29).
+ */
+export const GAMES_CATALOG_SIZE = 1000;
+/**
+ * How many unreleased games the sync pulls by IGDB hypes (the pre-release
+ * "want" count) for the `/games` upcoming sort. A second scan beside the
+ * Twitch popularity snapshot: Twitch ranks what people watch now, hypes rank
+ * what they want next. Unioned with the snapshot and every known id — the
+ * never-delete rule (Q29) covers upcoming rows the same way.
+ */
+export const GAMES_UPCOMING_SIZE = 100;
+/** Wall-clock ceiling on one API query, token request included. */
+export const IGDB_QUERY_TIMEOUT_MS = 15_000;
+/** Wall-clock ceiling on one cover download, body included. */
+export const IGDB_COVER_TIMEOUT_MS = 30_000;
+/** Most cover bytes read before the image is declared oversized. */
+export const IGDB_MAX_COVER_BYTES = 2 * 1024 * 1024;
+/** Minimum spacing between two outbound IGDB requests (under 4 req/s). */
+export const IGDB_MIN_REQUEST_INTERVAL_MS = 250;
+/** Backoff before the one retry a transient failure earns. */
+export const IGDB_RETRY_BACKOFF_MS = 1_000;
+/** Ceiling on a 429's `Retry-After` — beyond this the run fails instead. */
+export const IGDB_RETRY_BACKOFF_MAX_MS = 30_000;
+/**
+ * How much sooner than `expires_in` a token is considered expired, so a
+ * cached token is never used in the seconds it is about to die.
+ */
+export const IGDB_TOKEN_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
+/** Ids per `/games` hydration query — IGDB's documented page limit. */
+export const GAMES_HYDRATION_BATCH = 500;
+/** Longest game summary stored; IGDB's can run to thousands of characters. */
+export const GAME_SUMMARY_MAX_LENGTH = 1000;
+/** Longest single genre/platform label stored. */
+export const GAME_LABEL_MAX_LENGTH = 40;
+/** Most genre labels kept per game, then most platform labels. */
+export const GAME_GENRES_MAX = 6;
+export const GAME_PLATFORMS_MAX = 10;
+
+/**
  * The largest request body the RPC endpoint will accept.
  *
  * Derived from the image caps rather than written as a literal, so raising a
@@ -455,6 +644,10 @@ export const SIGNED_OUT_PATHS = new Set<string>([
   // produces a session, so whoever lands here is signed out by definition —
   // exempt for the same reason /appeal is.
   "/banned",
+  // The game directory's hub (issue #314, Q6): public like the game pages
+  // under the `/games/` prefix below, while `/discover` itself stays
+  // session-gated — the games URL space is public, the feeds are not.
+  "/games",
 ]);
 
 /**
@@ -470,12 +663,17 @@ export const SIGNED_OUT_PATHS = new Set<string>([
  * post from a signed-in viewer (tombstones, bans, blocks) hides it from an
  * anonymous one.
  *
+ * `/games/` is the game pages' half of the public game directory (issue
+ * #314, Q6): a game page renders for a signed-out visitor — strictly game
+ * data through the public `game.bySlug`/`game.list` reads — with the
+ * favorite button hidden until they sign in.
+ *
  * Reads through the same `isSignedOutPath` predicate as `SIGNED_OUT_PATHS`
  * so the two gates (server and client) still share ONE definition — the
  * redirect-loop guarantee below depends on it, and a prefix rule that only
  * one gate knew about would be exactly that bug.
  */
-const SIGNED_OUT_PATH_PREFIXES = ["/post/"];
+const SIGNED_OUT_PATH_PREFIXES = ["/post/", "/games/"];
 
 /** Whether a pathname (not percent-decoded — see the gates) is open to a signed-out visitor. */
 export function isSignedOutPath(pathname: string): boolean {
@@ -496,13 +694,16 @@ export function isSignedOutPath(pathname: string): boolean {
  * 1280 the fullscreen viewer and 2x feeds. Avatars: 96 covers every feed
  * chrome size at 2x, 256 the profile header at 2x. Banners render at most
  * full-width; 1280 bounds the common desktop case. Link-card lead images
- * render inside a card, never full-bleed.
+ * render inside a card, never full-bleed. Game covers are portrait (2:3):
+ * 320 covers the `/games` grid cell and the profile rail at 2x, 640 the
+ * game page header at 2x.
  */
 export const MEDIA_VARIANT_WIDTHS = {
   posts: [640, 1280],
   avatars: [96, 256],
   banners: [1280],
   "link-cards": [640],
+  games: [320, 640],
 } as const;
 
 /**
@@ -536,6 +737,8 @@ function variantWidthsFor(key: string): readonly number[] | undefined {
       return MEDIA_VARIANT_WIDTHS.banners;
     case "link-cards":
       return MEDIA_VARIANT_WIDTHS["link-cards"];
+    case "games":
+      return MEDIA_VARIANT_WIDTHS.games;
     default:
       return undefined;
   }
@@ -586,3 +789,14 @@ export function mediaVariantKeys(key: string): string[] {
  * the same silent `media="print"` failure through the back door.
  */
 export const NONBLOCKING_STYLESHEET_ONLOAD_HANDLER = "this.media='all'";
+
+/** Issue #368: decimal MB, shared by server validation and localized UI copy. */
+export const VIDEO_MAX_BYTES = 500_000_000;
+export const VIDEO_MAX_DURATION_SECONDS = 300;
+export const VIDEO_MAX_LONG_EDGE = 1920;
+export const VIDEO_MAX_SHORT_EDGE = 1080;
+export const VIDEO_MAX_FPS = 60;
+export const VIDEO_SEGMENT_SECONDS = 4;
+export const VIDEO_PREVIEW_SECONDS = 2;
+export const VIDEO_RENDITION_HEIGHTS = [360, 720, 1080] as const;
+export const VIDEO_INPUT_TYPES = ["video/mp4", "video/quicktime", "video/webm"] as const;

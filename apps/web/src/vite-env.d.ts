@@ -5,9 +5,8 @@
  *
  * Declaring them turns a typo into a type error instead of `undefined` at
  * runtime — `import.meta.env.VITE_ANYTHING` is otherwise `any` under Vite's
- * default `ImportMetaEnv`. All three are optional: none of them is required
- * for the app to run, they only switch on auth options that need matching
- * server-side credentials.
+ * default `ImportMetaEnv`. All are optional: none is required for the app to
+ * run, and each enables one configured integration.
  *
  * Anything here is PUBLIC. Vite inlines these values into the bundle, so a
  * secret placed in one is a secret published to every visitor — which is why
@@ -28,6 +27,13 @@ interface ImportMetaEnv {
    * credentials on the server — see packages/auth/src/social.ts.
    */
   readonly VITE_SOCIAL_PROVIDERS?: string;
+
+  /**
+   * Public GA4 measurement id. Unset disables analytics and its consent UI.
+   * The Docker image also retains this public flag so the server can emit the
+   * matching conditional Content-Security-Policy.
+   */
+  readonly VITE_GA_MEASUREMENT_ID?: string;
 }
 
 interface ImportMeta {
@@ -42,6 +48,9 @@ interface ImportMeta {
  * the bundle was built from.
  */
 declare const __APP_VERSION__: string;
+
+/** The current release's build-rendered Markdown, selected by device locale. */
+declare const __APP_CHANGELOG__: Readonly<Record<"en" | "fr", string | null>>;
 
 /**
  * `gifenc` (issue #201) ships no types of its own and has none published to

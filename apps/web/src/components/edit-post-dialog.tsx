@@ -1,14 +1,10 @@
+import { ResponsiveDialogContent } from "@/components/responsive-dialog-content";
 import { useEffect, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { editPostAtom, editPostDialogAtom, type EditPostTarget } from "@/atoms/post-edit";
+import { editPostAtom } from "@/atoms/post-edit";
+import { editPostDialogAtom, type EditPostTarget } from "@/atoms/dialog-targets";
 import { ComposerForm } from "@/components/composer-form";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { localizeEditPostError } from "@/lib/edit-post-error";
 import { viewerAtom } from "@/atoms/session";
 import { m } from "@/paraglide/messages.js";
@@ -63,7 +59,7 @@ function EditPostDialogBody({ target }: { target: EditPostTarget }) {
   if (!viewer) return null;
 
   return (
-    <DialogContent className="max-w-xl">
+    <ResponsiveDialogContent className="max-w-xl">
       <DialogHeader>
         <DialogTitle>{m.post_edit_title()}</DialogTitle>
         <DialogDescription>{m.post_edit_body()}</DialogDescription>
@@ -76,7 +72,7 @@ function EditPostDialogBody({ target }: { target: EditPostTarget }) {
           `existingAttachmentCount` is what lets the text be saved down to
           empty on a post that carries images — the same cross-field rule
           `post.edit` enforces against the row's own attachments. */}
-      <div className="px-6 pb-6">
+      <div className="min-w-0 pb-2 sm:px-2">
         <ComposerForm
           author={viewer}
           value={draft}
@@ -103,6 +99,6 @@ function EditPostDialogBody({ target }: { target: EditPostTarget }) {
           existingAttachmentCount={target.attachmentCount}
         />
       </div>
-    </DialogContent>
+    </ResponsiveDialogContent>
   );
 }

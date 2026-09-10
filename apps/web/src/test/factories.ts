@@ -1,15 +1,19 @@
 import { QueryClient } from "@tanstack/react-query";
 import {
   type AuditEntry,
+  type GameCard,
+  type GamePageData,
   type ModerationCase,
   type ModerationCaseDetail,
   type NotificationItem,
   type Post,
+  type PostListPage,
   type Profile,
   type TeamMember,
   type Thread,
   type UserSummary,
 } from "@/lib/orpc";
+import type { RankingMetadata, RankingSuggestion } from "@/lib/ranking";
 
 /**
  * Domain fixtures and QueryClient tuning, with no side effects. Importing this
@@ -98,9 +102,12 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     removedReason: null,
     editedAt: null,
     unavailable: false,
+    private: false,
     ...overrides,
     parent: overrides.parent ?? null,
+    parentPrivate: overrides.parentPrivate ?? false,
     quoted: overrides.quoted ?? null,
+    quotedPrivate: overrides.quotedPrivate ?? false,
     attachments: overrides.attachments ?? [],
   };
 }
@@ -116,8 +123,10 @@ export function makeUserSummary(overrides: Partial<UserSummary> = {}): UserSumma
     bio: null,
     bannerImage: null,
     createdAt: new Date(),
+    isPrivate: false,
     followedAt: new Date(),
     viewerIsFollowing: false,
+    hasRequested: false,
     ...overrides,
   };
 }
@@ -133,10 +142,13 @@ export function makeProfile(overrides: Partial<Profile> = {}): Profile {
     bio: null,
     bannerImage: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    isPrivate: false,
     followerCount: 0,
     followingCount: 0,
     viewerIsFollowing: false,
+    hasRequested: false,
     suspended: false,
+    badges: [],
     ...overrides,
   };
 }
@@ -147,6 +159,7 @@ export function makeThread(overrides: Partial<Thread> = {}): Thread {
     post: makePost(),
     ancestors: [],
     truncated: false,
+    gameMentions: {},
     ...overrides,
   };
 }
@@ -288,6 +301,7 @@ export function makeUserModerationCaseDetail(
       bio: null,
       bannerImage: null,
       createdAt: new Date(),
+      isPrivate: false,
       role: "user",
       banned: false,
       banExpires: null,
@@ -369,6 +383,82 @@ export function makeNotification(overrides: Partial<NotificationItem> = {}): Not
     actor: makeAuthor(),
     action: null,
     targetPostDeletedAt: null,
+    ...overrides,
+  };
+}
+
+/** One ranked-feed follow suggestion — a `post.list` ranking row (issue #305). */
+export function makeRankSuggestion(overrides: Partial<RankingSuggestion> = {}): RankingSuggestion {
+  return {
+    id: crypto.randomUUID(),
+    name: "Jamie Rivera",
+    username: "jamierivera",
+    displayUsername: "JamieRivera",
+    image: null,
+    viewerIsFollowing: false,
+    hasRequested: false,
+    ...overrides,
+  };
+}
+
+/** One ranked page's metadata block — the frozen snapshot plus its suggestions. */
+export function makeRanking(overrides: Partial<RankingMetadata> = {}): RankingMetadata {
+  return {
+    snapshotId: crypto.randomUUID(),
+    expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    hasInterests: true,
+    suggestions: [],
+    ...overrides,
+  };
+}
+
+/**
+ * One `post.list` page — chronological by default (`ranking: null`, no
+ * continuations), so existing feed fixtures keep reading as the
+ * chronological contract they always pinned.
+ */
+export function makePostListPage(overrides: Partial<PostListPage> = {}): PostListPage {
+  const page: PostListPage = {
+    items: [],
+    nextCursor: null,
+    gameMentions: {},
+    continuations: [],
+    ranking: null,
+    ...overrides,
+  };
+  return page;
+}
+
+/** One game directory card — `game.list`'s row. */
+export function makeGameCard(overrides: Partial<GameCard> = {}): GameCard {
+  return {
+    igdbId: 1,
+    slug: "hades",
+    name: "Hades",
+    coverMediaPath: null,
+    firstReleaseYear: 2020,
+    firstReleaseDate: 1577836800,
+    hypeCount: 0,
+    popularityRank: 1,
+    favoriteCount: 0,
+    ...overrides,
+  };
+}
+
+/** One game's public page payload — `game.bySlug`'s shape. */
+export function makeGamePageData(overrides: Partial<GamePageData> = {}): GamePageData {
+  return {
+    slug: "hades",
+    name: "Hades",
+    summary: "Zagreus fights his way out of the Underworld.",
+    coverMediaPath: null,
+    firstReleaseYear: 2020,
+    firstReleaseDate: 1577836800,
+    hypeCount: 0,
+    genres: ["Roguelike"],
+    platforms: ["PC"],
+    favoriteCount: 0,
+    viewerHasFavoritedGame: false,
     ...overrides,
   };
 }

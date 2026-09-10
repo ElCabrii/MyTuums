@@ -1,4 +1,5 @@
 import { test, expect } from "../../support/fixtures";
+import { expectRankedPostText } from "../../support/ranked-feed";
 import { ALICE, BOB } from "../../support/users";
 
 /**
@@ -53,15 +54,23 @@ test.describe("reposts", () => {
 
   test("a repost places the original in the global feed attributed to the reposter", async ({
     page,
+    bobPage,
     db,
   }) => {
     const aliceId = await db.getUserId(ALICE.username);
-    const bobId = await db.getUserId(BOB.username);
     const content = `Amplification target ${Date.now().toString()}`;
     const [seeded] = await db.seedPosts(aliceId, 1, { content: () => content });
     if (!seeded) throw new Error("seedPosts returned no row");
 
-    await db.seedRepost(seeded.id, bobId);
+    // Driven through bob's browser, not db.seedRepost: the ranked home keeps
+    // one entry per post at its latest event (issue #305), so a repost row
+    // stamped in the same millisecond as the original ties and keeps the
+    // unattributed authored event. A real repost action lands strictly after
+    // the post, deterministically keeping the attributed event.
+    await bobPage.goto(`/post/${seeded.id}`);
+    await bobPage.getByRole("button", { name: "Repost this post" }).click();
+    await bobPage.getByRole("menuitem", { name: "Repost", exact: true }).click();
+    await expect(bobPage.getByRole("button", { name: "Remove your repost" })).toBeVisible();
 
     await page.goto("/");
     // The attribution sits on the card shell ABOVE the content column, so the
@@ -111,9 +120,11 @@ test.describe("quoting a post", () => {
     // Success closes the dialog and the invalidated feed carries the new
     // quote with the original embedded inside it, linked to its permalink.
     // A quote is a top-level post: it lives on the home feed, not the
-    // quoted post's thread — which is still the page we are on.
+    // quoted post's thread — which is still the page we are on. That feed is
+    // ranked (issue #305), so page forward until the quote lands.
     await expect(dialog).not.toBeVisible();
     await page.goto("/");
+    await expectRankedPostText(page, quoteContent);
     const quoteCard = page.locator("div").filter({ hasText: quoteContent }).last();
     await expect(quoteCard.getByText(originalContent)).toBeVisible();
     // Two Alice links are correct here: the quote author's profile and the

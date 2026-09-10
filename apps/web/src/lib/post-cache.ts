@@ -149,8 +149,9 @@ export function readCachedPost(queryClient: QueryClient, postId: string): Post |
  * has to cover all of them:
  *
  * - `post.list` — paginated `InfiniteData`, one entry per (feed, author,
- *   parent) combination. A post can be in several at once: the home timeline,
- *   its author's profile feed, and the reply list under whatever it replies to.
+ *   parent, filters) combination. A post can be in several at once: the home
+ *   timeline, its author's profile feed, the reply list under whatever it
+ *   replies to, and any filtered Discover view (`q`, `gameSlug`) it matches.
  * - `post.thread` — a flat `{ post, ancestors }` object, one entry per open
  *   permalink. The focused post lives here, and so does every ancestor above
  *   it.

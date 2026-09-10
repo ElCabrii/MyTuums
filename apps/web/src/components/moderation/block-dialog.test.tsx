@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
-import { blockDialogAtom } from "@/atoms/moderation";
+import { blockDialogAtom } from "@/atoms/dialog-targets";
 
 import { renderWithProviders } from "@/test/render";
 import { BlockDialog } from "@/components/moderation/block-dialog";
@@ -42,9 +42,9 @@ describe("BlockDialog", () => {
     );
   });
 
-  it("closes immediately on submit, before the request settles — no confirmation step to wait through", async () => {
-    // Never resolves: proves the close doesn't wait on the mutation.
-    fakeClient.moderation.block.mockReturnValue(new Promise(() => {}));
+  it("keeps a failed block visible and closes after a successful retry", async () => {
+    fakeClient.moderation.block.mockRejectedValueOnce(new Error("Block failed"));
+    fakeClient.moderation.block.mockResolvedValue({ userId: "user-1", blocked: true });
     const store = createStore();
     store.set(blockDialogAtom, { userId: "user-1", handle: "badactor" });
     await renderWithProviders(<BlockDialog />, { store });
@@ -52,6 +52,9 @@ describe("BlockDialog", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: m.moderation_block_submit() }));
 
+    expect(await screen.findByRole("alert")).toHaveTextContent(m.moderation_block_error());
+    expect(store.get(blockDialogAtom)?.userId).toBe("user-1");
+    await user.click(screen.getByRole("button", { name: m.moderation_block_submit() }));
     await waitFor(() => expect(store.get(blockDialogAtom)).toBeNull());
   });
 

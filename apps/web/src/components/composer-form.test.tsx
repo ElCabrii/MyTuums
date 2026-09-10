@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   POST_ATTACHMENT_MAX_BYTES,
@@ -13,6 +13,7 @@ import { makeUserSummary } from "@/test/factories";
 import { renderWithProviders } from "@/test/render";
 import { ComposerForm } from "@/components/composer-form";
 import { installTestPostAttachment } from "@/lib/media";
+import { videoDraftAtomFamily } from "@/atoms/video-upload";
 import { m } from "@/paraglide/messages.js";
 
 const fakeClient = { search: { typeahead: vi.fn() } };
@@ -31,6 +32,12 @@ beforeEach(() => {
   installTestPostAttachment(identityProcessor);
 });
 
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
 const VALID_PNG_BYTES = Uint8Array.from(
   atob(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -44,7 +51,10 @@ const VALID_PNG_BYTES = Uint8Array.from(
  * prop rather than simulated typing. That matches how the real callers
  * (the atoms backing the draft) drive it.
  */
-async function renderComposer(overrides: Partial<ComponentProps<typeof ComposerForm>> = {}) {
+async function renderComposer(
+  overrides: Partial<ComponentProps<typeof ComposerForm>> = {},
+  signedInAs: boolean = false,
+) {
   const onSubmit = overrides.onSubmit ?? vi.fn();
   const onValueChange = overrides.onValueChange ?? vi.fn();
 
@@ -60,9 +70,15 @@ async function renderComposer(overrides: Partial<ComponentProps<typeof ComposerF
       submitLabel="Post"
       {...overrides}
     />,
+    { signedInAs },
   );
 
   return { onSubmit, onValueChange, ...result };
+}
+
+async function openMediaPicker() {
+  await userEvent.setup().click(screen.getByRole("button", { name: m.post_add_media() }));
+  return screen.getByLabelText<HTMLInputElement>(m.post_media_choose());
 }
 
 describe("ComposerForm", () => {
@@ -177,6 +193,7 @@ describe("ComposerForm", () => {
           displayUsername: "Alice",
         }),
       ],
+      games: [],
       posts: [],
     };
     fakeClient.search.typeahead.mockResolvedValue(payload);
@@ -227,6 +244,7 @@ describe("ComposerForm", () => {
           displayUsername: "Albert",
         }),
       ],
+      games: [],
       posts: [],
     };
     fakeClient.search.typeahead.mockResolvedValue(payload);
@@ -260,6 +278,40 @@ describe("ComposerForm", () => {
     expect(onValueChange).toHaveBeenCalledWith("before @alice after");
   });
 
+  it("anchors the mention panel to the caret via an inline top, not the field bottom (issue #336)", async () => {
+    const payload: SearchTypeahead = {
+      users: [
+        makeUserSummary({
+          id: "alice-anchor",
+          name: "Alice Example",
+          username: "alice",
+          displayUsername: "Alice",
+        }),
+      ],
+      games: [],
+      posts: [],
+    };
+    fakeClient.search.typeahead.mockResolvedValue(payload);
+    const rendered = await renderComposer({ value: "@al", mentionScope: "mention-anchor" });
+    rendered.queryClient.setQueryData(
+      orpc.search.typeahead.queryKey({ input: { q: "al" } }),
+      payload,
+    );
+
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(textarea, { target: { value: "@al", selectionStart: 3, selectionEnd: 3 } });
+    textarea.setSelectionRange(3, 3);
+    fireEvent.select(textarea);
+    await screen.findByRole("option", { name: /Alice Example.*@alice/i });
+
+    // jsdom has no layout, so every measured offset is zero — what this pins
+    // is the wiring, not the pixels: the panel carries the anchor's inline
+    // `top` instead of the old bottom-anchored class.
+    const listbox = screen.getByRole("listbox");
+    expect(listbox.style.top).toMatch(/^-?\d+px$/);
+    expect(listbox.className).not.toContain("top-[calc(100%");
+  });
+
   it("dismisses an open mention popup with Escape", async () => {
     const payload: SearchTypeahead = {
       users: [
@@ -270,6 +322,7 @@ describe("ComposerForm", () => {
           displayUsername: "Alice",
         }),
       ],
+      games: [],
       posts: [],
     };
     fakeClient.search.typeahead.mockResolvedValue(payload);
@@ -290,7 +343,7 @@ describe("ComposerForm", () => {
   });
 
   it("does not render an empty mention popup when no account matches", async () => {
-    fakeClient.search.typeahead.mockResolvedValue({ users: [], posts: [] });
+    fakeClient.search.typeahead.mockResolvedValue({ users: [], games: [], posts: [] });
     const queryClient = (
       await renderComposer({
         value: "@zz",
@@ -299,6 +352,7 @@ describe("ComposerForm", () => {
     ).queryClient;
     queryClient.setQueryData(orpc.search.typeahead.queryKey({ input: { q: "zz" } }), {
       users: [],
+      games: [],
       posts: [],
     });
 
@@ -311,11 +365,69 @@ describe("ComposerForm", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
+  it("opens one media picker and refuses mixed image/video selections", async () => {
+    const onAttachmentsChange = vi.fn();
+    const { store } = await renderComposer({ onAttachmentsChange });
+    expect(screen.queryByLabelText(m.post_media_choose())).not.toBeInTheDocument();
+    const picker = await openMediaPicker();
+    expect(screen.getByRole("dialog", { name: m.post_add_media() })).toBeInTheDocument();
+    expect(picker.accept).toContain("image/png");
+    expect(picker.accept).toContain("video/mp4");
+    fireEvent.change(picker, {
+      target: {
+        files: [
+          new File([VALID_PNG_BYTES], "image.png", { type: "image/png" }),
+          new File([new Uint8Array([1])], "video.mp4", { type: "video/mp4" }),
+        ],
+      },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(m.post_media_hint());
+    expect(onAttachmentsChange).not.toHaveBeenCalled();
+    expect(store.get(videoDraftAtomFamily("composer"))).toBeNull();
+  });
+
+  it("submits a ready video without a separate subtitle upload control", async () => {
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:video-preview");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const scope = "video-without-subtitles";
+    const { store, onSubmit } = await renderComposer({
+      onAttachmentsChange: vi.fn(),
+      mentionScope: scope,
+    });
+    const file = new File([new Uint8Array([1])], "video.mp4", { type: "video/mp4" });
+    act(() =>
+      store.set(videoDraftAtomFamily(scope), {
+        selectionId: "selected-video",
+        file,
+        videoId: "ready-video",
+        status: "uploaded",
+        bytes: file.size,
+        controller: new AbortController(),
+      }),
+    );
+    expect(screen.queryByText(/Optional captions/)).not.toBeInTheDocument();
+    fireEvent.error(screen.getByLabelText(m.video_preview_label()));
+    expect(screen.getByText(m.video_preview_unavailable())).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Post" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: m.post_add_media() })).toBeDisabled();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Post" }));
+    expect(onSubmit).toHaveBeenCalledWith("", [], { videoId: "ready-video" });
+  });
+
   it("accepts image selections through the accessible file control", async () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
 
-    const input = screen.getByLabelText<HTMLInputElement>(m.post_add_images());
+    const input = await openMediaPicker();
     const first = new File([VALID_PNG_BYTES], "first.png", { type: "image/png" });
     const second = new File([VALID_PNG_BYTES], "second.png", { type: "image/png" });
     fireEvent.change(input, { target: { files: [first, second] } });
@@ -339,7 +451,7 @@ describe("ComposerForm", () => {
       attachments: [],
     });
 
-    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+    fireEvent.change(await openMediaPicker(), {
       target: { files: [file] },
     });
     expect(screen.getByRole("button", { name: "Post" })).toBeDisabled();
@@ -361,7 +473,7 @@ describe("ComposerForm", () => {
       ],
     });
 
-    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+    fireEvent.change(await openMediaPicker(), {
       target: { files: [selected] },
     });
 
@@ -384,7 +496,7 @@ describe("ComposerForm", () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
 
-    const input = screen.getByLabelText<HTMLInputElement>(m.post_add_images());
+    const input = await openMediaPicker();
     const malformed = new File([new Uint8Array([1, 2, 3])], "malformed.png", {
       type: "image/png",
     });
@@ -393,7 +505,7 @@ describe("ComposerForm", () => {
     expect(onAttachmentsChange).not.toHaveBeenCalled();
 
     const mismatch = new File([VALID_PNG_BYTES], "mismatch.jpg", { type: "image/jpeg" });
-    fireEvent.change(input, { target: { files: [mismatch] } });
+    fireEvent.change(await openMediaPicker(), { target: { files: [mismatch] } });
     expect(await screen.findByRole("alert")).toHaveTextContent(m.post_image_invalid());
     expect(onAttachmentsChange).not.toHaveBeenCalled();
   });
@@ -402,7 +514,7 @@ describe("ComposerForm", () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
 
-    const input = screen.getByLabelText<HTMLInputElement>(m.post_add_images());
+    const input = await openMediaPicker();
     fireEvent.change(input, {
       target: {
         files: [new File([new Uint8Array([1, 2, 3])], "bad.png", { type: "image/png" })],
@@ -411,7 +523,7 @@ describe("ComposerForm", () => {
     await screen.findByRole("alert");
 
     const valid = new File([VALID_PNG_BYTES], "valid.png", { type: "image/png" });
-    fireEvent.change(input, { target: { files: [valid] } });
+    fireEvent.change(await openMediaPicker(), { target: { files: [valid] } });
     await waitFor(() =>
       expect(onAttachmentsChange).toHaveBeenCalledWith([expect.objectContaining({ file: valid })]),
     );
@@ -428,7 +540,7 @@ describe("ComposerForm", () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
 
-    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+    fireEvent.change(await openMediaPicker(), {
       target: { files: [picked] },
     });
 
@@ -444,7 +556,7 @@ describe("ComposerForm", () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
 
-    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+    fireEvent.change(await openMediaPicker(), {
       target: { files: [new File([VALID_PNG_BYTES], "doomed.png", { type: "image/png" })] },
     });
 
@@ -474,7 +586,7 @@ describe("ComposerForm", () => {
     const onAttachmentsChange = vi.fn();
     await renderComposer({ value: "hello", onAttachmentsChange, attachments: [] });
 
-    fireEvent.change(screen.getByLabelText<HTMLInputElement>(m.post_add_images()), {
+    fireEvent.change(await openMediaPicker(), {
       target: {
         files: [
           new File([VALID_PNG_BYTES], "a.png", { type: "image/png" }),
@@ -488,5 +600,81 @@ describe("ComposerForm", () => {
     // it, so it is refused and the loop stops with the limit message.
     await waitFor(() => expect(onAttachmentsChange.mock.calls.at(-1)?.[0]).toHaveLength(2));
     expect(await screen.findByRole("alert")).toHaveTextContent(m.post_image_limit());
+  });
+});
+
+describe("ComposerForm game tags (issue #314, Q4)", () => {
+  // `renderComposer` lives in the module scope above and mounts the same
+  // form the mention tests drive; these tests only swap the payload's games
+  // half in.
+
+  it("suggests games while typing a #tag and writes the catalog's full key on accept", async () => {
+    const payload: SearchTypeahead = {
+      users: [],
+      games: [
+        {
+          slug: "world-of-warcraft",
+          hashtagKey: "worldofwarcraft",
+          name: "World of Warcraft",
+          coverMediaPath: null,
+          firstReleaseYear: 2004,
+        },
+      ],
+      posts: [],
+    };
+    fakeClient.search.typeahead.mockResolvedValue(payload);
+    const onValueChange = vi.fn();
+    // The typeahead procedure is session-gated, so its query stays idle
+    // until the session is ready (issue #353) — render signed in.
+    const rendered = await renderComposer(
+      {
+        value: "raiding #wow tonight",
+        onValueChange,
+        mentionScope: "game-tag-accept",
+      },
+      true,
+    );
+    rendered.queryClient.setQueryData(
+      orpc.search.typeahead.queryKey({ input: { q: "wow" } }),
+      payload,
+    );
+
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    // Caret after `#wo` (index 10).
+    fireEvent.change(textarea, {
+      target: { value: "raiding #wow tonight", selectionStart: 10, selectionEnd: 10 },
+    });
+    textarea.setSelectionRange(10, 10);
+    fireEvent.select(textarea);
+
+    const option = await screen.findByRole("option", { name: /World of Warcraft/ });
+    expect(option).toHaveTextContent("#worldofwarcraft");
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onValueChange).toHaveBeenCalledWith("raiding #worldofwarcraft tonight");
+  });
+
+  it("keeps @handle completion unaffected while a tag popup is a different surface", async () => {
+    // Same query string through the @ path still offers users: the two token
+    // kinds share one typeahead but never one popup.
+    const payload: SearchTypeahead = {
+      users: [makeUserSummary({ id: "u-wow", name: "Wow Player", username: "wowplayer" })],
+      games: [],
+      posts: [],
+    };
+    fakeClient.search.typeahead.mockResolvedValue(payload);
+    const rendered = await renderComposer({ value: "@wow", mentionScope: "game-tag-mention" });
+    rendered.queryClient.setQueryData(
+      orpc.search.typeahead.queryKey({ input: { q: "wow" } }),
+      payload,
+    );
+
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(textarea, { target: { value: "@wow", selectionStart: 4, selectionEnd: 4 } });
+    textarea.setSelectionRange(4, 4);
+    fireEvent.select(textarea);
+
+    await screen.findByRole("option", { name: /Wow Player.*@wowplayer/i });
   });
 });

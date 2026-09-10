@@ -17,6 +17,29 @@ There are four, and only the first two carry untrusted input:
    disabled for loopback and single-label (Compose-internal) hosts.
 4. **The server → third parties** — the OAuth providers and Resend.
 
+### The edge gate (preview only)
+
+On preview, boundary 1 has a second half: **Cloudflare → the origin**, held
+by a shared secret rather than by network position. The origin's ingress is
+a public Railway hostname — the zone's CNAME is public DNS — so anyone can
+connect to it directly with the right SNI and skip Cloudflare entirely,
+Access included. When `EDGE_SECRET` is set (preview only), the server
+answers 404 to every request whose `x-edge-secret` header does not carry
+that exact value, before any routing branch runs — `/health` included. A
+Cloudflare Transform Rule scoped to `preview.mytuums.com` sets the header
+on every request it forwards, overwriting whatever the client sent, so the
+header is proof the request passed through the edge. It must be a shared
+secret and not a proxy-header presence check (`cf-connecting-ip` & co.):
+on a direct connection the client controls every header, so those can be
+forged. Unset in dev, CI, and production, which serve direct traffic by
+design — production is the public site and has no edge layer to prove.
+
+`GET /live` is the one route above the gate: Railway's healthchecker probes
+the deployment's ingress directly, through no edge proxy, so it can never
+carry the secret. It reports process liveness only — the DB-backed
+`/health` sits below the gate, and a blipping database must not make
+Railway roll back a deploy whose process is up.
+
 ## Exposed surfaces
 
 **Reachable without a session** (this list is exhaustive; verify against
@@ -25,12 +48,14 @@ There are four, and only the first two carry untrusted input:
 
 | Surface                       | Notes                                                              |
 | ----------------------------- | ------------------------------------------------------------------ |
+| `GET /live`                   | deploy liveness for Railway's healthchecker; no DB, no session     |
 | `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`                  |
 | `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`             |
 | Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`       |
 | `/post/<id>` permalinks       | the app's public read surface (0.4.0) — see below                  |
 | `/media/*`                    | session-optional; every key is still authorized per viewer         |
 | The branding page             | `about.mytuums.com` — one script-free HTML document, host-routed   |
+| `game.list`/`game.bySlug`     | public game catalog reads                                          |
 | Static assets                 | anything with a file extension — the SPA cannot boot otherwise     |
 | `moderation.appealOpen` (RPC) | capability-gated, not session-gated — see below                    |
 | `post.thread`/`post.list`     | session-optional reads; `list` admits an anonymous caller only on  |
@@ -125,9 +150,36 @@ Anything else building on `baseProcedure` is a bug.
   an OAuth identity may attach to an existing account; twitch is deliberately
   not on it.
 - **Better-auth's own rate limits** are stored in Postgres and cover the
-  security-sensitive endpoints (sign-in, the 2FA challenge, mail-sending).
+  security-sensitive endpoints (sign-in, sign-up, handle lookups, the 2FA
+  challenge, mail-sending).
   `AUTH_RATE_LIMIT=false` disables them and exists only for the E2E suite,
   where one IP drives the whole run. Never set it in production.
+- **Handle availability is deliberately observable, with bounded probing
+  (issue #380).** Keep the actionable `USERNAME_IS_ALREADY_TAKEN` response
+  so someone registering or changing their handle can choose another.
+  `/sign-up/email` accepts three attempts per 60 seconds, including failures;
+  `/is-username-available` and `/update-user` each accept ten. The username
+  plugin's update hook checks uniqueness before the endpoint's session guard,
+  making that path an anonymous lookup too. Budgets are separate per path and
+  resolved client IP; a deployment proxy must provide trustworthy client IP
+  headers; malformed or missing proxy identities are rejected at HTTP ingress. These limits reduce
+  harvesting and sign-up email abuse; they do not make public handles secret
+  or prevent probing from distributed IPs.
+- **One email identifies one account, verified or not (issue #380).** Better
+  Auth lowercases sign-up emails before lookup and persistence, and the
+  `user_email_unique` constraint has enforced uniqueness since migration
+  `0000`. With email verification required, signing up again with that email
+  and a different free handle deliberately returns HTTP 200 with a synthetic
+  user and `token: null`. It creates no user or credential and does not replace
+  the existing account's fields or password. Do not turn this into an
+  email-taken error: that would reveal private email membership. The auth
+  integration suite checks the database after these responses, including
+  case variants and both verification states. A response object alone does
+  not establish duplicate persistence. This is not a blanket guarantee
+  against email enumeration: the existing-email branch skips creation hooks,
+  so invalid consent or date-of-birth fields can produce a different outcome
+  for a fresh email. That pre-existing distinction is separate from the
+  reported duplicate-persistence finding.
 - **The page gate must recognise the `__Secure-` cookie prefix** used over
   HTTPS. A mismatch redirects every signed-in visitor on every page.
 - **`hasValidSession` fails open.** A database blip degrades to "the client
@@ -155,14 +207,50 @@ default.
 
 ## Rate limiting
 
-**Do not state that all limiting is keyed on `user:<id>`.** There are two
-mechanisms in `packages/api`, and better-auth has a third of its own.
+**Do not state that all limiting is keyed on `user:<id>`.** The API also
+limits anonymous reads and appeal capabilities; Better Auth limits auth requests.
 
-| Mechanism                                   | Key                                                       |
-| ------------------------------------------- | --------------------------------------------------------- |
-| `rateLimit(policy)` middleware              | `<policy>:user:<id>`                                      |
-| `rateLimitCapability(context, policy, key)` | `<policy>:appeal:<nonce>` or `<policy>:appeal:<actionId>` |
-| better-auth's own limiter                   | per IP, stored in Postgres                                |
+| Mechanism                                   | Key                                                        |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| `rateLimit(policy)` middleware              | `<policy>:user:<id>`                                       |
+| `rateLimitCapability(context, policy, key)` | `<policy>:appeal:<nonce>` or `<policy>:appeal:<actionId>`  |
+| `publicRateLimit(policy)`                   | `<policy>:user:<id>` or `<policy>:ip:<normalized address>` |
+| better-auth's own limiter                   | per IP, stored in Postgres                                 |
+
+The HTTP boundary overwrites `x-mytuums-client-ip` before dispatching auth,
+RPC or session reads. Callers cannot supply this internal identity themselves:
+
+- With `EDGE_SECRET`, the secret gate must pass before trusting Cloudflare's
+  single `CF-Connecting-IP`. The edge must overwrite both headers. This mode
+  takes precedence over Railway detection, because Railway sees Cloudflare's
+  address rather than the visitor's.
+- Without that gate, a Railway runtime (`RAILWAY_ENVIRONMENT_ID` present) uses
+  Railway public ingress's `X-Real-IP`. Keep this listener behind Railway's
+  public HTTP ingress; do not expose it through a TCP proxy or let untrusted
+  private-network workloads call it directly with forged headers.
+- Outside Railway, direct/local requests use the socket address and ignore all
+  supplied proxy headers. Vite's local proxy consequently shares the loopback
+  budget, which is appropriate for local development.
+
+Missing, invalid, repeated or comma-separated proxy IPs return HTTP 400 before
+application dispatch; `/live` and `/health` remain independent of IP headers
+(the existing edge-secret rule still applies to `/health`). There is no fallback
+from a missing trusted header to `X-Forwarded-For`. An unexpected burst of these
+400s is a proxy configuration fault to investigate, not a reason to disable the
+check. Do not set `RAILWAY_ENVIRONMENT_ID` manually on a non-Railway host.
+
+`@my-tuums/auth/client-ip` owns the internal header and Better Auth IP options.
+Both limiters reuse Better Auth's IPv4-mapped IPv6 normalization and IPv6 /64
+bucketing. Signed-in RPC budgets remain per user. In-process callers with no
+HTTP identity retain a bounded fallback; deployed proxy traffic cannot reach it
+with a missing identity.
+
+Deployment validation: confirm two actual client addresses have independent
+budgets, spoofed forwarding/internal headers do not change a budget, and the
+Better Auth shared-IP warning disappears. No database migration is required.
+The proxy contracts are documented by
+[Cloudflare](https://developers.cloudflare.com/fundamentals/reference/http-headers/#cf-connecting-ip)
+and [Railway](https://docs.railway.com/networking/public-networking/specs-and-limits#technical-specifications).
 
 `rateLimitCapability` is deliberately not a middleware: the appeal key only
 exists after the handler's own branch work (an HMAC verify, or the removal
@@ -228,6 +316,34 @@ makes the server dial out (issue #260):
   unfurling again — the purge's actor and reason are recorded on the row.
 
 ## Media
+
+**Video boundary** (`packages/api/src/video-uploads.ts`, `video-media.ts`,
+`apps/video-worker/src/probe.ts`): authenticated upload sessions own bounded
+signed multipart capabilities; browser declarations do not establish validity.
+Native probes validate actual container/codecs, oriented dimensions, timing and
+decoded frames before scaling. Processes receive local filenames, restricted
+input protocols and an environment without application credentials.
+
+Pending text/captions stay outside public posts and queue payloads contain only
+IDs. Attempt leases and database transactions fence publication, cancellation
+and duplicate delivery. Source deletion must be confirmed before publication.
+Terminal failure erases text/captions and creates one notice; content-free cleanup
+debt survives provider outages and account cascades. Raw video is never served.
+
+Every published asset passes the existing post authorizer and must belong to the
+current recorded inventory. HLS/VTT bodies are bounded and their asset references
+are rewritten through `/media/videos/`; arbitrary manifest destinations cannot
+escape the inventory. Binary assets redirect to signed URLs with a one-hour TTL;
+already-issued capabilities retain that bounded validity after access changes.
+Moderation removal retains successful evidence; author deletion schedules cleanup.
+
+Bucket CORS permits exact app origins for GET/HEAD/PUT and the required headers;
+it does not make objects public. The video CSP adds exact configured bucket
+origins to media/connect sources and allows blob media/HLS workers, without
+allowing blob scripts. Environment database/bucket pairing is mandatory because
+video reconciliation treats objects absent from its database as orphans.
+
+See [video operations](video-operations.md) for deployment and recovery controls.
 
 **Upload validation** (`packages/api/src/image.ts`):
 
@@ -305,13 +421,17 @@ not the boundary:
 - Every key is authorized **per viewer**, post attachments included
   (`canViewPostMedia`): a moderator may inspect a reported or tombstoned post,
   and an ordinary reader must clear both post tombstones and the author
-  visibility predicate. The one relaxation is that the **author of a
-  moderation-removed post may still read its attachments** — it discloses
+  visibility predicate. Private posts and private-account posts (issue #328)
+  gate the same way — author, approved followers and moderators pass,
+  anyone else (including anonymous) gets a 404. The one relaxation is that the
+  **author of a moderation-removed post may still read its attachments** — it discloses
   nothing they did not upload, the objects deliberately survive a removal so a
   restore is lossless, and it is what lets `moderation.appealPreview` show
   someone the images they are contesting. Ban and block visibility still
   applies to them, and an author-_deleted_ post stays closed to everyone but a
-  moderator because those objects are reaped.
+  moderator because those objects are reaped. Profile display objects stay
+  public for private accounts by decision — only posts, replies, lists and
+  their attachments lock.
 - Gating `/media` does **not** revoke a presigned URL already issued. That URL
   stays valid for its own TTL, because this server never sees it again.
 
@@ -322,6 +442,11 @@ local image preview in the crop editor), `frame-ancestors 'none'`,
 `X-Content-Type-Options: nosniff`,
 `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`
 and HSTS. Inner handlers win, so a handler setting its own header keeps it.
+The GA4 script and collection origins are added to `script-src` and
+`connect-src` only when the image was built with `VITE_GA_MEASUREMENT_ID`;
+they remain absent from unconfigured deployments and from the separate,
+script-free branding host. The browser still loads the tag only after a valid
+per-device opt-in.
 
 **The CSP is hash-based, which constrains the edge in front of the app.**
 Cloudflare's JavaScript Detections injects its own inline `<script>` into every
@@ -359,19 +484,50 @@ cover in any case; it stays on `'unsafe-hashes'` plus its hash.
 
 `publicUserColumns` in `packages/api/src/users.ts` is a privacy boundary, not
 a convenience selection. It is exactly: `id`, `name`, `username`,
-`displayUsername`, `image`, `bio`, `bannerImage`, `createdAt`.
+`displayUsername`, `image`, `bio`, `bannerImage`, `createdAt`, `isPrivate`.
 
-Never add `email`, `twoFactorEnabled`, `lastLoginMethod`, `role` or any
+`isPrivate` is in because it describes the profile's visibility — what the
+client's locked-account branch reads — like the counts, not its owner's
+settings. Never add `email`, `twoFactorEnabled`, `lastLoginMethod`, `role` or any
 preference column. Sign-in method in particular is reconnaissance, not profile
 data. `packages/api/src/users.int.test.ts` pins the exact shape, so widening
 it fails a test rather than shipping.
 
 Visibility filtering is centralised in `packages/api/src/visibility.ts` so
-banned or blocked content cannot leak through a surface that forgot to filter.
-A blocked profile reads as "no such user" — the same response as a handle that
+banned, blocked or private content cannot leak through a surface that forgot
+to filter. A blocked profile reads as "no such user" — the same response as a handle that
 never existed, so the block itself does not leak. A banned profile resolves so
 the UI can show a suspension stub, but `user.byUsername` redacts its authored
-profile fields, relationship counts and viewer relationship state first.
+profile fields, relationship counts and viewer relationship state first. A
+private profile still resolves for everyone so the client can render the
+locked notice; its posts, replies, follower/following lists, search rows and
+media rows hide from non-followers at the query layer (`privatePostHidden`,
+`privateUserHidden`, `canViewPostMedia`), and `follow` becomes a request
+gated by the pair's relationship lock — `block` severs pending requests both
+directions like the edges themselves.
+
+`post.unlike` and `post.unrepost` always allow removal of the caller's own
+interaction, including after losing visibility. Their count reads apply the
+full post visibility predicate in the same query as the aggregate. Hidden
+and nonexistent posts both return success with a zero count and a false
+viewer flag, preventing retained post IDs from exposing private activity.
+
+**Ranked snapshots store IDs, never content.** A `feedRankSnapshot` row holds
+ordered post IDs with repost attribution and the event instant — no text, no
+media, no scores. Every ranked page re-reads its slice live through the
+shared projection and re-applies the full visibility treatment (banned,
+blocked, private) plus live follow state and scope/filter membership, so a
+row hidden since the build drops instead of rendering; removed or deleted
+posts drop rather than stubbing. Ranked reads are signed-in only — an
+anonymous ranked call is refused UNAUTHORIZED, and the snapshot binds the
+viewer's id. Resuming with an unknown, foreign, mismatched-scope,
+mismatched-filter or expired id is an explicit error asking for a Refresh,
+never a silent restart under a fresh ordering. Expiry is enforced at
+authorization time (an expired row is refused immediately); physical deletion
+is opportunistic request-time maintenance, not a guarantee — a row past its
+30-minute TTL is already unservable whether or not it has been reaped. No
+impressions are recorded and no Redis is involved, so there is no
+view-history store to leak.
 
 ## Moderation authority
 

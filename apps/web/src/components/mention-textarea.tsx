@@ -1,18 +1,42 @@
 import { useAtom, useAtomValue } from "jotai";
-import { useEffect, useLayoutEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type Ref,
+} from "react";
 import { Loader2 } from "lucide-react";
 import { composerMentionAtomFamily } from "@/atoms/composer-mentions";
 import { typeaheadQueryAtomFamily } from "@/atoms/search";
+import { GameCover } from "@/components/game-cover";
 import { Textarea } from "@/components/ui/textarea";
 import { UserAvatar } from "@/components/user-avatar";
-import { insertMention, mentionAtCaret } from "@/lib/composer-mentions";
+import {
+  hashtagAtCaret,
+  insertHashtag,
+  insertMention,
+  mentionAtCaret,
+} from "@/lib/composer-mentions";
+import { measureCaretLine } from "@/lib/caret-measure";
+import { caretPanelPlacement } from "@/lib/caret-panel";
 import { nextHighlight, suggestionRows, type SuggestionRow } from "@/lib/search-suggestions";
-import { type SearchUser } from "@/lib/orpc";
+import { type SearchUser, type TypeaheadGame } from "@/lib/orpc";
 import { handleOf } from "@/lib/user";
 import { m } from "@/paraglide/messages.js";
 
 /** A user the mention dropdown can accept: a profile with a resolvable handle. */
 type MentionableUser = { user: SearchUser; handle: string };
+
+/** A game the tag dropdown can accept, paired with its canonical hashtag key. */
+type SuggestableGame = { game: TypeaheadGame; hashtagKey: string };
+
+/** The games a tag dropdown can accept: the typeahead payload's games as-is. */
+function suggestionGames(games: TypeaheadGame[] | undefined): SuggestableGame[] {
+  return (games ?? []).map((game) => ({ game, hashtagKey: game.hashtagKey }));
+}
 
 /**
  * The user rows a mention dropdown can accept: profiles with a resolvable
@@ -30,9 +54,85 @@ function mentionUsers(rows: SuggestionRow[]): MentionableUser[] {
   return users;
 }
 
-/** Frame classes shared by the populated list and the loading spinner. */
+/**
+ * Frame classes shared by the populated list and the loading spinner. The
+ * panel stays full-width (`right-0 left-0`); only its `top` moves, and that
+ * arrives as an inline style from the caret anchor below (issue #336) — so
+ * there is deliberately no top/bottom class here. Before the first
+ * measurement the panel takes its static position, just under the textarea,
+ * which is also where it used to be pinned.
+ */
 const panelClass =
-  "border-border bg-popover text-popover-foreground absolute top-[calc(100%+0.5rem)] right-0 left-0 z-50 rounded-xl border shadow-lg";
+  "border-border bg-popover text-popover-foreground absolute right-0 left-0 z-50 rounded-xl border shadow-lg";
+
+/** Gap between the caret line and the panel, in px — the old `0.5rem` offset. */
+const PANEL_GAP_PX = 8;
+
+/**
+ * The panel's height budget for the flip decision before it has rendered and
+ * measured itself, in px — matches the `max-h-60` cap on the lists below.
+ */
+const PANEL_MAX_HEIGHT_PX = 240;
+
+function GameSuggestions({
+  rows,
+  highlight,
+  onHighlight,
+  onAccept,
+  listboxId,
+  optionId,
+  panelRef,
+  panelStyle,
+}: {
+  rows: SuggestableGame[];
+  highlight: number;
+  onHighlight: (index: number) => void;
+  onAccept: (index: number) => void;
+  listboxId: string;
+  optionId: (index: number) => string;
+  /** Measures the rendered panel for the caret anchor's flip decision. */
+  panelRef: Ref<HTMLDivElement>;
+  /** The caret anchor's `top` — the panel's only positioning. */
+  panelStyle: CSSProperties | undefined;
+}) {
+  return (
+    <div
+      id={listboxId}
+      role="listbox"
+      aria-label={m.composer_game_suggestions_aria()}
+      ref={panelRef}
+      style={panelStyle}
+      className={`${panelClass} max-h-60 overflow-y-auto p-1.5`}
+    >
+      {rows.map((row, index) => (
+        <button
+          key={row.game.slug}
+          type="button"
+          role="option"
+          aria-selected={index === highlight}
+          id={optionId(index)}
+          onMouseDown={(event) => event.preventDefault()}
+          onMouseEnter={() => onHighlight(index)}
+          onClick={() => onAccept(index)}
+          className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left ${
+            index === highlight ? "bg-muted/60" : ""
+          }`}
+        >
+          <div className="bg-muted h-8 w-6 shrink-0 overflow-hidden rounded-sm">
+            <GameCover cover={row.game.coverMediaPath} name={row.game.name} sizes="32px" />
+          </div>
+          <span className="min-w-0">
+            <span className="text-foreground block truncate text-sm font-medium">
+              {row.game.name}
+            </span>
+            {/* The key is the contract: accepting writes exactly this tag. */}
+            <span className="text-muted-foreground block truncate text-xs">#{row.hashtagKey}</span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function MentionSuggestions({
   rows,
@@ -41,6 +141,8 @@ function MentionSuggestions({
   onAccept,
   listboxId,
   optionId,
+  panelRef,
+  panelStyle,
 }: {
   rows: MentionableUser[];
   highlight: number;
@@ -50,12 +152,18 @@ function MentionSuggestions({
   listboxId: string;
   /** Builds the option id for a given index; mirrors `aria-activedescendant`. */
   optionId: (index: number) => string;
+  /** Measures the rendered panel for the caret anchor's flip decision. */
+  panelRef: Ref<HTMLDivElement>;
+  /** The caret anchor's `top` — the panel's only positioning. */
+  panelStyle: CSSProperties | undefined;
 }) {
   return (
     <div
       id={listboxId}
       role="listbox"
       aria-label={m.composer_mention_suggestions_aria()}
+      ref={panelRef}
+      style={panelStyle}
       className={`${panelClass} max-h-60 overflow-y-auto p-1.5`}
     >
       {rows.map((row, index) => {
@@ -123,6 +231,7 @@ export function MentionTextarea({
   id,
   style,
   disabled = false,
+  enableGameSuggestions = false,
 }: {
   value: string;
   onValueChange: (next: string) => void;
@@ -144,18 +253,37 @@ export function MentionTextarea({
    */
   style?: CSSProperties;
   disabled?: boolean;
+  /**
+   * Whether `#tag` completion offers games (issue #314, Q4). The post, reply
+   * and quote composers say yes; the bio editor says no — a bio's hashtags
+   * render through the same linkifier but the bio has no batch map, so
+   * suggesting a resolvable tag there would promise a link it cannot keep.
+   */
+  enableGameSuggestions?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingCaretRef = useRef<number | null>(null);
   const suppressSelectionRef = useRef(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // The panel's `top` in px from the wrapper's top edge — the caret anchor
+  // (issue #336). Null until the first measurement; the panel then takes
+  // its static position just under the textarea for exactly one frame.
+  const [panelTop, setPanelTop] = useState<number | null>(null);
   const [mentionState, setMentionState] = useAtom(composerMentionAtomFamily(mentionScope));
-  const mentionQuery = mentionState.token?.query ?? "";
+  const mentionToken = mentionState.token;
+  const mentionOpen = mentionState.open;
+  const mentionQuery = mentionToken?.query ?? "";
   const typeahead = useAtomValue(typeaheadQueryAtomFamily(mentionQuery));
-  const rowsForQuery = mentionUsers(suggestionRows(typeahead.data));
+  // Which kind of token is active is a property of the marker the state's
+  // token was found under — one token, one kind, never both.
+  const completingHashtag = mentionState.token !== null && value[mentionState.token.start] === "#";
+  const userRows = completingHashtag ? [] : mentionUsers(suggestionRows(typeahead.data));
+  const gameRows = completingHashtag ? suggestionGames(typeahead.data?.games) : [];
+  const activeRowCount = completingHashtag ? gameRows.length : userRows.length;
   // Suggestions suppress while the field is disabled — a disabled textarea
   // cannot be typed into, so an open list has no source gesture to keep it up.
   const showMentionSuggestions =
-    !disabled && mentionState.open && (typeahead.isPending || rowsForQuery.length > 0);
+    !disabled && mentionState.open && (typeahead.isPending || activeRowCount > 0);
 
   // Namespaced once so the listbox/option ids and the ARIA wiring all agree,
   // and so two editors on the same page never collide on a duplicate id.
@@ -187,9 +315,66 @@ export function MentionTextarea({
     }
   }, [value]);
 
+  // Anchors the suggestion panel to the caret line (issue #336). The mirror
+  // measures the caret in the textarea's frame; adding the textarea's own
+  // offset within the relative wrapper converts to the panel's frame, minus
+  // the scroll the mirror never sees. Runs while open when the caret or the
+  // panel height can move — typing, token changes, and loading-to-rows swaps
+  // — but not on highlight-only arrow presses: the token ref is stable across
+  // those (see updateMentionState), so depending on the token instead of the
+  // whole mention state skips a mirror build and forced layout per press. A
+  // reopened panel never flashes a stale anchor: this is a layout effect, so
+  // the fresh measurement lands before the browser paints.
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || !showMentionSuggestions) return;
+    const reposition = () => {
+      const line = measureCaretLine(textarea, textarea.selectionStart ?? textarea.value.length);
+      const placement = caretPanelPlacement({
+        caretTop: textarea.offsetTop + line.top - textarea.scrollTop,
+        lineHeight: line.lineHeight,
+        gap: PANEL_GAP_PX,
+        panelHeight: panelRef.current?.offsetHeight || PANEL_MAX_HEIGHT_PX,
+        caretViewportBottom: line.viewportBottom,
+        viewportHeight: window.innerHeight,
+      });
+      setPanelTop((previous) => (previous === placement.top ? previous : placement.top));
+    };
+    reposition();
+    // Scroll and resize move the anchor without a value change: the
+    // textarea's own scroll shifts `scrollTop`, a window scroll shifts the
+    // textarea's viewport rect, and a resize shifts `innerHeight`. Listen
+    // while open, rAF-throttled and passive so wheel stays smooth.
+    let raf = 0;
+    const schedule = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(reposition);
+    };
+    textarea.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("scroll", schedule, { passive: true, capture: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      cancelAnimationFrame(raf);
+      textarea.removeEventListener("scroll", schedule);
+      window.removeEventListener("scroll", schedule, { capture: true });
+      window.removeEventListener("resize", schedule);
+    };
+  }, [
+    showMentionSuggestions,
+    mentionToken,
+    mentionOpen,
+    value,
+    typeahead.isPending,
+    activeRowCount,
+  ]);
+
   const updateMentionState = (nextValue: string, start: number | null, end: number | null) => {
     if (suppressSelectionRef.current) return;
-    const token = mentionAtCaret(nextValue, start, end);
+    // The caret sits in at most one token kind; `@` wins when both parsers
+    // could claim it (they cannot — a token's marker differs).
+    const token =
+      mentionAtCaret(nextValue, start, end) ??
+      (enableGameSuggestions ? hashtagAtCaret(nextValue, start, end) : null);
     setMentionState((previous) => {
       const tokenIsUnchanged =
         token !== null &&
@@ -208,11 +393,15 @@ export function MentionTextarea({
   };
 
   const acceptMention = (index: number) => {
-    const row = rowsForQuery[index];
     const token = mentionState.token;
-    if (!token || !row) return;
+    if (!token) return;
+    // The active kind's row at the highlighted index — an out-of-range index
+    // (no rows for this query) simply accepts nothing.
+    const insertion = completingHashtag
+      ? gameRows[index] && insertHashtag(value, token, gameRows[index].hashtagKey)
+      : userRows[index] && insertMention(value, token, userRows[index].handle);
+    if (!insertion) return;
 
-    const insertion = insertMention(value, token, row.handle);
     // Both branches arm the selection guard and leave it armed: restoring the
     // caret queues a synthetic `select` that must not re-open the list. See
     // the layout effect above and the onChange/onClick handlers.
@@ -242,14 +431,14 @@ export function MentionTextarea({
         event.preventDefault();
         setMentionState((previous) => ({
           ...previous,
-          highlight: nextHighlight(previous.highlight, 1, rowsForQuery.length),
+          highlight: nextHighlight(previous.highlight, 1, activeRowCount),
         }));
         break;
       case "ArrowUp":
         event.preventDefault();
         setMentionState((previous) => ({
           ...previous,
-          highlight: nextHighlight(previous.highlight, -1, rowsForQuery.length),
+          highlight: nextHighlight(previous.highlight, -1, activeRowCount),
         }));
         break;
       case "Enter":
@@ -267,6 +456,9 @@ export function MentionTextarea({
   };
 
   const wrapperClass = ["relative", wrapperClassName].filter(Boolean).join(" ");
+  // The caret anchor's inline style: the panel's only positioning (the frame
+  // class carries no top). Undefined until the first measurement.
+  const panelStyle: CSSProperties | undefined = panelTop === null ? undefined : { top: panelTop };
 
   return (
     <div className={wrapperClass}>
@@ -327,18 +519,9 @@ export function MentionTextarea({
         style={style}
       />
       {showMentionSuggestions &&
-        (typeahead.isPending ? (
-          <div
-            id={listboxId}
-            role="listbox"
-            aria-label={m.composer_mention_suggestions_aria()}
-            className={`${panelClass} flex items-center justify-center p-4`}
-          >
-            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
-          </div>
-        ) : (
-          <MentionSuggestions
-            rows={rowsForQuery}
+        (completingHashtag ? (
+          <GameSuggestions
+            rows={gameRows}
             highlight={mentionState.highlight}
             onHighlight={(index) =>
               setMentionState((previous) => ({ ...previous, highlight: index }))
@@ -346,6 +529,32 @@ export function MentionTextarea({
             onAccept={acceptMention}
             listboxId={listboxId}
             optionId={optionId}
+            panelRef={panelRef}
+            panelStyle={panelStyle}
+          />
+        ) : typeahead.isPending ? (
+          <div
+            id={listboxId}
+            role="listbox"
+            aria-label={m.composer_mention_suggestions_aria()}
+            ref={panelRef}
+            style={panelStyle}
+            className={`${panelClass} flex items-center justify-center p-4`}
+          >
+            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+          </div>
+        ) : (
+          <MentionSuggestions
+            rows={userRows}
+            highlight={mentionState.highlight}
+            onHighlight={(index) =>
+              setMentionState((previous) => ({ ...previous, highlight: index }))
+            }
+            onAccept={acceptMention}
+            listboxId={listboxId}
+            optionId={optionId}
+            panelRef={panelRef}
+            panelStyle={panelStyle}
           />
         ))}
     </div>

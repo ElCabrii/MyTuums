@@ -43,10 +43,23 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
 - Sessions are revoked on password reset, and a revoked session stops
   authenticating immediately — there is no session cookie cache.
 
+### Profile customization and account settings
+
+The pencil on your own profile opens a modal for the banner, avatar, display
+name, and bio. Image changes save immediately; name and bio use Save. Closing
+with unsaved text asks whether to discard it. The handle stays in account settings.
+
+Settings groups existing controls into Account (email address, handle, linked
+accounts, sign-out), Security (password, two-factor authentication, passkeys),
+Privacy (private account, follow requests, blocked users, analytics consent),
+and Preferences (default theme and language). Switching categories preserves
+form drafts until leaving settings. The device theme selector is in the account
+menu; the navigation bar has no standalone theme button.
+
 ## Posts, replies, likes, follows
 
 - Posts are plain text, up to 500 characters, trimmed. A post or reply carries
-  text, up to four images, or both — a submission with neither is refused, and
+  text, up to four images or one video, or text with that media — an empty submission is refused, and
   an image-only post stores an empty body rather than placeholder whitespace.
   Rendering recognizes
   three link shapes in that text and nothing else. Syntactically valid `@handles`
@@ -103,8 +116,10 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   500-character trim rule as creation applies, and images are not editable —
   an edit rewrites the body and nothing else. An edited post carries a visible
   "Edited" marker with the last edit time wherever it renders. Editing never
-  changes the post's timestamp, so feeds and search reflect the new text
-  without re-ranking or bumping the post. A removed or deleted post cannot be
+  changes the post's timestamp, so chronological feeds and search reflect the
+  new text without re-ranking or bumping the post; a ranked snapshot keeps the
+  frozen order it was built with, but its pages re-check filter membership
+  live, so an edit that removes the searched text or hashtag drops the item. A removed or deleted post cannot be
   edited — a removal keeps the story the author would appeal about immutable.
   A post under review stays editable: every edit records the text it replaced,
   and the moderation case view shows that history (the 50 most recent
@@ -155,7 +170,10 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   original whose author is banned or blocked reads like the author is gone —
   a quote keeps its own words with an unavailable embedded post, while a repost
   keeps the reposter's event but redacts the original author, content, media,
-  counts and interactions to the unavailable treatment.
+  counts and interactions to the unavailable treatment. A private original
+  (followers-only post or private account) degrades the same way but says so:
+  the quote's embedded post, the reply's parent line, and the repost's event
+  all render "This post is private" instead of the generic unavailable copy.
 - Bookmarks are the same idempotent pair — `bookmark` / `unbookmark` — holding
   a post for later. They are private by construction: no counts, no visibility
   to other users or to the post's author, nothing on the public profile, and
@@ -167,18 +185,75 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   is unbookmarking a post whose author has since blocked the saver or been
   banned: the row is the saver's own, so a saved post can always be removed
   even once it no longer renders.
+- Sharing takes a post out of the app: the share control on a post card opens
+  a dialog that previews the post and offers its canonical permalink — the
+  public `/post/<id>` URL — as a one-click copy (the URL row itself is also
+  fully selectable for hand-copying). Copied is confirmed by a toast; a
+  clipboard that refuses says so instead of posing as success, and the dialog
+  stays open either way. Client-side only: no procedure, no stored state.
+  Signed-out permalink viewers keep the sign-in-link treatment — the control
+  is signed-in only.
 - Follows are the same shape: `follow` / `unfollow`, with follower and
-  following lists.
-- Feeds come in two scopes — everyone, and the people you follow — and are
-  keyset-paginated so a page boundary can never skip or repeat an event. The
-  timeline is strictly reverse-chronological by event time — a post at its own
-  creation, a repost at the repost's — with no ranking and no deduplication:
-  the same post can appear once authored and once reposted.
+  following lists. A private account (issue #328, toggled in settings) does
+  not gain followers directly — `follow` creates a pending `follow_request`
+  instead, the owner is notified, and `followRequest.accept` converts it into
+  the edge (rejecting or cancelling deletes it). The profile button reads
+  Follow / Requested / Following from `viewerIsFollowing` + `hasRequested`.
+- The home feeds are ranked, not chronological. **For you** (everyone),
+  **Following** (you and the people you follow), and **Discover** (other people,
+  including those you follow) each serve the same scorer over their own candidate
+  set, frozen into a per-viewer snapshot that stays stable for 30 minutes and
+  advances only through an explicit **Refresh**. There is deliberately no
+  chronological toggle on these three surfaces. Interest outranks
+  outside-network discovery, which outranks raw popularity: favorite games
+  first, then likes, then the follow edge, then reposts and reply-thread
+  topics, with popularity last and freshness decaying throughout. No machine
+  learning — a transparent weighted score over data the app already holds
+  (favorites outrank likes, which outrank follows, which outrank reposts;
+  replying anywhere in a thread counts as topic interest in that thread).
+  Bookmarks never feed the score. A repeated author is gently pushed down,
+  never capped out. A viewer with no history gets a freshness/popularity
+  ordering plus an optional nudge to favorite games for sharper suggestions.
+  Removed or author-deleted posts never rank; if one disappears after the
+  snapshot was built, the page drops it rather than stubbing it (the stub
+  rules still apply on chronological surfaces, profiles, threads and repost
+  events). Follows and privacy are re-checked live on every page, so an
+  unfollow, a new follow, or a lock since the build changes what renders
+  without moving the frozen order. An unknown, foreign, differently-scoped or
+  expired snapshot is an explicit error that asks for a Refresh, never a
+  silent restart. The chronological RPC still exists underneath for the
+  surfaces that never ranked — profiles, bookmarks, post search, replies —
+  but the web offers no chronological switch on the home or Discover feeds.
+- Authors choose Public or Followers only from the visibility popover beside
+  Add images in the home and own-profile composers. The trigger identifies the
+  effective audience; private accounts always show Followers only, with Public
+  unavailable and an explanatory note. The draft choice survives publication
+  errors and resets to the account default on success. Private posts stay
+  hidden from non-viewers in Discover, post search, hashtag matches and anonymous
+  permalinks — direct reads return NOT_FOUND for non-viewers — and their `/media/` attachments 404
+  the same way except for the author, approved followers and moderators
+  inspecting a report. Private accounts themselves stay discoverable in user
+  search and the typeahead — only their posts are hidden.
+- Discover (`/discover`) is the ranked community reading surface — no
+  composer, no scope tabs — with post search and a Filters button on top.
+  Filters opens a popover containing the game picker; the selected game appears
+  as a removable chip. It
+  shows original posts by other authors, including people the viewer follows, with a
+  **Who to follow** module above the posts: the first three distinct authors
+  in the frozen order, filtered live against follows and follow requests, with
+  no refill until the next Refresh. Both filters narrow the same ranked
+  snapshot and compose as AND: free text
+  matches post text, the game filter matches `#hashtagKey` in post text
+  (resolved server-side from the game's slug), and the view is URL-persisted
+  (`?q=`, `?game=`) so it is shareable and the back button restores it. A
+  game hashtag click lands here filtered on that game. Private posts never
+  appear here for non-viewers.
 
 ## Notifications
 
 A like on your post, a reply to your post, a repost of your post, a quote of
-your post, a new follower, and a moderation action on your content or account
+your post, a new follower, a follow request against your private account
+(issue #328), and a moderation action on your content or account
 each leave one in-app notification — written in the same transaction as the
 event that caused it, and exactly once per event: a retried like, repost or
 follow mints no second notice, while like → unlike → like again is honestly
@@ -187,7 +262,9 @@ three events, not one collapsed one.
 - The notifications page (`/notifications`, reached from the header bell)
   lists them newest first, keyset-paginated like the feeds, with no grouping
   or ranking. The bell carries an unread count; opening the page is what
-  marks everything read.
+  marks everything read. Each row can be deleted, and the header clears the
+  whole inbox behind a confirmation — inbox management only, removing no
+  other user's rows and no audit trail.
 - A row about a post previews it (issue #281): the liked post's text — with
   thumbnails of its images — or the reply itself for a reply, as one
   truncated line under the sentence. A moderator-removed post previews
@@ -197,7 +274,8 @@ three events, not one collapsed one.
   cycling — moves the badge at most once a minute: every event still appears
   on the page, still unread, but the badge counts the burst as one tick.
   Different kinds of event each tick — a like, a reply and a follow are three
-  signals, not one — and moderation notices are never damped.
+  signals, not one — and moderation and follow-request notices are never
+  damped: each request is actionable, so each ticks.
 - Self-caused events never notify — liking, replying to, reposting or
   quoting your own post creates nothing.
 - Blocks hold on both sides: a user blocked by the recipient cannot generate
@@ -223,19 +301,150 @@ three events, not one collapsed one.
   on a person, and the purge audit trail lives on the link card itself, by
   design.
 
+## Mobile navigation
+
+Signed-in mobile pages use a fixed bottom navigation bar for Home, Discover,
+Games, and Profile. The header shows the logo image, notifications, and a compact
+moderation icon for authorized roles. Global search sits between the logo and
+notification bell on the same mobile header row. The Profile tab uses the signed-in user’s
+avatar. The own-profile account menu provides settings, bookmarks, theme selection, and
+sign-out; profiles provide a pencil button for customization. Private messages remain hidden until
+implemented. Page content and consent notices clear the bottom navigation and
+safe-area inset.
+
 ## Profiles and search
 
+- The profile activity filters are All, Posts, Reply, and Quotes & reposts.
+  The last selects only quotes authored by the profile owner and their own
+  repost events, newest event first, with the same visibility rules and
+  pagination as the other profile views. It is shareable as `?filter=shares`
+  and reads `post.list({ authorId, kind: "shares" })`; this API mode requires
+  a profile and includes reposts without a separate `includeReposts` flag.
 - A profile carries a display name, lowercase handle, bio (160 characters),
-  avatar, banner, join date, and follower/following counts. Bios use the same
-  safe linkification as posts and replies.
+  avatar, banner, join date, follower/following counts, and earned badges. Bios
+  use the same safe linkification as posts and replies.
 - Profiles are addressed by handle. A profile hidden by a block reads as "no
   such user"; a banned profile resolves to a suspended stub instead, without
-  its authored profile fields or relationship counts.
+  its authored profile fields, relationship counts or badges. A private
+  profile (issue #328) still resolves for everyone — the page shows the
+  header and a locked notice instead of the feed when the viewer is neither
+  the owner nor an approved follower, and the follower/following lists read
+  as empty for the same viewer.
 - Search has three surfaces: a profile-only header typeahead (up to five
-  users), a full user search, and a full post search. User results rank
-  handle-prefix matches ahead of substring matches.
+  users, plus up to three games), a full user search, and a full post search.
+  User results rank handle-prefix matches ahead of substring matches; game
+  results match on name or hashtag key in the catalog's popularity order.
+  Private accounts appear in user search and the typeahead like any other
+  account — only their posts are hidden from non-followers.
+
+### Badges
+
+A profile displays a small, fixed catalog of automatically-earned badges plus
+one manually-granted Founder badge, at most one tier per family, in a canonical
+order (follower tier, like tier, founder, super-early, early). Badges are
+public profile data, like follower counts; display names come from the
+locale's message catalogue, never the API. Every badge is a permanent
+achievement — a stamped `user_badge` row written the moment it is earned and
+never withdrawn, so a count receding below its threshold takes no badge with
+it. Tiered badges upgrade rather than combine: an account holds one row per
+tiered family, and crossing the next threshold raises it — "noticed" becomes
+"trendy", it does not stack beside it. The catalog and its thresholds live in
+one dependency-free module shared by server and browser
+(`@my-tuums/api/badges`).
+
+- **Follower tiers** (`popular` >1k, `rising_star` >10k, `star` >100k,
+  `superstar` >1M, `supernova` >10M followers): stamped inside `user.follow`'s
+  transaction by the follow that first passes the threshold, raised to the
+  next tier by whichever follow passes it, and kept even if followers unfollow
+  and the count recedes.
+- **Post-like tiers** (`noticed` >10k, `trendy` >100k, `big` >1M, `exploding`
+  > 10M, `giant` >100M likes on one post), measured by the author's most-liked
+  > post: stamped inside `post.like`'s transaction the first time a post passes
+  > a threshold, raised by whichever post first passes the next one, and kept
+  > even if likes recede.
+- **Join badges**: `super_early_access` for the first 50 accounts,
+  `early_access` for the 51st through 999th, by creation order — tiers of one
+  family, so an account carries the higher of what its rank earned and never
+  both. Stamped at account creation (the rank is fixed the moment the account
+  exists, and the count is capped so the check costs the same forever after),
+  with migration 0028 backfilling accounts that predate the stamping hook.
+- **Founder** (`founder`): granted out of band to the three founder accounts
+  by the committed one-off script (`pnpm db:grant:founder` locally,
+  `node apps/server/dist/grant-founder-badge.js` in production); no API, no
+  UI, and the mechanism refuses a re-grant and refuses once three accounts
+  hold it.
+
+Out of scope for 0.5.0: badges on post cards, staff-granted badges, and any
+notification when a badge is earned.
+
+## Games
+
+- The game directory is the app's public catalog of games, ranked by a
+  current Twitch popularity snapshot and hydrated from IGDB by a weekly job,
+  and seeded from a committed fixture in dev, CI and e2e. It
+  lives at `/games` (the hub, a cover grid with a filter bar and five
+  sorts: popularity, upcoming, A→Z, release year, most favorited) and
+  `/games/{slug}` (one game's page: cover, name, summary, release year,
+  genres, platforms, and a public favorites count). Both are open to
+  signed-out visitors.
+- The upcoming sort lists unreleased games only (TBA or future release),
+  most-wanted first by IGDB hypes — the pre-release "want" count. The weekly
+  job pulls the top hypes beside the Twitch snapshot, so the shelf stays
+  current without a second catalog. That count is used for ordering only;
+  game cards show the name and available release year without the IGDB count.
+- Every game the catalog has ever tracked stays listed — a game that drops
+  out of the popularity scan keeps its row and its last-known rank, so a
+  page that once resolved always resolves.
+- Games surface in search alongside people and posts: the header typeahead
+  offers up to three games (name or hashtag-key match, popularity order),
+  and `/search` carries a Games section.
+- A hashtag that matches a game's hashtag key shows the game's card on hover
+  (cover, name, year, favorites count, link to the game page) and links to
+  Discover filtered on that game (`/discover?game=slug`) — everywhere post
+  text renders (feeds, threads, search). The link is decided by a per-batch
+  map the server computes beside each page of posts; a tag the catalog does
+  not answer keeps its original post-search link. While writing, the composer
+  suggests the catalog's full key for a partial or abbreviated tag (`#wow` →
+  accept `#worldofwarcraft`).
+- A signed-in user can favorite a game from its page — a public stamp, not a
+  private save: the count on the game page is public, and the user's profile
+  carries six favorite covers: a compact horizontal strip above the feed on
+  mobile and a three-column, two-row grid beside it on desktop. A small
+  “See more” button opens a scrollable popover with game links and
+  pagination through the complete list, newest first. Empty profiles offer
+  a link to `/games`, with an invitation to favorite games on your own profile.
+  Favorites are visible to every signed-in viewer — except on a private
+  profile, where the rail hides from non-followers like the follow lists do.
+  The directory's fourth sort orders games by that count. Sort options stay on
+  one horizontally scrollable row.
 
 ## Media
+
+- Posts, replies and quotes may contain one video or up to four images; mixing
+  them is refused. Videos accept MP4, MOV and WebM up to 500 decimal MB and five
+  minutes, at most 60 fps and oriented dimensions fitting 1920×1080 or 1080×1920.
+  Actual formats/codecs and decoded frames are validated; scaling cannot make
+  an oversized input acceptable.
+- The composer's Add media button opens one dialog for images or a video. A
+  selection can contain up to four images or one video, never both. Separate
+  subtitle files cannot be uploaded.
+- Selected videos have a local preview before posting, including while uploading.
+  Native controls provide play/pause, seeking and volume; previews never autoplay.
+  A browser that cannot play the original file shows a message without blocking
+  upload or submission. Previewing adds no server processing or media transfer.
+- Video selection uploads with progress, cancellation and recovery from brief network
+  interruptions. Submission remains explicit. After submission, an author-only
+  pending card survives navigation/reload; it has no public post link or counters.
+  A ready video publishes automatically after its raw source is removed.
+- A terminal failure removes the pending draft and produces exactly one durable,
+  link-free notice: “Your video couldn’t be processed, so your post wasn’t
+  published. Please create a new post to try again.” There is no failed-post archive.
+- Playback provides adaptive 360p/720p/1080p where the source supports them,
+  without upscaling; higher renditions preserve source rates up to 60 fps.
+  The custom player includes play/pause, seek, mute/volume, quality, speed,
+  fullscreen and picture-in-picture where supported, captions on existing videos
+  that already have them, and timeline previews. At most one visible video autoplays, always
+  muted; scrolling offscreen pauses it. Autoplay can be disabled in Preferences.
 
 _Configuration-dependent_: uploads require the `S3_*` group. Without it the
 app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
@@ -279,6 +488,16 @@ app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
 - Legal pages (`/privacy`, `/terms`, `/mentions-legales`) are localized like
   everything else; the French text of `/mentions-legales` is the legally
   authoritative filing.
+- Each release can carry English and French release notes. The matching notes
+  are built into that version of the app and shown once per device, including
+  on a first or signed-out visit. Dismissal is local to the device; a rollback
+  never replays older notes, and a release without notes stays silent.
+- **Google Analytics 4 is configuration-dependent and opt-in.** With no
+  `VITE_GA_MEASUREMENT_ID`, no banner or analytics code runs. With one, every
+  signed-in and signed-out surface offers equally prominent accept/refuse
+  choices, remembers either choice on that device for at most six months, and
+  loads GA only after acceptance. The footer and account settings can reopen
+  the choice at any time; refusing changes no product behavior.
 
 ## Blocks
 
@@ -388,7 +607,8 @@ it cannot be restored. _Avoid:_ removed post, withdrawn post.
 
 **Edited post** — a post whose author rewrote its text after publishing. The
 row carries the last edit time and every surface renders an "Edited" marker;
-the creation timestamp never moves, so an edit never re-ranks a feed. Each
+the creation timestamp never moves, and an edit leaves an existing ranked
+snapshot's order unchanged. A subsequent Refresh can score the new text. Each
 edit records the text it replaced; that history is visible to moderators in
 the case view, never on public surfaces. A removed or deleted post cannot be
 edited. _Avoid:_ updated post, revised post.
@@ -397,6 +617,45 @@ edited. _Avoid:_ updated post, revised post.
 added text or images. An event about the original, not a post of its own: the
 feed renders the original attributed to the reposter. Idempotent as a pair
 (`repost` / `unrepost`). _Avoid:_ retweet, boost, share.
+
+**Discover** — the ranked community feed at `/discover`: top-level
+posts by other authors, including people the viewer follows, ordered by the shared
+ranked scorer, with the search and game filters composing as candidate
+filters and a Who-to-Follow module above the posts. Ranked-only: it has no
+chronological mode. _Avoid:_ global feed, explore.
+
+**Rank snapshot** — one viewer's frozen ranked ordering for one scope and
+filter set: ordered post IDs with repost attribution, never content, stable
+for 30 minutes and resumable by cursor. Follows, blocks, bans, privacy,
+tombstones and filter membership are re-checked live on every page; an
+unknown, foreign, mismatched or expired snapshot id is an explicit error
+asking for a Refresh. _Avoid:_ ranking cache, feed cache.
+
+**Game directory** — the public catalog of games at `/games`, ranked by a
+current Twitch popularity snapshot, hydrated from IGDB, and never shrunk: a
+game that leaves the popularity scan keeps its row
+and its last-known rank. Each game has a page (`/games/{slug}`) carrying
+strictly game data — no post feed. _Avoid:_ games list, IGDB database.
+
+**Hashtag key** — a game's resolution key: its name lowercased with every
+non-alphanumeric character stripped (`Baldur's Gate 3` → `baldursgate3`).
+Assigned once and never rewritten — when two games collide, the later one
+takes a release-year suffix (`doom2016`). Distinct from the slug, which is
+the URL shape (`baldurs-gate-3`). A post hashtag equal to a key resolves to
+that game's page; anything else stays a post-search link. _Avoid:_ tag id,
+game handle.
+
+**Game favorite** — a user's public stamp on a game: the count is public on
+the game's page, and the user's profile shows their favorited games to every
+signed-in viewer — except on a private profile, where the rail hides from
+non-followers. Idempotent as a pair (`favorite` / `unfavorite`), newest
+stamp wins the rail's order. The deliberate opposite of a bookmark's
+privacy. _Avoid:_ like, save, wishlist.
+
+**Share** — the post-card control that opens the share dialog: the post
+previewed, its canonical permalink offered for copy, the copy confirmed by a
+toast. Not an in-app redistribution, not an event, nothing stored
+server-side. "Share" in the interface always means this; a repost is a Repost.
 
 **Quote post** — a normal post that references another post, which renders
 embedded inside it. Carries every post rule; a reply cannot also be a quote.

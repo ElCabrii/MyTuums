@@ -44,6 +44,7 @@ const base = () => ({
     // this value is never asserted — package.json via vite.config.ts remains
     // the single source of truth for the bundle.
     __APP_VERSION__: JSON.stringify("0.0.0"),
+    __APP_CHANGELOG__: JSON.stringify({ en: null, fr: null }),
   },
   resolve: {
     alias: {

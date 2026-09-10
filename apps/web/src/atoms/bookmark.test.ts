@@ -54,13 +54,19 @@ function makePost(overrides: Partial<Post> & { id: string }): Post {
     removedReason: null,
     editedAt: null,
     unavailable: false,
+    private: false,
+    parentPrivate: false,
+    quotedPrivate: false,
     attachments: [],
     ...overrides,
   };
 }
 
 function feedPage(posts: Post[]): InfiniteData<PostListPage> {
-  return { pages: [{ items: posts, nextCursor: null }], pageParams: [undefined] };
+  return {
+    pages: [{ items: posts, nextCursor: null, gameMentions: {}, ranking: null }],
+    pageParams: [undefined],
+  };
 }
 
 function freshStoreWithPost(post: Post) {
@@ -160,7 +166,7 @@ describe("toggleBookmarkAtomFamily", () => {
     // Seeded as a literal: the options-typed key carries the exact page-param
     // type, which the `feedPage` helper's wider annotation does not satisfy.
     queryClient.setQueryData(bookmarksKey, {
-      pages: [{ items: [saved], nextCursor: null }],
+      pages: [{ items: [saved], nextCursor: null, gameMentions: {}, ranking: null }],
       pageParams: [undefined],
     });
     queryClient.setQueryData(homeKey, feedPage([saved]));
@@ -191,7 +197,12 @@ describe("toggleBookmarkAtomFamily", () => {
     const bookmarksKey = postListQueryOptions({ feed: "bookmarks" }).queryKey;
     queryClient.setQueryData(bookmarksKey, {
       pages: [
-        { items: [makePost({ id: "post-1", viewerHasBookmarked: false })], nextCursor: null },
+        {
+          items: [makePost({ id: "post-1", viewerHasBookmarked: false })],
+          nextCursor: null,
+          gameMentions: {},
+          ranking: null,
+        },
       ],
       pageParams: [undefined],
     });

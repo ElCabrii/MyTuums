@@ -19,22 +19,73 @@ app's build from the same origin.
 
 ## Change map
 
-| Intent                               | Primary                                                                               | Also touch                                                                                                                                                                                                         |
-| ------------------------------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Add a page                           | `src/routes/<name>.tsx` (thin wrapper)                                                | the page body in `src/components/`; the signed-out allowlist (`isSignedOutPath`) if it must work signed out; a stub in `src/test/route-tree.tsx` (checked by the canonical inventory test in `route-tree.test.ts`) |
-| Add client state                     | `src/atoms/<concern>.ts`                                                              | its `.test.ts` sibling                                                                                                                                                                                             |
-| Read server data                     | a new `atomWithQuery` / `atomWithInfiniteQuery` in `src/atoms/`                       | `src/lib/query-definitions.ts`; `src/lib/orpc.ts` for response types                                                                                                                                               |
-| Add a mutation with optimism         | `src/atoms/<concern>.ts`                                                              | use `beginFollowPatch` / `beginPostPatch` in `src/lib/follow-cache.ts` / `post-cache.ts` — they own their cache inventory, cancellation and snapshot; roll back via `restoreFollowCaches` / `restorePosts`         |
-| Add a UI component                   | `pnpm --filter @my-tuums/web exec shadcn add <component>`                             | never hand-write into `src/components/ui`                                                                                                                                                                          |
-| Add or change copy                   | `messages/en.json`, `messages/fr.json`                                                | recompile; never touch `src/paraglide`                                                                                                                                                                             |
-| Router-touching behaviour            | `src/hooks/`                                                                          | never an atom — see the invariants                                                                                                                                                                                 |
-| Change an auth flow page             | `src/routes/` + `src/atoms/auth.ts`                                                   | `src/lib/auth-validation.ts` (form policy only — the rules live in `@my-tuums/auth/rules`)                                                                                                                         |
-| Change the legal consent gate        | `src/atoms/legal-consent.ts`, `src/components/legal-consent-dialog.tsx`               | `LEGAL_VERSION` in `@my-tuums/auth/rules`; `e2e/support/users.ts` seeds consent for every fixture                                                                                                                  |
-| Add a moderation surface             | `src/atoms/moderation.ts`, `src/components/moderation/`                               | `src/hooks/use-require-role.ts`                                                                                                                                                                                    |
-| Change a public route's crawler head | `apps/server/src/public-heads.ts` (server half), this app's `index.html` marker block | keep the title/description copy in step with `src/lib/document-head.ts` and `messages/en.json`                                                                                                                     |
-| Change the notifications surface     | `src/atoms/notifications.ts`, `src/components/notifications-page.tsx`                 | the unread badge on the header bell (`src/components/header.tsx`); the per-type copy in `messages/`                                                                                                                |
+| Intent                                                      | Primary                                                                                                                                          | Also touch                                                                                                                                                                                                         |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Add a page                                                  | `src/routes/<name>.tsx` (thin wrapper)                                                                                                           | the page body in `src/components/`; the signed-out allowlist (`isSignedOutPath`) if it must work signed out; a stub in `src/test/route-tree.tsx` (checked by the canonical inventory test in `route-tree.test.ts`) |
+| Add client state                                            | `src/atoms/<concern>.ts`                                                                                                                         | its `.test.ts` sibling                                                                                                                                                                                             |
+| Read server data                                            | a new `atomWithQuery` / `atomWithInfiniteQuery` in `src/atoms/`                                                                                  | `src/lib/query-definitions.ts`; `src/lib/orpc.ts` for response types                                                                                                                                               |
+| Add a mutation with optimism                                | `src/atoms/<concern>.ts`                                                                                                                         | use `beginFollowPatch` / `beginPostPatch` in `src/lib/follow-cache.ts` / `post-cache.ts` — they own their cache inventory, cancellation and snapshot; roll back via `restoreFollowCaches` / `restorePosts`         |
+| Add a UI component                                          | `pnpm --filter @my-tuums/web exec shadcn add <component>`                                                                                        | never hand-write into `src/components/ui`                                                                                                                                                                          |
+| Add or change copy                                          | `messages/en.json`, `messages/fr.json`                                                                                                           | recompile; never touch `src/paraglide`                                                                                                                                                                             |
+| Router-touching behaviour                                   | `src/hooks/`                                                                                                                                     | never an atom — see the invariants                                                                                                                                                                                 |
+| Change an auth flow page                                    | `src/routes/` + `src/atoms/auth.ts`                                                                                                              | `src/lib/auth-validation.ts` (form policy only — the rules live in `@my-tuums/auth/rules`)                                                                                                                         |
+| Change the legal consent gate                               | `src/atoms/legal-consent.ts`, `src/components/legal-consent-dialog.tsx`                                                                          | `LEGAL_VERSION` in `@my-tuums/auth/rules`; `e2e/support/users.ts` seeds consent for every fixture                                                                                                                  |
+| Add release notes                                           | `changelog/`                                                                                                                                     | `src/build/changelog.ts` compiles the current version; `src/components/changelog-dialog.tsx` owns display                                                                                                          |
+| Add a moderation surface                                    | `src/atoms/moderation.ts`, `src/components/moderation/`                                                                                          | `src/hooks/use-require-role.ts`                                                                                                                                                                                    |
+| Change a public route's crawler head                        | `apps/server/src/public-heads.ts` (server half), this app's `index.html` marker block                                                            | keep the title/description copy in step with `src/lib/document-head.ts` and `messages/en.json`                                                                                                                     |
+| Change the notifications surface                            | `src/atoms/notifications.ts`, `src/components/notifications-page.tsx`                                                                            | the unread badge on the header bell (`src/components/header.tsx`); the per-type copy in `messages/`                                                                                                                |
+| Change a ranked feed (order, refresh, suggestions, prompts) | `src/components/ranked-feed.tsx`, `src/components/who-to-follow.tsx`, `src/atoms/post-feed.ts` (snapshot pinning, `refreshRankedFeedAtomFamily`) | `src/lib/ranking.ts` (the `ranking` readers, the expiry matcher); `src/lib/query-definitions.ts` (`isRankableFeedParams`, the ranked key segment); `src/lib/follow-cache.ts` (suggestion-row sweeps)               |
+| Change the badge surfaces                                   | `src/components/profile-badges.tsx`                                                                                                              | the catalog ids/tiers come from `@my-tuums/api/badges` (never restated); the localized names in `messages/` are keyed by badge id                                                                                  |
 
 ## Invariants
+
+- **Composers share one media picker.** `src/components/composer-media-dialog.tsx`
+  opens from Add media; `src/components/composer-form.tsx` accepts either images
+  or one video and owns validation. Separate subtitle uploads are unavailable.
+  Selected media and video progress remain visible in the composer after the
+  dialog closes.
+
+- **Video upload state outlives its composer component, not the tab.**
+  `src/atoms/video-upload.ts` owns scoped File/progress/cancellation state;
+  `src/lib/video-upload.ts` sends sequential 8 MiB parts with XHR and resumes
+  from server-confirmed parts. Selection/completion never submits a post.
+  Successful submission clears the draft; explicit removal cancels the upload.
+- **Composer video previews use the original local file.**
+  `src/components/local-video-preview.tsx` owns the native player and its blob
+  URL, released on replacement or unmount. Previewing never uploads, encodes,
+  submits, or validates the video. Unsupported local playback does not block
+  submission. Previews require explicit play and share viewport/tab visibility
+  and playback ownership with feed players through `src/hooks/use-video-visibility.ts`.
+- **Pending videos are server state.** `src/atoms/pending-videos.ts` polls
+  author-only submissions. When a pending item disappears, ranked feeds need a
+  new snapshot (`resetQueries`), not a refetch of the old pinned snapshot.
+- **Playback has one visible owner.** `src/atoms/video-playback.ts` coordinates
+  all full players and the persisted autoplay preference. Autoplay is muted;
+  sound requires explicit interaction. `src/components/video-player.tsx` loads
+  HLS.js on demand. Playback ownership and source ownership are separate: an
+  explicitly paused, visible player retains its source/buffers until another
+  player takes ownership or it leaves view. Pause/resume must not reload the
+  stream; the control reflects playback intent even while loading.
+  Clicking the video surface or pressing Space while it has focus toggles the same
+  playback intent; keyboard events on other controls retain their own behavior.
+  Compact attachment previews render the cover; full surfaces use the same custom player. In
+  fullscreen, the video fills the remaining height above the controls; the
+  feed height cap applies only outside fullscreen. Quality and speed portals
+  render inside the fullscreen element so their menus remain visible and interactive.
+
+- **Displayed media cannot start native browser drags.** `src/routes/__root.tsx`
+  cancels media drag starts at the app shell, including React portals such as
+  full-size image viewers. Pointer-based cropping and incoming file drops are
+  separate interactions.
+
+- **Global action dialogs load on first request.** `src/components/global-dialogs.tsx`
+  hosts the single Report/Block/Delete/Edit/Quote/Share instances. It observes
+  lightweight identities in `src/atoms/dialog-targets.ts` and `src/atoms/share-dialog.ts`
+  without importing mutations or dialog implementations. Each lazy wrapper stays
+  mounted after its first request so the dialog retains ownership of closing,
+  focus restoration, and body/mutation cleanup. Consent, changelog, and analytics
+  controllers remain unconditional; service-worker precaching is independent of
+  this React loading policy.
 
 - **One Jotai store, one QueryClient, one router.** `src/lib/store.ts` is
   hydrated with `queryClientAtom` at module scope, never through
@@ -62,6 +113,8 @@ app's build from the same origin.
   added there, not in `signOutAtom`. Its lightweight coordinator clears the QueryClient
   synchronously, then dynamically imports each family for an independent,
   best-effort sweep so chunk loading cannot block sign-out.
+  Notifications, the moderation queue and the audit log use single query
+  atoms: their data is cleared by the QueryClient, with no family to sweep.
 - **Like and follow serialise per entity.** One `scope` id per entity,
   per-entity intent atoms drop superseded responses, and rollback rides on
   mutation-level `onError` — per-call callbacks never fire for write-only
@@ -71,11 +124,35 @@ app's build from the same origin.
   because a repost is a feed _event_ whose position is server-ordered — a new
   one lands at the top of the home feeds, and an unrepost removes one from
   them.
+- **Marking notifications read cancels older list and badge requests before
+  patching their caches.** An unfinished initial list restarts after marking
+  read; loaded lists keep their pages without a redundant refetch. Otherwise
+  a late response can restore unread rows after the bell has cleared.
 - **Persisted atoms read `localStorage` as `unknown`, sanitise on read, and
   set `getOnInit: true`** — without it the first render flashes the default.
+- **Analytics has one root-mounted controller.** `AnalyticsConsent` alone
+  loads/stops GA and emits SPA page views; `analyticsConsentAtom` owns the
+  sanitised, six-month per-device choice. With no measurement id there is no
+  banner, storage write, script, page view, or analytics-specific CSP source.
+- **Release notes travel with their release.** Vite compiles only
+  `changelog/<version>.<locale>.md` matching `package.json`; the browser ships
+  rendered HTML, not Marked or historical notes. `ChangelogDialog` shows it
+  once per version and device, including new and signed-out users, while the
+  mandatory legal-consent dialog has priority. A missing file advances the
+  stored version silently, and an older cached bundle never overwrites a newer
+  seen version.
 - **Exactly one effect owns each redirect.** Auth pages call
   `useRedirectWhenSignedIn` and never navigate on success themselves;
   double-navigation races were real bugs.
+- **Product queries wait for account readiness without unmounting pages.**
+  `src/atoms/query-readiness.ts` combines the existing session, legal-consent,
+  and onboarding atoms for query `enabled` conditions. Public thread, reply,
+  link-card, and game reads also allow a settled, error-free anonymous session;
+  signed-in viewers still need consent and onboarding. Session confirmation
+  resumes queries, so accepting consent does not reset the whole QueryClient.
+  Query definitions use `retryUnlessClientError` to stop deterministic 4xx
+  retries while retaining bounded transient recovery. These client gates do
+  not replace server authorization or legal-version recovery.
 - **The legal consent gate decides everything itself.** `LegalConsentDialog`
   is mounted unconditionally in `__root.tsx`; it reads whether the viewer is
   signed in, whether their recorded `legalVersion` is current, and whether the
@@ -141,15 +218,32 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   page and its connected branch without recursive indentation;
   `replyContinuationAtom` resumes capped branches through the
   `continuationRootId` mode of the same procedure/cache prefix.
+- **Ranked feeds pin their snapshot in the cache, not in the key (issue
+  #305).** `postFeedAtom` forces `feed: "discover"` to ranked and drops the
+  flag beside any author/reply/repost/activity scoping, so a ranked global
+  feed never shares a cache entry with its chronological twin while unrankable
+  params never fork one. The family key carries a `|k` segment for ranked
+  params only — unranked seven-segment keys are byte-identical to before. The
+  input builder reads the cached first page's `snapshotId` at fetch time
+  (never subscribed) and sends it on first pages and cursor pages alike, while
+  the query key stays snapshot-free so the optimistic sweeps keep matching;
+  Refresh (`refreshRankedFeedAtomFamily`) resets exactly that feed's query so
+  the next fetch mints a new snapshot. `RankedFeed` owns the Refresh control,
+  the expiry recovery card (an expired snapshot offers Refresh, never retry —
+  retry would resend the same id), the optional Who-to-Follow module (top
+  three live-filtered candidates, no refill until Refresh; follow clicks patch
+  suggestion rows in place through `src/lib/follow-cache.ts`) and the
+  cold-start games prompt (For you and Discover only — Following keeps its
+  catch-up empty state).
 
 ## Dependencies and boundaries
 
-- Import exactly five workspace modules and no others:
-  `@my-tuums/api/constants`, `@my-tuums/api/dimensions`,
-  `@my-tuums/api/post-image`, `@my-tuums/api/roles`
-  and `@my-tuums/auth/rules`. All five must stay free of `@my-tuums/db`, which
+- Import exactly six workspace modules and no others:
+  `@my-tuums/api/constants`, `@my-tuums/api/badges`,
+  `@my-tuums/api/dimensions`, `@my-tuums/api/post-image`, `@my-tuums/api/roles`
+  and `@my-tuums/auth/rules`. All six must stay free of `@my-tuums/db`, which
   throws at module load in a browser. The production bundle contains those
-  five and nothing else from the packages — check a sourcemap's `sources` if
+  six and nothing else from the packages — check a sourcemap's `sources` if
   you need to confirm it after a change.
 - **`src/lib/auth-validation.ts` is a form adapter, not a rule book.** The
   handle bounds and charset, the date-of-birth parse and age comparison, the
@@ -166,8 +260,8 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   `/verify-email` itself rather than waiting on `useRedirectWhenSignedIn`, and
   `/login` does the same on the `EMAIL_NOT_VERIFIED` outcome.
 - In dev, Vite proxies `/rpc`, `/api/auth` and `/media` to the API on `:3001`.
-- Only two `VITE_*` variables are read: `VITE_SOCIAL_PROVIDERS` and
-  `VITE_GOOGLE_CLIENT_ID`. Both are inlined at build time — see
+- Only three `VITE_*` variables are read: `VITE_SOCIAL_PROVIDERS`,
+  `VITE_GOOGLE_CLIENT_ID`, and `VITE_GA_MEASUREMENT_ID`. All are inlined at build time — see
   [docs/operations.md](../../docs/operations.md).
 
 ## Generated files

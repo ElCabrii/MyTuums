@@ -157,6 +157,42 @@ describe("ProfileLink", () => {
     });
   });
 
+  it("renders the profile's badges beside the name in the hover card", async () => {
+    const queryClient = renderQueryClient();
+    queryFixtures(queryClient).profile.data(
+      "badged",
+      makeProfile({
+        id: "person-5",
+        username: "badged",
+        name: "Badged User",
+        badges: ["trendy", "founder", "early_access"],
+      }),
+    );
+
+    await renderWithProviders(<ProfileLink username="badged">Badged User</ProfileLink>, {
+      queryClient,
+      signedInAs: true,
+    });
+    vi.useFakeTimers();
+
+    fireEvent.mouseEnter(screen.getByRole("link", { name: "Badged User" }));
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    // The same badge row the profile header renders, in the API's order.
+    const card = screen.getByRole("list", { name: m.profile_badges_label() });
+    expect(card.querySelectorAll("li")).toHaveLength(3);
+    expect(screen.getByTitle(m.badge_trendy())).toBeInTheDocument();
+    expect(screen.getByTitle(m.badge_founder())).toBeInTheDocument();
+    expect(screen.getByTitle(m.badge_early_access())).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+  });
+
   it("renders only the suspension stub for a suspended profile", async () => {
     const queryClient = renderQueryClient();
     queryFixtures(queryClient).profile.data(
@@ -169,6 +205,10 @@ describe("ProfileLink", () => {
         image: "/media/avatars/suspended/private.webp",
         followerCount: 99,
         suspended: true,
+        // The server redacts badges on the stub along with every authored
+        // field (issue #308); the fixture keeps one so the assertion pins the
+        // card's behaviour, not the fixture's emptiness.
+        badges: ["founder"],
       }),
     );
 
@@ -190,6 +230,7 @@ describe("ProfileLink", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("img", { name: "Private display name" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: m.follow_action() })).not.toBeInTheDocument();
+    expect(screen.queryByTitle(m.badge_founder())).not.toBeInTheDocument();
   });
 });
 

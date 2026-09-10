@@ -1,13 +1,9 @@
+import { ResponsiveDialogContent } from "@/components/responsive-dialog-content";
 import { useAtomValue, useSetAtom } from "jotai";
-import { blockAtom, blockDialogAtom } from "@/atoms/moderation";
+import { blockAtom } from "@/atoms/moderation";
+import { blockDialogAtom } from "@/atoms/dialog-targets";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { m } from "@/paraglide/messages.js";
 
 /**
@@ -42,7 +38,7 @@ function BlockDialogBody({ target }: { target: { userId: string; handle: string 
   const block = useAtomValue(blockAtom);
 
   return (
-    <DialogContent className="max-w-md">
+    <ResponsiveDialogContent className="max-w-md">
       <DialogHeader>
         <DialogTitle>{m.moderation_block_title({ handle: target.handle })}</DialogTitle>
         <DialogDescription>{m.moderation_block_body()}</DialogDescription>
@@ -58,13 +54,15 @@ function BlockDialogBody({ target }: { target: { userId: string; handle: string 
           className="w-full"
           disabled={block.isPending}
           onClick={() => {
-            block.mutate({ userId: target.userId });
-            setTarget(null);
+            block.mutate(
+              { userId: target.userId },
+              { onSuccess: () => setTarget((current) => (current === target ? null : current)) },
+            );
           }}
         >
           {m.moderation_block_submit()}
         </Button>
       </div>
-    </DialogContent>
+    </ResponsiveDialogContent>
   );
 }

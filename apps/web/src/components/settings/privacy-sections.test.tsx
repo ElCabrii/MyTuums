@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { setTestSocialProviders } from "@/test/auth-fixture";
+import { setTestSession, setTestSocialProviders, signedInSession } from "@/test/auth-fixture";
 import { createTestQueryClient } from "@/test/factories";
 import { queryFixtures } from "@/test/query-fixtures";
 import { renderWithProviders } from "@/test/render";
@@ -7,6 +7,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore } from "jotai";
 import { authPendingAtom } from "@/atoms/auth";
+import { sessionAtom } from "@/atoms/session";
 import { linkedAccountsQueryKey } from "@/atoms/linked-accounts";
 import { authClient } from "@/lib/auth-client";
 import { orpc, type BlockedUser } from "@/lib/orpc";
@@ -40,6 +41,7 @@ function makeBlockedUser(overrides: Partial<BlockedUser> & { id: string }): Bloc
     bio: null,
     bannerImage: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    isPrivate: false,
     blockedAt: new Date("2026-02-01T00:00:00.000Z"),
     ...overrides,
   };
@@ -134,11 +136,25 @@ describe("LinkedAccountsSection", () => {
 });
 
 describe("BlockedUsersSection", () => {
+  // The blocked list stays idle until the session is ready (issue #353) — a
+  // store pre-seeded with the driven session, so each render mounts
+  // already-enabled and observes the seeded cache instead of a skeleton.
+  function readyStore() {
+    const session = signedInSession();
+    setTestSession(session);
+    const store = createStore();
+    // SAFETY: the complete session the fake store holds — the settings
+    // atoms read only whether the viewer may fire, never the store identity.
+    store.set(sessionAtom, session as never);
+    return store;
+  }
+
   it("renders loading, a retryable error, and the empty result", async () => {
     const loadingClient = createTestQueryClient();
     queryFixtures(loadingClient).query.loading(orpc.moderation.listBlocked.queryKey());
     const loading = await renderWithProviders(<BlockedUsersSection />, {
       queryClient: loadingClient,
+      store: readyStore(),
       signedInAs: true,
     });
     expect(screen.getByText(m.settings_blocked_loading())).toBeInTheDocument();
@@ -152,6 +168,7 @@ describe("BlockedUsersSection", () => {
     );
     await renderWithProviders(<BlockedUsersSection />, {
       queryClient: errorClient,
+      store: readyStore(),
       signedInAs: true,
     });
     expect(screen.getByRole("alert")).toHaveTextContent(m.settings_blocked_error());

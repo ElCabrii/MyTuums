@@ -9,17 +9,22 @@ import {
 /**
  * The email HTML rendering, tested through the exported builders.
  *
- * `escapeHtml`, `renderHtmlLine`, `renderHtmlCopy`, `renderActionButton` and
- * `brandedEmail` are private on purpose — they are the template's internals,
- * not an interface. What the rest of the repo calls is the builder per flow,
- * so that is what the assertions go through: action URLs become buttons,
- * while moderator- and author-supplied copy stays inert in an email client.
+ * `EmailCopy`, `lineSegments`, `EmailButton`, `MytuumsShell` and
+ * `renderBrandedEmail` (in `src/email-templates/`) are private on purpose —
+ * they are the template's internals, not an interface. What the rest of the
+ * repo calls is the builder per flow, so that is what the assertions go
+ * through: action URLs become buttons, while moderator- and author-supplied
+ * copy stays inert in an email client.
  *
  * These are `*.test.ts` and not `*.int.test.ts` for the same reason
  * `src/email.ts` is import-safe with no environment: nothing here touches the
  * database, the network or the root `.env`. The delivery path — whether a
  * notice is actually owed and sent — stays in `packages/api`'s integration
  * suites, which run the production instance against a real database.
+ *
+ * Escaping is structural now: every string reaches the HTML part as a React
+ * text child, so React's escaper (not a hand-rolled one) produces the
+ * entities below — note `'` becomes `&#x27;`.
  */
 
 type Anchor = {
@@ -46,17 +51,17 @@ function visibleHtml(html: string): string {
 }
 
 describe("branded email HTML", () => {
-  it("uses an accessible, table-based letter layout", () => {
-    const email = verificationEmail("https://mytuums.test/verify", "en");
+  it("uses a branded, table-based letter layout", async () => {
+    const email = await verificationEmail("https://mytuums.test/verify", "en");
 
-    expect(email.html).toContain('<table role="article" aria-labelledby="email-title"');
-    expect(email.html).toContain('<h1 id="email-title"');
+    expect(email.html).toContain('lang="en"');
+    expect(email.html).toContain('id="email-title"');
     expect(email.html).toContain('alt="MyTuums logo"');
     expect(email.html).toContain("border-top:3px solid #c6005c");
   });
 
-  it("keeps supplied moderator and author content escaped in the HTML part", () => {
-    const email = moderationRemovalEmail(
+  it("keeps supplied moderator and author content escaped in the HTML part", async () => {
+    const email = await moderationRemovalEmail(
       {
         postText: '<img src="x" onerror="alert(1)"> & "quoted"',
         attachmentCount: 0,
@@ -66,7 +71,7 @@ describe("branded email HTML", () => {
       "en",
     );
 
-    expect(email.html).toContain("Reason: &amp;&lt;&gt;&quot;&#39;");
+    expect(email.html).toContain("Reason: &amp;&lt;&gt;&quot;&#x27;");
     expect(email.html).toContain(
       "&lt;img src=&quot;x&quot; onerror=&quot;alert(1)&quot;&gt; &amp; &quot;quoted&quot;",
     );
@@ -74,8 +79,8 @@ describe("branded email HTML", () => {
     expect(email.html).not.toContain('onerror="alert(1)"');
   });
 
-  it("escapes & first, so an & next to markup is not double-escaped", () => {
-    const email = moderationRemovalEmail(
+  it("escapes & first, so an & next to markup is not double-escaped", async () => {
+    const email = await moderationRemovalEmail(
       {
         postText: "remove me",
         attachmentCount: 0,
@@ -110,8 +115,8 @@ describe("branded email HTML", () => {
       build: () => passwordResetEmail("https://mytuums.test/action?token=two&next=%2Fhome", "fr"),
       label: "Réinitialiser mon mot de passe",
     },
-  ])("renders a localized $name CTA instead of visible URL text", ({ build, label }) => {
-    const email = build();
+  ])("renders a localized $name CTA instead of visible URL text", async ({ build, label }) => {
+    const email = await build();
     const actionUrl = email.text.match(/https?:\/\/\S+/)?.[0];
 
     if (!actionUrl) throw new Error("expected the text fallback to contain an action URL");
@@ -126,11 +131,11 @@ describe("branded email HTML", () => {
     expect(visibleHtml(email.html)).not.toContain(actionUrl);
   });
 
-  it("keeps a moderation appeal URL in text and as an escaped CTA href", () => {
+  it("keeps a moderation appeal URL in text and as an escaped CTA href", async () => {
     const appealUrl =
       "https://mytuums.test/appeal?token=signed-capability&callbackURL=%2Fmoderation%3Ftab%3Dappeals";
 
-    const email = moderationRemovalEmail(
+    const email = await moderationRemovalEmail(
       { postText: "remove me", attachmentCount: 0, reason: "spam", appealUrl },
       "en",
     );
@@ -144,18 +149,18 @@ describe("branded email HTML", () => {
     expect(visibleHtml(email.html)).not.toContain(appealUrl);
   });
 
-  it("places the primary action before the fallback safety note", () => {
-    const email = verificationEmail("https://mytuums.test/verify", "en");
+  it("places the primary action before the fallback safety note", async () => {
+    const email = await verificationEmail("https://mytuums.test/verify", "en");
 
     expect(email.html.indexOf(">Verify my email address</a>")).toBeLessThan(
-      email.html.indexOf("If you didn&#39;t create a MyTuums account"),
+      email.html.indexOf("If you didn&#x27;t create a MyTuums account"),
     );
   });
 
-  it("keeps arbitrary URLs in quoted posts as ordinary safe links, separate from the CTA", () => {
+  it("keeps arbitrary URLs in quoted posts as ordinary safe links, separate from the CTA", async () => {
     const postUrl = "https://author.test/post?ref=moderation&part=quote";
     const appealUrl = "https://mytuums.test/appeal?token=signed-capability";
-    const email = moderationRemovalEmail(
+    const email = await moderationRemovalEmail(
       {
         postText: `See ${postUrl}`,
         attachmentCount: 0,
@@ -177,8 +182,8 @@ describe("branded email HTML", () => {
     expect(visibleHtml(email.html)).not.toContain(appealUrl);
   });
 
-  it("preserves the plain text's paragraph structure while placing the CTA after the copy", () => {
-    const email = moderationRemovalEmail(
+  it("preserves the plain text's paragraph structure while placing the CTA after the copy", async () => {
+    const email = await moderationRemovalEmail(
       {
         postText: "remove me",
         attachmentCount: 0,
@@ -192,13 +197,13 @@ describe("branded email HTML", () => {
     expect(rendered).toHaveLength(4);
     expect(rendered[0]).toBe("A moderator removed your post.");
     expect(rendered[1]).toBe("Reason: spam");
-    expect(rendered[2]).toBe("Your post:<br>&quot;remove me&quot;");
+    expect(rendered[2]).toBe("Your post:<br/>&quot;remove me&quot;");
     expect(rendered[3]).toBe("If you believe this was a mistake, you can appeal the decision:");
     expect(email.html).toContain(">Appeal this decision</a>");
   });
 
-  it("renders the French subject into <title> and <h1> while the header stays unescaped", () => {
-    const email = moderationRemovalEmail(
+  it("renders the French subject into <title> and <h1> while the header stays unescaped", async () => {
+    const email = await moderationRemovalEmail(
       {
         postText: "remove me",
         attachmentCount: 0,
@@ -223,8 +228,8 @@ describe("otpEmail", () => {
     vi.resetModules();
   });
 
-  it("keeps the code in the text fallback and gives it restrained emphasis in HTML", () => {
-    const email = otpEmail("123456", "en");
+  it("keeps the code in the text fallback and gives it restrained emphasis in HTML", async () => {
+    const email = await otpEmail("123456", "en");
 
     expect(email.text).toContain("123456");
     expect(email.html).toContain(">123456</strong>");
@@ -237,7 +242,7 @@ describe("otpEmail", () => {
     vi.resetModules();
     const { otpEmail: freshOtpEmail } = await import("./email.js");
 
-    const email = freshOtpEmail("123456", "en");
+    const email = await freshOtpEmail("123456", "en");
 
     expect(email.html).toContain('src="http://localhost:5173/mytuums-192.png"');
   });
@@ -251,7 +256,7 @@ describe("otpEmail", () => {
     vi.resetModules();
     const { otpEmail: freshOtpEmail } = await import("./email.js");
 
-    const email = freshOtpEmail("123456", "en");
+    const email = await freshOtpEmail("123456", "en");
 
     expect(email.html).toContain('src="https://mail.example.test/mytuums-192.png"');
   });

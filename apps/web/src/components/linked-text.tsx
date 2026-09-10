@@ -12,6 +12,7 @@ import {
 // LinkedText for the bio. See profile-link.tsx for why the cycle is
 // intentional and runtime-safe (hover-card content renders lazily on hover).
 import { ProfileLink } from "@/components/profile-link";
+import { GameHashtagLink } from "@/components/game-hashtag-link";
 
 type TextSegment = {
   kind: "text";
@@ -331,7 +332,7 @@ function linkedSegments(text: string): Segment[] {
   return segments;
 }
 
-function renderSegment(segment: Segment): ReactNode {
+function renderSegment(segment: Segment, gameMentions?: Record<string, string>): ReactNode {
   switch (segment.kind) {
     case "mention":
       return (
@@ -358,14 +359,24 @@ function renderSegment(segment: Segment): ReactNode {
           {segment.label}
         </a>
       );
-    case "hashtag":
-      // A tag is nothing but a link into post search filtered to itself: the
-      // query keeps the `#` so it matches hash-marked occurrences rather than
-      // the bare word. Post search is a substring scan, so a longer tag
+    case "hashtag": {
+      // A RESOLVED tag is a game hashtag (issue #314, Q3, as revised by the
+      // Discover feedback): hovering shows the game's card and clicking lands
+      // on Discover filtered to that game (`/discover?game=slug`), where the
+      // conversation about it lives. The server's per-batch map answers the
+      // canonical tag with the catalog's slug, and that answer is the whole
+      // mechanism — nothing is guessed client-side. Everything else keeps the
+      // original meaning: a link into post search filtered to itself, the
+      // query carrying the `#` so it matches hash-marked occurrences rather
+      // than the bare word. Post search is a substring scan, so a longer tag
       // (`#tag_expo`), a glued word (`word#tag`) or a URL fragment still
-      // matches. The label stays as typed while the query carries the
-      // canonical lowercase tag, the same split as a mention's label versus
-      // its `/@handle` href.
+      // matches. The label stays as typed while the link carries the
+      // canonical target, the same split as a mention's label versus its
+      // `/@handle` href.
+      const gameSlug = gameMentions?.[segment.tag];
+      if (gameSlug !== undefined) {
+        return <GameHashtagLink label={segment.label} slug={gameSlug} />;
+      }
       return (
         <Link
           to="/search"
@@ -375,6 +386,7 @@ function renderSegment(segment: Segment): ReactNode {
           {segment.label}
         </Link>
       );
+    }
     case "text":
       return segment.value;
   }
@@ -383,21 +395,31 @@ function renderSegment(segment: Segment): ReactNode {
 /**
  * Renders the three link shapes MyTuums recognizes inside otherwise plain,
  * author-written text: syntactically valid `@handles` as profile links,
- * absolute http(s) URLs as external anchors, and `#tags` as links into post
- * search filtered to the tag. Unknown handles deliberately link to the
- * canonical profile route, whose existing not-found state is the fallback;
- * malformed handles, malformed tags and every other scheme stay untouched
- * text. A tag has no minimum length, unlike a handle (`USERNAME_MIN_LENGTH`):
- * one character after the `#` is a complete tag, a deliberate asymmetry with
- * mentions. React text children keep the entire surface HTML-safe.
+ * absolute http(s) URLs as external anchors, and `#tags` as game hashtags
+ * (hover card + Discover filtered view) when the batch map resolves them, or
+ * as links into post search filtered to the tag otherwise. Unknown handles
+ * deliberately link to the canonical profile route, whose existing not-found
+ * state is the fallback; malformed handles, malformed tags and every other
+ * scheme stay untouched text. A tag has no minimum length, unlike a handle
+ * (`USERNAME_MIN_LENGTH`): one character after the `#` is a complete tag, a
+ * deliberate asymmetry with mentions. React text children keep the entire
+ * surface HTML-safe.
  *
  * Nothing here stops a click from bubbling: the surrounding surfaces that
  * navigate on click (`PostCard`) already ignore clicks landing inside an
  * anchor, so a link opens its destination and nothing else.
  */
-export function LinkedText({ text }: { text: string }) {
+export function LinkedText({
+  text,
+  gameMentions,
+}: {
+  text: string;
+  gameMentions?: Record<string, string>;
+}) {
   return linkedSegments(text).map((segment) => (
-    <Fragment key={`${segment.kind}-${segment.start}`}>{renderSegment(segment)}</Fragment>
+    <Fragment key={`${segment.kind}-${segment.start}`}>
+      {renderSegment(segment, gameMentions)}
+    </Fragment>
   ));
 }
 

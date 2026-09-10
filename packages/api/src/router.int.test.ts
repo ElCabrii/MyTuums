@@ -53,17 +53,20 @@ describe("the session gate", () => {
     expect(leaves.length).toBeGreaterThan(10);
 
     // The deliberate exceptions. `appealOpen` is capability-gated, not
-    // session-gated (a banned user cannot sign in to appeal), and the three
-    // public-read leaves (0.4.0) serve the anonymous post permalink:
-    // `post.thread` and the reply modes of `post.list` render a public
-    // thread, `post.linkCard` renders the cards that thread's posts carry.
-    // Each has its own anonymous-behavior tests; if a new session-less
-    // procedure ever appears, this set is where to notice it.
+    // session-gated (a banned user cannot sign in to appeal), and the
+    // public-read leaves serve the two anonymous page families: `post.thread`
+    // and the reply modes of `post.list` render the public post permalink
+    // (0.4.0), `post.linkCard` renders the cards that thread's posts carry,
+    // and `game.bySlug` / `game.list` render the public game directory
+    // (issue #314, Q6). Each has its own anonymous-behavior tests; if a new
+    // session-less procedure ever appears, this set is where to notice it.
     const sessionless = new Set([
       "moderation.appealOpen",
       "post.thread",
       "post.list",
       "post.linkCard",
+      "game.bySlug",
+      "game.list",
     ]);
 
     for (const { path, procedure } of leaves) {

@@ -30,16 +30,28 @@ re-proved here — see [../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
 
 ## Change map
 
-| Intent                              | Primary                                         | Also touch                                        |
-| ----------------------------------- | ----------------------------------------------- | ------------------------------------------------- |
-| Add a browser journey               | `tests/specs/<name>.spec.ts`                    | `support/db.ts` if it needs new seed data         |
-| Add a transport-level assertion     | `tests/api/<name>.spec.ts`                      | — (no browser, no auth state)                     |
-| Add a fixture account or seed shape | `support/users.ts`, `support/db.ts`             | `tests/auth.setup.ts` when it needs storage state |
-| Add a page-scoped locator helper    | `support/post-card.ts` or a new `support/` file | —                                                 |
-| Change ports or stack env           | `playwright.config.ts`                          | `../docs/operations.md`                           |
-| Add a shared browser context        | `support/fixtures.ts`                           | —                                                 |
+| Intent                              | Primary                                           | Also touch                                        |
+| ----------------------------------- | ------------------------------------------------- | ------------------------------------------------- |
+| Add a browser journey               | `tests/specs/<name>.spec.ts`                      | `support/db.ts` if it needs new seed data         |
+| Add a transport-level assertion     | `tests/api/<name>.spec.ts`                        | — (no browser, no auth state)                     |
+| Add a fixture account or seed shape | `support/users.ts`, `support/db.ts`               | `tests/auth.setup.ts` when it needs storage state |
+| Add a page-scoped locator helper    | `support/post-card.ts` or a new `support/` file   | —                                                 |
+| Wait for a post in a ranked feed    | `support/ranked-feed.ts` (`expectRankedPostText`) | — (ranked order has no first-page guarantee)      |
+| Change ports or stack env           | `playwright.config.ts`                            | `../docs/operations.md`                           |
+| Add a shared browser context        | `support/fixtures.ts`                             | —                                                 |
 
 ## Invariants
+
+- **The video upload regression owns only its observed capabilities.**
+  `tests/specs/video-upload.spec.ts` interrupts one multipart PUT, proves recovery
+  without resending confirmed parts, and checks explicit submission, private
+  pending state, reload and cancellation. Its transport fixture is not an encoder
+  fixture; native validation/playable-output tests run in the worker image. It
+  cleans exact session keys rather than scanning a bucket shared with local data.
+  CI configures and verifies its bucket's exact `http://localhost:5273` CORS
+  rule before the suite; local development uses the separately configured dev
+  bucket. Transport-level CSP assertions include only the configured bucket
+  origins and keep `blob:` out of script execution.
 
 - **`workers: 1`.** Every spec shares one Postgres and one in-process server
   rate limiter; parallel workers 429 each other and fight over fixtures, and
@@ -74,6 +86,12 @@ re-proved here — see [../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
 - **Storage state is cookies only.** `auth.setup.ts` captures it through an
   `APIRequestContext`, which has no page and therefore no `localStorage`. A
   spec asserting "nothing stored" must open a fresh `browser.newContext`.
+- **Unrelated browser journeys start with the current release notes seen.**
+  `support/fixtures.ts` seeds the version from `apps/web/package.json` for
+  the default, bob, and signed-out contexts. Release-note journeys opt out
+  with `showReleaseNotes: true`; `tests/specs/changelog.spec.ts` checks the
+  bundled notes and dismissal across a real reload. This keeps a version
+  bump from placing a modal over every unrelated journey.
 - **The setup project's file must live under `tests/`.** `testMatch` only
   filters files the `testDir` scan already found; it cannot reach outside it.
 - **Fixture sign-up goes through `E2E.webUrl`, not `E2E.serverUrl`.** The

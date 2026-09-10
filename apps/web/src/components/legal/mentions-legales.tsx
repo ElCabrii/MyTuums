@@ -54,6 +54,7 @@ export function MentionsLegales() {
         <Link to="/privacy">{m.legal_privacy_policy()}</Link>
         {m.legal_notice_s5_p1_after()}
       </p>
+      <p>{m.legal_notice_s5_p2()}</p>
 
       <h2>{m.legal_notice_s6_title()}</h2>
       <p>{m.legal_notice_s6_p1()}</p>

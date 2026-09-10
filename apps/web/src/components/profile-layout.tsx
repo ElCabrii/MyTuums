@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { getRouteApi, Link, Outlet } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
+import { ProfileEditDialog } from "@/components/profile-edit-dialog";
+import { AccountMenu } from "@/components/account-menu";
+import { ProfileGameRail } from "@/components/profile-game-rail";
 import { ORPCError } from "@orpc/client";
 import { BANNER_ASPECT_RATIO } from "@my-tuums/api/constants";
 import {
@@ -10,7 +13,8 @@ import {
 } from "@/lib/banner-frame";
 import { viewerAtom, isStaffAtom } from "@/atoms/session";
 import { profileAtomFamily } from "@/atoms/profile";
-import { blockDialogAtom, reportDialogAtom, unbanUserAtom } from "@/atoms/moderation";
+import { unbanUserAtom } from "@/atoms/moderation";
+import { blockDialogAtom, reportDialogAtom } from "@/atoms/dialog-targets";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,14 +22,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatJoinDate } from "@/lib/format";
+import { formatJoinDate, formatCount } from "@/lib/format";
 import { handleOf } from "@/lib/user";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/components/user-avatar";
 import { ImageViewer } from "@/components/image-viewer";
 import { AvatarUpgradePrompt } from "@/components/avatar-upgrade-prompt";
 import { FollowButton } from "@/components/follow-button";
 import { FollowListDialog } from "@/components/follow-list-dialog";
+import { ProfileBadges } from "@/components/profile-badges";
 import { ProfileMessage } from "@/components/profile-message";
 import { LinkedText } from "@/components/linked-text";
 import { useDocumentHead } from "@/hooks/use-document-head";
@@ -34,7 +40,6 @@ import {
   Calendar,
   Loader2,
   AlertCircle,
-  Settings,
   MoreHorizontal,
   ShieldAlert,
   ShieldCheck,
@@ -44,6 +49,45 @@ import { getLocale } from "@/paraglide/runtime.js";
 import { profilePageDescription } from "@/lib/document-head";
 
 const routeApi = getRouteApi("/@{$username}");
+
+/**
+ * The `ProfileLayout` loading state: banner plate, avatar, name/handle,
+ * bio and stats rows, so the header lands without the full-page
+ * spinner-to-profile jump.
+ *
+ * `aria-hidden`: it paints structure, not information.
+ */
+export function ProfileSkeleton() {
+  return (
+    <div className="bg-background min-h-screen pb-12" aria-hidden>
+      <Skeleton
+        className="border-border bg-muted mx-auto w-full overflow-hidden rounded-none border-b motion-reduce:animate-none"
+        style={{
+          aspectRatio: BANNER_ASPECT_RATIO,
+          maxWidth: BANNER_FRAME_MAX_WIDTH,
+          minHeight: BANNER_FRAME_MIN_HEIGHT,
+          maxHeight: BANNER_FRAME_MAX_HEIGHT,
+        }}
+      />
+      <div className="mx-auto max-w-[1500px] px-4 sm:px-8">
+        <div className="relative -mt-16 mb-4 flex flex-wrap items-end justify-between gap-3 sm:-mt-20">
+          <Skeleton className="h-28 w-28 rounded-full motion-reduce:animate-none sm:h-36 sm:w-36" />
+          <Skeleton className="h-9 w-24 rounded-full motion-reduce:animate-none" />
+        </div>
+        <div className="mb-6 space-y-3">
+          <Skeleton className="h-7 w-48 motion-reduce:animate-none" />
+          <Skeleton className="h-4 w-32 motion-reduce:animate-none" />
+          <Skeleton className="h-4 w-full max-w-2xl motion-reduce:animate-none" />
+          <Skeleton className="h-4 w-2/3 max-w-2xl motion-reduce:animate-none" />
+          <div className="flex gap-5">
+            <Skeleton className="h-4 w-20 motion-reduce:animate-none" />
+            <Skeleton className="h-4 w-20 motion-reduce:animate-none" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * The persistent half of a profile: banner, avatar, name and follow state. The
@@ -68,11 +112,7 @@ export function ProfileLayout() {
   );
 
   if (profileQuery.isPending) {
-    return (
-      <div className="flex h-[70vh] items-center justify-center">
-        <Loader2 className="text-primary dark:text-link h-8 w-8 animate-spin motion-reduce:animate-none" />
-      </div>
-    );
+    return <ProfileSkeleton />;
   }
 
   if (profileQuery.isError) {
@@ -102,6 +142,11 @@ export function ProfileLayout() {
   const isOwnProfile = viewer?.id === profile.id;
   const handle = handleOf(profile) || username;
   const displayName = profile.name || handle;
+  // Locked profiles (issue #328) hide the member lists from non-followers at
+  // the query layer; the counts render as plain numbers here rather than
+  // dialog triggers so nobody opens an inbox that can only ever come back
+  // empty.
+  const isLocked = (profile.isPrivate ?? false) && !isOwnProfile && !profile.viewerIsFollowing;
   const hasViewableAvatar = Boolean(profile.image && failedAvatarUrl !== profile.image);
 
   // The `suspended` flag is the server's contract for a banned profile (see
@@ -175,7 +220,7 @@ export function ProfileLayout() {
 
       <div className="mx-auto max-w-[1500px] px-4 sm:px-8">
         {/* Avatar & Action buttons */}
-        <div className="relative -mt-16 mb-4 flex items-end justify-between sm:-mt-20">
+        <div className="relative -mt-16 mb-4 flex flex-wrap items-end justify-between gap-3 sm:-mt-20">
           {hasViewableAvatar && profile.image ? (
             <ImageViewer
               src={profile.image}
@@ -205,28 +250,19 @@ export function ProfileLayout() {
           )}
 
           {isOwnProfile ? (
-            <div className="mb-2 flex gap-2.5">
-              {/* Was a dead button — now the way into /settings/account, where
-                  two-factor and passkeys live. The header's account menu
-                  (header.tsx) is the other entry point; this one stays so the
-                  destination is visible on the page itself, not only behind a
-                  menu. Sign-out deliberately does not follow it here: the
-                  account menu is on every page, and /settings/account carries
-                  the card for it (issue #282). */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-muted-foreground/30 gap-2 rounded-full"
-                nativeButton={false}
-                render={<Link to="/settings/account" />}
-              >
-                <Settings className="h-4 w-4" />
-                <span>{m.profile_settings()}</span>
-              </Button>
+            <div className="mt-20 mb-2 flex flex-wrap items-center gap-2 self-start sm:mt-24">
+              <ProfileEditDialog />
+              <div className="md:hidden">
+                <AccountMenu compact />
+              </div>
             </div>
           ) : (
-            <div className="mb-2 flex items-center gap-2">
-              <FollowButton userId={profile.id} isFollowing={profile.viewerIsFollowing} />
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <FollowButton
+                userId={profile.id}
+                isFollowing={profile.viewerIsFollowing}
+                hasRequested={profile.hasRequested}
+              />
               {/* Report and Block on someone else's profile — same shared
                   dialogs as the post card's kebab (see `atoms/moderation.ts`). */}
               <DropdownMenu>
@@ -270,8 +306,14 @@ export function ProfileLayout() {
         {/* Profile Info */}
         <div className="mb-6 space-y-3">
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{displayName}</h1>
+            <div className="flex flex-wrap items-end gap-2">
+              <h1 className="min-w-0 text-2xl font-bold tracking-tight [overflow-wrap:anywhere] sm:text-3xl">
+                {displayName}
+              </h1>
+              {/* Earned badges (issue #308) — the API's display set, already
+                  in canonical order; nothing renders for a badge-less
+                  profile. */}
+              <ProfileBadges badges={profile.badges} iconClassName="size-5" className="pb-1" />
             </div>
             <p className="text-muted-foreground text-sm font-medium">@{handle}</p>
           </div>
@@ -280,24 +322,45 @@ export function ProfileLayout() {
               emits React text children and profile links rather than HTML, so
               linkification does not create an escaping boundary. */}
           {profile.bio && (
-            <p className="max-w-2xl text-sm leading-relaxed whitespace-pre-line">
+            <p className="max-w-2xl text-sm leading-relaxed [overflow-wrap:anywhere] whitespace-pre-line">
               <LinkedText text={profile.bio} />
             </p>
           )}
 
           <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
-            <FollowListDialog
-              username={username}
-              handle={handle}
-              direction="following"
-              count={profile.followingCount}
-            />
-            <FollowListDialog
-              username={username}
-              handle={handle}
-              direction="followers"
-              count={profile.followerCount}
-            />
+            {isLocked ? (
+              <>
+                <span>
+                  <span className="text-foreground font-bold">
+                    {formatCount(profile.followingCount, getLocale())}
+                  </span>{" "}
+                  <span className="text-muted-foreground">{m.follow_following()}</span>
+                </span>
+                <span>
+                  <span className="text-foreground font-bold">
+                    {formatCount(profile.followerCount, getLocale())}
+                  </span>{" "}
+                  <span className="text-muted-foreground">
+                    {profile.followerCount === 1 ? m.follow_follower() : m.follow_followers()}
+                  </span>
+                </span>
+              </>
+            ) : (
+              <>
+                <FollowListDialog
+                  username={username}
+                  handle={handle}
+                  direction="following"
+                  count={profile.followingCount}
+                />
+                <FollowListDialog
+                  username={username}
+                  handle={handle}
+                  direction="followers"
+                  count={profile.followerCount}
+                />
+              </>
+            )}
           </div>
 
           <div className="text-muted-foreground flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
@@ -310,7 +373,18 @@ export function ProfileLayout() {
           </div>
         </div>
 
-        <Outlet />
+        <div
+          className={`grid grid-cols-1 gap-6 ${!isLocked ? "lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-8" : ""}`}
+        >
+          <div className="order-last min-w-0 lg:order-first">
+            <Outlet />
+          </div>
+          {!isLocked && (
+            <aside className="min-w-0">
+              <ProfileGameRail username={username} isOwnProfile={isOwnProfile} />
+            </aside>
+          )}
+        </div>
       </div>
     </div>
   );

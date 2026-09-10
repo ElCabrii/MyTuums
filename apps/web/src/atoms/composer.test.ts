@@ -1,11 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 
-const fakeClient = { post: { create: vi.fn(), list: vi.fn() } };
+const fakeClient = {
+  video: { pending: vi.fn().mockResolvedValue([]), cancel: vi.fn() },
+  post: { create: vi.fn(), list: vi.fn() },
+};
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));
 
-import { composerDraftAtom, createPostAtom } from "@/atoms/composer";
+import {
+  composerDraftAtom,
+  composerPrivacyAtom,
+  composerAttachmentsAtom,
+  createPostAtom,
+} from "@/atoms/composer";
 // `createPostAtom`'s `onSuccess` can't be handed a `set` — `atomWithMutation`'s
 // options factory only receives a `Getter` — so it reaches the app's ONE
 // singleton store directly (see the comment in composer.ts). That makes the
@@ -30,6 +38,8 @@ beforeEach(() => {
 afterEach(() => {
   singletonQueryClient.clear();
   singletonStore.set(composerDraftAtom, "");
+  singletonStore.set(composerPrivacyAtom, null);
+  singletonStore.set(composerAttachmentsAtom, []);
 });
 
 describe("composerDraftAtom persistence", () => {
@@ -55,6 +65,10 @@ describe("composerDraftAtom persistence", () => {
 describe("createPostAtom", () => {
   it("tracks pending state and clears the draft on success", async () => {
     singletonStore.set(composerDraftAtom, "hello world");
+    singletonStore.set(composerPrivacyAtom, true);
+    singletonStore.set(composerAttachmentsAtom, [
+      { id: "image", file: new File(["image"], "draft.png") },
+    ]);
 
     let resolveCreate!: (value: { id: string; content: string }) => void;
     fakeClient.post.create.mockImplementation(
@@ -73,12 +87,17 @@ describe("createPostAtom", () => {
 
     await vi.waitFor(() => expect(singletonStore.get(createPostAtom).isSuccess).toBe(true));
     expect(singletonStore.get(composerDraftAtom)).toBe("");
+    expect(singletonStore.get(composerPrivacyAtom)).toBeNull();
+    expect(singletonStore.get(composerAttachmentsAtom)).toEqual([]);
 
     unsub();
   });
 
   it("surfaces an error and leaves the draft untouched", async () => {
     singletonStore.set(composerDraftAtom, "still typing");
+    singletonStore.set(composerPrivacyAtom, true);
+    const attachments = [{ id: "image", file: new File(["image"], "draft.png") }];
+    singletonStore.set(composerAttachmentsAtom, attachments);
 
     fakeClient.post.create.mockRejectedValue(new Error("boom"));
 
@@ -89,6 +108,8 @@ describe("createPostAtom", () => {
     // A failed post has nothing to reconcile — the draft is exactly what
     // the composer should still show so the person can retry or edit it.
     expect(singletonStore.get(composerDraftAtom)).toBe("still typing");
+    expect(singletonStore.get(composerPrivacyAtom)).toBe(true);
+    expect(singletonStore.get(composerAttachmentsAtom)).toEqual(attachments);
 
     unsub();
   });

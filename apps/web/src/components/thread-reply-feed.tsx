@@ -4,6 +4,7 @@ import { AlertCircle, Loader2, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PaginatedState } from "@/components/paginated-state";
 import { PostCard } from "@/components/post-card";
+import { FeedSkeleton } from "@/components/post-feed";
 import type { postFeedAtom } from "@/atoms/post-feed";
 import { replyContinuationAtom } from "@/atoms/reply-continuation";
 import type { PostListPage } from "@/lib/orpc";
@@ -115,6 +116,7 @@ export function ThreadReplyFeed({
       emptyMessage={emptyMessage}
       isEmpty={conversations.length === 0}
       listClassName="space-y-4"
+      loadingFallback={<FeedSkeleton />}
     >
       {conversations.map(({ reply, continuation }) => (
         <div key={reply.id}>

@@ -660,3 +660,116 @@ describe("notification reads (issue #259)", () => {
     });
   });
 });
+
+describe("notification deletion (issue #330)", () => {
+  it("deleting your own notification removes it and clears its badge tick", async () => {
+    const author = await createTestUser();
+    const liker = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await call(appRouter.post.like, { postId: target.id }, { context: contextFor(liker) });
+    const before = await listFor(author);
+    expect(before.items).toHaveLength(1);
+
+    const result = await call(
+      appRouter.notification.delete,
+      { id: before.items[0].id },
+      { context: contextFor(author) },
+    );
+    expect(result).toEqual({ success: true, id: before.items[0].id });
+
+    expect((await listFor(author)).items).toHaveLength(0);
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 0,
+    });
+  });
+
+  it("deleting someone else's notification is NOT_FOUND and keeps their row", async () => {
+    const author = await createTestUser();
+    const other = await createTestUser();
+    const liker = await createTestUser();
+    const [target] = await seedPosts(author.id, 1);
+
+    await call(appRouter.post.like, { postId: target.id }, { context: contextFor(liker) });
+    const [{ id }] = (await listFor(author)).items;
+
+    await expect(
+      call(appRouter.notification.delete, { id }, { context: contextFor(other) }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await listFor(author)).items).toHaveLength(1);
+  });
+
+  it("deleting an unknown notification is NOT_FOUND", async () => {
+    const viewer = await createTestUser();
+
+    await expect(
+      call(appRouter.notification.delete, { id: randomUUID() }, { context: contextFor(viewer) }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("deleting one of two unread notifications leaves the badge at one", async () => {
+    const author = await createTestUser();
+    const firstLiker = await createTestUser();
+    const secondLiker = await createTestUser();
+    const [a, b] = await seedPosts(author.id, 2);
+
+    await call(appRouter.post.like, { postId: a.id }, { context: contextFor(firstLiker) });
+    await call(appRouter.post.like, { postId: b.id }, { context: contextFor(secondLiker) });
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 2,
+    });
+
+    const page = await listFor(author);
+    await call(
+      appRouter.notification.delete,
+      { id: page.items[0].id },
+      { context: contextFor(author) },
+    );
+
+    expect((await listFor(author)).items).toHaveLength(1);
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 1,
+    });
+  });
+
+  it("clearAll removes only the caller's rows and reports how many", async () => {
+    const author = await createTestUser();
+    const other = await createTestUser();
+    const liker = await createTestUser();
+    const [mine] = await seedPosts(author.id, 1);
+    const [theirs] = await seedPosts(other.id, 1);
+
+    await call(appRouter.post.like, { postId: mine.id }, { context: contextFor(liker) });
+    await call(appRouter.post.like, { postId: theirs.id }, { context: contextFor(liker) });
+
+    const cleared = await call(
+      appRouter.notification.clearAll,
+      {},
+      { context: contextFor(author) },
+    );
+    expect(cleared).toEqual({ deletedCount: 1 });
+
+    expect((await listFor(author)).items).toHaveLength(0);
+    expect(
+      await call(appRouter.notification.unreadCount, {}, { context: contextFor(author) }),
+    ).toEqual({
+      unreadCount: 0,
+    });
+    // The other recipient's inbox is untouched.
+    expect((await listFor(other)).items).toHaveLength(1);
+  });
+
+  it("clearAll on an empty inbox reports zero", async () => {
+    const viewer = await createTestUser();
+
+    await expect(
+      call(appRouter.notification.clearAll, {}, { context: contextFor(viewer) }),
+    ).resolves.toEqual({ deletedCount: 0 });
+  });
+});
