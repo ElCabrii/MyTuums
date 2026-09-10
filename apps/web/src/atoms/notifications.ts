@@ -40,15 +40,20 @@ export const unreadCountAtom = atomWithQuery((get) => ({
  * own answer is authoritative for exactly the state those caches hold — every
  * loaded row is now read, and the unread count is now zero — so refetching
  * both (what invalidation did, 0.4.0's audit finding) duplicated the page's
- * traffic for data the client can derive. Rows a block or deletion has since
- * hidden stay hidden: patching a row's read flag does not resurrect it.
+ * traffic for data the client can derive. In-flight reads are cancelled before
+ * patching so an older response cannot restore unread state. An initial list
+ * with no cached data restarts after cancellation so it can still load.
  */
 export const markAllReadAtom = atomWithMutation((get) => {
   const queryClient = get(queryClientAtom);
 
   return {
     ...orpc.notification.markRead.mutationOptions(),
-    onSuccess: () => {
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: orpc.notification.list.key() }),
+        queryClient.cancelQueries({ queryKey: unreadCountQueryOptions().queryKey }),
+      ]);
       // `setQueriesData` (plural) so every infinite-query page count under
       // the bare prefix — however many pages are loaded — flips in one pass.
       queryClient.setQueriesData<{ pages: Array<{ items: NotificationItem[] }> }>(
@@ -69,6 +74,11 @@ export const markAllReadAtom = atomWithMutation((get) => {
       // component the bare key lacks, and `setQueryData` writes only the
       // exact entry the badge observes.
       queryClient.setQueryData(unreadCountQueryOptions().queryKey, { unreadCount: 0 });
+      await queryClient.refetchQueries({
+        queryKey: orpc.notification.list.key(),
+        type: "active",
+        predicate: (query) => query.state.data === undefined,
+      });
     },
   };
 });
