@@ -1,3 +1,4 @@
+import { getClientIp } from "@my-tuums/auth/client-ip";
 import { ORPCError, os } from "@orpc/server";
 import {
   hasCompletedOnboarding,
@@ -216,24 +217,16 @@ export const publicReadProcedure = base.use(({ context, next }) => {
 });
 
 /**
- * The rate limiter for `publicReadProcedure`: keyed on the signed-in caller's
- * id when there is one, and on the first `X-Forwarded-For` address when there
- * is not (the proxy hop in front of every deployment — Cloudflare, Railway —
- * writes it; a request without it shares one "unknown" bucket, which is a
- * blunt fallback but never an unbounded one).
- *
- * IP-keyed is weaker than session-keyed — a determined caller rotates
- * addresses — but the calls it gates are reads already bounded per response
- * by pagination, and the alternative (no anonymous budget) would make the
- * public thread pages a free firehose.
+ * Signed-in budgets follow the account; anonymous budgets follow the address
+ * validated by the HTTP boundary, using the same normalization as Better Auth.
+ * Missing identity in non-HTTP callers shares one bounded fallback bucket.
  */
 export function publicRateLimit(policy: RateLimitPolicy) {
   return os.$context<Context>().middleware(({ context, next }) => {
-    const forwarded = context.headers?.get("x-forwarded-for");
-    const address = forwarded?.split(",")[0]?.trim();
+    const address = context.headers ? getClientIp(context.headers) : null;
     const key = context.session?.user
       ? `user:${context.session.user.id}`
-      : `ip:${address && address.length > 0 ? address : "unknown"}`;
+      : `ip:${address ?? "unknown"}`;
 
     const result = context.rateLimiter.consume(`${policy.name}:${key}`, policy);
     if (!result.allowed) {

@@ -83,10 +83,10 @@ export interface Context {
   /** Email delivery is explicit so tests can record sends without replacing the auth module. */
   emailSender: EmailSender;
   /**
-   * The raw request headers, for the one thing that still needs them after
-   * session resolution: the moderation emails' locale fallback
+   * Request headers after the HTTP boundary has established client identity.
+   * Anonymous rate limits read that identity; moderation emails use the locale fallback
    * (`localeFromRequest` in packages/auth/src/email.ts), used only when the
-   * recipient has no stored `localePreference`. Absent in tests, which build
+   * recipient has no stored `localePreference`. Optional in tests, which build
    * `Context` objects directly and always fall back to the base locale.
    */
   headers?: Headers;

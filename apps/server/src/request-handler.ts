@@ -6,6 +6,8 @@ import {
 } from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { Socket } from "node:net";
+import { z } from "zod";
+import { CLIENT_IP_HEADER } from "@my-tuums/auth/client-ip";
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { RPC_MAX_BODY_BYTES, RPC_SMALL_BODY_BYTES, isSignedOutPath } from "@my-tuums/api/constants";
@@ -44,6 +46,8 @@ export type SessionLookup =
  */
 export const AUTH_MAX_BODY_BYTES = 1024 * 1024;
 
+const clientAddressSchema = z.union([z.ipv4(), z.ipv6()]);
+
 /**
  * The stand-ins `createRequestHandler` routes through, injected so the
  * routing tree can be unit-tested with none of them real.
@@ -75,6 +79,8 @@ export interface RequestHandlerDeps {
    * without touching `process.env`.
    */
   edgeSecret?: string;
+  /** Direct Railway ingress supplies X-Real-IP; never enable for arbitrary proxies. */
+  railwayProxy?: boolean;
   /** `SELECT 1` — throws if Postgres is unreachable. */
   pingDb: () => Promise<void>;
   /** BetterAuth's node handler for everything under `/api/auth`. */
@@ -491,6 +497,30 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       drainRejectedRequest(req);
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not found");
+      return;
+    }
+
+    // Never accept a caller's internal identity header. Cloudflare identity is
+    // trusted only after the secret gate above; direct Railway ingress supplies
+    // X-Real-IP. A local server uses the connection address and ignores both.
+    delete req.headers[CLIENT_IP_HEADER];
+    const proxyHeader =
+      deps.edgeSecret !== undefined
+        ? "cf-connecting-ip"
+        : deps.railwayProxy
+          ? "x-real-ip"
+          : undefined;
+    const clientIp = clientAddressSchema.safeParse(
+      proxyHeader ? req.headers[proxyHeader] : req.socket.remoteAddress,
+    );
+    if (clientIp.success) {
+      req.headers[CLIENT_IP_HEADER] = clientIp.data;
+    } else if (proxyHeader && req.url !== "/health") {
+      // A missing/ambiguous upstream identity must not collapse all visitors
+      // into one auth bucket. Health probes remain independent of client IPs.
+      drainRejectedRequest(req);
+      res.writeHead(400, { "Content-Type": "text/plain" });
+      res.end("Invalid client address");
       return;
     }
 

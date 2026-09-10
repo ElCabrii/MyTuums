@@ -184,6 +184,7 @@ const handleRequest = createRequestHandler({
   // injects the matching `x-edge-secret` on preview.mytuums.com — see the
   // dep's own comment for the direct-to-origin bypass this closes.
   edgeSecret: env.EDGE_SECRET,
+  railwayProxy: env.RAILWAY_ENVIRONMENT_ID !== undefined,
   pingDb,
   authNodeHandler: (req, res) =>
     // SAFETY: node:http's createServer callback always hands the real

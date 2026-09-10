@@ -45,6 +45,15 @@ by the Playwright `api` project.
 
 ## Invariants
 
+- **Client identity is established after the edge gate, before dispatch.**
+  `request-handler.ts` overwrites `x-mytuums-client-ip`: verified Cloudflare
+  traffic uses `CF-Connecting-IP`, direct Railway ingress uses `X-Real-IP`
+  when its runtime supplies `RAILWAY_ENVIRONMENT_ID`, and local requests use
+  the socket address. Missing/malformed proxy identities return 400 except on
+  health probes. Never fall back to client-supplied forwarding headers. Both
+  downstream limiters consume this identity through `@my-tuums/auth/client-ip`.
+  Deployment requirements and validation are in `docs/security.md`.
+
 - **The ESM bundle provides Node's `require` through `createRequire`.** Bundled
   CommonJS dependencies such as React DOM's email renderer still require Node
   built-ins. Without the banner in `tsup.config.ts`, auth emails fail before

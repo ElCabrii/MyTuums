@@ -1,3 +1,4 @@
+import { clientIpOptions } from "./client-ip.js";
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -366,6 +367,7 @@ export const auth = betterAuth({
   ],
 
   trustedOrigins: [webOrigin],
+  advanced: { ipAddress: clientIpOptions },
 
   rateLimit: {
     enabled: authRateLimitEnabled,
@@ -408,7 +410,7 @@ export const auth = betterAuth({
 // router (packages/api/src/moderation-actions.ts) builds its email copy here
 // and sends through the same `sendEmail` pipe as the auth flows, reads the
 // locale the same way, and points appeal links at `webOrigin`. The package's
-// exports map exposes only `.`, `./testing` and `./rules`, so the public
+// exports map also exposes `./testing`, `./rules` and `./client-ip`; the public
 // surface is whatever this file names — plus the browser-safe account rules,
 // which are the one part of this package `apps/web` may import.
 export {

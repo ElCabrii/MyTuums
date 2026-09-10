@@ -91,6 +91,10 @@ belongs to `apps/video-worker`.
   never module globals.** Tests substitute all three; one suite's limiter state
   must not bleed into another's, and moderation tests record delivery through
   the same sender interface production uses.
+- **Anonymous reads use the HTTP boundary's validated client identity.**
+  `publicRateLimit` reads it through `@my-tuums/auth/client-ip`, reusing Better
+  Auth's IP normalization rather than interpreting `X-Forwarded-For` itself.
+  The signed-in branch still follows the user ID.
 - **`rateLimit` keys on `user:<id>`; `rateLimitCapability` keys on a
   capability.** Do not describe limiting here as uniformly per-user.
   `rateLimitCapability` is what throttles `moderation.appealOpen`

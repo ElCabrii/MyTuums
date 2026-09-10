@@ -15,6 +15,10 @@
     "./rules": {
       "types": "./src/rules.ts",
       "default": "./src/rules.ts"
+    },
+    "./client-ip": {
+      "types": "./src/client-ip.ts",
+      "default": "./src/client-ip.ts"
     }
   },
   "scripts": {

@@ -1433,3 +1433,96 @@ describe("createRequestHandler", () => {
     expect(isDestroyed()).toBe(true);
   });
 });
+
+describe("client identity at the HTTP boundary", () => {
+  const secret = "test-edge-secret-0123456789abcdef";
+  const identityHeader = "x-mytuums-client-ip";
+  function identityDeps(overrides: Partial<RequestHandlerDeps> = {}) {
+    return deps({
+      authNodeHandler: (req, res) => {
+        res.end(String(req.headers[identityHeader] ?? "missing"));
+      },
+      handleRpc: (req, res) => {
+        res.end(String(req.headers[identityHeader] ?? "missing"));
+        return Promise.resolve({ matched: true });
+      },
+      ...overrides,
+    });
+  }
+
+  it.each(["/api/auth/get-session", "/rpc/me"])(
+    "%s receives only the verified edge address",
+    async (url) => {
+      const request = reqStub(url, "POST", {
+        "x-edge-secret": secret,
+        "cf-connecting-ip": "198.51.100.81",
+        "x-real-ip": "203.0.113.1",
+        "x-forwarded-for": "192.0.2.99, 203.0.113.1",
+        [identityHeader]: "192.0.2.99",
+      });
+      const { res, calls } = resStub();
+      await createRequestHandler(identityDeps({ edgeSecret: secret, railwayProxy: true }))(
+        request,
+        res,
+      );
+      expect(calls.body).toBe("198.51.100.81");
+    },
+  );
+
+  it("preserves verified identity through chunked auth-body replay", async () => {
+    const request = streamReqStub("/api/auth/update-user", Buffer.from("{}"), "POST", {
+      "x-edge-secret": secret,
+      "cf-connecting-ip": "198.51.100.82",
+    });
+    const { res, calls } = resStub();
+    await createRequestHandler(identityDeps({ edgeSecret: secret }))(request, res);
+    expect(calls.body).toBe("198.51.100.82");
+  });
+
+  it("uses Railway's address rather than unverified Cloudflare or forwarded headers on direct ingress", async () => {
+    const request = reqStub("/rpc/me", "POST", {
+      "x-real-ip": "198.51.100.82",
+      "cf-connecting-ip": "192.0.2.99",
+      "x-forwarded-for": "192.0.2.99, 203.0.113.1",
+      [identityHeader]: "192.0.2.99",
+    });
+    const { res, calls } = resStub();
+    await createRequestHandler(identityDeps({ railwayProxy: true }))(request, res);
+    expect(calls.body).toBe("198.51.100.82");
+  });
+
+  it("uses the socket on a direct local server despite all forged IP headers", async () => {
+    const request = reqStub("/rpc/me", "POST", {
+      "x-real-ip": "192.0.2.99",
+      "cf-connecting-ip": "192.0.2.99",
+      "x-forwarded-for": "192.0.2.99",
+      [identityHeader]: "192.0.2.99",
+    });
+    Object.defineProperty(request.socket, "remoteAddress", { value: "127.0.0.1" });
+    const { res, calls } = resStub();
+    await createRequestHandler(identityDeps())(request, res);
+    expect(calls.body).toBe("127.0.0.1");
+  });
+
+  it.each([undefined, "invalid", "198.51.100.1, 198.51.100.2", ["198.51.100.1", "198.51.100.2"]])(
+    "rejects a missing or ambiguous proxy address (%s) rather than sharing the auth budget",
+    async (value) => {
+      for (const cloudflare of [true, false]) {
+        const request = reqStub("/api/auth/get-session", "GET", {
+          "x-edge-secret": secret,
+          [identityHeader]: "192.0.2.99",
+        });
+        request.headers[cloudflare ? "cf-connecting-ip" : "x-real-ip"] = value;
+        const { res, calls } = resStub();
+        await createRequestHandler(
+          identityDeps({
+            edgeSecret: cloudflare ? secret : undefined,
+            railwayProxy: true,
+          }),
+        )(request, res);
+        expect(calls.statusCode).toBe(400);
+        expect(calls.body).toBe("Invalid client address");
+      }
+    },
+  );
+});
