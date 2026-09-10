@@ -45,6 +45,13 @@ by the Playwright `api` project.
 
 ## Invariants
 
+- **The ESM bundle provides Node's `require` through `createRequire`.** Bundled
+  CommonJS dependencies such as React DOM's email renderer still require Node
+  built-ins. Without the banner in `tsup.config.ts`, auth emails fail before
+  reaching Resend even though password reset returns HTTP 200.
+  `src/email-bundle.test.ts` runs the bundled email builders in production mode
+  with plain Node, without sending mail or accessing a database.
+
 - **Video transport stays outside the RPC body buffer.** The server starts a
   producer-only queue and injects the video upload service when S3 is configured.
   Browsers PUT signed multipart parts directly to the bucket. `/media/videos/`
