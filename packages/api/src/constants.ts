@@ -489,13 +489,12 @@ export const IGDB_IMAGE_BASE_URL = "https://images.igdb.com/igdb/image/upload";
 export const TWITCH_HELIX_ORIGIN = "https://api.twitch.tv";
 /** Entries requested per `games/top` page — the endpoint's documented maximum. */
 export const TWITCH_TOP_GAMES_PAGE_SIZE = 100;
-/**
- * How many games the Twitch popularity snapshot ranks, and therefore the
- * catalog's steady-state size (issue Q2: "~top 1000, tune after seeing data" —
- * the constant is the tuning point). Rows already known are never deleted when
- * they fall out of it (Q29).
- */
-export const GAMES_CATALOG_SIZE = 1000;
+/** Live Twitch ranks retained in each catalog refresh. */
+export const GAMES_TWITCH_SIZE = 1000;
+/** Twitch games plus IGDB popular games selected per refresh; existing rows are never deleted. */
+export const GAMES_CATALOG_SIZE = 5000;
+/** IGDB's maximum page size for the page-visit popularity scan. */
+export const GAMES_POPULARITY_PAGE_SIZE = 500;
 /**
  * How many unreleased games the sync pulls by IGDB hypes (the pre-release
  * "want" count) for the `/games` upcoming sort. A second scan beside the

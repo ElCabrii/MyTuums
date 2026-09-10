@@ -41,6 +41,8 @@ import {
   GAME_SUMMARY_MAX_LENGTH,
   GAMES_CATALOG_SIZE,
   GAMES_HYDRATION_BATCH,
+  GAMES_POPULARITY_PAGE_SIZE,
+  GAMES_TWITCH_SIZE,
   GAMES_UPCOMING_SIZE,
 } from "./constants.js";
 import { gameCoverObjectKey } from "./game-media.js";
@@ -99,6 +101,8 @@ export class CatalogValidationError extends Error {
 export interface SyncGamesResult {
   /** Games the popularity scan ranked this run. */
   scanned: number;
+  /** Unique games selected from Twitch and IGDB popularity, before upcoming and retained rows. */
+  selected: number;
   /** Unreleased games the hypes scan returned this run. */
   upcoming: number;
   /** Games the table already held before this run. */
@@ -249,13 +253,13 @@ function validateStaged(rows: readonly StagedGameRow[], maxYear: number): void {
     }
     if (
       row.popularityRank !== null &&
-      (row.popularityRank < 1 || row.popularityRank > GAMES_CATALOG_SIZE)
+      (row.popularityRank < 1 || row.popularityRank > GAMES_TWITCH_SIZE)
     ) {
       // Bounded by the scan's ceiling, NOT the current scan's size: a
       // dropout keeps its last-known rank (Q29), which legitimately exceeds
       // a later, smaller scan's count.
       violations.push(
-        `igdb ${row.igdbId} has rank ${row.popularityRank} outside 1..${GAMES_CATALOG_SIZE}`,
+        `igdb ${row.igdbId} has rank ${row.popularityRank} outside 1..${GAMES_TWITCH_SIZE}`,
       );
     }
     if (!Number.isInteger(row.hypeCount) || row.hypeCount < 0) {
@@ -385,7 +389,7 @@ export async function syncGamesCatalog(deps: {
 
   // 1. The Twitch popularity snapshot: `games/top` pages in returned order
   //    (current viewer count, most popular first), `first=100` per page,
-  //    following `pagination.cursor` until GAMES_CATALOG_SIZE unique, valid
+  //    following `pagination.cursor` until GAMES_TWITCH_SIZE unique, valid
   //    IGDB ids are collected. Ranks are dense by first occurrence — Twitch's
   //    own order. Non-game categories carry an empty `igdb_id` and are
   //    skipped, as are malformed ids and repeats; only the `igdb_id` ever
@@ -400,9 +404,9 @@ export async function syncGamesCatalog(deps: {
       const id = twitchIgdbId(entry);
       if (id === null || ranks.has(id)) continue;
       ranks.set(id, ranks.size + 1);
-      if (ranks.size === GAMES_CATALOG_SIZE) break;
+      if (ranks.size === GAMES_TWITCH_SIZE) break;
     }
-    if (ranks.size === GAMES_CATALOG_SIZE) break;
+    if (ranks.size === GAMES_TWITCH_SIZE) break;
     // No cursor means no further pages; a repeated cursor means the pages
     // loop — either way the snapshot is exhausted, and the size check below
     // fails the run closed instead of looping forever.
@@ -411,11 +415,35 @@ export async function syncGamesCatalog(deps: {
     seenCursors.add(next);
     cursor = next;
   }
-  if (ranks.size < GAMES_CATALOG_SIZE) {
+  if (ranks.size < GAMES_TWITCH_SIZE) {
     throw new CatalogValidationError(
       ranks.size === 0
         ? "the Twitch popularity snapshot returned no games — refusing to sync an empty catalog"
-        : `the Twitch popularity snapshot ended after ${ranks.size} unique games — need ${GAMES_CATALOG_SIZE} to rank the catalog`,
+        : `the Twitch popularity snapshot ended after ${ranks.size} unique games — need ${GAMES_TWITCH_SIZE} to rank the catalog`,
+    );
+  }
+
+  // Expand directory coverage without inventing Twitch ranks for IGDB-only games.
+  // Page visits (popularity type 1) supply candidates in descending order.
+  const catalogIds = new Set(ranks.keys());
+  for (let offset = 0; offset < GAMES_CATALOG_SIZE; offset += GAMES_POPULARITY_PAGE_SIZE) {
+    const rows = parsePage(
+      z.object({ game_id: z.number().int().positive().safe() }),
+      "popularity_primitives",
+      await client.query(
+        "popularity_primitives",
+        `fields game_id; where popularity_type = 1; sort value desc; limit ${GAMES_POPULARITY_PAGE_SIZE}; offset ${offset};`,
+      ),
+    );
+    for (const row of rows) {
+      catalogIds.add(row.game_id);
+      if (catalogIds.size === GAMES_CATALOG_SIZE) break;
+    }
+    if (catalogIds.size === GAMES_CATALOG_SIZE || rows.length < GAMES_POPULARITY_PAGE_SIZE) break;
+  }
+  if (catalogIds.size < GAMES_CATALOG_SIZE) {
+    throw new CatalogValidationError(
+      `the combined popularity catalog contains ${catalogIds.size} unique games — need ${GAMES_CATALOG_SIZE}`,
     );
   }
 
@@ -440,12 +468,12 @@ export async function syncGamesCatalog(deps: {
     }
   }
 
-  // 3. Every id this run must leave better than it found it: the snapshot's
+  // 3. Every id this run must leave better than it found it: the combined catalog's
   //    set UNION the upcoming set UNION every id the table already holds
   //    (Q29's "every sync refreshes ALL known games").
   const knownRows = await deps.db.select().from(game);
   const known = new Map(knownRows.map((row) => [row.igdbId, row]));
-  const allIds = new Set<number>([...ranks.keys(), ...upcomingIds, ...known.keys()]);
+  const allIds = new Set<number>([...catalogIds, ...upcomingIds, ...known.keys()]);
 
   // 3. Hydration, id-batched, one request per batch (sub-expansion inline —
   //    three separate /covers /genres /platforms calls would triple the
@@ -554,6 +582,7 @@ export async function syncGamesCatalog(deps: {
   //    "optional-field gaps null out".
   const result: SyncGamesResult = {
     scanned: ranks.size,
+    selected: catalogIds.size,
     upcoming: upcomingIds.length,
     knownIds: knownRows.length,
     newGames: assignments.size,
