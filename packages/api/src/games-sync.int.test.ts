@@ -279,6 +279,32 @@ describe("syncGamesCatalog", () => {
     expect(new Set(result.requestedIds.flat()).size).toBe(5000);
   });
 
+  it("replaces unavailable IGDB popularity game 417145 and fills the catalog from later pages", async () => {
+    const catalog = doomCatalog();
+    const result = await runSync({
+      ...catalog,
+      popularIds: [417145, ...(catalog.popularIds ?? [])],
+    });
+    const rows = await db.select().from(game);
+    expect(result.selected).toBe(5000);
+    expect(rows).toHaveLength(5000);
+    expect(rows.some((row) => row.igdbId === 417145)).toBe(false);
+    expect(rows.some((row) => row.igdbId === FILLER_BASE + GAMES_CATALOG_SIZE - 3)).toBe(true);
+  });
+
+  it("preserves existing rows when unavailable popularity records leave too few valid games", async () => {
+    const catalog = doomCatalog();
+    catalog.games.delete(FILLER_BASE + GAMES_CATALOG_SIZE - 3);
+    await upsertGames(db, [stagedRow({ igdbId: 10 })], new Date());
+    const before = await db.select().from(game);
+    testStorageObjects.clear();
+    await expect(runSync(catalog)).rejects.toThrow(
+      /combined popularity catalog contains 4999 unique games — need 5000/,
+    );
+    expect(await db.select().from(game)).toEqual(before);
+    expect([...testStorageObjects.keys()]).toEqual([]);
+  });
+
   it("preserves the catalog and covers when IGDB cannot fill the target", async () => {
     await upsertGames(db, [stagedRow({ igdbId: 10 })], new Date());
     const before = await db.select().from(game);

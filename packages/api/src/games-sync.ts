@@ -42,6 +42,7 @@ import {
   GAMES_CATALOG_SIZE,
   GAMES_HYDRATION_BATCH,
   GAMES_POPULARITY_PAGE_SIZE,
+  GAMES_POPULARITY_SCAN_LIMIT,
   GAMES_TWITCH_SIZE,
   GAMES_UPCOMING_SIZE,
 } from "./constants.js";
@@ -52,6 +53,7 @@ import {
   createIgdbTransport,
   igdbGameRowSchema,
   type IgdbGameRow,
+  type IgdbClient,
   type IgdbTransport,
   type TwitchTopGame,
 } from "./igdb.js";
@@ -372,6 +374,23 @@ export async function seedGamesFixture(deps: {
   return { seeded: rows.length, coversUploaded };
 }
 
+async function hydrateGames(client: IgdbClient, ids: readonly number[]): Promise<IgdbGameRow[]> {
+  const hydrated: IgdbGameRow[] = [];
+  for (const batch of chunk(ids, GAMES_HYDRATION_BATCH)) {
+    hydrated.push(
+      ...parsePage(
+        igdbGameRowSchema,
+        "games",
+        await client.query(
+          "games",
+          `fields name,slug,summary,first_release_date,hypes,cover.image_id,genres.name,platforms.abbreviation,platforms.name; where id = (${batch.join(",")}); limit ${GAMES_HYDRATION_BATCH};`,
+        ),
+      ),
+    );
+  }
+  return hydrated;
+}
+
 export async function syncGamesCatalog(deps: {
   db: Database;
   storage: Storage | null;
@@ -426,7 +445,9 @@ export async function syncGamesCatalog(deps: {
   // Expand directory coverage without inventing Twitch ranks for IGDB-only games.
   // Page visits (popularity type 1) supply candidates in descending order.
   const catalogIds = new Set(ranks.keys());
-  for (let offset = 0; offset < GAMES_CATALOG_SIZE; offset += GAMES_POPULARITY_PAGE_SIZE) {
+  const checkedCandidates = new Set(ranks.keys());
+  const hydrated = new Map<number, IgdbGameRow>();
+  for (let offset = 0; offset < GAMES_POPULARITY_SCAN_LIMIT; offset += GAMES_POPULARITY_PAGE_SIZE) {
     const rows = parsePage(
       z.object({ game_id: z.number().int().positive().safe() }),
       "popularity_primitives",
@@ -435,8 +456,22 @@ export async function syncGamesCatalog(deps: {
         `fields game_id; where popularity_type = 1; sort value desc; limit ${GAMES_POPULARITY_PAGE_SIZE}; offset ${offset};`,
       ),
     );
+    // IGDB popularity can outlive its game record (production game 417145).
+    // Only count returned game records, and reuse them during final staging.
+    const candidateIds: number[] = [];
     for (const row of rows) {
-      catalogIds.add(row.game_id);
+      if (checkedCandidates.has(row.game_id)) continue;
+      checkedCandidates.add(row.game_id);
+      candidateIds.push(row.game_id);
+    }
+    const candidates = new Map(
+      (await hydrateGames(client, candidateIds)).map((row) => [row.id, row]),
+    );
+    for (const id of candidateIds) {
+      const candidate = candidates.get(id);
+      if (!candidate) continue;
+      catalogIds.add(id);
+      hydrated.set(id, candidate);
       if (catalogIds.size === GAMES_CATALOG_SIZE) break;
     }
     if (catalogIds.size === GAMES_CATALOG_SIZE || rows.length < GAMES_POPULARITY_PAGE_SIZE) break;
@@ -475,21 +510,10 @@ export async function syncGamesCatalog(deps: {
   const known = new Map(knownRows.map((row) => [row.igdbId, row]));
   const allIds = new Set<number>([...catalogIds, ...upcomingIds, ...known.keys()]);
 
-  // 3. Hydration, id-batched, one request per batch (sub-expansion inline —
-  //    three separate /covers /genres /platforms calls would triple the
-  //    requests for a join no client-side code performs).
-  const hydrated = new Map<number, IgdbGameRow>();
-  for (const batch of chunk([...allIds], GAMES_HYDRATION_BATCH)) {
-    const rows = parsePage(
-      igdbGameRowSchema,
-      "games",
-      await client.query(
-        "games",
-        `fields name,slug,summary,first_release_date,hypes,cover.image_id,genres.name,platforms.abbreviation,platforms.name; where id = (${batch.join(",")}); limit ${GAMES_HYDRATION_BATCH};`,
-      ),
-    );
-    for (const row of rows) hydrated.set(row.id, row);
-  }
+  // Popularity candidates are already hydrated; refresh the remaining Twitch,
+  // upcoming and known games through the same batched reader.
+  const remainingIds = [...allIds].filter((id) => !hydrated.has(id));
+  for (const row of await hydrateGames(client, remainingIds)) hydrated.set(row.id, row);
 
   // 4. Stage. A CURRENT snapshot member IGDB fails to hydrate is a validation
   //    failure (the snapshot says it exists); a dropout IGDB no longer returns

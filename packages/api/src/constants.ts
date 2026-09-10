@@ -495,6 +495,8 @@ export const GAMES_TWITCH_SIZE = 1000;
 export const GAMES_CATALOG_SIZE = 5000;
 /** IGDB's maximum page size for the page-visit popularity scan. */
 export const GAMES_POPULARITY_PAGE_SIZE = 500;
+/** Bound replacement scanning when popularity entries refer to unavailable games. */
+export const GAMES_POPULARITY_SCAN_LIMIT = GAMES_CATALOG_SIZE * 2;
 /**
  * How many unreleased games the sync pulls by IGDB hypes (the pre-release
  * "want" count) for the `/games` upcoming sort. A second scan beside the
