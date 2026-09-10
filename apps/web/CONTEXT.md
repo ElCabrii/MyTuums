@@ -229,7 +229,10 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   the query key stays snapshot-free so the optimistic sweeps keep matching;
   Refresh (`refreshRankedFeedAtomFamily`) resets exactly that feed's query so
   the next fetch mints a new snapshot. `RankedFeed` owns the Refresh control,
-  the expiry recovery card (an expired snapshot offers Refresh, never retry —
+  the expiry auto-recovery (an expired snapshot with retained rows resets
+  itself once — the same reset Refresh performs; the recovery card is the
+  fallback for a snapshot that refuses with no rows retained, where an
+  automatic reset could loop, and expiry never renders the ordinary retry —
   retry would resend the same id), the optional Who-to-Follow module (top
   three live-filtered candidates, no refill until Refresh; follow clicks patch
   suggestion rows in place through `src/lib/follow-cache.ts`) and the

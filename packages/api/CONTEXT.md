@@ -35,7 +35,7 @@ over HTTP and imports only its browser-safe subpaths.
 | Add or change a badge                                                 | `src/badges.ts` (the catalog — one definition, server and browser)                                         | `src/badges.test.ts`; the `user_badge` check constraint and the family's stamping site (`post.like`, `user.follow`, the auth create hook) keep in step                                                             |
 | Add a moderation action                                               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)                           | `src/constants.ts` (action code), `docs/product.md` glossary                                                                                                                                                       |
 | Change the queue or a case view                                       | `src/moderation-queue.ts`                                                                                  | `src/moderation-inputs.ts` if the input shape moves                                                                                                                                                                |
-| Change how a user is matched by text                                  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                                      | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking                                                                                                           |
+| Change how a user is matched by text                                  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                                      | all three search surfaces share matching; the accent-fold helpers live in `src/text-match.ts` (shared with `matchesGameQuery`); typeahead and `moderation.searchUsers` share relevance ranking                     |
 | Change the IGDB wire rules                                            | `src/igdb.ts` (the client — transport, retry, pacing)                                                      | `src/igdb.test.ts`; the IGDB_* constants in `src/constants.ts`                                                                                                                                                     |
 | Change the catalog sync                                               | `src/games-sync.ts` (stage → validate → covers → one transaction)                                          | `src/games-sync.int.test.ts`; `apps/server/src/games-sync.ts`; `docs/operations.md` Maintenance                                                                                                                    |
 | Change a game read (page, listing, matcher)                           | `src/games.ts` — the public directory's two procedures, its per-sort keysets and `matchesGameQuery`        | `src/games.int.test.ts`; the typeahead's games half in `src/search.ts` shares the matcher; a new sort needs its cursor-mirroring index in `packages/db/src/schema/app.ts`                                          |
@@ -151,9 +151,15 @@ belongs to `apps/video-worker`.
   as a caller-facing refusal.
 - **User matching has one definition.** `matchesUserQuery` in `src/search.ts`
   is what "this account matches what you typed" means — a left-anchored match
-  on the normalised `username`, or a substring of either display field.
-  `search.typeahead`, `search.users` and `moderation.searchUsers` all filter
-  through it, so widening a match lands on all three instead of drifting.
+  on the normalised `username`, or an accent-folded substring of either
+  display field. `search.typeahead`, `search.users` and `moderation.searchUsers`
+  all filter through it, so widening a match lands on all three instead of
+  drifting. Accent folding is shared with the game matcher through
+  `src/text-match.ts`: display-text columns and their patterns fold through
+  the `search_unaccent` SQL function (migration `0039_search_unaccent`, the
+  immutable `unaccent` wrapper — typing "pokemon" finds "Pokémon"), while the
+  ASCII-only `username` arm folds its pattern in JS so the left-anchored
+  `like` keeps using the username btree index.
   The two bounded lookup surfaces (`search.typeahead` and
   `moderation.searchUsers`) also share `userQueryRank`: exact handle, other
   handle prefixes, then display-only matches. `search.users` deliberately

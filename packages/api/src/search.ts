@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, isNull, like, not, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, like, not, or, type SQL, sql } from "drizzle-orm";
 import { game, post, user } from "@my-tuums/db/schema";
 import { z } from "zod";
 import {
@@ -13,8 +13,13 @@ import { keysetPage } from "./pagination.js";
 import { postSelection } from "./posts.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
+import { foldAccents, unaccentedContains, escapeLikePattern } from "./text-match.js";
 import { publicUserColumns, viewerHasRequested, viewerIsFollowing } from "./users.js";
 import { invisibleAuthor, privatePostHidden, visibleUser } from "./visibility.js";
+
+// Re-exported from its new leaf home (./text-match.js) so existing importers —
+// including search.test.ts — keep resolving it from here.
+export { escapeLikePattern };
 
 /**
  * Search over users and posts, plus the games half of the typeahead (the
@@ -22,31 +27,20 @@ import { invisibleAuthor, privatePostHidden, visibleUser } from "./visibility.js
  *
  * Matching is deliberately cheap rather than clever: a left-anchored `like`
  * on the already-normalised `username` (which can use its unique btree index
- * under C collation), or an `ilike` substring scan on name, displayUsername
- * and post content — a seq scan, fine at this scale. User input is escaped
- * (`escapeLikePattern`) so `%`, `_` and `\` are treated as literals, never as
- * pattern wildcards. Replies are excluded everywhere, mirroring the global
- * feed. Games match on name or hashtag key (issue #314, Q24 — the catalog
- * is ~1000 rows, the cheapest scan in the app). pg_trgm GIN indexes are the
- * documented future upgrade; none of this changes if they land.
+ * under C collation), or an accent-folded `ilike` substring scan on name,
+ * displayUsername and post content — a seq scan, fine at this scale. Accent
+ * folding runs both sides through the `search_unaccent` SQL function
+ * (./text-match.ts, migration `0039_search_unaccent`) so typing "pokemon"
+ * finds "Pokémon". User input is escaped (`escapeLikePattern`) so `%`, `_`
+ * and `\` are treated as literals, never as pattern wildcards. Replies are
+ * excluded everywhere, mirroring the global feed. Games match on name or
+ * hashtag key (issue #314, Q24 — the catalog is ~1000 rows, the cheapest
+ * scan in the app). pg_trgm GIN indexes are the documented future upgrade;
+ * none of this changes if they land.
  *
  * All procedures require a session, like every procedure in this app except
  * the reviewed public-read set (issue #36).
  */
-
-/**
- * Escapes the LIKE metacharacters in a search query so the caller's `%`, `_`
- * and `\` match literally instead of acting as pattern wildcards.
- *
- * `\` is escaped FIRST because it is LIKE's own escape character: replacing
- * it first means the backslashes this function adds for `%`/`_` are not
- * themselves escaped again, and a user-supplied backslash that preceded a
- * wildcard stays a single literal backslash ahead of the now-literal wildcard.
- * Everything else — including multi-byte text — passes through untouched.
- */
-export function escapeLikePattern(pattern: string): string {
-  return pattern.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
 
 /**
  * Keyset cursor for `search.users`. The id half is `z.string()`, not a uuid,
@@ -77,28 +71,28 @@ const searchUserSelection = (viewerId: string) => ({
 /**
  * LIKE pattern for a left-anchored username match. `username` is already
  * normalised to lowercase by the BetterAuth plugin, so the pattern is
- * lowercased here and matched with case-sensitive `like` — never wrapped in
- * `lower()` in SQL, which would guarantee the unique index can't be used.
+ * lowercased here, accent-folded in JS (`foldAccents` — the column itself is
+ * ASCII-only, so folding the pattern is the whole job) and matched with
+ * case-sensitive `like` — never wrapped in `lower()` or `search_unaccent()`
+ * in SQL, which would guarantee the unique index can't be used.
  */
-const prefixPattern = (pattern: string) => `${escapeLikePattern(pattern).toLowerCase()}%`;
-
-/** LIKE pattern for a case-insensitive substring match on name, displayUsername and content. */
-const containsPattern = (pattern: string) => `%${escapeLikePattern(pattern)}%`;
+const prefixPattern = (pattern: string) =>
+  `${escapeLikePattern(foldAccents(pattern)).toLowerCase()}%`;
 
 /**
  * Whether a user row matches a free-text query — the app's one definition of
  * "this account is the one you typed": a left-anchored match on the
- * normalised `username`, or a case-insensitive substring of either display
- * field. The typeahead, the results page and the moderation team's account
- * lookup all match on exactly this, so widening what counts as a match (a
- * third column, trigram similarity) lands on all three at once instead of
- * drifting between them.
+ * normalised `username`, or a case-insensitive, accent-folded substring of
+ * either display field. The typeahead, the results page and the moderation
+ * team's account lookup all match on exactly this, so widening what counts
+ * as a match (a third column, trigram similarity) lands on all three at
+ * once instead of drifting between them.
  */
 export function matchesUserQuery(q: string): SQL | undefined {
   return or(
     like(user.username, prefixPattern(q)),
-    ilike(user.name, containsPattern(q)),
-    ilike(user.displayUsername, containsPattern(q)),
+    unaccentedContains(user.name, q),
+    unaccentedContains(user.displayUsername, q),
   );
 }
 
@@ -114,7 +108,7 @@ export function matchesUserQuery(q: string): SQL | undefined {
 export function userQueryRank(q: string): SQL<number> {
   const prefix = prefixPattern(q);
   return sql`case
-    when ${user.username} = ${q.toLowerCase()} then 0
+    when ${user.username} = ${foldAccents(q).toLowerCase()} then 0
     when ${user.username} like ${prefix} then 1
     else 2
   end`;
@@ -257,7 +251,7 @@ export const searchRouter = {
       const viewerId = context.user.id;
 
       const filters = [
-        ilike(post.content, containsPattern(input.q)),
+        unaccentedContains(post.content, input.q),
         isNull(post.parentId),
         // Neither tombstone is a search result — the one visibility rule
         // search does NOT share with `post.list` (issue #48, extended to

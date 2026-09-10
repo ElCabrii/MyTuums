@@ -134,7 +134,37 @@ describe("HomePage", () => {
     expect(screen.getByText(m.feed_empty_following())).toBeInTheDocument();
   });
 
-  // Snapshot expiry renders its own recovery card, never the ordinary retry:
+  // An ordinary aged-out snapshot — retained rows plus the expiry refusal —
+  // recovers itself: RankedFeed performs the same reset Refresh performs,
+  // so the viewer never meets the card. The only route to fresh content
+  // from this seeded state is that automatic reset refetching.
+  it("recovers an expired snapshot without asking the viewer to refresh", async () => {
+    const store = createStore();
+    store.set(feedScopeAtom, "global");
+    const queryClient = createTestQueryClient();
+    queryFixtures(queryClient).postList.data([rankedGlobalPage("A stale ranking")], {
+      feed: "global",
+      ranked: true,
+    });
+    await queryFixtures(queryClient).query.error(
+      postListQueryOptions({ feed: "global", ranked: true }).queryKey,
+      new ORPCError("BAD_REQUEST", {
+        message: "This ranking is no longer valid. Refresh the feed to build a new one.",
+      }),
+    );
+    fakeClient.post.list.mockResolvedValue(rankedGlobalPage("A fresh ranking"));
+
+    await renderWithProviders(<HomePage />, { store, queryClient, signedInAs: true });
+
+    expect(await screen.findByText("A fresh ranking")).toBeInTheDocument();
+    expect(screen.queryByText(m.feed_snapshot_expired())).not.toBeInTheDocument();
+  });
+
+  // The card is the fallback, not the primary path: it renders only when
+  // expiry strikes a snapshot with no retained pages — the reset-and-loop
+  // case the automatic recovery must refuse (a freshly minted snapshot
+  // refusing again would loop forever). No data seeded, so no auto-refresh:
+  // expiry renders its own recovery card, never the ordinary retry —
   // retrying would resend the same expired snapshot and loop the same
   // refusal forever. The card names the expiry in the viewer's language and
   // offers the same Refresh that starts a new ranking.

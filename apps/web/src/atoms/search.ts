@@ -1,6 +1,7 @@
 import { atom } from "jotai";
 import { atomFamily } from "jotai-family";
 import { atomWithInfiniteQuery, atomWithQuery } from "jotai-tanstack-query";
+import { keepPreviousData } from "@tanstack/react-query";
 import { orpc, retryUnlessClientError, type SearchTypeahead } from "@/lib/orpc";
 import { protectedProductReadyAtom } from "@/atoms/query-readiness";
 import { searchPostsQueryOptions, searchUsersQueryOptions } from "@/lib/query-definitions";
@@ -70,6 +71,14 @@ export function typeaheadQueryOptions(q: string) {
     ...orpc.search.typeahead.queryOptions({ input: { q: normalized } }),
     enabled: normalized.length > 0,
     retry: retryUnlessClientError,
+    // Every debounced keystroke lands on a fresh query key; without the
+    // placeholder the dropdown's rows unmount for the whole round trip and
+    // the popup flashes to a lone spinner between characters (or, on a
+    // multi-word pause, sits on one). Keeping the previous response mounted
+    // until the new one lands is what makes while-typing suggestions feel
+    // continuous — the same retention the composer's mention panel gets
+    // from keeping its panel open while pending.
+    placeholderData: keepPreviousData,
   };
 }
 
