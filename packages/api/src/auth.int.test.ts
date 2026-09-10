@@ -366,7 +366,7 @@ describe("sign-up security (issue #380)", () => {
     return auth.handler(
       new Request(`http://localhost:3001/api/auth${path}`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-forwarded-for": ip },
+        headers: { "content-type": "application/json", "x-mytuums-client-ip": ip },
         body: JSON.stringify(body),
       }),
     );

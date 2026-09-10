@@ -10,6 +10,8 @@ const envSchema = z
     WEB_ORIGIN: z.string().default("http://localhost:5173"),
     PORT: z.coerce.number().default(3001),
     HOST: z.string().default("127.0.0.1"),
+    // Railway injects this at runtime; selects its documented public-ingress IP header.
+    RAILWAY_ENVIRONMENT_ID: z.string().min(1).optional(),
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 
     // Everything below is optional, and `packages/auth/src/env.ts` reads it

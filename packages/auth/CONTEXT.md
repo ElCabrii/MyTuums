@@ -1,5 +1,11 @@
 # packages/auth context
 
+The server-only `./client-ip` export owns the internal HTTP identity header,
+Better Auth IP options and the shared reader used by anonymous RPC limiting.
+Only the HTTP boundary may mint that header; see `docs/security.md` for proxy
+trust requirements. The instance's `advanced.ipAddress` uses this configuration
+so real visitors do not collapse into Better Auth's shared fallback bucket.
+
 ## Responsibility
 
 The single better-auth instance the whole app authenticates against, plus its

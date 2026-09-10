@@ -55,6 +55,7 @@ Railway roll back a deploy whose process is up.
 | `/post/<id>` permalinks       | the app's public read surface (0.4.0) — see below                  |
 | `/media/*`                    | session-optional; every key is still authorized per viewer         |
 | The branding page             | `about.mytuums.com` — one script-free HTML document, host-routed   |
+| `game.list`/`game.bySlug`     | public game catalog reads                                          |
 | Static assets                 | anything with a file extension — the SPA cannot boot otherwise     |
 | `moderation.appealOpen` (RPC) | capability-gated, not session-gated — see below                    |
 | `post.thread`/`post.list`     | session-optional reads; `list` admits an anonymous caller only on  |
@@ -161,7 +162,7 @@ Anything else building on `baseProcedure` is a bug.
   plugin's update hook checks uniqueness before the endpoint's session guard,
   making that path an anonymous lookup too. Budgets are separate per path and
   resolved client IP; a deployment proxy must provide trustworthy client IP
-  headers, and an unresolved IP shares a fallback bucket. These limits reduce
+  headers; malformed or missing proxy identities are rejected at HTTP ingress. These limits reduce
   harvesting and sign-up email abuse; they do not make public handles secret
   or prevent probing from distributed IPs.
 - **One email identifies one account, verified or not (issue #380).** Better
@@ -206,14 +207,50 @@ default.
 
 ## Rate limiting
 
-**Do not state that all limiting is keyed on `user:<id>`.** There are two
-mechanisms in `packages/api`, and better-auth has a third of its own.
+**Do not state that all limiting is keyed on `user:<id>`.** The API also
+limits anonymous reads and appeal capabilities; Better Auth limits auth requests.
 
-| Mechanism                                   | Key                                                       |
-| ------------------------------------------- | --------------------------------------------------------- |
-| `rateLimit(policy)` middleware              | `<policy>:user:<id>`                                      |
-| `rateLimitCapability(context, policy, key)` | `<policy>:appeal:<nonce>` or `<policy>:appeal:<actionId>` |
-| better-auth's own limiter                   | per IP, stored in Postgres                                |
+| Mechanism                                   | Key                                                        |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| `rateLimit(policy)` middleware              | `<policy>:user:<id>`                                       |
+| `rateLimitCapability(context, policy, key)` | `<policy>:appeal:<nonce>` or `<policy>:appeal:<actionId>`  |
+| `publicRateLimit(policy)`                   | `<policy>:user:<id>` or `<policy>:ip:<normalized address>` |
+| better-auth's own limiter                   | per IP, stored in Postgres                                 |
+
+The HTTP boundary overwrites `x-mytuums-client-ip` before dispatching auth,
+RPC or session reads. Callers cannot supply this internal identity themselves:
+
+- With `EDGE_SECRET`, the secret gate must pass before trusting Cloudflare's
+  single `CF-Connecting-IP`. The edge must overwrite both headers. This mode
+  takes precedence over Railway detection, because Railway sees Cloudflare's
+  address rather than the visitor's.
+- Without that gate, a Railway runtime (`RAILWAY_ENVIRONMENT_ID` present) uses
+  Railway public ingress's `X-Real-IP`. Keep this listener behind Railway's
+  public HTTP ingress; do not expose it through a TCP proxy or let untrusted
+  private-network workloads call it directly with forged headers.
+- Outside Railway, direct/local requests use the socket address and ignore all
+  supplied proxy headers. Vite's local proxy consequently shares the loopback
+  budget, which is appropriate for local development.
+
+Missing, invalid, repeated or comma-separated proxy IPs return HTTP 400 before
+application dispatch; `/live` and `/health` remain independent of IP headers
+(the existing edge-secret rule still applies to `/health`). There is no fallback
+from a missing trusted header to `X-Forwarded-For`. An unexpected burst of these
+400s is a proxy configuration fault to investigate, not a reason to disable the
+check. Do not set `RAILWAY_ENVIRONMENT_ID` manually on a non-Railway host.
+
+`@my-tuums/auth/client-ip` owns the internal header and Better Auth IP options.
+Both limiters reuse Better Auth's IPv4-mapped IPv6 normalization and IPv6 /64
+bucketing. Signed-in RPC budgets remain per user. In-process callers with no
+HTTP identity retain a bounded fallback; deployed proxy traffic cannot reach it
+with a missing identity.
+
+Deployment validation: confirm two actual client addresses have independent
+budgets, spoofed forwarding/internal headers do not change a budget, and the
+Better Auth shared-IP warning disappears. No database migration is required.
+The proxy contracts are documented by
+[Cloudflare](https://developers.cloudflare.com/fundamentals/reference/http-headers/#cf-connecting-ip)
+and [Railway](https://docs.railway.com/networking/public-networking/specs-and-limits#technical-specifications).
 
 `rateLimitCapability` is deliberately not a middleware: the appeal key only
 exists after the handler's own branch work (an HMAC verify, or the removal
