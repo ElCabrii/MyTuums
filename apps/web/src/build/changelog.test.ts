@@ -41,8 +41,8 @@ describe("loadBuiltChangelog", () => {
   it("loads both localized notes for the release", () => {
     const changelog = loadBuiltChangelog(changelogDirectory, "0.5.0");
 
-    expect(changelog.en).toContain("Discover more");
-    expect(changelog.fr).toContain("Découvrez davantage");
+    expect(changelog.en).toContain("Welcome to Beta!");
+    expect(changelog.fr).toContain("Bienvenue dans la bêta !");
   });
 
   it("returns no content when the running version has no release notes", () => {

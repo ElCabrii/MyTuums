@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../../support/fixtures";
 
 // The game directory is the app's second public page family (issue #314):
 // these specs drive it as the anonymous visitor it was opened for. The

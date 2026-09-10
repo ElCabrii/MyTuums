@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../../support/fixtures";
 import { postCardWithText } from "../../support/post-card";
 import { expectRankedPostText } from "../../support/ranked-feed";
 
