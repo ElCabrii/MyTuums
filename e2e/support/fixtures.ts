@@ -1,4 +1,5 @@
 import { test as base, type BrowserContext, type Page } from "@playwright/test";
+import webPackage from "../../apps/web/package.json" with { type: "json" };
 import { E2E } from "../playwright.config";
 import * as db from "./db";
 
@@ -11,9 +12,18 @@ type Fixtures = {
   db: typeof db;
   /** Seeds refusal in unrelated browser specs so the consent banner stays scoped to its own project. */
   analyticsRefusal: void;
+  /** Release-note journeys opt in to the fresh-device popup. */
+  showReleaseNotes: boolean;
+  releaseNotesSeen: void;
 };
 
 const ANALYTICS_CONSENT_KEY = "my-tuums.analytics-consent";
+
+async function seedSeenReleaseNotes(context: BrowserContext): Promise<void> {
+  await context.addInitScript((version) => {
+    localStorage.setItem("my-tuums.seen-changelog-version", JSON.stringify(version));
+  }, webPackage.version);
+}
 
 async function seedAnalyticsRefusal(context: BrowserContext | Page): Promise<void> {
   await context.addInitScript((storageKey) => {
@@ -26,16 +36,20 @@ async function seedAnalyticsRefusal(context: BrowserContext | Page): Promise<voi
  * pages plus the `db` seeding helpers to Playwright's default fixtures.
  */
 export const test = base.extend<Fixtures>({
-  bobPage: async ({ browser }, use, testInfo) => {
+  showReleaseNotes: [false, { option: true }],
+
+  bobPage: async ({ browser, showReleaseNotes }, use, testInfo) => {
     const context = await browser.newContext({ storageState: E2E.storageStateFor("bob") });
+    if (!showReleaseNotes) await seedSeenReleaseNotes(context);
     if (testInfo.project.name !== "analytics") await seedAnalyticsRefusal(context);
     const page = await context.newPage();
     await use(page);
     await context.close();
   },
 
-  signedOutPage: async ({ browser }, use, testInfo) => {
+  signedOutPage: async ({ browser, showReleaseNotes }, use, testInfo) => {
     const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    if (!showReleaseNotes) await seedSeenReleaseNotes(context);
     if (testInfo.project.name !== "analytics") await seedAnalyticsRefusal(context);
     const page = await context.newPage();
     await use(page);
@@ -55,6 +69,14 @@ export const test = base.extend<Fixtures>({
   analyticsRefusal: [
     async ({ page }, use, testInfo) => {
       if (testInfo.project.name !== "analytics") await seedAnalyticsRefusal(page);
+      await use();
+    },
+    { auto: true },
+  ],
+
+  releaseNotesSeen: [
+    async ({ context, showReleaseNotes }, use) => {
+      if (!showReleaseNotes) await seedSeenReleaseNotes(context);
       await use();
     },
     { auto: true },

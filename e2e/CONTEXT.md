@@ -86,6 +86,12 @@ re-proved here — see [../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
 - **Storage state is cookies only.** `auth.setup.ts` captures it through an
   `APIRequestContext`, which has no page and therefore no `localStorage`. A
   spec asserting "nothing stored" must open a fresh `browser.newContext`.
+- **Unrelated browser journeys start with the current release notes seen.**
+  `support/fixtures.ts` seeds the version from `apps/web/package.json` for
+  the default, bob, and signed-out contexts. Release-note journeys opt out
+  with `showReleaseNotes: true`; `tests/specs/changelog.spec.ts` checks the
+  bundled notes and dismissal across a real reload. This keeps a version
+  bump from placing a modal over every unrelated journey.
 - **The setup project's file must live under `tests/`.** `testMatch` only
   filters files the `testDir` scan already found; it cannot reach outside it.
 - **Fixture sign-up goes through `E2E.webUrl`, not `E2E.serverUrl`.** The
