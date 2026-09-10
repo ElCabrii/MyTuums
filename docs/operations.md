@@ -351,7 +351,10 @@ short of 1000 unique games, or a combined catalog below 5000 unique games) leave
 exits non-zero. Rows are never deleted — games that drop out of the snapshot
 keep their row and last-known rank. Ranking comes from Twitch Helix
 `games/top` (ordered by current viewer count). The additional IGDB games expand
-search and discovery without receiving fabricated Twitch ranks; the upcoming shelf comes from
+search and discovery without receiving fabricated Twitch ranks. Popularity entries
+whose game records are unavailable are skipped before counting toward the target;
+the sync scans up to 10000 popularity entries for replacements and fails without
+writes if fewer than 5000 combined games remain; the upcoming shelf comes from
 IGDB's `hypes` (the pre-release want count, TBA or future release only, top
 100); hydration and covers still come from IGDB, and only the `igdb_id` is
 ever stored — never Twitch's category id or box art. Covers are re-hosted
