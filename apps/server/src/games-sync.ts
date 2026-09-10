@@ -73,7 +73,7 @@ try {
   });
 
   console.log(
-    `games-sync: scanned ${result.scanned}, known ${result.knownIds}, new ${result.newGames}, ` +
+    `games-sync: scanned ${result.scanned}, selected ${result.selected}, known ${result.knownIds}, new ${result.newGames}, ` +
       `covers uploaded ${result.coversUploaded} / kept ${result.coversKept} / failed ${result.coversFailed}.`,
   );
   await closeDb();

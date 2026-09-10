@@ -337,8 +337,8 @@ repo, `DATABASE_URL` referencing the production Postgres) fires the command
 above every Monday at 04:00 UTC. The manual command remains for other
 environments, dry-run reports, and out-of-band prunes.
 
-**Game catalog sync.** The `game` table's catalog of the current Twitch top
-1000 plus the most-wanted unreleased games (issue #314) is refreshed by:
+**Game catalog sync.** The `game` table's catalog of 5000 games (the current Twitch top
+1000, filled with popular IGDB games by page visits) plus the most-wanted unreleased games (issue #314) is refreshed by:
 
 ```bash
 pnpm games:sync
@@ -346,11 +346,12 @@ pnpm games:sync
 
 Fail-closed by construction: the run stages and validates everything, then
 commits in a single transaction, so any failure (bad credentials, a Twitch or
-IGDB outage that survives its one retry, a validation violation, a snapshot
-short of 1000 unique games) leaves the previous catalog byte-identical and
+IGDB outage that survives its one retry, a validation violation, a Twitch snapshot
+short of 1000 unique games, or a combined catalog below 5000 unique games) leaves the previous catalog byte-identical and
 exits non-zero. Rows are never deleted — games that drop out of the snapshot
 keep their row and last-known rank. Ranking comes from Twitch Helix
-`games/top` (ordered by current viewer count); the upcoming shelf comes from
+`games/top` (ordered by current viewer count). The additional IGDB games expand
+search and discovery without receiving fabricated Twitch ranks; the upcoming shelf comes from
 IGDB's `hypes` (the pre-release want count, TBA or future release only, top
 100); hydration and covers still come from IGDB, and only the `igdb_id` is
 ever stored — never Twitch's category id or box art. Covers are re-hosted

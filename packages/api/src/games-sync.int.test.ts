@@ -1,7 +1,7 @@
 import { closeDb, db } from "@my-tuums/db";
 import { game } from "@my-tuums/db/schema";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { GAMES_CATALOG_SIZE } from "./constants.js";
+import { GAMES_CATALOG_SIZE, GAMES_TWITCH_SIZE } from "./constants.js";
 import { syncGamesCatalog, upsertGames, type StagedGameRow } from "./games-sync.js";
 import type { IgdbGameRow, IgdbTransport, TwitchTopGame } from "./igdb.js";
 import { testStorage, testStorageObjects, truncateAll } from "./testing/harness.js";
@@ -26,6 +26,8 @@ interface FakeTwitchOptions {
   covers: Map<string, Uint8Array>;
   /** When set, Helix answers 500 — the run must fail. */
   failHelix?: boolean;
+  /** Page-visit popularity candidates, including overlaps with Twitch. */
+  popularIds?: number[];
   /** IDs the upcoming (`sort hypes desc`) scan returns, in order. */
   upcomingIds?: number[];
 }
@@ -101,6 +103,13 @@ function fakeTwitch(options: FakeTwitchOptions): FakeTwitch {
         status: 200,
         headers: { "content-type": "application/json" },
       });
+    }
+    if (url.endsWith("/v4/popularity_primitives")) {
+      const offset = Number(/offset (\d+)/.exec(init.body ?? "")?.[1] ?? 0);
+      const limit = Number(/limit (\d+)/.exec(init.body ?? "")?.[1] ?? 10);
+      return json(
+        (options.popularIds ?? []).slice(offset, offset + limit).map((game_id) => ({ game_id })),
+      );
     }
     if (url.endsWith("/v4/games")) {
       const body = init.body ?? "";
@@ -180,8 +189,8 @@ function fillerGame(id: number): IgdbGameRow {
 const FILLER_BASE = 5000;
 
 /**
- * Pads a custom head of Helix entries out to a full `GAMES_CATALOG_SIZE`
- * snapshot with filler games. `headIds` declares the valid unique IGDB ids
+ * Pads the Twitch head to `GAMES_TWITCH_SIZE` and the combined popularity
+ * selection to `GAMES_CATALOG_SIZE` with filler games. `headIds` declares the valid unique IGDB ids
  * the head contributes, in first-occurrence order — the test states what it
  * built, and a miscount fails the run loudly instead of passing quietly.
  */
@@ -195,7 +204,11 @@ function snapshot(head: readonly TwitchTopGame[], headIds: readonly number[]): F
     }
   }
   return {
-    top: [...head, ...fillers.map((id) => topEntry(String(id)))],
+    top: [
+      ...head,
+      ...fillers.slice(0, GAMES_TWITCH_SIZE - headIds.length).map((id) => topEntry(String(id))),
+    ],
+    popularIds: [...headIds, ...fillers],
     games: new Map<number, IgdbGameRow>([
       ...doomGames(),
       ...fillers.map((id) => [id, fillerGame(id)] as const),
@@ -255,11 +268,33 @@ afterAll(async () => {
 });
 
 describe("syncGamesCatalog", () => {
+  it("fills the 5000-game directory from IGDB without assigning extra Twitch ranks", async () => {
+    const catalog = doomCatalog();
+    const result = await runSync(catalog);
+    const rows = await db.select().from(game);
+    expect(rows).toHaveLength(5000);
+    expect(result.scanned).toBe(1000);
+    expect(result.selected).toBe(5000);
+    expect(rows.filter((row) => row.popularityRank === null)).toHaveLength(4000);
+    expect(new Set(result.requestedIds.flat()).size).toBe(5000);
+  });
+
+  it("preserves the catalog and covers when IGDB cannot fill the target", async () => {
+    await upsertGames(db, [stagedRow({ igdbId: 10 })], new Date());
+    const before = await db.select().from(game);
+    testStorageObjects.clear();
+    await expect(runSync({ ...doomCatalog(), popularIds: [10, 20, 10] })).rejects.toThrow(
+      /combined popularity catalog contains 1000 unique games — need 5000/,
+    );
+    expect(await db.select().from(game)).toEqual(before);
+    expect([...testStorageObjects.keys()]).toEqual([]);
+  });
+
   it("commits the snapshot: sticky collision keys, dense ranks, normalized labels, re-hosted covers", async () => {
     const result = await runSync(doomCatalog());
 
     expect(result).toMatchObject({
-      scanned: GAMES_CATALOG_SIZE,
+      scanned: GAMES_TWITCH_SIZE,
       knownIds: 0,
       newGames: GAMES_CATALOG_SIZE,
       coversUploaded: 2,
@@ -296,7 +331,7 @@ describe("syncGamesCatalog", () => {
   it("follows cursor pagination past the first 100-item page until the snapshot is complete", async () => {
     const result = await runSync(doomCatalog());
 
-    expect(result.scanned).toBe(GAMES_CATALOG_SIZE);
+    expect(result.scanned).toBe(GAMES_TWITCH_SIZE);
     // Ten pages of 100: the first request carries no cursor, every later one
     // sends the previous page's cursor back as `after`.
     expect(result.afterCursors).toHaveLength(10);
@@ -325,7 +360,7 @@ describe("syncGamesCatalog", () => {
     ];
     const result = await runSync(snapshot(head, [20, 10]));
 
-    expect(result.scanned).toBe(GAMES_CATALOG_SIZE);
+    expect(result.scanned).toBe(GAMES_TWITCH_SIZE);
     const rows = await db.select().from(game);
     const byId = new Map(rows.map((row) => [row.igdbId, row]));
     // The six skipped entries consumed no ranks: the first valid games rank
@@ -345,7 +380,7 @@ describe("syncGamesCatalog", () => {
     const head = [topEntry("20"), topEntry("10"), topEntry("20"), topEntry("10")];
     const result = await runSync(snapshot(head, [20, 10]));
 
-    expect(result.scanned).toBe(GAMES_CATALOG_SIZE);
+    expect(result.scanned).toBe(GAMES_TWITCH_SIZE);
     const rows = await db.select().from(game);
     const byId = new Map(rows.map((row) => [row.igdbId, row]));
     expect(byId.get(20)?.popularityRank).toBe(1);
@@ -361,18 +396,21 @@ describe("syncGamesCatalog", () => {
     await runSync(doomCatalog());
 
     const rows = await db.select().from(game);
-    const ranks = rows.map((row) => row.popularityRank).sort((a, b) => (a ?? 0) - (b ?? 0));
+    const ranks = rows
+      .map((row) => row.popularityRank)
+      .filter((rank) => rank !== null)
+      .sort((a, b) => (a ?? 0) - (b ?? 0));
     // Dense: every integer exactly once, no gaps from skips or duplicates.
-    expect(ranks).toEqual(Array.from({ length: GAMES_CATALOG_SIZE }, (_, index) => index + 1));
+    expect(ranks).toEqual(Array.from({ length: GAMES_TWITCH_SIZE }, (_, index) => index + 1));
     // Stable: the rank is the first-occurrence position — [20, 10, 5000, …].
     const byId = new Map(rows.map((row) => [row.igdbId, row]));
     expect(byId.get(20)?.popularityRank).toBe(1);
     expect(byId.get(10)?.popularityRank).toBe(2);
     expect(byId.get(FILLER_BASE)?.popularityRank).toBe(3);
-    expect(byId.get(FILLER_BASE + GAMES_CATALOG_SIZE - 3)?.popularityRank).toBe(GAMES_CATALOG_SIZE);
+    expect(byId.get(FILLER_BASE + GAMES_TWITCH_SIZE - 3)?.popularityRank).toBe(GAMES_TWITCH_SIZE);
   });
 
-  it("fails closed when the snapshot ends before GAMES_CATALOG_SIZE unique games", async () => {
+  it("fails closed when the snapshot ends before GAMES_TWITCH_SIZE unique games", async () => {
     await expect(
       runSync({
         top: [topEntry("20"), topEntry("10"), topEntry("", "Just Chatting")],
@@ -404,7 +442,7 @@ describe("syncGamesCatalog", () => {
     expect([...testStorageObjects.keys()]).toEqual([]);
   });
 
-  it("keeps an unchanged cover — no upload, no key churn", async () => {
+  it("keeps an unchanged cover — no upload, no key churn", { timeout: 45_000 }, async () => {
     const catalog = doomCatalog();
     await runSync(catalog);
     const before = (await db.select().from(game)).find((row) => row.igdbId === 10);
@@ -421,85 +459,97 @@ describe("syncGamesCatalog", () => {
     expect(after?.coverMediaPath).toBe(before?.coverMediaPath);
   });
 
-  it("re-hosts a changed cover, content-addressed, and removes the superseded object after commit", async () => {
-    const catalog = doomCatalog();
-    await runSync(catalog);
+  it(
+    "re-hosts a changed cover, content-addressed, and removes the superseded object after commit",
+    { timeout: 45_000 },
+    async () => {
+      const catalog = doomCatalog();
+      await runSync(catalog);
 
-    const changed: FakeTwitchOptions = {
-      ...catalog,
-      games: new Map(catalog.games),
-      covers: new Map([
-        ["co1993", JPEG],
-        ["co2016", JPEG],
-        ["co9999", JPEG],
-      ]),
-    };
-    changed.games.set(10, { ...catalog.games.get(10)!, cover: { image_id: "co9999" } });
+      const changed: FakeTwitchOptions = {
+        ...catalog,
+        games: new Map(catalog.games),
+        covers: new Map([
+          ["co1993", JPEG],
+          ["co2016", JPEG],
+          ["co9999", JPEG],
+        ]),
+      };
+      changed.games.set(10, { ...catalog.games.get(10)!, cover: { image_id: "co9999" } });
 
-    const second = await runSync(changed);
-    expect(second.coversUploaded).toBe(1);
+      const second = await runSync(changed);
+      expect(second.coversUploaded).toBe(1);
 
-    const row = (await db.select().from(game)).find((current) => current.igdbId === 10);
-    expect(row?.coverMediaPath).toBe("/media/games/10-co9999.jpg");
-    expect(row?.coverImageId).toBe("co9999");
-    // The old object left WITH the commit, not before it.
-    expect(testStorageObjects.has("games/10-co1993.jpg")).toBe(false);
-    expect(testStorageObjects.has("games/10-co9999.jpg")).toBe(true);
-  });
+      const row = (await db.select().from(game)).find((current) => current.igdbId === 10);
+      expect(row?.coverMediaPath).toBe("/media/games/10-co9999.jpg");
+      expect(row?.coverImageId).toBe("co9999");
+      // The old object left WITH the commit, not before it.
+      expect(testStorageObjects.has("games/10-co1993.jpg")).toBe(false);
+      expect(testStorageObjects.has("games/10-co9999.jpg")).toBe(true);
+    },
+  );
 
-  it("keeps a cover that fails to download, with its compare key, so the change retries", async () => {
-    const catalog = doomCatalog();
-    await runSync(catalog);
+  it(
+    "keeps a cover that fails to download, with its compare key, so the change retries",
+    { timeout: 45_000 },
+    async () => {
+      const catalog = doomCatalog();
+      await runSync(catalog);
 
-    const failing: FakeTwitchOptions = {
-      ...catalog,
-      games: new Map(catalog.games),
-      covers: new Map(catalog.covers),
-    };
-    failing.games.set(10, { ...catalog.games.get(10)!, cover: { image_id: "co404" } });
-    // `co404` is absent from covers — the transport answers 404.
+      const failing: FakeTwitchOptions = {
+        ...catalog,
+        games: new Map(catalog.games),
+        covers: new Map(catalog.covers),
+      };
+      failing.games.set(10, { ...catalog.games.get(10)!, cover: { image_id: "co404" } });
+      // `co404` is absent from covers — the transport answers 404.
 
-    const second = await runSync(failing);
-    expect(second.coversFailed).toBe(1);
+      const second = await runSync(failing);
+      expect(second.coversFailed).toBe(1);
 
-    const row = (await db.select().from(game)).find((current) => current.igdbId === 10);
-    expect(row?.coverImageId).toBe("co1993");
-    expect(row?.coverMediaPath).toBe("/media/games/10-co1993.jpg");
-  });
+      const row = (await db.select().from(game)).find((current) => current.igdbId === 10);
+      expect(row?.coverImageId).toBe("co1993");
+      expect(row?.coverMediaPath).toBe("/media/games/10-co1993.jpg");
+    },
+  );
 
-  it("never deletes a dropout: it keeps its row and its last-known rank, refreshed from IGDB", async () => {
-    const catalog = doomCatalog();
-    await runSync(catalog);
+  it(
+    "never deletes a dropout: it keeps its row and its last-known rank, refreshed from IGDB",
+    { timeout: 45_000 },
+    async () => {
+      const catalog = doomCatalog();
+      await runSync(catalog);
 
-    // Run 2: only igdb 20 is in the snapshot (padded with fillers to the
-    // full size); 10 is a dropout but still hydratable (its id is known, so
-    // the union re-hydrates it).
-    const dropoutScan = snapshot([topEntry("20")], [20]);
-    await runSync(dropoutScan);
+      // Run 2: only igdb 20 is in the snapshot (padded with fillers to the
+      // full size); 10 is a dropout but still hydratable (its id is known, so
+      // the union re-hydrates it).
+      const dropoutScan = snapshot([topEntry("20")], [20]);
+      await runSync(dropoutScan);
 
-    const rows = await db.select().from(game);
-    // The dropout plus the filler's replacement: run 2's snapshot holds one
-    // filler (5998) run 1 never saw, while dropout 10 survives beside it —
-    // the catalog never shrinks (Q29).
-    expect(rows).toHaveLength(GAMES_CATALOG_SIZE + 1);
-    const dropout = rows.find((row) => row.igdbId === 10);
-    // Last-known rank (2 from run 1) — not null, and not clamped to the new
-    // snapshot's composition; ordering dropouts "by where they last placed"
-    // (Q29) is exactly this column's meaning.
-    expect(dropout?.popularityRank).toBe(2);
-    expect(dropout?.name).toBe("DOOM");
+      const rows = await db.select().from(game);
+      // The dropout plus the filler's replacement: run 2's snapshot holds one
+      // filler (9998) run 1 never saw, while dropout 10 survives beside it —
+      // the catalog never shrinks (Q29).
+      expect(rows).toHaveLength(GAMES_CATALOG_SIZE + 1);
+      const dropout = rows.find((row) => row.igdbId === 10);
+      // Last-known rank (2 from run 1) — not null, and not clamped to the new
+      // snapshot's composition; ordering dropouts "by where they last placed"
+      // (Q29) is exactly this column's meaning.
+      expect(dropout?.popularityRank).toBe(2);
+      expect(dropout?.name).toBe("DOOM");
 
-    // Run 3: the dropout stops hydrating entirely — the row still survives,
-    // verbatim, with its sticky key and last-known rank (Q29).
-    const vanished: FakeTwitchOptions = {
-      ...dropoutScan,
-      games: new Map([...dropoutScan.games].filter(([id]) => id !== 10)),
-    };
-    await runSync(vanished);
+      // Run 3: the dropout stops hydrating entirely — the row still survives,
+      // verbatim, with its sticky key and last-known rank (Q29).
+      const vanished: FakeTwitchOptions = {
+        ...dropoutScan,
+        games: new Map([...dropoutScan.games].filter(([id]) => id !== 10)),
+      };
+      await runSync(vanished);
 
-    const survivor = (await db.select().from(game)).find((row) => row.igdbId === 10);
-    expect(survivor).toMatchObject({ hashtagKey: "doom", popularityRank: 2, slug: "doom" });
-  });
+      const survivor = (await db.select().from(game)).find((row) => row.igdbId === 10);
+      expect(survivor).toMatchObject({ hashtagKey: "doom", popularityRank: 2, slug: "doom" });
+    },
+  );
 
   it("stages the upcoming scan's hypes and release dates alongside the Twitch ranks", async () => {
     const future = Date.UTC(2028, 0, 1) / 1000;
