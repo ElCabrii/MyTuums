@@ -124,6 +124,10 @@ app's build from the same origin.
   because a repost is a feed _event_ whose position is server-ordered — a new
   one lands at the top of the home feeds, and an unrepost removes one from
   them.
+- **Marking notifications read cancels older list and badge requests before
+  patching their caches.** An unfinished initial list restarts after marking
+  read; loaded lists keep their pages without a redundant refetch. Otherwise
+  a late response can restore unread rows after the bell has cleared.
 - **Persisted atoms read `localStorage` as `unknown`, sanitise on read, and
   set `getOnInit: true`** — without it the first render flashes the default.
 - **Analytics has one root-mounted controller.** `AnalyticsConsent` alone

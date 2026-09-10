@@ -154,6 +154,47 @@ it("loads the next viewer's notifications after sign-out and remount", async () 
  * requested and that the visible state still flips.
  */
 describe("markAllReadAtom", () => {
+  it("keeps rows read when the initial list response arrives after marking read", async () => {
+    setTestSession(signedInSession());
+    const store = createStore();
+    const queryClient = createTestQueryClient();
+    store.set(queryClientAtom, queryClient);
+    const row = makeNotification({ id: "late-notification", read: false });
+    let resolveList: (value: { items: NotificationItem[]; nextCursor: null }) => void = () => {
+      throw new Error("The list request has not started");
+    };
+    const pendingList = new Promise((resolve) => {
+      resolveList = resolve;
+    });
+    fakeClient.notification.list.mockReset().mockReturnValue(pendingList);
+    fakeClient.notification.markRead.mockImplementation(() => {
+      fakeClient.notification.list.mockResolvedValue({
+        items: [{ ...row, read: true }],
+        nextCursor: null,
+      });
+      return Promise.resolve({ read: 1 });
+    });
+    const unsubscribe = store.sub(notificationsFeedAtom, () => {});
+
+    try {
+      await vi.waitFor(() => expect(fakeClient.notification.list).toHaveBeenCalled());
+      await store.get(markAllReadAtom).mutateAsync({});
+      resolveList({ items: [row], nextCursor: null });
+
+      await vi.waitFor(() => {
+        expect(store.get(notificationsFeedAtom).data?.pages[0]?.items).toEqual([
+          { ...row, read: true },
+        ]);
+      });
+      expect(queryClient.getQueryData(unreadCountQueryOptions().queryKey)).toEqual({
+        unreadCount: 0,
+      });
+    } finally {
+      unsubscribe();
+      queryClient.clear();
+    }
+  });
+
   it("patches every loaded list row read and zeroes the badge, refetching nothing", async () => {
     // SAFETY: the patch walks only `read` off each row; two-row literals
     // carrying exactly that field are honest cache fixtures for it.

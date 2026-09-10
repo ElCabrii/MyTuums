@@ -30,8 +30,8 @@ import { getLocale } from "@/paraglide/runtime.js";
  *
  * Opening the page is what "read" means here: the mount effect below stamps
  * every unread row read, which is also what clears the header badge. The
- * invalidation that follows refetches the list, so the rows flip to their
- * read styling from the server's answer rather than a local patch.
+ * mutation patches loaded rows and restarts an unfinished initial list read
+ * after cancelling requests that could restore stale unread state.
  *
  * Rows are the recipient's private inbox entries (issue #330): each one can
  * be deleted, and the header clears the whole inbox behind a confirmation.

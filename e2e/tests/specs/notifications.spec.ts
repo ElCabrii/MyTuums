@@ -51,7 +51,8 @@ test.describe("notifications", () => {
     // would make clicking "Follow" a no-op that notifies nobody.
     await bobPage.goto(`/post/${seeded.id}`);
     await bobPage.getByRole("button", { name: "Like this post" }).click();
-    await bobPage.getByPlaceholder("Post your reply...").fill(`a bob reply ${Date.now()}`);
+    const replyContent = `a bob reply ${Date.now()}`;
+    await bobPage.getByPlaceholder("Post your reply...").fill(replyContent);
     await bobPage.getByRole("button", { name: "Reply" }).click();
     await bobPage.goto(`/@${ALICE.username}`);
     // Wait for the profile's follow control to render before branching on
@@ -74,9 +75,21 @@ test.describe("notifications", () => {
 
     await page.getByRole("button", { name: /^Notifications/ }).click();
     await expect(page).toHaveURL(/\/notifications$/);
-    await expect(page.getByText(`${BOB.name} liked your post`)).toBeVisible();
-    await expect(page.getByText(`${BOB.name} replied to your post`)).toBeVisible();
-    await expect(page.getByText(`${BOB.name} followed you`)).toBeVisible();
+    // Earlier attempts keep their rows in the shared database. Match this
+    // attempt's post and reply so duplicates cannot obscure a real failure.
+    await expect(
+      page
+        .getByRole("link")
+        .filter({ hasText: `${BOB.name} liked your post` })
+        .filter({ hasText: seeded.content }),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("link")
+        .filter({ hasText: `${BOB.name} replied to your post` })
+        .filter({ hasText: replyContent }),
+    ).toBeVisible();
+    await expect(page.getByText(`${BOB.name} followed you`).first()).toBeVisible();
 
     // Opening the page advanced the read cursor: the badge — re-fetched on
     // this same navigation — reads as the plain bell again, and the unread
