@@ -22,6 +22,11 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   splitting: false,
+  // Bundled CommonJS dependencies (React DOM's email renderer) still require
+  // Node built-ins at runtime. ESM has no require unless we provide it.
+  banner: {
+    js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);',
+  },
   // `packages/{db,auth,api}` are source-only internal packages: their
   // `exports` point straight at `.ts` files with `.js` specifiers. Node's
   // native type-stripping does not rewrite those specifiers, so importing
