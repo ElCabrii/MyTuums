@@ -131,8 +131,10 @@ export const resolvedThemeAtom = atom((get) => {
  * (an installed PWA's status/title bar) meets the page with no seam. The
  * same hand-copy the cold-load splash in index.html makes: a computed-style
  * read would hand back the raw `oklch(...)` declaration, and theme-color
- * consumers predate color-function parsing, so resolved hex it is. Keep in
- * step with those two places when a token moves.
+ * consumers predate color-function parsing, so resolved hex it is. The
+ * manifest's static `theme_color` (launch-time status bar and splash,
+ * before any JS can run) carries the light value; keep all three places in
+ * step when a token moves.
  */
 const BAR_COLORS = {
   light: "#f6f7f8",
