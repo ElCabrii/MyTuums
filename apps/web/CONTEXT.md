@@ -278,6 +278,16 @@ Both are git-ignored, and both are why `lint` and `typecheck` depend on
 `build` in `turbo.json`. The package's own `test` script compiles Paraglide
 first.
 
+The committed install icons are rendered assets too, produced from
+`public/mytuums.svg` by hand-run commands (no build hook): the `maskable`
+pair and `apple-touch-icon.png` are the mark at 60% centered on a full-bleed
+`#09090b` tile (the dark `--background` token — 60% keeps the hexagon's
+corners inside every launcher's mask circle), and the `monochrome` pair is
+the mark colorized to a white glyph on transparency for Android 13+ themed
+icons. Regenerate with `rsvg-convert` + ImageMagick when the logo changes;
+the `any` pair (`mytuums-192/512.png`, also the unfurl image) stays the bare
+transparent mark.
+
 ## Verification
 
 | Command                                                              | Covers                |
