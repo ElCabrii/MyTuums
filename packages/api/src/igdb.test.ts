@@ -301,6 +301,28 @@ describe("createIgdbClient.fetchCoverImage", () => {
     return new Response(bytes, { status, headers: { "content-type": "image/jpeg" } });
   }
 
+  it("a slow CDN cover does not block another cover download", async () => {
+    let releaseFirst: ((response: Response) => void) | undefined;
+    const first = new Promise<Response>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const transport: IgdbTransport = {
+      fetch: (url) => (url.includes("slow.jpg") ? first : Promise.resolve(coverResponse(JPEG))),
+    };
+    const api = client(transport);
+    const slow = api.fetchCoverImage("slow");
+    try {
+      const fast = await Promise.race([
+        api.fetchCoverImage("fast").then(() => "completed"),
+        new Promise<string>((resolve) => setTimeout(() => resolve("blocked"), 100)),
+      ]);
+      expect(fast).toBe("completed");
+    } finally {
+      releaseFirst?.(coverResponse(JPEG));
+      await slow;
+    }
+  });
+
   it("downloads a cover and sniffs its true format from the bytes", async () => {
     const { transport, calls } = scriptedTransport([() => coverResponse(JPEG)]);
 

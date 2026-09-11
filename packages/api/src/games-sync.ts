@@ -524,41 +524,48 @@ async function buildGamesCatalog(
     coversFailed: 0,
   };
   if (deps.storage) {
-    for (const row of staged) {
-      const existing = known.get(row.igdbId);
-      const desiredImageId = row.coverImageId;
-      if (desiredImageId !== null && desiredImageId === existing?.coverImageId) {
-        result.coversKept++;
-        continue;
-      }
+    const storage = deps.storage;
+    // Bound buffered image memory and open CDN/R2 requests while overlapping
+    // network latency. Each batch settles before publication or lease release.
+    for (const batch of chunk(staged, 4)) {
+      await Promise.all(
+        batch.map(async (row) => {
+          const existing = known.get(row.igdbId);
+          const desiredImageId = row.coverImageId;
+          if (desiredImageId !== null && desiredImageId === existing?.coverImageId) {
+            result.coversKept++;
+            return;
+          }
 
-      if (desiredImageId === null) {
-        row.coverMediaPath = null;
-        row.coverImageId = null;
-        continue;
-      }
+          if (desiredImageId === null) {
+            row.coverMediaPath = null;
+            row.coverImageId = null;
+            return;
+          }
 
-      try {
-        const cover = await client.fetchCoverImage(desiredImageId);
-        const key = gameCoverObjectKey(
-          row.igdbId,
-          desiredImageId,
-          IMAGE_EXTENSION[cover.contentType],
-          version,
-        );
-        await beginMediaUpload(deps.db, `catalog:${version}`, [mediaPathFor(key)]);
-        await deps.storage.put(key, cover.bytes, cover.contentType);
-        row.coverMediaPath = mediaPathFor(key);
-        row.coverImageId = desiredImageId;
-        result.coversUploaded++;
-      } catch {
-        // Per-cover tolerance (Q28): warn, keep the old cover and its
-        // compare key so the change retries next run.
-        result.coversFailed++;
-        row.coverMediaPath = existing?.coverMediaPath ?? null;
-        row.coverImageId = existing?.coverImageId ?? null;
-        console.warn({ event: "game_cover_deferred", gameId: row.igdbId });
-      }
+          try {
+            const cover = await client.fetchCoverImage(desiredImageId);
+            const key = gameCoverObjectKey(
+              row.igdbId,
+              desiredImageId,
+              IMAGE_EXTENSION[cover.contentType],
+              version,
+            );
+            await beginMediaUpload(deps.db, `catalog:${version}`, [mediaPathFor(key)]);
+            await storage.put(key, cover.bytes, cover.contentType);
+            row.coverMediaPath = mediaPathFor(key);
+            row.coverImageId = desiredImageId;
+            result.coversUploaded++;
+          } catch {
+            // Per-cover tolerance (Q28): warn, keep the old cover and its
+            // compare key so the change retries next run.
+            result.coversFailed++;
+            row.coverMediaPath = existing?.coverMediaPath ?? null;
+            row.coverImageId = existing?.coverImageId ?? null;
+            console.warn({ event: "game_cover_deferred", gameId: row.igdbId });
+          }
+        }),
+      );
     }
   } else if (staged.length > 0) {
     console.warn(

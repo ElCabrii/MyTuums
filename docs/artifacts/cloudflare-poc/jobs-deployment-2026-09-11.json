@@ -1,0 +1,28 @@
+{
+  "date": "2026-09-11",
+  "account_id": "734f3b84571b1967e6940140a0b7d75f",
+  "worker": "mytuums-poc-jobs",
+  "source_branch": "codex/cloudflare-poc",
+  "requested_commit": "07c7ce2cfb23f5293afbf2e654a8fa4492e9bdb3",
+  "trigger_uuid": "32f1edbb-7ca2-4f0f-93f0-9bd00484d2a4",
+  "build_uuid": "a098129c-31a0-40ad-98f8-1f228908c45d",
+  "build_outcome": "success",
+  "deployment_id": "068bafbb-da4d-4e33-9a13-bdce16772ab6",
+  "version_id": "74d1b2c9-0c39-43b0-9c03-a00850bae064",
+  "deployed_at": "2026-09-11T13:52:25.429577Z",
+  "workers_dev": false,
+  "preview_urls": false,
+  "cron": "* * * * *",
+  "workflows": ["mytuums-poc-video", "mytuums-poc-maintenance", "mytuums-poc-game-sync"],
+  "verified_secret_names": [
+    "APPEAL_TOKEN_SECRET",
+    "IGDB_CLIENT_ID",
+    "IGDB_CLIENT_SECRET",
+    "STREAM_API_TOKEN"
+  ],
+  "automatic_builds": "All paths excluded pending coordinated deployment ordering; manual build targets the PoC branch.",
+  "limitations": [
+    "Deployment success does not prove external credential validity or Workflow execution.",
+    "Hosted email, Stream and game-sync checks remain outstanding."
+  ]
+}

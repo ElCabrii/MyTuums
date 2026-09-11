@@ -451,14 +451,14 @@ export function createIgdbClient(config: {
       imageId: string,
     ): Promise<{ bytes: Uint8Array; contentType: AllowedImageType }> {
       const endpoint = `cover ${imageId}`;
-      const response = await schedule(() =>
-        withRetry(endpoint, () =>
-          send(
-            `${IGDB_IMAGE_BASE_URL}/t_cover_big/${encodeURIComponent(imageId)}.jpg`,
-            { method: "GET", headers: { Accept: "image/jpeg, image/png" } },
-            IGDB_COVER_TIMEOUT_MS,
-            endpoint,
-          ),
+      // CDN downloads do not use the authenticated API pacing queue. The
+      // catalog importer bounds concurrent downloads and retains retry/backoff.
+      const response = await withRetry(endpoint, () =>
+        send(
+          `${IGDB_IMAGE_BASE_URL}/t_cover_big/${encodeURIComponent(imageId)}.jpg`,
+          { method: "GET", headers: { Accept: "image/jpeg, image/png" } },
+          IGDB_COVER_TIMEOUT_MS,
+          endpoint,
         ),
       );
 

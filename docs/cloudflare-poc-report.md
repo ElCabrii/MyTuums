@@ -83,15 +83,22 @@ There are still no application users. See [the fixture record](artifacts/cloudfl
 
 GitHub repository access now works and its connection has been created. Stream
 reports 1,000 storage minutes. Email Sending is enabled for `mytuums.com`, with
-DNS status `ready` and a 200/day quota. The three Worker entries exist with no
-deployed versions; workers.dev and preview URLs are disabled. See
-[the account setup record](artifacts/cloudflare-poc/account-setup-2026-09-11.json).
+DNS status `ready` and a 200/day quota. Branding is deployed at
+`about-cf-poc.mytuums.com`; anonymous page and asset requests redirect to Access,
+and its workers.dev URL returns 404. The jobs Worker is deployed through Workers
+Builds, with video, maintenance and game-sync Workflows and the one-minute Cron.
+See [the jobs deployment record](artifacts/cloudflare-poc/jobs-deployment-2026-09-11.json).
 
-Workers Builds still needs its deployment token: the plugin cannot manage API
-tokens, so the owner must create/select it in the dashboard. Build triggers,
-dedicated runtime secrets and OAuth registrations remain to configure before
-hosted feature verification. See [operations](operations.md). No real email or
-video has been sent/uploaded by these setup checks.
+The build token and dedicated runtime secret names are configured. The owner
+reports registering the PoC OAuth applications. External credential validity,
+OAuth callbacks and live email/video behavior still require hosted verification.
+The app deployed successfully from commit
+`07c7ce2cfb23f5293afbf2e654a8fa4492e9bdb3` at `cf-poc.mytuums.com`. Anonymous
+homepage and auth-session API requests redirect to Access; workers.dev returns
+404 and preview URLs are disabled. Authenticated behavior remains unverified.
+See [the app deployment record](artifacts/cloudflare-poc/app-deployment-2026-09-11.json).
+App and jobs automatic build paths are excluded pending coordinated deployment
+ordering. Their manual builds target only `codex/cloudflare-poc`.
 
 The cost figures in the migration plan are illustrative platform prices. A measured
 Cloudflare estimate must include app requests/CPU, D1 rows/storage, image transforms,
@@ -103,3 +110,21 @@ Recommendation at this stage: continue the isolated PoC and resolve deployment
 access. There is enough local evidence to justify hosted testing, but not enough
 to recommend a production migration. The final adopt/revise/stop recommendation
 depends on the hosted feature checks, recovery rehearsal and measured usage.
+
+## Cold catalog import timeout
+
+The first live game-sync attempt timed out after 30 minutes before publication.
+D1 contained 3,809 upload intents and the active catalog remained the 28-game
+fixture. An intent alone does not prove its R2 upload completed. The old Workflow
+`games-1789135434886` was terminated before deploying a correction.
+
+The correction separates cover CDN downloads from authenticated IGDB API pacing
+and processes four covers concurrently, including their D1 intents and R2 writes.
+API query pacing, download validation and retry/backoff remain intact. Publication
+still waits for every cover decision and atomically replaces the catalog under
+its lease. This addresses serialized network latency; it does not add partial-run
+resume. A timed-out unpublished run still cannot reuse its covers on retry.
+
+The regression test holds one CDN response open and confirms another download can
+complete. It failed before the change and passed afterward. Hosted completion and
+cold-import duration must be measured before calling the timeout fixed remotely.
