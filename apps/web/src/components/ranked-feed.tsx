@@ -48,7 +48,7 @@ export function RankedFeed({
   emptyIcon?: typeof MessageSquare;
   /** Render the immediate-parent preview used by profile activity cards. */
   showParentContext?: boolean;
-  /** `"discover"` renders Who-to-Follow above the posts; home feeds carry none. */
+  /** `"discover"` renders Who-to-Follow above the posts; the Home sidebar mounts its own beside the feed. */
   suggestions?: "none" | "discover";
   /**
    * Whether the cold-start games prompt may render. The Following feed opts

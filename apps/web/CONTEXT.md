@@ -233,11 +233,15 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   itself once — the same reset Refresh performs; the recovery card is the
   fallback for a snapshot that refuses with no rows retained, where an
   automatic reset could loop, and expiry never renders the ordinary retry —
-  retry would resend the same id), the optional Who-to-Follow module (top
+  retry would resend the same id), the optional Who-to-Follow module above
+  Discover's posts (top
   three live-filtered candidates, no refill until Refresh; follow clicks patch
   suggestion rows in place through `src/lib/follow-cache.ts`) and the
   cold-start games prompt (For you and Discover only — Following keeps its
-  catch-up empty state).
+  catch-up empty state). The Home sidebar (`home-page.tsx`) mounts the same
+  `WhoToFollow` from the For-you feed's own atom — never on Following, which
+  would subscribe an unwatched global feed — beside the static legal-links
+  block.
 
 ## Dependencies and boundaries
 

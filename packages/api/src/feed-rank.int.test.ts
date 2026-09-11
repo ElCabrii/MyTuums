@@ -249,7 +249,10 @@ describe("ranked global (For you)", () => {
     expect(page.ranking).toMatchObject({ hasInterests: true });
     expect(page.ranking?.snapshotId).toMatch(/^[0-9a-f-]{36}$/);
     expect(Date.parse(page.ranking?.expiresAt ?? "")).not.toBeNaN();
-    expect(page.ranking?.suggestions).toEqual([]);
+    // For you derives its suggestions from the same frozen order Discover
+    // does: the followed and requested authors lead it and drop live, so the
+    // stranger is the one followable suggestion.
+    expect(page.ranking?.suggestions.map((suggestion) => suggestion.id)).toEqual([strangerB.id]);
   });
 
   it("ranks a newcomer's liked-topic post above an old followed post", async () => {
@@ -460,6 +463,9 @@ describe("ranked Following", () => {
     expect(followEvent?.repostedBy?.id).toBe(followed.id);
     // The stranger's original arrives only as the followed repost event.
     expect(page.items.find((item) => item.id === pDoomOld)?.repostedBy?.id).toBe(followed.id);
+    // Following carries no suggestions by design: its candidates are the
+    // viewer and followed authors, and the live follow filter empties that.
+    expect(page.ranking?.suggestions).toEqual([]);
   });
 
   it("downgrades a withdrawn amplification to the original in place", async () => {
