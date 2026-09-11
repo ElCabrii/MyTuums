@@ -60,8 +60,11 @@ Source: the [production Railway project](https://railway.com/project/ffdcd3e4-91
 
 ## Deployment and decision
 
-Owner-only Access applications, EU D1 and private EU R2 are provisioned. D1 and R2
-remain empty remotely. No app/jobs/branding Worker or Workers Builds trigger has
+Owner-only Access applications, EU D1 and private EU R2 are provisioned. D1 now has
+all seven committed migrations: its 114 schema objects match local output exactly,
+the migration hashes match, and no foreign-key violations or application users
+exist. See [the initialization record](artifacts/cloudflare-poc/d1-initialization-2026-09-11.json).
+R2 remains empty. No app/jobs/branding Worker or Workers Builds trigger has
 been deployed. Stream/Email authorization checks and the GitHub Builds connection
 remain unresolved. Dedicated runtime secrets and OAuth registrations are also
 required before live verification.

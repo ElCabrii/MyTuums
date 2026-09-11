@@ -23,7 +23,7 @@ remote option, loads no environment files and removes its own temporary files.
 It does not open the application's local or hosted PoC resources.
 See [migration status](../../docs/cloudflare-migration.md). The map below records native ownership and invariants.
 
-The unapplied PoC migration baseline is `drizzle-d1/0000_cloudflare_initial.sql`;
+The deployed PoC migration baseline is `drizzle-d1/0000_cloudflare_initial.sql`;
 `0001_database_invariants.sql` owns handle normalization, the two expression
 indexes Drizzle Kit cannot generate correctly, and `user_delete_post_tree`.
 Account deletion materializes its full reply descendant set and deletes that
@@ -37,15 +37,18 @@ maintains it on favorite insertion, deletion and game reassignment. These
 triggers also run for account-deletion cascades. Application writes must not
 adjust the counter separately; catalog refreshes preserve it.
 
-The never-deployed baseline was regenerated from the current schema when video
+Before deployment, the baseline was regenerated from the current schema when video
 ownership moved fully to Stream. It includes media intents, catalog versions,
 Workflow intents and Stream state. The remaining migrations are custom SQL:
 `0003_media_cleanup_triggers.sql` for profile/link/post images,
 `0004_game_cover_cleanup.sql` for catalog covers, and
 `0005_stream_cleanup_triggers.sql` for video termination/orphan cleanup.
-The previous experimental migration sequence was never applied remotely. Once
-this baseline is deployed, evolve it with new committed migrations, not another
-reset. Historical PostgreSQL migrations under `drizzle/` remain unchanged.
+The previous experimental migration sequence was never applied remotely. The
+current seven migrations, through `0006_durable_moderation_email.sql`, were applied
+to the isolated EU PoC database on September 11 from commit `9078e60`. All 114
+schema objects and ledger hashes match local migration output. Evolve this
+deployed baseline with new committed migrations; never regenerate or reset it.
+Historical PostgreSQL migrations under `drizzle/` remain unchanged.
 
 Video rows require a creator identity and retain a private upload capability,
 provider UID, deadline and verified width/height/duration/caption metadata.

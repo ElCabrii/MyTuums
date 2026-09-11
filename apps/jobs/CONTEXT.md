@@ -58,8 +58,8 @@ remain in [the migration record](../../docs/cloudflare-migration.md).
 ## Configuration and checks
 
 Wrangler targets the Ops account's isolated `mytuums-poc` D1 database, provisioned
-September 11 with EU jurisdiction and read replication disabled. The database is
-still empty; applying migrations and deploying remain separate operations. The
+September 11 with EU jurisdiction and read replication disabled. Its seven
+committed migrations are applied; it has no application users or seeded data yet. The
 private EU R2 bucket is also provisioned. Stream availability is outstanding. See the verified resource
 inventory in the migration record before any remote operation. No migration or
 deployment command belongs in the build script. The account ID is a non-secret

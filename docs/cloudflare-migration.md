@@ -6,6 +6,22 @@ Current feature evidence, Railway measurements and deployment gates are summariz
 in [the validation report](cloudflare-poc-report.md). The dated notes below retain
 the implementation history; older outstanding-work lists are historical.
 
+## Remote D1 initialization (2026-09-11)
+
+Commit `9078e60` is pushed to `codex/cloudflare-poc`; GitHub CI is queued for that
+branch. Full local verification passed before the final documentation and
+source-map configuration checks. The connected API has now applied the seven
+committed D1 migrations to `mytuums-poc` in EU/EEUR with read replication disabled.
+The payload was captured from the pinned Drizzle migration runner, including its
+ledger statements, and applied in one 122-statement API batch. A deliberate
+failure probe first verified that the API batch rolls back table creation.
+
+Readback confirms all seven migration hashes, zero foreign-key violations, zero
+users, and exact SQL equality for all 114 schema objects against a fresh local
+migration. See [the initialization record](artifacts/cloudflare-poc/d1-initialization-2026-09-11.json).
+The baseline is deployed now: append future migrations and do not regenerate it.
+No production data was imported, R2 was untouched, and Workers remain undeployed.
+
 ## Bounded native email delivery (2026-09-11)
 
 Six focused regressions first failed against the single-attempt sender: temporary
@@ -770,7 +786,7 @@ Access issuer: `https://mytuums.cloudflareaccess.com`.
 | --------------------------- | -------------------------------------- | ------------------------------------------------------------------------- |
 | App Access application      | `e188692f-23a1-4c09-b054-9ffea37c5699` | Protects `cf-poc.mytuums.com`; only `gab.debure@gmail.com` allowed        |
 | Branding Access application | `29c44e7b-a52f-4d81-b3b9-fd1cc649b760` | Protects `about-cf-poc.mytuums.com`; only the same owner allowed          |
-| D1 `mytuums-poc`            | `f4334c85-cca9-4437-976e-b52038047c62` | Empty; EU jurisdiction; running in EEUR; read replication disabled        |
+| D1 `mytuums-poc`            | `f4334c85-cca9-4437-976e-b52038047c62` | Seven migrations applied; no users; EU/EEUR; read replication disabled    |
 | R2 `mytuums-poc-media`      | `95311368c80c4bbdb105dbc817ed6c63`     | EU jurisdiction; EEUR; Standard class; r2.dev disabled; no custom domains |
 
 Both Access applications were created with their restrictive inline policies in
@@ -782,8 +798,8 @@ applications were not modified. Wire each Worker's corresponding audience:
 - Branding: `7e8b9194813d7f984e385e9be12fbc34dbfd9b2244689c9b7fd19305fbb6026e`
 
 No Workers, Workflow instances, Builds connections, custom domains or DNS records
-have been created by this implementation. No D1 application migrations or data
-have been imported remotely. The jobs configuration now records the real account
+have been created by this implementation. D1 migrations are now applied as
+recorded above; no production data has been imported. The jobs configuration records the real account
 and D1 IDs; local tests remain ephemeral and independent.
 
 R2 initially returned activation error 10042. The owner enabled it in the dashboard;
@@ -812,7 +828,8 @@ been sent and no subscription has been changed by this implementation.
 
 The jobs Worker deployment dry run, generated binding types and scoped Worker/test
 typechecks pass with the recorded account and database configuration. This is
-build-time verification; the empty D1 database is not application-ready yet.
+build-time verification. The D1 schema is now initialized, while seeding and
+Worker activation remain outstanding.
 
 Tooling notes:
 

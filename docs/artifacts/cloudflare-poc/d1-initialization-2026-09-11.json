@@ -1,0 +1,51 @@
+{
+  "verifiedAt": "2026-09-11T11:19:08Z",
+  "sourceCommit": "9078e605dde4735a9952992f9d37500301125f4b",
+  "accountId": "734f3b84571b1967e6940140a0b7d75f",
+  "databaseId": "f4334c85-cca9-4437-976e-b52038047c62",
+  "databaseName": "mytuums-poc",
+  "jurisdiction": "eu",
+  "servedByRegion": "EEUR",
+  "readReplication": "disabled",
+  "statementsApplied": 122,
+  "migrations": 7,
+  "migrationLedgerMatches": true,
+  "ledger": [
+    {
+      "hash": "f947d9648b7bece1ee7bee0c733260c3bf6772c16b09e8755ee16a22ecec14d2",
+      "created_at": 1789066382722
+    },
+    {
+      "hash": "c9ce05fe96dfe6b548b407af38cc0af429f53e2c215f5abd65b9ceed092e5a88",
+      "created_at": 1789066424238
+    },
+    {
+      "hash": "9b2fa9b428b8be4c5ed8f6bc8de43576cc7c3f23525a20eabd047c63b840a467",
+      "created_at": 1789066424796
+    },
+    {
+      "hash": "ff6d2e809c77fffb67984744801cda0d5311b1f62a8f6820b4533b9e3a759135",
+      "created_at": 1789066425397
+    },
+    {
+      "hash": "03a9e72d9cf41dc4189e401c4a3f58d1a798073845bf5a2012e73977242e9b11",
+      "created_at": 1789066425984
+    },
+    {
+      "hash": "adc6257abd8049355c0254f2edc568ea9f0506f02b7af7a68992a18b4dc9beeb",
+      "created_at": 1789066426589
+    },
+    {
+      "hash": "84954ad383b58b523210db25d5b984416aed051b3f9126abd347ee9f13c3c0ee",
+      "created_at": 1789122317474
+    }
+  ],
+  "foreignKeyViolations": 0,
+  "users": 0,
+  "localSchemaObjects": 114,
+  "remoteSchemaObjects": 114,
+  "exactSchemaSqlMatches": true,
+  "apiBatchRollbackProbePassed": true,
+  "scope": "Initial schema only. No production data imported; R2 untouched.",
+  "payloadSha256": "656daaa290c9643d2306e96d713c7f6b3578f9d8aa7ac1ae00eb3cb5ab4285b9"
+}
