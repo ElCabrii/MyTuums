@@ -6,8 +6,8 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#a9005d",
+  "background_color": "#f6f7f8",
+  "theme_color": "#f6f7f8",
   "icons": [
     {
       "src": "/mytuums-192.png",
