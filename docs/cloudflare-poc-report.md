@@ -128,3 +128,27 @@ resume. A timed-out unpublished run still cannot reuse its covers on retry.
 The regression test holds one CDN response open and confirms another download can
 complete. It failed before the change and passed afterward. Hosted completion and
 cold-import duration must be measured before calling the timeout fixed remotely.
+
+The corrected code passed `pnpm verify`: 656 D1 integration tests across 56 files
+(744.85 seconds), plus the unit/native, build, lint, type, format and schema gates.
+Workers Builds deployed commit `83f18a1151c5af5759c7da9cbaf34f5fe53c1a97`
+as jobs version `90914399-5dd1-44b9-9831-b1b43ca90e27`.
+
+The next live run completed cover processing and staged 5,079 rows but failed
+publication. Readback revealed duplicate slugs between real IGDB IDs and the
+fixture's invented IDs (for example, Apex Legends IDs 114795 and 900023).
+The 28 existing fixture slugs were prefixed with `poc-fixture-`, their synthetic
+popularity ranks cleared, and their active staged payloads updated to match.
+IDs, hashtag keys and user references were preserved. A fresh live run,
+`games-1789138913057`, is validating the repaired data with the fixed deployment.
+Future live PoC initialization must use an empty catalog or namespace fixtures
+before the first import; development fixtures are not real IGDB records.
+
+The final live run completed successfully on its first attempt, from
+15:02:07.997 to 15:11:49.038 UTC (9 minutes 41 seconds). Its result reports
+5,000 selected games, 100 upcoming candidates, 5,003 covers uploaded, 26 retained
+fixture covers and zero cover failures. The published union contains 5,079 games
+(including 28 preserved fixtures), with 5,029 cover paths. D1 readback confirms
+active version `f822f83f-09aa-42fa-ab75-5381336459a3`, no held lease, no remaining
+upload intents for that version and no foreign-key violations. Real-cover browser
+delivery is a separate check from successful import and storage publication.
