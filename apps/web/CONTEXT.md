@@ -285,8 +285,8 @@ pair and `apple-touch-icon.png` are the mark at 60% centered on a full-bleed
 corners inside every launcher's mask circle), and the `monochrome` pair is
 the mark colorized to a white glyph on transparency for Android 13+ themed
 icons. Regenerate with `rsvg-convert` + ImageMagick when the logo changes;
-the `any` pair (`mytuums-192/512.png`, also the unfurl image) stays the bare
-transparent mark.
+the `any` pair (`mytuums-192.png` and `mytuums-512.png` — also the unfurl
+image) stays the bare transparent mark.
 
 ## Verification
 
