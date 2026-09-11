@@ -16,12 +16,10 @@ const attachment: ComponentProps<typeof VideoPlayer>["attachment"] = {
   height: 360,
   video: {
     duration: 20,
-    frameRate: 30,
     previewUrl: "",
     captionUrl: null,
     captionLanguage: null,
     posterUrl: "/clip/poster.jpg",
-    renditions: [],
   },
 };
 

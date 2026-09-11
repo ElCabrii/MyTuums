@@ -1,11 +1,12 @@
+import { auth, closeDb } from "./testing/runtime.js";
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
-import { auth } from "@my-tuums/auth";
-import { closeDb, type Database } from "@my-tuums/db";
+
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   appeal,
   follow,
+  followRequest,
   moderationAction,
   post,
   postAttachment,
@@ -15,10 +16,9 @@ import {
   userBlock,
 } from "@my-tuums/db/schema";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
-import { APPEAL_TOKEN_MAX_LENGTH, appealToken } from "./appeal-token.js";
+import { APPEAL_TOKEN_MAX_LENGTH } from "./appeal-token.js";
+import { appealToken } from "./testing/runtime.js";
 import {
-  isActionLatest,
   removePostEffect,
   restorePostEffect,
   suspendUserEffect,
@@ -26,11 +26,11 @@ import {
 } from "./moderation-actions.js";
 import type { Context } from "./context.js";
 import { RATE_LIMITS } from "./rate-limit.js";
-import { acquireRelationshipLock } from "./relationship-lock.js";
 import { appRouter } from "./router.js";
 import { runSql } from "./sql.js";
 import {
   anonContext,
+  buildPendingEmail,
   contextFor,
   createTestUser,
   freshSessionFor,
@@ -58,54 +58,6 @@ async function moderatorUser(): Promise<TestUser> {
   const user = await createTestUser();
   await setUserRole(user.id, "moderator");
   return freshSessionFor(user);
-}
-
-/**
- * Waits until some session is parked on an ungranted advisory lock — the
- * signal that a concurrent call has reached `acquireRelationshipLock` and is
- * blocked there. Polling `pg_locks` beats an arbitrary sleep: it is the
- * actual condition, so the test neither races the scheduler nor pays for a
- * fixed delay. This file runs serially (`fileParallelism: false`), so an
- * ungranted advisory lock belongs to the test that is running.
- *
- * Deliberately best-effort rather than throwing on timeout: if the lock were
- * ever removed from the racing procedure, nothing would park here, and the
- * test must then fail on the invariant it is about — a prohibited edge — not
- * on a helper's timeout, which says nothing about what broke.
- */
-async function waitForAdvisoryLockWaiter(): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const rows = await runSql<{ waiting: number }>(
-      anonContext.db,
-      sql`select count(*)::int as waiting from pg_locks where locktype = 'advisory' and not granted`,
-    );
-    if (Number(rows[0]?.waiting ?? 0) > 0) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
-/** Waits until a moderation effect is blocked on the held post row. */
-async function waitForPostRowLockWaiter(): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    const rows = await runSql<{ blocked: boolean }>(
-      anonContext.db,
-      sql`
-      select exists (
-        select 1
-        from pg_stat_activity
-        where datname = current_database()
-          and pid <> pg_backend_pid()
-          and state = 'active'
-          and wait_event_type = 'Lock'
-          and query ilike '%for update%'
-          and query ilike '%post%'
-      ) as blocked
-    `,
-    );
-    if (rows[0]?.blocked) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-  throw new Error("Moderation removal never reached the held post-row lock");
 }
 
 /** Same idea as `moderatorUser`, one rank up. */
@@ -232,7 +184,7 @@ function appealLink(
   actionId: string,
   userId: string,
   opts: { iat?: number; nonce?: string } = {},
-): string {
+): Promise<string> {
   return appealToken.sign({
     purpose: "appeal",
     actionId,
@@ -511,48 +463,36 @@ describe("block and unblock", () => {
     expect(blockRow).toBeDefined();
   });
 
-  it("a follow racing a block cannot slip an edge in behind it", async () => {
-    // The exact interleaving the pair lock exists to make impossible: `follow`
-    // reads no block, a `block` commits (severing the existing edges), and
-    // then `follow`'s insert lands anyway — a prohibited edge standing behind
-    // the block, invisible while it holds and back in view the moment it is
-    // lifted.
-    //
-    // Made deterministic rather than left to chance: an outer transaction
-    // takes the pair's lock first, so the concurrent `follow` blocks on it
-    // before it can read anything. The block's own rows are written inside
-    // that transaction and committed, which puts `follow` in exactly the
-    // window the race needs. Without the lock in `follow`, it would read
-    // through the uncommitted block, see nothing, and insert.
-    const a = await createTestUser();
-    const b = await createTestUser();
-
-    let followCall: Promise<unknown> | undefined;
-    await anonContext.db.transaction(async (tx) => {
-      await acquireRelationshipLock(tx, a.id, b.id);
-
-      followCall = call(appRouter.user.follow, { userId: b.id }, { context: contextFor(a) }).catch(
-        (error) => z.instanceof(Error).parse(error),
-      );
-
-      // Wait until that call is actually parked on the advisory lock, so the
-      // commit below lands inside its window rather than before it starts.
-      await waitForAdvisoryLockWaiter();
-
-      await tx.insert(userBlock).values({ blockerId: a.id, blockedId: b.id });
-    });
-
-    await expect(followCall).resolves.toMatchObject({
-      code: "BAD_REQUEST",
-      message: "You can't follow this user.",
-    });
-    expect(
-      await anonContext.db
-        .select()
-        .from(follow)
-        .where(and(eq(follow.followerId, a.id), eq(follow.followingId, b.id))),
-    ).toHaveLength(0);
-  });
+  it.each([false, true])(
+    "a follow racing a block leaves no edge or request (private=%s)",
+    async (isPrivate) => {
+      const a = await createTestUser();
+      const b = await createTestUser();
+      await anonContext.db.update(user).set({ isPrivate }).where(eq(user.id, b.id));
+      const [following, blocking] = await Promise.allSettled([
+        call(appRouter.user.follow, { userId: b.id }, { context: contextFor(a) }),
+        call(appRouter.moderation.block, { userId: b.id }, { context: contextFor(a) }),
+      ]);
+      expect(blocking).toMatchObject({ status: "fulfilled", value: { blocked: true } });
+      if (following.status === "rejected")
+        expect(following).toMatchObject({ reason: { code: "BAD_REQUEST" } });
+      expect(
+        await anonContext.db
+          .select()
+          .from(follow)
+          .where(and(eq(follow.followerId, a.id), eq(follow.followingId, b.id))),
+      ).toEqual([]);
+      expect(
+        await anonContext.db
+          .select()
+          .from(followRequest)
+          .where(and(eq(followRequest.requesterId, a.id), eq(followRequest.targetId, b.id))),
+      ).toEqual([]);
+      await expect(
+        call(appRouter.user.follow, { userId: b.id }, { context: contextFor(a) }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "You can't follow this user." });
+    },
+  );
 
   it("blocking yourself or a missing account is refused", async () => {
     const a = await createTestUser();
@@ -878,7 +818,7 @@ describe("queue", () => {
     const removal = await latestAction("post_removed", "post", dual.id);
     await call(
       appRouter.moderation.appealOpen,
-      { token: appealLink(removal!.id, author.id), reason: "Appealing this removal" },
+      { token: await appealLink(removal!.id, author.id), reason: "Appealing this removal" },
       { context: anonContext },
     );
 
@@ -925,7 +865,7 @@ describe("queue", () => {
     const removal = await latestAction("post_removed", "post", dual.id);
     await call(
       appRouter.moderation.appealOpen,
-      { token: appealLink(removal!.id, author.id), reason: "Appealing this removal" },
+      { token: await appealLink(removal!.id, author.id), reason: "Appealing this removal" },
       { context: anonContext },
     );
     await call(appRouter.moderation.restorePost, { postId: dual.id }, { context: contextFor(mod) });
@@ -1000,7 +940,7 @@ describe("queue", () => {
     );
     await call(
       appRouter.moderation.appealOpen,
-      { token: appealLink(removal1!.id, author.id), reason: "This removal is unfair" },
+      { token: await appealLink(removal1!.id, author.id), reason: "This removal is unfair" },
       { context: anonContext },
     );
 
@@ -1014,7 +954,7 @@ describe("queue", () => {
     const removal2 = await latestAction("post_removed", "post", p2.id);
     await call(
       appRouter.moderation.appealOpen,
-      { token: appealLink(removal2!.id, author.id), reason: "This removal too" },
+      { token: await appealLink(removal2!.id, author.id), reason: "This removal too" },
       { context: anonContext },
     );
 
@@ -1061,7 +1001,10 @@ describe("queue", () => {
       const olderRemoval = await latestAction("post_removed", "post", olderPost.id);
       await call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(olderRemoval!.id, author.id), reason: "The removal was mistaken" },
+        {
+          token: await appealLink(olderRemoval!.id, author.id),
+          reason: "The removal was mistaken",
+        },
         { context: anonContext },
       );
 
@@ -1073,7 +1016,10 @@ describe("queue", () => {
       const roleChange = await latestAction("role_changed", "user", victim.id);
       await call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(roleChange!.id, victim.id), reason: "The role change was mistaken" },
+        {
+          token: await appealLink(roleChange!.id, victim.id),
+          reason: "The role change was mistaken",
+        },
         { context: anonContext },
       );
 
@@ -1085,7 +1031,7 @@ describe("queue", () => {
       const ban = await latestAction("user_banned", "user", victim.id);
       await call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(ban!.id, victim.id), reason: "The ban was mistaken" },
+        { token: await appealLink(ban!.id, victim.id), reason: "The ban was mistaken" },
         { context: anonContext },
       );
 
@@ -1521,7 +1467,7 @@ describe("removePost and restorePost", () => {
     ).resolves.toEqual({ postId: postRow.id, restored: true });
   });
 
-  it("concurrent restores log exactly one audit row and send exactly one email — the guard read is locked (issue #51)", async () => {
+  it("concurrent restores log exactly one audit row and send exactly one email — the D1 batch is atomic (issue #51)", async () => {
     const author = await createTestUser();
     const postRow = await seedPostContent(author.id, "race me");
     await call(
@@ -1626,7 +1572,7 @@ describe("removePost and restorePost", () => {
     const removal = await latestAction("post_removed", "post", postRow.id);
     const opened = await call(
       appRouter.moderation.appealOpen,
-      { token: appealLink(removal!.id, author.id), reason: "The removal was unfair" },
+      { token: await appealLink(removal!.id, author.id), reason: "The removal was unfair" },
       { context: anonContext },
     );
 
@@ -1685,7 +1631,7 @@ describe("removePost and restorePost", () => {
     const removal = await latestAction("post_removed", "post", postRow.id);
     const opened = await call(
       appRouter.moderation.appealOpen,
-      { token: appealLink(removal!.id, author.id), reason: "Please reconsider" },
+      { token: await appealLink(removal!.id, author.id), reason: "Please reconsider" },
       { context: anonContext },
     );
 
@@ -1725,55 +1671,36 @@ describe("removePost and restorePost", () => {
     });
   });
 
-  it("an author deletion that wins the row-lock race prevents moderation audit state", async () => {
+  it("a concurrent author deletion and moderation removal cannot both win or leave a false audit row", async () => {
     const author = await createTestUser();
     const mod = await moderatorUser();
-    const postRow = await seedPostContent(author.id, "delete wins the race");
-    let resolveHolderReady: () => void = () => {
-      throw new Error("holderReady resolved before initialization");
-    };
-    const holderReady = new Promise<void>((resolve) => {
-      resolveHolderReady = resolve;
-    });
-    let releaseHolder: () => void = () => {
-      throw new Error("releaseHolder called before initialization");
-    };
-    const holder = anonContext.db.transaction(async (tx) => {
-      await tx
-        .update(post)
-        .set({ deletedAt: new Date("2026-08-24T16:00:00.000Z") })
-        .where(eq(post.id, postRow.id));
-      resolveHolderReady();
-      await new Promise<void>((resolve) => {
-        releaseHolder = resolve;
-      });
-    });
-
-    await holderReady;
-    const removal = call(
-      appRouter.moderation.removePost,
-      { postId: postRow.id, reason: "raced moderation" },
-      { context: contextFor(mod) },
-    );
-
-    try {
-      await waitForPostRowLockWaiter();
-    } finally {
-      releaseHolder();
-    }
-    await holder;
-
-    await expect(removal).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: "This post was deleted by its author and can no longer be moderated.",
-    });
+    const postRow = await seedPostContent(author.id, "race the tombstones");
+    const [deletion, removal] = await Promise.allSettled([
+      call(appRouter.post.delete, { postId: postRow.id }, { context: contextFor(author) }),
+      call(
+        appRouter.moderation.removePost,
+        { postId: postRow.id, reason: "raced moderation" },
+        { context: contextFor(mod) },
+      ),
+    ]);
+    const [state] = await anonContext.db.select().from(post).where(eq(post.id, postRow.id));
     const actions = await anonContext.db
       .select({ action: moderationAction.action })
       .from(moderationAction)
-      .where(
-        and(eq(moderationAction.targetType, "post"), eq(moderationAction.targetPostId, postRow.id)),
-      );
-    expect(actions).toEqual([]);
+      .where(eq(moderationAction.targetPostId, postRow.id));
+    if (state.deletedAt) {
+      expect(state.removedAt).toBeNull();
+      expect(deletion.status).toBe("fulfilled");
+      expect(removal).toMatchObject({ status: "rejected", reason: { code: "BAD_REQUEST" } });
+      expect(actions).toEqual([]);
+      expect(vi.mocked(testEmailSender.send)).not.toHaveBeenCalled();
+    } else {
+      expect(state.removedAt).toBeInstanceOf(Date);
+      expect(removal.status).toBe("fulfilled");
+      expect(deletion).toMatchObject({ status: "rejected", reason: { code: "BAD_REQUEST" } });
+      expect(actions).toEqual([{ action: "post_removed" }]);
+      expect(vi.mocked(testEmailSender.send)).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("is NOT_FOUND for a missing post", async () => {
@@ -2068,7 +1995,7 @@ describe("banUser and unbanUser", () => {
 });
 
 describe("unbanEffect", () => {
-  it("refuses a sentence it cannot lift (strict) but no-ops on the appeal path (tolerateNotBanned) — the race undoAction's pre-check can lose", async () => {
+  it("refuses an absent sentence in strict mode and returns no effects when tolerateNotBanned is set", async () => {
     const target = await createTestUser();
     const actor = await staffUser();
 
@@ -2082,7 +2009,7 @@ describe("unbanEffect", () => {
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
-    // The appeal path (undoAction) tolerates the same state: the overturn
+    // The tolerant effect mode accepts the same state: the caller
     // must not fail over a lost race with a manual unban, and the appeal
     // still gets stamped.
     await expect(
@@ -2114,7 +2041,9 @@ describe("unbanEffect", () => {
     });
     expect(pending.pending).toHaveLength(1);
     expect(pending.pending[0].userId).toBe(target.id);
-    expect((await pending.pending[0].build("en")).subject).toBe("Your account is no longer banned");
+    expect((await buildPendingEmail(pending.pending[0], "en", anonContext.webOrigin)).subject).toBe(
+      "Your account is no longer banned",
+    );
 
     const [row] = await anonContext.db
       .select({ banned: user.banned, banExpires: user.banExpires })
@@ -2306,7 +2235,7 @@ describe("setRole, team, auditLog", () => {
       displayUsername: `${query}${index}`,
       role: "user",
     }));
-    await anonContext.db.insert(user).values([
+    const [first, ...rest] = [
       ...prefixRows,
       {
         id: exactId,
@@ -2317,7 +2246,8 @@ describe("setRole, team, auditLog", () => {
         displayUsername: query,
         role: "user",
       },
-    ]);
+    ].map((row) => anonContext.db.insert(user).values(row));
+    await anonContext.db.batch([first, ...rest]);
 
     const result = await call(
       appRouter.moderation.searchUsers,
@@ -2473,7 +2403,7 @@ describe("appeal flow", () => {
       { context: contextFor(mod1) },
     );
     const removal = await latestAction("post_removed", "post", postRow.id);
-    const token = appealLink(removal!.id, author.id);
+    const token = await appealLink(removal!.id, author.id);
 
     // Signed-out: the email link opens the appeal with no session at all.
     const opened = await call(
@@ -2571,7 +2501,7 @@ describe("appeal flow", () => {
     const opened = await call(
       appRouter.moderation.appealOpen,
       {
-        token: appealLink(removal!.id, author.id),
+        token: await appealLink(removal!.id, author.id),
         reason: "This removal should be reversed",
       },
       { context: anonContext },
@@ -2625,12 +2555,12 @@ describe("appeal flow", () => {
     }
 
     await Promise.all(
-      removals.map(({ actionId, postId }) =>
+      removals.map(async ({ actionId, postId }) =>
         Promise.allSettled([
           call(
             appRouter.moderation.appealOpen,
             {
-              token: appealLink(actionId, author.id),
+              token: await appealLink(actionId, author.id),
               reason: "This removal should be reversed",
             },
             { context: anonContext },
@@ -2673,7 +2603,7 @@ describe("appeal flow", () => {
     const opened = await call(
       appRouter.moderation.appealOpen,
       {
-        token: appealLink(removal!.id, author.id),
+        token: await appealLink(removal!.id, author.id),
         reason: "This removal should be reversed",
       },
       { context: anonContext },
@@ -2743,7 +2673,7 @@ describe("appeal flow", () => {
     const suspensionAppeal = await call(
       appRouter.moderation.appealOpen,
       {
-        token: appealLink(suspension!.id, suspendedUser.id),
+        token: await appealLink(suspension!.id, suspendedUser.id),
         reason: "The suspension should be reversed",
       },
       { context: anonContext },
@@ -2751,7 +2681,7 @@ describe("appeal flow", () => {
     const banAppeal = await call(
       appRouter.moderation.appealOpen,
       {
-        token: appealLink(ban!.id, bannedUser.id),
+        token: await appealLink(ban!.id, bannedUser.id),
         reason: "The ban should be reversed",
       },
       { context: anonContext },
@@ -2796,7 +2726,7 @@ describe("appeal flow", () => {
     const opened = await call(
       appRouter.moderation.appealOpen,
       {
-        token: appealLink(promotion!.id, userToPromote.id),
+        token: await appealLink(promotion!.id, userToPromote.id),
         reason: "I do not want this role change",
       },
       { context: anonContext },
@@ -2835,7 +2765,10 @@ describe("appeal flow", () => {
       const first = await latestAction("user_suspended", "user", victim.id);
       const firstAppeal = await call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(first!.id, victim.id), reason: "The first suspension was unfair" },
+        {
+          token: await appealLink(first!.id, victim.id),
+          reason: "The first suspension was unfair",
+        },
         { context: anonContext },
       );
 
@@ -2849,7 +2782,10 @@ describe("appeal flow", () => {
 
       const secondAppeal = await call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(second!.id, victim.id), reason: "The second suspension was unfair" },
+        {
+          token: await appealLink(second!.id, victim.id),
+          reason: "The second suspension was unfair",
+        },
         { context: anonContext },
       );
 
@@ -2901,7 +2837,10 @@ describe("appeal flow", () => {
       const suspension = await latestAction("user_suspended", "user", victim.id);
       const suspensionAppeal = await call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(suspension!.id, victim.id), reason: "The suspension was mistaken" },
+        {
+          token: await appealLink(suspension!.id, victim.id),
+          reason: "The suspension was mistaken",
+        },
         { context: anonContext },
       );
 
@@ -2913,7 +2852,7 @@ describe("appeal flow", () => {
       const ban = await latestAction("user_banned", "user", victim.id);
       const banAppeal = await call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(ban!.id, victim.id), reason: "The permanent ban was mistaken" },
+        { token: await appealLink(ban!.id, victim.id), reason: "The permanent ban was mistaken" },
         { context: anonContext },
       );
 
@@ -2965,7 +2904,10 @@ describe("appeal flow", () => {
       const roleChange = await latestAction("role_changed", "user", victim.id);
       const roleAppeal = await call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(roleChange!.id, victim.id), reason: "The role change was mistaken" },
+        {
+          token: await appealLink(roleChange!.id, victim.id),
+          reason: "The role change was mistaken",
+        },
         { context: anonContext },
       );
 
@@ -2977,7 +2919,7 @@ describe("appeal flow", () => {
       const ban = await latestAction("user_banned", "user", victim.id);
       const banAppeal = await call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(ban!.id, victim.id), reason: "The ban was mistaken" },
+        { token: await appealLink(ban!.id, victim.id), reason: "The ban was mistaken" },
         { context: anonContext },
       );
 
@@ -2998,7 +2940,7 @@ describe("appeal flow", () => {
     const reviewingMod = await moderatorUser();
 
     try {
-      await suspendUserEffect(anonContext.db, {
+      await suspendUserEffect(anonContext, {
         userId: victim.id,
         actorId: actingMod.id,
         actorRole: actingMod.session.user.role ?? "moderator",
@@ -3008,14 +2950,17 @@ describe("appeal flow", () => {
       const first = await latestAction("user_suspended", "user", victim.id);
       const opened = await call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(first!.id, victim.id), reason: "The first suspension was unfair" },
+        {
+          token: await appealLink(first!.id, victim.id),
+          reason: "The first suspension was unfair",
+        },
         { context: anonContext },
       );
 
       // The raw effect models an older caller that bypasses the wrapper. The
       // review guard must still refuse both outcomes rather than resolving an
       // appeal for a sentence that no longer governs the account.
-      await suspendUserEffect(anonContext.db, {
+      await suspendUserEffect(anonContext, {
         userId: victim.id,
         actorId: actingMod.id,
         actorRole: actingMod.session.user.role ?? "moderator",
@@ -3059,7 +3004,7 @@ describe("appeal flow", () => {
     const removal = await latestAction("post_removed", "post", postRow.id);
     const opened = await call(
       appRouter.moderation.appealOpen,
-      { token: appealLink(removal!.id, author.id), reason: "I want it back" },
+      { token: await appealLink(removal!.id, author.id), reason: "I want it back" },
       { context: anonContext },
     );
     const reviewed = await call(
@@ -3105,7 +3050,7 @@ describe("appeal flow", () => {
     await expect(
       call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(removal!.id, stranger.id), reason: "This link is not for me" },
+        { token: await appealLink(removal!.id, stranger.id), reason: "This link is not for me" },
         { context: anonContext },
       ),
     ).rejects.toMatchObject({
@@ -3113,7 +3058,7 @@ describe("appeal flow", () => {
       message: "This appeal link is no longer valid.",
     });
 
-    const expired = appealLink(removal!.id, author.id, {
+    const expired = await appealLink(removal!.id, author.id, {
       iat: Math.floor(Date.now() / 1000) - 8 * 24 * 60 * 60,
     });
     await expect(
@@ -3160,7 +3105,7 @@ describe("appeal flow", () => {
     await expect(
       call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(restoreAction!.id, author.id), reason: "Restore this restore" },
+        { token: await appealLink(restoreAction!.id, author.id), reason: "Restore this restore" },
         { context: anonContext },
       ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "This action can't be appealed." });
@@ -3169,7 +3114,7 @@ describe("appeal flow", () => {
     await expect(
       call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(removal!.id, author.id), reason: "The removal was wrong" },
+        { token: await appealLink(removal!.id, author.id), reason: "The removal was wrong" },
         { context: anonContext },
       ),
     ).rejects.toMatchObject({
@@ -3191,14 +3136,14 @@ describe("appeal flow", () => {
 
     await call(
       appRouter.moderation.appealOpen,
-      { token: appealLink(removal!.id, author.id), reason: "First appeal" },
+      { token: await appealLink(removal!.id, author.id), reason: "First appeal" },
       { context: anonContext },
     );
     // A fresh link for the same action still collides on the open appeal.
     await expect(
       call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(removal!.id, author.id), reason: "Second appeal" },
+        { token: await appealLink(removal!.id, author.id), reason: "Second appeal" },
         { context: anonContext },
       ),
     ).rejects.toMatchObject({
@@ -3224,7 +3169,7 @@ describe("appeal flow", () => {
 
     const opened = await call(
       appRouter.moderation.appealOpen,
-      { token: appealLink(removal!.id, author.id), reason: "This removal is unfair" },
+      { token: await appealLink(removal!.id, author.id), reason: "This removal is unfair" },
       { context: anonContext },
     );
     await call(
@@ -3239,7 +3184,7 @@ describe("appeal flow", () => {
     await expect(
       call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(removal!.id, author.id), reason: "Appealing again anyway" },
+        { token: await appealLink(removal!.id, author.id), reason: "Appealing again anyway" },
         { context: anonContext },
       ),
     ).rejects.toMatchObject({
@@ -3264,7 +3209,7 @@ describe("appeal flow", () => {
     const removal1 = await latestAction("post_removed", "post", postRow.id);
     const opened = await call(
       appRouter.moderation.appealOpen,
-      { token: appealLink(removal1!.id, author.id), reason: "The first removal was unfair" },
+      { token: await appealLink(removal1!.id, author.id), reason: "The first removal was unfair" },
       { context: anonContext },
     );
 
@@ -3272,7 +3217,7 @@ describe("appeal flow", () => {
     // gate. The public wrappers now close the old appeal as superseded, which
     // is covered by the forward-action tests above.
     await restorePostEffect(anonContext.db, { postId: postRow.id, actorId: mod.id });
-    await removePostEffect(anonContext.db, {
+    await removePostEffect(anonContext, {
       postId: postRow.id,
       actorId: mod.id,
       reason: "second offense",
@@ -3300,7 +3245,7 @@ describe("appeal flow", () => {
     await expect(
       call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(removal1!.id, author.id), reason: "Appealing the old removal" },
+        { token: await appealLink(removal1!.id, author.id), reason: "Appealing the old removal" },
         { context: anonContext },
       ),
     ).rejects.toMatchObject({
@@ -3327,7 +3272,7 @@ describe("appeal flow", () => {
 
     const opened = await call(
       appRouter.moderation.appealOpen,
-      { token: appealLink(demotion!.id, victim.id), reason: "I should keep my rank" },
+      { token: await appealLink(demotion!.id, victim.id), reason: "I should keep my rank" },
       { context: anonContext },
     );
 
@@ -3442,7 +3387,7 @@ describe("appeal flow", () => {
     await expect(
       call(
         appRouter.moderation.appealOpen,
-        { token: appealLink(removal!.id, author.id), reason: "short" },
+        { token: await appealLink(removal!.id, author.id), reason: "short" },
         { context: anonContext },
       ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
@@ -3463,7 +3408,7 @@ describe("appeal flow", () => {
 
     const opened = await call(
       appRouter.moderation.appealOpen,
-      { token: appealLink(suspension!.id, victim.id), reason: "I was not spamming" },
+      { token: await appealLink(suspension!.id, victim.id), reason: "I was not spamming" },
       { context: anonContext },
     );
     await call(
@@ -3533,7 +3478,7 @@ describe("appeal flow", () => {
       { context: contextFor(mod) },
     );
     const removal = await latestAction("post_removed", "post", postRow.id);
-    const token = appealLink(removal!.id, author.id);
+    const token = await appealLink(removal!.id, author.id);
 
     // Replays of one link share its nonce's budget (`report:appeal:<nonce>`):
     // the first opens the appeal, later ones are refused as used links — and
@@ -3780,227 +3725,5 @@ describe("gates", () => {
     expect(refused).toMatchObject({ code: "TOO_MANY_REQUESTS" });
 
     await clearQueueFixtures();
-  });
-});
-
-/** A Drizzle statement captured immediately before execution. */
-interface CapturedQuery {
-  sql: string;
-  params: unknown[];
-}
-
-interface CapturedThenable extends PromiseLike<readonly object[]> {
-  toSQL(): CapturedQuery;
-}
-
-type CapturedTransactionHandle = Parameters<Parameters<Database["transaction"]>[0]>[0];
-type CapturedTransactionConfig = NonNullable<Parameters<Database["transaction"]>[1]>;
-
-interface CapturedTransaction {
-  <Result>(
-    callback: (transaction: CapturedTransactionHandle) => Promise<Result>,
-    config?: CapturedTransactionConfig,
-  ): Promise<Result>;
-}
-
-/**
- * A real Database handle that records the SQL of every executed query builder.
- * Chained builder methods stay wrapped, while all operations use the original connection.
- */
-function capturingDb(target: Database, capture: (query: CapturedQuery) => void): Database {
-  function wrap<Value extends object>(value: Value): Value {
-    return new Proxy(value, {
-      get(owner, property) {
-        if (property === "then") {
-          // SAFETY: Drizzle query builders expose both PromiseLike.then and toSQL at execution time.
-          const query = owner as Value & CapturedThenable;
-          capture(query.toSQL());
-          return query.then.bind(query);
-        }
-
-        // SAFETY: A Proxy get trap receives a property belonging to its wrapped Drizzle object.
-        const member = owner[property as keyof Value];
-        if (!(member instanceof Function)) return member;
-
-        if (property === "transaction") {
-          // A transaction returns a Promise rather than a query builder. Wrap
-          // the transaction handle handed to its callback so the inner real
-          // queries are captured, and let the outer Promise pass through.
-          // SAFETY: this branch is reached only for Drizzle's Database.transaction member.
-          const transaction = member as CapturedTransaction;
-          return <Result>(
-            callback: (transaction: CapturedTransactionHandle) => Promise<Result>,
-            config?: CapturedTransactionConfig,
-          ) =>
-            transaction.call(
-              owner,
-              (transactionHandle) => callback(wrap(transactionHandle)),
-              config,
-            );
-        }
-
-        // SAFETY: Drizzle's fluent builder methods return another builder object; terminal execution
-        // is handled by the `then` branch above rather than this wrapper.
-        const method = member as (...args: never[]) => object;
-        return (...args: never[]) => wrap(method.apply(owner, args));
-      },
-    });
-  }
-
-  return wrap(target);
-}
-
-const explainParameterSchema = z.union([z.string(), z.number(), z.boolean(), z.date(), z.null()]);
-type ExplainParameter = z.infer<typeof explainParameterSchema>;
-
-function sqlLiteral(value: ExplainParameter): string {
-  const stringValue = z.string().safeParse(value);
-  if (stringValue.success) return `'${stringValue.data.replaceAll("'", "''")}'`;
-
-  const numberValue = z.number().safeParse(value);
-  if (numberValue.success) return String(numberValue.data);
-
-  const booleanValue = z.boolean().safeParse(value);
-  if (booleanValue.success) return booleanValue.data ? "true" : "false";
-
-  const dateValue = z.date().safeParse(value);
-  if (dateValue.success) return `'${dateValue.data.toISOString()}'`;
-
-  return "null";
-}
-
-/** Interpolates Drizzle's `$n` placeholders so Postgres can EXPLAIN the exact emitted query. */
-function interpolatedSql(query: CapturedQuery): string {
-  const parameters = z.array(explainParameterSchema).parse(query.params);
-  let sqlText = query.sql;
-  // Highest first, so `$10` is never hit by the `$1` replacement.
-  for (let index = parameters.length; index >= 1; index -= 1) {
-    const value = parameters[index - 1];
-    if (value === undefined) throw new Error(`missing SQL parameter $${index}`);
-    sqlText = sqlText.replaceAll(`$${index}`, () => sqlLiteral(value));
-  }
-  return sqlText;
-}
-
-/** Runs EXPLAIN against captured SQL and returns the planner's text lines. */
-async function explainPlan(db: Database, query: CapturedQuery): Promise<string> {
-  // `unsafe` is EXPLAIN-only: the text is Drizzle's own captured query with
-  // its captured parameters re-interpolated by `interpolatedSql` (zod-
-  // validated, quote-escaped) — never caller-controlled input.
-  // SAFETY: an EXPLAIN answers with one `"QUERY PLAN": string` column per
-  // row; postgres.js types `unsafe` as unshaped rows, so the cast only names
-  // the shape Postgres documents for this statement.
-  const rows = (await db.$client.unsafe(`explain ${interpolatedSql(query)}`)) as {
-    "QUERY PLAN": string;
-  }[];
-  return rows.map((row) => row["QUERY PLAN"]).join("\n");
-}
-
-/**
- * The two "what was the last action on X" lookups on the appeal path exist
- * to be served by `moderation_action_target_idx` (see the index's comment in
- * packages/db/src/schema/app.ts). Both used to omit `target_type` — the
- * index's leading column — which left the planner no choice but to seq-scan
- * the whole audit log (issue #55). The redundant `target_type` predicates
- * that fix it are invisible to behaviour tests (the
- * `moderation_action_target_match` check constraint makes them no-ops
- * semantically), so the regression test is a plan assertion on the SQL the
- * handlers really send.
- */
-describe("moderation_action_target_idx reachability", () => {
-  it("the appeal-path lookups reach the target index once the table has history", async () => {
-    // The planner needs a populated, ANALYZEd table before it will prefer
-    // the index over a seq scan — a handful of fixture rows would never
-    // show the regression this test exists for.
-    try {
-      await runSql(
-        anonContext.db,
-        sql`
-        insert into ${moderationAction}
-          (action, target_type, target_post_id, target_user_id, reason, note, details, created_at)
-        select 'post_removed', 'post',
-               ('00000000-0000-4000-8000-' || lpad(to_hex((i / 5) % 4000 + 1), 12, '0'))::uuid,
-               null, 'fixture', 'index-plan-fixture', '{}',
-               now() - (i || ' seconds')::interval
-        from generate_series(1, 20000) as i
-      `,
-      );
-      await runSql(anonContext.db, sql`analyze "moderation_action"`);
-
-      const captured: CapturedQuery[] = [];
-      const capturedDb = capturingDb(anonContext.db, (query) => captured.push(query));
-
-      // `isActionLatest`'s "anything newer?" probe — the real function,
-      // running against the populated table, SQL captured on the way out.
-      // The createdAt anchor is deliberately old: a recent anchor makes the
-      // `(created_at, id) > (…)` comparison a "scan the newest rows" plan on
-      // moderation_action_created_idx, which is a fine plan but not the one
-      // this test exists for (see the aging below).
-      await isActionLatest(capturedDb, {
-        id: "00000000-0000-4000-8000-000000000099",
-        action: "post_removed",
-        targetType: "post",
-        targetPostId: "00000000-0000-4000-8000-000000000042",
-        targetUserId: null,
-        createdAt: new Date(Date.now() - 30 * 86_400_000),
-      });
-      expect(captured).toHaveLength(1);
-
-      // The signed-in `appealOpen` path — the real procedure, so the
-      // removal lookup is the handler's own SQL. removePost below logs the
-      // removal row the lookup is meant to find.
-      const author = await createTestUser();
-      const mod = await moderatorUser();
-      const postRow = await seedPostContent(author.id, "index plan fodder");
-      await call(
-        appRouter.moderation.removePost,
-        { postId: postRow.id, reason: "spam" },
-        { context: contextFor(mod) },
-      );
-
-      // Age the contested rows 30 days: a fresh removal row is the newest
-      // row in the table, and the planner then serves both lookups from
-      // moderation_action_created_idx ("start at the newest row, walk until
-      // the filter matches") — correct, but not the target_idx plan this
-      // test asserts. With the matches buried under all 20k filler rows,
-      // moderation_action_target_idx is unambiguously cheapest, the same
-      // shape as the issue's 50k-row evidence.
-      const removal = await latestAction("post_removed", "post", postRow.id);
-      if (!removal) throw new Error("removePost logged no removal row");
-      await anonContext.db
-        .update(moderationAction)
-        .set({ createdAt: new Date(Date.now() - 30 * 86_400_000) })
-        .where(eq(moderationAction.id, removal.id));
-      await runSql(anonContext.db, sql`analyze "moderation_action"`);
-
-      captured.length = 0;
-      await call(
-        appRouter.moderation.appealOpen,
-        { postId: postRow.id, reason: "Appealing from the plan test" },
-        // The handler runs every query through the capture db, which still
-        // is the real connection — only the SQL is recorded.
-        { context: { ...contextFor(author), db: capturedDb } },
-      );
-
-      // The two queries under test are the only captured ones whose
-      // parameters carry the 'post_removed' action code: the removal lookup
-      // and `isActionLatest`. The action-by-id and appeal lookups
-      // parameterize on their own ids, the post lookup on the post id.
-      const underTest = captured.filter((query) => query.params.includes("post_removed"));
-      expect(underTest).toHaveLength(2);
-
-      for (const query of underTest) {
-        const plan = await explainPlan(anonContext.db, query);
-        expect(plan).toContain("Index Scan using moderation_action_target_idx");
-        expect(plan).not.toContain("Seq Scan on moderation_action");
-      }
-    } finally {
-      // This test's rows are its own: the audit-log walk asserts against the
-      // whole table, so the filler must not outlive the test.
-      await anonContext.db
-        .delete(moderationAction)
-        .where(eq(moderationAction.note, "index-plan-fixture"));
-      await clearQueueFixtures();
-    }
   });
 });

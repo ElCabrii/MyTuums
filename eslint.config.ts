@@ -17,6 +17,8 @@ export default tseslint.config(
       "**/node_modules/**",
       "**/dist/**",
       "**/.turbo/**",
+      // Generated Wrangler bundles and local state; Worker sources stay linted.
+      "**/.wrangler/**",
       "apps/web/src/paraglide/**",
       "apps/branding/src/paraglide/**",
       "packages/db/drizzle/**",
@@ -63,8 +65,6 @@ export default tseslint.config(
           // failed with no-unsafe-* errors on lines that were not actually
           // unsafe.
           allowDefaultProject: [
-            "packages/db/drizzle.config.ts",
-            "apps/server/tsup.config.ts",
             // `apps/server/tsconfig.json` sets `rootDir: "src"`, so this one
             // cannot join its `include` the way the other vitest configs join
             // theirs. It is object literals only, so the weaker inferred

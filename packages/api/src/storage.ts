@@ -1,3 +1,4 @@
+import type { ObjectStorage, ObjectStorageMaintenance } from "./object-storage.js";
 /**
  * S3-compatible object storage, for user-uploaded avatars and banners.
  *
@@ -58,47 +59,12 @@ export interface StorageConfig {
   region?: string;
 }
 
-/** The safe surface of a bucket — all a procedure or the media route may do. */
-export interface Storage {
-  put(key: string, body: Uint8Array, contentType: string): Promise<void>;
-  remove(key: string): Promise<void>;
-  /** A time-limited URL the browser can fetch the object from directly. */
+/** Legacy S3 delivery. Native application code uses ObjectStorage directly. */
+export interface Storage extends ObjectStorage {
   signedGetUrl(key: string, expiresInSeconds?: number): Promise<string>;
-  /**
-   * The object's stored metadata, or `null` when the key does not exist. How
-   * the media route decides whether a derived variant (`media-variants.ts`)
-   * already has an object behind it before spending a generation.
-   */
-  head(key: string): Promise<{ contentType: string } | null>;
-  /**
-   * The object's bytes and stored content type, or `null` when the key does
-   * not exist. The read side of on-demand variant generation — nothing else
-   * uses it; serving still goes through `signedGetUrl` so bytes never proxy
-   * through this process.
-   */
-  get(key: string): Promise<{ bytes: Uint8Array; contentType: string } | null>;
 }
 
-/**
- * The full surface the factory actually provides, cleanup included.
- *
- * Deliberately NOT what `Context.storage` is typed as. These delete or list
- * everything under a prefix — pointed at production, that destroys every
- * avatar — and a procedure should not even be able to name them. They exist
- * for two callers, the E2E suite's cleanup and the reconcile script
- * (`packages/api/scripts/reconcile-media.ts`), and only those import the
- * destructive factory — the same instinct that makes `@my-tuums/auth/testing`
- * a separate instance rather than a conditional spread. The warning that used
- * to live in prose on the interface now lives in the type.
- */
-export interface DestructiveStorage extends Storage {
-  /** Every object key under a prefix. Used by the reconcile script. */
-  listByPrefix(prefix: string): Promise<string[]>;
-  /** Deletes specific keys in batches. Used by the reconcile script. */
-  removeMany(keys: string[]): Promise<number>;
-  /** Deletes every object under a prefix. Used by the E2E suite's cleanup. */
-  removeByPrefix(prefix: string): Promise<number>;
-}
+export interface DestructiveStorage extends Storage, ObjectStorageMaintenance {}
 
 /** A per-key failure returned inside an otherwise successful S3 delete response. */
 export interface StorageDeleteFailure {

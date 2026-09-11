@@ -1,7 +1,8 @@
+import { closeDb } from "./testing/runtime.js";
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
-import { desc, eq, sql } from "drizzle-orm";
-import { closeDb } from "@my-tuums/db";
+import { and, desc, eq, isNull } from "drizzle-orm";
+
 import { post, postAttachment, postEdit, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -13,9 +14,9 @@ import {
   THREAD_REPLY_BRANCH_CHILD_FANOUT,
 } from "./constants.js";
 import type { Context } from "./context.js";
-import { withPostMediaLifecycleLock } from "./post-media-lock.js";
+import { readMediaReferences } from "./media-intents.js";
+import { reconcileMedia } from "./reconcile-media.js";
 import { appRouter } from "./router.js";
-import { runSql } from "./sql.js";
 import {
   anonContext,
   contextFor,
@@ -198,52 +199,6 @@ function deferred(): Deferred {
       resolve();
     },
   };
-}
-
-/** Waits until another connection is blocked on this test's post-row lock. */
-async function waitForPostLockWait(): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    const rows = await runSql<{ blocked: boolean }>(
-      anonContext.db,
-      sql`
-      SELECT EXISTS (
-        SELECT 1
-        FROM pg_stat_activity
-        WHERE datname = current_database()
-          AND pid <> pg_backend_pid()
-          AND state = 'active'
-          AND wait_event_type = 'Lock'
-          AND query LIKE 'update "post" set%'
-      ) AS blocked
-    `,
-    );
-    if (rows[0]?.blocked) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-  throw new Error("Author deletion never reached the held post-row lock");
-}
-
-/** Waits until a post attachment writer is blocked by the shared media lock. */
-async function waitForPostMediaLifecycleLockWait(): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    const rows = await runSql<{ blocked: boolean }>(
-      anonContext.db,
-      sql`
-      SELECT EXISTS (
-        SELECT 1
-        FROM pg_stat_activity
-        WHERE datname = current_database()
-          AND pid <> pg_backend_pid()
-          AND state = 'active'
-          AND wait_event_type = 'Lock'
-          AND query LIKE '%pg_advisory_xact_lock%'
-      ) AS blocked
-    `,
-    );
-    if (rows[0]?.blocked) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-  throw new Error("Post attachment creation never reached the held media lifecycle lock");
 }
 
 describe("post.create", () => {
@@ -435,33 +390,36 @@ describe("post.create", () => {
     expect(testStorageObjects.size).toBe(0);
   });
 
-  it("holds the media lifecycle lock through upload and attachment-row commit", async () => {
+  it("keeps an image during reconciliation before its attachment row commits", async () => {
     const author = await createTestUser();
-    const holderReady = deferred();
-    const releaseHolder = deferred();
-    const holder = withPostMediaLifecycleLock(anonContext.db, async () => {
-      holderReady.resolve();
-      await releaseHolder.promise;
-    });
-
-    await holderReady.promise;
+    const uploaded = deferred();
+    const releaseUpload = deferred();
+    const storage = {
+      ...testStorage,
+      put: async (key: string, bytes: Uint8Array, contentType: string) => {
+        await testStorage.put(key, bytes, contentType);
+        uploaded.resolve();
+        await releaseUpload.promise;
+      },
+    };
     const creation = call(
       appRouter.post.create,
-      { content: "serialized image", attachments: [postImage("serialized.png")] },
-      { context: contextFor(author) },
+      { content: "pending image", attachments: [postImage("pending.png")] },
+      { context: contextFor(author, author.context.rateLimiter, storage) },
     );
 
+    await uploaded.promise;
     try {
-      await waitForPostMediaLifecycleLockWait();
-      // The writer has not reached storage.put while the reconciler-equivalent
-      // lock holder is active. Once released, upload and row commit happen in
-      // the same transaction that acquired the lock.
-      expect(testStorageObjects.size).toBe(0);
+      const result = await reconcileMedia({
+        storage: testStorage,
+        readReferences: () => readMediaReferences(anonContext.db),
+      });
+      expect(result.deleted).toBe(0);
+      expect(testStorageObjects.size).toBe(1);
     } finally {
-      releaseHolder.resolve();
+      releaseUpload.resolve();
     }
 
-    await holder;
     const created = await creation;
     expect(created.attachments).toHaveLength(1);
     expect(testStorageObjects.size).toBe(1);
@@ -732,81 +690,41 @@ describe("post.delete", () => {
     expect(item?.removedReason).toBe("spam");
   });
 
-  it("refuses when moderator removal commits after the guard read but before the tombstone update", async () => {
+  it("a concurrent conditional moderator tombstone and author deletion cannot both win", async () => {
     const author = await createTestUser();
     const [target] = await seedPosts(author.id, 1);
-    const holderReady = deferred();
-    const releaseHolder = deferred();
-    const holder = anonContext.db.transaction(async (tx) => {
-      await tx
+    // Isolate the deletion race from the moderation router's audit/email
+    // contract: its competing state transition may only remove a live post.
+    const [removal, deletion] = await Promise.allSettled([
+      anonContext.db
         .update(post)
         .set({ removedAt: new Date(), removedReason: "spam" })
-        .where(eq(post.id, target.id));
-      holderReady.resolve();
-      await releaseHolder.promise;
-    });
-
-    await holderReady.promise;
-    const deletion = call(
-      appRouter.post.delete,
-      { postId: target.id },
-      {
-        context: contextFor(author),
-      },
-    );
-
-    try {
-      await waitForPostLockWait();
-    } finally {
-      releaseHolder.resolve();
+        .where(and(eq(post.id, target.id), isNull(post.deletedAt), isNull(post.removedAt)))
+        .returning({ id: post.id }),
+      call(appRouter.post.delete, { postId: target.id }, { context: contextFor(author) }),
+    ]);
+    expect(removal.status).toBe("fulfilled");
+    const [row] = await anonContext.db.select().from(post).where(eq(post.id, target.id));
+    if (row.removedAt) {
+      expect(row.deletedAt).toBeNull();
+      expect(deletion).toMatchObject({ status: "rejected", reason: { code: "BAD_REQUEST" } });
+    } else {
+      expect(row.deletedAt).toBeInstanceOf(Date);
+      expect(removal).toMatchObject({ status: "fulfilled", value: [] });
+      expect(deletion).toMatchObject({ status: "fulfilled", value: { deletedAt: row.deletedAt } });
     }
-    await holder;
-
-    await expect(deletion).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: "This post was removed by a moderator and can no longer be deleted.",
-    });
-
-    const [row] = await anonContext.db
-      .select({ removedAt: post.removedAt, deletedAt: post.deletedAt })
-      .from(post)
-      .where(eq(post.id, target.id));
-    expect(row?.removedAt).not.toBeNull();
-    expect(row?.deletedAt).toBeNull();
   });
 
-  it("returns the winning tombstone when another author deletion commits after the guard read", async () => {
+  it("concurrent author deletions return the same winning tombstone", async () => {
     const author = await createTestUser();
     const [target] = await seedPosts(author.id, 1);
-    const winningDeletedAt = new Date("2026-08-22T12:00:00.000Z");
-    const holderReady = deferred();
-    const releaseHolder = deferred();
-    const holder = anonContext.db.transaction(async (tx) => {
-      await tx.update(post).set({ deletedAt: winningDeletedAt }).where(eq(post.id, target.id));
-      holderReady.resolve();
-      await releaseHolder.promise;
-    });
-
-    await holderReady.promise;
-    const deletion = call(
-      appRouter.post.delete,
-      { postId: target.id },
-      {
-        context: contextFor(author),
-      },
+    const results = await Promise.all(
+      Array.from({ length: 6 }, () =>
+        call(appRouter.post.delete, { postId: target.id }, { context: contextFor(author) }),
+      ),
     );
-
-    try {
-      await waitForPostLockWait();
-    } finally {
-      releaseHolder.resolve();
-    }
-    await holder;
-
-    await expect(deletion).resolves.toEqual({
-      postId: target.id,
-      deletedAt: winningDeletedAt,
-    });
+    expect(results.every(({ deletedAt }) => deletedAt instanceof Date)).toBe(true);
+    expect(new Set(results.map(({ deletedAt }) => deletedAt.getTime())).size).toBe(1);
   });
 });
 
@@ -1052,7 +970,7 @@ describe("post.edit", () => {
     expect(refreshed.reports[0]?.snapshotContent).toContain("edited during review");
   });
 
-  it("cannot lose a version to concurrent edits: the row lock serializes the history", async () => {
+  it("cannot lose a version to concurrent edits: the D1 batch serializes the history", async () => {
     const author = await createTestUser();
     const [target] = await seedPosts(author.id, 1);
 
@@ -1060,8 +978,8 @@ describe("post.edit", () => {
     // Both guard reads may see the seed text before either commits; without
     // serialization the loser would record the seed text twice and the
     // winner's wording would survive nowhere — invisible to the moderator
-    // judging the case. `post.edit` opens its transaction by locking the
-    // row, so each edit records what it *actually* superseded.
+    // judging the case. `post.edit` captures history and replaces text in
+    // one batch, so each edit records what it *actually* superseded.
     await Promise.all(
       ["first writer", "second writer"].map((content) =>
         call(appRouter.post.edit, { postId: target.id, content }, { context: contextFor(author) }),

@@ -4,48 +4,52 @@
 // which runs the CLI and then ./scripts/patch-auth-schema.ts (that script's
 // header explains what it changes and why). Application tables live in
 // ./app.ts so regeneration never clobbers them.
-import { relations } from "drizzle-orm";
-import { pgTable, text, bigint, timestamp, boolean, integer, index } from "drizzle-orm/pg-core";
+import { relations, sql } from "drizzle-orm";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
-export const user = pgTable("user", {
+export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified").default(false).notNull(),
+  emailVerified: integer("email_verified", { mode: "boolean" }).default(false).notNull(),
   image: text("image"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .defaultNow()
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
   username: text("username").unique(),
   displayUsername: text("display_username"),
   role: text("role"),
-  banned: boolean("banned").default(false),
+  banned: integer("banned", { mode: "boolean" }).default(false),
   banReason: text("ban_reason"),
-  banExpires: timestamp("ban_expires", { withTimezone: true }),
-  twoFactorEnabled: boolean("two_factor_enabled").default(false),
+  banExpires: integer("ban_expires", { mode: "timestamp_ms" }),
+  twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).default(false),
   lastLoginMethod: text("last_login_method"),
-  dateOfBirth: timestamp("date_of_birth", { withTimezone: true }),
+  dateOfBirth: integer("date_of_birth", { mode: "timestamp_ms" }),
   bio: text("bio"),
   bannerImage: text("banner_image"),
   imageOriginal: text("image_original"),
   bannerImageOriginal: text("banner_image_original"),
   themePreference: text("theme_preference"),
   localePreference: text("locale_preference"),
-  legalAcceptedAt: timestamp("legal_accepted_at", { withTimezone: true }),
+  legalAcceptedAt: integer("legal_accepted_at", { mode: "timestamp_ms" }),
   legalVersion: text("legal_version"),
-  isPrivate: boolean("is_private").default(false),
+  isPrivate: integer("is_private", { mode: "boolean" }).default(false),
 });
 
-export const session = pgTable(
+export const session = sqliteTable(
   "session",
   {
     id: text("id").primaryKey(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
     token: text("token").notNull().unique(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
     ipAddress: text("ip_address"),
@@ -58,7 +62,7 @@ export const session = pgTable(
   (table) => [index("session_userId_idx").on(table.userId)],
 );
 
-export const account = pgTable(
+export const account = sqliteTable(
   "account",
   {
     id: text("id").primaryKey(),
@@ -70,35 +74,43 @@ export const account = pgTable(
     accessToken: text("access_token"),
     refreshToken: text("refresh_token"),
     idToken: text("id_token"),
-    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
-    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+    accessTokenExpiresAt: integer("access_token_expires_at", {
+      mode: "timestamp_ms",
+    }),
+    refreshTokenExpiresAt: integer("refresh_token_expires_at", {
+      mode: "timestamp_ms",
+    }),
     scope: text("scope"),
     password: text("password"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
   (table) => [index("account_userId_idx").on(table.userId)],
 );
 
-export const verification = pgTable(
+export const verification = sqliteTable(
   "verification",
   {
     id: text("id").primaryKey(),
     identifier: text("identifier").notNull(),
     value: text("value").notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .defaultNow()
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
   (table) => [index("verification_identifier_idx").on(table.identifier)],
 );
 
-export const twoFactor = pgTable(
+export const twoFactor = sqliteTable(
   "two_factor",
   {
     id: text("id").primaryKey(),
@@ -107,9 +119,9 @@ export const twoFactor = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    verified: boolean("verified").default(true),
+    verified: integer("verified", { mode: "boolean" }).default(true),
     failedVerificationCount: integer("failed_verification_count").default(0),
-    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    lockedUntil: integer("locked_until", { mode: "timestamp_ms" }),
   },
   (table) => [
     index("twoFactor_secret_idx").on(table.secret),
@@ -117,7 +129,7 @@ export const twoFactor = pgTable(
   ],
 );
 
-export const passkey = pgTable(
+export const passkey = sqliteTable(
   "passkey",
   {
     id: text("id").primaryKey(),
@@ -129,9 +141,9 @@ export const passkey = pgTable(
     credentialID: text("credential_id").notNull(),
     counter: integer("counter").notNull(),
     deviceType: text("device_type").notNull(),
-    backedUp: boolean("backed_up").notNull(),
+    backedUp: integer("backed_up", { mode: "boolean" }).notNull(),
     transports: text("transports"),
-    createdAt: timestamp("created_at", { withTimezone: true }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }),
     aaguid: text("aaguid"),
   },
   (table) => [
@@ -140,11 +152,11 @@ export const passkey = pgTable(
   ],
 );
 
-export const rateLimit = pgTable("rate_limit", {
+export const rateLimit = sqliteTable("rate_limit", {
   id: text("id").primaryKey(),
   key: text("key").notNull().unique(),
   count: integer("count").notNull(),
-  lastRequest: bigint("last_request", { mode: "number" }).notNull(),
+  lastRequest: integer("last_request").notNull(),
 });
 
 export const userRelations = relations(user, ({ many }) => ({

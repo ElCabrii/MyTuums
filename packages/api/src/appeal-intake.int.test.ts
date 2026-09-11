@@ -1,3 +1,4 @@
+import { closeDb } from "./testing/runtime.js";
 /**
  * Focused tests for the appeal-intake module's own interface.
  *
@@ -9,22 +10,22 @@
  *
  * - the two sources normalising to the SAME appeal target, so an action
  *   appealed through one capability is closed to the other;
- * - concurrent opens, where the contested action-row lock serializes intake
+ * - concurrent opens, where the D1 batch serializes intake
  *   and the database constraints remain the final exactly-once backstop.
  *
- * Everything runs against real Postgres. The concurrency tests deliberately
+ * Everything runs against real D1. The concurrency tests deliberately
  * use real calls rather than a stubbed lock: what is being verified is that
- * callers serialize on the real `moderation_action` row and still produce one
+ * callers serialize their conditional inserts and still produce one
  * appeal with caller-facing refusals for every loser.
  */
 import { randomUUID } from "node:crypto";
-import { closeDb } from "@my-tuums/db";
+
 import { desc, eq } from "drizzle-orm";
 import { appeal, moderationAction, post } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { openAppeal } from "./appeal-intake.js";
-import { appealToken } from "./appeal-token.js";
+import { appealToken } from "./testing/runtime.js";
 import { removePostEffect } from "./moderation-actions.js";
 import {
   anonContext,
@@ -52,7 +53,7 @@ async function removedPost(author: TestUser): Promise<{ postId: string; actionId
     .insert(post)
     .values({ authorId: author.id, content: `intake fixture ${randomUUID()}` })
     .returning({ id: post.id });
-  await removePostEffect(anonContext.db, {
+  await removePostEffect(anonContext, {
     postId: row.id,
     actorId: moderator.id,
     reason: "spam",
@@ -67,7 +68,7 @@ async function removedPost(author: TestUser): Promise<{ postId: string; actionId
 }
 
 /** An email link for an action, minted the way `makeAppealUrl` does. */
-function link(actionId: string, userId: string): string {
+function link(actionId: string, userId: string): Promise<string> {
   return appealToken.sign({
     purpose: "appeal",
     actionId,
@@ -100,7 +101,7 @@ describe("appeal intake — one target from two sources", () => {
     // stub created — the sources differ, the target they normalise to does not.
     await expect(
       openAppeal(anonContext, {
-        token: link(actionId, author.id),
+        token: await link(actionId, author.id),
         reason: "Appealing the same removal by link",
       }),
     ).rejects.toMatchObject({
@@ -118,7 +119,7 @@ describe("appeal intake — concurrent exactly-once", () => {
   /**
    * The refusal depends on whether the loser presented the winning nonce or a
    * different link for the same action. Either way it must get a caller-facing
-   * BAD_REQUEST after the action-row lock lets it observe the winner.
+   * BAD_REQUEST after the D1 batch observes the winner.
    */
   const LOSER_MESSAGES = [
     "This appeal link has already been used.",
@@ -136,12 +137,12 @@ describe("appeal intake — concurrent exactly-once", () => {
     const { actionId } = await removedPost(author);
 
     // Eight fresh links — distinct nonces, so each spends its own budget. The
-    // action-row lock serializes their replay reads; the open-per-action index
+    // D1 batch serializes their eligibility checks; the open-per-action index
     // remains the database backstop.
     const results = await Promise.allSettled(
-      Array.from({ length: 8 }, (_, i) =>
+      Array.from({ length: 8 }, async (_, i) =>
         openAppeal(anonContext, {
-          token: link(actionId, author.id),
+          token: await link(actionId, author.id),
           reason: `Racing appeal number ${String(i)}`,
         }),
       ),
@@ -160,9 +161,9 @@ describe("appeal intake — concurrent exactly-once", () => {
   it("one link replayed concurrently: the nonce is spent once, every loser a BAD_REQUEST", async () => {
     const author = await createTestUser();
     const { actionId } = await removedPost(author);
-    const token = link(actionId, author.id);
+    const token = await link(actionId, author.id);
 
-    // The same link eight times — all serialize on the action row and then see
+    // The same link eight times — all serialize their conditional insert and then see
     // the winning nonce as spent. The unique `token_nonce` column remains the
     // database backstop. All eight share one rate-limit key
     // (`report:appeal:<nonce>`), which the report tier's 20/min clears.
@@ -180,6 +181,97 @@ describe("appeal intake — concurrent exactly-once", () => {
       expect(refusal.message).toBe("This appeal link has already been used.");
     }
 
+    await anonContext.db.delete(appeal);
+  });
+});
+
+describe("appeal intake — stored action and replay guards", () => {
+  it("orders tied actions by ID and ignores newer removals against another post", async () => {
+    const author = await createTestUser();
+    const first = await removedPost(author);
+    const second = await removedPost(author);
+    const [oldAction] = await anonContext.db
+      .select()
+      .from(moderationAction)
+      .where(eq(moderationAction.id, first.actionId));
+    if (!oldAction) throw new Error("missing removal fixture");
+    const newerId = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    await anonContext.db.insert(moderationAction).values({
+      ...oldAction,
+      id: newerId,
+    });
+
+    await expect(
+      openAppeal(anonContext, {
+        token: await link(first.actionId, author.id),
+        reason: "This is the older action",
+      }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "A newer moderation action has superseded this one.",
+    });
+    expect(await appealsFor(first.actionId)).toHaveLength(0);
+    const opened = await openAppeal(anonContext, {
+      token: await link(newerId, author.id),
+      reason: "This is the governing action",
+    });
+    expect(opened.status).toBe("open");
+    expect(
+      (
+        await openAppeal(anonContext, {
+          token: await link(second.actionId, author.id),
+          reason: "This is a different post",
+        })
+      ).status,
+    ).toBe("open");
+    await anonContext.db.delete(appeal);
+  });
+
+  it("gives a spent nonce precedence across actions and refuses a fresh link after final review", async () => {
+    const author = await createTestUser();
+    const first = await removedPost(author);
+    const second = await removedPost(author);
+    const nonce = randomUUID();
+    const tokenFor = (actionId: string) =>
+      appealToken.sign({
+        purpose: "appeal",
+        actionId,
+        userId: author.id,
+        nonce,
+        iat: Math.floor(Date.now() / 1000),
+      });
+    const opened = await openAppeal(anonContext, {
+      token: await tokenFor(first.actionId),
+      reason: "The first action's appeal",
+    });
+    await openAppeal(anonContext, {
+      token: await link(second.actionId, author.id),
+      reason: "The second action's appeal",
+    });
+    await expect(
+      openAppeal(anonContext, {
+        token: await tokenFor(second.actionId),
+        reason: "A nonce spent on a different action",
+      }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This appeal link has already been used.",
+    });
+    await anonContext.db
+      .update(appeal)
+      .set({ status: "upheld" })
+      .where(eq(appeal.id, opened.appealId));
+    await expect(
+      openAppeal(anonContext, {
+        token: await link(first.actionId, author.id),
+        reason: "A fresh link after a final review",
+      }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This action has already been appealed, and the review is final.",
+    });
+    expect(await appealsFor(first.actionId)).toHaveLength(1);
+    expect(await appealsFor(second.actionId)).toHaveLength(1);
     await anonContext.db.delete(appeal);
   });
 });

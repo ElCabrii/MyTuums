@@ -1,5 +1,16 @@
-import type { SQL } from "drizzle-orm";
+import { sql, type AnyColumn, type SQL } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
+import type { z } from "zod";
+
+/** SQLite JSON projections arrive as text; validate them at the query boundary. */
+export function jsonDecoder<T>(schema: z.ZodType<T>) {
+  return (value: string | null): T => schema.parse(value === null ? null : JSON.parse(value));
+}
+
+/** Bind a text ID set once, including an empty set, within D1's parameter limit. */
+export function textIn(column: AnyColumn<{ data: string }>, values: readonly string[]) {
+  return sql`${column} in (select value from json_each(${JSON.stringify(values)}))`;
+}
 
 /**
  * The single execution point for hand-written SQL.
@@ -12,17 +23,9 @@ import type { Database } from "@my-tuums/db";
  * it is (a parameterized fragment runner) rather than a bare `execute` that
  * string-concatenating scanners cannot tell apart from built SQL.
  *
- * The element-access call is deliberate: it preserves the method's receiver
- * (`this`) the same way a dotted call would, while keeping the raw execution
- * on this one line. Keep this module free of runtime imports — `e2e` loads it
- * before it has fixed up `DATABASE_URL`, so only type-only imports are safe.
+ * This module has no ambient connection. The caller
+ * supplies its D1 database and Drizzle binds the fragment's parameters.
  */
-export function runSql<T = unknown>(
-  executor: Pick<Database, "execute">,
-  fragment: SQL,
-): Promise<T[]> {
-  // SAFETY: `execute` returns the driver's raw rows for whatever fragment it
-  // was handed — the generic only shapes already-plain objects, so the cast
-  // encodes no checked invariant.
-  return executor["execute"](fragment) as Promise<T[]>;
+export function runSql<T = unknown>(executor: Pick<Database, "all">, fragment: SQL): Promise<T[]> {
+  return executor.all<T>(fragment);
 }

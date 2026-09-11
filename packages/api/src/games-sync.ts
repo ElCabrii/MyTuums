@@ -1,39 +1,24 @@
 /**
- * The game-catalog sync (issue #314): stage, validate, commit — in that
- * order, with exactly ONE transaction at the end.
+ * Fetch and validate a complete IGDB/Twitch catalog under a fenced D1 lease.
+ * game-catalog.ts stages invisible rows and atomically publishes their live
+ * projection with an active-version pointer. Existing IDs, hashtag assignments,
+ * creation times and favorites survive every refresh, including IGDB dropouts.
  *
- * Fail-closed (Q28) is the whole design: every IGDB call, derivation and
- * check happens BEFORE the commit transaction, so any failure — a refused
- * token, a 5xx that survives its one retry, a game that fails validation —
- * throws with the previous catalog byte-identical, and the entrypoint
- * (`apps/server/src/games-sync.ts`) turns that into exit 1 so Railway marks
- * the cron run FAILED.
- *
- * Never delete, never freeze (Q29): the scan reads the current Twitch
- * popularity snapshot plus the most-wanted unreleased games by IGDB hypes,
- * but the ids hydrated are the union of those sets with EVERY id the `game`
- * table already holds — dropouts are re-staged from their existing row
- * (IGDB-side removal tolerated), keep their last-known `popularityRank`, and
- * a dropout IGDB no longer returns at all survives verbatim. That is also
- * why the upsert never rewrites `hashtagKey` or `createdAt` (see
- * `./games-hashtag.ts` for the stickiness reasoning).
- *
- * Covers are the one thing that cannot be transactional — they are bucket
- * writes. They happen BEFORE the transaction under content-addressed keys
- * (`games/<igdbId>-<imageId>.<ext>`, see `./game-media.ts`), which makes
- * them idempotent instead: a run that dies after uploading leaves exactly
- * the objects the next successful run writes and references. Superseded
- * objects are removed best-effort AFTER the commit, the link-card ordering.
- *
- * `upsertGames` is the single row-write path, shared with the fixture
- * seeder (`scripts/seed-games.ts`) so the two writers cannot drift.
+ * Cover uploads have version-specific immutable paths protected by media intents.
+ * Publication consumes live intents and records superseded-object cleanup in
+ * the same transaction. Failed runs keep the previous public catalog intact.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "@my-tuums/db";
 import { game } from "@my-tuums/db/schema";
+import {
+  beginGameCatalog,
+  cleanupGameCatalogVersions,
+  publishGameCatalog,
+  releaseGameCatalog,
+  stageGameCatalog,
+} from "./game-catalog.js";
 import {
   GAME_GENRES_MAX,
   GAME_LABEL_MAX_LENGTH,
@@ -63,7 +48,8 @@ import {
 // no `./igdb` package subpath for the container to reach instead.
 export { createIgdbTransport };
 import { IMAGE_EXTENSION, mediaPathFor } from "./image.js";
-import type { Storage } from "./storage.js";
+import type { ObjectStorage } from "./object-storage.js";
+import { beginMediaUpload, cleanupMediaIntents } from "./media-intents.js";
 
 /** A validated catalog row, ready to upsert. The fixture's exact shape. */
 export interface StagedGameRow {
@@ -149,7 +135,7 @@ function parsePage<Row>(schema: z.ZodType<Row>, endpoint: string, rows: readonly
   return parsed.data;
 }
 
-/** The subset of `Database` upserts need — satisfied by `db` and any `tx`. */
+/** Direct row insertion is reserved for integration fixtures. */
 type GameWriter = Pick<Database, "insert">;
 
 function chunk<T>(items: readonly T[], size: number): T[][] {
@@ -186,7 +172,8 @@ function releaseYear(firstReleaseDate: number | null | undefined): number | null
 }
 
 /**
- * The single row-write path (sync + seeder). `hashtagKey` and `createdAt`
+ * Integration fixture helper. Production sync and seeding use game-catalog.ts.
+ * `hashtagKey` and `createdAt`
  * are deliberately ABSENT from the `set` clause: an existing key is sticky
  * (Q29) and a creation timestamp is a creation timestamp — the omission is
  * the rule, not an oversight.
@@ -196,7 +183,8 @@ export async function upsertGames(
   rows: readonly StagedGameRow[],
   now: Date,
 ): Promise<void> {
-  for (const batch of chunk(rows, GAMES_HYDRATION_BATCH)) {
+  // Each row has 14 bound values; five rows leave room below D1's 100-parameter limit.
+  for (const batch of chunk(rows, 5)) {
     await writer
       .insert(game)
       .values(
@@ -227,7 +215,7 @@ export async function upsertGames(
   }
 }
 
-function validateStaged(rows: readonly StagedGameRow[], maxYear: number): void {
+export function validateStaged(rows: readonly StagedGameRow[], maxYear: number): void {
   const violations: string[] = [];
   const seenIds = new Set<number>();
   const seenKeys = new Set<string>();
@@ -275,105 +263,6 @@ function validateStaged(rows: readonly StagedGameRow[], maxYear: number): void {
   if (violations.length > 0) throw new CatalogValidationError(violations);
 }
 
-/**
- * The committed fixture's location — hand-authored seed data in
- * `packages/db/fixtures/` (issue Q27), read at runtime so the JSON never
- * compiles into a second copy. Only ever executed from source (the seeder
- * script and e2e's global setup, both tsx-run); the container bundles the
- * sync only, which never reads the fixture.
- */
-function gamesFixturePath(): string {
-  return new URL("../../db/fixtures/games.json", import.meta.url).pathname;
-}
-
-function gamesFixtureCoversDir(): string {
-  return new URL("../../db/fixtures/covers", import.meta.url).pathname;
-}
-
-/**
- * The fixture file's own schema — a hand-authored file is still external
- * input (a hand-edit can break it), so it is parsed at the read boundary
- * like every other I/O. Exported for `games-fixture.test.ts`, which pins
- * the file's semantic contract on top of this shape contract.
- */
-export const stagedGameFixtureSchema = z.object({
-  igdbId: z.number(),
-  slug: z.string().min(1),
-  hashtagKey: z.string().min(1),
-  name: z.string().min(1),
-  summary: z.string().nullable(),
-  coverImageId: z.string().nullable(),
-  firstReleaseYear: z.number().nullable(),
-  firstReleaseDate: z.number().nullable().optional(),
-  hypeCount: z.number().optional(),
-  genres: z.array(z.string()),
-  platforms: z.array(z.string()),
-  popularityRank: z.number().nullable(),
-});
-
-/** Reads and shape-checks the fixture; throws plainly on a hand-edit that breaks it. */
-function readGamesFixture(): StagedGameRow[] {
-  const parsed = stagedGameFixtureSchema
-    .array()
-    .safeParse(JSON.parse(readFileSync(gamesFixturePath(), "utf8")));
-  if (!parsed.success) {
-    throw new Error(
-      `packages/db/fixtures/games.json failed its schema: ${parsed.error.issues
-        .slice(0, 3)
-        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
-        .join(", ")}`,
-    );
-  }
-  // Older fixture rows predate the hype fields — default them so a hand-edit
-  // adding only the catalog columns keeps seeding. New rows carry both.
-  return parsed.data.map((row) => ({
-    ...row,
-    firstReleaseDate: row.firstReleaseDate ?? null,
-    hypeCount: row.hypeCount ?? 0,
-    coverMediaPath: null,
-  }));
-}
-
-/**
- * Seeds the catalog from the committed fixture — the dev/CI/e2e data source
- * (issue Q27), and the only writer besides the sync itself. Upserts through
- * the same `upsertGames`, so a re-seed is idempotent and the two writers
- * cannot drift.
- *
- * Covers upload only when a bucket is configured (the whole S3_* group or
- * none — the same rule `context.ts` applies); without one the catalog is
- * seeded bare rather than failing, mirroring how uploads degrade. A cover
- * failure here fails the seed: unlike the sync's per-game tolerance, the
- * fixture's covers are local files with no remote to fail against.
- */
-export async function seedGamesFixture(deps: {
-  db: Database;
-  storage: Storage | null;
-  now?: () => Date;
-}): Promise<{ seeded: number; coversUploaded: number }> {
-  const now = deps.now?.() ?? new Date();
-  const rows = readGamesFixture();
-  let coversUploaded = 0;
-
-  if (deps.storage) {
-    for (const row of rows) {
-      if (!row.coverImageId) continue;
-      const bytes = new Uint8Array(
-        readFileSync(join(gamesFixtureCoversDir(), `${row.coverImageId}.jpg`)),
-      );
-      const key = gameCoverObjectKey(row.igdbId, row.coverImageId, "jpg");
-      await deps.storage.put(key, bytes, "image/jpeg");
-      row.coverMediaPath = mediaPathFor(key);
-      coversUploaded++;
-    }
-  }
-
-  await deps.db.transaction(async (tx) => {
-    await upsertGames(tx, rows, now);
-  });
-  return { seeded: rows.length, coversUploaded };
-}
-
 async function hydrateGames(client: IgdbClient, ids: readonly number[]): Promise<IgdbGameRow[]> {
   const hydrated: IgdbGameRow[] = [];
   for (const batch of chunk(ids, GAMES_HYDRATION_BATCH)) {
@@ -391,15 +280,35 @@ async function hydrateGames(client: IgdbClient, ids: readonly number[]): Promise
   return hydrated;
 }
 
-export async function syncGamesCatalog(deps: {
+interface SyncGamesDeps {
   db: Database;
-  storage: Storage | null;
+  storage: Pick<ObjectStorage, "put" | "remove"> | null;
   transport: IgdbTransport;
   clientId: string;
   clientSecret: string;
   now?: () => Date;
-}): Promise<SyncGamesResult> {
+  /** Scheduled retries must never replace an identical or newer published snapshot. */
+  skipIfCurrent?: boolean;
+}
+
+export async function syncGamesCatalog(deps: SyncGamesDeps): Promise<SyncGamesResult> {
   const now = deps.now?.() ?? new Date();
+  const version = await beginGameCatalog(deps.db, now, deps.skipIfCurrent);
+  try {
+    return await buildGamesCatalog(deps, version, now);
+  } finally {
+    await releaseGameCatalog(deps.db, version);
+    await cleanupGameCatalogVersions(deps.db).catch(() => {
+      console.error({ event: "catalog_version_cleanup_deferred" });
+    });
+  }
+}
+
+async function buildGamesCatalog(
+  deps: SyncGamesDeps,
+  version: string,
+  now: Date,
+): Promise<SyncGamesResult> {
   const client = createIgdbClient({
     clientId: deps.clientId,
     clientSecret: deps.clientSecret,
@@ -614,7 +523,6 @@ export async function syncGamesCatalog(deps: {
     coversKept: 0,
     coversFailed: 0,
   };
-  const supersededKeys: string[] = [];
   if (deps.storage) {
     for (const row of staged) {
       const existing = known.get(row.igdbId);
@@ -623,14 +531,10 @@ export async function syncGamesCatalog(deps: {
         result.coversKept++;
         continue;
       }
-      const previousKey = existing?.coverMediaPath?.startsWith("/media/")
-        ? existing.coverMediaPath.slice("/media/".length)
-        : null;
 
       if (desiredImageId === null) {
         row.coverMediaPath = null;
         row.coverImageId = null;
-        if (previousKey) supersededKeys.push(previousKey);
         continue;
       }
 
@@ -640,21 +544,20 @@ export async function syncGamesCatalog(deps: {
           row.igdbId,
           desiredImageId,
           IMAGE_EXTENSION[cover.contentType],
+          version,
         );
+        await beginMediaUpload(deps.db, `catalog:${version}`, [mediaPathFor(key)]);
         await deps.storage.put(key, cover.bytes, cover.contentType);
         row.coverMediaPath = mediaPathFor(key);
         row.coverImageId = desiredImageId;
-        if (previousKey && previousKey !== key) supersededKeys.push(previousKey);
         result.coversUploaded++;
-      } catch (error) {
+      } catch {
         // Per-cover tolerance (Q28): warn, keep the old cover and its
         // compare key so the change retries next run.
         result.coversFailed++;
         row.coverMediaPath = existing?.coverMediaPath ?? null;
         row.coverImageId = existing?.coverImageId ?? null;
-        console.warn(
-          `games-sync: cover for igdb ${row.igdbId} (${desiredImageId}) failed — keeping the previous cover: ${String(error)}`,
-        );
+        console.warn({ event: "game_cover_deferred", gameId: row.igdbId });
       }
     }
   } else if (staged.length > 0) {
@@ -668,16 +571,15 @@ export async function syncGamesCatalog(deps: {
     }
   }
 
-  // 8. Commit: ONE transaction, all rows, all-or-nothing (Q28).
-  await deps.db.transaction(async (tx) => {
-    await upsertGames(tx, staged, now);
-  });
+  // 8. Stage invisibly, then publish the complete projection and pointer atomically.
+  await stageGameCatalog(deps.db, version, staged);
+  await publishGameCatalog(deps.db, version, staged.length);
 
-  // 9. Superseded covers leave AFTER the rows that referenced them are
-  //     committed — the link-card ordering. Best-effort by design: a missed
-  //     removal is an orphan, never a broken reference.
-  for (const key of supersededKeys) {
-    if (deps.storage) await deps.storage.remove(key).catch(() => {});
+  // The publication trigger records obsolete immutable paths. Failed removals retry.
+  if (deps.storage) {
+    await cleanupMediaIntents(deps.db, deps.storage, "catalog").catch(() => {
+      console.error({ event: "catalog_cleanup_deferred" });
+    });
   }
 
   return result;

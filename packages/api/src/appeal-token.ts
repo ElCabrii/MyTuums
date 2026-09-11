@@ -1,4 +1,3 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
 /**
@@ -48,88 +47,86 @@ export const APPEAL_TOKEN_MAX_LENGTH = 4 * 1024;
 const APPEAL_TOKEN_SIGNATURE_LENGTH = 43;
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 
-/**
- * An HMAC-SHA256 capability signer for the signed-out appeal links.
- *
- * Format is `base64url(payload).base64url(hmac)` — two base64url halves with
- * a dot, the same shape as the JWT the app already handles, but without a
- * JWT library's surface. Verification is constant-time (timingSafeEqual
- * after a length pre-check) and re-parses the payload through the zod schema
- * — a tampered or malformed token fails one of the three checks (signature,
- * schema, TTL) and is indistinguishable in effect from an invalid one.
- *
- * The `now` parameter exists so unit tests can pin the clock; production
- * calls `verify(raw)` and gets `Date.now()`.
- */
-export function createAppealTokenSigner(secret: string) {
-  function sign(payload: AppealTokenPayload): string {
-    const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-    const signature = createHmac("sha256", secret).update(body).digest("base64url");
-    return `${body}.${signature}`;
+/** Capabilities have one textual representation, including unused padding bits. */
+function encode(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+}
+
+function decode(value: string): Uint8Array<ArrayBuffer> | null {
+  if (!BASE64URL_RE.test(value)) return null;
+  try {
+    const bytes = Uint8Array.from(atob(value.replaceAll("-", "+").replaceAll("_", "/")), (char) =>
+      char.charCodeAt(0),
+    );
+    return encode(bytes) === value ? bytes : null;
+  } catch {
+    return null;
   }
-
-  function verify(raw: string, now: number = Date.now()): AppealTokenPayload | null {
-    // Keep this check before `lastIndexOf`, slicing, decoding, or HMAC work:
-    // callers can invoke the verifier directly, outside the oRPC schema.
-    if (raw.length === 0 || raw.length > APPEAL_TOKEN_MAX_LENGTH) return null;
-
-    const dot = raw.lastIndexOf(".");
-    if (dot <= 0) return null;
-
-    const body = raw.slice(0, dot);
-    const encodedSignature = raw.slice(dot + 1);
-    // Reject implausible signatures before Buffer.from allocates a decoded
-    // buffer. Checking the alphabet also avoids Node's permissive base64
-    // decoder accepting punctuation as if it were padding.
-    if (
-      encodedSignature.length !== APPEAL_TOKEN_SIGNATURE_LENGTH ||
-      !BASE64URL_RE.test(encodedSignature)
-    ) {
-      return null;
-    }
-
-    const provided = Buffer.from(encodedSignature, "base64url");
-    // Node's decoder accepts non-zero unused pad bits, so distinct strings can
-    // decode to the same bytes. Capabilities have one textual representation:
-    // require the canonical unpadded base64url encoding before comparing it.
-    if (provided.toString("base64url") !== encodedSignature) return null;
-
-    const expected = createHmac("sha256", secret).update(body).digest();
-
-    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-      return null;
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-    } catch {
-      return null;
-    }
-
-    const result = payloadSchema.safeParse(parsed);
-    if (!result.success) return null;
-    if (result.data.iat * 1000 + APPEAL_TOKEN_TTL_MS <= now) return null;
-
-    return result.data;
-  }
-
-  return { sign, verify };
 }
 
 /**
- * The one signer the app uses, keyed on `BETTER_AUTH_SECRET`.
- *
- * Reusing the auth secret is safe — anyone holding it can already mint
- * sessions and impersonate anyone — and it means the appeal link's security
- * posture is exactly the session system's. The fallback mirrors better-auth's
- * own dev fallback byte-for-byte (dist/context/create-context.mjs:78:
- * `"better-auth-secret-12345678901234567890"`), so a deployment that forgot
- * to set the variable fails identically to one that never had auth working
- * at all — and `apps/server/src/env.ts` requires ≥32 chars of real
- * randomness, so production never actually reaches this line.
+ * HMAC-SHA256 capabilities use Web Crypto verification and the existing
+ * base64url(payload).base64url(signature) format. The entrypoint supplies its
+ * secret explicitly; importing this module never reads environment variables.
  */
-const secret = process.env.BETTER_AUTH_SECRET?.trim() || "better-auth-secret-12345678901234567890";
+export function createAppealTokenSigner(secret: string) {
+  if (secret.trim().length < 32)
+    throw new Error("Appeal signing requires a secret of at least 32 characters.");
+  const encoder = new TextEncoder();
+  // Import inside the first request, since Workers disallow top-level async I/O.
+  let key: ReturnType<typeof crypto.subtle.importKey> | undefined;
+  function signingKey() {
+    key ??= crypto.subtle.importKey(
+      "raw",
+      encoder.encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign", "verify"],
+    );
+    return key;
+  }
 
-/** The process-wide signer. Unit tests build their own with an injected secret. */
-export const appealToken = createAppealTokenSigner(secret);
+  async function sign(payload: AppealTokenPayload): Promise<string> {
+    const json = JSON.stringify(payloadSchema.parse(payload));
+    if (json.length > APPEAL_TOKEN_MAX_LENGTH) throw new Error("Appeal token is too large.");
+    const body = encode(encoder.encode(json));
+    if (body.length + 1 + APPEAL_TOKEN_SIGNATURE_LENGTH > APPEAL_TOKEN_MAX_LENGTH)
+      throw new Error("Appeal token is too large.");
+    const signature = await crypto.subtle.sign("HMAC", await signingKey(), encoder.encode(body));
+    return `${body}.${encode(new Uint8Array(signature))}`;
+  }
+
+  async function verify(raw: string, now: number = Date.now()): Promise<AppealTokenPayload | null> {
+    // Bound allocation and cryptographic work even outside the oRPC schema.
+    if (raw.length === 0 || raw.length > APPEAL_TOKEN_MAX_LENGTH) return null;
+    const dot = raw.lastIndexOf(".");
+    if (dot <= 0) return null;
+    const body = raw.slice(0, dot);
+    const encodedSignature = raw.slice(dot + 1);
+    if (encodedSignature.length !== APPEAL_TOKEN_SIGNATURE_LENGTH) return null;
+    const provided = decode(encodedSignature);
+    const bytes = decode(body);
+    if (!provided || !bytes) return null;
+    if (!(await crypto.subtle.verify("HMAC", await signingKey(), provided, encoder.encode(body))))
+      return null;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(
+        new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes),
+      );
+    } catch {
+      return null;
+    }
+    const result = payloadSchema.safeParse(parsed);
+    if (!result.success) return null;
+    if (result.data.iat * 1000 + APPEAL_TOKEN_TTL_MS <= now) return null;
+    return result.data;
+  }
+  return { sign, verify };
+}
+
+export type AppealTokenSigner = ReturnType<typeof createAppealTokenSigner>;

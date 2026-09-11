@@ -20,7 +20,7 @@
  * list — keep the copies in step.
  */
 import { ne, sql } from "drizzle-orm";
-import { db } from "./index.js";
+import type { Database } from "./index.js";
 import { user, userBadge } from "./schema/index.js";
 
 /** Among the first 50 accounts: `super_early_access`. */
@@ -55,7 +55,7 @@ const EARLY_ACCESS_BADGE = "early_access";
  * tolerance the derived `created_at` comparison had, cosmetic, and bounded
  * by however many sign-ups share one instant.
  */
-export async function stampJoinBadges(userId: string): Promise<void> {
+export async function stampJoinBadges(db: Database, userId: string): Promise<void> {
   // The hook runs after the account's own row landed, so the count must
   // exclude it: rank is how many accounts were created strictly before
   // this one, and every OTHER existing row was.
@@ -65,7 +65,7 @@ export async function stampJoinBadges(userId: string): Promise<void> {
     .where(ne(user.id, userId))
     .limit(EARLY_ACCESS_RANK)
     .as("preceding");
-  const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(preceding);
+  const [row] = await db.select({ count: sql<number>`count(*)` }).from(preceding);
 
   const badge =
     row.count < SUPER_EARLY_ACCESS_RANK

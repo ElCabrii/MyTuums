@@ -1,7 +1,3 @@
-# The landing site is a single public page: everything is crawlable, by
-# classic search engines and AI agents alike. The Sitemap directive may point
-# across hosts, so this one file also advertises the app's sitemap.
+# Private Cloudflare migration experiment; Access is the enforcement boundary.
 User-agent: *
-Allow: /
-
-Sitemap: https://about.mytuums.com/sitemap.xml
+Disallow: /

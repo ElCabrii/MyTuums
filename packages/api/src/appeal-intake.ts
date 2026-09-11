@@ -5,14 +5,14 @@
  * Everything a caller has to know to safely open an appeal — which capability
  * identifies the contested action, what budget that capability spends, whether
  * the action is still contestable, whether this attempt is a replay, and how a
- * lost insert race reads back to the appellant — lives here.
+ * concurrent attempt reads back to the appellant — lives here.
  * `moderation.appealOpen` expresses *what* it wants (`openAppeal`) and this
  * module owns *how*.
  *
  * The deletion test: delete this module and the branch ordering (verify before
  * any database work, budget at the exact point the key exists), the
  * appealable/current/latest gates, the nonce-versus-action replay precedence
- * and the unique-violation translation would all have to move back into the
+ * and atomic persistence would all have to move back into the
  * one anonymous procedure — plus into any future surface that opens an appeal.
  *
  * ## Two sources, one target
@@ -28,28 +28,20 @@
  * ## What stays outside
  *
  * Signing and verifying links is `./appeal-token.ts`; whether an action is
- * still in force or still the latest of its kind is `./moderation-actions.ts`;
+ * still in force or still the latest of its kind is `./moderation-action-state.ts`;
  * budget accounting is `./procedures.ts`. None of it is duplicated here.
  * Appeal *review* — the uphold/overturn decision and the moderation reversal
  * it applies — is deliberately not intake's business and stays in
  * `./moderation-appeals.ts`.
  */
 
-import { randomUUID } from "node:crypto";
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
-import { z } from "zod";
 import { appeal, moderationAction, post } from "@my-tuums/db/schema";
-import { appealToken } from "./appeal-token.js";
 import { APPEALABLE_ACTIONS } from "./constants.js";
 import type { Context } from "./context.js";
-import {
-  isActionCurrent,
-  isActionLatest,
-  type ActionRow,
-  type DbLike,
-} from "./moderation-actions.js";
-import { lockModerationTarget } from "./moderation-target-lock.js";
+import type { ActionRow, DbLike } from "./moderation-actions.js";
+import { moderationActionState } from "./moderation-action-state.js";
 import { rateLimitCapability } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 
@@ -61,7 +53,7 @@ import { RATE_LIMITS } from "./rate-limit.js";
  * notice, so it needs neither `headers` nor `storage` — the naming of what it
  * cannot reach is half of what keeps review's concerns out of intake.
  */
-export type AppealIntakeContext = Pick<Context, "db" | "session" | "rateLimiter">;
+export type AppealIntakeContext = Pick<Context, "db" | "session" | "rateLimiter" | "appealToken">;
 
 /** What a caller presents: exactly one capability, plus the appellant's own words. */
 export interface AppealRequest {
@@ -96,31 +88,6 @@ interface AppealTarget {
 }
 
 /**
- * Whether a thrown error is postgres' `unique_violation` (SQLSTATE 23505).
- *
- * postgres.js puts the code on the error it throws, but drizzle wraps every
- * driver failure in a `DrizzleQueryError` that carries the original as its
- * `cause` — so the code is NOT on the error a query builder rejects with, and
- * matching only the top level lets a genuine constraint race escape as a 500
- * instead of the caller-facing refusal below. Walking the `cause` chain is
- * what makes the check survive that wrapping (and any future layer that adds
- * one); the depth bound is a guard against a self-referential chain, not a
- * real limit — the chains this sees are one link long.
- */
-const databaseErrorSchema = z.object({
-  code: z.string().optional(),
-  cause: z.unknown().optional(),
-});
-
-function isUniqueViolation<Value>(error: Value, depth = 0): boolean {
-  if (depth >= 8) return false;
-  const parsed = databaseErrorSchema.safeParse(error);
-  if (!parsed.success) return false;
-  if (parsed.data.code === "23505") return true;
-  return parsed.data.cause === undefined ? false : isUniqueViolation(parsed.data.cause, depth + 1);
-}
-
-/**
  * The user an action happened to — its target user, or the author for post
  * actions.
  *
@@ -150,14 +117,14 @@ export async function actionTargetUser(db: DbLike, action: ActionRow): Promise<s
  * is unguessable to anyone who does not hold the email, so one link's replays
  * can never exhaust another appellant's.
  */
-function fromEmailToken(context: AppealIntakeContext, token: string): AppealTarget {
-  const payload = appealToken.verify(token);
+async function fromEmailToken(context: AppealIntakeContext, token: string): Promise<AppealTarget> {
+  const payload = await context.appealToken.verify(token);
   if (!payload) {
     throw new ORPCError("BAD_REQUEST", {
       message: "This appeal link is invalid or has expired.",
     });
   }
-  rateLimitCapability(context, RATE_LIMITS.report, `appeal:${payload.nonce}`);
+  await rateLimitCapability(context, RATE_LIMITS.report, `appeal:${payload.nonce}`);
   return { actionId: payload.actionId, appellantId: payload.userId, nonce: payload.nonce };
 }
 
@@ -205,7 +172,7 @@ async function fromRemovedPostStub(
     throw new ORPCError("NOT_FOUND", { message: "This post has no removal to appeal." });
   }
 
-  rateLimitCapability(context, RATE_LIMITS.report, `appeal:${removal.id}`);
+  await rateLimitCapability(context, RATE_LIMITS.report, `appeal:${removal.id}`);
 
   const [target] = await context.db
     .select({ authorId: post.authorId })
@@ -219,7 +186,7 @@ async function fromRemovedPostStub(
 
   // A session is not a one-time capability, so this attempt gets a fresh nonce
   // and the "one open appeal per action" rule is what stops the second try.
-  return { actionId: removal.id, appellantId: sessionUser.id, nonce: randomUUID() };
+  return { actionId: removal.id, appellantId: sessionUser.id, nonce: crypto.randomUUID() };
 }
 
 /**
@@ -243,198 +210,63 @@ async function resolveTarget(
 }
 
 /**
- * Proves the action a target names is one this appellant may still contest.
- *
- * The action row is locked before the gates run and stays locked through the
- * appeal insert. Manual reversal takes the same lock before closing appeals,
- * so either intake inserts first and reversal closes it, or reversal commits
- * first and intake's current/latest checks observe that there is nothing left
- * to appeal.
- *
- * Four gates then apply, source-blind by construction: the action exists, it
- * is one of the appealable kinds, it happened to *this* appellant, and it is
- * both still in force (`isActionCurrent` reads live state) and still the latest
- * of its kind (`isActionLatest` reads the log). The last two answer different
- * questions — remove → restore → remove leaves the first removal's live-state
- * check reading the *second* tombstone as current — so both are required.
- *
- * "No longer valid" is deliberately the same wording for a vanished action and
- * for one belonging to someone else: a link handed onward must not reveal
- * whether the action it names exists.
+ * A single ordered refusal expression guards the insert and explains a rejected
+ * attempt. D1 serializes the batch, so neither a competing intake nor a manual
+ * reversal can pass between validation and persistence. Nonce reuse wins over
+ * an existing appeal for the action, even when those matches are different rows.
  */
-async function assertContestable(db: DbLike, target: AppealTarget): Promise<void> {
-  const [actionRow] = await db
-    .select({
-      id: moderationAction.id,
-      action: moderationAction.action,
-      targetType: moderationAction.targetType,
-      targetPostId: moderationAction.targetPostId,
-      targetUserId: moderationAction.targetUserId,
-      createdAt: moderationAction.createdAt,
-      details: moderationAction.details,
-    })
-    .from(moderationAction)
-    .where(eq(moderationAction.id, target.actionId))
-    .for("update")
-    .limit(1);
-  if (!actionRow) {
-    throw new ORPCError("BAD_REQUEST", { message: "This appeal link is no longer valid." });
-  }
-  // SAFETY: This select lists every ActionRow field, and the schema's action
-  // check constraint restricts the stored code to ModerationActionCode.
-  const action = actionRow as ActionRow;
-  if (!APPEALABLE_ACTIONS.includes(action.action)) {
-    throw new ORPCError("BAD_REQUEST", { message: "This action can't be appealed." });
-  }
-  const targetUserId = await actionTargetUser(db, action);
-  if (!targetUserId || targetUserId !== target.appellantId) {
-    throw new ORPCError("BAD_REQUEST", { message: "This appeal link is no longer valid." });
-  }
-  if (!(await isActionCurrent(db, action))) {
-    throw new ORPCError("BAD_REQUEST", {
-      message: "There's nothing to appeal anymore — this action was already undone.",
-    });
-  }
-  if (!(await isActionLatest(db, action))) {
-    throw new ORPCError("BAD_REQUEST", {
-      message: "A newer moderation action has superseded this one.",
-    });
-  }
+function intakeRefusal(target: AppealTarget) {
+  return sql<string | null>`case
+    when moderation_action.action not in
+      (select value from json_each(${JSON.stringify(APPEALABLE_ACTIONS)}))
+      then 'This action can''t be appealed.'
+    when ${moderationActionState.recipientId} is not ${target.appellantId}
+      then 'This appeal link is no longer valid.'
+    when not (${moderationActionState.current})
+      then 'There''s nothing to appeal anymore — this action was already undone.'
+    when not (${moderationActionState.latest})
+      then 'A newer moderation action has superseded this one.'
+    when exists (select 1 from ${appeal} where ${appeal.tokenNonce} = ${target.nonce})
+      then 'This appeal link has already been used.'
+    when exists (select 1 from ${appeal}
+      where ${appeal.actionId} = ${target.actionId} and ${appeal.status} = 'open')
+      then 'There''s already an open appeal for this action.'
+    when exists (select 1 from ${appeal} where ${appeal.actionId} = ${target.actionId})
+      then 'This action has already been appealed, and the review is final.'
+    else null end`;
 }
 
 /**
- * Locks the target before `assertContestable` locks the action row.
- *
- * Forward sanctions use the same target-first order before scanning action
- * history. Reading the action without a lock is only to discover which target
- * row to lock; the authoritative action read remains the locked query in
- * `assertContestable`.
- */
-async function lockAppealTarget(db: DbLike, target: AppealTarget): Promise<void> {
-  const [action] = await db
-    .select({
-      targetType: moderationAction.targetType,
-      targetPostId: moderationAction.targetPostId,
-      targetUserId: moderationAction.targetUserId,
-    })
-    .from(moderationAction)
-    .where(eq(moderationAction.id, target.actionId))
-    .limit(1);
-  if (!action) return;
-
-  // SAFETY: the moderation_action target-match check constraint restricts this
-  // column to the two moderation target kinds.
-  const targetType = action.targetType as "post" | "user";
-  const targetId = targetType === "post" ? action.targetPostId : action.targetUserId;
-  if (!targetId) return;
-  await lockModerationTarget(db, { targetType, targetId });
-}
-
-/**
- * Refuses an attempt an earlier appeal already answered.
- *
- * One query covers both refusals: a REUSED link (same nonce — a double click
- * on the email) and a SECOND appeal against the same action (a fresh link
- * while one is in flight). They answer different questions, so the nonce match
- * wins: "your appeal was received, nothing to do" is the true reading of a
- * replayed link, and a fresh-link retry gets the open-appeal message instead.
- * A *reviewed* appeal is final — the action can never be appealed again (the
- * schema comment and the resolution email both promise that), so a prior row
- * in any status closes this path too.
- *
- * The action-row lock serializes application callers before this read. The
- * database constraints remain the final authority for collisions caused by a
- * writer outside this path; see {@link insertAppeal}.
- */
-async function refuseReplay(db: DbLike, target: AppealTarget): Promise<void> {
-  const [existing] = await db
-    .select({ id: appeal.id, status: appeal.status, tokenNonce: appeal.tokenNonce })
-    .from(appeal)
-    .where(or(eq(appeal.actionId, target.actionId), eq(appeal.tokenNonce, target.nonce)))
-    .limit(1);
-  if (!existing) return;
-  if (existing.tokenNonce === target.nonce) {
-    throw new ORPCError("BAD_REQUEST", { message: "This appeal link has already been used." });
-  }
-  if (existing.status === "open") {
-    throw new ORPCError("BAD_REQUEST", {
-      message: "There's already an open appeal for this action.",
-    });
-  }
-  throw new ORPCError("BAD_REQUEST", {
-    message: "This action has already been appealed, and the review is final.",
-  });
-}
-
-/**
- * Writes the row after the action-row lock and replay check.
- *
- * The unique `token_nonce` column and the partial unique open-per-action index
- * remain the authority even though application callers serialize on the
- * action row. A constraint rejection is translated to the used-link refusal
- * rather than surfacing a 500.
- */
-async function insertAppeal(
-  db: DbLike,
-  target: AppealTarget,
-  reason: string,
-): Promise<OpenedAppeal> {
-  let inserted: { id: string } | undefined;
-  try {
-    [inserted] = await db
-      .insert(appeal)
-      .values({
-        actionId: target.actionId,
-        appellantId: target.appellantId,
-        tokenNonce: target.nonce,
-        reason,
-      })
-      .returning({ id: appeal.id });
-  } catch (error) {
-    if (isUniqueViolation(error)) {
-      throw new ORPCError("BAD_REQUEST", { message: "This appeal link has already been used." });
-    }
-    throw error;
-  }
-  // Outside the catch on purpose: this is a "cannot happen" guard on the
-  // insert's own result, not a database error the unique-violation branch
-  // above should ever be asked to classify.
-  if (!inserted) throw new Error("appeal insert returned no row");
-  return { appealId: inserted.id, status: "open" };
-}
-
-/**
- * Opens an appeal, or throws the refusal the attempt earned.
- *
- * The order is load-bearing and is the reason this is one function rather than
- * a set of steps a caller sequences:
- *
- * 1. **Authenticate the source.** Exactly one capability, verified by its own
- *    adapter. For the email link that is an HMAC comparison before any
- *    database work, so an anonymous caller with a bad signature never reaches
- *    Postgres at all.
- * 2. **Spend the capability's budget**, inside the adapter, at the point its
- *    key comes into existence — the link's nonce, or the removal's id. Every
- *    query after this point is paid for.
- * 3. **Lock the target, then the contested action and prove it contestable** —
- *    appealable, this appellant's, current, latest. The locks are held through
- *    the insert so a forward sanction or manual reversal cannot pass between
- *    validation and persistence.
- * 4. **Refuse a replay**, then insert and let the unique constraints settle
- *    what the read could not.
- *
- * No notice is sent and no moderation state changes: intake records a request
- * to be heard, and `moderation.appealReview` is what answers it.
+ * Authenticate and budget the capability before any common database work,
+ * then atomically check eligibility and insert. The second statement explains
+ * a refused insert from the same serialized batch; successful inserts ignore
+ * that read because their own newly persisted nonce is now spent.
  */
 export async function openAppeal(
   context: AppealIntakeContext,
   request: AppealRequest,
 ): Promise<OpenedAppeal> {
   const target = await resolveTarget(context, request);
-  return context.db.transaction(async (tx) => {
-    await lockAppealTarget(tx, target);
-    await assertContestable(tx, target);
-    await refuseReplay(tx, target);
-    return insertAppeal(tx, target, request.reason);
+  const refusal = intakeRefusal(target);
+  const id = crypto.randomUUID();
+  const [inserted, reasons] = await context.db.batch([
+    context.db
+      .insert(appeal)
+      .select(
+        sql`select ${id}, ${target.actionId},
+      ${target.appellantId}, ${target.nonce}, ${request.reason}, 'open', null, null,
+      cast(unixepoch('subsec') * 1000 as integer), null
+      from ${moderationAction}
+      where ${moderationAction.id} = ${target.actionId} and (${refusal}) is null`,
+      )
+      .returning({ id: appeal.id }),
+    context.db
+      .select({ refusal })
+      .from(moderationAction)
+      .where(eq(moderationAction.id, target.actionId)),
+  ]);
+  if (inserted[0]) return { appealId: inserted[0].id, status: "open" };
+  throw new ORPCError("BAD_REQUEST", {
+    message: reasons[0]?.refusal ?? "This appeal link is no longer valid.",
   });
 }

@@ -6,14 +6,8 @@ const META_DESCRIPTION_MAX_LENGTH = 160;
 /** The brand name as shared metadata; not localized, like the logo. */
 const SITE_NAME = "MyTuums";
 
-/**
- * The production origin every canonical and unfurl URL points at. Canonicals
- * must stay stable across environments — that is their whole point — so this
- * is deliberately not derived from `window.location`. index.html restates the
- * same origin and brand strings statically because it cannot import this
- * module; change the two together.
- */
-export const SITE_ORIGIN = "https://mytuums.com";
+/** The isolated PoC origin. Keep the static index metadata in step with this value. */
+export const SITE_ORIGIN = "https://cf-poc.mytuums.com";
 
 /**
  * The square brand mark shared as the card image. Chosen over the 4096 px

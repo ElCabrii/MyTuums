@@ -1,0 +1,30 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "mytuums-poc-branding",
+  "account_id": "734f3b84571b1967e6940140a0b7d75f",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "upload_source_maps": true,
+  "routes": [{ "pattern": "about-cf-poc.mytuums.com", "custom_domain": true }],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "none",
+    "not_found_handling": "none",
+  },
+  "vars": {
+    "BRANDING_ORIGIN": "https://about-cf-poc.mytuums.com",
+    "ACCESS_TEAM_DOMAIN": "https://mytuums.cloudflareaccess.com",
+    "ACCESS_AUDIENCE": "7e8b9194813d7f984e385e9be12fbc34dbfd9b2244689c9b7fd19305fbb6026e",
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "redact_query_string": true,
+    "logs": { "invocation_logs": false },
+  },
+}

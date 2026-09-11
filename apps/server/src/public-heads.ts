@@ -25,10 +25,7 @@
 import type { Database } from "@my-tuums/db";
 import { publicGameHead, type PublicGameHead } from "@my-tuums/api/public-game-head";
 import { publicPostHead, type PublicPostHead } from "@my-tuums/api/public-post-head";
-import type { IndexHtmlTransform } from "./static-files.js";
 
-/** Mirrors `SITE_ORIGIN` in apps/web/src/lib/document-head.ts — change together. */
-const SITE_ORIGIN = "https://mytuums.com";
 /** Mirrors `SITE_IMAGE_PATH` there — the square mark unfurlers can afford. */
 const SITE_IMAGE_PATH = "/mytuums-512.png";
 /** Mirrors `app_title_suffix` — the suffix every route title carries. */
@@ -150,17 +147,18 @@ function escapeHtml(value: string): string {
 }
 
 /** The full tag set a route head carries — `pageHead`'s shape, minus the live-only bits. */
-function headBlockFor(route: {
-  title: string;
-  description: string;
-  path: string;
-  imagePath?: string | null;
-}): string {
+function headBlockFor(
+  origin: string,
+  route: {
+    title: string;
+    description: string;
+    path: string;
+    imagePath?: string | null;
+  },
+): string {
   const title = `${route.title} - ${TITLE_SUFFIX}`;
-  const url = `${SITE_ORIGIN}${route.path}`;
-  const image = route.imagePath
-    ? `${SITE_ORIGIN}${route.imagePath}`
-    : `${SITE_ORIGIN}${SITE_IMAGE_PATH}`;
+  const url = `${origin}${route.path}`;
+  const image = route.imagePath ? `${origin}${route.imagePath}` : `${origin}${SITE_IMAGE_PATH}`;
   return [
     HEAD_BLOCK_START,
     `<title data-app-fallback>${escapeHtml(title)}</title>`,
@@ -198,22 +196,23 @@ const GAMES_PATH_PREFIX = "/games/";
  * gate 302s it — and an unmarked build must degrade to serving the file
  * verbatim, never to a broken one).
  */
-export function createPublicHeadTransform(db: Database): IndexHtmlTransform {
-  return async (pathname, html) => {
+export function createPublicHeadTransform(db: Database, webOrigin: string) {
+  const origin = new URL(webOrigin).origin;
+  return async (pathname: string, html: string): Promise<string> => {
     if (pathname.startsWith(POST_PATH_PREFIX)) {
       const postId = pathname.slice(POST_PATH_PREFIX.length).replace(/\/+$/, "");
       let head: PublicPostHead | null = null;
       try {
         head = await publicPostHead(db, postId);
-      } catch (error) {
+      } catch {
         // The unfurl degrades to the generic head; the page itself still
         // loads and the SPA takes over.
-        console.error("Failed to build the public post head:", error);
+        console.error({ event: "public_post_head_unavailable" });
       }
       if (head) {
         return replaceHeadBlock(
           html,
-          headBlockFor({
+          headBlockFor(origin, {
             title: head.title,
             description: head.description,
             path: `${POST_PATH_PREFIX}${encodeURIComponent(postId)}`,
@@ -229,15 +228,15 @@ export function createPublicHeadTransform(db: Database): IndexHtmlTransform {
       let head: PublicGameHead | null = null;
       try {
         head = await publicGameHead(db, decodeURIComponent(slug));
-      } catch (error) {
+      } catch {
         // Same degradation as the post head: the unfurl falls back, the page
         // itself still loads and the SPA takes over.
-        console.error("Failed to build the public game head:", error);
+        console.error({ event: "public_game_head_unavailable" });
       }
       if (head) {
         return replaceHeadBlock(
           html,
-          headBlockFor({
+          headBlockFor(origin, {
             title: head.title,
             description: head.description,
             path: `${GAMES_PATH_PREFIX}${slug}`,
@@ -250,6 +249,6 @@ export function createPublicHeadTransform(db: Database): IndexHtmlTransform {
 
     const route = ROUTE_HEADS.get(pathname);
     if (!route) return html;
-    return replaceHeadBlock(html, headBlockFor({ ...route, path: pathname }));
+    return replaceHeadBlock(html, headBlockFor(origin, { ...route, path: pathname }));
   };
 }

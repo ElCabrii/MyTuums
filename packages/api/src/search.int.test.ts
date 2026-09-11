@@ -1,6 +1,7 @@
+import { closeDb, db } from "./testing/runtime.js";
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
-import { closeDb, db } from "@my-tuums/db";
+
 import { post, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SEARCH_PAGE_SIZE, SEARCH_QUERY_MAX_LENGTH } from "./constants.js";
@@ -82,10 +83,19 @@ async function seedPostContentMany(
     content,
     createdAt: createdAt instanceof Date ? createdAt : createdAt(i),
   }));
-  return anonContext.db
-    .insert(post)
-    .values(rows)
-    .returning({ id: post.id, createdAt: post.createdAt });
+  const inserted: { id: string; createdAt: Date }[] = [];
+  for (let offset = 0; offset < rows.length; offset += 50) {
+    const [first, ...rest] = rows
+      .slice(offset, offset + 50)
+      .map((row) =>
+        anonContext.db
+          .insert(post)
+          .values(row)
+          .returning({ id: post.id, createdAt: post.createdAt }),
+      );
+    inserted.push(...(await anonContext.db.batch([first, ...rest])).flat());
+  }
+  return inserted;
 }
 
 /**
@@ -109,10 +119,19 @@ async function seedUsers(
     if (row.createdAt) value.createdAt = row.createdAt;
     return value;
   });
-  return anonContext.db
-    .insert(user)
-    .values(values)
-    .returning({ id: user.id, username: user.username, createdAt: user.createdAt });
+  const inserted: { id: string; username: string | null; createdAt: Date }[] = [];
+  for (let offset = 0; offset < values.length; offset += 50) {
+    const [first, ...rest] = values
+      .slice(offset, offset + 50)
+      .map((row) =>
+        anonContext.db
+          .insert(user)
+          .values(row)
+          .returning({ id: user.id, username: user.username, createdAt: user.createdAt }),
+      );
+    inserted.push(...(await anonContext.db.batch([first, ...rest])).flat());
+  }
+  return inserted;
 }
 
 interface SearchPageInput {
@@ -464,7 +483,7 @@ describe("search.posts", () => {
     // unless the post batch's gameMentions map resolves the tag, in which
     // case it links to `/games/{slug}` instead (issue #314, Q3; that half's
     // server contract lives in games-mentions.int.test.ts). This pins the
-    // search half of the contract: `ilike` folds the case the client folded,
+    // search half of the contract: the shared matcher folds the case the client folded,
     // and the `#` keeps posts that merely contain the word out of what is
     // presented as "posts tagged #tag".
     const author = await createTestUser();

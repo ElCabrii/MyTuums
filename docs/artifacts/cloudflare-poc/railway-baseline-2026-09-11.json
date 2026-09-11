@@ -1,0 +1,230 @@
+{
+  "capturedAt": "2026-09-11 11:00:52 UTC",
+  "projectId": "ffdcd3e4-918b-4d72-aae3-971a3c6b1438",
+  "environmentId": "814c546d-cae5-4e1f-bd9f-7930eae09ea8",
+  "hoursBack": 168,
+  "sampleRateSeconds": 3600,
+  "source": "Railway plugin get_service_metrics; summarized resource metrics, not billing totals or logical database size",
+  "services": [
+    {
+      "service": {
+        "id": "0b549837-557e-45d6-81ea-554976bb1b77",
+        "name": "mytuums-video-worker"
+      },
+      "environment": {
+        "id": "814c546d-cae5-4e1f-bd9f-7930eae09ea8",
+        "name": "production"
+      },
+      "metrics": [
+        {
+          "measurement": "CPU_USAGE",
+          "current": 0.000012563055555555556,
+          "average": 0.00016916685568704805,
+          "min": 0,
+          "max": 0.0020479191666666666,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "MEMORY_USAGE_GB",
+          "current": 0.055533568,
+          "average": 0.013005461803164226,
+          "min": 0,
+          "max": 0.19101057944806205,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "DISK_USAGE_GB",
+          "current": 0,
+          "average": 0,
+          "min": 0,
+          "max": 0,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "NETWORK_TX_GB",
+          "current": 0.000008717,
+          "average": 0.00009363909467455623,
+          "min": 0,
+          "max": 0.001075962,
+          "sampleCount": 169
+        }
+      ]
+    },
+    {
+      "service": {
+        "id": "69571eaf-487d-4e45-85af-be3e43096ebd",
+        "name": "mytuums-games-sync"
+      },
+      "environment": {
+        "id": "814c546d-cae5-4e1f-bd9f-7930eae09ea8",
+        "name": "production"
+      },
+      "metrics": [
+        {
+          "measurement": "CPU_USAGE",
+          "current": 0,
+          "average": 0.00004325157790927022,
+          "min": 0,
+          "max": 0.003723950277777778,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "MEMORY_USAGE_GB",
+          "current": 0.075767808,
+          "average": 0.0174225094077205,
+          "min": 0,
+          "max": 0.15810696533333335,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "DISK_USAGE_GB",
+          "current": 0,
+          "average": 0,
+          "min": 0,
+          "max": 0,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "NETWORK_TX_GB",
+          "current": 0,
+          "average": 0.00072392250295858,
+          "min": 0,
+          "max": 0.065771856,
+          "sampleCount": 169
+        }
+      ]
+    },
+    {
+      "service": {
+        "id": "b05271c5-6840-476f-a77c-dca4ad2f1a7a",
+        "name": "mytuums-prune-notifications"
+      },
+      "environment": {
+        "id": "814c546d-cae5-4e1f-bd9f-7930eae09ea8",
+        "name": "production"
+      },
+      "metrics": [
+        {
+          "measurement": "CPU_USAGE",
+          "current": 0,
+          "average": 0,
+          "min": 0,
+          "max": 0,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "MEMORY_USAGE_GB",
+          "current": 0,
+          "average": 0,
+          "min": 0,
+          "max": 0,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "DISK_USAGE_GB",
+          "current": 0,
+          "average": 0,
+          "min": 0,
+          "max": 0,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "NETWORK_TX_GB",
+          "current": 0,
+          "average": 0,
+          "min": 0,
+          "max": 0,
+          "sampleCount": 169
+        }
+      ]
+    },
+    {
+      "service": {
+        "id": "9d2fe458-a456-4062-bcab-50afca980585",
+        "name": "mytuums-server"
+      },
+      "environment": {
+        "id": "814c546d-cae5-4e1f-bd9f-7930eae09ea8",
+        "name": "production"
+      },
+      "metrics": [
+        {
+          "measurement": "CPU_USAGE",
+          "current": 0.000001601388888888889,
+          "average": 0.0003332469477317555,
+          "min": 0.000001601388888888889,
+          "max": 0.005059855555555556,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "MEMORY_USAGE_GB",
+          "current": 0.138244096,
+          "average": 0.18421068486420128,
+          "min": 0.1366771271775701,
+          "max": 0.5174784895300546,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "DISK_USAGE_GB",
+          "current": 0,
+          "average": 0,
+          "min": 0,
+          "max": 0,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "NETWORK_TX_GB",
+          "current": 0,
+          "average": 0.0008970195976331363,
+          "min": 0,
+          "max": 0.008460827,
+          "sampleCount": 169
+        }
+      ]
+    },
+    {
+      "service": {
+        "id": "c8bfea31-83fb-4ef4-b833-65ec0984aa2d",
+        "name": "mytuums-postgres"
+      },
+      "environment": {
+        "id": "814c546d-cae5-4e1f-bd9f-7930eae09ea8",
+        "name": "production"
+      },
+      "metrics": [
+        {
+          "measurement": "CPU_USAGE",
+          "current": 0.000013264722222222221,
+          "average": 0.00029055330046022363,
+          "min": 0.000013264722222222221,
+          "max": 0.0018061972222222222,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "MEMORY_USAGE_GB",
+          "current": 0.174780416,
+          "average": 0.07162216183400386,
+          "min": 0.05830059154285714,
+          "max": 0.174780416,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "DISK_USAGE_GB",
+          "current": 0.130596864,
+          "average": 0.11939637704003798,
+          "min": 0.11786392596078432,
+          "max": 0.130596864,
+          "sampleCount": 169
+        },
+        {
+          "measurement": "NETWORK_TX_GB",
+          "current": 0,
+          "average": 0,
+          "min": 0,
+          "max": 0,
+          "sampleCount": 169
+        }
+      ]
+    }
+  ]
+}

@@ -1,25 +1,26 @@
+import { closeDb, webOrigin } from "./testing/runtime.js";
+import { createAppealTokenSigner } from "./appeal-token.js";
 import { randomUUID } from "node:crypto";
-import { webOrigin } from "@my-tuums/auth";
-import { closeDb } from "@my-tuums/db";
-import { and, eq } from "drizzle-orm";
+
+import { and, eq, sql } from "drizzle-orm";
 import { moderationAction, post, postAttachment, report, user } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-  applyModerationEffect,
   banUser,
   banUserEffect,
   removePost,
   removePostEffect,
+  makeAppealUrl,
   restorePost,
   restoreRoleEffect,
   setRole,
   setRoleEffect,
   suspendUser,
   unbanUser,
-  type DbLike,
 } from "./moderation-actions.js";
 import {
   anonContext,
+  buildPendingEmail,
   createTestUser,
   setUserBan,
   setUserRole,
@@ -45,30 +46,25 @@ async function seedPost(authorId: string, content: string): Promise<string> {
   return row.id;
 }
 
-/**
- * A `DbLike` whose `transaction` runs the callback against the REAL database
- * and then throws — every write the effect made inside its transaction is
- * rolled back, exactly as a mid-transaction failure would. This is how the
- * tests force a failure AFTER the writes, so the rollback guarantees (no
- * audit row, no partial state, no email) are exercised rather than assumed.
- */
-function dbThatRollsBack(): DbLike {
-  const real = anonContext.db;
-  return {
-    select: real.select.bind(real),
-    insert: real.insert.bind(real),
-    update: real.update.bind(real),
-    delete: real.delete.bind(real),
-    execute: real.execute.bind(real),
-    transaction: async (callback) =>
-      real.transaction(async (tx) => {
-        await callback(tx);
-        throw new Error("simulated failure after writes, before commit");
-      }),
-  };
-}
-
 describe("forward moderation effects", () => {
+  it("uses the deployment's origin and signer for emailed appeal capabilities", async () => {
+    const appealToken = createAppealTokenSigner("isolated-poc-appeal-secret-at-least-32-chars");
+    const actionId = randomUUID();
+    const userId = randomUUID();
+    const url = new URL(
+      await makeAppealUrl(
+        { webOrigin: "https://cf-poc.example.test", appealToken },
+        actionId,
+        userId,
+      ),
+    );
+    expect(url.origin).toBe("https://cf-poc.example.test");
+    expect(url.pathname).toBe("/appeal");
+    const token = url.searchParams.get("token")!;
+    expect(await appealToken.verify(token)).toMatchObject({ actionId, userId, purpose: "appeal" });
+    expect(await anonContext.appealToken.verify(token)).toBeNull();
+  });
+
   it("removePostEffect describes the removed post's images, and drops the quote block when there is no text", async () => {
     const author = await createTestUser();
     const mod = await createTestUser();
@@ -90,14 +86,14 @@ describe("forward moderation effects", () => {
           height: 64,
         });
       }
-      const { pending } = await removePostEffect(anonContext.db, {
+      const { pending } = await removePostEffect(anonContext, {
         postId: row.id,
         actorId: mod.id,
         reason: "spam content",
       });
       return {
-        en: (await pending[0].build("en")).text,
-        fr: (await pending[0].build("fr")).text,
+        en: (await buildPendingEmail(pending[0], "en", anonContext.webOrigin)).text,
+        fr: (await buildPendingEmail(pending[0], "fr", anonContext.webOrigin)).text,
       };
     }
 
@@ -129,7 +125,7 @@ describe("forward moderation effects", () => {
       reason: "spam",
     });
 
-    const { pending } = await removePostEffect(anonContext.db, {
+    const { pending } = await removePostEffect(anonContext, {
       postId,
       actorId: mod.id,
       reason: "spam content",
@@ -139,10 +135,16 @@ describe("forward moderation effects", () => {
     expect(vi.mocked(testEmailSender.send)).not.toHaveBeenCalled();
     expect(pending).toHaveLength(1);
     expect(pending[0].userId).toBe(author.id);
-    expect((await pending[0].build("en")).subject).toBe("Your post was removed from MyTuums");
+    expect((await buildPendingEmail(pending[0], "en", anonContext.webOrigin)).subject).toBe(
+      "Your post was removed from MyTuums",
+    );
     // A text-only post is quoted with no image count at all.
-    expect((await pending[0].build("en")).text).toContain('Your post:\n"remove me"');
-    expect((await pending[0].build("fr")).text).toContain("Votre publication :\n« remove me »");
+    expect((await buildPendingEmail(pending[0], "en", anonContext.webOrigin)).text).toContain(
+      'Your post:\n"remove me"',
+    );
+    expect((await buildPendingEmail(pending[0], "fr", anonContext.webOrigin)).text).toContain(
+      "Votre publication :\n« remove me »",
+    );
 
     const [row] = await anonContext.db
       .select({
@@ -186,13 +188,20 @@ describe("forward moderation effects", () => {
       reason: "spam",
     });
 
-    await expect(
-      removePostEffect(dbThatRollsBack(), {
-        postId,
-        actorId: mod.id,
-        reason: "spam content",
-      }),
-    ).rejects.toThrow("simulated failure after writes, before commit");
+    await anonContext.db.run(sql`create trigger reject_removal_test before update on post
+      when new.removed_at is not null
+      begin select raise(abort, 'injected removal failure'); end`);
+    try {
+      await expect(
+        removePostEffect(anonContext, {
+          postId,
+          actorId: mod.id,
+          reason: "spam content",
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await anonContext.db.run(sql`drop trigger reject_removal_test`);
+    }
 
     const [row] = await anonContext.db
       .select({ removedAt: post.removedAt })
@@ -222,14 +231,21 @@ describe("forward moderation effects", () => {
     await setUserRole(admin.id, "admin");
     const bob = await createTestUser();
 
-    await expect(
-      setRoleEffect(dbThatRollsBack(), {
-        userId: bob.id,
-        actorId: admin.id,
-        actorRole: "admin",
-        role: "moderator",
-      }),
-    ).rejects.toThrow("simulated failure after writes, before commit");
+    await anonContext.db.run(sql`create trigger reject_role_test before update on user
+      when new.role is not old.role
+      begin select raise(abort, 'injected role change failure'); end`);
+    try {
+      await expect(
+        setRoleEffect(anonContext.db, {
+          userId: bob.id,
+          actorId: admin.id,
+          actorRole: "admin",
+          role: "moderator",
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await anonContext.db.run(sql`drop trigger reject_role_test`);
+    }
 
     const [row] = await anonContext.db
       .select({ role: user.role })
@@ -299,7 +315,9 @@ describe("forward moderation effects", () => {
 
     expect(pending.pending).toHaveLength(1);
     expect(pending.pending[0].userId).toBe(bob.id);
-    expect((await pending.pending[0].build("en")).subject).toBe("Your MyTuums role changed");
+    expect((await buildPendingEmail(pending.pending[0], "en", anonContext.webOrigin)).subject).toBe(
+      "Your MyTuums role changed",
+    );
 
     const [row] = await anonContext.db
       .select({ role: user.role })
@@ -357,7 +375,7 @@ describe("forward moderation effects", () => {
     const staff = await createTestUser();
     await setUserRole(staff.id, "staff");
 
-    const { pending } = await banUserEffect(anonContext.db, {
+    const { pending } = await banUserEffect(anonContext, {
       userId: victim.id,
       actorId: staff.id,
       actorRole: "staff",
@@ -371,46 +389,51 @@ describe("forward moderation effects", () => {
     expect(row?.banned).toBe(true);
     expect(row?.banExpires).toBeNull();
     expect(pending).toHaveLength(1);
-    expect((await pending[0].build("en")).subject).toBe("Your account was banned");
+    expect((await buildPendingEmail(pending[0], "en", anonContext.webOrigin)).subject).toBe(
+      "Your account was banned",
+    );
   });
 });
 
-describe("applyModerationEffect", () => {
-  it("sends the effect's notice after its commit — and a dead email adapter is swallowed, the action stands", async () => {
+describe("moderation commit and send", () => {
+  it("commits removal despite mail failure and logs only the request identifier", async () => {
     const author = await createTestUser();
     const mod = await createTestUser();
     await setUserRole(mod.id, "moderator");
     const postId = await seedPost(author.id, "email may fail");
 
-    vi.mocked(testEmailSender.send).mockRejectedValueOnce(new Error("resend is down"));
+    vi.mocked(testEmailSender.send).mockRejectedValueOnce(
+      new Error("synthetic provider credential and private appeal URL"),
+    );
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(
-      removePost(anonContext, {
-        postId,
-        actorId: mod.id,
-        reason: "spam",
-      }),
-    ).resolves.toBeUndefined();
+    try {
+      await expect(
+        removePost(anonContext, {
+          postId,
+          actorId: mod.id,
+          reason: "spam",
+        }),
+      ).resolves.toBeUndefined();
 
-    expect(vi.mocked(testEmailSender.send)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(testEmailSender.send).mock.calls[0][0].subject).toBe(
-      "Your post was removed from MyTuums",
-    );
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringMatching(/Moderation email failed to send/),
-      expect.anything(),
-      expect.any(Error),
-    );
+      expect(vi.mocked(testEmailSender.send)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(testEmailSender.send).mock.calls[0][0].subject).toBe(
+        "Your post was removed from MyTuums",
+      );
+      expect(errorSpy.mock.calls).toEqual([
+        [{ event: "moderation_email_failed", requestId: anonContext.requestId }],
+      ]);
 
-    // The removal committed before the send — the failed adapter changes
-    // nothing about the action.
-    const [row] = await anonContext.db
-      .select({ removedAt: post.removedAt })
-      .from(post)
-      .where(eq(post.id, postId));
-    expect(row?.removedAt).not.toBeNull();
-    errorSpy.mockRestore();
+      // The removal committed before the send — the failed adapter changes
+      // nothing about the action.
+      const [row] = await anonContext.db
+        .select({ removedAt: post.removedAt })
+        .from(post)
+        .where(eq(post.id, postId));
+      expect(row?.removedAt).not.toBeNull();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("an effect that rolls back produces no audit row and no email", async () => {
@@ -419,21 +442,23 @@ describe("applyModerationEffect", () => {
     await setUserRole(mod.id, "moderator");
     const postId = await seedPost(author.id, "roll me back");
 
-    // The runner opens the transaction and hands the effect the transaction
-    // handle; the effect runs inside it and then throws, so the runner's
-    // transaction rolls back — the removal, the audit row and the send all
-    // vanish together.
-    await expect(
-      applyModerationEffect(anonContext, async (db) => {
-        const { pending } = await removePostEffect(db, {
+    // Fail the notification write after its audit insert. The public entry
+    // point must roll everything back and never send the promised email.
+    await anonContext.db
+      .run(sql`create trigger reject_removal_notice_test before insert on notification
+      when new.type = 'moderation'
+      begin select raise(abort, 'injected notification failure'); end`);
+    try {
+      await expect(
+        removePost(anonContext, {
           postId,
           actorId: mod.id,
           reason: "spam content",
-        });
-        expect(pending).toHaveLength(1);
-        throw new Error("simulated failure after writes, before commit");
-      }),
-    ).rejects.toThrow("simulated failure after writes, before commit");
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await anonContext.db.run(sql`drop trigger reject_removal_notice_test`);
+    }
 
     const [row] = await anonContext.db
       .select({ removedAt: post.removedAt })

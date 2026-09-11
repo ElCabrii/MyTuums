@@ -12,7 +12,16 @@
       // they must be declared here too or a cached build restores only the
       // bundle and leaves `lint`/`typecheck` to resolve imports that no
       // longer exist on disk.
-      "outputs": ["dist/**", "src/routeTree.gen.ts", "src/paraglide/**"]
+      "outputs": ["dist/**", ".wrangler/dist/**", "src/routeTree.gen.ts", "src/paraglide/**"]
+    },
+    "@my-tuums/server#build": {
+      "dependsOn": ["^build", "@my-tuums/web#build"],
+      "outputs": [".wrangler/dist/**"]
+    },
+    // Artifact tests must use completed app and branding builds, including assets.
+    "@my-tuums/server#test:unit": {
+      "dependsOn": ["build", "@my-tuums/branding#build"],
+      "cache": false
     },
     // `lint` and `typecheck` need the generated, git-ignored files that the
     // web build produces (`routeTree.gen.ts`, `src/paraglide/**`), so they
@@ -37,9 +46,6 @@
       "cache": false
     },
     "db:migrate": {
-      "cache": false
-    },
-    "db:push": {
       "cache": false
     }
   }

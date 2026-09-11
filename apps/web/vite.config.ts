@@ -11,20 +11,18 @@ import pkg from "./package.json" with { type: "json" };
 
 // Where /rpc and /api/auth are proxied in dev. Overridable so the E2E suite
 // can point the web app at its own server on a different port and run beside
-// a live `pnpm dev` (or the docker container) instead of fighting it for 3001.
+// a live `pnpm dev` instead of fighting it for 3001.
 const rpcTarget = process.env.RPC_TARGET ?? "http://localhost:3001";
 const changelog = loadBuiltChangelog(path.resolve(import.meta.dirname, "changelog"), pkg.version);
 
 export default defineConfig({
-  // Vite only loads .env files from its own project root by default, which is
-  // apps/web — not the monorepo root where the real .env lives (every other
-  // process here reads that one via `dotenv -e ../../.env`, e.g.
-  // packages/db's scripts). Without this, VITE_GOOGLE_CLIENT_ID and
-  // VITE_SOCIAL_PROVIDERS are invisible to import.meta.env, so no OAuth
-  // buttons and no One Tap ever render, with nothing in the console to say
-  // why - the code has no missing dependency, it just never saw the values.
+  // Share optional public build inputs from the monorepo root. Worker runtime
+  // secrets are bindings and are never loaded from this file.
   envDir: path.resolve(import.meta.dirname, "../.."),
   define: {
+    // This PoC entrypoint requires all three provider credential pairs. Keep the
+    // browser list aligned; One Tap still requires its matching public client ID.
+    "import.meta.env.VITE_SOCIAL_PROVIDERS": JSON.stringify("google,discord,twitch"),
     // The footer's "v0.4.2" and the header's alpha/beta tag come from
     // package.json's `version` field, inlined here rather than read at
     // runtime — no env file or API round-trip to drift from the release

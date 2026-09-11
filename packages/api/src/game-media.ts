@@ -9,23 +9,22 @@
  * decision exists to make, so the authorizer is a constant and the whole
  * module is shape + policy.
  *
- * The key is `games/<igdbId>-<imageId>.<ext>`, where `imageId` is IGDB's own
- * image hash. That makes it content-addressed — a re-sync of an unchanged
- * cover re-uploads the same bytes under the same key — which is what licenses
- * the `public` redirect cache below: the object a key names never changes, so
- * no staleness budget exists to bound beyond the signature's own life.
+ * New keys include the catalog version: games/<igdbId>-<imageId>.<version>.<ext>.
+ * An unchanged cover is retained without upload; a changed cover gets a fresh
+ * immutable path even if IGDB returns to an older image. Delayed cleanup from
+ * an earlier run can therefore never delete a later run's upload.
  */
 import { parseMediaVariantKey } from "./constants.js";
 import { secondsUntilWindowEnd } from "./storage.js";
 
-/**
- * The bucket key under which a game's cover is re-hosted. Deterministic in
- * (igdbId, imageId) so the sync's uploads are idempotent: a run that dies
- * mid-sync leaves objects the next successful run references rather than
- * orphans, and a repeat sync of an unchanged cover performs no upload at all.
- */
-export function gameCoverObjectKey(igdbId: number, imageId: string, ext: string): string {
-  return `games/${igdbId}-${imageId}.${ext}`;
+/** Retry-stable within one catalog version, never reused by another version. */
+export function gameCoverObjectKey(
+  igdbId: number,
+  imageId: string,
+  ext: string,
+  version: string,
+): string {
+  return `games/${igdbId}-${imageId}.${version.replaceAll("-", "")}.${ext}`;
 }
 
 /**
@@ -40,7 +39,7 @@ export function canViewGameCoverMedia(): Promise<boolean> {
 /**
  * The Cache-Control a game-cover redirect may carry, or `null` when it must
  * not be stored. Unlike every other media class, this one is `public`: covers
- * are public content under content-addressed keys, so a shared cache may hold
+ * are public content under immutable keys, so a shared cache may hold
  * the redirect. The `max-age` is still bounded by the presigned URL's
  * remaining signing window (`secondsUntilWindowEnd`) so a stored redirect can
  * never outlive the signature it points at — the same budget

@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, or, sql, type SQL } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { ORPCError } from "@orpc/server";
 import type { Database } from "@my-tuums/db";
 import { game, gameFavorite, follow, user } from "@my-tuums/db/schema";
@@ -19,6 +20,8 @@ import {
   publicReadProcedure,
   rateLimit,
 } from "./procedures.js";
+import { containsText } from "./search-text.js";
+import { textIn } from "./sql.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { visibleUser } from "./visibility.js";
 
@@ -60,7 +63,35 @@ function viewerHasFavoritedGame(viewerId: string | null) {
   return sql<boolean>`exists (
     select 1 from ${gameFavorite}
     where ${gameFavorite.gameId} = ${game.igdbId} and ${gameFavorite.userId} = ${viewerId}
-  )`;
+  )`.mapWith(Boolean);
+}
+
+/** The batch returns the count from the same commit as the viewer's change.
+ * D1 triggers own count maintenance, including account-deletion cascades. */
+async function setGameFavorite(db: Database, slug: string, userId: string, favorited: boolean) {
+  const mutation: BatchItem<"sqlite"> = favorited
+    ? db
+        .insert(gameFavorite)
+        .select(
+          sql`select ${game.igdbId}, ${userId}, cast(unixepoch('subsec') * 1000 as integer)
+          from ${game} where ${game.slug} = ${slug}`,
+        )
+        .onConflictDoNothing()
+    : db
+        .delete(gameFavorite)
+        .where(
+          and(
+            eq(gameFavorite.userId, userId),
+            sql`${gameFavorite.gameId} = (select ${game.igdbId} from ${game} where ${game.slug} = ${slug})`,
+          ),
+        );
+  const [, rows] = await db.batch([
+    mutation,
+    db.select({ favoriteCount: game.favoriteCount }).from(game).where(eq(game.slug, slug)),
+  ]);
+  const row = rows[0];
+  if (!row) throw new ORPCError("NOT_FOUND", { message: "No such game." });
+  return { slug, favoriteCount: row.favoriteCount, viewerHasFavoritedGame: favorited };
 }
 
 /** The game page's whole read: the catalog row plus the favorite state. */
@@ -129,7 +160,7 @@ interface GameSortEntry {
  * the database clock so the boundary never skews with the app server's.
  */
 function unreleasedFilter(): SQL {
-  return sql`(${game.firstReleaseDate} is null or to_timestamp(${game.firstReleaseDate}) > now())`;
+  return sql`(${game.firstReleaseDate} is null or ${game.firstReleaseDate} > unixepoch('subsec'))`;
 }
 
 const GAME_SORTS = {
@@ -192,17 +223,6 @@ function coalesceYearParam(key: number | string | null): SQL {
 type GameReader = Pick<Database, "select">;
 
 /**
- * Escapes the LIKE metacharacters so a caller's `%`, `_` and `\` match
- * literally — the same rule `escapeLikePattern` applies on the users/posts
- * half (search.ts); restated here because games.ts cannot import it without
- * a cycle, and one escaped pattern helper per module boundary beats a shared
- * escape module for three lines of mechanical code.
- */
-function escapeLikePattern(pattern: string): string {
-  return pattern.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
-
-/**
  * Whether a game row matches a free-text query — the game half of "this is
  * the thing you typed" (issue #314, Q24): a case-insensitive substring of
  * the display name or of the hashtag key, so both `world of` and
@@ -211,8 +231,7 @@ function escapeLikePattern(pattern: string): string {
  * the directory pages match on exactly one predicate.
  */
 export function matchesGameQuery(q: string): SQL | undefined {
-  const contains = `%${escapeLikePattern(q)}%`;
-  return or(ilike(game.name, contains), ilike(game.hashtagKey, contains));
+  return or(containsText(game.name, q), containsText(game.hashtagKey, q));
 }
 
 /** A grid row `gameKeysetPage` returns. */
@@ -276,7 +295,7 @@ export async function gameMentionsFor(
   const rows = await db
     .select({ hashtagKey: game.hashtagKey, slug: game.slug })
     .from(game)
-    .where(inArray(game.hashtagKey, keys));
+    .where(textIn(game.hashtagKey, keys));
 
   return Object.fromEntries(rows.map((row) => [row.hashtagKey, row.slug]));
 }
@@ -393,36 +412,9 @@ export const gameRouter = {
   favorite: protectedProcedure
     .use(rateLimit(RATE_LIMITS.favoriteGame))
     .input(z.object({ slug: z.string().trim().min(1).max(GAME_SLUG_MAX_LENGTH) }))
-    .handler(async ({ input, context }) => {
-      const [target] = await context.db
-        .select({ igdbId: game.igdbId })
-        .from(game)
-        .where(eq(game.slug, input.slug))
-        .limit(1);
-      if (!target) throw new ORPCError("NOT_FOUND", { message: "No such game." });
-
-      const favoriteCount = await context.db.transaction(async (tx) => {
-        const inserted = await tx
-          .insert(gameFavorite)
-          .values({ gameId: target.igdbId, userId: context.user.id })
-          .onConflictDoNothing()
-          .returning({ gameId: gameFavorite.gameId });
-        if (inserted.length > 0) {
-          await tx
-            .update(game)
-            .set({ favoriteCount: sql`${game.favoriteCount} + 1` })
-            .where(eq(game.igdbId, target.igdbId));
-        }
-        const [row] = await tx
-          .select({ favoriteCount: game.favoriteCount })
-          .from(game)
-          .where(eq(game.igdbId, target.igdbId))
-          .limit(1);
-        return row.favoriteCount;
-      });
-
-      return { slug: input.slug, favoriteCount, viewerHasFavoritedGame: true };
-    }),
+    .handler(({ input, context }) =>
+      setGameFavorite(context.db, input.slug, context.user.id, true),
+    ),
 
   /**
    * Unfavorites a game. Idempotent; the count decrements only when a row
@@ -435,37 +427,9 @@ export const gameRouter = {
   unfavorite: protectedProcedure
     .use(rateLimit(RATE_LIMITS.favoriteGame))
     .input(z.object({ slug: z.string().trim().min(1).max(GAME_SLUG_MAX_LENGTH) }))
-    .handler(async ({ input, context }) => {
-      const [target] = await context.db
-        .select({ igdbId: game.igdbId })
-        .from(game)
-        .where(eq(game.slug, input.slug))
-        .limit(1);
-      if (!target) throw new ORPCError("NOT_FOUND", { message: "No such game." });
-
-      const favoriteCount = await context.db.transaction(async (tx) => {
-        const removed = await tx
-          .delete(gameFavorite)
-          .where(
-            and(eq(gameFavorite.gameId, target.igdbId), eq(gameFavorite.userId, context.user.id)),
-          )
-          .returning({ gameId: gameFavorite.gameId });
-        if (removed.length > 0) {
-          await tx
-            .update(game)
-            .set({ favoriteCount: sql`${game.favoriteCount} - 1` })
-            .where(eq(game.igdbId, target.igdbId));
-        }
-        const [row] = await tx
-          .select({ favoriteCount: game.favoriteCount })
-          .from(game)
-          .where(eq(game.igdbId, target.igdbId))
-          .limit(1);
-        return row.favoriteCount;
-      });
-
-      return { slug: input.slug, favoriteCount, viewerHasFavoritedGame: false };
-    }),
+    .handler(({ input, context }) =>
+      setGameFavorite(context.db, input.slug, context.user.id, false),
+    ),
 
   /**
    * One profile's favorites rail (Q11/Q25): the games a user has favorited,

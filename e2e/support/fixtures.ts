@@ -2,6 +2,7 @@ import { test as base, type BrowserContext, type Page } from "@playwright/test";
 import webPackage from "../../apps/web/package.json" with { type: "json" };
 import { E2E } from "../playwright.config";
 import * as db from "./db";
+import { closeTestPlatform } from "./platform.js";
 
 type Fixtures = {
   /** A page authenticated as bob — for two-viewer scenarios (like/follow sync, DM-style checks). */
@@ -35,7 +36,19 @@ async function seedAnalyticsRefusal(context: BrowserContext | Page): Promise<voi
  * The suite's extended test handle: adds the `bobPage` and `signedOutPage`
  * pages plus the `db` seeding helpers to Playwright's default fixtures.
  */
-export const test = base.extend<Fixtures>({
+export const test = base.extend<Fixtures, { platformLifetime: void }>({
+  // Playwright parses this empty pattern to determine fixture dependencies.
+  platformLifetime: [
+    // eslint-disable-next-line no-empty-pattern -- required by Playwright's fixture parser
+    async ({}, use) => {
+      try {
+        await use();
+      } finally {
+        await closeTestPlatform();
+      }
+    },
+    { scope: "worker", auto: true },
+  ],
   showReleaseNotes: [false, { option: true }],
 
   bobPage: async ({ browser, showReleaseNotes }, use, testInfo) => {

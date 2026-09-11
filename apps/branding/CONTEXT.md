@@ -1,14 +1,42 @@
 # apps/branding context
 
+## Cloudflare PoC
+
+This branch targets `about-cf-poc.mytuums.com`, with product links pointing to
+`cf-poc.mytuums.com`. The source HTML, compiled frontend and crawler documents
+all use these isolated hosts. `robots.txt` disallows crawling; every response also
+has `X-Robots-Tag: noindex, nofollow`. Access, not crawler instructions, enforces
+privacy. Production's main branch is unchanged.
+
+`wrangler.jsonc` declares `mytuums-poc-branding`, the existing owner-only Access
+audience and its custom domain. Both workers.dev and preview URLs are disabled.
+`worker/index.ts` verifies the exact request origin and Access JWT before serving
+any asset, including icons, scripts and the document. It reuses the server's
+Access verifier; this is a server-side dependency, never a frontend import.
+Keep `run_worker_first: true`, `html_handling: none` and `not_found_handling: none`.
+Only `/` maps to `/index.html`; missing paths stay 404. Responses are private,
+uncached, and carry restrictive security headers. Only GET/HEAD are accepted.
+Logs contain a failure event and generated request ID; invocation logs are off
+and query-string redaction is enabled in native observability.
+
+`pnpm --filter @my-tuums/branding build` builds Vite assets and performs a Wrangler
+dry run. It does not publish. `pnpm --filter @my-tuums/branding types` regenerates
+`worker/worker-configuration.d.ts`; run `pnpm format` afterward. Typechecking covers
+the browser and Worker independently. The native security/build test lives at
+`apps/server/src/native-branding.test.ts`; run it through the server's Vitest
+command after building branding. It executes the actual Wrangler bundle with
+the built Vite assets and real local asset routing, using ephemeral Access keys.
+This proves local behavior, not live Access or Workers Builds configuration.
+Remote deployment and the branch-restricted build still need setup.
+
 ## Responsibility
 
-The public landing site served at `about.mytuums.com` ("The social media, for
+The Access-protected landing site served at `about-cf-poc.mytuums.com` ("The social media, for
 gamers"). A second, deliberately tiny Vite app — one page, no router, no
 state library, no API client — that shares the SPA's entire visual system
 (Tailwind v4, the shadcn preset in `components.json`, Inter Variable, the
 theme tokens copied verbatim into `src/index.css`) and its Paraglide en/fr
-pipeline. The server serves this app's build when `Host` is the branding
-hostname — see `apps/server/src/branding-host.ts`.
+pipeline. The native branding Worker serves the build after Access validation.
 
 ## Start here
 
@@ -30,14 +58,14 @@ hostname — see `apps/server/src/branding-host.ts`.
 
 ## Invariants
 
-- **No router, no Jotai, no workspace imports.** The site links into the app
+- **No router, no Jotai, no workspace imports in the browser.** The site links into the app
   with absolute URLs and renders no viewer-relative state; a dependency that
   creeps in here ships to every visitor of the landing page.
 - **Every string goes through Paraglide** — en and fr stay complete, and the
   language menu switches by `setLocale` exactly like the app's footer.
 - **No inline scripts in `index.html`** — the enforced CSP has no inline
   allowance; the bundle's same-origin module scripts are already covered.
-- **The CTA links are absolute to the apex** (`src/lib/site.ts`): a relative
+- **The CTA links are absolute to the PoC app** (`src/lib/site.ts`): a relative
   link would strand a visitor on a host where the app is never served and
   session cookies do not exist.
 - **The social URLs exist in exactly two places that must agree**: the
@@ -45,8 +73,8 @@ hostname — see `apps/server/src/branding-host.ts`.
   Organization JSON-LD `sameAs` (`apps/web/index.html`); the JSON-LD in this
   app's own `index.html` mirrors the same list.
 - **`public/robots.txt`, `sitemap.xml` and `llms.txt` are the crawler- and
-  agent-facing surface** — absolute `https://about.mytuums.com/` URLs only,
-  and `Allow: /` for every user agent, AI crawlers included.
+  agent-facing surface** — they use PoC URLs and remain behind Access.
+  `robots.txt` disallows crawling for this private experiment.
 
 ## Generated files
 
@@ -65,6 +93,5 @@ Git-ignored, and why `lint` and `typecheck` depend on `build` in
 | `pnpm --filter @my-tuums/branding dev`                | dev server on `:5174` |
 | `pnpm --filter @my-tuums/branding lint` / `typecheck` | this package alone    |
 
-There is no test suite: the site is presentational, host routing is pinned
-in `apps/server/src/request-handler.test.ts`, and the static handler it is
-served through is pinned in `apps/server/src/static-files.test.ts`.
+The browser remains presentational. The native branding test described above
+pins its deployed artifact and asset admission boundary.

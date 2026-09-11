@@ -1,30 +1,20 @@
 /**
- * Applying the generated migrations, as a library function.
- *
- * Lives in `packages/db` rather than in `apps/server` because this package is
- * the one that owns both halves: `drizzle-orm` is its dependency, and the SQL
- * in `packages/db/drizzle` is its output. `apps/server` does not declare
- * `drizzle-orm` at all, so importing the migrator there only appears to work
- * through hoisting — under pnpm's strict layout it does not resolve.
- *
- * `drizzle-orm`'s migrator, not `drizzle-kit`: the two apply the same files and
- * share the same `drizzle.__drizzle_migrations` bookkeeping, but drizzle-kit is
- * a dev dependency and shipping it (plus its tree) in a runtime image to spend
- * a few seconds per deploy is a poor trade.
+ * Apply the committed D1 migrations through the explicit target binding.
+ * Local tests and the PoC deployment command share Drizzle's migration ledger.
  */
-import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { db } from "./index.js";
+import { migrate } from "drizzle-orm/d1/migrator";
+import { drizzle } from "drizzle-orm/d1";
+import type { Database } from "./index.js";
 
 /**
  * Applies every migration the target database has not recorded yet.
  *
- * Idempotent: already-applied migrations are skipped by hash, so running it on
+ * Idempotent: already-applied migrations are skipped by journal timestamp, so running it on
  * a deploy that changed no schema is a no-op.
  *
  * `migrationsFolder` is passed in rather than resolved from this module's own
- * location on purpose — the server bundles this file with tsup, so at runtime
- * `import.meta.url` points at `apps/server/dist`, nowhere near the SQL.
+ * location so the caller owns the deployment artifact's SQL path.
  */
-export async function runMigrations(migrationsFolder: string): Promise<void> {
-  await migrate(db, { migrationsFolder });
+export async function runMigrations(db: Database, migrationsFolder: string): Promise<void> {
+  await migrate(drizzle(db.$client), { migrationsFolder });
 }

@@ -9,7 +9,7 @@ behaviour and vocabulary, [product.md](product.md).
 **Source of truth:** `pnpm-workspace.yaml`, each package's `package.json`,
 `turbo.json`
 
-Dependencies point one way. `apps/web`, `apps/server` and `apps/video-worker` are leaves; nothing
+Dependencies point one way. `apps/web`, `apps/server` and `apps/jobs` are leaves; nothing
 imports them.
 
 ```
@@ -18,152 +18,93 @@ apps/server ──▶ packages/api ──▶ packages/auth ──▶ packages/db
             └─▶ packages/auth ─────────────────────┘
             └─▶ packages/db
 e2e ──▶ packages/api, packages/auth, packages/db
-apps/video-worker ──▶ packages/api/video-worker, packages/db
+apps/jobs ──▶ packages/api/cloudflare-jobs, packages/db
 ```
 
-`packages/api`, `packages/auth` and `packages/db` are **source-only**: they
-export `.ts` from `exports` and have no build step. Consumers compile them
-(`apps/web` through Vite) or inline them (`apps/server` through tsup, because
-Node's type-stripping cannot rewrite the `.js` specifiers those packages
-ship). Only `apps/server`'s own declared dependencies stay external in the
-bundle.
-
-`apps/web` may import four workspace modules and no others:
-`@my-tuums/api/constants`, `@my-tuums/api/dimensions`, `@my-tuums/api/roles`
-and `@my-tuums/auth/rules`. All four must stay free of `@my-tuums/db`, which reads
-`DATABASE_URL` at module scope and throws in a browser.
-
-The `packages/auth` edge is the one that looks surprising, so it is worth
-stating why it does not weaken the direction above. `@my-tuums/auth/rules`
-(`packages/auth/src/rules.ts`) is the single statement of the account rules —
-handle bounds, charset and lowercase normalization, the date-of-birth parse and
-age comparison, the bio limit, the preference lists, and the English rejection
-strings — and it is the only file in that package with **no imports at all**.
-Reaching it does not construct the better-auth instance, read any env, or touch
-`@my-tuums/db`; the production bundle contains exactly those four workspace
-modules and nothing else from the packages. It lives in `packages/auth` because
-that is where the rules are _enforced_ (the database hooks are the only place a
-user-field rule actually holds) and because `packages/api` already depends on
-`packages/auth` — putting the shared statement in `packages/api` instead would
-force `packages/auth` to import it, closing a cycle.
+`packages/api`, `packages/auth` and `packages/db` export TypeScript source.
+Wrangler bundles them for Workers; local maintenance and test tools use tsx or
+fixture bundling. The browser may import only the dependency-free subpaths listed
+in [root context](../CONTEXT.md#cross-cutting-invariants). It never imports a D1
+client or constructs an auth instance.
 
 ## Development topology
 
-**Source of truth:** `apps/web/vite.config.ts`, `docker-compose.yml`,
+**Source of truth:** `apps/web/vite.config.ts`, `apps/server/src/e2e-server.ts`,
 `e2e/playwright.config.ts`
 
-`pnpm dev` runs two processes: the API on `:3001` and Vite on `:5173`. The
-browser talks to Vite, which proxies three prefixes to the API:
+Native E2E runs Vite on `:5273` with its Worker gateway on `:3101`. The gateway
+composes real app, D1, R2, Durable Objects and video Workflow code with synthetic
+Access, email and Stream transport. Each test database/bucket is isolated and
+ends in `_test`; no production selectors or credentials enter this stack.
 
-| Prefix      | Target                         | Note                                                                            |
-| ----------- | ------------------------------ | ------------------------------------------------------------------------------- |
-| `/rpc`      | `RPC_TARGET` (default `:3001`) | `changeOrigin: true`                                                            |
-| `/api/auth` | same                           | same                                                                            |
-| `/media`    | same                           | the 302 is **not** followed by the proxy — the browser follows it to the bucket |
-
-Vite's `envDir` is the monorepo root, so the single `.env` feeds Vite and every
-`dotenv -e ../../.env` script alike.
-
-`pnpm video:dev` runs the optional worker separately on health port `3002`.
-FFmpeg and the environment's database/bucket pair are required. Ordinary
-`pnpm dev` excludes it so image-only development does not require native tools.
-
-`pnpm docker:up` occupies the same two ports with the production image, so run
-one or the other. The E2E stack deliberately uses `:3101` / `:5273` so it can
-run beside a live dev stack.
+Interactive `pnpm dev` currently starts Vite on `:5173` and low-level Wrangler on
+`:3001`. Its loopback composition remains incomplete: the deployment entrypoint
+requires its PoC host, Access assertion and secrets. `pnpm jobs:dev` starts jobs
+separately; sharing the app's local persistence for recovery remains to wire.
+Vite proxies `/rpc`, `/api/auth` and `/media` to `RPC_TARGET`. Only public build
+inputs come from the root Vite environment; maintenance tools bind D1/R2 directly.
 
 ## Production topology — one origin
 
-**Source of truth:** `apps/server/Dockerfile`, `apps/server/src/static-files.ts`,
-`apps/web/src/lib/orpc.ts`
+**Source of truth:** `apps/server/wrangler.jsonc`, `apps/server/worker/index.ts`,
+`apps/branding/wrangler.jsonc`, `apps/jobs/wrangler.jsonc`
 
-In production there is no proxy and no second origin. The Docker image sets
-`WEB_DIST=/app/apps/web/dist` and the same Node process serves the SPA, the
-auth endpoints, the RPC API and media redirects.
+This is the isolated PoC's intended hosted topology. It has not yet been deployed;
+Railway production continues independently.
 
-Video processing adds an independent worker service in the same environment and
-European region. It shares PostgreSQL and the bucket, has no browser-facing
-origin, and never handles a user's HTTP upload. Deployment settings are in
-[video operations](video-operations.md).
+```mermaid
+flowchart LR
+  Browser --> Access[Owner-only Cloudflare Access]
+  Access --> App[App Worker + SPA assets]
+  Access --> Branding[Branding Worker + assets]
+  App --> D1[EU D1]
+  App --> R2[Private EU R2]
+  App --> Images[Images transformations]
+  App --> Stream[Private Stream video]
+  App --> Email[Email Service]
+  App --> Counters[Rate-limit Durable Objects]
+  App --> Video[Video Workflow]
+  Cron[Cron recovery and schedules] --> Jobs[Jobs Worker / Workflows]
+  Jobs --> D1
+  Jobs --> R2
+  Jobs --> Stream
+  Jobs --> Video
+```
 
-The Vite build also emits `/service-worker.js`, whose generated precache list
-contains the hashed app-shell assets. The worker never caches RPC, auth, or
-media responses; it only supplies the cached SPA shell when a document
-navigation is offline. The worker and manifest are root files with `no-cache`
-headers so browser update checks cannot be pinned to an old release.
+The app serves SPA, auth, RPC and media on `cf-poc.mytuums.com`, preserving relative
+`/rpc` and `/media` URLs. The separate branding Worker serves
+`about-cf-poc.mytuums.com`. Both validate Access before serving assets, disable
+public workers.dev/preview URLs, and mark responses private/no-store and noindex.
 
-This is a requirement, not a packaging preference: `apps/web/src/lib/orpc.ts`
-resolves `/rpc` against `window.location.origin`, and uploaded images are
-stored as relative `/media/<key>` paths. Split the two across origins and RPC
-and every image break together.
-
-One hostname is deliberately outside that origin: `about.mytuums.com` serves
-the branding site (`apps/branding`, a second small Vite build), which uses
-none of `/rpc`, `/media` or the SPA and links into the app with absolute
-URLs. The same process serves it — host routing in `request-handler.ts` over
-`BRANDING_DIST`, not a second deployment — so the one-origin guarantees for
-the app are untouched and no new surface is operated. Its DNS record is
-provisioned on Railway (see [operations.md](operations.md)).
+Jobs dispatch durable D1 intents and coordinate Stream processing, staged game
+catalog publication and pruning. Provider requests happen outside atomic D1
+batches. No queue, database migration or video encoding runs inside an HTTP
+request. Video source/encoding is owned by Stream; images and game covers use R2.
 
 ## HTTP route order and access gates
 
-**Source of truth:** `apps/server/src/request-handler.ts`
+**Source of truth:** `apps/server/src/worker-request-handler.ts`
 
-Every request is given an `x-request-id` **before** any branch runs — that is
-what puts it on responses written by the injected handlers too. Then, in
-order:
+Every response carries a generated `x-request-id`. Exact host, Access and trusted
+edge identity admission precede dispatch, including health and static assets.
 
-| #   | Match                     | Gate                                            |
-| --- | ------------------------- | ----------------------------------------------- |
-| 1   | `GET /health` (exact)     | none — probes skip session and RPC matching     |
-| 2   | `/api/auth/admin/*`       | always 404 — see below                          |
-| 3   | `/api/auth*`              | better-auth's own handler                       |
-| 4   | `/rpc*`                   | Content-Length cap, then oRPC                   |
-| 5   | `/media/*`                | GET/HEAD only; session optional, key authorized |
-| 6   | Host `about.mytuums.com`  | the branding page — public, ahead of the gate   |
-| 7   | extension-less GET/HEAD   | page gate: session unless on `isSignedOutPath`  |
-| 8   | static files              | `apps/server/src/static-files.ts`               |
-| 9   | 404, then a catch-all 500 | logged with the request id                      |
+| Order | Match                          | Gate                                                                    |
+| ----- | ------------------------------ | ----------------------------------------------------------------------- |
+| 1     | `GET /health`                  | D1 health after Access                                                  |
+| 2     | normalized `/api/auth/admin/*` | always 404                                                              |
+| 3     | `/api/auth`                    | bounded lazy body, Better Auth admission and dispatch                   |
+| 4     | `/rpc`                         | declared/actual byte caps, large-body session gate, bounded concurrency |
+| 5     | `/media`                       | GET/HEAD, current per-key authorization                                 |
+| 6     | documents                      | shared signed-out allowlist, otherwise app-session page gate            |
+| 7     | assets                         | explicit asset binding lookup; no implicit SPA fallback                 |
+| 8     | missing/fault                  | private 404/500 with content-free event                                 |
 
-Ordering facts that are load-bearing:
-
-- **`/api/auth/admin/*` 404s before the auth pass-through.** The better-auth
-  admin plugin gates on its own `adminRoles` option, which cannot express this
-  app's moderator/staff/admin hierarchy. Blocking it keeps `/rpc` the only
-  path to a moderation action, so the hierarchy and the audit log are the only
-  enforcement surface.
-- **The `/rpc` body cap runs before oRPC buffers.** oRPC buffers a multipart
-  body while routing, which is before auth, rate limiting or any payload
-  check. Chunked bodies carry no Content-Length and are bounded at the same
-  ceiling by oRPC's `BodyLimitPlugin`, wired in `apps/server/src/index.ts`.
-- **`/media` is session-optional with per-key authorization.** Since 0.4.0
-  (public post permalinks) an anonymous caller proceeds with a null viewer and
-  every key — post, profile, link-card — is answered by its authorizer
-  (`canViewPostMedia`/`canViewProfileMedia`/`canViewLinkCardMedia`), which
-  keep owner-only rules owner-only. A cookie whose session store cannot be
-  read is a 503, fail closed.
-- **The branding-host branch sits after every API prefix and before the page
-  gate.** `about.mytuums.com` gets the built branding site (`apps/branding`,
-  served from `BRANDING_DIST` through the same static-file handler as the
-  SPA) instead of the app: the gate never sees a branding-host document, so
-  the site is public without touching `SIGNED_OUT_PATHS`, and the app shell
-  never boots on a host whose cookies, canonicals and RP ID all belong to
-  the apex.
-- **The page gate sits after every API prefix**, so it needs no copy of the
-  routing decisions above it. It reads `isSignedOutPath` (the
-  `SIGNED_OUT_PATHS` set plus the `/post/` prefix) from
-  `packages/api/src/constants.ts` — the same definition the client gate
-  reads. Two copies would let the gates disagree and loop a visitor forever.
-- **The SPA's `index.html` gets a per-route head before it ships.** When
-  `WEB_DIST` is set, the static handler runs `createPublicHeadTransform`
-  (`apps/server/src/public-heads.ts`): the auth/legal routes get their static
-  title/description/canonical/og tags, a `/post/<id>` gets its excerpt and
-  lead image from `publicPostHead`, and everything else keeps the generic
-  fallback. The substituted tags carry `data-app-fallback`, so the SPA's
-  mount effect still removes them and the live route head is the single
-  owner.
-- **`hasValidSession` fails open.** A database blip degrades to "the client
-  gate decides" and "images keep loading", never to a mass sign-out.
+Media authorization runs before I/O and again before delivery; session-store
+failure denies media. Only the page shell retains its fail-open presentation
+rule. Admin plugin endpoints remain inaccessible, keeping moderation behind RPC
+hierarchy and audit guards. Auth rate limiting precedes body reads; failed or
+unused request bodies are cancelled. Detailed limits and native regression
+coverage are in [Worker context](../apps/server/worker/CONTEXT.md).
 
 ## oRPC context
 
@@ -181,7 +122,7 @@ The router's top-level groups:
 
 - `me` — the caller's own session user
 - `post` — `create`, `delete`, `list`, `thread`, `like`, `unlike`
-- `video` — multipart begin/status/part/finish/cancel and author-only pending submissions
+- `video` — native Stream begin/status/finish/cancel and author-only pending submissions
 - `user` — `byUsername`, `uploadImage`, `removeImage`, `follow`, `unfollow`, `followers`, `following`
 - `game` — `bySlug`, `list` (public: the `/games` directory, issue #314)
 - `search` — `typeahead`, `users`, `posts`
@@ -225,7 +166,7 @@ those exact prefixes.
 `packages/auth/src/env.ts`, `apps/web/src/lib/auth-client.ts`
 
 One better-auth instance serves the whole app, mounted at `/api/auth` by
-`apps/server/src/index.ts`. Plugins: username, twoFactor, passkey, oneTap,
+`apps/server/worker/application.ts`. Plugins: username, twoFactor, passkey, oneTap,
 lastLoginMethod, admin, i18n. `trustedOrigins` is `[webOrigin]` only.
 
 Session resolution goes through `auth.api.getSession` on every request — there
@@ -343,16 +284,17 @@ sides by CI. See [operations.md](operations.md).
   pipeline is the cooperative path, not the boundary.
 - **Lifecycle.** `user.uploadImage` and `user.removeImage` are thin
   procedures over `packages/api/src/profile-media.ts`, which owns the whole
-  avatar/banner lifecycle: minting the object pair, the locked database
-  swap, and the best-effort cleanup of superseded objects. The ordering is
-  load-bearing — prepare/write the new objects, atomically swap the row
-  references under `FOR UPDATE`, then delete the old objects — and it lives
-  in exactly one place, so the two procedures cannot drift. Its interface
-  accepts the bare database handle rather than a transaction handle, making
-  the swap transaction the outermost commit before cleanup begins. A failed
-  write or a rolled-back swap leaves the profile untouched and the fresh
-  objects orphaned for reconciliation; a failed cleanup is swallowed and the
-  stale objects are reaped the same way.
+  avatar/banner lifecycle: register the immutable pair in a 30-minute upload
+  intent, write both objects, then publish their references and consume the
+  live intent in one D1 batch. Database triggers record the actual superseded
+  pair in the same transaction, including concurrent replacements and account
+  deletion. Cleanup follows commit; failures retain durable debt for retry.
+  An expired upload cannot publish. An ambiguous database acknowledgement must
+  never cause deletion of freshly uploaded objects, since publication may have
+  committed. Reconciliation lists objects before taking one SQL snapshot of
+  pending and published image references; it also catches late writes after
+  upload expiry. Native storage adapters and scheduled recovery remain pending
+  on this migration branch.
 - **Upload.** `user.uploadImage` accepts bytes, sniffs the actual type rather
   than trusting the declared one (`sniffImageType`), parses dimensions from the
   header (`packages/api/src/dimensions.ts`), and enforces per-slot byte and
@@ -375,10 +317,11 @@ sides by CI. See [operations.md](operations.md).
   outlive the signature it points at. Presigned URLs remain **windowed**
   (`MEDIA_SIGNING_WINDOW_MS`, 30 minutes) — byte-identical within a window,
   which is what keeps repeat views off the bucket either way.
-- **Reconciliation.** `pnpm --filter @my-tuums/api reconcile:media` deletes
-  objects no row points at. It lists the bucket **before** reading the `user`
-  rows — the reverse order would treat an upload that landed between the two
-  steps as an orphan and delete an object whose row points at it. A derived
+- **Reconciliation.** The reconciler deletes objects with no live reference or
+  upload intent. It lists the bucket **before** reading all pending and published
+  image references in one SQL snapshot — separate reads could miss an upload
+  committing between them. The legacy `reconcile:media` command still needs
+  native binding configuration on this branch. A derived
   variant is referenced exactly while its base is: the pairing rule adds
   every derivable variant key of each referenced base, so on-demand
   generation never orphans a survivor and a dead base's variants are reaped
@@ -386,49 +329,58 @@ sides by CI. See [operations.md](operations.md).
 
 ### Video lifecycle and playback
 
-**Source of truth:** `packages/api/src/video-lifecycle.ts`,
-`packages/api/src/video-uploads.ts`, `packages/api/src/video-media.ts`,
-`apps/video-worker/src/job.ts`, `apps/web/src/components/video-player.tsx`.
+**Source of truth:** `packages/api/src/video-uploads.ts`,
+`packages/api/src/video-lifecycle.ts`, `packages/api/src/stream-publication.ts`,
+`packages/api/src/stream-processing.ts`, `packages/api/src/video-media.ts`,
+`packages/api/src/stream.ts`, `apps/web/src/components/video-player.tsx`.
 
-1. Selection creates a durable upload owner before issuing signed multipart
-   capabilities. The browser streams 8 MiB parts directly to the private bucket;
-   progress/cancel/recovery do not buffer a video in the RPC server.
-   The composer previews the same original File through a temporary browser blob
-   URL, independent of upload completion. Unmount/replacement revokes that URL;
-   preview playback never queues processing or grants publication consent.
-2. Upload completion alone creates no post. Explicit submission stores text,
-   target in `video_submission` and enqueues an IDs-only
-   pg-boss job in the same transaction. Only the author can list pending rows.
-3. A leased attempt downloads to bounded scratch space, validates actual media
-   and decoded frames, then produces H.264/AAC fMP4 HLS, a cover and two-second
-   timeline sprites. Attempt-specific keys fence stale workers.
-4. Once every derivative is uploaded, the attempt records its inventory. It
-   deletes the raw source and confirms absence before publishing the normal
-   post, attachment, counters and notifications through shared publication rules
-   in one transaction. Retried delivery cannot publish twice.
-5. Failure erases pending text/captions, creates one link-free failure notice,
-   and retains content-free cleanup debt. Expiry, cancellation, deletion and
-   account cascades also owe cleanup. Maintenance compares rows and actual
-   storage to find abandoned multipart sessions and late stale writes.
+The native domain and media adapters, Workflow polling, caption handoff and
+scheduled recovery are implemented and tested locally. The FFmpeg application
+has been removed from this branch. Application composition includes video routing;
+the deployable entrypoint and hosted validation remain outstanding.
 
-Every `/media/videos/` request verifies the current published attempt, asset
-inventory and existing post visibility. Bounded HLS/VTT bodies rewrite references
-back through that gate; binary segments, initialization files, covers and sprites
-redirect to short-lived signed URLs. Published media survives moderation removal
-for evidence/restoration; author deletion schedules removal.
+1. A D1 owner/creator record precedes Stream creation. Only its author can obtain
+   the tus upload capability, which expires after 24 hours. The browser resumes
+   sequential 8 MiB PATCH requests from Stream's HEAD-confirmed byte offset.
+   Local preview remains independent of upload completion and publication consent.
+2. Completion verifies authenticated provider upload status and creates no post.
+   Explicit submission commits private text, queued state, a 30-minute deadline
+   and an IDs-only Workflow intent. Dispatch follows commit; recovery retries
+   ambiguous acknowledgements under the same stable instance ID.
+3. Authenticated processing must produce valid Stream dimensions and duration
+   before `recordStreamReady`. Captions, when present, must finish their provider
+   upload before that transition. There is no local FFmpeg derivative inventory
+   or source-deletion guarantee in the native schema.
+4. Publication latches author/target/deadline eligibility in the first D1 batch
+   statement. That same transaction inserts the ordinary post, attachment and
+   notifications, attaches the post ID and removes the private submission.
+   No clock is rechecked between those effects; duplicate delivery cannot publish
+   twice. The attachment size is the accepted upload size, not encoded storage.
+5. Failure commits one link-free notice, pending-text erasure and cleanup debt.
+   Cancellation, account/post deletion and expiry also owe cleanup. Recovery
+   lists unknown provider UIDs by exact creator identity and keeps empty records
+   for 24 hours to catch late creation visibility; failed deletions retain debt.
 
-Full attachment surfaces use one custom player. HLS.js loads on demand, selects
-adaptive or explicit renditions and releases playback sources offscreen. Jotai
-coordinates a single visible player; autoplay is muted and can be disabled per
-device. Controls include seeking, volume, speed, captions, fullscreen/PiP where
-supported and timeline previews. Compact surfaces show the same video's cover.
+Media routes require a published video and the existing post authorizer. Token
+issuance rechecks authorization after provider I/O. Native Stream bearer tokens
+last one hour; direct HLS segments and thumbnails do not revisit Access or the
+application during that window. There is no source-download route. Captions are
+fetched privately with a 1 MiB limit. A bounded VTT index points at two-second,
+individually authorized Stream thumbnails, replacing encoded preview sprites.
+
+The player retains its single-visible-owner, autoplay, controls and fullscreen
+behavior. HLS.js learns available quality levels from Stream's manifest; native
+HLS fallback lets the browser manage adaptation. No database rendition filename
+is constructed. Actual playback, caption alignment and thumbnail behavior still
+need the Access-protected deployed checks.
 
 ## Moderation — report, action, audit, appeal
 
 **Source of truth:** `packages/api/src/moderation.ts`,
 `packages/api/src/moderation-queue.ts`, `packages/api/src/appeal-intake.ts`,
-`packages/api/src/moderation-appeals.ts`,
-`packages/api/src/moderation-actions.ts`, `packages/db/src/schema/app.ts`
+`packages/api/src/moderation-appeals.ts`, `packages/api/src/appeal-review.ts`,
+`packages/api/src/moderation-actions.ts`, `packages/api/src/moderation-post.ts`,
+`packages/api/src/moderation-user.ts`, `packages/db/src/schema/app.ts`
 
 1. **Report.** `moderation.report` writes a row keyed
    `(reporterId, targetType, targetId)`. A repeat report refreshes the
@@ -443,55 +395,93 @@ supported and timeline previews. Compact surfaces show the same video's cover.
    loaded for the page after the merge and the slice, so a row says which
    case to open rather than only how many are waiting.
 3. **Action.** Removals and suspensions are `moderatorProcedure`; bans, role
-   changes, the team view and the audit log are `staffProcedure`. Every action
-   is one effect in `packages/api/src/moderation-actions.ts`
-   (`removePostEffect`, `suspendUserEffect`, `banUserEffect`, `setRoleEffect`):
-   the effect owns its `FOR UPDATE` guard read, the report stamps, the audit
-   row, and the notice it owes. The module's single entry point —
-   `applyModerationEffect`, wrapped per-action as `removePost`, `restorePost`,
-   `suspendUser`, `banUser`, `unbanUser`, `setRole` — opens the transaction,
-   runs the effect inside it, and sends the owed notices only after it
-   commits, so the procedures pass `Context` once and never touch the notices
-   themselves.
-4. **Audit.** `moderation_action` is append-only. Every effect — forward and
-   inverse (`restorePostEffect`, `unbanEffect`, `restoreRoleEffect`) — reads
-   its guard `FOR UPDATE` inside its own transaction: an unlocked pre-read is
-   a TOCTOU that two concurrent restores both pass and both log, and a double
-   log is a lie about what happened. The role overturn checks the contested
-   grant under that same lock, so a racing role change can never be clobbered
-   by an appeal that already passed its currency check. A rollback produces no
-   audit row, no partial state change and no email: the notices are returned,
-   never sent from inside the transaction, and `applyModerationEffect` sends
-   them only after the owning transaction commits.
-5. **Appeal intake.** `moderation.appealOpen` is a thin procedure over
-   `packages/api/src/appeal-intake.ts`, which owns the whole intake lifecycle.
-   The email link (an HMAC-signed token, works signed out — a banned user
-   cannot sign in) and the signed-in author's removed-post stub are two source
-   adapters: each authenticates its own claim and spends its own
-   capability-keyed budget, and both normalise to one internal target — the
-   contested action, its appellant, and the nonce that makes the attempt
-   replayable exactly once. Everything after that is source-blind and one
-   transaction: lock the contested action row, prove it appealable, still
-   current and still latest, refuse a replay, then insert. The action lock is
-   shared with manual reversal; database uniqueness remains the final backstop.
-   Intake sends no email and changes no moderation state.
-6. **Appeal review.** `moderation.appealReview` upholds or overturns, in one
-   transaction with the inverse effect and the `appeal_resolved` audit row,
-   and excludes the moderator who took the original action. It runs that
-   transaction through `applyModerationEffect`, so the overturn's notices go
-   out after the REVIEW's commit — never an inner savepoint.
-   The review checks both the live target state and whether the action is still
-   latest; an overturn that changes nothing is refused rather than recorded as
-   a false remedy. Forward removal, suspension and ban actions close older
-   open appeals in their control family as `superseded` in the same transaction
-   as the new action.
-7. **Manual reversal.** Restoring a post, unbanning or unsuspending an account,
-   or changing a role that an open appeal contests stamps that appeal
-   `reversed` in the same transaction. The wrapper first locks the contested
-   action rows — the same synchronization point appeal intake holds through
-   insert — then the appeal and target. It leaves the review fields empty and
-   does not add an `appeal_resolved` row because no appeal review occurred;
-   the inverse action's audit row and post-commit email record what happened.
+   changes, the team view and audit log are `staffProcedure`. The wrappers in
+   `packages/api/src/moderation-actions.ts` call guarded D1 batches owned by
+   `moderation-post.ts` and `moderation-user.ts`. Each batch owns state checks,
+   report stamps, session revocation where applicable, the audit and in-app
+   notice. Wrappers send the owed email only after the batch commits.
+4. **Audit.** `moderation_action` is append-only. Conditional audit inserts
+   record the actual state being changed, and their new IDs gate dependent
+   writes. D1 serializes the whole batch: a losing concurrent restore cannot
+   create another audit or notice. A role restore checks both the contested
+   grant and the reviewer's ability to manage the held and restored roles.
+   Any failed statement rolls back all preceding effects; no email is sent
+   before commit. Email retry durability remains migration work.
+5. **Appeal intake.** `moderation.appealOpen` delegates to
+   `packages/api/src/appeal-intake.ts`. The HMAC email link works signed out;
+   the removed-post stub requires the author's session. Each adapter proves
+   its capability and spends its own budget before normalizing to an action,
+   appellant and nonce. One D1 batch conditionally inserts and reads the
+   refusal if no row was created. The insert checks appealability, ownership,
+   current/latest state and prior appeals. Nonce reuse takes precedence over
+   an action match; a final review prevents fresh-link retries too. Shared
+   current/latest SQL lives in `moderation-action-state.ts`; suspension expiry
+   is evaluated against the database clock. Unique indexes remain the backstop.
+6. **Appeal review.** `moderation.appealReview` delegates to `appeal-review.ts`.
+   A preliminary read chooses the inverse statements; the batch rechecks open
+   status, original actor, current/latest action state and target rank. It
+   composes the inverse with the review stamp, `appeal_resolved` audit and
+   both notices. The inverse's audit ID gates the resolution because the
+   original action is no longer current after its reversal. Upholding checks
+   latest state but needs no inverse. Only the winner sends post-commit email.
+   A late error rolls everything back; an overturn that changes nothing is
+   refused. Forward sanctions close older appeals in their control family as
+   `superseded` within their own batch.
+7. **Manual reversal.** Restoring a post, lifting a sanction or changing a
+   contested role stamps that family's open appeals `reversed` in the same
+   D1 batch. Review fields stay empty and no `appeal_resolved` row is invented.
+   Author-deleted legacy posts instead have open appeals withdrawn before a
+   moderation refusal, so they cannot leave an unresolvable queue item.
+
+## Game catalog publication
+
+**Source of truth:** `packages/api/src/game-catalog.ts`,
+`packages/api/src/games-sync.ts`, `packages/api/src/game-media.ts`
+
+The sync acquires a 30-minute D1 lease before reading the current catalog or
+fetching Twitch/IGDB. It stages a complete validated catalog in invisible version
+rows. Publication checks the lease, expected row count, permanent hashtag keys,
+retained game IDs and any new cover's upload intent. A single D1 batch stamps
+the version, updates the indexed live game table, switches the active-version
+pointer and consumes published upload intents. A failure rolls back that whole
+transition; concurrent requests see a complete catalog. Favorites reference the
+permanent game IDs, and publication preserves counts and creation timestamps.
+
+A replacement publisher fences an expired run. Replaying an already active
+version succeeds without republishing it. Cleanup removes up to 250 obsolete
+staged rows and ten empty versions per pass, protecting active and running
+versions. The future jobs Worker must schedule those recovery passes.
+
+New cover paths contain a catalog version token. Unchanged covers are retained;
+a later return to an older IGDB image gets a new path. Upload intents protect
+storage writes before publication, and triggers record replaced cover paths in
+the publication transaction. Failed storage deletions remain retryable. The
+shared image reconciler reads game covers and pending intents alongside other
+image references, after listing the bucket. Native bindings and Workflow step
+integration are still pending on this migration branch.
+
+## Text search
+
+**Source of truth:** `packages/api/src/search-text.ts`,
+`packages/api/scripts/generate-case-folding.ts`
+
+`packages/api/src/search-text.ts` owns literal substring matching shared by users,
+posts and games. D1's ASCII-only `lower()` is combined with Unicode 17 simple-case
+variants for the characters present in the query, then `INSTR` matches the whole
+literal string. Short alphabets use direct replacements; longer ones use a bound
+JSON sequence in a recursive SQL expression, preserving the existing 100-character
+input limit without exceeding D1's parameter or LIKE/GLOB limits. Matching remains
+inside the query with visibility and keyset pagination, so it cannot drop matches
+by filtering an already limited page. Canonical ASCII handles instead use an
+indexable prefix range; relevance still ranks exact handles before prefixes.
+Combining that range with unindexed display-name alternatives still scans users.
+
+Case data is generated from pinned Unicode source, with a checksum and accompanying
+license. No stored copy of normalized user/post/game text needs synchronization.
+Accents and code-point count are significant: ß matches ẞ, while SS is different;
+there is no accent stripping, Unicode normalization or locale-specific casing.
+Substring searches still scan candidate text. Deployment measurements must include
+long queries and non-Latin text before assessing the production cost.
 
 ## Ranked feeds
 
@@ -528,7 +518,10 @@ pure JS function scores them, and a snapshot freezes the order for paging.
    hidden content lends no affinity and no topics, and bookmarks are never
    read. The hashtag scan mirrors the client's linkifier charset and
    boundaries, and the game filter's SQL prefilter is a superset re-checked
-   exactly in JS. Scoring is pure JS over these candidates, never a duplicated
+   exactly in JS. A SQLite row-number partition selects each original's latest
+   visible repost before limiting, so viral activity cannot consume the whole
+   candidate budget. ID sets use JSON parameters within D1's binding limit.
+   Scoring is pure JS over these candidates, never a duplicated
    SQL formula: one `scorePost` owns the weights.
 2. **Scoring (one pure function).** `scorePost` weights capped categories in
    priority order — favorite-game overlap (12), like affinity (7), the follow
@@ -561,14 +554,16 @@ pure JS function scores them, and a snapshot freezes the order for paging.
    (`loadRankSnapshot` refuses an expired row immediately); physical cleanup
    is opportunistic and request-time only. Each build sweeps at most 100
    globally-expired rows and trims the viewer past
-   `FEED_RANK_MAX_SNAPSHOTS_PER_VIEWER` (10) under a per-viewer advisory
-   transaction lock. Resume paths only read and validate the snapshot. There
+   `FEED_RANK_MAX_SNAPSHOTS_PER_VIEWER` (10). Insert, global sweep, viewer
+   expiry cleanup and one-row overflow trim commit in one D1 batch, preserving
+   the cap across concurrent builds. The new ID is protected from the trim;
+   expiry uses the database clock. Resume paths only read and validate the snapshot. There
    is no impressions table, no Redis, no background job.
 
 ## Schemas and migrations
 
-**Source of truth:** `packages/db/src/schema`, `packages/db/drizzle.config.ts`,
-`apps/server/src/migrate.ts`
+**Source of truth:** `packages/db/src/schema`, `packages/db/drizzle.d1.config.ts`,
+`packages/db/scripts/migrate.ts`
 
 The schema is split in two and joined by a barrel:
 
@@ -580,42 +575,41 @@ The schema is split in two and joined by a barrel:
   wipe them.
 
 Lifecycle: edit the schema → `pnpm db:generate` writes SQL and a snapshot into
-`packages/db/drizzle` → commit both → apply with `pnpm db:push` locally, or by
-the pre-deploy runner in production. `pnpm --filter @my-tuums/db db:check`
+`packages/db/drizzle-d1` → commit both → apply with
+`pnpm --filter @my-tuums/db db:migrate` locally, adding `--remote` explicitly
+for the isolated PoC pre-deploy step. `pnpm --filter @my-tuums/db db:check`
 catches a schema edit that never had a migration generated.
 
 Migrations run as a pre-deploy step, never at server boot: N replicas would
-race the same DDL. The image ships `apps/server/dist/migrate.js` and the SQL
-so Railway and `docker-compose.yml` run the identical runner.
+race the same DDL. The command validates the exact PoC account/database, opens
+a D1-only binding, and applies the committed SQL through Drizzle's migration
+ledger. Its nonzero exit must prevent deployment; Wrangler's separate migration
+ledger must not be mixed with this command. The remote deployment remains
+unverified. `db:test:setup` instead validates an ephemeral local D1 database.
 
 Handle canonicalisation is also enforced by the database trigger installed in
-`0015_lowercase_usernames`: `username` is lowercased and `display_username` is
-derived from it on every handle write. This closes the pre-deploy interval in
-which Railway still routes traffic to the previous application version, and
-keeps direct database writers from splitting the two representations.
+`0001_database_invariants.sql`: `username` is lowercased and `display_username` is
+derived from it on every handle write. This keeps direct database writers and application versions from splitting
+the two representations.
 
 ## Test topology
 
-**Source of truth:** `packages/api/vitest.config.ts`, `packages/auth/vitest.config.ts`,
-`apps/web/vitest.config.ts`, `e2e/playwright.config.ts`, `.github/workflows/ci.yml`
+**Source of truth:** workspace Vitest configs, `e2e/playwright.config.ts`,
+`.github/workflows/ci.yml`
 
-| Layer       | What runs                                                         | Needs                                         |
-| ----------- | ----------------------------------------------------------------- | --------------------------------------------- |
-| Unit        | `*.test.ts(x)` — pure logic, atoms, components, request handling  | nothing; must pass with no database reachable |
-| Integration | `*.int.test.ts` in `packages/api`                                 | real Postgres, `fileParallelism: false`       |
-| Contract    | Playwright's `api` project — headers, CORS, body caps, the gates  | the real server; no browser, no auth state    |
-| E2E         | Playwright's `setup` / `chromium` projects                        | real server, real Postgres, optional bucket   |
-| Image       | CI builds the image, asserts its contents, boots it and probes it | a Postgres service                            |
+| Layer                   | Execution                                            | Resources                                     |
+| ----------------------- | ---------------------------------------------------- | --------------------------------------------- |
+| Unit                    | pure logic, atoms, components and boundary contracts | no hosted resources                           |
+| Native runtime/artifact | actual Worker bundles and Workflow classes           | disposable workerd/D1/R2, synthetic providers |
+| Integration             | API and Better Auth with committed D1 migrations     | ephemeral local D1 per suite                  |
+| HTTP contract           | Playwright `api` project                             | local native E2E stack                        |
+| Browser                 | Playwright setup and browser journeys                | same stack plus Chromium                      |
 
-The unit/integration split is structural rather than circumstantial: the unit
-projects blank `DATABASE_URL` themselves (`packages/api/vitest.config.ts`,
-`packages/auth/vitest.config.ts`), so a unit test that grows a database
-dependency fails by name on a developer's machine as well as in CI. The
-`image` job is the only place the production artefact is ever started; the E2E
-suite runs the dev server.
-
-What belongs in which layer, and when a test deserves to exist at all:
-[../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
+`pnpm verify` includes native artifact tests; CI no longer builds a Node image.
+`pnpm test:e2e` also exercises browser image upload and resumable synthetic video
+transport without cloud credentials. Hosted codecs, provider delivery and account
+configuration remain separate deployment checks. Never rebuild artifacts during
+an active runtime test. See [testing strategy](../TESTING_STRATEGY.md).
 
 ## Further reading
 

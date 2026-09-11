@@ -1,191 +1,88 @@
 # Video worker operations
 
-The video worker is a separate TypeScript application at `apps/video-worker`.
-Node coordinates durable work; native FFmpeg does validation and encoding.
-It uses the application's PostgreSQL database and the same environment's private
-bucket. The implementation and local measurements are recorded in
-[video implementation](video-implementation.md).
+This branch uses Stream for video storage/encoding and Cloudflare Workflows for
+processing coordination. The native owner is [apps/jobs/CONTEXT.md](../apps/jobs/CONTEXT.md).
+Local compiled runtime tests pass; deployment and hosted provider behavior remain
+unverified. The full scope and resource inventory are in
+[the migration record](cloudflare-migration.md).
 
-## Local development
+## Cloudflare PoC runtime
 
-Run the existing schema migrations and configure the complete development `S3_*`
-group in `.env`. Install FFmpeg/FFprobe with libx264, AAC and zscale support, or
-use the worker image. Start the app with `pnpm dev`, then the optional worker
-in another terminal with `pnpm video:dev`. Its health port is `3002`; the dev
-command overrides the server's `.env` port. The worker is excluded from ordinary
-`pnpm dev`, so development without a bucket or FFmpeg still works.
+The jobs Worker handles video processing, game sync and maintenance. It has no
+HTTP handler; workers.dev and preview URLs are disabled in its configuration.
+The isolated EU D1 database and private EU R2 bucket are provisioned. D1 remains
+empty until its committed migrations are applied. Stream availability and required
+secrets still need verification before deployment.
 
-Each running worker must have a database that owns **all** `videos/` objects in
-its bucket. Do not run full reconciliation against a temporary test database
-sharing a bucket with unrelated development videos. The browser regression
-cleans only the upload capabilities created by its own page.
+Each submitted video commits a stable Workflow intent with its private pending
+post. A Workflow polls Stream and publishes only while D1 still permits it.
+Selection and upload completion are not author consent to publish. Processing
+expires after thirty minutes; abandoned uploads expire after twenty-four hours.
+Minute maintenance enforces deadlines even when the original Workflow never ran.
 
-## Railway service configuration
+Monitoring removes completed intents, restarts errored instances under the same
+ID and retries unconfirmed creation/status without inventing a replacement ID.
+Paused and terminated instances remain under operator control. A video still
+has its database processing deadline while paused. Inspect identifiers, statuses
+and counts; do not log captions, drafts or raw SQL/provider errors.
 
-Create a dedicated `video-worker` service in Preview first, then production
-after verifying the release. These are the settings to apply; this change does
-not create or deploy a Railway service.
+## Storage, playback and cleanup
 
-| Setting              | Value                                                                    |
-| -------------------- | ------------------------------------------------------------------------ |
-| Repository           | This monorepo, root directory `/`                                        |
-| Dockerfile           | `apps/video-worker/Dockerfile`                                           |
-| Start command        | Image default: `node apps/video-worker/dist/index.js`                    |
-| Region               | `europe-west4-drams3a`, matching the existing application and PostgreSQL |
-| Bucket               | The same environment's bucket, confirmed in the same European region     |
-| Replicas             | `1` initially                                                            |
-| Health check         | `/health`, port from Railway's `PORT`                                    |
-| Restart              | On failure; keep the service running continuously                        |
-| Sleeping / cron      | Disabled; queue polling and maintenance require a running process        |
-| Pre-deploy migration | None on the worker; deploy the server's migration step first             |
-| Public domain        | None required                                                            |
-| Preview branch       | The active release branch, currently release/0.5.0                       |
-| Production branch    | `main`, gated by CI                                                      |
+Stream owns encoded video and source retention. The PoC does not reproduce the
+former FFmpeg codec, frame-rate, rendition, probe or source-deletion guarantees.
+Its accepted behavior is documented in the migration record; the original native
+media tests and benchmark measurements are historical evidence only.
 
-Runtime variables:
+Playback requires current application authorization before issuing a signed
+Stream capability. Access protects the application and token issuance. A holder
+can use an issued playback capability directly until its one-hour expiry.
 
-| Variable                                                               | Value / default                                                                          |
-| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                                                         | Reference the same environment's PostgreSQL connection                                   |
-| `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Reference that environment's bucket credentials; never copy another environment's values |
-| `S3_REGION`                                                            | Bucket signing region, default `auto`                                                    |
-| `VIDEO_WORKER_CONCURRENCY`                                             | `1` initially; validated range 1–16                                                      |
-| `VIDEO_FFMPEG_THREADS`                                                 | `2` initially; validated range 1–16                                                      |
-| `VIDEO_TEMP_DIRECTORY`                                                 | `/tmp/mytuums-video-worker`, dedicated ephemeral scratch space                           |
-| `PORT`                                                                 | Railway-provided port, default `3002`                                                    |
-
-The worker needs no auth, email, OAuth, IGDB or frontend credentials. Its image
-runs as a non-root user and uses `tini` to forward shutdown to native children.
-Allow at least 30 seconds of termination grace. Start with one processing slot;
-measure process-tree RSS and temporary disk at the configured resource limits
-before raising concurrency. Each slot may hold a 500 MB source plus all derivatives.
-Local encoder RSS measurements alone are not a memory limit recommendation.
-
-Environment pairing is mandatory:
-
-| Execution                 | Database                      | Bucket                                             |
-| ------------------------- | ----------------------------- | -------------------------------------------------- |
-| Production worker         | Production PostgreSQL         | Production bucket                                  |
-| Preview worker            | Preview PostgreSQL            | Preview bucket                                     |
-| Local worker              | Local development PostgreSQL  | Development bucket                                 |
-| CI image smoke            | Disposable `_test` PostgreSQL | Local empty storage stub                           |
-| Browser upload regression | Disposable `_test` PostgreSQL | CI bucket; dev bucket locally, scoped cleanup only |
-
-Railway's [legacy Config as Code](https://docs.railway.com/config-as-code)
-does not accept new services. This repository currently operates service
-settings through Railway; no new `railway.toml` is introduced. Adopting
-[Railway TypeScript IaC](https://docs.railway.com/infrastructure-as-code) for the
-whole existing project is a separate migration.
-
-## Bucket CORS
-
-Video parts upload directly from the browser. HLS.js fetches binary assets after
-authorized same-origin redirects, so the bucket must permit the app's exact
-origin for `GET`, `HEAD` and `PUT`, request headers `content-type` and `range`,
-and exposed headers `ETag`, `Content-Length`, `Content-Range`, `Accept-Ranges`.
-Objects remain private and requests still require signed URLs.
-
-The helper preserves other CORS rules and defaults to a read-only plan:
-
-```bash
-pnpm --filter @my-tuums/api storage:video-cors http://localhost:5173 http://localhost:5273
-```
-
-After reviewing the selected bucket and exact origins, append `--apply` to
-persist the rule and verify readback. Use `https://preview.mytuums.com` in
-Preview, `https://mytuums.com` in production, and `http://localhost:5273` in CI.
-The development bucket was explicitly approved for `5173`, `5273` and the
-temporary built-app inspection port `39101`; that rule persists after testing.
-The E2E job applies and verifies the `http://localhost:5273` rule on its CI bucket
-before browser tests, preserving other rules. It refuses a configured bucket
-without a `ci` name segment and skips setup when bucket credentials are absent.
-That rule persists between runs. Preview and production CORS remain a deployment
-step.
+D1 records durable Stream cleanup obligations before owning rows disappear.
+Retries survive post/account deletion, cancellation and ambiguous provider calls.
+R2 stores images and covers privately. Minute maintenance drains cleanup intents;
+a daily inventory lists objects before reading a consistent D1 reference snapshot.
+Keep database, R2 bucket and Stream namespace isolated as one PoC environment.
+Do not clear debt by deleting lifecycle or outbox rows. After a restore, pause
+cleanup until the restored database and provider inventories are reconciled.
 
 ## Migrations
 
-`0037_greedy_peter_parker.sql` adds video lifecycle tables and attachment/notice
-contracts. `0038_video_queue.sql` installs the pinned pg-boss 12.26.0 schema
-under `video_jobs`. The server's normal pre-deploy migration step applies both
-before either new server procedures or a worker starts.
+Use committed migrations in `packages/db/drizzle-d1`. Builds and Worker startup
+must not apply migrations. The original PostgreSQL history remains preserved in
+`packages/db/drizzle` for comparison; native jobs use the D1 outbox and Workflows,
+not the old pg-boss schema. Native seed/reset and remote recovery commands remain
+outstanding in the migration plan.
 
-The initial queue migration was generated by creating a custom Drizzle migration
-and filling that **new** file with the vendor construction plan:
+## Local development and verification
 
-```bash
-pnpm --filter @my-tuums/db exec drizzle-kit generate --custom --name=video_queue
-pnpm --filter @my-tuums/api exec tsx scripts/generate-video-queue.ts 0038_video_queue.sql
-```
-
-Do not rerun this over an applied migration. A pg-boss upgrade requires a new
-reviewed upgrade migration using that version's upgrade plan, adapter regression
-tests, and image smoke verification. Startup has `migrate` and `createSchema`
-disabled and does not create statistics partitions.
-
-## Recovery and observability
-
-- The process queue has identifiers-only payloads. Submission and enqueue commit
-  in one transaction. Application leases fence duplicate/stale deliveries;
-  heartbeats renew every 30 seconds against a 90-second lease.
-- A processing attempt has a 30-minute deadline and at most three encoding
-  attempts. Upload/submission state expires after 24 hours. A ready retry reuses
-  the completed assets while source deletion or publication recovers.
-- Maintenance runs each minute, reconciling expired/orphaned rows, actual objects,
-  multipart sessions and cleanup debt. Failed deletion retries back off up to six
-  hours without forgetting the obligation. Bucket scans also catch writes that
-  arrive after a previous cleanup finished.
-- Native cancellation waits for the child to exit; it escalates from SIGTERM to
-  SIGKILL after five seconds. Normal completion removes scratch directories.
-  Startup and maintenance reap recognized crash leftovers older than one hour.
-- `video_worker_ready`, `video_processed`, `video_processing_failed`,
-  `video_cleanup`, `video_queue_error` and shutdown/start failures are structured,
-  content-free logs. Processing reports elapsed time, encoder CPU/RSS and output
-  bytes. Validation failures use a safe reason code; `frame_rate_exceeded`
-  identifies a rejected frame rate without exposing source metadata. Cleanup reports completed/deferred obligations and removed scratch dirs.
-- `/health` is healthy only after tools, database, queues and consumers initialize;
-  queue/maintenance failures make it unhealthy. Monitor queue age, pending age,
-  cleanup debt age, retry/failure counts, disk usage and process-tree RSS.
-
-Useful read-only queue inspection (run against the intended environment):
-
-```sql
-SELECT name, state, count(*), min(created_on) AS oldest
-FROM video_jobs.job
-GROUP BY name, state;
-
-SELECT state, count(*), min(created_at) AS oldest
-FROM video
-GROUP BY state;
-
-SELECT count(*), min(next_attempt_at) AS oldest_due
-FROM video_cleanup
-WHERE next_attempt_at <= now();
-```
-
-After a provider outage, restore connectivity and let maintenance drain the debt.
-Do not delete queue/lifecycle rows to clear an alert. After a database restore,
-pause all video workers until the restored database and bucket inventory have
-been checked together; an older database may consider newer videos orphaned.
-For rollback, stop consumers first and roll back application images while keeping
-the additive schema and pending/cleanup rows. Resume a compatible worker to drain
-work; never reverse these migrations while live submissions exist.
-
-## Verification
+`pnpm jobs:dev` starts Wrangler with local bindings and no public HTTP route.
+It does not connect the unfinished application entrypoint or seed a database.
+Use the compiled runtime suite for a self-contained synthetic experiment:
 
 ```bash
-pnpm --filter @my-tuums/video-worker test:unit
-pnpm --filter @my-tuums/video-worker test:media
-pnpm --filter @my-tuums/e2e e2e tests/specs/video-upload.spec.ts
-docker build -f apps/video-worker/Dockerfile -t mytuums-video-worker:local .
+pnpm --filter @my-tuums/jobs test:unit
+pnpm --filter @my-tuums/jobs typecheck
+pnpm --filter @my-tuums/jobs lint
 ```
 
-The Docker build runs real encoding tests with its FFmpeg build. After migrating
-a disposable `_test` database, run `node apps/video-worker/dist/smoke.js` in the
-image with only its `DATABASE_URL`; it starts the real worker, exercises local
-storage maintenance, checks health, and observes a queue delivery complete.
-CI performs this in the existing image job, without bucket secrets.
+The test script first builds through Wrangler, then runs the real local
+Workflows/D1/R2 engine with synthetic Stream and catalog responses. It covers
+video publication/captions, replay, cancellation/deadlines, cleanup, multi-batch
+pruning, a 5,000-game catalog and absence of HTTP access. A separate
+`pnpm --filter @my-tuums/jobs build` performs a deployment dry run only.
+It does not create resources, apply migrations or deploy.
 
-The benchmark command accepts a local source:
-`pnpm --filter @my-tuums/video-worker benchmark /absolute/path/video.mp4`.
-It emits JSON and removes its derivatives. Its CPU/RSS scope and limitations are
-documented in the output and [measurement record](video-implementation.md#measurements).
+These checks replace the removed FFmpeg application's unit/media suites and
+Docker queue smoke on this branch. API D1 lifecycle tests remain in place.
+The Node app and E2E harness still need migration; local fixture responses do not
+prove hosted Stream behavior or complete feature parity.
+
+## Historical Railway implementation
+
+The FFmpeg application and Docker build are preserved at
+[commit 9365342](https://github.com/ElCabrii/MyTuums/tree/936534256487531ac426cae222399904dd59e0a9/apps/video-worker).
+Use its [versioned operations guide](https://github.com/ElCabrii/MyTuums/blob/936534256487531ac426cae222399904dd59e0a9/docs/video-operations.md)
+for original commands and recovery procedures. Its
+[implementation and measurement record](video-implementation.md) remains here
+for comparison. Removing that runtime from this PoC branch does not alter any
+Railway deployment.

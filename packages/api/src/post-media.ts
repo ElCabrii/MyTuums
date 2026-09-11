@@ -5,15 +5,17 @@
  * several ordered objects, and its visibility follows the post (including
  * moderation tombstones and blocks), not just the signed-in state.
  */
-import { randomUUID } from "node:crypto";
 import { and, eq, getTableName, isNull, not, or, sql, type AnyColumn } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
-import { post, postAttachment, user, video, type VideoPlayback } from "@my-tuums/db/schema";
+import { post, postAttachment, user, video } from "@my-tuums/db/schema";
+import { z } from "zod";
+import { jsonDecoder } from "./sql.js";
 import { roleAtLeast } from "./roles.js";
 import { invisibleAuthor, privatePostHidden } from "./visibility.js";
-import { mediaPathFor, objectKeyFromMediaPath } from "./image.js";
+import { mediaPathFor } from "./image.js";
 import { mediaVariantKeys, type AllowedImageType } from "./constants.js";
-import type { Storage } from "./storage.js";
+import type { ObjectStorage } from "./object-storage.js";
+import { cleanupMediaIntents } from "./media-intents.js";
 
 const EXTENSION = {
   "image/png": "png",
@@ -54,9 +56,8 @@ export function postImageObjectKey(
 }
 
 /**
- * Writes nothing to the database. The caller can therefore prepare objects
- * before its post transaction and remove every prepared key if that
- * transaction fails.
+ * Writes nothing. The caller records these keys as an upload intent before
+ * storage writes, then atomically publishes their rows and consumes the intent.
  */
 export function preparePostAttachments(
   authorId: string,
@@ -64,7 +65,7 @@ export function preparePostAttachments(
   inputs: readonly PostAttachmentInput[],
 ): PreparedPostAttachment[] {
   return inputs.map((input, position) => {
-    const id = randomUUID();
+    const id = crypto.randomUUID();
     const key = postImageObjectKey(authorId, postId, id, input.type);
     return {
       id,
@@ -83,7 +84,7 @@ export function preparePostAttachments(
 
 /** Uploads all prepared objects, cleaning the partial batch on failure. */
 export async function writePostAttachments(
-  storage: Storage,
+  storage: ObjectStorage,
   prepared: readonly PreparedPostAttachment[],
 ): Promise<void> {
   const written: PreparedPostAttachment[] = [];
@@ -112,7 +113,7 @@ export async function writePostAttachments(
  * reconciliation job removes the now-unreferenced objects eventually.
  */
 export async function discardPostAttachments(
-  storage: Storage,
+  storage: ObjectStorage,
   attachments: readonly Pick<PreparedPostAttachment, "key">[],
 ): Promise<void> {
   await Promise.all(
@@ -123,46 +124,29 @@ export async function discardPostAttachments(
       return keys.map(async (objectKey) => {
         try {
           await storage.remove(objectKey);
-        } catch (error) {
+        } catch {
           // Reconciliation can retry a provider outage; never hide the original
           // post/storage failure behind a cleanup error.
           // Do not include the object key in logs: media paths can be correlated
           // with an author's private post while this cleanup runs after a failed
           // write or a hard account deletion.
-          console.error("Failed to delete post attachment object", error);
+          console.error({ event: "post_attachment_cleanup_deferred" });
         }
       });
     }),
   );
 }
 
-/**
- * Removes the non-restorable media of an author's deleted post.
- *
- * The relation is deleted first, after the post tombstone has committed. A
- * failed object deletion therefore becomes an orphan the guarded reconciler
- * can remove, rather than a live-looking row that keeps an inaccessible object
- * forever. Moderation removals use no such cleanup because they are reversible.
- */
+/** Retry the image cleanup recorded atomically with the author's tombstone. */
 export async function cleanupDeletedPostAttachments(
   db: Database,
-  storage: Storage | null,
+  storage: ObjectStorage | null,
   postId: string,
 ): Promise<void> {
-  const rows = await db
-    .select({ mediaPath: postAttachment.mediaPath })
-    .from(postAttachment)
-    .where(eq(postAttachment.postId, postId));
-  if (rows.length === 0) return;
-
-  await db.delete(postAttachment).where(eq(postAttachment.postId, postId));
   if (!storage) return;
-
-  const keys = rows
-    .map(({ mediaPath }) => objectKeyFromMediaPath(mediaPath))
-    .filter((key): key is string => key !== null)
-    .map((key) => ({ key }));
-  await discardPostAttachments(storage, keys);
+  await cleanupMediaIntents(db, storage, `post:${postId}`).catch(() => {
+    console.error({ event: "post_media_cleanup_deferred" });
+  });
 }
 
 /** The row shape inserted after the post row exists. */
@@ -184,24 +168,25 @@ export function postAttachmentRows(
 }
 
 /** One served attachment — the wire shape every post surface renders. */
-export type PostAttachment = {
-  id: string;
-  url: string;
-  position: number;
-  contentType: string;
-  byteSize: number;
-  width: number;
-  height: number;
-  video?: {
-    duration: number;
-    frameRate: number;
-    renditions: VideoPlayback["renditions"];
-    posterUrl: string;
-    previewUrl: string;
-    captionUrl: string | null;
-    captionLanguage: string | null;
-  };
-};
+export const postAttachmentSchema = z.object({
+  id: z.string(),
+  url: z.string(),
+  position: z.number(),
+  contentType: z.string(),
+  byteSize: z.number(),
+  width: z.number(),
+  height: z.number(),
+  video: z
+    .object({
+      duration: z.number(),
+      posterUrl: z.string(),
+      previewUrl: z.string(),
+      captionUrl: z.string().nullable(),
+      captionLanguage: z.string().nullable(),
+    })
+    .optional(),
+});
+export type PostAttachment = z.infer<typeof postAttachmentSchema>;
 
 /**
  * The outer post's columns, always table-qualified.
@@ -233,9 +218,7 @@ function attachmentColumn(column: AnyColumn) {
  * definition instead of cycling two modules or forking the projection.
  */
 export function postAttachmentsSelection(includeTombstones = false) {
-  return sql<PostAttachment[]>`coalesce((
-    select jsonb_agg(
-      jsonb_build_object(
+  const image = sql`json_object(
         'id', ${attachmentColumn(postAttachment.id)},
         'url', ${attachmentColumn(postAttachment.mediaPath)},
         'position', ${attachmentColumn(postAttachment.position)},
@@ -243,17 +226,20 @@ export function postAttachmentsSelection(includeTombstones = false) {
         'byteSize', ${attachmentColumn(postAttachment.byteSize)},
         'width', ${attachmentColumn(postAttachment.width)},
         'height', ${attachmentColumn(postAttachment.height)}
-      ) || case when ${attachmentColumn(postAttachment.videoId)} is null then '{}'::jsonb else
-        jsonb_build_object('video', jsonb_build_object(
+      )`;
+  const playback = sql`json_object(
           'duration', ${attachmentColumn(video.playback)}->'duration',
-          'frameRate', ${attachmentColumn(video.playback)}->'frameRate',
-          'renditions', ${attachmentColumn(video.playback)}->'renditions',
           'posterUrl', replace(${attachmentColumn(postAttachment.mediaPath)}, 'master.m3u8', 'cover.jpg'),
           'previewUrl', replace(${attachmentColumn(postAttachment.mediaPath)}, 'master.m3u8', 'previews.vtt'),
-          'captionUrl', case when ${attachmentColumn(video.assets)} @> '[{"name":"captions.vtt"}]'::jsonb
+          'captionUrl', case when json_extract(${attachmentColumn(video.playback)}, '$.captionLanguage') is not null
             then replace(${attachmentColumn(postAttachment.mediaPath)}, 'master.m3u8', 'captions.vtt') else null end,
           'captionLanguage', ${attachmentColumn(video.playback)}->'captionLanguage'
-        )) end order by ${attachmentColumn(postAttachment.position)}
+        )`;
+  return sql<PostAttachment[]>`coalesce((
+    select json_group_array(
+      json(case when ${attachmentColumn(postAttachment.videoId)} is null then ${image}
+        else json_set(${image}, '$.video', ${playback}) end)
+      order by ${attachmentColumn(postAttachment.position)}
     )
     from ${postAttachment}
     left join ${video} on ${attachmentColumn(video.id)} = ${attachmentColumn(postAttachment.videoId)}
@@ -263,7 +249,7 @@ export function postAttachmentsSelection(includeTombstones = false) {
           ? sql``
           : sql`and ${outerPost("removed_at")} is null and ${outerPost("deleted_at")} is null`
       }
-  ), '[]'::jsonb)`;
+  ), '[]')`.mapWith(jsonDecoder(z.array(postAttachmentSchema)));
 }
 
 export const postAttachments = postAttachmentsSelection();

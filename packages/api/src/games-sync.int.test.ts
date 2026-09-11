@@ -1,4 +1,5 @@
-import { closeDb, db } from "@my-tuums/db";
+import { closeDb, db } from "./testing/runtime.js";
+
 import { game } from "@my-tuums/db/schema";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GAMES_CATALOG_SIZE, GAMES_TWITCH_SIZE } from "./constants.js";
@@ -342,16 +343,20 @@ describe("syncGamesCatalog", () => {
       firstReleaseYear: 1993,
       genres: ["Shooter"], // trimmed, empties dropped, duplicates collapsed
       platforms: ["DOS", "SNES"], // abbreviation preferred, name as fallback
-      coverMediaPath: "/media/games/10-co1993.jpg",
       coverImageId: "co1993",
     });
+    expect(byId.get(10)?.coverMediaPath).toMatch(/^\/media\/games\/10-co1993\.[a-f0-9]{32}\.jpg$/);
     expect(byId.get(20)).toMatchObject({
       hashtagKey: "doom2016",
       popularityRank: 1,
       summary: null,
     });
-    expect(testStorageObjects.has("games/10-co1993.jpg")).toBe(true);
-    expect(testStorageObjects.has("games/20-co2016.jpg")).toBe(true);
+    expect([...testStorageObjects.keys()]).toContain(
+      byId.get(10)?.coverMediaPath?.slice("/media/".length),
+    );
+    expect([...testStorageObjects.keys()]).toContain(
+      byId.get(20)?.coverMediaPath?.slice("/media/".length),
+    );
   });
 
   it("follows cursor pagination past the first 100-item page until the snapshot is complete", async () => {
@@ -486,7 +491,7 @@ describe("syncGamesCatalog", () => {
   });
 
   it(
-    "re-hosts a changed cover, content-addressed, and removes the superseded object after commit",
+    "re-hosts a changed cover under an immutable version key, and removes the superseded object after commit",
     { timeout: 45_000 },
     async () => {
       const catalog = doomCatalog();
@@ -507,11 +512,15 @@ describe("syncGamesCatalog", () => {
       expect(second.coversUploaded).toBe(1);
 
       const row = (await db.select().from(game)).find((current) => current.igdbId === 10);
-      expect(row?.coverMediaPath).toBe("/media/games/10-co9999.jpg");
+      expect(row?.coverMediaPath).toMatch(/^\/media\/games\/10-co9999\.[a-f0-9]{32}\.jpg$/);
       expect(row?.coverImageId).toBe("co9999");
       // The old object left WITH the commit, not before it.
-      expect(testStorageObjects.has("games/10-co1993.jpg")).toBe(false);
-      expect(testStorageObjects.has("games/10-co9999.jpg")).toBe(true);
+      expect([...testStorageObjects.keys()].some((key) => key.startsWith("games/10-co1993."))).toBe(
+        false,
+      );
+      expect([...testStorageObjects.keys()]).toContain(
+        row?.coverMediaPath?.slice("/media/".length),
+      );
     },
   );
 
@@ -535,7 +544,7 @@ describe("syncGamesCatalog", () => {
 
       const row = (await db.select().from(game)).find((current) => current.igdbId === 10);
       expect(row?.coverImageId).toBe("co1993");
-      expect(row?.coverMediaPath).toBe("/media/games/10-co1993.jpg");
+      expect(row?.coverMediaPath).toMatch(/^\/media\/games\/10-co1993\.[a-f0-9]{32}\.jpg$/);
     },
   );
 

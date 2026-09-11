@@ -10,8 +10,8 @@
  * runtime along for twelve transactional emails that need none of it.
  *
  * Deliberate non-use: emailcn's `<Tailwind>` layer. The server bundle
- * (`apps/server/tsup.config.ts`) inlines this package, so the Tailwind
- * compiler would ship inside the production server image and run on every
+ * (built through Wrangler) inlines this package, so the Tailwind
+ * compiler would ship inside the application Worker and run on every
  * send. The styles below are plain inline-style objects over these tokens —
  * the same output the Tailwind layer inlines to, without the compiler.
  *

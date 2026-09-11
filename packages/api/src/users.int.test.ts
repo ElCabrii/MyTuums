@@ -1,5 +1,6 @@
+import { closeDb } from "./testing/runtime.js";
 import { call } from "@orpc/server";
-import { closeDb } from "@my-tuums/db";
+
 import { userBlock } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";

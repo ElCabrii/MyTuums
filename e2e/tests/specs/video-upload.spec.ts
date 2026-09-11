@@ -1,54 +1,71 @@
 import { test, expect } from "../../support/fixtures";
-import { createVideoStorage } from "@my-tuums/api/video-worker";
+import { testPlatform } from "../../support/platform";
+import { E2E_STREAM_ORIGIN, streamFixtureKey, streamFixtureUpload } from "../../stream-fixture";
 
-test("video multipart recovery keeps explicit submission and durable pending UI (issue #368)", async ({
+test("video tus recovery keeps explicit submission and durable pending UI (issue #368)", async ({
   page,
   bobPage,
 }) => {
   test.setTimeout(90_000);
-  const endpoint = process.env.S3_ENDPOINT;
-  const bucket = process.env.S3_BUCKET;
-  const accessKeyId = process.env.S3_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
-  test.skip(
-    !endpoint || !bucket || !accessKeyId || !secretAccessKey,
-    "no Storage Bucket configured",
-  );
-  if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) return;
-  if (!/(?:^|-)(?:dev|ci)(?:-|$)/.test(bucket))
-    throw new Error("Video tests require the dev or CI bucket.");
-  const storage = createVideoStorage({
-    endpoint,
-    bucket,
-    accessKeyId,
-    secretAccessKey,
-    region: process.env.S3_REGION ?? "auto",
-  });
-  const uploads = new Map<string, string>();
+  const { bucket } = await testPlatform();
+  const uploads = new Set<string>();
   let interrupted = false;
   let firstPartRequests = 0;
-  await page.route("**/*", async (route) => {
-    const url = new URL(route.request().url());
-    const key = /videos\/[0-9a-f-]{36}\/source$/.exec(url.pathname)?.[0];
-    const uploadId = url.searchParams.get("uploadId");
-    if (route.request().method() === "PUT" && key && uploadId) {
-      uploads.set(key, uploadId);
-      if (url.searchParams.get("partNumber") === "1") firstPartRequests += 1;
-      if (url.searchParams.get("partNumber") === "2" && !interrupted) {
-        interrupted = true;
-        await route.abort("internetdisconnected");
-        return;
-      }
+  const confirmedOffsets: number[] = [];
+  // Every request to the synthetic provider is intercepted, including OPTIONS;
+  // route.fulfill never forwards capabilities or source bytes to the Internet.
+  await page.route(`${E2E_STREAM_ORIGIN}/**`, async (route) => {
+    const request = route.request();
+    const uid = new URL(request.url()).pathname.slice(1);
+    const key = streamFixtureKey(uid);
+    uploads.add(key);
+    const object = await bucket.get(key);
+    expect(object).not.toBeNull();
+    if (!object) throw new Error("Synthetic upload was not created by the API.");
+    const upload = streamFixtureUpload.parse(await object.json());
+    const headers = {
+      "Access-Control-Allow-Origin": "http://localhost:5273",
+      "Access-Control-Allow-Methods": "HEAD, PATCH, OPTIONS",
+      "Access-Control-Allow-Headers": "Tus-Resumable, Upload-Offset, Content-Type",
+      "Access-Control-Expose-Headers": "Upload-Length, Upload-Offset, Tus-Resumable",
+      "Tus-Resumable": "1.0.0",
+      "Upload-Length": String(upload.byteSize),
+      "Upload-Offset": String(upload.offset),
+    };
+    if (request.method() === "OPTIONS") {
+      await route.fulfill({ status: 204, headers });
+      return;
     }
-    await route.continue();
+    if (request.method() === "HEAD") {
+      confirmedOffsets.push(upload.offset);
+      await route.fulfill({ status: 200, headers });
+      return;
+    }
+    expect(request.method()).toBe("PATCH");
+    expect(request.headers()["upload-offset"]).toBe(String(upload.offset));
+    if (upload.offset === 0) firstPartRequests += 1;
+    const bytes = request.postDataBuffer()?.byteLength ?? 0;
+    expect(bytes).toBeGreaterThan(0);
+    upload.offset += bytes;
+    expect(upload.offset).toBeLessThanOrEqual(upload.byteSize);
+    await bucket.put(key, JSON.stringify(upload));
+    if (!interrupted) {
+      interrupted = true;
+      await route.abort("internetdisconnected");
+      return;
+    }
+    await route.fulfill({
+      status: 204,
+      headers: { ...headers, "Upload-Offset": String(upload.offset) },
+    });
   });
   try {
     await page.goto("/");
     const content = `Pending video browser recovery ${Date.now().toString()}`;
     const composer = page.getByPlaceholder("Share a gaming update, clip, or tournament result...");
     await composer.fill(content);
-    // This fixture exercises direct browser multipart transport. Native format
-    // validation and playable output are covered by the worker's media tests.
+    // Synthetic bytes exercise tus transport only; they do not prove hosted
+    // Stream codec processing or playback.
     await page.getByRole("button", { name: "Add media", exact: true }).click();
     await page.getByLabel("Choose images or a video", { exact: true }).setInputFiles({
       name: "transport.mp4",
@@ -60,6 +77,7 @@ test("video multipart recovery keeps explicit submission and durable pending UI 
     ).toBeVisible({ timeout: 60_000 });
     expect(interrupted).toBe(true);
     expect(firstPartRequests).toBe(1);
+    expect(confirmedOffsets).toEqual([0, 8 * 1024 * 1024]);
     await expect(page.locator("p").filter({ hasText: content })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Post", exact: true })).toBeEnabled();
     await page.getByRole("button", { name: "Post", exact: true }).click();
@@ -73,11 +91,6 @@ test("video multipart recovery keeps explicit submission and durable pending UI 
     await page.getByRole("button", { name: "Cancel pending post" }).click();
     await expect(page.getByText(content, { exact: true })).toHaveCount(0);
   } finally {
-    // Only capabilities created by this page are cleaned. A local test database
-    // may share the dev bucket, so a bucket-wide video sweep would be unsafe.
-    for (const [key, uploadId] of uploads) {
-      await storage.abortMultipart(key, uploadId);
-      await storage.removePrefix(key.slice(0, -"source".length));
-    }
+    for (const key of uploads) await bucket.delete(key);
   }
 });

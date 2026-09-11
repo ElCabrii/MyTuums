@@ -1,8 +1,8 @@
+import { createConnectValidatedLookup, createLinkFetchTransport } from "./link-card-node.js";
 import { describe, expect, it } from "vitest";
 import type { LookupAddress } from "node:dns";
+import { setTimeout as delay } from "node:timers/promises";
 import {
-  createConnectValidatedLookup,
-  createLinkFetchTransport,
   guardedLinkFetch,
   isGlobalUnicastAddress,
   parseOpenGraphMetadata,
@@ -83,6 +83,18 @@ describe("isGlobalUnicastAddress", () => {
     expect(isGlobalUnicastAddress("")).toBe(false);
     expect(isGlobalUnicastAddress("999.1.1.1")).toBe(false);
     expect(isGlobalUnicastAddress("fe80::1%eth0")).toBe(false);
+    for (const malformed of [
+      "093.184.216.34",
+      "1.1.1.01",
+      "2606:::1",
+      "2606:1:2:3:4:5:6::7",
+      ":2606:1:2:3:4:5:6:7",
+      "2606:1:2:3:4:5:6:7:",
+      "2606::1::2",
+      "2606::093.184.216.34",
+    ]) {
+      expect(isGlobalUnicastAddress(malformed), malformed).toBe(false);
+    }
   });
 });
 
@@ -446,6 +458,86 @@ describe("guardedLinkFetch", () => {
     });
 
     expect(result).toEqual({ ok: false, reason: "timeout" });
+  });
+
+  it("includes DNS in the deadline and never fetches after a late lookup", async () => {
+    let requests = 0;
+    const pending = guardedLinkFetch(new URL("https://slow.example/"), {
+      transport: {
+        async lookup() {
+          await delay(80);
+          return GLOBAL;
+        },
+        fetch() {
+          requests += 1;
+          return Promise.resolve(
+            new Response("late", { headers: { "content-type": "text/html" } }),
+          );
+        },
+      },
+      timeoutMs: 20,
+      maxBytes: 1024,
+      acceptContentType: () => true,
+    });
+    const result = await Promise.race([pending, delay(50, "deadline missed")]);
+    expect(result).toEqual({ ok: false, reason: "timeout" });
+    await delay(100);
+    expect(requests).toBe(0);
+  });
+
+  it.each([
+    { status: 302, headers: { location: "http://127.0.0.1/" }, reason: "address" },
+    { status: 302, headers: {}, reason: "network" },
+    { status: 404, headers: {}, reason: "status" },
+    { status: 200, headers: { "content-type": "application/json" }, reason: "contentType" },
+  ])("cancels the unconsumed response on $reason refusal", async ({ status, headers, reason }) => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>(
+      {
+        cancel() {
+          cancelled = true;
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const result = await guardedLinkFetch(new URL("https://example.com/"), {
+      transport: {
+        lookup: (host) => Promise.resolve(host === "127.0.0.1" ? [host] : GLOBAL),
+        fetch: () => Promise.resolve(new Response(body, { status, headers })),
+      },
+      maxBytes: 1024,
+      acceptContentType: (type) => type === "text/html",
+    });
+    expect(result).toEqual({ ok: false, reason });
+    expect(cancelled).toBe(true);
+  });
+
+  it("cancels a response that arrives after the fetch deadline", async () => {
+    let cancelled = false;
+    const result = await guardedLinkFetch(new URL("https://example.com/"), {
+      transport: {
+        lookup: () => Promise.resolve(GLOBAL),
+        async fetch() {
+          await delay(80);
+          return new Response(
+            new ReadableStream<Uint8Array>(
+              {
+                cancel() {
+                  cancelled = true;
+                },
+              },
+              { highWaterMark: 0 },
+            ),
+          );
+        },
+      },
+      timeoutMs: 20,
+      maxBytes: 1024,
+      acceptContentType: () => true,
+    });
+    expect(result).toEqual({ ok: false, reason: "timeout" });
+    await delay(100);
+    expect(cancelled).toBe(true);
   });
 
   it("refuses a non-HTML content type before reading the body", async () => {

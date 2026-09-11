@@ -12,6 +12,8 @@ dist/
 # backups like `.env.bak` that would otherwise be untracked-but-committable
 # files carrying live credentials.
 .env*
+.dev.vars*
+.wrangler/
 
 # IDE
 .vscode/

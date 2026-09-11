@@ -57,8 +57,11 @@ type SessionUser = NonNullable<Context["session"]>["user"];
  * `rateLimitCapability` below.
  */
 export function rateLimit(policy: RateLimitPolicy) {
-  return os.$context<Context & { user: SessionUser }>().middleware(({ context, next }) => {
-    const result = context.rateLimiter.consume(`${policy.name}:user:${context.user.id}`, policy);
+  return os.$context<Context & { user: SessionUser }>().middleware(async ({ context, next }) => {
+    const result = await context.rateLimiter.consume(
+      `${policy.name}:user:${context.user.id}`,
+      policy,
+    );
 
     if (!result.allowed) {
       throw new ORPCError("TOO_MANY_REQUESTS", {
@@ -98,12 +101,12 @@ export function rateLimit(policy: RateLimitPolicy) {
  * caller is `./appeal-intake.ts`, which deliberately declares a narrower
  * context than a procedure gets, and this function has never needed more.
  */
-export function rateLimitCapability(
+export async function rateLimitCapability(
   context: Pick<Context, "rateLimiter">,
   policy: RateLimitPolicy,
   key: string,
-): void {
-  const result = context.rateLimiter.consume(`${policy.name}:${key}`, policy);
+): Promise<void> {
+  const result = await context.rateLimiter.consume(`${policy.name}:${key}`, policy);
 
   if (!result.allowed) {
     throw new ORPCError("TOO_MANY_REQUESTS", {
@@ -222,13 +225,13 @@ export const publicReadProcedure = base.use(({ context, next }) => {
  * Missing identity in non-HTTP callers shares one bounded fallback bucket.
  */
 export function publicRateLimit(policy: RateLimitPolicy) {
-  return os.$context<Context>().middleware(({ context, next }) => {
+  return os.$context<Context>().middleware(async ({ context, next }) => {
     const address = context.headers ? getClientIp(context.headers) : null;
     const key = context.session?.user
       ? `user:${context.session.user.id}`
       : `ip:${address ?? "unknown"}`;
 
-    const result = context.rateLimiter.consume(`${policy.name}:${key}`, policy);
+    const result = await context.rateLimiter.consume(`${policy.name}:${key}`, policy);
     if (!result.allowed) {
       throw new ORPCError("TOO_MANY_REQUESTS", {
         message: "You're doing that too fast. Try again in a moment.",

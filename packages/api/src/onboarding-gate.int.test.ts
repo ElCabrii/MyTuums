@@ -1,8 +1,9 @@
+import { auth, closeDb } from "./testing/runtime.js";
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
-import { auth } from "@my-tuums/auth";
+
 import { ONBOARDING_REQUIRED_MESSAGE } from "@my-tuums/auth/rules";
-import { closeDb } from "@my-tuums/db";
+
 import { user } from "@my-tuums/db/schema";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

@@ -5,7 +5,6 @@ import { VIDEO_INPUT_TYPES, VIDEO_MAX_BYTES } from "./constants.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { VideoLifecycleError } from "./video-lifecycle.js";
-import { VIDEO_PART_BYTES } from "./video-storage.js";
 
 export function requireVideoUploads(context: Pick<Context, "videoUploads">) {
   if (!context.videoUploads)
@@ -50,21 +49,6 @@ export const videoRouter = {
     .input(uploadId)
     .handler(({ input, context }) =>
       videoAction(() => requireVideoUploads(context).status(input.videoId, context.user.id)),
-    ),
-  part: read
-    .input(
-      uploadId.extend({
-        number: z
-          .number()
-          .int()
-          .min(1)
-          .max(Math.ceil(VIDEO_MAX_BYTES / VIDEO_PART_BYTES)),
-      }),
-    )
-    .handler(({ input, context }) =>
-      videoAction(() =>
-        requireVideoUploads(context).part(input.videoId, context.user.id, input.number),
-      ),
     ),
   finish: write
     .input(uploadId)

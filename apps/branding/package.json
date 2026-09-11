@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "cross-env NODE_ENV=production vite build",
+    "build": "cross-env NODE_ENV=production vite build && pnpm build:worker",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
-    "paraglide": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide --emit-ts-declarations"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p worker/tsconfig.json",
+    "paraglide": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide --emit-ts-declarations",
+    "build:worker": "wrangler deploy --dry-run --outdir .wrangler/dist",
+    "types": "wrangler types worker/worker-configuration.d.ts --env-interface BrandingEnv --include-runtime false"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

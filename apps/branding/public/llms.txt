@@ -2,13 +2,15 @@
 
 > The social media, for gamers.
 
+This is an Access-protected migration experiment using synthetic data.
+
 MyTuums is a gaming-first social network: posts and threads, reposts and
 quotes, likes and bookmarks, follows, and human-reviewed moderation with
 in-app appeals.
 
-- App: [https://mytuums.com](https://mytuums.com)
-- Create an account: [https://mytuums.com/register](https://mytuums.com/register)
-- Sign in: [https://mytuums.com/login](https://mytuums.com/login)
+- App: [https://cf-poc.mytuums.com](https://cf-poc.mytuums.com)
+- Create an account: [https://cf-poc.mytuums.com/register](https://cf-poc.mytuums.com/register)
+- Sign in: [https://cf-poc.mytuums.com/login](https://cf-poc.mytuums.com/login)
 - X (Twitter): [https://x.com/mytuums](https://x.com/mytuums)
 - Instagram: [https://www.instagram.com/mytuums/](https://www.instagram.com/mytuums/)
 - TikTok: [https://www.tiktok.com/@mytuums](https://www.tiktok.com/@mytuums)
@@ -17,9 +19,9 @@ in-app appeals.
 
 ## Notes
 
-- This landing site ([https://about.mytuums.com](https://about.mytuums.com))
+- This landing site ([https://about-cf-poc.mytuums.com](https://about-cf-poc.mytuums.com))
   is available in English and French; the language is chosen in the page
   header.
 - The product requires an account for posting and browsing feeds, but
-  individual post permalinks are publicly readable — see the app's own
-  [llms.txt](https://mytuums.com/llms.txt) for the public surface.
+  individual post permalinks are session-optional behind Access — see the app's own
+  [llms.txt](https://cf-poc.mytuums.com/llms.txt) for the public surface.

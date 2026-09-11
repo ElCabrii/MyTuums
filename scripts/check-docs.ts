@@ -80,11 +80,11 @@ const REQUIRED_DOCS = {
     "Glossary",
   ],
   "docs/operations.md": [
-    "Environment file",
+    "Configuration",
     "Local development",
-    "Railway",
+    "Cloudflare deployment",
     "Build-time and runtime configuration",
-    "Docker image",
+    "Worker artifacts",
     "Migrations",
     "Observability",
     "CI checks",
@@ -668,25 +668,27 @@ if (!routerBody) {
 }
 
 // --------------------------------------------------------------------------
-// 9. Documented VITE_* build args match the Dockerfile
+// 9. Documented VITE_* inputs match the browser's typed configuration contract
 // --------------------------------------------------------------------------
 
-const dockerfile = read("apps/server/Dockerfile");
-const dockerArgs = [...dockerfile.matchAll(/^ARG\s+(VITE_\w+)/gm)].map((m) => m[1]).sort();
-const documentedArgs = markedList("docs/operations.md", "vite-build-args");
-if (documentedArgs === null) {
+const viteTypes = read("apps/web/src/vite-env.d.ts");
+const viteInputs = [...viteTypes.matchAll(/^\s*readonly\s+(VITE_\w+)\??:/gm)]
+  .map((m) => m[1])
+  .sort();
+const documentedInputs = markedList("docs/operations.md", "vite-build-inputs");
+if (documentedInputs === null) {
   fail(
     "docs/operations.md",
-    "has no <!-- docs:check=vite-build-args --> marker",
-    "mark the Docker build-argument list so it can be checked against apps/server/Dockerfile",
+    "has no <!-- docs:check=vite-build-inputs --> marker",
+    "mark the public build input list so it can be checked against apps/web/src/vite-env.d.ts",
   );
 } else {
-  const sorted = [...documentedArgs].sort();
-  if (sorted.join(",") !== dockerArgs.join(",")) {
+  const sorted = [...documentedInputs].sort();
+  if (sorted.join(",") !== viteInputs.join(",")) {
     fail(
       "docs/operations.md",
-      `documented VITE_* build args [${sorted.join(", ")}] differ from apps/server/Dockerfile [${dockerArgs.join(", ")}]`,
-      "update the marked list to match the Dockerfile's ARG lines",
+      `documented VITE_* build inputs [${sorted.join(", ")}] differ from apps/web/src/vite-env.d.ts [${viteInputs.join(", ")}]`,
+      "update the marked list to match the browser's declared VITE_* inputs",
     );
   }
 }

@@ -1,11 +1,10 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, not, or, sql } from "drizzle-orm";
+import { and, desc, eq, not, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
-import { follow, followRequest, user, userBadge, userBlock } from "@my-tuums/db/schema";
+import { follow, followRequest, user, userBadge } from "@my-tuums/db/schema";
 import { normalizeUsername, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from "@my-tuums/auth/rules";
 import { z } from "zod";
-import { displayProfileBadges, FOLLOWER_BADGE_TIERS, followerBadgeTierFor } from "./badges.js";
-import { stampBadgeTier } from "./badge-stamping.js";
+import { displayProfileBadges } from "./badges.js";
 import {
   CURSOR_MAX_ENCODED_LENGTH,
   FOLLOW_PAGE_SIZE,
@@ -13,12 +12,12 @@ import {
   IMAGE_KINDS,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
-import { insertNotification } from "./notifications.js";
+import { acceptFollowRequest, followUser } from "./follow-lifecycle.js";
+import { jsonDecoder } from "./sql.js";
 import { keysetPage } from "./pagination.js";
 import { acceptImage, type ImageRejection } from "./image.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
-import { acquireRelationshipLock } from "./relationship-lock.js";
 import { replaceProfileMedia, removeProfileMedia, requireStorage } from "./profile-media.js";
 import { effectivelyBanned, invisibleUser, privateUserHidden, visibleUser } from "./visibility.js";
 
@@ -75,11 +74,11 @@ export const publicUserColumns = {
  * of these an index scan rather than a table scan.
  */
 const followerCount = sql<number>`(
-  select count(*)::int from ${follow} where ${follow.followingId} = ${user.id}
+  select count(*) from ${follow} where ${follow.followingId} = ${user.id}
 )`;
 
 const followingCount = sql<number>`(
-  select count(*)::int from ${follow} where ${follow.followerId} = ${user.id}
+  select count(*) from ${follow} where ${follow.followerId} = ${user.id}
 )`;
 
 /**
@@ -89,14 +88,14 @@ const followingCount = sql<number>`(
  * rows.
  */
 const stampedBadges = sql<string[]>`coalesce((
-  select array_agg(${userBadge.badge}) from ${userBadge} where ${userBadge.userId} = ${user.id}
-), '{}'::text[])`;
+  select json_group_array(${userBadge.badge}) from ${userBadge} where ${userBadge.userId} = ${user.id}
+), '[]')`.mapWith(jsonDecoder(z.array(z.string())));
 
 export function viewerIsFollowing(viewerId: string) {
   return sql<boolean>`exists (
     select 1 from ${follow}
     where ${follow.followingId} = ${user.id} and ${follow.followerId} = ${viewerId}
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /**
@@ -109,7 +108,7 @@ export function viewerHasRequested(viewerId: string) {
   return sql<boolean>`exists (
     select 1 from ${followRequest}
     where ${followRequest.targetId} = ${user.id} and ${followRequest.requesterId} = ${viewerId}
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /**
@@ -130,7 +129,7 @@ const usernameInput = z.string().trim().min(USERNAME_MIN_LENGTH).max(USERNAME_MA
 
 async function countFollowers(db: Pick<Database, "select">, userId: string): Promise<number> {
   const [row] = await db
-    .select({ count: sql<number>`count(*)::int` })
+    .select({ count: sql<number>`count(*)` })
     .from(follow)
     .where(eq(follow.followingId, userId));
 
@@ -315,7 +314,13 @@ export const userRouter = {
    */
   uploadImage: protectedProcedure
     .use(rateLimit(RATE_LIMITS.upload))
-    .input(z.object({ kind: z.enum(IMAGE_KINDS), original: z.file(), display: z.file() }))
+    .input(
+      z.object({
+        kind: z.enum(IMAGE_KINDS),
+        original: z.instanceof(File),
+        display: z.instanceof(File),
+      }),
+    )
     .handler(async ({ input, context }) => {
       const storage = requireStorage(context);
 
@@ -376,166 +381,7 @@ export const userRouter = {
   follow: protectedProcedure
     .use(rateLimit(RATE_LIMITS.follow))
     .input(z.object({ userId: z.string().min(1) }))
-    .handler(async ({ input, context }) => {
-      // Checked before the existence query so the caller gets a readable 400.
-      // The `follow_not_self` CHECK constraint is still the actual invariant
-      // (see packages/db/src/schema/app.ts) — without this guard it would
-      // surface as an unexplained INTERNAL_SERVER_ERROR instead.
-      if (input.userId === context.user.id) {
-        throw new ORPCError("BAD_REQUEST", { message: "You can't follow yourself." });
-      }
-
-      const [target] = await context.db
-        .select({ id: user.id })
-        .from(user)
-        .where(eq(user.id, input.userId))
-        .limit(1);
-
-      if (!target) {
-        throw new ORPCError("NOT_FOUND", { message: "No such user." });
-      }
-
-      // One transaction under the pair's relationship lock, with the privacy
-      // branch decided INSIDE it (issue #328). Reading `isPrivate` outside
-      // would race a toggle: public→private between the read and the lock
-      // would mint a direct edge on a private account, bypassing approval.
-      // The block check is shared — a block racing either path cannot leave a
-      // prohibited edge or request behind it.
-      //
-      // The lock also serializes against `block`/`unblock`, which take the
-      // same pair lock: without it a `block` committing between the check and
-      // the insert would be undone by the insert, leaving a prohibited edge
-      // standing behind the block.
-      let outcome = { viewerIsFollowing: false, requested: false };
-      await context.db.transaction(async (tx) => {
-        await acquireRelationshipLock(tx, context.user.id, input.userId);
-
-        // A block in either direction makes the follow a bad request, not a
-        // silent no-op: a follow that quietly did nothing would read as
-        // broken UI. A blocked account's profile is already invisible, so this
-        // guard is what stops a direct follow attempt after the block.
-        const [block] = await tx
-          .select({ id: userBlock.blockerId })
-          .from(userBlock)
-          .where(
-            or(
-              and(eq(userBlock.blockerId, context.user.id), eq(userBlock.blockedId, input.userId)),
-              and(eq(userBlock.blockerId, input.userId), eq(userBlock.blockedId, context.user.id)),
-            ),
-          )
-          .limit(1);
-
-        if (block) {
-          throw new ORPCError("BAD_REQUEST", { message: "You can't follow this user." });
-        }
-
-        const [privacy] = await tx
-          .select({ isPrivate: user.isPrivate })
-          .from(user)
-          .where(eq(user.id, input.userId))
-          .limit(1);
-
-        // Private accounts do not gain followers directly — the caller's
-        // intent becomes a pending request the target approves.
-        if (privacy?.isPrivate) {
-          // Already following: idempotent success, no second request and no
-          // second notification — the follow edge is the terminal state. Any
-          // orphaned request row is cleared so the inbox and `hasRequested`
-          // cannot disagree with the edge.
-          const [existing] = await tx
-            .select({ followerId: follow.followerId })
-            .from(follow)
-            .where(
-              and(eq(follow.followerId, context.user.id), eq(follow.followingId, input.userId)),
-            )
-            .limit(1);
-          if (existing) {
-            await tx
-              .delete(followRequest)
-              .where(
-                and(
-                  eq(followRequest.requesterId, context.user.id),
-                  eq(followRequest.targetId, input.userId),
-                ),
-              );
-            outcome = { viewerIsFollowing: true, requested: false };
-            return;
-          }
-
-          const inserted = await tx
-            .insert(followRequest)
-            .values({ requesterId: context.user.id, targetId: input.userId })
-            .onConflictDoNothing()
-            .returning({ requesterId: followRequest.requesterId });
-
-          if (inserted.length > 0) {
-            await insertNotification(tx, {
-              recipientId: input.userId,
-              actorId: context.user.id,
-              type: "follow_request",
-            });
-          }
-          outcome = { viewerIsFollowing: false, requested: true };
-          return;
-        }
-
-        // The (follower_id, following_id) primary key makes the duplicate
-        // impossible; this just declines to error on it. `.returning()` is
-        // empty exactly when it swallowed a duplicate, so the notification
-        // below mints only on the follow that actually landed — a retried
-        // follow never double-notifies, and follow → unfollow → follow again
-        // is honestly three events, not one collapsed.
-        const inserted = await tx
-          .insert(follow)
-          .values({ followerId: context.user.id, followingId: input.userId })
-          .onConflictDoNothing()
-          .returning({ followerId: follow.followerId });
-
-        // A request that predates the target going public (requested while
-        // private, followed after the toggle) must not survive the edge: the
-        // inbox would keep showing a request from someone already following,
-        // and `hasRequested` would stick true on a public profile. Cleared
-        // unconditionally — even a duplicate edge implies the request is moot.
-        await tx
-          .delete(followRequest)
-          .where(
-            and(
-              eq(followRequest.requesterId, context.user.id),
-              eq(followRequest.targetId, input.userId),
-            ),
-          );
-
-        if (inserted.length > 0) {
-          await insertNotification(tx, {
-            recipientId: input.userId,
-            actorId: context.user.id,
-            type: "follow",
-          });
-
-          // Follower-tier badge stamping (issue #308), the exact shape of
-          // the like-tier stamping in ./posts.ts. A follow that actually
-          // landed is the only moment a threshold can first be passed, so
-          // the cost is one index-only count per new follow and nothing
-          // anywhere else — a retried follow never reaches this branch. The
-          // count read and the stamp ride the follow's own transaction, so
-          // a rollback leaves neither half; the tier upgrades in place (see
-          // ./badge-stamping.ts — one row per family, kept on a recede,
-          // `unfollow` never unstamps: the tier was genuinely reached).
-          const badge = followerBadgeTierFor(await countFollowers(tx, input.userId));
-          if (badge) {
-            await stampBadgeTier(tx, input.userId, FOLLOWER_BADGE_TIERS, badge);
-          }
-        }
-        outcome = { viewerIsFollowing: true, requested: false };
-      });
-
-      return {
-        userId: input.userId,
-        followerCount: await countFollowers(context.db, input.userId),
-        viewerIsFollowing: outcome.viewerIsFollowing,
-        requested: outcome.requested,
-      };
-    }),
+    .handler(({ input, context }) => followUser(context.db, context.user.id, input.userId)),
 
   /**
    * Unfollows a user. Requires a session.
@@ -559,31 +405,19 @@ export const userRouter = {
         throw new ORPCError("NOT_FOUND", { message: "No such user." });
       }
 
-      // Both deletes ride one transaction under the pair lock (issue #328):
-      // `accept` reads the request row under the same lock before inserting
-      // the edge, so an unlocked withdraw racing an accept could delete the
-      // request while the accept still lands the follow. The lock is the
-      // relationship invariant — every writer of either table takes it.
-      await context.db.transaction(async (tx) => {
-        await acquireRelationshipLock(tx, context.user.id, input.userId);
-        await tx
+      await context.db.batch([
+        context.db
           .delete(follow)
-          .where(and(eq(follow.followerId, context.user.id), eq(follow.followingId, input.userId)));
-        // Withdrawing a pending request rides the same call: a Requested row
-        // is the caller's own, so an unfollow that finds no edge still clears
-        // the request — the end state ("I do not follow them") is already true
-        // either way. The dedicated `cancel` below is the explicit withdraw;
-        // this keeps direct calls from stranding a request the page no longer
-        // renders.
-        await tx
+          .where(and(eq(follow.followerId, context.user.id), eq(follow.followingId, input.userId))),
+        context.db
           .delete(followRequest)
           .where(
             and(
               eq(followRequest.requesterId, context.user.id),
               eq(followRequest.targetId, input.userId),
             ),
-          );
-      });
+          ),
+      ]);
 
       return {
         userId: input.userId,
@@ -795,65 +629,11 @@ export const userRouter = {
       .use(rateLimit(RATE_LIMITS.follow))
       .input(z.object({ requesterId: z.string().min(1) }))
       .handler(async ({ input, context }) => {
-        await context.db.transaction(async (tx) => {
-          await acquireRelationshipLock(tx, input.requesterId, context.user.id);
-
-          const [req] = await tx
-            .select({ requesterId: followRequest.requesterId })
-            .from(followRequest)
-            .where(
-              and(
-                eq(followRequest.requesterId, input.requesterId),
-                eq(followRequest.targetId, context.user.id),
-              ),
-            )
-            .limit(1);
-
-          // Already following without a pending row: terminal state reached
-          // by a racing accept — succeed rather than 404 on a retry.
-          if (!req) {
-            const [edge] = await tx
-              .select({ followerId: follow.followerId })
-              .from(follow)
-              .where(
-                and(
-                  eq(follow.followerId, input.requesterId),
-                  eq(follow.followingId, context.user.id),
-                ),
-              )
-              .limit(1);
-            if (edge) return;
-            throw new ORPCError("NOT_FOUND", { message: "No such follow request." });
-          }
-
-          await tx
-            .delete(followRequest)
-            .where(
-              and(
-                eq(followRequest.requesterId, input.requesterId),
-                eq(followRequest.targetId, context.user.id),
-              ),
-            );
-
-          const inserted = await tx
-            .insert(follow)
-            .values({ followerId: input.requesterId, followingId: context.user.id })
-            .onConflictDoNothing()
-            .returning({ followerId: follow.followerId });
-
-          if (inserted.length > 0) {
-            await insertNotification(tx, {
-              recipientId: context.user.id,
-              actorId: input.requesterId,
-              type: "follow",
-            });
-
-            const badge = followerBadgeTierFor(await countFollowers(tx, context.user.id));
-            if (badge) {
-              await stampBadgeTier(tx, context.user.id, FOLLOWER_BADGE_TIERS, badge);
-            }
-          }
-        });
+        const followerCount = await acceptFollowRequest(
+          context.db,
+          input.requesterId,
+          context.user.id,
+        );
 
         // Whether the acceptor follows the requester back — the profile shape
         // this returns names the requester, so its viewer-relative flag reads
@@ -868,7 +648,7 @@ export const userRouter = {
 
         return {
           userId: input.requesterId,
-          followerCount: await countFollowers(context.db, context.user.id),
+          followerCount,
           viewerIsFollowing: !!backEdge,
         };
       }),
@@ -882,17 +662,14 @@ export const userRouter = {
       .use(rateLimit(RATE_LIMITS.follow))
       .input(z.object({ requesterId: z.string().min(1) }))
       .handler(async ({ input, context }) => {
-        await context.db.transaction(async (tx) => {
-          await acquireRelationshipLock(tx, input.requesterId, context.user.id);
-          await tx
-            .delete(followRequest)
-            .where(
-              and(
-                eq(followRequest.requesterId, input.requesterId),
-                eq(followRequest.targetId, context.user.id),
-              ),
-            );
-        });
+        await context.db
+          .delete(followRequest)
+          .where(
+            and(
+              eq(followRequest.requesterId, input.requesterId),
+              eq(followRequest.targetId, context.user.id),
+            ),
+          );
 
         return { userId: input.requesterId, rejected: true as const };
       }),
@@ -907,17 +684,14 @@ export const userRouter = {
       .use(rateLimit(RATE_LIMITS.follow))
       .input(z.object({ targetId: z.string().min(1) }))
       .handler(async ({ input, context }) => {
-        await context.db.transaction(async (tx) => {
-          await acquireRelationshipLock(tx, context.user.id, input.targetId);
-          await tx
-            .delete(followRequest)
-            .where(
-              and(
-                eq(followRequest.requesterId, context.user.id),
-                eq(followRequest.targetId, input.targetId),
-              ),
-            );
-        });
+        await context.db
+          .delete(followRequest)
+          .where(
+            and(
+              eq(followRequest.requesterId, context.user.id),
+              eq(followRequest.targetId, input.targetId),
+            ),
+          );
 
         return { userId: input.targetId, cancelled: true as const };
       }),

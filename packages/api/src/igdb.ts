@@ -158,6 +158,7 @@ export function createIgdbTransport(): IgdbTransport {
         headers: init.headers,
         body: init.body,
         signal: init.signal,
+        redirect: "manual",
       }),
   };
 }
@@ -198,7 +199,28 @@ async function parseBody<Row>(
 ): Promise<Row> {
   let raw: unknown;
   try {
-    raw = await response.json();
+    if (!response.body) throw new Error("Missing provider response body.");
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
+    let text = "";
+    let size = 0;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        const value: unknown = chunk.value;
+        if (!(value instanceof Uint8Array)) throw new Error("Invalid provider response bytes.");
+        size += value.byteLength;
+        // Hydration is limited to 500 games per response. Bound the raw bytes
+        // before JSON parsing as well, including unknown provider fields.
+        if (size > 8 * 1024 * 1024) throw new Error("Provider response exceeds its size limit.");
+        text += decoder.decode(value, { stream: true });
+      }
+      raw = JSON.parse(text + decoder.decode());
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
   } catch {
     throw new IgdbError("bad_response", failure);
   }
@@ -272,7 +294,7 @@ export function createIgdbClient(config: {
       if (error instanceof IgdbError) throw error;
       throw new IgdbError("network", `${endpoint} request failed: ${String(error)}`, { endpoint });
     } finally {
-      clearTimeout(timeoutId);
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
     }
   }
 

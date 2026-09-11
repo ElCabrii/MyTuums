@@ -13,7 +13,6 @@
  * so the declared MIME type is checked against an allowlist AND against the
  * file's own leading bytes.
  */
-import { randomUUID } from "node:crypto";
 import {
   IMAGE_LIMITS,
   MAX_IMAGE_MEGAPIXELS,
@@ -162,7 +161,7 @@ export function imageObjectKey(
   userId: string,
   type: AllowedImageType,
   variant: ImageVariant,
-  id: string = randomUUID(),
+  id: string = crypto.randomUUID(),
 ): string {
   const infix = variant === "original" ? ".orig" : "";
   return `${KEY_PREFIX[kind]}/${userId}/${id}${infix}.${EXTENSION[type]}`;
@@ -195,7 +194,7 @@ export function objectKeyFromMediaPath(value: string | null | undefined): string
  * encoded separator or a stray query would all be the caller's to choose
  * without it. Anchored and explicit rather than a blocklist.
  *
- * The uuid is the grouped form, matching `randomUUID()`'s output — the old
+ * The uuid is the grouped form, matching `crypto.randomUUID()`'s output — the old
  * `[a-f0-9-]{36}` also matched 36 hyphens, which is not a shape this app
  * writes. The optional `.orig` infix is the original's key (see
  * `imageObjectKey`), and the bare-uuid shape is a stored link preview's lead
@@ -206,8 +205,9 @@ export function objectKeyFromMediaPath(value: string | null | undefined): string
  * given width is one this app mints is `parseMediaVariantKey`'s to say).
  *
  * A game cover is `games/<igdbId>-<imageId>.<ext>` (issue #314): the IGDB id
- * of the game and IGDB's own image hash, so the key is content-addressed and
- * a repeat sync re-uploads exactly the same object — see `./game-media.ts`.
+ * of the game and IGDB's image hash. New uploads add a 32-hex catalog version
+ * before the extension so delayed cleanup cannot target a later upload.
+ * Legacy cover keys remain readable — see `./game-media.ts`.
  */
 export function isSafeObjectKey(key: string): boolean {
   return (
@@ -220,6 +220,6 @@ export function isSafeObjectKey(key: string): boolean {
     /^link-cards\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(webp|png|jpg|gif)(?:\.w\d+\.webp)?$/.test(
       key,
     ) ||
-    /^games\/\d+-[a-z0-9]{2,64}\.(webp|png|jpg|gif)(?:\.w\d+\.webp)?$/.test(key)
+    /^games\/\d+-[a-z0-9]{2,64}(?:\.[a-f0-9]{32})?\.(webp|png|jpg|gif)(?:\.w\d+\.webp)?$/.test(key)
   );
 }

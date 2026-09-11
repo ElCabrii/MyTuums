@@ -12,10 +12,6 @@
       "types": "./src/schema/index.ts",
       "default": "./src/schema/index.ts"
     },
-    "./testing": {
-      "types": "./src/testing.ts",
-      "default": "./src/testing.ts"
-    },
     "./migrate": {
       "types": "./src/migrate.ts",
       "default": "./src/migrate.ts"
@@ -31,31 +27,40 @@
     "./stamp-join-badges": {
       "types": "./src/stamp-join-badges.ts",
       "default": "./src/stamp-join-badges.ts"
+    },
+    "./testing/d1": {
+      "types": "./src/testing/d1.ts",
+      "default": "./src/testing/d1.ts"
+    },
+    "./poc-database": {
+      "types": "./scripts/poc-database.ts",
+      "default": "./scripts/poc-database.ts"
     }
   },
   "scripts": {
-    "db:generate": "dotenv -e ../../.env -- drizzle-kit generate",
-    "db:check": "dotenv -e ../../.env -- drizzle-kit check",
-    "db:generate:auth": "dotenv -e ../../.env -- npx @better-auth/cli generate --config ../auth/src/index.ts --output ./src/schema/auth.ts -y && tsx ./scripts/patch-auth-schema.ts",
-    "db:migrate": "dotenv -e ../../.env -- drizzle-kit migrate",
-    "db:push": "dotenv -e ../../.env -- drizzle-kit push",
-    "db:studio": "dotenv -e ../../.env -- drizzle-kit studio",
-    "db:test:setup": "dotenv -e ../../.env -- tsx scripts/setup-test-db.ts",
-    "db:promote": "dotenv -e ../../.env -- tsx scripts/promote-user.ts",
-    "db:grant:founder": "dotenv -e ../../.env -- tsx scripts/grant-founder-badge.ts",
+    "db:generate": "drizzle-kit generate --config drizzle.d1.config.ts",
+    "db:check": "drizzle-kit check --config drizzle.d1.config.ts",
+    "db:generate:auth": "NODE_OPTIONS=\"--import tsx\" npx @better-auth/cli generate --config ../auth/schema.config.ts --output ./src/schema/auth.ts -y && tsx ./scripts/patch-auth-schema.ts",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:rehearse:recovery": "tsx scripts/rehearse-recovery.ts",
+    "db:test:setup": "tsx scripts/setup-test-db.ts",
+    "db:promote": "tsx scripts/admin.ts promote",
+    "db:grant:founder": "tsx scripts/admin.ts founder",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "drizzle-orm": "^0.45.2",
-    "postgres": "^3.4.7"
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
     "@my-tuums/tsconfig": "workspace:*",
     "@types/node": "catalog:",
-    "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.5",
     "tsx": "^4.19.0",
-    "@typescript/native": "catalog:"
+    "@typescript/native": "catalog:",
+    "miniflare": "5.20260908.0-alpha",
+    "@cloudflare/workers-types": "5.20260908.1",
+    "wrangler": "4.130.0",
+    "zod": "catalog:"
   }
 }

@@ -1,3 +1,4 @@
+import { auth, authTest, testHelpers, closeDb, db } from "./testing/runtime.js";
 /**
  * The auth-hardening surface, against real BetterAuth and real Postgres.
  *
@@ -11,15 +12,14 @@ import { createHmac, randomUUID } from "node:crypto";
 import { base32 } from "@better-auth/utils/base32";
 import { createOTP } from "@better-auth/utils/otp";
 import { desc, eq, like } from "drizzle-orm";
-import { auth, PROVIDER_IMAGE_MAX_URL_LENGTH } from "@my-tuums/auth";
+import { PROVIDER_IMAGE_MAX_URL_LENGTH } from "@my-tuums/auth";
 import {
   BIO_MAX_LENGTH,
   LEGAL_ACCEPTANCE_REQUIRED_MESSAGE,
   LEGAL_VERSION,
   USERNAME_CANONICAL_WRITE_MESSAGE,
 } from "@my-tuums/auth/rules";
-import { authTest, testHelpers } from "@my-tuums/auth/testing";
-import { closeDb, db } from "@my-tuums/db";
+
 import { account, twoFactor, user, verification } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { truncateAll } from "./testing/harness.js";

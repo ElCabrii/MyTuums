@@ -1,5 +1,6 @@
+import { closeDb, db } from "./testing/runtime.js";
 import { call } from "@orpc/server";
-import { closeDb, db } from "@my-tuums/db";
+
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { upsertGames, type StagedGameRow } from "./games-sync.js";
 import { appRouter } from "./router.js";

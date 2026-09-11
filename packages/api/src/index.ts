@@ -7,7 +7,7 @@
 export { appRouter, type AppRouter } from "./router.js";
 export { createVideoUploads } from "./video-uploads.js";
 export { resolveVideoMedia } from "./video-media.js";
-export { createContext, defaultStorage } from "./context.js";
+export { createContext } from "./context.js";
 export { createMediaResolver, type MediaAuthorizer, type MediaResolver } from "./media.js";
 export { ensureMediaVariant } from "./media-variants.js";
 export { canViewPostMedia } from "./post-media.js";

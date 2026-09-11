@@ -1,39 +1,6 @@
-/**
- * The one place this package sends mail.
- *
- * Every email-bearing auth flow (two-factor OTP, address verification,
- * password reset) and every moderation notice (issue #38) goes through
- * `sendEmail`, so swapping Resend for something else is a change to this file
- * alone.
- *
- * Resend is used when `RESEND_API_KEY` is set. When it isn't:
- *
- * - in development and test the message is logged and the flow continues, so
- *   TOTP-based 2FA, sign-up and password reset are all fully usable on a clone
- *   with no email account at all;
- * - in production the send logs loudly — the mail is still silently dropped
- *   from the caller's point of view. Better Auth swallows `sendEmail`
- *   rejections and runs reset/verification sends in the background, so the
- *   HTTP response is success and the person sees no error, only an inbox that
- *   never receives anything.
- */
-import { Resend } from "resend";
+import type { SendEmail } from "@cloudflare/workers-types";
 import { type EmailAction, renderBrandedEmail } from "./email-templates/shell.js";
-import { emailFrom, isProduction, resendApiKey, webOrigin } from "./env.js";
 
-/**
- * Constructed lazily rather than at module scope so importing this package
- * never reaches for the network or the key — `packages/api`'s unit tests and
- * the Better Auth CLI both import the auth instance purely for its types.
- */
-let resend: Resend | undefined;
-
-function client(apiKey: string): Resend {
-  resend ??= new Resend(apiKey);
-  return resend;
-}
-
-/** One multipart email to send: recipient, subject, HTML body and its plain-text fallback. */
 export interface OutgoingEmail {
   to: string;
   subject: string;
@@ -41,48 +8,40 @@ export interface OutgoingEmail {
   html: string;
 }
 
-/**
- * Sends one email: through Resend when a key is configured, otherwise logged
- * (dev/test) or a loudly-logged refusal (production). Note the prod path's
- * throw does NOT surface to the user — Better Auth swallows send rejections
- * and runs reset/verification sends in the background, so the HTTP response
- * is success either way; the loud log is for operators.
- */
-export async function sendEmail({ to, subject, text, html }: OutgoingEmail): Promise<void> {
-  if (!resendApiKey) {
-    if (isProduction) {
-      throw new Error(
-        `Refusing to drop an auth email to ${to} silently: RESEND_API_KEY is not set. ` +
-          "Set it (and EMAIL_FROM to an address on a domain verified with Resend), " +
-          "or disable the flows that send mail.",
-      );
-    }
-
-    // Quiet under Vitest only. The integration suite signs up a fresh user per
-    // test and `emailVerification.sendOnSignUp` fires on every one, which would
-    // bury the actual test output. Development still logs — that console line
-    // is how you click a verification or password-reset link without an email
-    // account, and the E2E stack deliberately runs as `development` so its
-    // server output keeps them too.
-    if (process.env.NODE_ENV !== "test") {
-      console.info(`\n[auth:email] to=${to}\n[auth:email] subject=${subject}\n${text}\n`);
-    }
-    return;
+/** Safe delivery classification; provider messages and causes are deliberately discarded. */
+export class EmailDeliveryError extends Error {
+  constructor(readonly retryable: boolean) {
+    super("Email sending failed.");
+    this.name = "EmailDeliveryError";
   }
+}
 
-  const { error } = await client(resendApiKey).emails.send({
-    from: emailFrom,
-    to,
-    subject,
-    text,
-    html,
-  });
-
-  // The Resend SDK reports failures in the response body rather than by
-  // rejecting, so an unchecked call would look like a successful send.
-  if (error) {
-    throw new Error(`Resend refused the message to ${to}: ${error.message}`);
-  }
+/** Bind outgoing mail to this environment's verified Cloudflare sender. */
+export function createEmailSender(binding: SendEmail, from: string) {
+  return async (email: OutgoingEmail): Promise<void> => {
+    const message = { from, ...email };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let retryable: boolean;
+      try {
+        await binding.send(message);
+        return;
+      } catch (error) {
+        retryable =
+          error instanceof Error &&
+          "code" in error &&
+          (error.code === "E_RATE_LIMIT_EXCEEDED" || error.code === "E_INTERNAL_SERVER_ERROR");
+        // The binding has no idempotency key. Unknown failures may follow an
+        // accepted send, so only documented temporary errors are retried.
+        if (retryable && attempt < 2) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+          continue;
+        }
+      }
+      // Provider diagnostics may include addresses or capabilities. Neither the
+      // message nor the cause may escape into caller logs or HTTP responses.
+      throw new EmailDeliveryError(retryable);
+    }
+  };
 }
 
 /**
@@ -108,20 +67,6 @@ interface EmailRenderOptions {
 }
 
 /**
- * The public logo asset, resolved against the same browser origin every
- * security-relevant email link uses. The server rejects a malformed origin at
- * boot; the fallback keeps this package's quiet env reader import-safe for CLI
- * tooling that may load it without the server validator.
- */
-function emailLogoUrl(): string {
-  try {
-    return new URL("/mytuums-192.png", webOrigin).href;
-  } catch {
-    return "http://localhost:5173/mytuums-192.png";
-  }
-}
-
-/**
  * Gives every auth and moderation message one branded HTML family while the
  * locale-specific copy remains the source of truth for both multipart parts.
  *
@@ -134,6 +79,7 @@ function emailLogoUrl(): string {
  * because `react-email`'s `render` inlines styles asynchronously.
  */
 async function brandedEmail(
+  webOrigin: string,
   copy: EmailCopy,
   locale: EmailLocale,
   options: EmailRenderOptions = {},
@@ -144,7 +90,7 @@ async function brandedEmail(
       subject: copy.subject,
       text: copy.text,
       locale,
-      logoUrl: emailLogoUrl(),
+      logoUrl: new URL("/mytuums-192.png", webOrigin).href,
       action: options.action,
       otp: options.otp,
     }),
@@ -436,103 +382,115 @@ const copy = {
 
 /** Builds the two-factor OTP email copy for the given locale. */
 export async function otpEmail(
+  webOrigin: string,
   otp: string,
   locale: EmailLocale,
 ): Promise<Omit<OutgoingEmail, "to">> {
-  return brandedEmail(copy.otp[locale](otp), locale, { otp });
+  return brandedEmail(webOrigin, copy.otp[locale](otp), locale, { otp });
 }
 
 /** Builds the email-verification email copy for the given locale. */
 export async function verificationEmail(
+  webOrigin: string,
   url: string,
   locale: EmailLocale,
 ): Promise<Omit<OutgoingEmail, "to">> {
-  return brandedEmail(copy.verify[locale](url), locale, {
+  return brandedEmail(webOrigin, copy.verify[locale](url), locale, {
     action: { url, label: ACTION_LABELS.verify[locale] },
   });
 }
 
 /** Builds the password-reset email copy for the given locale. */
 export async function passwordResetEmail(
+  webOrigin: string,
   url: string,
   locale: EmailLocale,
 ): Promise<Omit<OutgoingEmail, "to">> {
-  return brandedEmail(copy.reset[locale](url), locale, {
+  return brandedEmail(webOrigin, copy.reset[locale](url), locale, {
     action: { url, label: ACTION_LABELS.reset[locale] },
   });
 }
 
 /** Builds the post-removal notice copy — describes the post and links the appeal. */
 export async function moderationRemovalEmail(
+  webOrigin: string,
   args: RemovalArgs,
   locale: EmailLocale,
 ): Promise<Omit<OutgoingEmail, "to">> {
-  return brandedEmail(copy.moderation.removal[locale](args), locale, {
+  return brandedEmail(webOrigin, copy.moderation.removal[locale](args), locale, {
     action: { url: args.appealUrl, label: ACTION_LABELS.appeal[locale] },
   });
 }
 
 /** Builds the post-restored notice copy. */
 export async function moderationRestoreEmail(
+  webOrigin: string,
   locale: EmailLocale,
 ): Promise<Omit<OutgoingEmail, "to">> {
-  return brandedEmail(copy.moderation.restore[locale](), locale);
+  return brandedEmail(webOrigin, copy.moderation.restore[locale](), locale);
 }
 
 /** Builds the suspension notice copy — names the expiry time and links the appeal. */
 export async function moderationSuspensionEmail(
+  webOrigin: string,
   args: { reason: string; expiresAt: Date; appealUrl: string },
   locale: EmailLocale,
 ): Promise<Omit<OutgoingEmail, "to">> {
-  return brandedEmail(copy.moderation.suspension[locale](args), locale, {
+  return brandedEmail(webOrigin, copy.moderation.suspension[locale](args), locale, {
     action: { url: args.appealUrl, label: ACTION_LABELS.appeal[locale] },
   });
 }
 
 /** Builds the suspension-lifted notice copy. */
 export async function moderationUnsuspensionEmail(
+  webOrigin: string,
   locale: EmailLocale,
 ): Promise<Omit<OutgoingEmail, "to">> {
-  return brandedEmail(copy.moderation.unsuspension[locale](), locale);
+  return brandedEmail(webOrigin, copy.moderation.unsuspension[locale](), locale);
 }
 
 /** Builds the ban notice copy — states the reason and links the appeal. */
 export async function moderationBanEmail(
+  webOrigin: string,
   args: { reason: string; appealUrl: string },
   locale: EmailLocale,
 ): Promise<Omit<OutgoingEmail, "to">> {
-  return brandedEmail(copy.moderation.ban[locale](args), locale, {
+  return brandedEmail(webOrigin, copy.moderation.ban[locale](args), locale, {
     action: { url: args.appealUrl, label: ACTION_LABELS.appeal[locale] },
   });
 }
 
 /** Builds the ban-lifted notice copy. */
 export async function moderationUnbanEmail(
+  webOrigin: string,
   locale: EmailLocale,
 ): Promise<Omit<OutgoingEmail, "to">> {
-  return brandedEmail(copy.moderation.unban[locale](), locale);
+  return brandedEmail(webOrigin, copy.moderation.unban[locale](), locale);
 }
 
 /** Builds the role-change notice copy — the reason is optional (a setRole without one). */
 export async function moderationRoleEmail(
+  webOrigin: string,
   args: { role: string; reason?: string },
   locale: EmailLocale,
 ): Promise<Omit<OutgoingEmail, "to">> {
-  return brandedEmail(copy.moderation.role[locale](args), locale);
+  return brandedEmail(webOrigin, copy.moderation.role[locale](args), locale);
 }
 
 /** Builds the report-resolution notice for reporters — the case's outcome, not the appeal's. */
 export async function moderationCaseResolutionEmail(
+  webOrigin: string,
   args: { outcome: "actioned" | "dismissed"; note?: string },
   locale: EmailLocale,
 ): Promise<Omit<OutgoingEmail, "to">> {
-  return brandedEmail(copy.moderation.caseResolution[locale](args), locale);
+  return brandedEmail(webOrigin, copy.moderation.caseResolution[locale](args), locale);
 }
 
 /** Builds the appeal-review notice copy for the given outcome. */
 export async function moderationResolutionEmail(
+  webOrigin: string,
   args: { outcome: "upheld" | "overturned"; note?: string },
   locale: EmailLocale,
 ): Promise<Omit<OutgoingEmail, "to">> {
-  return brandedEmail(copy.moderation.resolution[locale](args), locale);
+  return brandedEmail(webOrigin, copy.moderation.resolution[locale](args), locale);
 }

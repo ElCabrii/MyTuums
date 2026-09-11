@@ -1,6 +1,7 @@
+import { closeDb } from "./testing/runtime.js";
 import { call } from "@orpc/server";
 import { randomUUID } from "node:crypto";
-import { closeDb } from "@my-tuums/db";
+
 import { notification, notificationLastSeen, postAttachment, user } from "@my-tuums/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -257,7 +258,7 @@ describe("notification writes (issue #259)", () => {
     await call(appRouter.post.like, { postId: second.id }, { context: contextFor(liker) });
     await author.context.db
       .update(notification)
-      .set({ createdAt: sql`date_trunc('minute', now()) - interval '61 seconds'` })
+      .set({ createdAt: sql`(cast(unixepoch() / 60 as integer) * 60 - 61) * 1000` })
       .where(eq(notification.recipientId, author.id));
 
     // One tick for the burst, but both rows are on the page and both are
@@ -535,9 +536,7 @@ describe("notification reads (issue #259)", () => {
 
   it("markRead stamps every unread row once and takes the badge to zero", async () => {
     const author = await createTestUser();
-    // Two likers, not one: a same-type event from the same actor inside the
-    // burst window arrives born-read (see the damper test), and this test is
-    // about stamping two genuinely unread rows.
+    // Different actors make both the badge and the raw unread count two.
     const firstLiker = await createTestUser();
     const secondLiker = await createTestUser();
     const [a, b] = await seedPosts(author.id, 2);
@@ -571,14 +570,11 @@ describe("notification reads (issue #259)", () => {
     await call(appRouter.post.like, { postId: target.id }, { context: contextFor(liker) });
     await call(appRouter.notification.markRead, {}, { context: contextFor(author) });
 
-    // `now()` reads the transaction's start time, so a page open that
-    // started later can commit first; its newer stamp is what the cursor
-    // must keep. Simulated deterministically by a stamp ahead of this
-    // markRead's transaction clock: a blind `seen_at = now()` upsert would
-    // write its own earlier time and the cursor would move backwards.
+    // Simulate an existing cursor ahead of the current database clock. A
+    // blind replacement would move it backwards and resurrect read rows.
     await author.context.db
       .update(notificationLastSeen)
-      .set({ seenAt: sql`now() + interval '1 hour'` })
+      .set({ seenAt: sql`cast(unixepoch('subsec') * 1000 as integer) + 3600000` })
       .where(eq(notificationLastSeen.recipientId, author.id));
     const [ahead] = await author.context.db
       .select({ seenAt: notificationLastSeen.seenAt })
@@ -646,7 +642,7 @@ describe("notification reads (issue #259)", () => {
     // Past the horizon by the same database clock the read side compares on.
     await author.context.db
       .update(notification)
-      .set({ createdAt: sql`now() - interval '91 days'` })
+      .set({ createdAt: sql`cast(unixepoch('subsec') * 1000 as integer) - ${91 * 86400000}` })
       .where(eq(notification.postId, old.id));
     await call(appRouter.post.like, { postId: fresh.id }, { context: contextFor(liker) });
 

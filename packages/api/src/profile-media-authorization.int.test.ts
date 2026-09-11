@@ -1,5 +1,6 @@
+import { closeDb } from "./testing/runtime.js";
 import { randomUUID } from "node:crypto";
-import { closeDb } from "@my-tuums/db";
+
 import { user, userBlock } from "@my-tuums/db/schema";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

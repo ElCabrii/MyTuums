@@ -12,11 +12,6 @@
  * post inherits: a dead URL, a timeout, an oversized or non-HTML target, or a
  * refused private address all leave the caller with "no card".
  */
-import { lookup as dnsLookup } from "node:dns/promises";
-import type { LookupAddress, LookupAllOptions } from "node:dns";
-import { isIP } from "node:net";
-import type { LookupFunction } from "node:net";
-import { Agent } from "undici";
 import {
   LINK_CARD_DESCRIPTION_MAX_LENGTH,
   LINK_CARD_FETCH_TIMEOUT_MS,
@@ -42,125 +37,9 @@ import {
  */
 export interface LinkFetchTransport {
   /** Every address the hostname resolves to. Must throw when it does not resolve. */
-  lookup(hostname: string): Promise<string[]>;
+  lookup(hostname: string, init?: { signal: AbortSignal }): Promise<string[]>;
   /** One request. Redirects are NEVER followed here — the guard re-checks each hop. */
   fetch(url: URL, init: { signal: AbortSignal }): Promise<Response>;
-}
-
-/**
- * The non-standard fetch init slot undici's fetch reads, used only through
- * the SAFETY-noted view in `createLinkFetchTransport`. Named because the
- * standard `RequestInit` type carries it only through @types/node's vendored
- * undici-types, whose `Dispatcher` declaration has drifted from the runtime
- * package's.
- */
-interface DispatcherInit {
-  dispatcher: unknown;
-}
-
-/**
- * The connect-time half of the address guard: the same range table
- * `isGlobalUnicastAddress` applies, run inside the HTTP client's own DNS
- * resolution instead of before it.
- *
- * The pre-flight `transport.lookup` check answers "is this hostname safe";
- * this one answers "is the address the socket is about to open safe". A
- * rebinding resolver can pass the first with a public address and answer the
- * client's own resolution moments later with a private one — only validating
- * at connect time, on the address actually connected to, closes that window.
- * (IP literals never reach a lookup — `net` connects to them directly — and
- * a literal cannot rebind: the pre-flight check already judged it.)
- *
- * Exported for its unit pins (the resolver is injectable for exactly that —
- * a pin against the real resolver would be network I/O); the default
- * transport wires it into the dispatcher its fetches ride on.
- */
-export function createConnectValidatedLookup(
-  resolve: (hostname: string, options: LookupAllOptions) => Promise<LookupAddress[]> = dnsLookup,
-): LookupFunction {
-  return (hostname, options, callback) => {
-    resolve(hostname, { ...options, all: true, verbatim: true }).then(
-      (addresses: LookupAddress[]) => {
-        // Every candidate the resolver returns must pass, not just the
-        // first: the client may try any of them.
-        if (!addresses.every((result) => isGlobalUnicastAddress(result.address))) {
-          // The address arguments are ignored once err is set; `""`/`0` are
-          // the placeholders the signature demands.
-          callback(
-            new Error(`connect-time refusal: ${hostname} re-resolved outside global unicast`),
-            "",
-            0,
-          );
-          return;
-        }
-        // dns with `all: true` only ever produces the array form of the
-        // callback's union, which is the form undici's connector asks for.
-        callback(null, addresses);
-      },
-      (cause: unknown) => {
-        callback(new Error(`connect-time resolution failed: ${hostname}`, { cause }), "", 0);
-      },
-    );
-  };
-}
-
-/**
- * The production transport: the real DNS resolver and the real `fetch`, whose
- * dispatcher re-resolves every hop through `createConnectValidatedLookup`.
- */
-export function createLinkFetchTransport(): LinkFetchTransport {
-  // One pooled dispatcher per transport — the transport is a module singleton
-  // (`Context` threads it; tests substitute the whole transport), so a
-  // per-fetch Agent would shed its connection pool on every hop.
-  const dispatcher = new Agent({ connect: { lookup: createConnectValidatedLookup() } });
-  return {
-    async lookup(hostname) {
-      // A bracketed IPv6 literal (`new URL("http://[::1]/").hostname` keeps
-      // the brackets) is unwrapped first: `isIP` and the resolver both
-      // refuse the bracketed spelling, so without this a literal IPv6 target
-      // would miss the short-circuit and fail resolution instead of being
-      // judged by the address guard.
-      //
-      // SAFETY: this is safe only because `isGlobalUnicastAddress` refuses
-      // `::ffff:0:0/96` in both spellings. A bracketed IPv4-mapped literal
-      // (`[::ffff:127.0.0.1]`, canonicalized by the URL parser to
-      // `[::ffff:7f00:1]`) must not be able to reach the resolver as a
-      // "literal IPv6 address" that is really a private IPv4; the range
-      // table, not the brackets, is what refuses it.
-      const literal =
-        hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
-      // A literal IP resolves to itself; dnsLookup would accept it too, but
-      // short-circuiting keeps literal-IP targets off the resolver entirely.
-      if (isIP(literal) !== 0) return [literal];
-      const results = await dnsLookup(hostname, { all: true, verbatim: true });
-      return results.map((result) => result.address);
-    },
-    fetch(url, init) {
-      // `redirect: "manual"` is load-bearing: an HTTP client that follows
-      // redirects internally re-resolves and reconnects with no chance for
-      // this module to check the intermediate target. The dispatcher is the
-      // rebinding backstop: each hop's socket opens only on an address the
-      // connect-time guard passed, so a hostname cannot resolve public for
-      // the pre-flight check and private for the actual connection.
-      //
-      // SAFETY: `dispatcher` is undici's documented non-standard fetch
-      // option, and Node's global fetch IS undici's fetch — the option
-      // reaches the dispatcher on Node 24 (the runtime this repo pins).
-      // It is spread in because no `RequestInit` type carries it: undici's
-      // own `fetch` types would, but its `Response` return type is not
-      // assignable to the global `Response` every tsconfig in this repo
-      // reads, and the transport interface must keep the global one.
-      const guardedInit: RequestInit = { signal: init.signal, redirect: "manual" };
-      // SAFETY: declaration skew only — `RequestInit`'s `dispatcher` is
-      // typed by @types/node's vendored undici-types (7.18), whose
-      // `Dispatcher` no longer textually matches the runtime `undici`
-      // package's (7.29). Node's global fetch IS undici's fetch and takes
-      // any undici Dispatcher at runtime; this Agent is one. The view
-      // through `DispatcherInit` compiles to no runtime code.
-      (guardedInit as DispatcherInit).dispatcher = dispatcher;
-      return fetch(url, guardedInit);
-    },
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +93,7 @@ function ipv4ToLong(address: string): number | null {
   if (parts.length !== 4) return null;
   let value = 0;
   for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part)) return null;
+    if (!/^(?:0|[1-9]\d{0,2})$/.test(part)) return null;
     const octet = Number(part);
     if (octet > 255) return null;
     value = (value << 8) | octet;
@@ -243,12 +122,11 @@ function parseIpv6(address: string): bigint | null {
   const leftGroups =
     halves.length === 2 ? (halves[0] ? halves[0].split(":") : []) : normalized.split(":");
   const rightGroups = halves.length === 2 ? (halves[1] ? halves[1].split(":") : []) : [];
-  const clean = (groups: string[]) => groups.filter((group) => group !== "");
-  const left = clean(leftGroups);
-  const right = clean(rightGroups);
+  const left = leftGroups;
+  const right = rightGroups;
 
   const missing = 8 - left.length - right.length;
-  if (halves.length === 2 ? missing < 0 : missing !== 0) return null;
+  if (halves.length === 2 ? missing <= 0 : missing !== 0) return null;
 
   let value = 0n;
   for (const group of [
@@ -311,18 +189,14 @@ const REFUSED_IPV6_RANGES: ReadonlyArray<readonly [bigint, bigint]> = [
  * unparseable is refused (fail closed).
  */
 export function isGlobalUnicastAddress(address: string): boolean {
-  const family = isIP(address);
-
-  if (family === 4) {
-    const value = ipv4ToLong(address);
-    if (value === null) return false;
-    return !REFUSED_IPV4_RANGES.some(([first, last]) => value >= first && value <= last);
+  const ipv4 = ipv4ToLong(address);
+  if (ipv4 !== null) {
+    return !REFUSED_IPV4_RANGES.some(([first, last]) => ipv4 >= first && ipv4 <= last);
   }
-
-  if (family === 6) {
-    const value = parseIpv6(address);
-    if (value === null) return false;
-    return !REFUSED_IPV6_RANGES.some(([first, last]) => value >= first && value <= last);
+  if (address.includes(":")) {
+    const ipv6 = parseIpv6(address);
+    if (ipv6 === null) return false;
+    return !REFUSED_IPV6_RANGES.some(([first, last]) => ipv6 >= first && ipv6 <= last);
   }
 
   return false;
@@ -408,25 +282,8 @@ export async function guardedLinkFetch(
       return { ok: false, reason: "scheme" };
     }
 
-    // Resolve and validate before connecting. A hostname that fails to
-    // resolve is as refused as one that resolves somewhere private: there is
-    // no address this app is willing to dial for it. This runs before the
-    // port check on purpose: a literal or resolved private address is the
-    // more serious refusal, and the integration pins hold a real loopback
-    // listener on a random port against exactly this path.
     if (current.hostname.length === 0) return { ok: false, reason: "address" };
-    let addresses: string[];
-    try {
-      addresses = await options.transport.lookup(current.hostname);
-    } catch {
-      return { ok: false, reason: "address" };
-    }
-    if (addresses.length === 0 || !addresses.every((address) => isGlobalUnicastAddress(address))) {
-      return { ok: false, reason: "address" };
-    }
-    if (!isAllowedPort(current)) return { ok: false, reason: "port" };
-
-    let response: Response | "timeout";
+    let response: Response | "timeout" | "address" | "port";
     try {
       response = await fetchRacingDeadline(options.transport, current, deadline);
     } catch {
@@ -435,42 +292,49 @@ export async function guardedLinkFetch(
       // a procedure failure the post inherits.
       return { ok: false, reason: "network" };
     }
-    if (response === "timeout") return { ok: false, reason: "timeout" };
+    if (response === "timeout" || response === "address" || response === "port")
+      return { ok: false, reason: response };
 
-    const location = response.headers.get("location");
-    if (
-      response.status === 301 ||
-      response.status === 302 ||
-      response.status === 303 ||
-      response.status === 307 ||
-      response.status === 308
-    ) {
-      if (!location) return { ok: false, reason: "network" };
-      let next: URL;
-      try {
-        next = new URL(location, current);
-      } catch {
-        return { ok: false, reason: "network" };
+    try {
+      const location = response.headers.get("location");
+      if (
+        response.status === 301 ||
+        response.status === 302 ||
+        response.status === 303 ||
+        response.status === 307 ||
+        response.status === 308
+      ) {
+        if (!location) return { ok: false, reason: "network" };
+        let next: URL;
+        try {
+          next = new URL(location, current);
+        } catch {
+          return { ok: false, reason: "network" };
+        }
+        // The next iteration re-runs every check on `next` — scheme, port,
+        // DNS, ranges — which is the entire point of following redirects
+        // manually.
+        if (hop === LINK_CARD_MAX_REDIRECTS) return { ok: false, reason: "redirects" };
+        current = next;
+        continue;
       }
-      // The next iteration re-runs every check on `next` — scheme, port,
-      // DNS, ranges — which is the entire point of following redirects
-      // manually.
-      if (hop === LINK_CARD_MAX_REDIRECTS) return { ok: false, reason: "redirects" };
-      current = next;
-      continue;
+
+      if (!response.ok) return { ok: false, reason: "status" };
+
+      const contentType = normalizeContentType(response.headers.get("content-type"));
+      if (!options.acceptContentType(contentType)) return { ok: false, reason: "contentType" };
+
+      const bytes = await readCappedBody(response, options.maxBytes, deadline);
+      if (bytes === "timeout") return { ok: false, reason: "timeout" };
+      if (bytes === "oversized") return { ok: false, reason: "oversized" };
+      if (bytes === "network") return { ok: false, reason: "network" };
+
+      return { ok: true, bytes, contentType, finalUrl: current };
+    } finally {
+      // Redirects and status/type refusals must release their body too. Do not
+      // await an uncooperative transport's cancellation beyond the deadline.
+      if (response.body && !response.body.locked) response.body.cancel().catch(() => {});
     }
-
-    if (!response.ok) return { ok: false, reason: "status" };
-
-    const contentType = normalizeContentType(response.headers.get("content-type"));
-    if (!options.acceptContentType(contentType)) return { ok: false, reason: "contentType" };
-
-    const bytes = await readCappedBody(response, options.maxBytes, deadline);
-    if (bytes === "timeout") return { ok: false, reason: "timeout" };
-    if (bytes === "oversized") return { ok: false, reason: "oversized" };
-    if (bytes === "network") return { ok: false, reason: "network" };
-
-    return { ok: true, bytes, contentType, finalUrl: current };
   }
 
   // Unreachable: the hop budget is checked before following a redirect.
@@ -485,7 +349,7 @@ async function fetchRacingDeadline(
   transport: LinkFetchTransport,
   url: URL,
   deadline: number,
-): Promise<Response | "timeout"> {
+): Promise<Response | "timeout" | "address" | "port"> {
   const remaining = deadline - Date.now();
   if (remaining <= 0) return "timeout";
 
@@ -502,7 +366,25 @@ async function fetchRacingDeadline(
     }, remaining);
   });
 
-  const fetchPromise = transport.fetch(url, { signal: controller.signal });
+  const fetchPromise = (async (): Promise<Response | "timeout" | "address" | "port"> => {
+    // DNS is part of the same wall-clock budget, including every redirect hop.
+    let addresses: string[];
+    try {
+      addresses = await transport.lookup(url.hostname, { signal: controller.signal });
+    } catch {
+      return "address";
+    }
+    if (controller.signal.aborted) return "timeout";
+    if (!addresses.length || !addresses.every(isGlobalUnicastAddress)) return "address";
+    // Preserve address refusal before port refusal. Neither can open a socket.
+    if (!isAllowedPort(url)) return "port";
+    const response = await transport.fetch(url, { signal: controller.signal });
+    if (controller.signal.aborted) {
+      response.body?.cancel().catch(() => {});
+      return "timeout";
+    }
+    return response;
+  })();
   // A transport that loses the race can still reject afterwards (the socket
   // error the abort causes). The race never observes it; attach the no-op
   // catch so it cannot surface as an unhandled rejection either.
@@ -511,7 +393,7 @@ async function fetchRacingDeadline(
   try {
     return await Promise.race([fetchPromise, timeoutPromise]);
   } finally {
-    clearTimeout(timeoutId);
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
 }
 
@@ -553,7 +435,7 @@ async function readCappedBody(
       } catch {
         return "network";
       } finally {
-        clearTimeout(timeoutId);
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
       }
       if (read === "timeout") return "timeout";
 
@@ -570,6 +452,7 @@ async function readCappedBody(
     // Cancel releases the transport's resources on every early exit — a
     // refusal must not leave the connection draining in the background.
     reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 
   const bytes = new Uint8Array(total);

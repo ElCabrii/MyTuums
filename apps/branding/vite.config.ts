@@ -14,8 +14,8 @@ import path from "node:path";
 // Paraglide message pipeline, so the two sites can never look or read like
 // different products.
 //
-// The server serves this app's dist when `Host` is about.mytuums.com
-// (BRANDING_DIST in apps/server) — see apps/server/src/request-handler.ts.
+// The native Worker serves this branch's build at about-cf-poc.mytuums.com
+// after Access validation — see worker/index.ts and wrangler.jsonc.
 export default defineConfig({
   plugins: [
     tailwindcss(),

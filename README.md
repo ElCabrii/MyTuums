@@ -1,8 +1,12 @@
 # MyTuums
 
-A Twitter-style social app — posts, replies, likes, follows, profiles, search,
-and a full moderation system with appeals. React 19 + Vite SPA, Node 24 + oRPC
-API, Postgres + Drizzle, deployed on Railway in the EU.
+This experimental branch implements an isolated Cloudflare-native PoC. Railway
+production, `main` and other branches keep their existing deployment paths.
+Hosted deployment and complete verification are still outstanding; use
+[the migration record](docs/cloudflare-migration.md) for current status.
+
+MyTuums is a social app with posts, replies, likes, follows, profiles, search and
+moderation with appeals. This branch runs its backend on Workers with D1 and R2.
 
 This README is about developing it. What the product _does_ is
 [docs/product.md](docs/product.md); if you are an AI coding agent, start at
@@ -14,37 +18,33 @@ This README is about developing it. What the product _does_ is
 | -------- | ---------------------------------------------------------------------------- |
 | Monorepo | pnpm 12 + Turborepo, Node 24, TypeScript strict everywhere                   |
 | Web      | React 19, Vite, TanStack Router, Jotai, TanStack Query, Paraglide, shadcn/ui |
-| Server   | `node:http`, no framework — auth, RPC, media and the SPA on one origin       |
-| API      | oRPC procedures over Drizzle, keyset pagination, S3 presigned uploads        |
+| Server   | Cloudflare Worker: auth, RPC, private media and SPA on one origin            |
+| API      | oRPC procedures over Drizzle, D1 atomic batches, R2 media                    |
 | Auth     | better-auth: password, OAuth, two-factor, passkeys, One Tap                  |
-| Data     | Postgres 16, Drizzle ORM, committed migrations                               |
-| Hosting  | Railway (EU), Docker image built from `apps/server/Dockerfile`               |
+| Data     | D1 (SQLite), Drizzle ORM, committed migrations                               |
+| Hosting  | Workers, private EU R2, Stream, Images, Email Service and Workflows          |
 
 ## Prerequisites
 
 - Node 24 (`.nvmrc`) and pnpm 12
-- Docker, for Postgres and for running the production image locally
-- FFmpeg/FFprobe with libx264 and zscale support when running the optional video
-  worker on the host; the worker Docker image includes them.
+- Chromium and its system libraries for browser tests
 
 ## Setup
 
 ```bash
-cp .env.example .env      # the single source of env for every host-side process
 pnpm install
-pnpm docker:up            # Postgres :5432 + the server image :3001, migrations applied first
+pnpm build
+pnpm db:test:setup
+pnpm test:e2e
 ```
 
-Then either keep the Docker stack, or stop it and develop host-side:
+Native tests provision isolated local D1/R2 without Docker, PostgreSQL or cloud
+credentials. E2E uses synthetic Access, email and Stream transport and owns ports
+`:3101` / `:5273`. It does not prove hosted provider availability.
 
-```bash
-pnpm dev                  # API :3001, Vite :5173
-```
-
-`pnpm dev` and `pnpm docker:up` both want ports 3001 and 5173 — run one, not
-both. `.env.example` explains every variable and what happens when it is
-unset; the traps worth knowing are collected in
-[docs/operations.md](docs/operations.md).
+Interactive `pnpm dev` wiring is still incomplete. It starts Vite and low-level
+Wrangler, whose real entrypoint requires the PoC host, Access assertion and
+secrets. See [operations](docs/operations.md#local-development) before using it.
 
 ## Agent browser
 
@@ -66,7 +66,7 @@ Install official Google Chrome and set `executablePath` to
 Ubuntu's existing Chrome sandbox policy. Keep this machine-specific path out
 of project configuration and keep the browser sandbox enabled.
 
-After starting the local app using the setup above, use a unique
+After the interactive local development composition is available, use a unique
 session name for your task and pass it on every command:
 
 ```bash
@@ -77,7 +77,7 @@ agent-browser --session mytuums-example errors
 agent-browser --session mytuums-example close
 ```
 
-For the Docker-served app, use `http://localhost:3001`. Keep the hostname
+Keep the hostname
 `localhost` consistent for auth cookies and passkeys. Use development accounts
 and non-production data; keep saved auth state and captures in the ignored
 `.agent-browser/` directory or outside the repository. Inspect changed flows
@@ -86,49 +86,62 @@ in the existing test suites; see [E2E context](e2e/CONTEXT.md).
 
 ## Common commands
 
-Video processing runs separately: `pnpm video:dev` starts the worker on health
-port `3002` alongside `pnpm dev`. It requires the complete development bucket
-configuration. See [video operations](docs/video-operations.md) for bucket CORS,
-environment pairing, Docker/Railway settings and recovery.
+On this experimental branch, `pnpm jobs:dev` starts the local Cloudflare jobs
+Worker. It coordinates Stream video processing, game sync and maintenance through
+Workflows. It has no HTTP health endpoint and does not require FFmpeg. The app
+entrypoint is implemented; the end-to-end development stack is still being ported. Use the
+[video operations checks](docs/video-operations.md) for the isolated native runtime.
+
+The PoC maintenance commands use local D1/R2 by default, with `--remote` selecting
+only the isolated hosted PoC resources:
+
+```bash
+pnpm games:seed --database=mytuums-poc
+pnpm --filter @my-tuums/api reconcile:media --bucket=mytuums-poc-media
+pnpm --filter @my-tuums/api prune:notifications --retention-days=90
+```
+
+Reconciliation deletes unreferenced managed images. Notification pruning is a
+dry run unless `--apply` is added. These commands load no `.env` or S3 credentials.
 
 Three levels of validation, widening. Use the narrowest one that can see your
 change while you work, and `pnpm verify` before you push.
 
 | Command            | What it does                                                     |
 | ------------------ | ---------------------------------------------------------------- |
-| `pnpm test:unit`   | **fast** — vitest unit suites, no database needed, ~30s          |
+| `pnpm test:unit`   | Vitest logic/component suites plus native Worker fixtures        |
 | `pnpm verify`      | **PR** — build, lint, typecheck, format, docs, unit, integration |
 | `pnpm verify:full` | **full** — the above plus the Playwright suite                   |
 
-`pnpm verify` is exactly what CI's `Verify` job runs. It needs a reachable
-Postgres (`pnpm docker:up`).
+`pnpm verify` is exactly what CI's `Verify` job runs. This Cloudflare PoC branch
+is still being ported; see [the migration record](docs/cloudflare-migration.md)
+for current checks and the remaining development and hosted deployment work.
 
 | Command                                                         | What it does                                                   |
 | --------------------------------------------------------------- | -------------------------------------------------------------- |
 | `pnpm build`                                                    | production builds across the workspace                         |
 | `pnpm lint` · `pnpm typecheck`                                  | Oxlint, ESLint, and TypeScript across the workspace            |
 | `pnpm format`                                                   | Prettier write; checked separately from `pnpm lint`            |
-| `pnpm db:test:setup` then `pnpm test:integration`               | API integration suites against real Postgres                   |
+| `pnpm db:test:setup` then `pnpm test:integration`               | API integration suites against ephemeral local D1              |
 | `pnpm test:e2e`                                                 | Playwright; slow, own ports (`:3101` / `:5273`)                |
-| `pnpm db:generate` · `pnpm db:push` · `pnpm db:promote`         | new migration · apply it · appoint the first admin (bootstrap) |
+| `pnpm db:generate` · `pnpm db:migrate` · `pnpm db:promote`      | new migration · apply it · appoint the first admin (bootstrap) |
 | `pnpm docs:check`                                               | validate the docs against the code                             |
-| `pnpm docker:up` · `pnpm docker:down`                           | the full local stack                                           |
 | `pnpm --filter @my-tuums/api exec vitest run src/image.test.ts` | one test file (same shape for web)                             |
 
 The rest of the Drizzle toolbox is package-level:
-`pnpm --filter @my-tuums/db db:migrate` · `db:check` · `db:studio` ·
+`pnpm --filter @my-tuums/db db:migrate` · `db:check` ·
 `db:generate:auth`.
 
 ## Repository layout
 
-`apps/video-worker` is the native video processing application; it shares the
-API's lifecycle rules and database while running independently of HTTP requests.
+`apps/jobs` owns the Cloudflare background runtime; it shares the API's lifecycle
+rules and D1 database while running independently of HTTP requests.
 
 | Path            | What lives there                                                                     |
 | --------------- | ------------------------------------------------------------------------------------ |
 | `apps/web`      | the SPA: file routes in `src/routes`, Jotai state in `src/atoms`, i18n in `messages` |
 | `apps/branding` | the public landing site served at `about.mytuums.com`                                |
-| `apps/server`   | the HTTP server: routing tree, env validation, static SPA, Dockerfile                |
+| `apps/server`   | the native application Worker, Access, HTTP gates and static SPA                     |
 | `packages/api`  | oRPC procedures, business rules, moderation, media, rate limiting                    |
 | `packages/auth` | the single better-auth instance and its providers, email and hooks                   |
 | `packages/db`   | Drizzle schema, committed migrations, test-database guards                           |

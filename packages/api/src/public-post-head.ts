@@ -18,6 +18,8 @@
  * page the public API would 404 never leaks a head.
  */
 import { and, eq, isNull, not, sql } from "drizzle-orm";
+import { z } from "zod";
+import { jsonDecoder } from "./sql.js";
 import type { Database } from "@my-tuums/db";
 import { post, postAttachment, user } from "@my-tuums/db/schema";
 import { mediaVariantPath } from "./constants.js";
@@ -52,8 +54,8 @@ export async function publicPostHead(db: Database, postId: string): Promise<Publ
   const [row] = await db
     .select({
       content: post.content,
-      image: sql<{ path: string; isVideo: boolean } | null>`(
-        select json_build_object(
+      image: sql`(
+        select json_object(
           'path', ${postAttachment.mediaPath},
           'isVideo', ${postAttachment.videoId} is not null
         )
@@ -61,7 +63,16 @@ export async function publicPostHead(db: Database, postId: string): Promise<Publ
         where ${postAttachment.postId} = ${post.id}
         order by ${postAttachment.position}
         limit 1
-      )`,
+      )`.mapWith(
+        jsonDecoder(
+          z
+            .object({
+              path: z.string(),
+              isVideo: z.union([z.literal(0), z.literal(1)]).transform(Boolean),
+            })
+            .nullable(),
+        ),
+      ),
     })
     .from(post)
     .innerJoin(user, eq(user.id, post.authorId))

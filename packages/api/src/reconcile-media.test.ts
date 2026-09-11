@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  reconcileMedia,
-  type MediaAttachmentRow,
-  type MediaImageRow,
-  type MediaLinkCardRow,
-} from "./reconcile-media.js";
+import { reconcileMedia, type MediaReferenceRow } from "./reconcile-media.js";
 
 /** A realistic key: `isSafeObjectKey` requires the slug and grouped-uuid shape. */
 const LIVE_KEY = "avatars/alicemedia/11111111-1111-4111-8111-111111111111.webp";
@@ -39,11 +34,8 @@ function fakeBucket(initial: string[]) {
   };
 }
 
-const liveRow: MediaImageRow = {
-  image: `/media/${LIVE_KEY}`,
-  bannerImage: null,
-  imageOriginal: null,
-  bannerImageOriginal: null,
+const liveRow: MediaReferenceRow = {
+  mediaPath: `/media/${LIVE_KEY}`,
 };
 
 describe("reconcileMedia", () => {
@@ -52,7 +44,7 @@ describe("reconcileMedia", () => {
 
     const result = await reconcileMedia({
       storage,
-      readUserRows: () => Promise.resolve([liveRow]),
+      readReferences: () => Promise.resolve([liveRow]),
     });
 
     expect(deleted).toEqual([ORPHAN_KEY]);
@@ -75,7 +67,7 @@ describe("reconcileMedia", () => {
     // listing, missing from `referenced` — a perfect orphan, deleted while
     // the row still points at it.
     const rows = [liveRow];
-    const freshRow: MediaImageRow = { ...liveRow, image: `/media/${FRESH_KEY}` };
+    const freshRow: MediaReferenceRow = { ...liveRow, mediaPath: `/media/${FRESH_KEY}` };
     let uploaded = false;
     const storageWithConcurrentUpload = {
       ...storage,
@@ -91,7 +83,7 @@ describe("reconcileMedia", () => {
 
     await reconcileMedia({
       storage: storageWithConcurrentUpload,
-      readUserRows: () => Promise.resolve([...rows]),
+      readReferences: () => Promise.resolve([...rows]),
     });
 
     expect(deleted).toEqual([ORPHAN_KEY]);
@@ -101,19 +93,18 @@ describe("reconcileMedia", () => {
 
   it("keeps referenced post attachments and reaps failed/account-deleted objects", async () => {
     const { bucket, deleted, storage } = fakeBucket([POST_LIVE_KEY, POST_ORPHAN_KEY]);
-    const attachments: MediaAttachmentRow[] = [{ mediaPath: `/media/${POST_LIVE_KEY}` }];
+    const attachments: MediaReferenceRow[] = [{ mediaPath: `/media/${POST_LIVE_KEY}` }];
 
     const result = await reconcileMedia({
       storage,
-      readUserRows: () => Promise.resolve([]),
-      readPostAttachmentRows: () => Promise.resolve(attachments),
+      readReferences: () => Promise.resolve(attachments),
     });
 
     expect(deleted).toEqual([POST_ORPHAN_KEY]);
     expect(bucket.has(POST_LIVE_KEY)).toBe(true);
     expect(bucket.has(POST_ORPHAN_KEY)).toBe(false);
     // 1 base attachment + its 2 derivable variant keys.
-    expect(result).toEqual({ rows: 0, referenced: 3, listed: 2, deleted: 1 });
+    expect(result).toEqual({ rows: 1, referenced: 3, listed: 2, deleted: 1 });
   });
 
   it("reaps a variant whose base is gone but keeps one whose base survives", async () => {
@@ -132,9 +123,8 @@ describe("reconcileMedia", () => {
 
     await reconcileMedia({
       storage,
-      readUserRows: () => Promise.resolve([]),
-      readPostAttachmentRows: () =>
-        Promise.resolve<MediaAttachmentRow[]>([{ mediaPath: `/media/${liveBaseWithVariant}` }]),
+      readReferences: () =>
+        Promise.resolve<MediaReferenceRow[]>([{ mediaPath: `/media/${liveBaseWithVariant}` }]),
     });
 
     expect(deleted).toEqual([orphanedVariant]);
@@ -146,8 +136,7 @@ describe("reconcileMedia", () => {
 
     await reconcileMedia({
       storage,
-      readUserRows: () => Promise.resolve([]),
-      readPostAttachmentRows: () => Promise.resolve([]),
+      readReferences: () => Promise.resolve([]),
     });
 
     expect(deleted).toEqual([POST_ORPHAN_KEY]);
@@ -158,15 +147,14 @@ describe("reconcileMedia", () => {
     const { bucket, deleted, storage } = fakeBucket([CARD_LIVE_KEY, CARD_ORPHAN_KEY]);
     // A negative cache entry carries no image at all; a positive one's path
     // is the only reference to its object.
-    const cards: MediaLinkCardRow[] = [
-      { imageMediaPath: `/media/${CARD_LIVE_KEY}` },
-      { imageMediaPath: null },
+    const cards: MediaReferenceRow[] = [
+      { mediaPath: `/media/${CARD_LIVE_KEY}` },
+      { mediaPath: null },
     ];
 
     await reconcileMedia({
       storage,
-      readUserRows: () => Promise.resolve([]),
-      readLinkCardRows: () => Promise.resolve(cards),
+      readReferences: () => Promise.resolve(cards),
     });
 
     expect(deleted).toEqual([CARD_ORPHAN_KEY]);

@@ -17,20 +17,6 @@ import { uniqueUser } from "../../support/users";
 test.use({ storageState: { cookies: [], origins: [] } });
 
 /**
- * The same all-or-nothing check the stack applies when forwarding `S3_*` to
- * the server (s3Env() in playwright.config.ts): the server refuses to boot on
- * a *partial* group, so with three of four variables set it runs WITHOUT
- * object storage and these upload specs would fail against NOT_IMPLEMENTED.
- * The spec must skip whenever the full group isn't present, not just when
- * the bucket name is.
- */
-function storageBucketConfigured(): boolean {
-  return ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"].every((key) =>
-    Boolean(process.env[key]),
-  );
-}
-
-/**
  * The uploaded object must be the canonical 3:1, and its display frame must be
  * the 3:1 composition with the height clamps from `apps/web/src/lib/banner-frame.ts`.
  *
@@ -111,16 +97,8 @@ test.describe("profile details", () => {
   });
 });
 
-/**
- * These hit the real Storage Bucket — there is no fake in the browser path.
- * `global-setup.ts` purges the suite's uploaded objects by prefix at the
- * start of every run (via `truncateAll` in support/db.ts), and the whole
- * suite is skipped gracefully on a machine with no `S3_*` group because the
- * procedure reports NOT_IMPLEMENTED rather than crashing.
- */
+/** Browser uploads always use the local R2 binding; no account credentials or skips. */
 test.describe("images", () => {
-  test.skip(!storageBucketConfigured(), "no Storage Bucket configured (S3_* unset)");
-
   /**
    * Picking a file opens the crop editor (issue #151) instead of uploading
    * straight away; the upload only starts once a crop is committed. Applying
