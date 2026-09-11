@@ -239,7 +239,13 @@ Do not copy or alter D1's reserved `_cf_` metadata or mix Drizzle's ledger with
 Wrangler migrations. These commands follow the current
 [D1 import/export documentation](https://developers.cloudflare.com/d1/best-practices/import-export-data/).
 
-The local rehearsal does **not** verify hosted
+The September 11 hosted SQL export/import rehearsal restored the initialized PoC
+into a disposable EU D1 database. All 114 schema objects and seven ledger entries
+matched, with no foreign-key violations. The disposable database and local backup
+were removed; the original PoC database was unchanged. The source had no
+application users. See [the recovery record](artifacts/cloudflare-poc/d1-recovery-2026-09-11.json).
+
+Neither SQL export/import rehearsal verifies
 [Time Travel recovery](https://developers.cloudflare.com/d1/reference/time-travel/).
 Before hosted recovery, restrict PoC traffic, stop writes and job dispatch, record
 the exact resource IDs and recovery point, and export the current database.
@@ -248,8 +254,9 @@ invariants. R2 bytes, Stream videos, Workflow histories and rate-limit Durable
 Objects are separate state: D1 restoration cannot restore them. Keep cleanup and
 jobs stopped until restored media references and job intents are reconciled with
 those systems; an older database can otherwise cause valid newer media to be
-classified as orphaned. Hosted recovery and the coordinated media/job procedure
-remain unverified. No reset, cutover or remote deletion is performed by this runbook.
+classified as orphaned. Hosted recovery of populated application data and the
+coordinated media/job procedure remain unverified. No reset, cutover or remote
+deletion is performed by this runbook.
 
 ## Observability
 
@@ -327,6 +334,15 @@ fixture instead:
 ```bash
 pnpm games:seed --database=mytuums-poc
 ```
+
+On September 11 the connected Cloudflare API seeded the remote PoC pair with the
+same fixture: 28 games and 26 private cover objects. That operation replayed the
+existing seeder's captured SQL batches and storage writes after verifying empty,
+idle targets; it did not authenticate Wrangler. All fixture values and object
+hashes match. See [the seed evidence](artifacts/cloudflare-poc/fixture-seed-2026-09-11.json).
+The normal repeatable CLI remains the command above, with `--remote` and Wrangler
+authentication for hosted resources. A connected plugin does not supply CLI
+credentials automatically.
 
 The native PoC commands require the exact database or bucket name and validate
 both against the application's fixed account, D1 ID and EU R2 configuration.

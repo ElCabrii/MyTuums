@@ -1,0 +1,163 @@
+{
+  "verifiedAt": "2026-09-11 12:00:25 UTC",
+  "sourceCommit": "a4265e9ba0550b032cd0e1c5daf72a9b8bf465e1",
+  "accountId": "734f3b84571b1967e6940140a0b7d75f",
+  "databaseId": "f4334c85-cca9-4437-976e-b52038047c62",
+  "databaseName": "mytuums-poc",
+  "bucketName": "mytuums-poc-media",
+  "jurisdiction": "eu",
+  "method": "Captured the existing seedGamesFixture operations against fresh local D1, replayed the same ordered statements and atomic batches through the plugin, and uploaded the committed cover bytes between their upload-intent and publication operations.",
+  "games": 28,
+  "coverObjects": 26,
+  "coverBytes": 22897,
+  "activeVersion": "b6af11d9-ca2b-48da-b8fb-9554b6688aa1",
+  "queriesApplied": 40,
+  "fixtureValuesMatch": true,
+  "clockGeneratedColumnsComparedSeparately": [
+    "game.created_at",
+    "game_catalog_version.published_at"
+  ],
+  "stagedPayloadsMatch": true,
+  "objectsSha256Match": true,
+  "objectContentTypesMatch": true,
+  "foreignKeyViolations": 0,
+  "migrations": 7,
+  "users": 0,
+  "pendingMediaIntents": 0,
+  "catalogLeaseReleased": true,
+  "r2ManagedDomainEnabled": false,
+  "r2CustomDomains": [],
+  "scope": "Committed synthetic catalog fixtures only. No production data or credentials. No hosted Worker serving, Images transformations or live IGDB sync tested.",
+  "objects": [
+    {
+      "key": "games/900001-colol.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 880,
+      "sha256": "bfa51b5d5dc4725ed71b09309716105c11882abd1d51ce485a7b4749f3efbce0"
+    },
+    {
+      "key": "games/900002-cotac.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "31e03cd5446f65427efa867032d9fca4682266090d8ee780acc67fb9b0be2c09"
+    },
+    {
+      "key": "games/900003-cotac.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "31e03cd5446f65427efa867032d9fca4682266090d8ee780acc67fb9b0be2c09"
+    },
+    {
+      "key": "games/900004-cobr.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "7088ea8decf5765c7d8056595d57f909e28347eed9d31765fa0ce8ac01a36d46"
+    },
+    {
+      "key": "games/900005-cocraft.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "b6ebde5b94d571c03ccb5f3ad967f7bf7ee42d636e00dce3ecf3bde02ea07c43"
+    },
+    {
+      "key": "games/900006-cocity.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 880,
+      "sha256": "1e9e219396d571a2d361be7f572d78dff664032096f7081f08d6c25629a215ad"
+    },
+    {
+      "key": "games/900007-corpg.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "9761ec7ad8a32bd29a94f9e7dd66be6a8e73c7c498696dd3a9f032db10f69932"
+    },
+    {
+      "key": "games/900008-cosouls.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 880,
+      "sha256": "71cd7a4dc3f66bcdea0dbb1cb68ad833c4a04c08c67147151039710e81fc0ae8"
+    },
+    {
+      "key": "games/900009-commo.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "a5d67dcf1a9f8fc0fdeb4c89592a8956c89c42b8ab9e8d9d47e57ed9685fbe17"
+    },
+    {
+      "key": "games/900010-codoom.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "6247b262c15a7f05508c563388545b10a11e7780dc7d71d60369f482dcef14d1"
+    },
+    {
+      "key": "games/900011-codoom.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "6247b262c15a7f05508c563388545b10a11e7780dc7d71d60369f482dcef14d1"
+    },
+    {
+      "key": "games/900012-cojrpg.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "8a778f1ca53b11532962caf1c4c2cfc3d6299afae47d7df551a1b52a0c53998c"
+    },
+    {
+      "key": "games/900013-cojrpg.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "8a778f1ca53b11532962caf1c4c2cfc3d6299afae47d7df551a1b52a0c53998c"
+    },
+    {
+      "key": "games/900014-coadventure.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 880,
+      "sha256": "19d50c92fcbbfd5a623c7823100c14913cfcbf6da2de9fe51692061e4a642290"
+    },
+    {
+      "key": "games/900015-corpg.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "9761ec7ad8a32bd29a94f9e7dd66be6a8e73c7c498696dd3a9f032db10f69932"
+    },
+    {
+      "key": "games/900016-cobr.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "7088ea8decf5765c7d8056595d57f909e28347eed9d31765fa0ce8ac01a36d46"
+    },
+    {
+      "key": "games/900017-corogue.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "6dbbec467d3e754a7aa6cb89889e402ddb098e70f24adcfc89bf27299b51bb97"
+    },
+    {
+      "key": "games/900018-cocraft.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "b6ebde5b94d571c03ccb5f3ad967f7bf7ee42d636e00dce3ecf3bde02ea07c43"
+    },
+    {
+      "key": "games/900019-coadventure.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 880,
+      "sha256": "19d50c92fcbbfd5a623c7823100c14913cfcbf6da2de9fe51692061e4a642290"
+    },
+    {
+      "key": "games/900020-cocity.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 880,
+      "sha256": "1e9e219396d571a2d361be7f572d78dff664032096f7081f08d6c25629a215ad"
+    },
+    {
+      "key": "games/900021-corpg.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "9761ec7ad8a32bd29a94f9e7dd66be6a8e73c7c498696dd3a9f032db10f69932"
+    },
+    {
+      "key": "games/900022-cosport.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 880,
+      "sha256": "ab92d84e1af90f5d1e24793039b5909c3fe48ea402fa42f3e2fbe04d6b20de60"
+    },
+    {
+      "key": "games/900023-cobr.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "7088ea8decf5765c7d8056595d57f909e28347eed9d31765fa0ce8ac01a36d46"
+    },
+    {
+      "key": "games/900025-cosport.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 880,
+      "sha256": "ab92d84e1af90f5d1e24793039b5909c3fe48ea402fa42f3e2fbe04d6b20de60"
+    },
+    {
+      "key": "games/900026-corpg.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 881,
+      "sha256": "9761ec7ad8a32bd29a94f9e7dd66be6a8e73c7c498696dd3a9f032db10f69932"
+    },
+    {
+      "key": "games/900028-cosport.b6af11d9ca2b48dab8fb9554b6688aa1.jpg",
+      "size": 880,
+      "sha256": "ab92d84e1af90f5d1e24793039b5909c3fe48ea402fa42f3e2fbe04d6b20de60"
+    }
+  ]
+}

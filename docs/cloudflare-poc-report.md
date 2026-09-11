@@ -33,6 +33,16 @@ eight native Workflow checks. Full `pnpm verify` then passed: 1,521 unit/native 
 checks across 56 D1 suites (782.74 seconds for integration). Final documentation
 and source-map configuration received separate checks afterward.
 
+GitHub CI subsequently passed both Verify and E2E tests for commit `a4265e9`,
+including the durable moderation email changes. See [the completed run](https://github.com/ElCabrii/MyTuums/actions/runs/34593742228).
+
+Hosted D1 SQL export/import also passed against a disposable EU database: all 114
+schema objects matched exactly, the seven-entry migration ledger matched, and
+foreign-key validation found no violations. The source contained no application
+users; this verifies schema and ledger recovery, not populated application or
+coordinated media/job recovery. The temporary database and local SQL backup were
+removed. See [the recovery record](artifacts/cloudflare-poc/d1-recovery-2026-09-11.json).
+
 ## Railway baseline
 
 Read-only Railway plugin inspection on September 11 found five production services,
@@ -64,10 +74,26 @@ Owner-only Access applications, EU D1 and private EU R2 are provisioned. D1 now 
 all seven committed migrations: its 114 schema objects match local output exactly,
 the migration hashes match, and no foreign-key violations or application users
 exist. See [the initialization record](artifacts/cloudflare-poc/d1-initialization-2026-09-11.json).
-R2 remains empty. No app/jobs/branding Worker or Workers Builds trigger has
+The committed fixture is now seeded remotely: 28 games and 26 private R2 cover
+objects (22,897 bytes). Fixture values and staged payloads match the fresh local
+seeder run; database-generated creation/publication timestamps were validated
+separately. Every object matches its source SHA-256 and content type. No
+foreign-key violations, pending upload intents or held catalog lease remain.
+There are still no application users. See [the fixture record](artifacts/cloudflare-poc/fixture-seed-2026-09-11.json).
+
+No app/jobs/branding Worker or Workers Builds trigger has
 been deployed. Stream/Email authorization checks and the GitHub Builds connection
 remain unresolved. Dedicated runtime secrets and OAuth registrations are also
 required before live verification.
+
+The latest read-only checks still return Stream authorization error `10002` and
+Email authorization error `2036`; these do not establish whether either product
+is enabled. Builds has no tokens and cannot resolve the repository configuration.
+The earlier connection attempt explicitly reported disconnected Git integration.
+To unblock deployment, connect `ElCabrii/MyTuums` to Workers Builds in the Ops
+account for `codex/cloudflare-poc` only, enable/authorize the required Stream and
+Email services, and provision the dedicated PoC secrets/OAuth registrations
+listed in [operations](operations.md). Keep credentials out of chat and source.
 
 The cost figures in the migration plan are illustrative platform prices. A measured
 Cloudflare estimate must include app requests/CPU, D1 rows/storage, image transforms,

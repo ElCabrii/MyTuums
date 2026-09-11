@@ -6,6 +6,33 @@ Current feature evidence, Railway measurements and deployment gates are summariz
 in [the validation report](cloudflare-poc-report.md). The dated notes below retain
 the implementation history; older outstanding-work lists are historical.
 
+## Hosted fixture seed (2026-09-11)
+
+The isolated EU D1/R2 pair now contains the committed synthetic catalog: 28 games
+and 26 cover objects totaling 22,897 bytes. The existing fixture seeder ran against
+fresh local D1; its ordered statements and original atomic batches were captured
+and replayed through the plugin, with object uploads between upload intent and
+publication. Every database result cardinality matched before continuing.
+The deployed catalog values and staged payloads match; database-generated clocks
+were validated separately. All object SHA-256 hashes and content types match.
+No users, foreign-key violations, pending upload intents or held catalog lease
+remain. R2's managed domain is disabled and it has no custom domains. See
+[the fixture record](artifacts/cloudflare-poc/fixture-seed-2026-09-11.json).
+
+This does not verify hosted app delivery, Images transformations or IGDB sync.
+Stream/Email authorization and the GitHub Builds connection remain unresolved;
+the usable deployment and measured cost report still require those account steps.
+
+## Hosted recovery and branch CI (2026-09-11)
+
+Both Verify and E2E tests passed in [GitHub CI](https://github.com/ElCabrii/MyTuums/actions/runs/34593742228)
+for commit `a4265e9`. Hosted D1 export/import restored the initialized PoC into a
+disposable EU database: all 114 schema objects and the seven-entry migration
+ledger matched, with zero foreign-key violations. The temporary database and
+local SQL backup were removed. This was schema/ledger recovery without application
+users; coordinated R2/Stream/Workflow recovery remains outstanding. See
+[the recovery record](artifacts/cloudflare-poc/d1-recovery-2026-09-11.json).
+
 ## Remote D1 initialization (2026-09-11)
 
 Commit `9078e60` is pushed to `codex/cloudflare-poc`; GitHub CI is queued for that
