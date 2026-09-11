@@ -197,6 +197,13 @@ function SuggestionRow({
  * error, no-results, and the rows themselves. Split out of `SearchBox` so
  * the box stays a thin shell (input + popup + keyboard wiring) and the
  * list's own branching lives here.
+ *
+ * The spinner gate requires an empty list, not just `isPending`: with
+ * `keepPreviousData` (atoms/search.ts) a pending query still carries the
+ * previous response, and swapping live rows for a lone spinner between
+ * keystrokes is exactly the flicker the placeholder exists to prevent. Only
+ * a query with nothing to show — the first one — spends its wait on the
+ * spinner.
  */
 function SuggestionList({
   typeahead,
@@ -213,7 +220,7 @@ function SuggestionList({
   onSelect: (index: number) => void;
   onDismiss: () => void;
 }) {
-  if (typeahead.isPending) {
+  if (typeahead.isPending && rows.length === 0) {
     return (
       <div role="option" className="flex items-center justify-center py-3">
         <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />

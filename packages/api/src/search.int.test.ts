@@ -280,6 +280,31 @@ describe("search.typeahead", () => {
     expect(ids[0]).toBe(alice.id);
   });
 
+  it("matches across accents both ways — pokemon finds Zoë, and café finds the cafe username", async () => {
+    const viewer = await createTestUser();
+    // Her username deliberately cannot match the query: only the accented
+    // display name can surface her, and only if the fold ran on the column.
+    const [named] = await seedUsers([{ username: "pocketgardener", name: "Zoë" }]);
+    // The reverse direction: an accented QUERY must still reach the ASCII,
+    // pre-lowercased username column — the JS-side pattern fold that keeps
+    // the username prefix arm on its btree index.
+    const cafe = await createTestUser({ username: "cafe", name: "Corner Shop" });
+
+    const byPlain = await call(
+      appRouter.search.typeahead,
+      { q: "zoe" },
+      { context: contextFor(viewer) },
+    );
+    expect(byPlain.users.map((u) => u.id)).toContain(named.id);
+
+    const byAccented = await call(
+      appRouter.search.typeahead,
+      { q: "café" },
+      { context: contextFor(viewer) },
+    );
+    expect(byAccented.users.map((u) => u.id)).toContain(cafe.id);
+  });
+
   it("treats % in a query as a literal — 100% finds only posts that contain a percent sign", async () => {
     const author = await createTestUser();
     const battery = await seedPostContent(author.id, "battery at 100%");
@@ -311,6 +336,19 @@ describe("search.typeahead", () => {
 
     const posts = await call(appRouter.search.posts, { q: tag }, { context: contextFor(author) });
     expect(posts.items.map((p) => p.id)).toEqual([root.id]);
+  });
+
+  it("matches post content across accents — pokemon finds a post about Pokémon", async () => {
+    const author = await createTestUser();
+    const hit = await seedPostContent(author.id, "finally caught them all in Pokémon");
+    await seedPostContent(author.id, "unrelated chatter");
+
+    const posts = await call(
+      appRouter.search.posts,
+      { q: "pokemon" },
+      { context: contextFor(author) },
+    );
+    expect(posts.items.map((p) => p.id)).toEqual([hit.id]);
   });
 });
 
@@ -641,6 +679,14 @@ describe("search.games", () => {
       popularityRank: 4,
       firstReleaseYear: 2020,
     },
+    {
+      igdbId: 910_005,
+      slug: "pokemon-rouge",
+      hashtagKey: "pokemonrouge",
+      name: "Pokémon Rouge",
+      popularityRank: 5,
+      firstReleaseYear: 1996,
+    },
   ];
 
   beforeAll(async () => {
@@ -690,5 +736,15 @@ describe("search.games", () => {
       { context: contextFor(viewer) },
     );
     expect(byKey.games.map((game) => game.slug)).toEqual(["wow-classic"]);
+  });
+
+  it("matches game names across accents — pokemon finds Pokémon Rouge", async () => {
+    const viewer = await createTestUser();
+    const result = await call(
+      appRouter.search.typeahead,
+      { q: "pokemon" },
+      { context: contextFor(viewer) },
+    );
+    expect(result.games.map((game) => game.slug)).toEqual(["pokemon-rouge"]);
   });
 });

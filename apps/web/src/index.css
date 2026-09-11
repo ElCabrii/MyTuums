@@ -189,3 +189,21 @@
     --mobile-nav-height: 0px;
   }
 }
+
+/* Signed-out pages have no fixed bottom bar, but under edge-to-edge drawing
+   (`viewport-fit=cover`) their content would still run under the transparent
+   system bars: the top inset keeps auth chrome clear of the status bar /
+   notch, and the bottom one keeps the last form field clear of the gesture
+   bar. Setting the toast offset variable (rather than only padding) means
+   the Toaster's `--mobile-nav-height`-based offset clears the gesture bar
+   here too, exactly as it clears the tab bar above. */
+.signed-out-shell {
+  --mobile-nav-height: env(safe-area-inset-bottom);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@media (min-width: 48rem) {
+  .signed-out-shell {
+    --mobile-nav-height: 0px;
+  }
+}

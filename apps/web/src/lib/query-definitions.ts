@@ -7,6 +7,7 @@ import {
   SEARCH_PAGE_SIZE,
 } from "@my-tuums/api/constants";
 import type { FeedScope } from "@/lib/feed-scope";
+import { keepPreviousData } from "@tanstack/react-query";
 import { orpc, retryUnlessClientError } from "@/lib/orpc";
 
 interface PostListInput {
@@ -340,6 +341,10 @@ export function searchUsersQueryOptions(q: string) {
     }),
     enabled: normalized.length > 0,
     retry: retryUnlessClientError,
+    // Editing the query swaps the key, not the page: keep the previous
+    // results mounted until the new ones land — the page-level twin of the
+    // typeahead's placeholder (see atoms/search.ts).
+    placeholderData: keepPreviousData,
   };
 }
 
@@ -362,6 +367,7 @@ export function searchPostsQueryOptions(q: string) {
     }),
     enabled: normalized.length > 0,
     retry: retryUnlessClientError,
+    placeholderData: keepPreviousData,
   };
 }
 

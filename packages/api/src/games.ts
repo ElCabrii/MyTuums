@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import type { Database } from "@my-tuums/db";
 import { game, gameFavorite, follow, user } from "@my-tuums/db/schema";
@@ -13,6 +13,7 @@ import {
   SEARCH_QUERY_MAX_LENGTH,
 } from "./constants.js";
 import { createCursorCodec, createGameCursorCodec, type GameSort } from "./cursor.js";
+import { unaccentedContains } from "./text-match.js";
 import {
   protectedProcedure,
   publicRateLimit,
@@ -192,27 +193,17 @@ function coalesceYearParam(key: number | string | null): SQL {
 type GameReader = Pick<Database, "select">;
 
 /**
- * Escapes the LIKE metacharacters so a caller's `%`, `_` and `\` match
- * literally — the same rule `escapeLikePattern` applies on the users/posts
- * half (search.ts); restated here because games.ts cannot import it without
- * a cycle, and one escaped pattern helper per module boundary beats a shared
- * escape module for three lines of mechanical code.
- */
-function escapeLikePattern(pattern: string): string {
-  return pattern.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
-
-/**
  * Whether a game row matches a free-text query — the game half of "this is
- * the thing you typed" (issue #314, Q24): a case-insensitive substring of
- * the display name or of the hashtag key, so both `world of` and
- * `worldofwarcraft` find World of Warcraft. Defined here, beside the game
- * reads that share it; `search.typeahead` imports it so the dropdown and
- * the directory pages match on exactly one predicate.
+ * the thing you typed" (issue #314, Q24): a case-insensitive, accent-folded
+ * substring of the display name or of the hashtag key, so both `world of`
+ * and `worldofwarcraft` find World of Warcraft — and `pokemon` finds
+ * Pokémon. Defined here, beside the game reads that share it;
+ * `search.typeahead` imports it so the dropdown and the directory pages
+ * match on exactly one predicate. The folding helpers live in
+ * ./text-match.ts, the leaf module this file and search.ts share.
  */
 export function matchesGameQuery(q: string): SQL | undefined {
-  const contains = `%${escapeLikePattern(q)}%`;
-  return or(ilike(game.name, contains), ilike(game.hashtagKey, contains));
+  return or(unaccentedContains(game.name, q), unaccentedContains(game.hashtagKey, q));
 }
 
 /** A grid row `gameKeysetPage` returns. */

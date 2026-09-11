@@ -220,8 +220,11 @@ menu; the navigation bar has no standalone theme button.
   events). Follows and privacy are re-checked live on every page, so an
   unfollow, a new follow, or a lock since the build changes what renders
   without moving the frozen order. An unknown, foreign, differently-scoped or
-  expired snapshot is an explicit error that asks for a Refresh, never a
-  silent restart. The chronological RPC still exists underneath for the
+  expired snapshot is an explicit error, and an expired one recovers itself:
+  the feed drops the pinned id and builds a fresh snapshot, once, without
+  asking the viewer to Refresh (a snapshot that refuses while fresh renders
+  the recovery card instead, so a bad state can never loop silent rebuilds).
+  The chronological RPC still exists underneath for the
   surfaces that never ranked — profiles, bookmarks, post search, replies —
   but the web offers no chronological switch on the home or Discover feeds.
 - Authors choose Public or Followers only from the visibility popover beside
@@ -628,8 +631,9 @@ chronological mode. _Avoid:_ global feed, explore.
 filter set: ordered post IDs with repost attribution, never content, stable
 for 30 minutes and resumable by cursor. Follows, blocks, bans, privacy,
 tombstones and filter membership are re-checked live on every page; an
-unknown, foreign, mismatched or expired snapshot id is an explicit error
-asking for a Refresh. _Avoid:_ ranking cache, feed cache.
+unknown, foreign, mismatched or expired snapshot id is an explicit error,
+and expiry on a resumed snapshot self-recovers client-side by dropping the
+id and building fresh. _Avoid:_ ranking cache, feed cache.
 
 **Game directory** — the public catalog of games at `/games`, ranked by a
 current Twitch popularity snapshot, hydrated from IGDB, and never shrunk: a

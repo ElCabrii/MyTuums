@@ -229,6 +229,10 @@ pnpm db:test:setup                     # create and migrate the _test database
 pnpm db:promote                        # grant a moderator/staff/admin role (local)
 ```
 
+`0039_search_unaccent` installs the `unaccent` extension (trusted — the
+pre-deploy migrator's database owner can install it without a superuser) and
+the immutable `search_unaccent` wrapper the search matchers call.
+
 `pnpm db:promote` runs through `tsx` and `dotenv-cli`, which are dev
 dependencies and therefore absent from the production image. To appoint the
 first admin in production, run the bundled entry point from the Railway
