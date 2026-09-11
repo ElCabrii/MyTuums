@@ -29,7 +29,7 @@ export function HomePage() {
   const scope = useAtomValue(homeFeedScopeAtom);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl items-start gap-6 px-4 py-8">
+    <div className="flex w-full items-start gap-6 px-4 py-8">
       <div className="mx-auto w-full max-w-2xl space-y-4">
         <div className="border-border flex items-baseline justify-between gap-3 border-b pb-2">
           <h1 className="text-lg font-bold tracking-tight">{m.feed_title()}</h1>
@@ -84,11 +84,16 @@ export function HomePage() {
       </div>
 
       {/*
-        The right rail (lg and up). Who-to-Follow mounts only on For you: it
-        reads the same global-feed atom the feed column reads — structurally
-        one observer — while mounting it on Following would fetch a second,
-        unwatched feed. Following's own suggestions are empty by contract, so
-        there is nothing to lose: the sidebar keeps the legal links alone.
+        The right rail (lg and up), docked against the viewport's right edge:
+        the feed column's own auto margins center it exactly as it stood
+        before the sidebar existed, and the free space they leave to its
+        right is where the rail lands — not a centered two-column group,
+        which would drag the feed off center. Who-to-Follow mounts only on
+        For you: it reads the same global-feed atom the feed column reads —
+        structurally one observer — while mounting it on Following would
+        fetch a second, unwatched feed. Following's own suggestions are empty
+        by contract, so there is nothing to lose: the sidebar keeps the legal
+        links alone.
       */}
       <aside className="hidden w-80 shrink-0 space-y-6 lg:block">
         {scope === "global" && (
@@ -109,7 +114,7 @@ function LegalLinks() {
   return (
     <section aria-label={m.legal_links_title()} className="space-y-3">
       <h2 className="text-foreground text-sm font-bold">{m.legal_links_title()}</h2>
-      <ul className="text-muted-foreground space-y-2 text-sm">
+      <ul className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-sm">
         <li>
           <Link to="/privacy" className="hover:text-foreground hover:underline">
             {m.legal_privacy_policy()}
