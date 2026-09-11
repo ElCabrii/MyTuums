@@ -40,8 +40,11 @@ The intended deployment is branch-specific Workers Builds for
 and preview URLs are disabled. Jobs have no public HTTP handler.
 
 The app and branding bundles, D1 schema, R2 adapters and Workflows are implemented
-locally. Hosted activation, provider credentials, Builds integration, migrations,
-synthetic seeding and deployed parity tests remain outstanding. No production
+locally. The remote D1 migrations and synthetic game/R2 fixtures are applied.
+GitHub is connected, Stream has 1,000 storage minutes, and Email Sending's domain
+DNS is ready. The three Worker entries exist without deployed versions, with
+workers.dev and preview URLs disabled. A Builds deployment token, runtime
+credentials, build triggers and deployed parity tests remain outstanding. No production
 import, cutover or branch-protection update belongs to this PoC.
 
 ### Workers Builds configuration draft
@@ -83,6 +86,26 @@ returned error 8000008: Cloudflare's Git integration is disconnected. The build
 token list is also empty. Reconnect `ElCabrii/MyTuums` to this account before
 configuring the PoC branch builds. No build trigger, build token, subscription,
 Worker or deployment was created by these checks.
+
+After account setup at 13:00 UTC, the GitHub repository lookup succeeds and the
+connection is `edb3ba42-0325-417c-a75a-34634c78f67d`. Stream now reports 1,000
+storage minutes, and Email Sending reports a 200/day quota with `mytuums.com`
+enabled and DNS status `ready`. These are configuration checks, not encoding or
+delivery evidence. See [the setup record](artifacts/cloudflare-poc/account-setup-2026-09-11.json).
+
+Workers Builds still has no deployment token. The plugin cannot manage account
+API tokens (permission lookup returns `9109`), so the owner must create/select
+one under the branding Worker's **Settings → Builds → API token**. The
+[Builds configuration reference](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)
+describes automatic token creation in that dashboard flow. Keep the value in
+Cloudflare; only its Builds UUID is needed for API trigger configuration.
+Initially the empty Worker entries prevented dashboard build settings from
+opening. Branding now has one **undeployed** bootstrap version
+`590ec5f2-041c-42ea-b1d5-e9b1d8764e69`, containing only an unconditional empty 503
+response and no bindings. It exists to unlock setup, not to serve the PoC.
+Readback confirms zero deployments, no custom domains and disabled workers.dev
+and preview URLs. App/jobs remain versionless; their secrets API returns `10007`.
+The real application artifacts will be deployed through branch-specific Builds.
 
 ## Build-time and runtime configuration
 

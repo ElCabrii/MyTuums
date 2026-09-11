@@ -81,19 +81,17 @@ separately. Every object matches its source SHA-256 and content type. No
 foreign-key violations, pending upload intents or held catalog lease remain.
 There are still no application users. See [the fixture record](artifacts/cloudflare-poc/fixture-seed-2026-09-11.json).
 
-No app/jobs/branding Worker or Workers Builds trigger has
-been deployed. Stream/Email authorization checks and the GitHub Builds connection
-remain unresolved. Dedicated runtime secrets and OAuth registrations are also
-required before live verification.
+GitHub repository access now works and its connection has been created. Stream
+reports 1,000 storage minutes. Email Sending is enabled for `mytuums.com`, with
+DNS status `ready` and a 200/day quota. The three Worker entries exist with no
+deployed versions; workers.dev and preview URLs are disabled. See
+[the account setup record](artifacts/cloudflare-poc/account-setup-2026-09-11.json).
 
-The latest read-only checks still return Stream authorization error `10002` and
-Email authorization error `2036`; these do not establish whether either product
-is enabled. Builds has no tokens and cannot resolve the repository configuration.
-The earlier connection attempt explicitly reported disconnected Git integration.
-To unblock deployment, connect `ElCabrii/MyTuums` to Workers Builds in the Ops
-account for `codex/cloudflare-poc` only, enable/authorize the required Stream and
-Email services, and provision the dedicated PoC secrets/OAuth registrations
-listed in [operations](operations.md). Keep credentials out of chat and source.
+Workers Builds still needs its deployment token: the plugin cannot manage API
+tokens, so the owner must create/select it in the dashboard. Build triggers,
+dedicated runtime secrets and OAuth registrations remain to configure before
+hosted feature verification. See [operations](operations.md). No real email or
+video has been sent/uploaded by these setup checks.
 
 The cost figures in the migration plan are illustrative platform prices. A measured
 Cloudflare estimate must include app requests/CPU, D1 rows/storage, image transforms,

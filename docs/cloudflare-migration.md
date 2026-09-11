@@ -6,6 +6,19 @@ Current feature evidence, Railway measurements and deployment gates are summariz
 in [the validation report](cloudflare-poc-report.md). The dated notes below retain
 the implementation history; older outstanding-work lists are historical.
 
+## Account setup and Worker entries (2026-09-11, after 13:00 UTC)
+
+The user's account setup resolved GitHub, Stream and Email authorization. The
+repository connection now exists, Stream has 1,000 storage minutes, and Email
+Sending's `mytuums.com` DNS is ready. All three named PoC Worker entries have
+been created without deploying a version, with public and preview URLs disabled.
+Branding additionally has an undeployed, unbound 503 bootstrap version to unlock
+dashboard settings after the empty Worker screen prevented build-token setup.
+The next prerequisite is a Builds deployment token; the plugin cannot manage
+API tokens. Runtime credentials, branch triggers and hosted parity checks remain.
+See [the account setup record](artifacts/cloudflare-poc/account-setup-2026-09-11.json)
+and [operations](operations.md) for the owner's dashboard step.
+
 ## Hosted fixture seed (2026-09-11)
 
 The isolated EU D1/R2 pair now contains the committed synthetic catalog: 28 games
