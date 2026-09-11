@@ -227,6 +227,11 @@ menu; the navigation bar has no standalone theme button.
   The chronological RPC still exists underneath for the
   surfaces that never ranked — profiles, bookmarks, post search, replies —
   but the web offers no chronological switch on the home or Discover feeds.
+  On wide screens the Home page carries a right sidebar: For you feeds it a
+  **Who to follow** module with the same snapshot-derived, live-filtered
+  selection Discover serves (see below) — Following carries none, since its
+  candidates are accounts already followed — and beneath it the legal links
+  (the same three documents the site footer carries).
 - Authors choose Public or Followers only from the visibility popover beside
   Add images in the home and own-profile composers. The trigger identifies the
   effective audience; private accounts always show Followers only, with Public
@@ -241,8 +246,9 @@ menu; the navigation bar has no standalone theme button.
   composer, no scope tabs — with post search and a Filters button on top.
   Filters opens a popover containing the game picker; the selected game appears
   as a removable chip. It
-  shows original posts by other authors, including people the viewer follows, with a
-  **Who to follow** module above the posts: the first three distinct authors
+  shows original posts by other authors, including people the viewer follows, with the
+  **Who to follow** module above the posts (the Home sidebar shows the same
+  module beside For you): the first three distinct authors
   in the frozen order, filtered live against follows and follow requests, with
   no refill until the next Refresh. Both filters narrow the same ranked
   snapshot and compose as AND: free text

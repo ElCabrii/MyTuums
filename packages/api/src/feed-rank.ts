@@ -1114,8 +1114,8 @@ export async function loadRankSnapshot(
 }
 
 /**
- * Discover's follow suggestions: the FIRST three distinct authors in the
- * frozen order — no refills. The selection walks the snapshot once, keeping
+ * The For-you and Discover follow suggestions: the FIRST three distinct
+ * authors in the frozen order — no refills. The selection walks the snapshot once, keeping
  * authors whose representative post is alive, visible to the viewer
  * (private-hidden authors are out — a suggestion must be followable
  * directly), and still matching the page's filters; the viewer's live follow/request state then

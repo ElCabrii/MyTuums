@@ -6,10 +6,11 @@ import { getFeedRanking } from "@/lib/ranking";
 import { m } from "@/paraglide/messages.js";
 
 /**
- * Who to Follow (issue #305): the compact suggestion module above Discover's
- * posts. Reads the ranked Discover feed's own metadata — the same atom the
- * post list reads, so there is structurally one observer, not two that
- * happen to agree — and renders the top three candidates the API returned.
+ * Who to Follow (issue #305): the compact suggestion module. Discover renders
+ * it above its posts; the Home sidebar renders it beside the For-you feed.
+ * Both read their ranked feed's own metadata — the same atom the post list
+ * reads, so there is structurally one observer, not two that happen to
+ * agree — and render the top three candidates the API returned.
  *
  * Follow state is live: `lib/follow-cache.ts` patches suggestion rows in
  * place, so a successful follow filters its row out here without shuffling
@@ -20,7 +21,7 @@ import { m } from "@/paraglide/messages.js";
  * Nothing renders while the feed loads or errors (the post list's skeleton
  * and retry own those states), and nothing renders once every candidate is
  * followed or requested. The cold-start games prompt lives in
- * `RankedFeed`, not here, so Discover never renders it twice.
+ * `RankedFeed`, not here, so no surface renders it twice.
  */
 export function WhoToFollow({ feedAtom }: { feedAtom: ReturnType<typeof postFeedAtom> }) {
   const feed = useAtomValue(feedAtom);
