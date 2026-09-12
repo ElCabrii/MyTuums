@@ -208,3 +208,20 @@ exercise administrative invariants against real D1.
 - [docs/architecture.md](../../docs/architecture.md) — schema split and migration lifecycle.
 - [docs/operations.md](../../docs/operations.md) — how migrations run in production.
 - [docs/security.md](../../docs/security.md) — the test-database guard.
+
+## Preview migration
+
+`scripts/preview-import.ts` converts the explicit preview snapshot offline, checks
+all rows and foreign keys, and emits a new D1 SQL artifact with the native migration
+ledger. `scripts/prepare-preview-import.ts` is its guarded CLI; importer tests use
+Node’s test runner through `pnpm --filter @my-tuums/db test:unit`. See
+[the preview migration record](../../docs/cloudflare-preview-migration.md).
+`db:migrate --environment=preview` uses the exact preview resource pair from
+`apps/server/wrangler.preview.jsonc`; the default remains PoC. Never use the full
+snapshot importer against an environment that is accepting writes.
+
+`deploy:preview` gates the clean migration branch against the exact commit’s
+latest GitHub Actions Verify and E2E results, then builds and deploys migrations,
+jobs and application in order. `preview-deploy-checks.test.ts` covers refusals
+for missing, foreign, superseded and failed checks. This operator command does
+not automatically cut over domains, freeze source writes or start schedules.

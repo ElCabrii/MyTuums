@@ -202,3 +202,11 @@ entrypoint. Its Stream provider fixture shares upload metadata through local R2;
 the real Stream adapter and jobs Video Workflow run unchanged. Browser routing
 handles synthetic tus HEAD/PATCH requests and lost-acknowledgement recovery.
 No actual codec processing, hosted playback or external provider request occurs.
+
+## Native preview candidate
+
+The entrypoint now permits the fixed preview and migration-candidate origins,
+paired with the `mytuums-preview` Stream namespace. The default configuration
+remains PoC. `../wrangler.preview.jsonc` binds only the isolated EU preview D1/R2
+pair and owner-only candidate Access audience. Final-origin cutover must change
+origin, route and audience together; see [the execution record](../../../docs/cloudflare-preview-migration.md).

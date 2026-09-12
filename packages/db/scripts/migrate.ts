@@ -1,14 +1,23 @@
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { runMigrations } from "../src/migrate.js";
-import { openPocDatabase } from "./poc-database.js";
+import { openPocDatabase, openPreviewDatabase } from "./poc-database.js";
 
 async function run() {
-  const { values } = parseArgs({ options: { remote: { type: "boolean", default: false } } });
-  const database = await openPocDatabase(values.remote);
+  const { values } = parseArgs({
+    options: {
+      remote: { type: "boolean", default: false },
+      environment: { type: "string", default: "poc" },
+    },
+  });
+  if (values.environment !== "poc" && values.environment !== "preview")
+    throw new Error("Unknown migration environment.");
+  const database = await (values.environment === "preview" ? openPreviewDatabase : openPocDatabase)(
+    values.remote,
+  );
   try {
     console.log(
-      `Applying committed D1 migrations to mytuums-poc (${values.remote ? "remote" : "local"}).`,
+      `Applying committed D1 migrations to mytuums-${values.environment} (${values.remote ? "remote" : "local"}).`,
     );
     await runMigrations(database.db, fileURLToPath(new URL("../drizzle-d1", import.meta.url)));
     console.log("D1 migrations up to date.");
@@ -21,7 +30,7 @@ try {
   await run();
 } catch {
   console.error(
-    "D1 migration failed. Usage: pnpm --filter @my-tuums/db db:migrate [--remote]. Check Wrangler authentication, the PoC configuration and migration state before retrying.",
+    "D1 migration failed. Usage: pnpm --filter @my-tuums/db db:migrate [--remote] [--environment=poc|preview]. Check Wrangler authentication, the selected configuration and migration state before retrying.",
   );
   process.exitCode = 1;
 }

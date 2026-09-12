@@ -92,3 +92,11 @@ scheduled recovery for dispatch. It never invokes IGDB outside this Worker and
 its success means queued, not completed. Stable Workflow IDs and staged catalog
 fencing are unchanged. Local administrative requests need recovery connected to
 the same local D1 persistence; remote execution awaits the PoC jobs deployment.
+
+## Preview migration
+
+`wrangler.preview.jsonc` declares the isolated preview database, private media
+bucket, Stream creator namespace and three Workflow names. Cron is deliberately
+empty during the import rehearsal. The archive bucket is never bound to this
+Worker. Deploy preview jobs before its app from the same CI-verified commit;
+see [the execution record](../../docs/cloudflare-preview-migration.md).

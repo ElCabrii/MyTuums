@@ -14,23 +14,34 @@ import { createWorkerApplication } from "./application.js";
 export { RateLimitCounter } from "./rate-limit-counter.js";
 export { AuthRateLimitCounter } from "./auth-rate-limit-counter.js";
 
-const configuration = z.object({
-  WEB_ORIGIN: z.literal("https://cf-poc.mytuums.com"),
-  ACCESS_TEAM_DOMAIN: z.literal("https://mytuums.cloudflareaccess.com"),
-  ACCESS_AUDIENCE: z.string().regex(/^[0-9a-f]{64}$/),
-  CLOUDFLARE_ACCOUNT_ID: z.literal("734f3b84571b1967e6940140a0b7d75f"),
-  STREAM_NAMESPACE: z.literal("mytuums-poc"),
-  EMAIL_FROM: z.literal("noreply@mytuums.com"),
-  BETTER_AUTH_SECRET: z.string().min(32),
-  APPEAL_TOKEN_SECRET: z.string().min(32),
-  STREAM_API_TOKEN: z.string().min(1),
-  GOOGLE_CLIENT_ID: z.string().min(1),
-  GOOGLE_CLIENT_SECRET: z.string().min(1),
-  DISCORD_CLIENT_ID: z.string().min(1),
-  DISCORD_CLIENT_SECRET: z.string().min(1),
-  TWITCH_CLIENT_ID: z.string().min(1),
-  TWITCH_CLIENT_SECRET: z.string().min(1),
-});
+const configuration = z
+  .object({
+    WEB_ORIGIN: z.enum([
+      "https://cf-poc.mytuums.com",
+      "https://preview-candidate.mytuums.com",
+      "https://preview.mytuums.com",
+    ]),
+    ACCESS_TEAM_DOMAIN: z.literal("https://mytuums.cloudflareaccess.com"),
+    ACCESS_AUDIENCE: z.string().regex(/^[0-9a-f]{64}$/),
+    CLOUDFLARE_ACCOUNT_ID: z.literal("734f3b84571b1967e6940140a0b7d75f"),
+    STREAM_NAMESPACE: z.enum(["mytuums-poc", "mytuums-preview"]),
+    EMAIL_FROM: z.literal("noreply@mytuums.com"),
+    BETTER_AUTH_SECRET: z.string().min(32),
+    APPEAL_TOKEN_SECRET: z.string().min(32),
+    STREAM_API_TOKEN: z.string().min(1),
+    GOOGLE_CLIENT_ID: z.string().min(1),
+    GOOGLE_CLIENT_SECRET: z.string().min(1),
+    DISCORD_CLIENT_ID: z.string().min(1),
+    DISCORD_CLIENT_SECRET: z.string().min(1),
+    TWITCH_CLIENT_ID: z.string().min(1),
+    TWITCH_CLIENT_SECRET: z.string().min(1),
+  })
+  .refine(
+    (config) =>
+      (config.WEB_ORIGIN === "https://cf-poc.mytuums.com") ===
+      (config.STREAM_NAMESPACE === "mytuums-poc"),
+    "Origin and Stream namespace must belong to the same environment.",
+  );
 
 async function application(env: AppEnv) {
   const config = configuration.parse(env);

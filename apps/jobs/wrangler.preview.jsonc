@@ -1,0 +1,64 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "mytuums-preview-jobs",
+  "account_id": "734f3b84571b1967e6940140a0b7d75f",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-10",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "upload_source_maps": true,
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "limits": { "cpu_ms": 300000, "subrequests": 50000 },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mytuums-preview",
+      "database_id": "c8ce4268-2a4c-4175-b574-93c1c45aac92",
+      "migrations_dir": "../../packages/db/drizzle-d1",
+    },
+  ],
+  "stream": { "binding": "STREAM", "remote": false },
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["noreply@mytuums.com"],
+      "remote": false,
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "mytuums-preview-media",
+      "jurisdiction": "eu",
+      "remote": false,
+    },
+  ],
+  "vars": {
+    "WEB_ORIGIN": "https://preview-candidate.mytuums.com",
+    "EMAIL_FROM": "noreply@mytuums.com",
+    "STREAM_NAMESPACE": "mytuums-preview",
+    "CLOUDFLARE_ACCOUNT_ID": "734f3b84571b1967e6940140a0b7d75f",
+  },
+  "secrets": {
+    "required": ["STREAM_API_TOKEN", "IGDB_CLIENT_ID", "IGDB_CLIENT_SECRET", "APPEAL_TOKEN_SECRET"],
+  },
+  "triggers": { "crons": [] },
+  "workflows": [
+    {
+      "binding": "VIDEO_WORKFLOW",
+      "name": "mytuums-preview-video",
+      "class_name": "VideoWorkflow",
+    },
+    {
+      "binding": "MAINTENANCE_WORKFLOW",
+      "name": "mytuums-preview-maintenance",
+      "class_name": "MaintenanceWorkflow",
+    },
+    {
+      "binding": "GAME_SYNC_WORKFLOW",
+      "name": "mytuums-preview-game-sync",
+      "class_name": "GameSyncWorkflow",
+    },
+  ],
+}

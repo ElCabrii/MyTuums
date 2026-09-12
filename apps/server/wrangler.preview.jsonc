@@ -1,0 +1,92 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "mytuums-preview-app",
+  "account_id": "734f3b84571b1967e6940140a0b7d75f",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "preview-candidate.mytuums.com", "custom_domain": true }],
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "none",
+    "not_found_handling": "none",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mytuums-preview",
+      "database_id": "c8ce4268-2a4c-4175-b574-93c1c45aac92",
+      "migrations_dir": "../../packages/db/drizzle-d1",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "mytuums-preview-media",
+      "jurisdiction": "eu",
+      "remote": false,
+    },
+  ],
+  "images": { "binding": "IMAGES", "remote": false },
+  "stream": { "binding": "STREAM", "remote": false },
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["noreply@mytuums.com"],
+      "remote": false,
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "API_COUNTERS", "class_name": "RateLimitCounter" },
+      { "name": "AUTH_COUNTERS", "class_name": "AuthRateLimitCounter" },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RateLimitCounter", "AuthRateLimitCounter"],
+    },
+  ],
+  "workflows": [
+    {
+      "binding": "VIDEO_WORKFLOW",
+      "name": "mytuums-preview-video",
+      "class_name": "VideoWorkflow",
+      "script_name": "mytuums-preview-jobs",
+    },
+  ],
+  "vars": {
+    "WEB_ORIGIN": "https://preview-candidate.mytuums.com",
+    "ACCESS_TEAM_DOMAIN": "https://mytuums.cloudflareaccess.com",
+    "ACCESS_AUDIENCE": "e5abc28a2568684b5fb2d7a83e797cab5d15f12e619ed0b271f49bd999cfa495",
+    "CLOUDFLARE_ACCOUNT_ID": "734f3b84571b1967e6940140a0b7d75f",
+    "STREAM_NAMESPACE": "mytuums-preview",
+    "EMAIL_FROM": "noreply@mytuums.com",
+  },
+  "secrets": {
+    "required": [
+      "BETTER_AUTH_SECRET",
+      "APPEAL_TOKEN_SECRET",
+      "STREAM_API_TOKEN",
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+      "DISCORD_CLIENT_ID",
+      "DISCORD_CLIENT_SECRET",
+      "TWITCH_CLIENT_ID",
+      "TWITCH_CLIENT_SECRET",
+    ],
+  },
+  "limits": { "cpu_ms": 30000 },
+  "upload_source_maps": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "redact_query_string": true,
+    "logs": { "invocation_logs": false },
+  },
+}

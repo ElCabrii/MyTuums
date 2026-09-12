@@ -1,7 +1,8 @@
 # Repository context
 
 This experimental branch is migrating to Cloudflare-native infrastructure.
-The authoritative scope, verified progress and outstanding work are in
+Preview migration execution is tracked in [the preview migration record](docs/cloudflare-preview-migration.md).
+The authoritative PoC scope, verified progress and outstanding work are in
 [the migration record](docs/cloudflare-migration.md). The Node deployment and PostgreSQL runtime configuration have been removed on
 this branch. Hosted activation and interactive local development remain incomplete.
 

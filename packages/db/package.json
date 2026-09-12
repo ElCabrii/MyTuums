@@ -47,7 +47,10 @@
     "db:promote": "tsx scripts/admin.ts promote",
     "db:grant:founder": "tsx scripts/admin.ts founder",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "db:prepare:preview": "tsx scripts/prepare-preview-import.ts",
+    "test:unit": "tsx --test scripts/*.test.ts",
+    "deploy:preview": "tsx scripts/deploy-preview.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2"

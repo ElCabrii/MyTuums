@@ -1,0 +1,70 @@
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { z } from "zod";
+import { requirePreviewChecks } from "./preview-deploy-checks.js";
+
+const root = fileURLToPath(new URL("../../../", import.meta.url));
+const git = (...args: string[]) =>
+  execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+const commit = z
+  .string()
+  .regex(/^[a-f0-9]{40}$/)
+  .parse(git("rev-parse", "HEAD"));
+function assertCheckout() {
+  if (
+    git("branch", "--show-current") !== "codex/cloudflare-poc" ||
+    git("rev-parse", "HEAD") !== commit ||
+    git("status", "--porcelain")
+  ) {
+    throw new Error(
+      "Preview deployment requires the unchanged, clean codex/cloudflare-poc checkout.",
+    );
+  }
+}
+assertCheckout();
+if (
+  !process.env.VITE_GOOGLE_CLIENT_ID ||
+  process.env.VITE_SOCIAL_PROVIDERS !== "google,discord,twitch"
+) {
+  throw new Error(
+    "Supply the preview public Google client ID and VITE_SOCIAL_PROVIDERS=google,discord,twitch before building.",
+  );
+}
+const response = await fetch(
+  `https://api.github.com/repos/ElCabrii/MyTuums/commits/${commit}/check-runs?per_page=100`,
+  {
+    headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+    signal: AbortSignal.timeout(15000),
+  },
+);
+if (!response.ok) throw new Error("Cannot verify the preview commit's CI checks.");
+requirePreviewChecks(commit, await response.text());
+
+function run(args: string[]) {
+  assertCheckout();
+  execFileSync("pnpm", args, { cwd: root, stdio: "inherit" });
+}
+console.log(`Deploying verified preview commit ${commit}: build, migrations, jobs, application.`);
+run(["build"]);
+run(["db:migrate", "--remote", "--environment=preview"]);
+run([
+  "--filter",
+  "@my-tuums/jobs",
+  "exec",
+  "wrangler",
+  "deploy",
+  "--config",
+  "wrangler.preview.jsonc",
+]);
+run([
+  "--filter",
+  "@my-tuums/server",
+  "exec",
+  "wrangler",
+  "deploy",
+  "--config",
+  "wrangler.preview.jsonc",
+]);
+console.log(
+  "Preview deployment commands completed. Verify authenticated health and provider behavior before reopening writes.",
+);
