@@ -26,8 +26,10 @@ obsolete Docker gate with actual native artifact validation at release time.
 - Isolated branch: `codex/cloudflare-production` in `/tmp/mytuums-cloudflare-production`.
 - Starting native revision: `d0f2c3341e967c64fc1e4165f8bb543d86a28fb0`.
 - Incoming main revision: `dd220dd50cbbc9f0cd32db62676ca1525decdd1f`.
-- Merge is in progress. Four files required conflict resolution; the incoming UI
-  changes merged cleanly. Native accent-insensitive search is being verified.
+- Main integration was committed as `6d3fff25e4c88f4887f66faca4c1cd3e5fc27239`
+  and opened as draft PR #396. The incoming UI changes merged cleanly.
+  Full local Verify passed, including 662 integration tests; all 107 browser
+  checks passed. Hosted CI remains a deployment gate.
 - The production PostgreSQL 18 unaccent dictionary was captured read-only. Its
   SHA-256 is `ecf4c41c0883dee17d02431e0a7f24a2611aadf8fe1da06e98c6ccb4acc4a981`.
   The port now uses that exact dictionary; 51 focused search tests pass.
@@ -86,7 +88,7 @@ Temporary Railway SSH key registration:
 files and the private SSH agent when migration access is no longer needed.
 The database has no usable public endpoint; use the private SSH export path.
 
-## Remaining gates
+## Execution checklist
 
 1. Complete main integration, search parity, local development/browser validation,
    full Verify and native E2E, then deploy the verified revision to preview.
@@ -154,3 +156,27 @@ candidate approval, while leaving the running production services available.
 Then merge and validate the resulting main commit before beginning maintenance;
 CI time must not consume the 30-minute data cutover budget. Production Cron and
 source retirement remain later coordinated steps, not effects of preparation.
+
+## Refresh rehearsal and CI recovery
+
+A second read-only production export took 5.65 seconds and still contained 6,355
+rows. The refresh procedure removes triggers before dropping tables in reverse
+foreign-key order, then imports the schema, rows and triggers from the committed
+migration-based converter. It was first checked locally with a deliberate
+candidate mutation, then exercised against the unserved production D1 clone
+after exporting a private backup. The hosted import processed 6,528 statements
+in 531 ms. All 29 application tables, seven migration hashes and foreign keys
+reconciled afterward; no cleanup side effects were introduced. This does not yet
+measure the final media delta or the complete coordinated cutover.
+
+The local full Verify and browser suites passed. Initial hosted checks failed
+because the runner shares the developer machine: local E2E occupied port 3101,
+and the host `/tmp` quota caused a SQLite write failure in the badge stress test.
+Local browser processes have exited. CI now uses its own disk-backed temporary
+directory for verification and browser commands, and push/PR events share a
+branch concurrency key. Test requirements and deployment gates are unchanged.
+
+Temporary candidate verification access is scoped only to
+`preview-candidate.mytuums.com`: policy `cd0b938d-2e75-4650-8720-055b6c2b0127`,
+service token `c36a787f-7f87-42c7-9709-92ee4fd194b2`, expiring September 12 at
+16:31 UTC. Remove both after automated hosted checks. The owner policy is intact.

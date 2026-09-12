@@ -4,8 +4,10 @@ This branch now serves preview through Cloudflare-native infrastructure.
 Preview migration execution is tracked in [the preview migration record](docs/cloudflare-preview-migration.md).
 The authoritative PoC scope, verified progress and outstanding work are in
 [the migration record](docs/cloudflare-migration.md). The Node deployment and PostgreSQL runtime configuration have been removed on
-this branch. Final preview sign-in confirmation and schedule activation are tracked
-in the preview migration record; interactive local development remains incomplete.
+this branch. Preview owner verification and schedule activation are complete. Production
+preparation and release gates are tracked in
+[the production execution record](docs/cloudflare-production-migration.md);
+interactive local development remains incomplete.
 
 The repository map for MyTuums. Use the routing table to reach the context that
 owns a change; use `docs/` for cross-package architecture, product behavior,

@@ -31,8 +31,10 @@ no provider credentials. Production Railway configuration and required checks on
   It uses synthetic Access/mail/Stream providers and never loads bucket secrets.
 - Both jobs use the self-hosted runner, Node 24 and the frozen pnpm lockfile.
   Browser system libraries must already be installed on that runner.
-- Each job has a 30-minute timeout. A newer run cancels an older run for the same
-  ref. Playwright reports survive test failure and expire after seven days.
+- Each job has a 30-minute timeout. Push and pull-request events share the head
+  branch concurrency key, so duplicate runs cannot occupy the runner queue.
+  `TMPDIR` uses the runner-owned temporary directory, avoiding the host
+  `/tmp` quota that previously caused SQLite write failures during badge tests. Playwright reports survive test failure and expire after seven days.
 - The Node Docker image job and PostgreSQL services are removed on this branch.
   Actual Wrangler artifacts are tested through the local workerd runtime.
 - Main's historical `Docker image builds` required check is unchanged. Do not

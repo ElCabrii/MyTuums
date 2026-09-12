@@ -6,7 +6,7 @@ on:
   pull_request:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
@@ -29,6 +29,8 @@ jobs:
           cache: true
           require-lockfile: true
       - run: pnpm verify
+        env:
+          TMPDIR: ${{ runner.temp }}
 
   e2e:
     name: E2E tests
@@ -54,6 +56,8 @@ jobs:
       - name: Install Chromium
         run: pnpm --filter @my-tuums/e2e exec playwright install chromium
       - run: pnpm test:e2e
+        env:
+          TMPDIR: ${{ runner.temp }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
         with:
