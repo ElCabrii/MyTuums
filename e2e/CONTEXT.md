@@ -86,6 +86,9 @@ See [../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
   defaults, within D1's 100-parameter ceiling. Raw times
   are epoch milliseconds, including notification backdating.
 - Locators use roles, labels and structure; no `data-testid` attributes.
+- For optimistic controls, a persistence check waits for the final write response
+  before reloading. Optimistic UI state alone does not mean the mutation queue
+  has finished; an immediate reload can cancel queued requests.
 - Storage state contains cookies only. Fresh-storage assertions need a new
   browser context. Unrelated journeys start with analytics refused and the
   current release notes already seen; relevant journeys explicitly opt out.

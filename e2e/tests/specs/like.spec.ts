@@ -66,6 +66,12 @@ test.describe("liking a post", () => {
     // whichever face the LIKE control currently shows.
     const anyLikeButton = () => page.getByRole("button", { name: /^(Unlike|Like) this post/ });
 
+    let likeResponses = 0;
+    const finalLike = page.waitForResponse((response) => {
+      if (new URL(response.url()).pathname !== "/rpc/post/like") return false;
+      likeResponses += 1;
+      return likeResponses === 2;
+    });
     await anyLikeButton().click(); // like
     await anyLikeButton().click(); // unlike
     await anyLikeButton().click(); // like — the last intent
@@ -79,6 +85,9 @@ test.describe("liking a post", () => {
       "true",
     );
 
+    // Optimistic feedback can precede the queued writes. Reload only after the
+    // final like completes; navigating earlier cancels the queue itself.
+    expect((await finalLike).ok()).toBe(true);
     await page.reload();
 
     // The server itself — not just the client cache — has to agree: this

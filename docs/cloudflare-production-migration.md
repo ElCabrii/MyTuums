@@ -180,3 +180,12 @@ Temporary candidate verification access is scoped only to
 `preview-candidate.mytuums.com`: policy `cd0b938d-2e75-4650-8720-055b6c2b0127`,
 service token `c36a787f-7f87-42c7-9709-92ee4fd194b2`, expiring September 12 at
 16:31 UTC. Remove both after automated hosted checks. The owner policy is intact.
+
+The CI temporary-directory fix also requires `globalPassThroughEnv: ["TMPDIR"]`
+in Turbo: an isolated probe showed strict mode stripping the variable before
+that addition, and preserving the disk-backed path afterward. The rapid-like
+browser trace exposed a separate test race: reload cancelled the unlike request
+before the final like was sent. A controlled 500 ms network delay reproduced the
+failure; waiting for the final like response made the same probe pass. The delay
+was removed, and the persistence assertion remains. No application rate limits
+or mutation behavior were relaxed.
