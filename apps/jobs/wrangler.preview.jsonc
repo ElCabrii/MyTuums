@@ -35,7 +35,7 @@
     },
   ],
   "vars": {
-    "WEB_ORIGIN": "https://preview-candidate.mytuums.com",
+    "WEB_ORIGIN": "https://preview.mytuums.com",
     "EMAIL_FROM": "noreply@mytuums.com",
     "STREAM_NAMESPACE": "mytuums-preview",
     "CLOUDFLARE_ACCOUNT_ID": "734f3b84571b1967e6940140a0b7d75f",

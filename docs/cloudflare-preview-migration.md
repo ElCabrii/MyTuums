@@ -21,8 +21,10 @@ outside this migration. Implementation stays on `codex/cloudflare-poc`.
 Use `apps/server/wrangler.preview.jsonc` and `apps/jobs/wrangler.preview.jsonc`
 explicitly. Default Wrangler configuration still targets the isolated PoC. Jobs
 have no Cron triggers during rehearsal. Neither Worker has a workers.dev endpoint
-or deployment preview URL. The candidate Access audience must be replaced with
-the existing preview audience when changing the final origin and route.
+or deployment preview URL. The committed configuration now selects the final preview origin and its existing
+Access audience. Deploying it is the cutover step and must follow the final source
+freeze and reconciliation; the live candidate remains on the previously verified
+configuration until that deployment.
 
 Never run cleanup against the archive bucket. Do not seed the PoC fixtures into
 preview. Keep `BETTER_AUTH_SECRET` identical to the old preview secret: password,
@@ -62,18 +64,28 @@ keeps its existing callbacks and passkey relying-party hostname.
 - Imported the rehearsal into hosted D1: 37 tables, 2,621,440 bytes. All 29
   application table counts and SHA-256 row digests match, all seven native
   migration hashes match, and `foreign_key_check` reports zero violations.
-- Created placeholder preview app/jobs Workers to prepare their secret bindings.
-  They have no public routes; workers.dev and deployment preview URLs are disabled.
-  The real application is not deployed yet.
+- Deployed the real candidate from verified commit `a2f3ff0a` to
+  `preview-candidate.mytuums.com`. Both Workers keep workers.dev and deployment
+  preview URLs disabled, and jobs have no schedules.
 - Copied preview auth/OAuth, IGDB and appeal secrets directly into the new Worker
   secret bindings without displaying their values. The existing auth secret is
   preserved. The owner added `STREAM_API_TOKEN` to both Workers and completed
   local Wrangler OAuth authentication; both requirements are verified.
 - Overnight PoC maintenance now shows successful automatic executions. The earlier
   absence of Cron evidence is no longer an established blocker.
-- Bulk R2 transfer uses authenticated Wrangler remote bindings, checking every
-  destination against the local SHA-256 backup ledger. A private append-only
-  verification journal permits resuming after transient connection failures.
+- Completed and verified 3,117 active non-video objects and all 3,155 original
+  archive objects against their SHA-256 hashes and sizes. Seven snapshot files
+  are also verified in the archive. Both R2 buckets have public access disabled.
+- Candidate HTTP checks passed for the preserved owner session, game listing,
+  stored game cover, both videos’ signed playback, posters and timeline previews.
+  Requests without Access credentials are refused by the edge.
+- Native Images produced a verified WebP. Cloudflare Email Service accepted the
+  one authorized test email, and Gabriel confirmed inbox delivery. Native Stream
+  upload creation and cancellation passed; disposable provider uploads and their
+  candidate database records were removed afterward.
+- Gabriel authorized a four-hour service token and candidate-only Service Auth
+  policy for verification. Remove both after candidate checks; the existing final
+  preview and production Access policies remain unchanged.
 - The first migration CI run passed Verify but exposed Chromium resource
   exhaustion while repeatedly loading the Vite development module graph.
   Browser tests now build the frontend before serving it through Vite preview.
@@ -92,8 +104,9 @@ integration tests (776.50 seconds). The six importer/deployment-gate tests passe
 as did scoped database lint/typechecking, Oxlint, formatting and documentation
 checks. Both preview Wrangler configurations completed dry-run builds. Local D1
 accepted the full import, and hosted D1 row hashes and foreign keys were verified.
-Authenticated candidate/provider smoke checks and final cutover remain pending;
-these results do not mean the Railway preview has switched.
+The exact candidate commit passed GitHub Verify and all 107 browser tests. Hosted
+candidate/provider smoke checks passed. Final source freeze, reconciliation and
+cutover remain pending; Railway preview has not switched yet.
 
 ## Repeatable preparation
 
