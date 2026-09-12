@@ -84,18 +84,25 @@ export function HomePage() {
       </div>
 
       {/*
-        The right rail (lg and up), docked against the viewport's right edge:
-        the feed column's own auto margins center it exactly as it stood
-        before the sidebar existed, and the free space they leave to its
-        right is where the rail lands — not a centered two-column group,
-        which would drag the feed off center. Who-to-Follow mounts only on
-        For you: it reads the same global-feed atom the feed column reads —
-        structurally one observer — while mounting it on Following would
-        fetch a second, unwatched feed. Following's own suggestions are empty
-        by contract, so there is nothing to lose: the sidebar keeps the legal
-        links alone.
+        The right rail (lg and up). The feed column's own auto margins center
+        it exactly as it stood before the sidebar existed; the rail lands in
+        the free space they leave to its right — never a centered two-column
+        group, which would drag the feed off center. At 2xl the gutter is
+        wide enough for the rail to sit at its midpoint: the margin below is
+        half the gutter minus half the rail (100% - 42rem is twice the
+        gutter, the feed being centered), so the rail's right edge falls
+        halfway between the feed and the screen edge; below 2xl that calc
+        would go negative, so the rail stays flush right. Who-to-Follow
+        mounts only on For you: it reads the same global-feed atom the feed
+        column reads — structurally one observer — while mounting it on
+        Following would fetch a second, unwatched feed. Following's own
+        suggestions are empty by contract, so there is nothing to lose: the
+        sidebar keeps the legal links alone. Below lg the rail is hidden on
+        purpose — small screens meet the module on Discover, whose inline
+        placement serves every width, and the footer already carries the
+        legal links.
       */}
-      <aside className="hidden w-80 shrink-0 space-y-6 lg:block">
+      <aside className="hidden w-80 shrink-0 space-y-6 lg:block 2xl:mr-[calc((100%-42rem)/4-10rem)]">
         {scope === "global" && (
           <WhoToFollow feedAtom={postFeedAtom({ feed: "global", ranked: true })} />
         )}

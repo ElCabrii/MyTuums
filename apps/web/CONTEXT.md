@@ -241,7 +241,9 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   catch-up empty state). The Home sidebar (`home-page.tsx`) mounts the same
   `WhoToFollow` from the For-you feed's own atom — never on Following, which
   would subscribe an unwatched global feed — beside the static legal-links
-  block.
+  block. The rail is lg-and-up only: below lg Home deliberately shows no
+  suggestions module (Discover's inline one serves every width), and the
+  legal links stay footer-only there.
 
 ## Dependencies and boundaries
 

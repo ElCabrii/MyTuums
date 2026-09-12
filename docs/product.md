@@ -231,7 +231,9 @@ menu; the navigation bar has no standalone theme button.
   **Who to follow** module with the same snapshot-derived, live-filtered
   selection Discover serves (see below) — Following carries none, since its
   candidates are accounts already followed — and beneath it the legal links
-  (the same three documents the site footer carries).
+  (the same three documents the site footer carries). Small screens show
+  neither: Discover's inline module serves suggestions at every width, and
+  the footer carries the legal links.
 - Authors choose Public or Followers only from the visibility popover beside
   Add images in the home and own-profile composers. The trigger identifies the
   effective audience; private accounts always show Followers only, with Public
