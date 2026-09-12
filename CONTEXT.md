@@ -1,13 +1,11 @@
 # Repository context
 
-This branch now serves preview through Cloudflare-native infrastructure.
-Preview migration execution is tracked in [the preview migration record](docs/cloudflare-preview-migration.md).
-The authoritative PoC scope, verified progress and outstanding work are in
-[the migration record](docs/cloudflare-migration.md). The Node deployment and PostgreSQL runtime configuration have been removed on
-this branch. Preview owner verification and schedule activation are complete. Production
-preparation and release gates are tracked in
-[the production execution record](docs/cloudflare-production-migration.md);
-local app/jobs development uses isolated persistent native resources; see
+Preview and production run on Cloudflare-native infrastructure. The production
+cutover, exact deployed versions and retained Railway rollback data are recorded
+in [the production execution record](docs/cloudflare-production-migration.md).
+Preview history is in [the preview migration record](docs/cloudflare-preview-migration.md).
+The original PoC history is in [the migration record](docs/cloudflare-migration.md).
+Local app/jobs development uses isolated persistent native resources; see
 [local development](docs/operations.md#local-development).
 
 The repository map for MyTuums. Use the routing table to reach the context that
@@ -157,7 +155,7 @@ cannot drift. While iterating, go narrower still:
 
 API integration tests create ephemeral local D1 databases and need no Postgres
 or credentials. E2E now uses local Worker/D1/R2/Workflow bindings with a synthetic
-Stream transport fixture. Hosted provider checks and interactive local development remain outstanding.
+Stream transport fixture. Hosted provider checks and interactive local development passed during the production migration.
 
 What belongs in which suite, and when a test deserves to exist at all:
 [TESTING_STRATEGY.md](TESTING_STRATEGY.md).

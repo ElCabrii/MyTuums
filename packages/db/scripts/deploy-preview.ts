@@ -8,15 +8,13 @@ import { requirePreviewChecks } from "./preview-deploy-checks.js";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const { values } = parseArgs({ options: { target: { type: "string", default: "preview" } } });
-const target = z.enum(["preview", "production-candidate", "production"]).parse(values.target);
+const target = z.enum(["preview", "production"]).parse(values.target);
 const environment = target === "preview" ? "preview" : "production";
 const appConfiguration = `wrangler.${target}.jsonc`;
 const allowedBranches =
   target === "production"
     ? ["main"]
-    : target === "production-candidate"
-      ? ["codex/cloudflare-production"]
-      : ["codex/cloudflare-poc", "codex/cloudflare-production"];
+    : ["main", "codex/cloudflare-poc", "codex/cloudflare-production"];
 const git = (...args: string[]) =>
   execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 const commit = z
@@ -61,11 +59,7 @@ const config = z
   .object({
     vars: z.object({
       WEB_ORIGIN: z.literal(
-        target === "production"
-          ? "https://mytuums.com"
-          : target === "production-candidate"
-            ? "https://preview-candidate.mytuums.com"
-            : "https://preview.mytuums.com",
+        target === "production" ? "https://mytuums.com" : "https://preview.mytuums.com",
       ),
       GOOGLE_ANALYTICS: z.enum(["enabled", "disabled"]),
     }),

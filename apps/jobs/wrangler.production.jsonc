@@ -53,7 +53,7 @@
     "required": ["STREAM_API_TOKEN", "IGDB_CLIENT_ID", "IGDB_CLIENT_SECRET", "APPEAL_TOKEN_SECRET"],
   },
   "triggers": {
-    "crons": [],
+    "crons": ["* * * * *"],
   },
   "workflows": [
     {

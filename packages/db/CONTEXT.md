@@ -220,9 +220,12 @@ Node’s test runner through `pnpm --filter @my-tuums/db test:unit`. See
 `apps/server/wrangler.preview.jsonc`; the default remains PoC. Never use the full
 snapshot importer against an environment that is accepting writes.
 
-`deploy:preview` gates the clean migration branch against the exact commit’s
-latest GitHub Actions Verify and E2E results, then builds and deploys migrations,
-jobs and application in order. `preview-deploy-checks.test.ts` covers refusals
+`deploy:preview` gates a clean allowed branch against the exact commit’s latest
+GitHub Actions Verify, E2E tests and Docker image builds results. Production
+requires `main`; preview also accepts `main` and the existing native migration
+branches. The retired production-candidate target is refused. It then builds and
+deploys migrations, the private link fetcher, jobs and app in order; production
+also deploys branding. `preview-deploy-checks.test.ts` covers refusals
 for missing, foreign, superseded and failed checks. This operator command does
 not automatically cut over domains, freeze source writes or start schedules.
 
