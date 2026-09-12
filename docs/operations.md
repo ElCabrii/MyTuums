@@ -34,7 +34,7 @@ link. No message is sent to an external mailbox.
 `apps/server/src/development-platform.ts` owns one Miniflare instance with the
 real app and jobs bundles, committed migrations, D1, R2, Images, Workflows and
 rate-limit Durable Objects. Data persists under
-`apps/server/.wrangler/development` across restarts, separately from E2E, PoC and
+apps/server/.wrangler/development across restarts, separately from E2E, PoC and
 hosted resources. To reset development data, stop `pnpm dev` and remove only that
 directory. Development startup applies migrations only to this local database.
 
