@@ -21,10 +21,9 @@ outside this migration. Implementation stays on `codex/cloudflare-poc`.
 Use `apps/server/wrangler.preview.jsonc` and `apps/jobs/wrangler.preview.jsonc`
 explicitly. Default Wrangler configuration still targets the isolated PoC. Jobs
 have no Cron triggers during rehearsal. Neither Worker has a workers.dev endpoint
-or deployment preview URL. The committed configuration now selects the final preview origin and its existing
-Access audience. Deploying it is the cutover step and must follow the final source
-freeze and reconciliation; the live candidate remains on the previously verified
-configuration until that deployment.
+or deployment preview URL. The final preview origin and its existing Access audience are now deployed.
+The candidate hostname has been detached. Jobs remain unscheduled until the owner
+confirms final-origin sign-in and media behavior.
 
 Never run cleanup against the archive bucket. Do not seed the PoC fixtures into
 preview. Keep `BETTER_AUTH_SECRET` identical to the old preview secret: password,
@@ -43,7 +42,8 @@ keeps its existing callbacks and passkey relying-party hostname.
 - Exported PostgreSQL with `pg_dump`, including its 39-entry migration history and
   legacy job schema. Exported all 29 application tables in a read-only,
   repeatable-read transaction for conversion. These are rehearsal snapshots;
-  Railway preview continues accepting writes until the final maintenance window.
+  The final maintenance-window snapshot was captured after stopping the Railway
+  application and background writers.
 - Snapshot: 2,812 application rows, including 10 users, 24 posts, 2,635 games,
   18 sessions, 11 linked auth accounts, one two-factor record and two published
   videos. No pending video submissions or video cleanup obligations were present.
@@ -97,6 +97,43 @@ keeps its existing callbacks and passkey relying-party hostname.
   Static metadata, client document heads and copied post URLs therefore stay
   within the candidate or final preview environment, rather than linking to PoC.
 
+## Cutover, September 12
+
+- Final commit `101ad5bed63646d0d1cfef53a1a61b5316c26675` passed both
+  GitHub Verify and all 107 browser tests in run `34684957287`. The deployed app
+  version is `c219b9cc-cf98-4551-9f4d-d8f9dce2822d`; jobs version is
+  `81a370e4-03be-4d3c-ab83-0299941e0049`.
+- Railway’s three preview writers have no connected source; the old game Cron
+  schedule is removed. Their deployments report `deploymentStopped: true`.
+  Use the documented `deploymentStop` API for this operation. The installed CLI
+  interpreted zero replicas as removing the region and supplied a default region;
+  preview’s original European region was restored before the final export.
+- The final PostgreSQL dump and two independent application exports agree with the
+  rehearsal: all 29 application tables and 2,812 rows are unchanged. The source
+  media inventory still contains the same 3,155 keys, ETags and sizes. No unfinished
+  video, submission, cleanup obligation or active legacy job remained.
+- D1 still matches every converted row and all seven migration hashes, with zero
+  foreign-key violations. No second full import or target reset was necessary.
+  Thirteen final snapshot/verification files are hash-verified under the private
+  archive’s `migration-20260912/final/` prefix and copied to durable local backup.
+- Replaced only the old preview CNAME with the Worker custom domain. Cloudflare
+  refused to attach while the Railway CNAME existed, so its exact saved record
+  was removed before domain attachment. Worker domain ID:
+  `70d48b833cd761209fee2ac07fd83c41e209d53c`.
+- Existing preview Access policy `00c33257-20eb-4937-9869-62e52c7c695b` is
+  unchanged, including its four allowed identities. The final URL has valid TLS
+  and redirects unauthenticated requests to Cloudflare Access. Disabled only
+  preview’s legacy edge-secret transform; retained it for recovery.
+- Removed the temporary candidate Service Auth policy/token, candidate Worker
+  domain and temporary Railway SSH key/agent. Production deployments are unchanged.
+- The old preview PostgreSQL deployment and its 5 GB volume remain retained. A
+  stop was requested, but its stopped flag has not yet confirmed completion; do
+  not describe all Railway resources as shut down or billing as ended. The native
+  application uses only D1. Preserve source data/backups for at least seven days
+  after cutover, through September 19, before separately retiring them.
+- Owner confirmation of sign-in, existing posts, covers and video at the final
+  URL is pending. Native schedules remain paused until that check is complete.
+
 ## Verification
 
 `pnpm verify` passed on September 12, including 56 integration files and all 656
@@ -105,8 +142,12 @@ as did scoped database lint/typechecking, Oxlint, formatting and documentation
 checks. Both preview Wrangler configurations completed dry-run builds. Local D1
 accepted the full import, and hosted D1 row hashes and foreign keys were verified.
 The exact candidate commit passed GitHub Verify and all 107 browser tests. Hosted
-candidate/provider smoke checks passed. Final source freeze, reconciliation and
-cutover remain pending; Railway preview has not switched yet.
+candidate/provider smoke checks passed. Final source freeze, reconciliation and hostname cutover are complete. Owner
+confirmation of final-origin OAuth/media and schedule activation remain pending.
+
+The post-cutover `pnpm verify` run also passed, including all 656 integration
+tests in 56 files (846.18 seconds). Final formatting and documentation checks
+passed after updating this record.
 
 ## Repeatable preparation
 
@@ -169,7 +210,7 @@ configured. This is an operator-triggered pipeline; automatic push deployment is
 not enabled during rehearsal. Future Workers Builds automation must preserve the
 same CI and deployment ordering gates.
 
-## Remaining deployment and cutover sequence
+## Cutover procedure and retention
 
 1. Finish R2 copies and verify every destination object against the backup ledger.
    Preserve backups in the archive bucket, outside active cleanup namespaces.

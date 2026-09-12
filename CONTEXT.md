@@ -1,10 +1,11 @@
 # Repository context
 
-This experimental branch is migrating to Cloudflare-native infrastructure.
+This branch now serves preview through Cloudflare-native infrastructure.
 Preview migration execution is tracked in [the preview migration record](docs/cloudflare-preview-migration.md).
 The authoritative PoC scope, verified progress and outstanding work are in
 [the migration record](docs/cloudflare-migration.md). The Node deployment and PostgreSQL runtime configuration have been removed on
-this branch. Hosted activation and interactive local development remain incomplete.
+this branch. Final preview sign-in confirmation and schedule activation are tracked
+in the preview migration record; interactive local development remains incomplete.
 
 The repository map for MyTuums. Use the routing table to reach the context that
 owns a change; use `docs/` for cross-package architecture, product behavior,
