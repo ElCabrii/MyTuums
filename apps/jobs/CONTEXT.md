@@ -91,7 +91,7 @@ D1 game-sync intent shape as Cron. It takes its timestamp from D1 and relies on
 scheduled recovery for dispatch. It never invokes IGDB outside this Worker and
 its success means queued, not completed. Stable Workflow IDs and staged catalog
 fencing are unchanged. Local administrative requests need recovery connected to
-the same local D1 persistence; remote execution awaits the PoC jobs deployment.
+the same local D1 persistence. The guarded remote CLI selects the deployed PoC pair; production and preview have their own scheduled recovery.
 
 ## Preview migration
 

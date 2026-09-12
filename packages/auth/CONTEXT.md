@@ -1,6 +1,6 @@
 # packages/auth context
 
-Cloudflare PoC: `createAuth(options)` replaces the module-global instance.
+`createAuth(options)` constructs the authentication instance for each native environment.
 It receives the database, origin, secret, social-provider credentials and mail
 transport. `createEmailSender(binding, from)` uses native Cloudflare Email Service.
 It snapshots each rendered message and permits three attempts for the documented
@@ -16,8 +16,8 @@ Every email builder receives this deployment's explicit origin as its first
 argument, including OTP messages with no action URL. There is no fallback logo
 origin or module-load environment access. `src/env.ts` now only defines the
 OAuth credential type. `schema.config.ts` shares the actual auth configuration with the SQLite generator.
-`createTestAuth` replaces the fixture singleton. Application callers are still
-being ported; see [migration status](../../docs/cloudflare-migration.md).
+`createTestAuth` supplies isolated fixtures. Hosted composition is recorded in
+[the production execution record](../../docs/cloudflare-production-migration.md).
 
 The server-only `./client-ip` export owns the internal HTTP identity header,
 Better Auth IP options and the shared reader used by anonymous RPC limiting.
@@ -33,8 +33,7 @@ pass `createAuthRateLimitStorage` from `src/rate-limit-storage.ts`, backed by th
 rules, plugin rules and trusted IP normalization remain Better Auth-owned.
 The adapter preserves the current inactivity window, hashes counter names and
 propagates failures. The default database storage remains for isolated auth
-integration tests and unported callers; production Worker binding setup remains
-outstanding. The adapter's required `consume` prevents selecting the older
+integration tests; hosted Workers use their independent Durable Object binding. The adapter's required `consume` prevents selecting the older
 non-atomic get/set request path. No auth schema change is needed.
 
 ## Failure diagnostics

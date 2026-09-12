@@ -37,26 +37,26 @@ composes real app, D1, R2, Durable Objects and video Workflow code with syntheti
 Access, email and Stream transport. Each test database/bucket is isolated and
 ends in `_test`; no production selectors or credentials enter this stack.
 
-Interactive `pnpm dev` currently starts Vite on `:5173` and low-level Wrangler on
-`:3001`. Its loopback composition remains incomplete: the deployment entrypoint
-requires its PoC host, Access assertion and secrets. `pnpm jobs:dev` starts jobs
-separately; sharing the app's local persistence for recovery remains to wire.
-Vite proxies `/rpc`, `/api/auth` and `/media` to `RPC_TARGET`. Only public build
-inputs come from the root Vite environment; maintenance tools bind D1/R2 directly.
+Interactive `pnpm dev` starts Vite on `:5173`, its loopback Worker on `:3001`
+and branding on `:5174`. `apps/server/src/development-platform.ts` composes the
+real app/jobs bundles with isolated persistent D1/R2 and captured email.
+`pnpm jobs:dev` starts a maintenance Workflow in that same local persistence.
+OAuth, Stream and IGDB remain hosted-preview checks; local development loads no
+provider secrets. See [operations](operations.md#local-development).
 
 ## Production topology — one origin
 
-**Source of truth:** `apps/server/wrangler.jsonc`, `apps/server/worker/index.ts`,
-`apps/branding/wrangler.jsonc`, `apps/jobs/wrangler.jsonc`
+**Source of truth:** `apps/server/wrangler.production.jsonc`, `apps/server/worker/index.ts`,
+`apps/branding/wrangler.production.jsonc`, `apps/jobs/wrangler.production.jsonc`,
+`apps/link-fetcher/wrangler.production.jsonc`
 
-This is the isolated PoC's intended hosted topology. It has not yet been deployed;
-Railway production continues independently.
+Production and preview run this native topology with isolated resources. Railway
+is retained only as frozen migration source data; it is not a runtime dependency.
 
 ```mermaid
 flowchart LR
-  Browser --> Access[Owner-only Cloudflare Access]
-  Access --> App[App Worker + SPA assets]
-  Access --> Branding[Branding Worker + assets]
+  Browser --> App[App Worker and SPA assets]
+  Browser --> Branding[Branding Worker and assets]
   App --> D1[EU D1]
   App --> R2[Private EU R2]
   App --> Images[Images transformations]
@@ -64,17 +64,28 @@ flowchart LR
   App --> Email[Email Service]
   App --> Counters[Rate-limit Durable Objects]
   App --> Video[Video Workflow]
-  Cron[Cron recovery and schedules] --> Jobs[Jobs Worker / Workflows]
+  App --> Links[Private link-fetcher Worker]
+  Links --> Container[Cloudflare Container with guarded HTTP]
+  Container --> Targets[External link targets]
+  Cron[Cron recovery and schedules] --> Jobs[Jobs Worker and Workflows]
   Jobs --> D1
   Jobs --> R2
   Jobs --> Stream
+  Jobs --> Email
   Jobs --> Video
 ```
 
-The app serves SPA, auth, RPC and media on `cf-poc.mytuums.com`, preserving relative
-`/rpc` and `/media` URLs. The separate branding Worker serves
-`about-cf-poc.mytuums.com`. Both validate Access before serving assets, disable
-public workers.dev/preview URLs, and mark responses private/no-store and noindex.
+The production app serves SPA, auth, RPC and media on `mytuums.com`, preserving
+relative `/rpc` and `/media` URLs. Branding serves `about.mytuums.com` separately.
+Both validate their exact origin; only these fixed production hosts admit public
+traffic. Application authentication and per-object media authorization still
+apply. Preview and PoC add verified Access before every route or asset and
+refuse indexing. Workers.dev and version preview URLs remain disabled.
+
+The private link-fetcher Container receives bounded URL requests through its
+service binding, with no app cookies, database bindings or provider secrets.
+Its Node transport retains connect-time DNS/IP checks and hostname TLS verification.
+The migration archive bucket is never bound to any runtime Worker or cleanup job.
 
 Jobs dispatch durable D1 intents and coordinate Stream processing, staged game
 catalog publication and pruning. Provider requests happen outside atomic D1
@@ -334,10 +345,10 @@ sides by CI. See [operations.md](operations.md).
 `packages/api/src/stream-processing.ts`, `packages/api/src/video-media.ts`,
 `packages/api/src/stream.ts`, `apps/web/src/components/video-player.tsx`.
 
-The native domain and media adapters, Workflow polling, caption handoff and
-scheduled recovery are implemented and tested locally. The FFmpeg application
-has been removed from this branch. Application composition includes video routing;
-the deployable entrypoint and hosted validation remain outstanding.
+The deployed native adapters and Workflows handle polling, caption handoff,
+publication and scheduled recovery. The FFmpeg application is retired. Local
+integration and browser tests cover the native contracts; hosted candidate and
+production checks verified Stream upload behavior and preserved-video playback.
 
 1. A D1 owner/creator record precedes Stream creation. Only its author can obtain
    the tus upload capability, which expires after 24 hours. The browser resumes
@@ -579,15 +590,15 @@ The schema is split in two and joined by a barrel:
 Lifecycle: edit the schema → `pnpm db:generate` writes SQL and a snapshot into
 `packages/db/drizzle-d1` → commit both → apply with
 `pnpm --filter @my-tuums/db db:migrate` locally, adding `--remote` explicitly
-for the isolated PoC pre-deploy step. `pnpm --filter @my-tuums/db db:check`
+and the exact `--environment=preview|production` selector for hosted releases. `pnpm --filter @my-tuums/db db:check`
 catches a schema edit that never had a migration generated.
 
 Migrations run as a pre-deploy step, never at server boot: N replicas would
-race the same DDL. The command validates the exact PoC account/database, opens
+race the same DDL. The command validates the selected environment's fixed account/database, opens
 a D1-only binding, and applies the committed SQL through Drizzle's migration
 ledger. Its nonzero exit must prevent deployment; Wrangler's separate migration
-ledger must not be mixed with this command. The remote deployment remains
-unverified. `db:test:setup` instead validates an ephemeral local D1 database.
+ledger must not be mixed with this command. Hosted releases apply these migrations
+through the CI-gated deployment command. `db:test:setup` instead validates an ephemeral local D1 database.
 
 Handle canonicalisation is also enforced by the database trigger installed in
 `0001_database_invariants.sql`: `username` is lowercased and `display_username` is

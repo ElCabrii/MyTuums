@@ -1,21 +1,20 @@
 # apps/branding context
 
-## Cloudflare PoC
+## Cloudflare deployment
 
-This branch targets `about-cf-poc.mytuums.com`, with product links pointing to
-`cf-poc.mytuums.com`. The source HTML, compiled frontend and crawler documents
-all use these isolated hosts. `robots.txt` disallows crawling; every response also
-has `X-Robots-Tag: noindex, nofollow`. Access, not crawler instructions, enforces
-privacy. Production's main branch is unchanged.
+Production serves `about.mytuums.com` with product links to `mytuums.com`.
+The separate PoC serves `about-cf-poc.mytuums.com` with links to
+`cf-poc.mytuums.com`, a disallow crawler policy and mandatory Access.
+Production emits its public crawler documents and uses the fixed public origin.
 
-`wrangler.jsonc` declares `mytuums-poc-branding`, the existing owner-only Access
-audience and its custom domain. Both workers.dev and preview URLs are disabled.
-`worker/index.ts` verifies the exact request origin and Access JWT before serving
-any asset, including icons, scripts and the document. It reuses the server's
-Access verifier; this is a server-side dependency, never a frontend import.
+`wrangler.production.jsonc` and `wrangler.jsonc` declare separate Worker names
+and Custom Domains. Both disable workers.dev and version preview URLs.
+`worker/index.ts` verifies the exact origin and, for PoC, the Access JWT before
+serving any asset. Public admission is restricted to the fixed production host.
+It reuses the server's Access verifier as a server-side dependency only.
 Keep `run_worker_first: true`, `html_handling: none` and `not_found_handling: none`.
 Only `/` maps to `/index.html`; missing paths stay 404. Responses are private,
-uncached, and carry restrictive security headers. Only GET/HEAD are accepted.
+uncached and carry restrictive security headers. Only GET/HEAD are accepted.
 Logs contain a failure event and generated request ID; invocation logs are off
 and query-string redaction is enabled in native observability.
 
@@ -67,7 +66,7 @@ pipeline. The native branding Worker serves the build after Access validation.
   language menu switches by `setLocale` exactly like the app's footer.
 - **No inline scripts in `index.html`** — the enforced CSP has no inline
   allowance; the bundle's same-origin module scripts are already covered.
-- **The CTA links are absolute to the PoC app** (`src/lib/site.ts`): a relative
+- **The CTA links are absolute to the configured app origin** (`src/lib/site.ts`): a relative
   link would strand a visitor on a host where the app is never served and
   session cookies do not exist.
 - **The social URLs exist in exactly two places that must agree**: the

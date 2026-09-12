@@ -363,18 +363,19 @@ per consumer.
 - [docs/product.md](../../docs/product.md) — what each screen is supposed to do.
 - [docs/security.md](../../docs/security.md) — the redirect guard and the gates.
 
-## Cloudflare PoC build
+## Cloudflare build
 
 Static metadata, document heads and copied post links use `VITE_WEB_ORIGIN`.
-Vite accepts only the PoC, preview candidate and final preview origins, defaulting
-to `https://cf-poc.mytuums.com`. The ordered preview deployment derives this public
-build input from its Worker configuration, keeping links within that database's
-environment. All hosted origins remain behind Access.
-Crawler files refuse indexing and the sitemap contains no public URLs. Vite
-pins the Google/Discord/Twitch button list to the three credential pairs required
-by the native application entrypoint. The matching public Google client ID for
-One Tap must be supplied by Workers Builds before hosted authentication checks.
-Root Turbo builds this SPA before the application Worker that packages it.
+The ordered deployment command derives this public input from the target Worker
+configuration; production uses `https://mytuums.com`, while preview and PoC stay
+within their isolated environments. The default remains the PoC origin. Preview
+and PoC require Access and refuse indexing; production is public and emits the
+production crawler documents below.
+
+Vite pins Google/Discord/Twitch buttons to the three credential pairs required by
+the native entrypoint. Supply the matching public Google client ID at build time
+for One Tap; runtime secrets cannot change a built frontend. Root Turbo builds
+the SPA before the application Worker that packages it.
 
 ## Environment-specific crawler documents
 

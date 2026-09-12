@@ -6,60 +6,54 @@ invariants a change must not quietly break. For the reporting policy, see
 
 ## Trust boundaries
 
-There are four, and only the first two carry untrusted input:
+The live trust boundaries are:
 
-1. **The public internet → the HTTP server.** One process terminates
-   everything: `apps/server/src/request-handler.ts`. There is no separate
-   API origin and therefore no CORS surface in production.
-2. **The browser → object storage.** Uploaded bytes, and presigned URLs the
-   browser follows directly to the bucket.
-3. **The server → Postgres.** TLS is required for dotted hostnames and
-   disabled for loopback and single-label (Compose-internal) hosts.
-4. **The server → third parties** — the OAuth providers and Resend.
+1. **The browser → application and branding Workers.** Exact-origin admission
+   runs first. Public mode is restricted to the fixed production hosts; preview
+   and PoC require verified Access JWTs before any route or asset. Application
+   sessions and authorization still apply after environment admission.
+2. **Workers → D1 and private R2.** Native bindings select the environment's fixed
+   resources. SQL parameters, constraints and atomic batches protect data writes;
+   media authorization precedes storage access and delivery. Browsers receive no
+   public R2 URLs. The migration archive is never a runtime cleanup binding.
+3. **The browser → Stream.** Owners receive bounded, expiring upload capabilities.
+   Playback capabilities are issued only after current visibility checks and have
+   the documented one-hour revocation window below.
+4. **Workers → external providers.** OAuth and IGDB credentials are explicit
+   secret bindings. Application and moderation mail use Cloudflare Email Service;
+   no Resend credential is used by the live runtime.
+5. **The app → private link-fetcher Worker → Cloudflare Container → untrusted links.**
+   The service binding carries bounded URL requests, never app cookies or database
+   access. The Container retains connect-time address checks and hostname TLS
+   validation. Preflight DNS checks alone are insufficient.
 
-### The edge gate (preview only)
-
-On preview, boundary 1 has a second half: **Cloudflare → the origin**, held
-by a shared secret rather than by network position. The origin's ingress is
-a public Railway hostname — the zone's CNAME is public DNS — so anyone can
-connect to it directly with the right SNI and skip Cloudflare entirely,
-Access included. When `EDGE_SECRET` is set (preview only), the server
-answers 404 to every request whose `x-edge-secret` header does not carry
-that exact value, before any routing branch runs — `/health` included. A
-Cloudflare Transform Rule scoped to `preview.mytuums.com` sets the header
-on every request it forwards, overwriting whatever the client sent, so the
-header is proof the request passed through the edge. It must be a shared
-secret and not a proxy-header presence check (`cf-connecting-ip` & co.):
-on a direct connection the client controls every header, so those can be
-forged. Unset in dev, CI, and production, which serve direct traffic by
-design — production is the public site and has no edge layer to prove.
-
-`GET /live` is the one route above the gate: Railway's healthchecker probes
-the deployment's ingress directly, through no edge proxy, so it can never
-carry the secret. It reports process liveness only — the DB-backed
-`/health` sits below the gate, and a blipping database must not make
-Railway roll back a deploy whose process is up.
+The app serves auth, RPC, media and SPA assets on one origin; there is no separate
+production API origin or cross-origin RPC surface. Workers.dev and version preview
+URLs remain disabled. The old Railway edge-secret gate belongs only to retained
+Node transport helpers and their tests; it is not a live ingress path. The source
+Railway database is read-only and legacy application writers are stopped during
+the retention period recorded in [the migration record](cloudflare-production-migration.md).
 
 ## Exposed surfaces
 
 **Reachable without a session** (this list is exhaustive; verify against
-`apps/server/src/request-handler.ts` and
+`apps/server/src/worker-request-handler.ts` and
 `packages/api/src/constants.ts`):
 
-| Surface                       | Notes                                                              |
-| ----------------------------- | ------------------------------------------------------------------ |
-| `GET /live`                   | deploy liveness for Railway's healthchecker; no DB, no session     |
-| `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`                  |
-| `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`             |
-| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`       |
-| `/post/<id>` permalinks       | the app's public read surface (0.4.0) — see below                  |
-| `/media/*`                    | session-optional; every key is still authorized per viewer         |
-| The branding page             | `about.mytuums.com` — one script-free HTML document, host-routed   |
-| `game.list`/`game.bySlug`     | public game catalog reads                                          |
-| Static assets                 | anything with a file extension — the SPA cannot boot otherwise     |
-| `moderation.appealOpen` (RPC) | capability-gated, not session-gated — see below                    |
-| `post.thread`/`post.list`     | session-optional reads; `list` admits an anonymous caller only on  |
-| (reply modes)/`post.linkCard` | its `parentId`/`continuationRootId` modes — the permalink's halves |
+| Surface                       | Notes                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| `GET /live`                   | native process liveness; no DB or session; environment admission still applies |
+| `GET /health`                 | exact match, DB-backed, returns `{"status":"ok"}`                              |
+| `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`                         |
+| Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`                   |
+| `/post/<id>` permalinks       | the app's public read surface (0.4.0) — see below                              |
+| `/media/*`                    | session-optional; every key is still authorized per viewer                     |
+| The branding page             | `about.mytuums.com` — a separate Worker with built SPA assets                  |
+| `game.list`/`game.bySlug`     | public game catalog reads                                                      |
+| Static assets                 | anything with a file extension — the SPA cannot boot otherwise                 |
+| `moderation.appealOpen` (RPC) | capability-gated, not session-gated — see below                                |
+| `post.thread`/`post.list`     | session-optional reads; `list` admits an anonymous caller only on              |
+| (reply modes)/`post.linkCard` | its `parentId`/`continuationRootId` modes — the permalink's halves             |
 
 **`/api/auth/admin/*` returns 404 before the auth handler sees it.** The
 better-auth admin plugin gates on its own `adminRoles` option, which cannot
@@ -67,7 +61,7 @@ express this app's moderator/staff/admin hierarchy. Blocking those endpoints
 keeps `/rpc` the only route to a moderation action, so the rank hierarchy and
 the audit log stay the only enforcement surface.
 
-On the Cloudflare PoC branch, post and account moderation check target state
+Post and account moderation check target state
 and rank inside D1 write batches. Audit records, in-app notices, report stamps,
 session revocation and applicable appeal closure roll back together. The role
 catalog remains the authority for rank checks; restoring a contested role must
@@ -225,29 +219,19 @@ limits anonymous reads and appeal capabilities; Better Auth limits auth requests
 | `rateLimit(policy)` middleware              | `<policy>:user:<id>`                                       |
 | `rateLimitCapability(context, policy, key)` | `<policy>:appeal:<nonce>` or `<policy>:appeal:<actionId>`  |
 | `publicRateLimit(policy)`                   | `<policy>:user:<id>` or `<policy>:ip:<normalized address>` |
-| better-auth's own limiter                   | per IP, stored in Postgres                                 |
+| better-auth's own limiter                   | per IP, stored in a dedicated Durable Object               |
 
-The HTTP boundary overwrites `x-mytuums-client-ip` before dispatching auth,
-RPC or session reads. Callers cannot supply this internal identity themselves:
+The native HTTP boundary overwrites `x-mytuums-client-ip` before auth, RPC or
+session dispatch. After exact-origin and environment admission it validates
+Cloudflare's single `CF-Connecting-IP`; client-supplied internal or forwarded
+headers cannot select a budget. Missing, invalid or combined addresses return
+400 before application dispatch, except the exact `/live` and `/health` probes.
+There is no fallback to `X-Forwarded-For`.
 
-- With `EDGE_SECRET`, the secret gate must pass before trusting Cloudflare's
-  single `CF-Connecting-IP`. The edge must overwrite both headers. This mode
-  takes precedence over Railway detection, because Railway sees Cloudflare's
-  address rather than the visitor's.
-- Without that gate, a Railway runtime (`RAILWAY_ENVIRONMENT_ID` present) uses
-  Railway public ingress's `X-Real-IP`. Keep this listener behind Railway's
-  public HTTP ingress; do not expose it through a TCP proxy or let untrusted
-  private-network workloads call it directly with forged headers.
-- Outside Railway, direct/local requests use the socket address and ignore all
-  supplied proxy headers. Vite's local proxy consequently shares the loopback
-  budget, which is appropriate for local development.
-
-Missing, invalid, repeated or comma-separated proxy IPs return HTTP 400 before
-application dispatch; `/live` and `/health` remain independent of IP headers
-(the existing edge-secret rule still applies to `/health`). There is no fallback
-from a missing trusted header to `X-Forwarded-For`. An unexpected burst of these
-400s is a proxy configuration fault to investigate, not a reason to disable the
-check. Do not set `RAILWAY_ENVIRONMENT_ID` manually on a non-Railway host.
+The separate loopback development entrypoint accepts only its fixed HTTP local
+origin and supplies the loopback identity. Production cannot select that entrypoint.
+Legacy Node transport tests retain Railway/edge-secret/socket-address contracts,
+but those helpers are not deployed listeners.
 
 `@my-tuums/auth/client-ip` owns the internal header and Better Auth IP options.
 Both limiters reuse Better Auth's IPv4-mapped IPv6 normalization and IPv6 /64
@@ -327,7 +311,7 @@ makes the server dial out (issue #260):
 
 ## Media
 
-**Cloudflare PoC video boundary:** `packages/api/src/stream.ts` requires private
+**Cloudflare video boundary:** `packages/api/src/stream.ts` requires private
 Stream videos and verifies their environment-scoped creator before provider
 operations. Tus destinations are validated; only the owner receives upload
 capabilities, which are cleared on completion/termination. Creator identity is
@@ -339,7 +323,7 @@ latches author eligibility, target visibility and the processing deadline inside
 its publication batch. Post, attachment, notification and pending-text removal
 share that commit. It does not claim FFmpeg-specific codec/frame validation,
 derivative storage accounting or source deletion. Those are accepted Stream
-processing differences for this synthetic-data PoC.
+processing differences of the native Stream runtime.
 
 Failure commits one notice, private-text/caption erasure and cleanup debt.
 Cleanup survives account deletion and retains empty tombstones for 24 hours to
@@ -355,9 +339,9 @@ requests do not revisit Cloudflare Access. The app exposes no raw-source or
 arbitrary media path. Captions have a 1 MiB bound; preview indexes contain at most
 150 local authorized thumbnail paths and no bearer token.
 
-Worker routing, Access, exact Stream CSP destinations and scheduled recovery are
-not deployed yet. The legacy operational commands in
-[video operations](video-operations.md) remain a runtime replacement checklist.
+Worker routing, environment admission, exact Stream CSP destinations and
+scheduled recovery are deployed. Use [video operations](video-operations.md)
+for native recovery and maintenance procedures.
 
 **Upload validation** (`packages/api/src/image.ts`):
 
@@ -575,12 +559,12 @@ view-history store to leak.
 
 ## Configuration and secrets
 
-- `apps/server/worker/index.ts` validates the fixed PoC origin/account, Access
-  audience, minimum 32-character auth secret and all three OAuth credential pairs.
+- `apps/server/worker/index.ts` validates the fixed environment origin/account,
+  its public-or-Access admission mode, minimum 32-character auth secret and all
+  three OAuth credential pairs. Private environments also require an Access audience.
   Missing or malformed configuration fails closed with a content-free event;
   no environment values or validation details enter the response/log. Secrets
-  come from bindings, not process environment. The old Node boot path is removed
-  on this branch.
+  come from bindings, not process environment. The old Node application boot path is removed.
 - The Cloudflare auth factory receives explicit database, origin, secret,
   provider credentials and delivery transport. Its `packages/auth/src/env.ts` defines only
   the OAuth credential type; no auth module reads process environment or supplies
@@ -618,12 +602,10 @@ view-history store to leak.
   `e2e/support/platform.ts`. No test selects a production URL or remote bucket.
   Maintenance tools separately validate the exact PoC resource pair and default
   to local storage; remote access requires an explicit flag.
-- **Every Railway environment owns its own bucket** and one environment's
-  credentials cannot address another's. This is what keeps the E2E suite's
-  prefix deletion away from real users' avatars: dev locally, ci in CI, never
-  production.
-- **The E2E stack blanks `RESEND_API_KEY`** so fixture sign-ups can never fire
-  a live send.
+- **Every hosted environment has its own D1/R2 pair and Stream creator namespace.**
+  A cleanup job must never cross that boundary or bind the migration archive.
+- **E2E and local development capture mail through synthetic transports.**
+  They load no provider credentials and cannot send fixture mail externally.
 - **`@my-tuums/auth/testing`** exposes privileged helpers (session minting, OTP
   capture) and is reachable only through that subpath. Never import it from
   application code.
