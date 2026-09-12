@@ -50,7 +50,10 @@ Zone: `e596b15a6c397986f91c737c156b7100`.
 
 The archive bucket must never be bound to runtime cleanup. The production
 database/bucket/Stream namespace must remain isolated from preview and PoC.
-App/jobs Worker slots contain deny-all bootstrap code and production secrets, including the user-provided Stream tokens. No real production runtime, Workflow or domain has been deployed. The temporary network diagnostic Worker was removed.
+The production app/jobs Workers are deployed only as a protected candidate at
+`preview-candidate.mytuums.com`, using the rehearsal D1/R2 copy. Production
+schedules remain empty. The actual production domains and Railway writers have
+not changed. Temporary network diagnostic Workers and their Container were removed.
 
 Railway project: `ffdcd3e4-918b-4d72-aae3-971a3c6b1438`.
 Production environment: `814c546d-cae5-4e1f-bd9f-7930eae09ea8`.
@@ -60,7 +63,7 @@ Both `mytuums.com` and `about.mytuums.com` must move before retiring the server.
 
 ## Rehearsal snapshot
 
-Private files are under `/tmp/mytuums-production-migration-private`, mode 0700;
+Private files are under `/home/gabriel/.local/share/mytuums/production-migration-private`, mode 0700;
 credentials, snapshots and media are excluded from Git. Rehearsal snapshots and
 media have also been checksum-verified under
 `/home/gabriel/.local/share/mytuums/production-migration-20260912`. API tokens and
@@ -136,15 +139,12 @@ Crawler source documents are retained from main under each app's
 private builds emit disallow/noindex-oriented documents. Production branding
 links point to `mytuums.com`.
 
-Rich link previews remain a release decision. The old Undici client requires
-runtime Wasm compilation, which Workers forbids. An experimental pure-JavaScript
-HTTP parser with sockets passed local framing, rebinding and certificate-refusal
-checks, but the hosted diagnostic failed valid-site TLS handshakes and could not
-fetch those sites. The unsuccessful transport and dependency were removed.
-Existing stored cards are preserved; new links currently use the same plain-link
-fallback as preview. Do not replace connection-time validation with DNS preflight
-plus ordinary fetch. A feature-complete alternative needs a separately validated
-transport; do not claim this gap is resolved.
+Rich links now use the private Cloudflare Container described below. Hosted
+candidate API and browser checks verified a new card's metadata and mirrored R2
+image. The Node transport retains connect-time address validation and hostname
+TLS verification. The earlier Workers socket experiment was removed after it
+failed valid-site TLS checks. Ordinary DNS preflight plus unpinned fetch is not
+an acceptable replacement.
 
 Email Service currently allows 200 messages/day. Resend's available history has
 28 delivered messages and zero suppressions (complete responses, no next page).
@@ -231,3 +231,52 @@ reduced 10,000-row setup from 562 ms to 181 ms by increasing the JSON batch from
 limit. The unchanged seven badge assertions then passed in 32 seconds. Thresholds,
 account counts and the 120-second deadline are unchanged. Deployment now also
 waits for the newly provisioned private fetcher before exposing an application.
+
+## Candidate deployment and verification — September 12, 15:30 UTC
+
+Runtime revision `6c3b2053da75310aa9fa11ee34ee22bc6e5a0238` passed local full
+Verify, including all 662 API integration tests. GitHub run `34700223711` passed
+Verify and E2E. One composer layout test initially saw the loading screen and
+passed its configured retry; ten subsequent repetitions with retries disabled
+all passed. This does not establish the cause of the isolated CI failure.
+
+The private deployment wrapper initially inherited mode 077 for generated build
+files. The Container's non-root user could not read its owner-only bundle, and
+the readiness gate stopped before replacing the preview application. Rebuilding
+with normal public-artifact permissions corrected the wrapper; credential and
+migration files remain private. No runtime authentication controls changed.
+
+| Deployment                | Worker version                         |
+| ------------------------- | -------------------------------------- |
+| Preview app               | `09a7bd08-926e-4379-a9e1-3a2d56a66f31` |
+| Preview jobs              | `f0969b68-2c20-446d-934b-263a1b67b7e7` |
+| Preview link fetcher      | `23262cc8-22f8-4bc6-afb5-14c4a81fd746` |
+| Production candidate app  | `fd605fc8-10f3-4a18-82f5-2a017ad5fca2` |
+| Production candidate jobs | `25929952-6a7e-47b3-b291-de279046f003` |
+| Production link fetcher   | `e521c48a-2c98-4d7f-bbdb-996494e6be43` |
+
+Preview data was preserved and committed migrations were already current. Its
+minute recovery schedule remains enabled, with successful instances observed
+after deployment. Candidate/production schedules remain empty.
+
+Candidate checks passed for health, preserved owner session, application page,
+anonymous Access refusal, game cover delivery, legacy video previews, signed
+thumbnail and HLS playback, new rich-card metadata/image, and Stream upload
+creation/cancellation. Browser inspection confirmed all 20 visible game covers
+loaded and a newly posted rich card displayed its title, description and image.
+The disposable test post was deleted through the application's own procedure.
+
+Automatic approval review rejected a broad maintenance Workflow test because its
+cleanup scope included more than the disposable upload. That Workflow was not
+run. The single cancelled test Stream upload was identified by its exact creator,
+creation time and pending-upload state, then deleted separately. Its idempotent
+cleanup intent remains in the rehearsal database. The existing imported video
+was untouched. No additional migration email was sent.
+
+The replacement temporary candidate Service Auth policy and token were revoked
+after automated checks; only the existing Migration owner Access policy remains.
+The private test browser was closed and its saved cookie/token files removed.
+Owner Google/password sign-in, post and image/video upload/playback verification
+is pending. Candidate trial changes will be replaced by the final frozen source
+copy. Interactive local development, the full timed cutover rehearsal, final
+source reconciliation and release coordination remain before main/cutover.
