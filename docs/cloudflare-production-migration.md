@@ -276,7 +276,52 @@ was untouched. No additional migration email was sent.
 The replacement temporary candidate Service Auth policy and token were revoked
 after automated checks; only the existing Migration owner Access policy remains.
 The private test browser was closed and its saved cookie/token files removed.
-Owner Google/password sign-in, post and image/video upload/playback verification
-is pending. Candidate trial changes will be replaced by the final frozen source
-copy. Interactive local development, the full timed cutover rehearsal, final
-source reconciliation and release coordination remain before main/cutover.
+Owner candidate verification passed on September 12 after adding the candidate
+Google OAuth callback and JavaScript origin to the existing client. Candidate trial changes will be replaced by the final frozen source
+copy. Final source reconciliation and release coordination remain before
+main/cutover. Local development and the transfer rehearsal are recorded below.
+
+## Local development completion
+
+A separate loopback composition now starts the real application and jobs with
+persistent local D1/R2, Images, Workflows and captured email. The regression
+checks account/mail persistence, hosted admission refusal and maintenance
+removal through shared app/jobs storage. The first cleanup test used an invalid
+media key; correcting it to the application's actual path contract made the
+cross-worker cleanup pass. OAuth, Stream and IGDB remain hosted-preview checks.
+The complete timed transfer rehearsal and release gates above remain required.
+
+## Timed transfer rehearsal, September 12
+
+The fresh read-only PostgreSQL snapshot (including current column types and an
+exact public-table-set check) still contains 29 tables and 6,355 rows. JSON and
+SQL exports took 2.20 and 1.72 seconds. All 6,256 source objects / 165,245,601
+bytes match the earlier ETag/size inventory; no copy delta or deletion exists.
+
+A new isolated EU D1 database imported all 6,476 SQL statements in 567 ms.
+Every converted row checksum, all seven migration hashes and zero foreign-key
+violations matched through the hosted binding in 10.91 seconds. That disposable
+database was deleted after verification; the owner-approved candidate remained
+intact. The final refresh SQL was separately tested with deliberate candidate-only
+job debt: it drops 15 triggers and 37 tables in dependency order, restores the
+snapshot, removes the trial debt and preserves every source checksum.
+
+The Cloudflare media/archive comparison took 137.03 seconds: all 6,246 runtime
+originals and 6,256 archive originals match verified size/checksum metadata.
+Runtime R2 also contains two candidate-created objects; final reconciliation
+must consider these against the frozen source. Eight fresh snapshot/report files
+were archived and content-verified in 9.26 seconds. These component measurements
+leave substantial room within the 30-minute maintenance budget; the final run
+must still stop source writers and recheck the delta immediately before import.
+
+All four legacy app/job services exist only in the production environment; dev
+and CI have no Railway service instances, and preview uses distinct service IDs.
+Before main merge, disconnect those four repository sources without stopping
+the running deployments. Keep Verify and E2E required, replacing the obsolete
+Railway Docker image check; Verify builds the private Cloudflare Container.
+Wait for exact main CI before starting the maintenance timer. During cutover,
+use temporary maintenance routes on both production hosts, stop and drain every
+legacy writer, back up the candidate, import/reconcile final data, deploy the
+verified main revision and perform read-only smoke checks before reopening.
+Cloudflare [Worker routes take precedence over Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/routes/),
+so the maintenance route can remain in place throughout domain replacement.

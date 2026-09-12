@@ -25,12 +25,27 @@ No PostgreSQL, Docker or external bucket credentials are needed for native tests
 `:5273`, using real local D1/R2/Workflows and synthetic Access, mail and Stream
 transport. It resets only its `_test` resources; see [E2E context](../e2e/CONTEXT.md).
 
-`pnpm dev` starts Vite and the low-level local application Worker on `:3001`.
-It is not yet a usable interactive native development environment: the real
-entrypoint requires its exact PoC host, Access assertion and secret bindings.
-A loopback development composition and shared jobs persistence remain to wire.
-`pnpm jobs:dev` starts the separate jobs Worker; starting it alone does not prove
-it can dispatch requests queued in the application's local D1 state.
+`pnpm dev` starts the app at `http://localhost:5173`, its Worker at
+`http://localhost:3001`, and branding at `http://localhost:5174`. Keep `localhost`
+consistent for cookies and passkeys. Register with a development email address,
+then open `http://localhost:3001/__dev/emails` and follow the captured verification
+link. No message is sent to an external mailbox.
+
+`apps/server/src/development-platform.ts` owns one Miniflare instance with the
+real app and jobs bundles, committed migrations, D1, R2, Images, Workflows and
+rate-limit Durable Objects. Data persists under
+`apps/server/.wrangler/development` across restarts, separately from E2E, PoC and
+hosted resources. To reset development data, stop `pnpm dev` and remove only that
+directory. Development startup applies migrations only to this local database.
+
+`pnpm jobs:dev` requests one maintenance Workflow against the same local D1/R2.
+There is no automatic local Cron. Restart `pnpm dev` after changing bundled
+Worker or jobs sources. Rich links reuse the guarded Node fetching transport.
+Password auth, posts, images and captured mail work locally; OAuth, Stream video
+processing and IGDB sync require hosted preview verification. The local app
+omits OAuth buttons and video uploads, loads no provider secrets, and blocks
+unconfigured Worker outbound calls. Its separate entrypoint accepts only HTTP
+loopback requests on port 3001 and appears in no deployment configuration.
 
 ## Cloudflare deployment
 
@@ -381,8 +396,8 @@ and reading live plus pending references in one D1 snapshot. It does not delete
 Stream videos. The retyped bucket argument is its deliberate deletion guard.
 
 **Lighthouse.** `pnpm lighthouse` and `pnpm lighthouse:desktop` run against
-`http://localhost:3001/`. The low-level local Worker still requires the PoC
-Access assertion and exact host; interactive development wiring remains outstanding. Reports land in `lighthouse-reports/`, which is git-ignored.
+`http://localhost:3001/` by default. For the Vite development UI, explicitly target
+`http://localhost:5173/`; port 3001 serves the local API, not the built SPA. Reports land in `lighthouse-reports/`, which is git-ignored.
 Note that the valid-source-maps audit flags the main chunk: its gatherer gives
 up on a large map after 1.5 seconds. The maps themselves work, and the audit
 carries no score weight.

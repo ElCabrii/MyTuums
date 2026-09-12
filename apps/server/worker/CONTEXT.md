@@ -228,3 +228,10 @@ admin denial, alternate-host refusal and rejection of a public candidate config.
 Rich link networking uses the private Cloudflare Container described in
 [its context](../../link-fetcher/CONTEXT.md). Hosted card verification remains a
 release gate; no browser credentials cross that binding.
+
+## Interactive local development
+
+`development.ts` composes the same application with fixed loopback admission,
+local bindings, password auth and captured mail. It has no hosted configuration
+or Access bypass flag. `../src/development-platform.ts` owns resource persistence
+and jobs bindings; see [local development](../../../docs/operations.md#local-development).

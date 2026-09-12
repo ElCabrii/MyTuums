@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "turbo run dev --filter=!@my-tuums/jobs",
-    "jobs:dev": "pnpm --filter @my-tuums/jobs dev",
+    "jobs:dev": "pnpm --filter @my-tuums/server jobs:dev",
     "build": "turbo run build",
     "lint": "pnpm lint:oxlint && eslint eslint.config.ts scripts && turbo run lint",
     "lint:oxlint": "oxlint --deny-warnings",

@@ -65,10 +65,13 @@ Use scoped Vitest files while iterating, `typecheck:worker` for native binding
 code and `pnpm verify` for the repository gate. Artifact tests need completed app
 and branding builds; never rebuild their assets during a test run.
 
-`pnpm dev` now starts low-level local Wrangler, but interactive development
-composition remains incomplete: the real entrypoint requires the PoC host,
-Access assertion and secrets. The E2E composition is complete for synthetic
-browser tests; it is isolated test tooling, not a user development database.
+`pnpm dev` uses `src/development-platform.ts` and `worker/development.ts` for a
+separate loopback-only app/jobs composition. Local D1/R2 and captured mail persist
+under `.wrangler/development`; E2E state and hosted configuration are never loaded.
+`src/development-platform.test.ts` checks admission, account/mail persistence and
+maintenance cleanup across app/jobs storage. `pnpm jobs:dev` requests local
+maintenance. Provider limits and reset instructions are in
+[operations](../../docs/operations.md#local-development).
 
 The unused Node environment parser and its legacy configuration tests are also
 removed. `worker/index.ts` validates native bindings; `.env.example` contains

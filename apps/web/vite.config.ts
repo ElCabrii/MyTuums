@@ -14,9 +14,13 @@ import pkg from "./package.json" with { type: "json" };
 // can point the web app at its own server on a different port and run beside
 // a live `pnpm dev` instead of fighting it for 3001.
 const rpcTarget = process.env.RPC_TARGET ?? "http://localhost:3001";
-const siteOrigin = process.env.VITE_WEB_ORIGIN ?? "https://cf-poc.mytuums.com";
+const localDevelopment = process.env.MYTUUMS_LOCAL_DEV === "1";
+const siteOrigin = localDevelopment
+  ? "http://localhost:5173"
+  : (process.env.VITE_WEB_ORIGIN ?? "https://cf-poc.mytuums.com");
 if (
   ![
+    "http://localhost:5173",
     "https://cf-poc.mytuums.com",
     "https://preview-candidate.mytuums.com",
     "https://preview.mytuums.com",
@@ -35,7 +39,9 @@ export default defineConfig({
     "import.meta.env.VITE_WEB_ORIGIN": JSON.stringify(siteOrigin),
     // This PoC entrypoint requires all three provider credential pairs. Keep the
     // browser list aligned; One Tap still requires its matching public client ID.
-    "import.meta.env.VITE_SOCIAL_PROVIDERS": JSON.stringify("google,discord,twitch"),
+    "import.meta.env.VITE_SOCIAL_PROVIDERS": JSON.stringify(
+      localDevelopment ? "" : "google,discord,twitch",
+    ),
     // The footer's "v0.4.2" and the header's alpha/beta tag come from
     // package.json's `version` field, inlined here rather than read at
     // runtime — no env file or API round-trip to drift from the release

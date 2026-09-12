@@ -1,9 +1,7 @@
 # MyTuums
 
-This experimental branch implements an isolated Cloudflare-native PoC. Railway
-production, `main` and other branches keep their existing deployment paths.
-Hosted deployment and complete verification are still outstanding; use
-[the migration record](docs/cloudflare-migration.md) for current status.
+Preview runs on Cloudflare. Production migration preparation and release gates
+are tracked in [the production execution record](docs/cloudflare-production-migration.md).
 
 MyTuums is a social app with posts, replies, likes, follows, profiles, search and
 moderation with appeals. This branch runs its backend on Workers with D1 and R2.
@@ -45,9 +43,11 @@ Native tests provision isolated local D1/R2 without Docker, PostgreSQL or cloud
 credentials. E2E uses synthetic Access, email and Stream transport and owns ports
 `:3101` / `:5273`. It does not prove hosted provider availability.
 
-Interactive `pnpm dev` wiring is still incomplete. It starts Vite and low-level
-Wrangler, whose real entrypoint requires the PoC host, Access assertion and
-secrets. See [operations](docs/operations.md#local-development) before using it.
+Run `pnpm dev` for the local app at `http://localhost:5173` and branding at
+`http://localhost:5174`. Password accounts, posts, images and captured email use
+persistent local D1/R2; no cloud credentials are needed. Open
+`http://localhost:3001/__dev/emails` for verification links. See
+[operations](docs/operations.md#local-development) for persistence and provider limits.
 
 ## Agent browser
 
@@ -69,8 +69,7 @@ Install official Google Chrome and set `executablePath` to
 Ubuntu's existing Chrome sandbox policy. Keep this machine-specific path out
 of project configuration and keep the browser sandbox enabled.
 
-After the interactive local development composition is available, use a unique
-session name for your task and pass it on every command:
+Use a unique session name for your task and pass it on every command:
 
 ```bash
 agent-browser --session mytuums-example open http://localhost:5173
@@ -89,11 +88,9 @@ in the existing test suites; see [E2E context](e2e/CONTEXT.md).
 
 ## Common commands
 
-On this experimental branch, `pnpm jobs:dev` starts the local Cloudflare jobs
-Worker. It coordinates Stream video processing, game sync and maintenance through
-Workflows. It has no HTTP health endpoint and does not require FFmpeg. The app
-entrypoint is implemented; the end-to-end development stack is still being ported. Use the
-[video operations checks](docs/video-operations.md) for the isolated native runtime.
+`pnpm jobs:dev` starts one maintenance Workflow in the running local development
+stack. App and jobs share its D1/R2 state. OAuth, Stream video processing and IGDB
+provider checks use hosted preview; the local stack has no provider credentials.
 
 The PoC maintenance commands use local D1/R2 by default, with `--remote` selecting
 only the isolated hosted PoC resources:

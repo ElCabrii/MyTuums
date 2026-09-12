@@ -7,7 +7,7 @@
     "node": "^24.15.0 || >=26.0.0"
   },
   "scripts": {
-    "dev": "wrangler dev --local --port 3001",
+    "dev": "tsx watch src/development-server.ts",
     "build": "pnpm build:worker",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json && pnpm typecheck:worker",
@@ -16,7 +16,8 @@
     "games:sync": "tsx src/games-sync.ts",
     "typecheck:worker": "tsc --noEmit -p worker/tsconfig.json",
     "build:worker": "wrangler deploy --dry-run --outdir .wrangler/dist",
-    "types": "wrangler types worker/worker-configuration.d.ts --env-interface AppEnv --include-runtime false"
+    "types": "wrangler types worker/worker-configuration.d.ts --env-interface AppEnv --include-runtime false",
+    "jobs:dev": "tsx src/development-maintenance.ts"
   },
   "dependencies": {
     "@my-tuums/api": "workspace:*",

@@ -7,7 +7,8 @@ The authoritative PoC scope, verified progress and outstanding work are in
 this branch. Preview owner verification and schedule activation are complete. Production
 preparation and release gates are tracked in
 [the production execution record](docs/cloudflare-production-migration.md);
-interactive local development remains incomplete.
+local app/jobs development uses isolated persistent native resources; see
+[local development](docs/operations.md#local-development).
 
 The repository map for MyTuums. Use the routing table to reach the context that
 owns a change; use `docs/` for cross-package architecture, product behavior,

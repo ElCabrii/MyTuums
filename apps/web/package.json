@@ -4,7 +4,7 @@
   "version": "0.5.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "cross-env MYTUUMS_LOCAL_DEV=1 vite --host localhost --port 5173 --strictPort",
     "build": "cross-env NODE_ENV=production vite build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

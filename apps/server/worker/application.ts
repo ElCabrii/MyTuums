@@ -25,7 +25,7 @@ export async function createWorkerApplication(options: {
   bucket: R2Bucket;
   images: ImagesBinding;
   stream: StreamService | null;
-  /** Null is reserved for the validated public production origin. */
+  /** Null is reserved for validated public production and the separate loopback-only development entrypoint. */
   access: { teamDomain: string; audience: string } | null;
   streamOrigins: readonly string[];
   googleAnalytics?: boolean;
