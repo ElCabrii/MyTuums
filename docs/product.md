@@ -227,13 +227,15 @@ menu; the navigation bar has no standalone theme button.
   The chronological RPC still exists underneath for the
   surfaces that never ranked — profiles, bookmarks, post search, replies —
   but the web offers no chronological switch on the home or Discover feeds.
-  On wide screens the Home page carries a right sidebar: For you feeds it a
+  At 2xl and up the Home page carries a right sidebar, seated halfway
+  between the centered feed column and the screen edge: For you feeds it a
   **Who to follow** module with the same snapshot-derived, live-filtered
   selection Discover serves (see below) — Following carries none, since its
   candidates are accounts already followed — and beneath it the legal links
-  (the same three documents the site footer carries). Small screens show
-  neither: Discover's inline module serves suggestions at every width, and
-  the footer carries the legal links.
+  (the same three documents the site footer carries). Below 2xl neither
+  renders: the gutter cannot seat the sidebar without stealing from the
+  feed, Discover's inline module serves suggestions at every width, and the
+  footer carries the legal links.
 - Authors choose Public or Followers only from the visibility popover beside
   Add images in the home and own-profile composers. The trigger identifies the
   effective audience; private accounts always show Followers only, with Public
