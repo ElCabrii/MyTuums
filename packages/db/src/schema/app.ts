@@ -1,22 +1,111 @@
 // Application-specific tables live here, kept separate from ./auth.ts so
 // that regenerating the BetterAuth schema (`db:generate:auth`, see the header
 // of ./auth.ts) never clobbers app-owned tables.
-import { relations, sql } from "drizzle-orm";
+import { desc, relations, sql } from "drizzle-orm";
 import {
-  pgTable,
+  sqliteTable,
   text,
   integer,
-  uuid,
-  timestamp,
-  boolean,
   index,
   uniqueIndex,
   primaryKey,
   check,
-  jsonb,
-  type AnyPgColumn,
-} from "drizzle-orm/pg-core";
+  type AnySQLiteColumn,
+} from "drizzle-orm/sqlite-core";
 import { user } from "./auth.js";
+
+/** Committed scheduling obligations survive request crashes and owner deletion. */
+export const jobIntent = sqliteTable(
+  "job_intent",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind").$type<"video" | "game-sync" | "maintenance">().notNull(),
+    entityId: text("entity_id").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: integer("next_attempt_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`),
+    dispatchedAt: integer("dispatched_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`),
+  },
+  (t) => [
+    index("job_intent_due_idx").on(t.dispatchedAt, t.nextAttemptAt),
+    check("job_intent_kind", sql`${t.kind} in ('video', 'game-sync', 'maintenance')`),
+  ],
+);
+
+/** Moderation notices commit with their actions and survive an interrupted sender. */
+export const moderationEmail = sqliteTable(
+  "moderation_email",
+  {
+    sequence: integer("sequence").primaryKey({ autoIncrement: true }),
+    id: text("id").notNull().unique(),
+    sourceId: text("source_id").notNull(),
+    // Deleted accounts no longer receive notices; actor/post deletion is independent.
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    locale: text("locale", { enum: ["en", "fr"] }).notNull(),
+    content: text("content", { mode: "json" }).$type<unknown>().notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: integer("next_attempt_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`),
+    leaseId: text("lease_id"),
+    leaseUntil: integer("lease_until", { mode: "timestamp_ms" }),
+    failedAt: integer("failed_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer) + 86400000)`),
+  },
+  (t) => [
+    uniqueIndex("moderation_email_source_user_unique").on(t.sourceId, t.userId),
+    index("moderation_email_due_idx").on(t.failedAt, t.nextAttemptAt),
+    index("moderation_email_expiry_idx").on(t.expiresAt),
+    index("moderation_email_user_sequence_idx").on(t.userId, t.sequence),
+    check("moderation_email_locale", sql`${t.locale} in ('en', 'fr')`),
+    check("moderation_email_attempts", sql`${t.attempts} >= 0`),
+    check("moderation_email_lease", sql`(${t.leaseId} is null) = (${t.leaseUntil} is null)`),
+    check("moderation_email_content", sql`json_valid(${t.content})`),
+  ],
+);
+
+/** Protects image objects until their post and attachment rows commit together. */
+export const postMediaUpload = sqliteTable(
+  "post_media_upload",
+  {
+    postId: text("post_id").primaryKey(),
+    // No foreign keys: an account deletion must not erase unfinished cleanup.
+    keys: text("keys", { mode: "json" }).$type<string[]>().notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [index("post_media_upload_expiry_idx").on(t.expiresAt)],
+);
+
+/** Durable profile/link-card uploads and cleanup; ownership deletion must not cascade this debt. */
+export const mediaIntent = sqliteTable(
+  "media_intent",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    scope: text("scope").notNull(),
+    kind: text("kind", { enum: ["upload", "cleanup"] }).notNull(),
+    paths: text("paths", { mode: "json" }).$type<(string | null)[]>().notNull(),
+    // Uploads can commit only before this deadline; cleanup becomes eligible at it.
+    readyAt: integer("ready_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [
+    index("media_intent_ready_idx").on(t.readyAt),
+    index("media_intent_scope_ready_idx").on(t.scope, t.readyAt),
+    check("media_intent_kind", sql`${t.kind} in ('upload', 'cleanup')`),
+  ],
+);
 
 // Table names are singular to match the BetterAuth-generated tables in
 // ./auth.ts (`user`, `session`, ...) rather than mixing conventions.
@@ -24,30 +113,31 @@ import { user } from "./auth.js";
  * A single status update — a top-level post, or a reply threaded under
  * `parentId`. Read and written by the `post` procedures in packages/api.
  */
-export const post = pgTable(
+export const post = sqliteTable(
   "post",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
     // `user.id` is text (BetterAuth's own id format), so the FK must be too.
     authorId: text("author_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
     // Null for a top-level post, set for a reply. A self-reference needs the
-    // explicit `AnyPgColumn` return type: without it the callback's inferred
+    // explicit `AnySQLiteColumn` return type: without it the callback's inferred
     // type refers to `post` while `post` is still being defined, and tsc gives
     // up with "implicitly has type 'any' because it does not have a type
     // annotation and is referenced directly or indirectly in its own
     // initializer".
     //
-    // `onDelete: "cascade"` stays correct now that posts can be deleted
-    // individually (issue #148) *because* `post.delete` is a tombstone, not a
-    // row delete: the row survives, so a self-delete never fires this
-    // cascade. The only hard delete left is the author's account going away,
-    // which is already cascading the whole subtree with it. Turning
-    // `post.delete` into a real DELETE would have to change this first, or
-    // one author's delete silently takes an unrelated conversation with it.
-    parentId: uuid("parent_id").references((): AnyPgColumn => post.id, { onDelete: "cascade" }),
+    // Account deletion removes the complete descendant set in one statement
+    // through user_delete_post_tree (the custom D1 migration). Recursive FK
+    // cascades exceed D1's trigger depth on long conversations. NO ACTION
+    // still refuses dangling parents; post.delete itself remains a tombstone.
+    parentId: text("parent_id").references((): AnySQLiteColumn => post.id, {
+      onDelete: "no action",
+    }),
     // The post a quote references (issue #261). Unlike `parentId` — a
     // structural thread edge — a quote is a *reference*: the quoted post is
     // rendered embedded inside the quoting post, and neither belongs to the
@@ -60,14 +150,14 @@ export const post = pgTable(
     // about their own post, not part of the quoted author's subtree. The
     // projection in packages/api resolves the id at read time and renders a
     // null (unavailable) embedded card once the row no longer exists.
-    quotedPostId: uuid("quoted_post_id"),
+    quotedPostId: text("quoted_post_id"),
     // The removal tombstone (issue #38): a removed post is never deleted —
     // it stays in feeds as a stub (see `postSelection` in packages/api) so
     // threads, likes and replies keep their shape. `removedBy` is set null
     // when the moderator's account goes away, the same policy as
     // moderation_action.actor_id below; `removedReason` is the moderator's
     // stated reason, shown to the author and the moderation queue.
-    removedAt: timestamp("removed_at", { withTimezone: true, precision: 3 }),
+    removedAt: integer("removed_at", { mode: "timestamp_ms" }),
     removedBy: text("removed_by").references(() => user.id, { onDelete: "set null" }),
     removedReason: text("removed_reason"),
     // The author's own delete (issue #148) — a second tombstone, independent
@@ -81,7 +171,7 @@ export const post = pgTable(
     //
     // No `deletedBy`: the only account that can set this is `authorId`, which
     // the row already carries. No reason either — nobody is owed one.
-    deletedAt: timestamp("deleted_at", { withTimezone: true, precision: 3 }),
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
     // The author's own edit (issue #264): stamped the first time `post.edit`
     // rewrites the text and restamped on every later edit, so it carries the
     // LAST edit time. Null means never edited. `createdAt` deliberately never
@@ -90,31 +180,19 @@ export const post = pgTable(
     // open even under moderation review, and the moderation case view shows
     // the recorded history so a moderator judges what was written, not only
     // what currently stands.
-    editedAt: timestamp("edited_at", { withTimezone: true, precision: 3 }),
+    editedAt: integer("edited_at", { mode: "timestamp_ms" }),
     // Followers-only visibility (issue #328): when true, the post is visible
     // only to its author and the author's approved followers (plus moderators
     // inspecting reported content). A private account's posts are private by
     // default — `post.create` fills this from the author's `isPrivate` when
     // the caller omits it. NOT NULL DEFAULT false so every pre-privacy row
     // reads public without a backfill.
-    isPrivate: boolean("is_private").default(false).notNull(),
-    // `withTimezone` is not cosmetic. On a bare `timestamp` (no time zone),
-    // Postgres resolves `now()` to the *database session's* local wall clock,
-    // while Drizzle's `mapFromDriverValue` reads the column back by appending
-    // `+0000` — i.e. as if it were UTC. Those two only agree when the server
-    // runs on UTC, so anywhere else every post comes back shifted by the
-    // offset and the relative timestamps in the UI read "in 2 hours". With
-    // `timestamptz` both sides speak instants and the offset cancels out.
-    //
-    // `precision: 3` is load-bearing for the keyset pagination below, not a
-    // storage optimisation. Postgres defaults to microseconds, but a JS `Date`
-    // — which is what Drizzle reads this into, and all a JSON cursor can carry
-    // — only holds milliseconds. So a cursor built from `.340448` encodes
-    // `.340`, and the row-value comparison `(created_at, id) < ('...340', id)`
-    // then excludes the stored `.340448` along with *every other row in that
-    // millisecond*: a silent skip. Storing at the precision the consumer can
-    // represent makes the cursor round-trip exact.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    isPrivate: integer("is_private", { mode: "boolean" }).default(false).notNull(),
+    // Store UTC epoch milliseconds so Date serialization and keyset cursors
+    // round-trip exactly, including multiple posts in the same millisecond.
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     // All three indexes are ordered to match the keyset pagination in
@@ -124,16 +202,16 @@ export const post = pgTable(
     // Partial, because the home timelines (global and Following) are
     // top-level only — `post.list` filters `parent_id is null` unless it was
     // asked for replies. Excluding replies from the index keeps it the size
-    // of the thing it actually serves, and lets Postgres use it for exactly
+    // of the thing it actually serves, and lets SQLite use it for exactly
     // the queries whose predicate implies the same restriction.
     index("post_created_idx")
-      .on(t.createdAt.desc(), t.id.desc())
+      .on(desc(t.createdAt), desc(t.id))
       .where(sql`${t.parentId} is null`),
     // Deliberately NOT partial, unlike the one above: a profile feed passes
     // `includeReplies`, so this index has to cover replies too.
-    index("post_author_created_idx").on(t.authorId, t.createdAt.desc(), t.id.desc()),
+    index("post_author_created_idx").on(t.authorId, desc(t.createdAt), desc(t.id)),
     // The reply list under a single post.
-    index("post_parent_created_idx").on(t.parentId, t.createdAt.desc(), t.id.desc()),
+    index("post_parent_created_idx").on(t.parentId, desc(t.createdAt), desc(t.id)),
   ],
 );
 
@@ -155,30 +233,41 @@ export const post = pgTable(
  * the cascade when the post row itself goes (the author's account being
  * hard-deleted — `post.delete` is a tombstone and keeps the row).
  */
-export const postEdit = pgTable(
+export const postEdit = sqliteTable(
   "post_edit",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    postId: uuid("post_id")
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    postId: text("post_id")
       .notNull()
       .references(() => post.id, { onDelete: "cascade" }),
     // The text this edit replaced, not the text it wrote: the live
     // `post.content` is always the newest version, so the original wording
     // exists nowhere else and this is the only place it can survive.
     content: text("content").notNull(),
-    // `timestamptz` and `precision: 3` for the same reasons as
-    // post.created_at above.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    // Same millisecond precision as post.created_at for stable cursors.
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     // The case view's read: one post's history, newest first. `id` breaks
     // ties between edits landing in the same millisecond the same way the
     // post keyset indexes do.
-    index("post_edit_post_created_idx").on(t.postId, t.createdAt.desc(), t.id.desc()),
+    index("post_edit_post_created_idx").on(t.postId, desc(t.createdAt), desc(t.id)),
   ],
 );
 
-/** Published derivatives are immutable within one processing attempt. */
+/** Verified Stream input metadata; encoding renditions remain provider-owned. */
+export interface StreamPlayback {
+  width: number;
+  height: number;
+  duration: number;
+  captionLanguage: string | null;
+}
+
+/** Legacy encoder types, retained only until the old worker sources are removed. */
 export interface VideoPlayback {
   width: number;
   height: number;
@@ -205,12 +294,14 @@ export interface VideoAsset {
  * An account/post cascade nulls its reference so cleanup can still find every
  * object. Submitted text lives separately and cascades with its author.
  */
-export const video = pgTable(
+export const video = sqliteTable(
   "video",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
     authorId: text("author_id").references(() => user.id, { onDelete: "set null" }),
-    postId: uuid("post_id").references(() => post.id, { onDelete: "set null" }),
+    postId: text("post_id").references(() => post.id, { onDelete: "set null" }),
     state: text("state")
       .$type<
         | "uploading"
@@ -226,63 +317,64 @@ export const video = pgTable(
       .notNull()
       .default("uploading"),
     byteSize: integer("byte_size").notNull(),
-    sourceKey: text("source_key").notNull(),
-    multipartId: text("multipart_id"),
-    attemptId: uuid("attempt_id"),
-    attempts: integer("attempts").notNull().default(0),
-    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true, precision: 3 }),
-    sourceDeletedAt: timestamp("source_deleted_at", { withTimezone: true, precision: 3 }),
-    playback: jsonb("playback").$type<VideoPlayback>(),
-    assets: jsonb("assets").$type<VideoAsset[]>().notNull().default([]),
-    expiresAt: timestamp("expires_at", { withTimezone: true, precision: 3 }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    streamCreatorId: text("stream_creator_id").notNull(),
+    streamUid: text("stream_uid"),
+    uploadUrl: text("upload_url"),
+    playback: text("playback", { mode: "json" }).$type<StreamPlayback>(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     uniqueIndex("video_post_idx").on(t.postId),
-    uniqueIndex("video_source_idx").on(t.sourceKey),
+    uniqueIndex("video_stream_uid_idx").on(t.streamUid),
     index("video_state_expiry_idx").on(t.state, t.expiresAt),
-    index("video_author_created_idx").on(t.authorId, t.createdAt.desc(), t.id.desc()),
+    index("video_author_created_idx").on(t.authorId, desc(t.createdAt), desc(t.id)),
     check(
       "video_state",
       sql`${t.state} in ('uploading', 'uploaded', 'queued', 'processing', 'ready', 'published', 'failed', 'cancelled', 'deleted')`,
     ),
     check("video_byte_size", sql`${t.byteSize} > 0 and ${t.byteSize} <= 500000000`),
-    check("video_attempts", sql`${t.attempts} >= 0`),
     check(
-      "video_ready_assets",
-      sql`${t.state} not in ('ready', 'published') or (${t.playback} is not null and ${t.attemptId} is not null and jsonb_array_length(${t.assets}) > 0)`,
-    ),
-    check(
-      "video_published_source",
-      sql`${t.state} <> 'published' or ${t.sourceDeletedAt} is not null`,
+      "video_ready_metadata",
+      sql`${t.state} not in ('ready', 'published') or (${t.streamUid} is not null and ${t.playback} is not null
+        and coalesce(json_type(${t.playback}, '$.width') = 'integer', false) and json_extract(${t.playback}, '$.width') > 0
+        and coalesce(json_type(${t.playback}, '$.height') = 'integer', false) and json_extract(${t.playback}, '$.height') > 0
+        and coalesce(json_type(${t.playback}, '$.duration') in ('integer', 'real'), false)
+        and json_extract(${t.playback}, '$.duration') > 0 and json_extract(${t.playback}, '$.duration') <= 300)`,
     ),
   ],
 );
 
 /** A pending post is absent from the published post table and all its readers. */
-export const videoSubmission = pgTable(
+export const videoSubmission = sqliteTable(
   "video_submission",
   {
-    videoId: uuid("video_id")
+    videoId: text("video_id")
       .primaryKey()
       .references(() => video.id, { onDelete: "cascade" }),
     authorId: text("author_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    postId: uuid("post_id").notNull().defaultRandom(),
+    postId: text("post_id")
+      .notNull()
+      .$defaultFn(() => crypto.randomUUID()),
     content: text("content").notNull(),
     // Resolve these again when publishing. Cascading them would silently erase a
     // pending reply without leaving the worker a chance to notify its author.
-    parentId: uuid("parent_id"),
-    quotedPostId: uuid("quoted_post_id"),
-    isPrivate: boolean("is_private").notNull(),
+    parentId: text("parent_id"),
+    quotedPostId: text("quoted_post_id"),
+    isPrivate: integer("is_private", { mode: "boolean" }).notNull(),
     caption: text("caption"),
     captionLanguage: text("caption_language"),
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     uniqueIndex("video_submission_post_idx").on(t.postId),
-    index("video_submission_author_idx").on(t.authorId, t.createdAt.desc()),
+    index("video_submission_author_idx").on(t.authorId, desc(t.createdAt)),
     check("video_submission_target", sql`${t.parentId} is null or ${t.quotedPostId} is null`),
   ],
 );
@@ -291,19 +383,22 @@ export const videoSubmission = pgTable(
  * Storage deletion is not transactional. These obligations survive every FK
  * cascade and retain only opaque keys, never failed post text or captions.
  */
-export const videoCleanup = pgTable(
+export const videoCleanup = sqliteTable(
   "video_cleanup",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    videoId: uuid("video_id").notNull(),
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    videoId: text("video_id").notNull(),
     prefix: text("prefix").notNull(),
-    sourceKey: text("source_key"),
-    multipartId: text("multipart_id"),
     attempts: integer("attempts").notNull().default(0),
-    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, precision: 3 })
-      .defaultNow()
+    nextAttemptAt: integer("next_attempt_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
       .notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
+    streamUid: text("stream_uid"),
   },
   (t) => [
     uniqueIndex("video_cleanup_prefix_idx").on(t.prefix),
@@ -322,21 +417,25 @@ export const videoCleanup = pgTable(
  * tombstone commits. The API projection and media gate hide moderation rows
  * until the post is visible again, so neither tombstone exposes a copied URL.
  */
-export const postAttachment = pgTable(
+export const postAttachment = sqliteTable(
   "post_attachment",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    postId: uuid("post_id")
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    postId: text("post_id")
       .notNull()
       .references(() => post.id, { onDelete: "cascade" }),
     position: integer("position").notNull(),
     mediaPath: text("media_path").notNull(),
     contentType: text("content_type").notNull(),
-    videoId: uuid("video_id").references(() => video.id),
+    videoId: text("video_id").references(() => video.id),
     byteSize: integer("byte_size").notNull(),
     width: integer("width").notNull(),
     height: integer("height").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     uniqueIndex("post_attachment_position_idx").on(t.postId, t.position),
@@ -355,18 +454,19 @@ export const postAttachment = pgTable(
  * A like — one row per (post, user) pair; the composite primary key *is* the
  * "one like per user per post" rule (see the inline note below).
  */
-export const postLike = pgTable(
+export const postLike = sqliteTable(
   "post_like",
   {
-    postId: uuid("post_id")
+    postId: text("post_id")
       .notNull()
       .references(() => post.id, { onDelete: "cascade" }),
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    // `timestamptz` and `precision: 3` for the same reasons as
-    // post.created_at above.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    // Same millisecond precision as post.created_at for stable cursors.
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     // This composite primary key *is* the "one like per user per post" rule.
@@ -382,7 +482,7 @@ export const postLike = pgTable(
     // likes sharing a timestamp. Same shape as
     // `post_bookmark_user_created_idx`: once `user_id` is bound,
     // (created_at, post_id) is the rest of the comparison.
-    index("post_like_user_created_idx").on(t.userId, t.createdAt.desc(), t.postId.desc()),
+    index("post_like_user_created_idx").on(t.userId, desc(t.createdAt), desc(t.postId)),
   ],
 );
 
@@ -396,10 +496,10 @@ export const postLike = pgTable(
  * timeline — post rows at their own `created_at`, repost rows amplifying the
  * original at the repost's `created_at` (see `post.list` in packages/api).
  */
-export const postRepost = pgTable(
+export const postRepost = sqliteTable(
   "post_repost",
   {
-    postId: uuid("post_id")
+    postId: text("post_id")
       .notNull()
       .references(() => post.id, { onDelete: "cascade" }),
     userId: text("user_id")
@@ -410,7 +510,9 @@ export const postRepost = pgTable(
     // precision is load-bearing: the merged home-feed cursor orders on this
     // timestamp, and a cursor that cannot round-trip it would silently skip
     // repost events.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     // This composite primary key *is* the "one repost per user per post" rule,
@@ -431,8 +533,8 @@ export const postRepost = pgTable(
     // the profile feed's author filter, (created_at, post_id) is the rest of
     // the same event-cursor comparison. A created_at-leading index cannot
     // serve it: every entry would be read and filtered on user_id.
-    index("post_repost_created_idx").on(t.createdAt.desc(), t.postId.desc(), t.userId.desc()),
-    index("post_repost_user_created_idx").on(t.userId, t.createdAt.desc(), t.postId.desc()),
+    index("post_repost_created_idx").on(desc(t.createdAt), desc(t.postId), desc(t.userId)),
+    index("post_repost_user_created_idx").on(t.userId, desc(t.createdAt), desc(t.postId)),
   ],
 );
 
@@ -448,10 +550,10 @@ export const postRepost = pgTable(
  * caller alone, and the bookmarks page is the only list ever built from this
  * table.
  */
-export const postBookmark = pgTable(
+export const postBookmark = sqliteTable(
   "post_bookmark",
   {
-    postId: uuid("post_id")
+    postId: text("post_id")
       .notNull()
       .references(() => post.id, { onDelete: "cascade" }),
     userId: text("user_id")
@@ -460,7 +562,9 @@ export const postBookmark = pgTable(
     // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above — and because the bookmarks page keyset-paginates
     // on (created_at, post_id), the precision is load-bearing here too.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     // This composite primary key *is* the "one bookmark per user per post"
@@ -472,7 +576,7 @@ export const postBookmark = pgTable(
     // breaking ties between bookmarks sharing a timestamp. The primary key
     // already covers the other direction — "has the viewer bookmarked this
     // post".
-    index("post_bookmark_user_created_idx").on(t.userId, t.createdAt.desc(), t.postId.desc()),
+    index("post_bookmark_user_created_idx").on(t.userId, desc(t.createdAt), desc(t.postId)),
   ],
 );
 
@@ -480,7 +584,7 @@ export const postBookmark = pgTable(
  * A directed follow edge from `followerId` to `followingId` — the rows the
  * Following feed and the follow lists are built from.
  */
-export const follow = pgTable(
+export const follow = sqliteTable(
   "follow",
   {
     // Both sides are `text` for the same reason post.author_id is: `user.id`
@@ -491,12 +595,13 @@ export const follow = pgTable(
     followingId: text("following_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    // `timestamptz` and `precision: 3` for the same reasons as
-    // post.created_at above. It matters more here than anywhere else: follow
+    // Same millisecond precision as post.created_at for stable cursors. It matters more here than anywhere else: follow
     // rows are routinely written in batches that share a single `now()`, so
     // the tie-breaker in the cursor is exercised constantly rather than by
     // coincidence.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     // As with post_like, this composite primary key *is* the "you can follow
@@ -515,12 +620,8 @@ export const follow = pgTable(
     // breaking ties between rows sharing a timestamp. The primary key already
     // covers the third access path — "does A follow B", which is both the
     // viewer's follow check and the Following feed's semi-join.
-    index("follow_following_created_idx").on(
-      t.followingId,
-      t.createdAt.desc(),
-      t.followerId.desc(),
-    ),
-    index("follow_follower_created_idx").on(t.followerId, t.createdAt.desc(), t.followingId.desc()),
+    index("follow_following_created_idx").on(t.followingId, desc(t.createdAt), desc(t.followerId)),
+    index("follow_follower_created_idx").on(t.followerId, desc(t.createdAt), desc(t.followingId)),
   ],
 );
 
@@ -534,7 +635,7 @@ export const follow = pgTable(
  * (requester, target) pair" rule, so requesting twice is idempotent via
  * `onConflictDoNothing`, exactly like `follow` itself.
  */
-export const followRequest = pgTable(
+export const followRequest = sqliteTable(
   "follow_request",
   {
     // Both sides are `text` for the same reason follow's are: `user.id` is
@@ -547,7 +648,9 @@ export const followRequest = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     // `timestamptz` and `precision: 3` for the same reasons as
     // follow.created_at above — requests are routinely listed newest-first.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     primaryKey({ columns: [t.requesterId, t.targetId] }),
@@ -557,13 +660,13 @@ export const followRequest = pgTable(
     // newest first, with the *other* party's id breaking ties.
     index("follow_request_target_created_idx").on(
       t.targetId,
-      t.createdAt.desc(),
-      t.requesterId.desc(),
+      desc(t.createdAt),
+      desc(t.requesterId),
     ),
     index("follow_request_requester_created_idx").on(
       t.requesterId,
-      t.createdAt.desc(),
-      t.targetId.desc(),
+      desc(t.createdAt),
+      desc(t.targetId),
     ),
   ],
 );
@@ -584,7 +687,7 @@ export const followRequest = pgTable(
  * the target exists is enforced by the procedure, which resolves the id
  * against the target table before inserting.
  */
-export const report = pgTable(
+export const report = sqliteTable(
   "report",
   {
     // `user.id` is text (BetterAuth's own id format), so the FK must be too.
@@ -611,13 +714,14 @@ export const report = pgTable(
     // report alongside `createdAt`, since the reporter is re-reporting what
     // they now see.
     snapshotContent: text("snapshot_content"),
-    // `timestamptz` and `precision: 3` for the same reasons as
-    // post.created_at above.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    // Same millisecond precision as post.created_at for stable cursors.
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
     // A null `resolvedAt` means the case is open. Resolution is a stamp
     // (`resolvedBy`/`resolvedOutcome`/`resolutionNote` land together), never
     // a delete — the rows stay as the case's history.
-    resolvedAt: timestamp("resolved_at", { withTimezone: true, precision: 3 }),
+    resolvedAt: integer("resolved_at", { mode: "timestamp_ms" }),
     resolvedBy: text("resolved_by").references(() => user.id, { onDelete: "set null" }),
     resolvedOutcome: text("resolved_outcome"),
     resolutionNote: text("resolution_note"),
@@ -643,12 +747,12 @@ export const report = pgTable(
     // match the queue query's predicate, the same reasoning as
     // post_created_idx above.
     index("report_open_idx")
-      .on(t.createdAt.desc(), t.targetType, t.targetId)
+      .on(desc(t.createdAt), t.targetType, t.targetId)
       .where(sql`${t.resolvedAt} is null`),
     // "Everything reported against X" — the case view's full report history
     // (resolved rows included) and the queue's GROUP BY both lead with the
     // target key. Non-partial on purpose: the case view reads all history.
-    index("report_target_idx").on(t.targetType, t.targetId, t.createdAt.desc()),
+    index("report_target_idx").on(t.targetType, t.targetId, desc(t.createdAt)),
   ],
 );
 
@@ -676,7 +780,7 @@ export const report = pgTable(
  * points the other way). Keep the two in step — badges.ts's unit test pins
  * its half.
  */
-export const userBadge = pgTable(
+export const userBadge = sqliteTable(
   "user_badge",
   {
     // `user.id` is text (BetterAuth's own id format), so the FK must be too.
@@ -684,9 +788,10 @@ export const userBadge = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     badge: text("badge").notNull(),
-    // `timestamptz` and `precision: 3` for the same reasons as
-    // post.created_at above.
-    earnedAt: timestamp("earned_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    // Same millisecond precision as post.created_at for stable cursors.
+    earnedAt: integer("earned_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     // This composite primary key *is* the "a badge is stamped at most once per
@@ -715,7 +820,7 @@ export const userBadge = pgTable(
  * and rewriting like state on every block/unblock is both noisy (email
  * churn, audit rows) and wrong (a like is not a relationship).
  */
-export const userBlock = pgTable(
+export const userBlock = sqliteTable(
   "user_block",
   {
     // Both sides are `text` for the same reason post.author_id is: `user.id`
@@ -726,9 +831,10 @@ export const userBlock = pgTable(
     blockedId: text("blocked_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    // `timestamptz` and `precision: 3` for the same reasons as
-    // post.created_at above.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    // Same millisecond precision as post.created_at for stable cursors.
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     // This composite primary key *is* the "block someone at most once" rule;
@@ -761,28 +867,32 @@ export const userBlock = pgTable(
  * the DELETE would abort wholesale. Whether the target exists is enforced
  * by the procedures, which resolve the id before acting.
  */
-export const moderationAction = pgTable(
+export const moderationAction = sqliteTable(
   "moderation_action",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
     // One of the action codes checked below — the design's stable set.
     action: text("action").notNull(),
     actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
     // `'post'` or `'user'` — decides which target column below is set
     // (checked below).
     targetType: text("target_type").notNull(),
-    targetPostId: uuid("target_post_id"),
+    targetPostId: text("target_post_id"),
     targetUserId: text("target_user_id"),
     reason: text("reason"),
     note: text("note"),
     // Action-specific extras: `{oldRole, newRole}` for role_changed,
     // `{durationSeconds}` for user_suspended, `{outcome}` for
     // appeal_resolved, `{reporterCount, outcome}` for case_resolved.
-    details: jsonb("details").default({}).notNull(),
+    details: text("details", { mode: "json" }).default({}).notNull(),
     // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above — and because the audit log is keyset-paginated
     // on (created_at, id), the precision is load-bearing here too.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     check(
@@ -802,7 +912,7 @@ export const moderationAction = pgTable(
       sql`(${t.targetType} = 'post') = (${t.targetPostId} is not null)`,
     ),
     // The audit log's keyset order: newest first, `id` breaking ties.
-    index("moderation_action_created_idx").on(t.createdAt.desc(), t.id.desc()),
+    index("moderation_action_created_idx").on(desc(t.createdAt), desc(t.id)),
     // "What was the last action on X" — the removed-post appeal stub path
     // and the queue's latest-action lookups. Deliberately not partial: the
     // audit log is queried by target across all of history, not just open
@@ -811,7 +921,7 @@ export const moderationAction = pgTable(
       t.targetType,
       t.targetPostId,
       t.targetUserId,
-      t.createdAt.desc(),
+      desc(t.createdAt),
     ),
   ],
 );
@@ -829,18 +939,20 @@ export const moderationAction = pgTable(
  * One open appeal per action is enforced by the partial unique index below
  * — re-appealing an upheld action must go through a moderator, not the
  * form. A newer action of the same kind against the same target closes the
- * older appeal as `superseded` (see `supersedeOpenAppeals` in
- * packages/api/src/moderation-actions.ts), so at most one appeal per target
+ * older appeal as `superseded` (see the D1 statement builders in
+ * packages/api/src/moderation-post.ts and moderation-user.ts), so at most one appeal per target
  * per control family is ever open: an appeal against a sanction that no
  * longer governs anything cannot be reviewed as if it did.
  */
-export const appeal = pgTable(
+export const appeal = sqliteTable(
   "appeal",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
     // Cascades with the action: an appeal is evidence attached to the
     // action it contests, and the audit log never hides actions.
-    actionId: uuid("action_id")
+    actionId: text("action_id")
       .notNull()
       .references(() => moderationAction.id, { onDelete: "cascade" }),
     // Always set — the token's payload carries the userId even when the
@@ -863,10 +975,11 @@ export const appeal = pgTable(
     status: text("status").default("open").notNull(),
     reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
     reviewNote: text("review_note"),
-    // `timestamptz` and `precision: 3` for the same reasons as
-    // post.created_at above.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
-    reviewedAt: timestamp("reviewed_at", { withTimezone: true, precision: 3 }),
+    // Same millisecond precision as post.created_at for stable cursors.
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
+    reviewedAt: integer("reviewed_at", { mode: "timestamp_ms" }),
   },
   (t) => [
     check(
@@ -876,7 +989,7 @@ export const appeal = pgTable(
     // The queue scans open appeals, newest first — the sort column is in
     // the index so the partial scan never needs a heap sort.
     index("appeal_open_idx")
-      .on(t.status, t.createdAt.desc())
+      .on(t.status, desc(t.createdAt))
       .where(sql`${t.status} = 'open'`),
     // The "one open appeal per action" rule, as a partial unique index —
     // resolved appeals are history and may accumulate.
@@ -909,10 +1022,12 @@ export const appeal = pgTable(
  * user-caused rows their cascade-equivalent semantics without losing the
  * moderation ones.
  */
-export const notification = pgTable(
+export const notification = sqliteTable(
   "notification",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
     // The notification's owner — the only person the list ever serves. Their
     // account going away takes their notifications with them.
     recipientId: text("recipient_id")
@@ -941,17 +1056,19 @@ export const notification = pgTable(
       .notNull(),
     // The like's or repost's post / the reply or quote itself (the thing the
     // recipient clicks through to). Null for follow and moderation.
-    postId: uuid("post_id").references(() => post.id, { onDelete: "cascade" }),
+    postId: text("post_id").references(() => post.id, { onDelete: "cascade" }),
     // The moderation action the notification mirrors — carries the code,
     // reason and target the page renders. Null for user-caused types.
-    actionId: uuid("action_id").references(() => moderationAction.id, { onDelete: "cascade" }),
+    actionId: text("action_id").references(() => moderationAction.id, { onDelete: "cascade" }),
     // No FK: the notice must outlive the failed video and submission. Uniqueness
     // makes terminal redelivery harmless even after cleanup removes those rows.
-    videoId: uuid("video_id"),
+    videoId: text("video_id"),
     // `timestamptz` and `precision: 3` for the same reasons as
     // post.created_at above — and because the list is keyset-paginated on
     // (created_at, id), the precision is load-bearing here too.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     check(
@@ -981,7 +1098,7 @@ export const notification = pgTable(
     // read state is a per-recipient seen-at cursor
     // (`notification_last_seen`), so "unread" is `created_at > seen_at` —
     // exactly the leading columns here.
-    index("notification_recipient_created_idx").on(t.recipientId, t.createdAt.desc(), t.id.desc()),
+    index("notification_recipient_created_idx").on(t.recipientId, desc(t.createdAt), desc(t.id)),
   ],
 );
 
@@ -998,11 +1115,13 @@ export const notification = pgTable(
  * One row per recipient, created by `notification.markRead`. Absent means
  * never opened the page: everything is unread.
  */
-export const notificationLastSeen = pgTable("notification_last_seen", {
+export const notificationLastSeen = sqliteTable("notification_last_seen", {
   recipientId: text("recipient_id")
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
-  seenAt: timestamp("seen_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  seenAt: integer("seen_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+    .notNull(),
 });
 
 /**
@@ -1031,10 +1150,12 @@ export const notificationLastSeen = pgTable("notification_last_seen", {
  * `moderation_action` table cannot hold, its targets being post- and
  * user-shaped by schema.
  */
-export const linkCard = pgTable(
+export const linkCard = sqliteTable(
   "link_card",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
     // The normalized absolute http(s) URL (scheme + host + path + query, the
     // fragment dropped — it never changes what the server returns). The
     // unique index below is the "fetched once per window" rule's anchor.
@@ -1043,8 +1164,10 @@ export const linkCard = pgTable(
     title: text("title"),
     description: text("description"),
     imageMediaPath: text("image_media_path"),
-    fetchedAt: timestamp("fetched_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
-    purgedAt: timestamp("purged_at", { withTimezone: true, precision: 3 }),
+    fetchedAt: integer("fetched_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
+    purgedAt: integer("purged_at", { mode: "timestamp_ms" }),
     purgedBy: text("purged_by").references(() => user.id, { onDelete: "set null" }),
     purgedReason: text("purged_reason"),
   },
@@ -1057,6 +1180,37 @@ export const linkCard = pgTable(
       sql`(${t.title} is null and ${t.domain} is null) or (${t.title} is not null and ${t.domain} is not null)`,
     ),
   ],
+);
+
+/** A fenced catalog build. Staged rows remain invisible until publication. */
+export const gameCatalogVersion = sqliteTable("game_catalog_version", {
+  id: text("id").primaryKey(),
+  syncedAt: integer("synced_at", { mode: "timestamp_ms" }).notNull(),
+  publishedAt: integer("published_at", { mode: "timestamp_ms" }),
+});
+
+/** The one publisher lease and active version; game is its indexed live projection. */
+export const gameCatalogState = sqliteTable(
+  "game_catalog_state",
+  {
+    id: integer("id").primaryKey(),
+    activeVersion: text("active_version").references(() => gameCatalogVersion.id),
+    runningVersion: text("running_version").references(() => gameCatalogVersion.id),
+    leaseUntil: integer("lease_until", { mode: "timestamp_ms" }),
+  },
+  (t) => [check("game_catalog_singleton", sql`${t.id} = 1`)],
+);
+
+export const gameCatalogRow = sqliteTable(
+  "game_catalog_row",
+  {
+    versionId: text("version_id")
+      .notNull()
+      .references(() => gameCatalogVersion.id, { onDelete: "cascade" }),
+    igdbId: integer("igdb_id").notNull(),
+    payload: text("payload").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.versionId, t.igdbId] })],
 );
 
 /**
@@ -1072,7 +1226,7 @@ export const linkCard = pgTable(
  * collision resolution, never an output (issue Q29's "collision assignments
  * stay permanently stable").
  *
- * Covers are re-hosted in the media bucket under `games/<igdbId>-<imageId>.<ext>`
+ * Covers are re-hosted under `games/<igdbId>-<imageId>.<version>.<ext>`
  * (issue Q9), never hot-linked from IGDB; `coverImageId` doubles as the
  * incremental-download compare key so repeat syncs only fetch changed covers.
  *
@@ -1082,7 +1236,7 @@ export const linkCard = pgTable(
  * `popularityRank` so the `/games` index can order dropouts by where they
  * last placed.
  */
-export const game = pgTable(
+export const game = sqliteTable(
   "game",
   {
     igdbId: integer("igdb_id").primaryKey(),
@@ -1098,22 +1252,16 @@ export const game = pgTable(
     // than jsonb or FK catalog tables: no read ever queries by genre or
     // platform (the page renders them as labels), so normalization would add
     // join and sync-ordering cost for zero reads.
-    genres: text("genres")
-      .array()
-      .notNull()
-      .default(sql`'{}'::text[]`),
-    platforms: text("platforms")
-      .array()
-      .notNull()
-      .default(sql`'{}'::text[]`),
+    genres: text("genres", { mode: "json" }).$type<string[]>().notNull().default([]),
+    platforms: text("platforms", { mode: "json" }).$type<string[]>().notNull().default([]),
     // Rank in the most recent popularity scan that included this game. Null
     // only for rows that have never been ranked (fixture-only games before
     // the first real sync).
     popularityRank: integer("popularity_rank"),
     // Denormalized count of `game_favorite` rows — the showcase divergence
     // (Q26): unlike `post_bookmark`'s no-count rule, a game's favorite count
-    // is public data. Maintained transactionally by the favorite/unfavorite
-    // procedures only; the sync's upsert deliberately omits it from its set
+    // is public data. D1 migration 0002 maintains it through favorite-row
+    // triggers, including account cascades; sync deliberately omits it from its set
     // clause so a catalog refresh can never zero anyone's counts.
     favoriteCount: integer("favorite_count").notNull().default(0),
     // IGDB `hypes` — the "want" count before release. Hydrated on every sync
@@ -1129,8 +1277,10 @@ export const game = pgTable(
     firstReleaseDate: integer("first_release_date"),
     // Advanced for every row on every successful sync — including dropouts
     // re-staged from their existing row when IGDB no longer hydrates them.
-    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, precision: 3 }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    lastSyncedAt: integer("last_synced_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   // The `/games` index cursors (issue Q23), one index per sort, each
   // mirroring the exact expression the query in packages/api/src/games.ts
@@ -1142,9 +1292,9 @@ export const game = pgTable(
   // key is never null (the column defaults to 0), so its index needs no
   // coalesce.
   (t) => [
+    // Expression indexes are in the custom D1 migration: drizzle-kit splits
+    // the comma inside coalesce() into incorrectly quoted column names.
     index("game_name_idx").on(t.name, t.igdbId),
-    index("game_popularity_idx").on(sql`coalesce(${t.popularityRank}, 2147483647)`, t.igdbId),
-    index("game_year_idx").on(sql`coalesce(${t.firstReleaseYear}, 0)`, t.igdbId),
     index("game_favorite_count_idx").on(t.favoriteCount, t.igdbId),
     index("game_hype_idx").on(t.hypeCount, t.igdbId),
   ],
@@ -1162,7 +1312,7 @@ export const game = pgTable(
  * double-click, and the index below still mirrors the profile rail's
  * newest-first walk.
  */
-export const gameFavorite = pgTable(
+export const gameFavorite = sqliteTable(
   "game_favorite",
   {
     gameId: integer("game_id")
@@ -1176,7 +1326,9 @@ export const gameFavorite = pgTable(
     // `timestamptz` + `precision: 3` for the same reasons as
     // post_bookmark.created_at — the profile rail keyset-paginates on
     // (created_at, game_id), so the precision is load-bearing here too.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
   },
   (t) => [
     primaryKey({ columns: [t.gameId, t.userId] }),
@@ -1184,7 +1336,7 @@ export const gameFavorite = pgTable(
     // breaking ties between favorites sharing a timestamp. The primary key
     // already covers the other direction — "has the viewer favorited this
     // game".
-    index("game_favorite_user_created_idx").on(t.userId, t.createdAt.desc(), t.gameId.desc()),
+    index("game_favorite_user_created_idx").on(t.userId, desc(t.createdAt), desc(t.gameId)),
   ],
 );
 
@@ -1403,10 +1555,12 @@ export interface FeedRankSnapshotItem {
  * maintenance runs on snapshot creation: a bounded global expiry sweep and
  * a per-viewer live-row cap, both by indexed predicates.
  */
-export const feedRankSnapshot = pgTable(
+export const feedRankSnapshot = sqliteTable(
   "feed_rank_snapshot",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
     // `user.id` is text (BetterAuth's own id format), so the FK must be too.
     viewerId: text("viewer_id")
       .notNull()
@@ -1422,23 +1576,24 @@ export const feedRankSnapshot = pgTable(
     // re-check membership against the same key even if the catalog moves.
     gameHashtagKey: text("game_hashtag_key"),
     // The frozen rank order: `FeedRankSnapshotItem[]`, best first.
-    items: jsonb("items").$type<FeedRankSnapshotItem[]>().notNull().default([]),
+    items: text("items", { mode: "json" }).$type<FeedRankSnapshotItem[]>().notNull().default([]),
     // Whether the viewer had any interest history at build time (favorites,
     // follows, likes, reposts, reply-thread topics). False marks a cold
     // start — freshness/popularity/diversity ordering — and tells the client
     // to prompt for game interests.
-    hasInterests: boolean("has_interests").default(false).notNull(),
-    // `timestamptz` and `precision: 3` for the same reasons as
-    // post.created_at above.
-    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 }).defaultNow().notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true, precision: 3 }).notNull(),
+    hasInterests: integer("has_interests", { mode: "boolean" }).default(false).notNull(),
+    // Same millisecond precision as post.created_at for stable cursors.
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [
     check("feed_rank_snapshot_scope", sql`${t.scope} in ('global', 'following', 'discover')`),
     // The request-time maintenance path: the viewer's rows by expiry, so
     // deleting their expired snapshots and enforcing the per-viewer live cap
     // are index scans, not table scans.
-    index("feed_rank_snapshot_viewer_expires_idx").on(t.viewerId, t.expiresAt.desc()),
+    index("feed_rank_snapshot_viewer_expires_idx").on(t.viewerId, desc(t.expiresAt)),
     // The expiry read: rows past their TTL, for bounded cleanup.
     index("feed_rank_snapshot_expires_idx").on(t.expiresAt),
   ],

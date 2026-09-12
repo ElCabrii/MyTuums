@@ -1,5 +1,6 @@
+import { closeDb } from "./testing/runtime.js";
 import { call, type AnyProcedure } from "@orpc/server";
-import { closeDb } from "@my-tuums/db";
+
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";
 import { anonContext, contextFor, createTestUser, truncateAll } from "./testing/harness.js";

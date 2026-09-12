@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "e2e": "dotenv -e ../.env -- playwright test",
-    "e2e:ui": "dotenv -e ../.env -- playwright test --ui",
+    "e2e": "VITE_GA_MEASUREMENT_ID=G-E2E306TEST pnpm --filter @my-tuums/web build && playwright test",
+    "e2e:ui": "VITE_GA_MEASUREMENT_ID=G-E2E306TEST pnpm --filter @my-tuums/web build && playwright test --ui",
     "e2e:report": "playwright show-report",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json"
@@ -20,7 +20,9 @@
     "@types/node": "catalog:",
     "dotenv-cli": "^11.0.0",
     "drizzle-orm": "^0.45.2",
-    "@typescript/native": "catalog:"
+    "@typescript/native": "catalog:",
+    "miniflare": "5.20260908.0-alpha",
+    "zod": "catalog:"
   },
   "dependencies": {
     "@my-tuums/api": "workspace:*"

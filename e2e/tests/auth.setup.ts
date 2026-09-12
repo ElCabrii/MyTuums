@@ -1,3 +1,4 @@
+import { closeTestPlatform } from "../support/platform.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test as setup, type APIRequestContext } from "@playwright/test";
@@ -119,3 +120,5 @@ for (const user of FIXTURE_USERS) {
     await request.storageState({ path: E2E.storageStateFor(user.username) });
   });
 }
+
+setup.afterAll(closeTestPlatform);

@@ -7,33 +7,34 @@
     "node": "^24.15.0 || >=26.0.0"
   },
   "scripts": {
-    "dev": "dotenv -e ../../.env -- tsx watch src/index.ts",
-    "build": "tsup",
-    "start": "dotenv -e ../../.env -- node dist/index.js",
+    "dev": "tsx watch src/development-server.ts",
+    "build": "pnpm build:worker",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && pnpm typecheck:worker",
     "test": "vitest run",
     "test:unit": "vitest run",
-    "games:sync": "dotenv -e ../../.env -- tsx src/games-sync.ts"
+    "games:sync": "tsx src/games-sync.ts",
+    "typecheck:worker": "tsc --noEmit -p worker/tsconfig.json",
+    "build:worker": "wrangler deploy --dry-run --outdir .wrangler/dist",
+    "types": "wrangler types worker/worker-configuration.d.ts --env-interface AppEnv --include-runtime false",
+    "jobs:dev": "tsx src/development-maintenance.ts"
   },
   "dependencies": {
     "@my-tuums/api": "workspace:*",
     "@my-tuums/auth": "workspace:*",
     "@my-tuums/db": "workspace:*",
-    "@opentelemetry/core": "^2.10.0",
     "@orpc/server": "^1.5.0",
-    "@sentry/node": "^10.69.0",
     "better-auth": "catalog:",
-    "pg-boss": "12.26.0",
+    "jose": "6.2.5",
     "sharp": "^0.35.4",
     "undici": "^7.29.0",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@my-tuums/tsconfig": "workspace:*",
+    "@orpc/client": "1.14.13",
     "@types/node": "catalog:",
     "@typescript/native": "catalog:",
-    "dotenv-cli": "^11.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",
     "vitest": "^4.1.10"

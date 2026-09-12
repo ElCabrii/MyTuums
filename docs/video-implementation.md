@@ -1,10 +1,12 @@
 # Video implementation — issue #368
 
-Implementation record for [issue #368](https://github.com/ElCabrii/MyTuums/issues/368).
-The complete issue remains the acceptance contract. The staged implementation is
-present in the codebase, with local verification recorded below. No Railway
-service was created or deployed; rollout settings and recovery procedures are in
-[video operations](video-operations.md).
+Historical implementation record for [issue #368](https://github.com/ElCabrii/MyTuums/issues/368) at
+[commit 9365342](https://github.com/ElCabrii/MyTuums/tree/936534256487531ac426cae222399904dd59e0a9/apps/video-worker).
+The FFmpeg application, media tests and Docker build are removed on this Cloudflare
+branch. Measurements below describe that original implementation, not Stream.
+Accepted PoC differences and current checks are in [video operations](video-operations.md).
+Original rollout/recovery instructions remain in the
+[versioned operations guide](https://github.com/ElCabrii/MyTuums/blob/936534256487531ac426cae222399904dd59e0a9/docs/video-operations.md).
 
 ## Stages and evidence
 
@@ -31,7 +33,7 @@ service was created or deployed; rollout settings and recovery procedures are in
 
 ## Decisions
 
-- TypeScript on Node 24 supervises native FFmpeg; `apps/video-worker` is a
+- TypeScript on Node 24 supervises native FFmpeg; [the original video worker](https://github.com/ElCabrii/MyTuums/tree/936534256487531ac426cae222399904dd59e0a9/apps/video-worker) is a
   separate executable workspace and Railway service.
 - Keep pending submissions outside `post`. Insert the published post, its
   attachment, and ordinary notifications in one guarded transaction.

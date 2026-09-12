@@ -1,13 +1,15 @@
+import { auth, closeDb, db } from "./testing/runtime.js";
 import { randomUUID } from "node:crypto";
 import { call } from "@orpc/server";
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { auth } from "@my-tuums/auth";
+import { and, eq, sql } from "drizzle-orm";
+
 import { LEGAL_VERSION } from "@my-tuums/auth/rules";
-import { closeDb, db } from "@my-tuums/db";
+
 import { grantFounderBadge } from "@my-tuums/db/grant-founder-badge";
 import { follow, postLike, user, userBadge } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./router.js";
+import { runSql, textIn } from "./sql.js";
 import {
   contextFor,
   createTestUser,
@@ -53,6 +55,10 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return chunks;
 }
 
+// The largest payload (5,000 bare users) is about 675 KB, below D1's 2 MB
+// value limit. Larger batches avoid hundreds of test binding round trips.
+const FIXTURE_BATCH_SIZE = 5_000;
+
 type BareUser = typeof user.$inferInsert;
 
 /** Bare `user` rows in bulk — no session, no credential; presence is all a badge reads. */
@@ -62,17 +68,20 @@ async function seedBareUsers(count: number): Promise<string[]> {
     name: "Badge Fixture",
     email: `badges+${randomUUID()}@example.com`,
   }));
-  const ids: string[] = [];
-  for (const part of chunk(rows, 4000)) {
-    const inserted = await db.insert(user).values(part).returning({ id: user.id });
-    ids.push(...inserted.map((row) => row.id));
+  for (const part of chunk(rows, FIXTURE_BATCH_SIZE)) {
+    await runSql(
+      db,
+      sql`insert into "user" (id, name, email)
+      select json_extract(value, '$.id'), json_extract(value, '$.name'), json_extract(value, '$.email')
+      from json_each(${JSON.stringify(part)})`,
+    );
   }
-  return ids;
+  return rows.map((row) => row.id);
 }
 
 /** Seeds bare rows until exactly `target` accounts exist — the next sign-up's rank. */
 async function topUpUsersTo(target: number): Promise<void> {
-  const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(user);
+  const [row] = await db.select({ count: sql<number>`count(*)` }).from(user);
   if (row.count < target) await seedBareUsers(target - row.count);
 }
 
@@ -112,17 +121,23 @@ async function signUpFresh(username: string): Promise<string> {
 }
 
 async function seedFollows(followerIds: readonly string[], followingId: string): Promise<void> {
-  for (const part of chunk(followerIds, 8000)) {
-    await db.insert(follow).values(part.map((followerId) => ({ followerId, followingId })));
+  for (const part of chunk(followerIds, FIXTURE_BATCH_SIZE)) {
+    await runSql(
+      db,
+      sql`insert into follow (follower_id, following_id)
+      select value, ${followingId} from json_each(${JSON.stringify(part)})`,
+    );
   }
 }
 
 async function seedLikes(postId: string, likerIds: readonly string[]): Promise<void> {
-  for (const part of chunk(likerIds, 8000)) {
-    await db
-      .insert(postLike)
-      .values(part.map((userId) => ({ postId, userId })))
-      .onConflictDoNothing();
+  for (const part of chunk(likerIds, FIXTURE_BATCH_SIZE)) {
+    await runSql(
+      db,
+      sql`insert into post_like (post_id, user_id)
+      select ${postId}, value from json_each(${JSON.stringify(part)}) where true
+      on conflict do nothing`,
+    );
   }
 }
 
@@ -186,7 +201,7 @@ describe("user.follow badge stamping (issue #308)", () => {
     await db
       .delete(follow)
       .where(
-        and(eq(follow.followingId, subject), inArray(follow.followerId, followers.slice(0, 2))),
+        and(eq(follow.followingId, subject), textIn(follow.followerId, followers.slice(0, 2))),
       );
 
     const viewer = await createTestUser();
@@ -218,7 +233,7 @@ describe("user.follow badge stamping (issue #308)", () => {
     await db
       .delete(follow)
       .where(
-        and(eq(follow.followingId, subject), inArray(follow.followerId, surge.slice(0, 8_994))),
+        and(eq(follow.followingId, subject), textIn(follow.followerId, surge.slice(0, 8_994))),
       );
     const fifth = await createTestUser();
     await call(appRouter.user.follow, { userId: subject }, { context: contextFor(fifth) });
@@ -281,7 +296,7 @@ describe("post.like badge stamping (issue #308)", () => {
     await db
       .delete(postLike)
       .where(
-        and(eq(postLike.postId, secondPost.id), inArray(postLike.userId, likers.slice(0, 100))),
+        and(eq(postLike.postId, secondPost.id), textIn(postLike.userId, likers.slice(0, 100))),
       );
     expect(await stampedRows(author)).toEqual([{ badge: "trendy" }]);
 
@@ -304,7 +319,7 @@ describe("founder badge grant (issue #308)", () => {
       .where(eq(user.id, founder));
     const username = handle[0].username!;
 
-    await expect(grantFounderBadge(username)).resolves.toContain("Founder");
+    await expect(grantFounderBadge(db, username)).resolves.toContain("Founder");
     expect(await stampedRows(founder)).toEqual([{ badge: "founder" }]);
 
     const viewer = await createTestUser();
@@ -317,27 +332,34 @@ describe("founder badge grant (issue #308)", () => {
     expect(profile.badges).toEqual(["founder"]);
 
     // Once per account: a repeat for the same account is refused.
-    await expect(grantFounderBadge(username)).rejects.toThrow(/already carries/);
+    await expect(grantFounderBadge(db, username)).rejects.toThrow(/already carries/);
 
-    // The two remaining partners are granted, then the budget is spent.
+    // Three candidates compete for the two remaining slots.
     // (The prefixes stay short of the 20-char handle bound with the uuid
     // suffix appended — `user.byUsername` validates its input.)
     const partnerTwo = await seedSubjectUser(`foundertwo${randomUUID().slice(0, 8)}`);
     const partnerThree = await seedSubjectUser(`founderthree${randomUUID().slice(0, 7)}`);
-    for (const partner of [partnerTwo, partnerThree]) {
-      const partnerHandle = await db
-        .select({ username: user.username })
-        .from(user)
-        .where(eq(user.id, partner));
-      await expect(grantFounderBadge(partnerHandle[0].username!)).resolves.toContain("Founder");
-    }
+    const contender = await seedSubjectUser(`contender${randomUUID().slice(0, 8)}`);
+    const grants = await Promise.allSettled(
+      [partnerTwo, partnerThree, contender].map(async (partner) => {
+        const partnerHandle = await db
+          .select({ username: user.username })
+          .from(user)
+          .where(eq(user.id, partner));
+        return grantFounderBadge(db, partnerHandle[0].username!);
+      }),
+    );
+    // Three simultaneous callers compete for two slots; the D1 guard must be atomic.
+    expect(grants.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+    expect(grants.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(await db.select().from(userBadge).where(eq(userBadge.badge, "founder"))).toHaveLength(3);
 
     const latecomer = await seedSubjectUser(`founderfour${randomUUID().slice(0, 8)}`);
     const latecomerHandle = await db
       .select({ username: user.username })
       .from(user)
       .where(eq(user.id, latecomer));
-    await expect(grantFounderBadge(latecomerHandle[0].username!)).rejects.toThrow(/spent/);
+    await expect(grantFounderBadge(db, latecomerHandle[0].username!)).rejects.toThrow(/spent/);
   });
 
   it("redacts the founder badge on the suspended stub, like every authored field", async () => {

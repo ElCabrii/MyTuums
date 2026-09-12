@@ -67,6 +67,13 @@ express this app's moderator/staff/admin hierarchy. Blocking those endpoints
 keeps `/rpc` the only route to a moderation action, so the rank hierarchy and
 the audit log stay the only enforcement surface.
 
+On the Cloudflare PoC branch, post and account moderation check target state
+and rank inside D1 write batches. Audit records, in-app notices, report stamps,
+session revocation and applicable appeal closure roll back together. The role
+catalog remains the authority for rank checks; restoring a contested role must
+not overwrite a newer grant. Emails are sent only after commit. Appeal intake
+and review are still being migrated and are not deployment-ready.
+
 **Everything else requires a session.** Every other oRPC procedure is built
 from `protectedProcedure`, and every page outside `isSignedOutPath` is gated
 by the server before the bundle even downloads. The public permalink's own
@@ -95,14 +102,17 @@ link in their notification email must work signed out.
 `packages/api/src/procedures.ts` exports `baseProcedure` for this single
 procedure. It is not unguarded — it is **capability-gated**:
 
-- The link carries an HMAC-SHA256 token signed with `BETTER_AUTH_SECRET`
+- The link carries an HMAC-SHA256 token signed with `APPEAL_TOKEN_SECRET`
   (`packages/api/src/appeal-token.ts`): base64url payload, `.`, signature.
-- Verification is constant-time (`timingSafeEqual`, with a length check
-  first), re-parses the payload against its schema, and enforces a 7-day TTL.
+  The Worker entrypoint must pass this secret explicitly to its signer and bind
+  it through API context. There is no environment lookup or built-in fallback;
+  empty/short secrets are rejected.
+- Verification uses Web Crypto `subtle.verify` after size and encoding
+  checks, re-parses the payload against its schema, and enforces a 7-day TTL.
   A tampered, malformed or expired token is indistinguishable from an invalid
   one.
 - The endpoint and verifier cap tokens at 4 KiB, and the verifier accepts only
-  the canonical unpadded base64url signature. Oversized or alternate textual
+  canonical unpadded base64url payload and signature. Oversized or alternate textual
   encodings are rejected before HMAC comparison or database work.
 - The signature check itself is deliberately unthrottled: it is a cheap HMAC
   comparison performed before any database work, and only a holder of a valid
@@ -290,7 +300,7 @@ makes the server dial out (issue #260):
   the hex form `[::ffff:7f00:1]`, so judging only the dotted spelling judged
   nothing a request can actually carry. The same table is re-applied at
   connect time, inside the HTTP client's own resolution
-  (`createConnectValidatedLookup` in `packages/api/src/link-card-http.ts`):
+  (`createConnectValidatedLookup` in `packages/api/src/link-card-node.ts`):
   a rebinding DNS server that answers the pre-flight check with a public
   address and the actual connection with a private one still finds no socket
   to open — the address the client connects to, not the one it once resolved
@@ -317,33 +327,37 @@ makes the server dial out (issue #260):
 
 ## Media
 
-**Video boundary** (`packages/api/src/video-uploads.ts`, `video-media.ts`,
-`apps/video-worker/src/probe.ts`): authenticated upload sessions own bounded
-signed multipart capabilities; browser declarations do not establish validity.
-Native probes validate actual container/codecs, oriented dimensions, timing and
-decoded frames before scaling. Processes receive local filenames, restricted
-input protocols and an environment without application credentials.
+**Cloudflare PoC video boundary:** `packages/api/src/stream.ts` requires private
+Stream videos and verifies their environment-scoped creator before provider
+operations. Tus destinations are validated; only the owner receives upload
+capabilities, which are cleared on completion/termination. Creator identity is
+recorded before provider I/O, allowing recovery after ambiguous creation and
+account deletion. Browser declarations/upload completion do not authorize a post.
 
-Pending text/captions stay outside public posts and queue payloads contain only
-IDs. Attempt leases and database transactions fence publication, cancellation
-and duplicate delivery. Source deletion must be confirmed before publication.
-Terminal failure erases text/captions and creates one notice; content-free cleanup
-debt survives provider outages and account cascades. Raw video is never served.
+`packages/api/src/stream-publication.ts` accepts validated Stream metadata and
+latches author eligibility, target visibility and the processing deadline inside
+its publication batch. Post, attachment, notification and pending-text removal
+share that commit. It does not claim FFmpeg-specific codec/frame validation,
+derivative storage accounting or source deletion. Those are accepted Stream
+processing differences for this synthetic-data PoC.
 
-Every published asset passes the existing post authorizer and must belong to the
-current recorded inventory. HLS/VTT bodies are bounded and their asset references
-are rewritten through `/media/videos/`; arbitrary manifest destinations cannot
-escape the inventory. Binary assets redirect to signed URLs with a one-hour TTL;
-already-issued capabilities retain that bounded validity after access changes.
-Moderation removal retains successful evidence; author deletion schedules cleanup.
+Failure commits one notice, private-text/caption erasure and cleanup debt.
+Cleanup survives account deletion and retains empty tombstones for 24 hours to
+catch late provider visibility; that recovery window is not a provider guarantee.
+Moderation retains successful media for the existing author/moderator evidence
+gates. Author deletion schedules provider removal.
 
-Bucket CORS permits exact app origins for GET/HEAD/PUT and the required headers;
-it does not make objects public. The video CSP adds exact configured bucket
-origins to media/connect sources and allows blob media/HLS workers, without
-allowing blob scripts. Environment database/bucket pairing is mandatory because
-video reconciliation treats objects absent from its database as orphans.
+`packages/api/src/video-media.ts` gates manifest-token issuance, posters, caption
+retrieval and timeline previews on current post visibility, rechecking after
+provider I/O. Native tokens expire after one hour. Their holder can access Stream
+directly during that period, including after an app permission change; those
+requests do not revisit Cloudflare Access. The app exposes no raw-source or
+arbitrary media path. Captions have a 1 MiB bound; preview indexes contain at most
+150 local authorized thumbnail paths and no bearer token.
 
-See [video operations](video-operations.md) for deployment and recovery controls.
+Worker routing, Access, exact Stream CSP destinations and scheduled recovery are
+not deployed yet. The legacy operational commands in
+[video operations](video-operations.md) remain a runtime replacement checklist.
 
 **Upload validation** (`packages/api/src/image.ts`):
 
@@ -382,23 +396,19 @@ not the boundary:
 
 **Replacement and removal** (`packages/api/src/profile-media.ts`):
 
-- The lifecycle is one module: prepare/write the new objects, atomically swap
-  the row references under a row lock, then best-effort delete the superseded
-  pair. The row lock is what makes two concurrent replacements serialize —
-  without it, both could read the same old keys, and each would delete them
-  after its own swap, orphaning the pair the first to commit wrote (the
-  reconciliation script reaps it). The lock makes the final committer observe
-  and delete the first committer's superseded pair instead, so the leak never
-  happens.
-- Cleanup only ever deletes keys derived from the _previous_ row values, and
-  only when they are this app's own keys — never the pair the request just
-  committed, and never a provider's absolute avatar URL.
-- A failed write or a rollback of the lifecycle's own swap transaction leaves
-  the profile untouched; the freshly written objects are orphans, reaped by
-  the reconciliation script rather than by any request path. The lifecycle
-  interface accepts only the bare `Database` handle, not a transaction handle,
-  so the swap transaction is always the outermost commit and cleanup cannot
-  run ahead of a caller-owned rollback.
+- The lifecycle registers an upload intent before any storage write, then
+  publishes the pair and consumes its unexpired intent in one D1 batch.
+  Triggers capture the actual previous paths in each serialized transition,
+  so concurrent replacements record cleanup for every superseded pair.
+- Replacement cleanup uses only previous managed paths; provider URLs are
+  ignored. Paths are immutable and cannot be reattached through profile edits.
+  Cleanup debt survives account deletion and failed removals.
+- A failed write or rolled-back batch leaves the profile untouched. Unconsumed
+  uploads expire after 30 minutes and cannot publish afterward. Never delete
+  newly written objects on an ambiguous database acknowledgement: publication
+  may already have committed. Recovery retries cleanup; inventory reconciliation
+  lists objects before reading pending and live references in one SQL snapshot,
+  covering late PUTs without a gap during publication.
 
 **Retrieval:**
 
@@ -502,9 +512,11 @@ profile fields, relationship counts and viewer relationship state first. A
 private profile still resolves for everyone so the client can render the
 locked notice; its posts, replies, follower/following lists, search rows and
 media rows hide from non-followers at the query layer (`privatePostHidden`,
-`privateUserHidden`, `canViewPostMedia`), and `follow` becomes a request
-gated by the pair's relationship lock — `block` severs pending requests both
-directions like the edges themselves.
+`privateUserHidden`, `canViewPostMedia`), and `follow` becomes a request.
+Privacy and block checks execute inside the same D1 batch as the relationship
+write, notification and badge effects. `block` atomically severs pending requests
+in both directions along with the follow edges. Approval and withdrawal cannot
+act on a request read outside their write batch.
 
 `post.unlike` and `post.unrepost` always allow removal of the caller's own
 interaction, including after losing visibility. Their count reads apply the
@@ -551,41 +563,61 @@ view-history store to leak.
   appeal row and then the target row, matching review's appeal-before-target
   order.
 - Appeal review excludes the moderator who took the original action.
-- The bootstrap promotion (`pnpm db:promote` / `node apps/server/dist/promote.js`)
+- The bootstrap promotion (`pnpm db:promote`, with `--remote` for PoC D1)
   is the one deliberate exception to "role changes go through `/rpc`": it
   exists to appoint the first admin before anyone can moderate. It is
   bootstrap-only by construction — `promoteUser` in `packages/db/src/promote.ts`
-  refuses to run once an admin already exists — so it cannot become an
+  atomically refuses to run once an admin already exists, including concurrent
+  invocations. The CLI validates the isolated PoC account/database and defaults
+  to local bindings, so it cannot become an
   unrestricted production role setter that bypasses the rank guard and the
   audit log.
 
 ## Configuration and secrets
 
-- `apps/server/src/env.ts` is the loud boot-time validator: it refuses to
-  start on a partial OAuth pair or a partial `S3_*` group, and requires
-  `BETTER_AUTH_SECRET` to be at least 32 characters. `parseEnv` throws but
-  never calls `process.exit` — only `apps/server/src/index.ts` turns a bad
-  environment into an exit, so tests can inspect the failure.
-- `packages/auth/src/env.ts` is the quiet reader: a missing value makes a
-  feature absent, never a crash.
-- `BETTER_AUTH_SECRET` also keys the appeal-link HMAC. Rotating it signs out
-  every session **and** invalidates outstanding appeal links.
+- `apps/server/worker/index.ts` validates the fixed PoC origin/account, Access
+  audience, minimum 32-character auth secret and all three OAuth credential pairs.
+  Missing or malformed configuration fails closed with a content-free event;
+  no environment values or validation details enter the response/log. Secrets
+  come from bindings, not process environment. The old Node boot path is removed
+  on this branch.
+- The Cloudflare auth factory receives explicit database, origin, secret,
+  provider credentials and delivery transport. Its `packages/auth/src/env.ts` defines only
+  the OAuth credential type; no auth module reads process environment or supplies
+  fallback credentials. Email templates receive the deployment origin explicitly,
+  including notices that contain no action link.
+- `BETTER_AUTH_SECRET` belongs only to the app's authentication sessions.
+  `APPEAL_TOKEN_SECRET` independently keys appeal links and is shared by the app
+  and jobs Workers. Rotating the latter invalidates outstanding appeal links;
+  rotate it consistently on both Workers. Pending notices hold private content
+  in D1 for at most 24 hours, are deleted after acknowledged delivery, and cascade
+  with recipient deletion. Workflow state contains counts rather than message
+  text or capabilities. Accepted-but-unacknowledged delivery may repeat after
+  lease recovery; the provider binding supplies no idempotency key.
 - `.gitignore` covers `.env*` — including stray backups like `.env.bak`, which
   would otherwise be untracked-but-committable files holding live credentials.
 - The access log records the pathname only, never the raw URL, because query
   strings are where tokens end up.
-- Sentry captures 500-class faults only. Capturing 4xx would flood the project
-  with callers' own mistakes.
+- Native auth/provider diagnostics must not include credentials, recipients,
+  SQL parameters, media keys or capability URLs. Better Auth receives a safe
+  logger; its API-error hook converts unexpected failures to a generic 500
+  APIError so Better Call cannot log the raw exception afterward. Moderation
+  mail failures retain only the generated request identifier. Local workerd
+  and API regressions enforce these properties; hosted log inspection remains
+  a deployment gate.
+
 - Every third-party GitHub Action is pinned to a full commit SHA; every
   checkout sets `persist-credentials: false` so the `GITHUB_TOKEN` cannot ride
   out in an uploaded artefact.
 
 ## Test and environment isolation
 
-- **Destructive database helpers refuse any database whose name does not end
-  in `_test`** (`assertTestDatabase` in `packages/db/src/testing.ts`, and
-  `packages/db/scripts/setup-test-db.ts`). `resolveTestDatabaseUrl` derives
-  that name from `DATABASE_URL` when `DATABASE_URL_TEST` is unset.
+- **Native test resources are isolated and named with `_test`.**
+  `packages/db/src/testing/d1.ts` creates ephemeral D1 runtimes; E2E's explicit
+  database/bucket names and persistence roots are guarded by
+  `e2e/support/platform.ts`. No test selects a production URL or remote bucket.
+  Maintenance tools separately validate the exact PoC resource pair and default
+  to local storage; remote access requires an explicit flag.
 - **Every Railway environment owns its own bucket** and one environment's
   credentials cannot address another's. This is what keeps the E2E suite's
   prefix deletion away from real users' avatars: dev locally, ci in CI, never

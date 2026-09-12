@@ -1,47 +1,15 @@
 import { createHmac } from "node:crypto";
 import { and, desc, eq, like, sql } from "drizzle-orm";
-import { assertTestDatabase, databaseNameOf, resolveTestDatabaseUrl } from "@my-tuums/db/testing";
 import type { UserRole } from "@my-tuums/api/roles";
-// Static on purpose: this module has no runtime imports, so evaluating it
-// cannot trip @my-tuums/db's module-scope DATABASE_URL check before the
-// fix-up below has run.
-import { runSql } from "@my-tuums/api/sql";
 import { normalizeUsername } from "@my-tuums/auth/rules";
 import { E2E } from "../playwright.config";
+import { E2E_AUTH_SECRET } from "../constants.js";
+import { assertTestPlatform, testPlatform } from "./platform.js";
 import { legalConsentBody } from "./users";
 
-/**
- * Same fix-up `global-setup.ts` needs, for the same reason: `@my-tuums/db`
- * reads `DATABASE_URL` at module scope, and `dotenv -e ../.env` has already
- * put the *dev* database's URL there by the time this module is first
- * imported in a worker process.
- *
- * Guarded rather than a bare re-assignment, unlike global-setup.ts: this file
- * is imported from worker processes, and it is genuinely unclear whether a
- * worker inherits the mutation global-setup.ts made in the main Playwright
- * process (Node's `child_process.fork` copies `process.env` at fork time, and
- * global setup finishes before workers are spawned — but that's an
- * implementation detail of the runner, not a contract). If it *did* inherit
- * an already-`_test` URL, calling `resolveTestDatabaseUrl()` again would
- * derive `..._test_test` instead of leaving it alone.
- */
-function ensureTestDatabaseUrl(): void {
-  const current = process.env.DATABASE_URL;
-  if (current && databaseNameOf(current).endsWith("_test")) return;
-  process.env.DATABASE_URL = resolveTestDatabaseUrl();
-}
-ensureTestDatabaseUrl();
-
-// Dynamic, for the same reason as global-setup.ts: a static `import` is
-// hoisted above the assignment above and would evaluate @my-tuums/db's
-// module-scope `DATABASE_URL` check against the wrong value. Both promises
-// are created once per worker process and every helper below awaits the same
-// cached one.
-const dbModulePromise = import("@my-tuums/db");
 const schemaModulePromise = import("@my-tuums/db/schema");
-
 async function getDb() {
-  return (await dbModulePromise).db;
+  return (await testPlatform()).db;
 }
 
 /**
@@ -140,7 +108,7 @@ export async function createUser(
  * and later calls this to simulate the verification link being clicked.
  */
 export async function markEmailVerified(userId: string): Promise<void> {
-  assertTestDatabase();
+  assertTestPlatform();
   const db = await getDb();
   const { user } = await schemaModulePromise;
 
@@ -162,7 +130,7 @@ export async function markEmailVerified(userId: string): Promise<void> {
  * would produce a session the gate correctly considers complete.
  */
 export async function clearUsername(userId: string): Promise<void> {
-  assertTestDatabase();
+  assertTestPlatform();
   const db = await getDb();
   const { user } = await schemaModulePromise;
 
@@ -177,7 +145,7 @@ export async function clearUsername(userId: string): Promise<void> {
  * that way.
  */
 export async function clearDateOfBirth(userId: string): Promise<void> {
-  assertTestDatabase();
+  assertTestPlatform();
   const db = await getDb();
   const { user } = await schemaModulePromise;
 
@@ -195,7 +163,7 @@ export async function clearDateOfBirth(userId: string): Promise<void> {
  * unset*, not the path that left them that way.
  */
 export async function clearLegalConsent(userId: string): Promise<void> {
-  assertTestDatabase();
+  assertTestPlatform();
   const db = await getDb();
   const { user } = await schemaModulePromise;
 
@@ -258,7 +226,7 @@ export async function getUserId(username: string): Promise<string> {
  * `createUser`). The expression below matches what create-context.mjs sets.
  */
 export function emailVerificationLinkFor(email: string, callbackURL: string): string {
-  const secret = process.env.BETTER_AUTH_SECRET ?? "playwright-e2e-secret-at-least-32-characters";
+  const secret = E2E_AUTH_SECRET;
   const header = Buffer.from(JSON.stringify({ alg: "HS256" })).toString("base64url");
   const now = Math.floor(Date.now() / 1000);
   const payload = Buffer.from(
@@ -282,7 +250,7 @@ export function emailVerificationLinkFor(email: string, callbackURL: string): st
  * the DB is.
  */
 export async function passwordResetTokenFor(userId: string): Promise<string> {
-  assertTestDatabase();
+  assertTestPlatform();
   const db = await getDb();
   const { verification } = await schemaModulePromise;
 
@@ -325,10 +293,19 @@ export async function seedPosts(
     createdAt: new Date(base + index),
   }));
 
-  return db
-    .insert(post)
-    .values(rows)
-    .returning({ id: post.id, content: post.content, createdAt: post.createdAt });
+  const seeded: SeededPost[] = [];
+  // Drizzle also binds generated IDs and default privacy values: five
+  // parameters per post. Twenty rows fit D1's 100-parameter ceiling.
+  const batchSize = 20;
+  for (let offset = 0; offset < rows.length; offset += batchSize) {
+    seeded.push(
+      ...(await db
+        .insert(post)
+        .values(rows.slice(offset, offset + batchSize))
+        .returning({ id: post.id, content: post.content, createdAt: post.createdAt })),
+    );
+  }
+  return seeded;
 }
 
 /** Inserts a single reply. Returns enough to chain another `seedReply` off it. */
@@ -406,7 +383,7 @@ export async function deleteReport(input: {
   targetType: "post" | "user";
   targetId: string;
 }): Promise<void> {
-  assertTestDatabase();
+  assertTestPlatform();
   const db = await getDb();
   const { report } = await schemaModulePromise;
   await db
@@ -431,7 +408,7 @@ export async function deleteReport(input: {
  * browser request.
  */
 export async function setUserRole(userId: string, role: UserRole): Promise<void> {
-  assertTestDatabase();
+  assertTestPlatform();
   const db = await getDb();
   const { user } = await schemaModulePromise;
 
@@ -456,95 +433,43 @@ export async function expireNotificationDamperWindow(
   actorId: string,
   recipientId: string,
 ): Promise<void> {
-  assertTestDatabase();
+  assertTestPlatform();
   const db = await getDb();
   const { notification } = await schemaModulePromise;
 
   await db
     .update(notification)
-    .set({ createdAt: sql`${notification.createdAt} - interval '61 seconds'` })
+    .set({ createdAt: sql`${notification.createdAt} - 61000` })
     .where(and(eq(notification.actorId, actorId), eq(notification.recipientId, recipientId)));
 }
 
-/**
- * Empties every table and purges the suite's uploaded bucket objects.
- * `global-setup.ts` calls this once at the start of every run; a spec can
- * also call it directly for a guaranteed-clean slate of its own rather than
- * trusting no earlier spec left state behind (workers are pinned to 1, so
- * specs do share one database — see playwright.config.ts).
- * The list is explicit — the same tables the API harness truncates
- * (`packages/api/src/testing/harness.ts`) — and not a thinner `user`-only
- * `cascade` version. Most moderation tables would be reached through the
- * `user` foreign keys anyway, but `moderation_action.target_post_id` and
- * `target_user_id` deliberately have NO foreign keys, so cascade-only
- * reachability is one schema tweak away from silently leaking rows between
- * specs (issue #59).
- */
+/** Reset only local test bindings, preserving the committed migration ledger. */
 export async function truncateAll(): Promise<void> {
-  assertTestDatabase();
-  const db = await getDb();
-  const schema = await schemaModulePromise;
-
-  await runSql(
-    db,
-    sql`
-    truncate table
-      ${schema.postLike}, ${schema.follow}, ${schema.report},
-      ${schema.userBlock}, ${schema.appeal}, ${schema.moderationAction},
-      ${schema.notification}, ${schema.notificationLastSeen},
-      ${schema.post}, ${schema.linkCard},
-      ${schema.gameFavorite}, ${schema.game},
-      ${schema.session}, ${schema.account}, ${schema.verification},
-      ${schema.rateLimit}, ${schema.twoFactor}, ${schema.passkey},
-      ${schema.user}
-    cascade
+  assertTestPlatform();
+  const { db, bucket } = await testPlatform();
+  const tables = await db.$client
+    .prepare(
+      `
+    select name from sqlite_master where type = 'table'
+      and name not like 'sqlite_%' and substr(name, 1, 4) != '_cf_'
+      and name != '__drizzle_migrations'
+    order by case when name = 'user' then 0
+      when name in ('media_intent', 'video_cleanup', 'job_intent') then 2 else 1 end, name
   `,
-  );
-
-  await purgeUploadedImages();
-}
-
-/**
- * Deletes every object the suite uploaded to the Storage Bucket.
- *
- * Unlike every other cleanup here, this reaches outside Postgres — objects live
- * in a bucket and a `truncate` cannot touch them, so without this each E2E run
- * leaves its avatars behind permanently and the bill grows one test run at a
- * time.
- *
- * Deliberately best-effort: an unreachable bucket, or a run with no `S3_*`
- * group configured at all, must not fail a suite whose subject was the
- * database. The upload specs are skipped in that configuration anyway (the
- * procedure reports NOT_IMPLEMENTED), so there is nothing to clean.
- *
- * **This is why the E2E bucket must not be the production one.** It deletes by
- * prefix, unconditionally — pointed at production it would delete real users'
- * avatars. See the warning in `.env.example`.
- */
-async function purgeUploadedImages(): Promise<void> {
-  if (!process.env.S3_ENDPOINT || !process.env.S3_BUCKET) return;
-
-  try {
-    // The destructive factory, on purpose: `removeByPrefix` lives only on
-    // `DestructiveStorage`, and only this cleanup may reach it. `createStorage`
-    // returns plain `Storage` — no procedures, and no other caller, can even
-    // name the method.
-    const { createDestructiveStorage } = await import("@my-tuums/api/storage");
-    const storage = createDestructiveStorage({
-      endpoint: process.env.S3_ENDPOINT,
-      bucket: process.env.S3_BUCKET,
-      accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "",
-      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "",
-      region: process.env.S3_REGION,
-    });
-
-    await Promise.all([
-      storage.removeByPrefix("avatars/"),
-      storage.removeByPrefix("banners/"),
-      storage.removeByPrefix("posts/"),
-      storage.removeByPrefix("link-cards/"),
-    ]);
-  } catch (error) {
-    console.warn("Could not purge uploaded test images from the bucket:", error);
-  }
+    )
+    .all<{ name: string }>();
+  // Parent deletion can capture cleanup debt. Delete those debt tables last;
+  // defer FK checks across this local, atomic reset rather than disabling them.
+  await db.$client.batch([
+    db.$client.prepare("PRAGMA defer_foreign_keys = ON"),
+    ...tables.results.map(({ name }) =>
+      db.$client.prepare(`delete from "${name.replaceAll('"', '""')}"`),
+    ),
+  ]);
+  let cursor: string | undefined;
+  do {
+    const page = await bucket.list({ cursor, limit: 1000 });
+    if (page.objects.length) await bucket.delete(page.objects.map((object) => object.key));
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor !== undefined);
 }

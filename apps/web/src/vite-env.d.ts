@@ -14,6 +14,9 @@
  * and no client secret does.
  */
 interface ImportMetaEnv {
+  /** Public deployment origin for metadata and links; defaults to the isolated PoC. */
+  readonly VITE_WEB_ORIGIN?: string;
+
   /**
    * Google OAuth client id, needed in the browser because Google's One Tap
    * script runs in the page. Unset disables the One Tap prompt.

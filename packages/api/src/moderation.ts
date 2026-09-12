@@ -1,5 +1,5 @@
 import { asc, desc, eq, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { alias } from "drizzle-orm/sqlite-core";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import type { Database } from "@my-tuums/db";
@@ -37,7 +37,6 @@ import { queueRouter } from "./moderation-queue.js";
 import { keysetPage } from "./pagination.js";
 import { moderatorProcedure, protectedProcedure, rateLimit, staffProcedure } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
-import { acquireRelationshipLock } from "./relationship-lock.js";
 import { roleAtLeast, roleRank, USER_ROLES } from "./roles.js";
 import { matchesUserQuery, userQueryRank } from "./search.js";
 import { publicUserColumns } from "./users.js";
@@ -223,36 +222,23 @@ export const moderationRouter = {
         .limit(1);
       if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
 
-      // The follow sever and the block row commit together: two bare
-      // statements would let a mid-failure leave the follows deleted with no
-      // block in place — the severs are the block's side effect, not a
-      // standalone action.
-      //
-      // The pair's relationship lock is what makes the sever stick. `follow`
-      // checks for a block and then inserts its edge; without a lock spanning
-      // both operations, a follow that passed its check before this
-      // transaction can commit its insert after the delete above, leaving a
-      // prohibited edge behind the block. `follow` and `unblock` take the same
-      // lock, so relationship writes for a pair are serialized — the only
-      // place to enforce an invariant that spans two tables.
-      await context.db.transaction(async (tx) => {
-        await acquireRelationshipLock(tx, context.user.id, input.userId);
-        await tx.delete(follow).where(
+      // The block and both kinds of relationship sever commit together.
+      // Follow writers must check blocks inside their own D1 batch, so no
+      // follow can commit a stale permission check after this sever.
+      await context.db.batch([
+        context.db.delete(follow).where(
           sql`(${follow.followerId} = ${context.user.id} and ${follow.followingId} = ${input.userId})
-                 or (${follow.followerId} = ${input.userId} and ${follow.followingId} = ${context.user.id})`,
-        );
-        // Pending follow requests (issue #328) sever the same way: a block
-        // must leave neither an edge nor a request that an unblock would put
-        // back in view.
-        await tx.delete(followRequest).where(
+            or (${follow.followerId} = ${input.userId} and ${follow.followingId} = ${context.user.id})`,
+        ),
+        context.db.delete(followRequest).where(
           sql`(${followRequest.requesterId} = ${context.user.id} and ${followRequest.targetId} = ${input.userId})
-                 or (${followRequest.requesterId} = ${input.userId} and ${followRequest.targetId} = ${context.user.id})`,
-        );
-        await tx
+            or (${followRequest.requesterId} = ${input.userId} and ${followRequest.targetId} = ${context.user.id})`,
+        ),
+        context.db
           .insert(userBlock)
           .values({ blockerId: context.user.id, blockedId: input.userId })
-          .onConflictDoNothing();
-      });
+          .onConflictDoNothing(),
+      ]);
 
       return { userId: input.userId, blocked: true };
     }),
@@ -269,20 +255,11 @@ export const moderationRouter = {
         .limit(1);
       if (!target) throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
 
-      // Under the same pair lock as `block` and `follow`, so a follow that is
-      // mid-flight cannot straddle the removal: it either finds the block and
-      // is refused, or runs entirely after the unblock and is allowed. Without
-      // the lock, a follow whose check ran while the block stood could still
-      // insert afterwards — the same edge the block was supposed to forbid,
-      // now committed with no block left to explain it.
-      await context.db.transaction(async (tx) => {
-        await acquireRelationshipLock(tx, context.user.id, input.userId);
-        await tx
-          .delete(userBlock)
-          .where(
-            sql`${userBlock.blockerId} = ${context.user.id} and ${userBlock.blockedId} = ${input.userId}`,
-          );
-      });
+      await context.db
+        .delete(userBlock)
+        .where(
+          sql`${userBlock.blockerId} = ${context.user.id} and ${userBlock.blockedId} = ${input.userId}`,
+        );
 
       return { userId: input.userId, blocked: false };
     }),
@@ -495,7 +472,7 @@ export const moderationRouter = {
    * blocked would hide them from the person whose job is to act on them.
    *
    * The `search` tier rather than `moderate`, because this is what the tier
-   * is for — an ILIKE scan fired by a debounced field. Spending the
+   * is for — a text scan fired by a debounced field. Spending the
    * moderation budget on keystrokes would lock the viewer out of the queue
    * they came to work.
    */

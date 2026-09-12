@@ -1,4 +1,5 @@
-import { closeDb } from "@my-tuums/db";
+import { closeDb } from "./testing/runtime.js";
+
 import { user } from "@my-tuums/db/schema";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -22,14 +23,12 @@ afterAll(async () => {
 
 /**
  * The lifecycle is tested through the same seam production callers cross —
- * a real Postgres `Database` and the harness's in-memory bucket. Assertions
+ * a real D1 `Database` and the harness's in-memory bucket. Assertions
  * are about observable state: the `user` row and what the bucket holds.
  * No private helper is called, and no drizzle internals are parsed.
  *
- * The write-failure and rollback tests use a real transaction so the
- * database's snapshot-and-discard behaviour is exercised, not simulated:
- * `transaction` really runs the lifecycle's queries and really discards
- * them on throw.
+ * Durable upload intents protect partial writes; D1 cleanup/rollback and
+ * expiry contracts live in media-intents.int.test.ts.
  */
 
 const PNG_BYTES = new Uint8Array([1, 2, 3, 4]);
@@ -153,7 +152,7 @@ describe("replaceProfileMedia", () => {
     ).toBe(2);
   });
 
-  it("leaks only the display object when the original write fails — the row never moved", async () => {
+  it("retains the partial upload for recovery when the original write fails — the row never moved", async () => {
     const alice = await createTestUser();
     const old = await seedStoredPair(alice, "avatar");
     const realPut = testStorage.put.bind(testStorage);
@@ -173,7 +172,7 @@ describe("replaceProfileMedia", () => {
     expect(stored.image).toBe(old.display);
     expect(stored.imageOriginal).toBe(old.original);
     // Only the display object of the new pair was written before the failure
-    // — an orphan for the reconciliation module to reap, never a column value.
+    // — protected by its upload intent, never a column value.
     const newKeys = [...testStorageObjects.keys()].filter(
       (key) =>
         key !== old.display.replace("/media/", "") && key !== old.original.replace("/media/", ""),

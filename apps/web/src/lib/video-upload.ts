@@ -2,9 +2,10 @@ import { client } from "@/lib/orpc";
 import { VIDEO_INPUT_TYPES } from "@my-tuums/api/constants";
 
 /** XHR exposes upload progress without reading a source video into JS memory. */
-function uploadPart(
+function uploadChunk(
   url: string,
   part: Blob,
+  offset: number,
   signal: AbortSignal,
   progress: (bytes: number) => void,
 ): Promise<void> {
@@ -13,11 +14,18 @@ function uploadPart(
     const request = new XMLHttpRequest();
     const abort = () => request.abort();
     signal.addEventListener("abort", abort, { once: true });
-    request.open("PUT", url);
+    request.open("PATCH", url);
+    request.setRequestHeader("Tus-Resumable", "1.0.0");
+    request.setRequestHeader("Upload-Offset", String(offset));
+    request.setRequestHeader("Content-Type", "application/offset+octet-stream");
     request.timeout = 180_000;
     request.upload.onprogress = (event) => progress(event.loaded);
     request.onload = () => {
-      if (request.status >= 200 && request.status < 300) resolve();
+      if (
+        request.status === 204 &&
+        request.getResponseHeader("Upload-Offset") === String(offset + part.size)
+      )
+        resolve();
       else reject(new Error("The video part could not be uploaded."));
     };
     request.onerror = request.ontimeout = () =>
@@ -28,7 +36,29 @@ function uploadPart(
   });
 }
 
-/** Resume from server-confirmed parts, including a completion whose response was lost. */
+async function uploadOffset(url: string, byteSize: number, signal: AbortSignal): Promise<number> {
+  const response = await fetch(url, {
+    method: "HEAD",
+    signal,
+    credentials: "omit",
+    redirect: "error",
+    headers: { "Tus-Resumable": "1.0.0" },
+  });
+  const raw = response.headers.get("Upload-Offset");
+  if (
+    !response.ok ||
+    response.headers.get("Upload-Length") !== String(byteSize) ||
+    raw === null ||
+    !/^\d+$/.test(raw)
+  )
+    throw new Error("The upload position could not be verified.");
+  const offset = Number(raw);
+  if (!Number.isSafeInteger(offset) || offset > byteSize)
+    throw new Error("Invalid upload position.");
+  return offset;
+}
+
+/** Resume from Stream's confirmed offset, including a PATCH whose response was lost. */
 export async function uploadVideo(
   file: File,
   options: {
@@ -51,21 +81,19 @@ export async function uploadVideo(
   }
   signal.throwIfAborted();
   const status = await client.video.status({ videoId }, { signal });
+  if (status.byteSize !== file.size) throw new Error("This upload is no longer available.");
   if (status.state === "uploaded") return videoId;
   if (status.state !== "uploading") throw new Error("This upload is no longer available.");
-  const completed = new Set(status.completedParts);
-  let bytes = status.completedParts.reduce(
-    (total, number) =>
-      total + Math.min(status.partBytes, file.size - (number - 1) * status.partBytes),
-    0,
-  );
+  if (!status.uploadUrl) throw new Error("This upload is no longer available.");
+  const chunkBytes = 8 * 1024 * 1024;
+  let bytes = await uploadOffset(status.uploadUrl, file.size, signal);
   options.onProgress(bytes);
-  for (let number = 1; number <= Math.ceil(file.size / status.partBytes); number++) {
-    if (completed.has(number)) continue;
+  while (bytes < file.size) {
     signal.throwIfAborted();
-    const { url } = await client.video.part({ videoId, number }, { signal });
-    const part = file.slice((number - 1) * status.partBytes, number * status.partBytes);
-    await uploadPart(url, part, signal, (loaded) => options.onProgress(bytes + loaded));
+    const part = file.slice(bytes, bytes + chunkBytes);
+    await uploadChunk(status.uploadUrl, part, bytes, signal, (loaded) =>
+      options.onProgress(bytes + loaded),
+    );
     bytes += part.size;
     options.onProgress(bytes);
   }

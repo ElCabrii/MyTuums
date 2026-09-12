@@ -1,5 +1,15 @@
 # Repository context
 
+This branch now serves preview through Cloudflare-native infrastructure.
+Preview migration execution is tracked in [the preview migration record](docs/cloudflare-preview-migration.md).
+The authoritative PoC scope, verified progress and outstanding work are in
+[the migration record](docs/cloudflare-migration.md). The Node deployment and PostgreSQL runtime configuration have been removed on
+this branch. Preview owner verification and schedule activation are complete. Production
+preparation and release gates are tracked in
+[the production execution record](docs/cloudflare-production-migration.md);
+local app/jobs development uses isolated persistent native resources; see
+[local development](docs/operations.md#local-development).
+
 The repository map for MyTuums. Use the routing table to reach the context that
 owns a change; use `docs/` for cross-package architecture, product behavior,
 operations, and security.
@@ -10,31 +20,33 @@ MyTuums — a Twitter-style social app (posts, replies, likes, bookmarks,
 follows, profiles, moderation) with real authentication. pnpm 12 + Turborepo
 on Node 24, TypeScript strict everywhere.
 
-| Workspace           | Package                  | Owns                                                            |
-| ------------------- | ------------------------ | --------------------------------------------------------------- |
-| `apps/web`          | `@my-tuums/web`          | React 19 + Vite SPA, TanStack Router, Jotai                     |
-| `apps/branding`     | `@my-tuums/branding`     | the public landing site served at about.mytuums.com             |
-| `apps/server`       | `@my-tuums/server`       | `node:http` application server and server maintenance commands  |
-| `apps/video-worker` | `@my-tuums/video-worker` | video queue consumers, native encoding, publication and cleanup |
-| `packages/api`      | `@my-tuums/api`          | oRPC procedures, business rules, media, moderation              |
-| `packages/auth`     | `@my-tuums/auth`         | the single better-auth instance                                 |
-| `packages/db`       | `@my-tuums/db`           | Drizzle schema, migrations, test-database guards                |
-| `e2e`               | `@my-tuums/e2e`          | Playwright journeys over the real stack                         |
+| Workspace           | Package                  | Owns                                                              |
+| ------------------- | ------------------------ | ----------------------------------------------------------------- |
+| `apps/web`          | `@my-tuums/web`          | React 19 + Vite SPA, TanStack Router, Jotai                       |
+| `apps/branding`     | `@my-tuums/branding`     | the public landing site served at about.mytuums.com               |
+| `apps/server`       | `@my-tuums/server`       | Cloudflare application Worker and native maintenance CLIs         |
+| `apps/link-fetcher` | `@my-tuums/link-fetcher` | private Cloudflare Container for guarded rich-link HTTP           |
+| `apps/jobs`         | `@my-tuums/jobs`         | Cloudflare Workflows, video processing, Cron recovery and pruning |
+| `packages/api`      | `@my-tuums/api`          | oRPC procedures, business rules, media, moderation                |
+| `packages/auth`     | `@my-tuums/auth`         | the single better-auth instance                                   |
+| `packages/db`       | `@my-tuums/db`           | Drizzle schema, migrations, test-database guards                  |
+| `e2e`               | `@my-tuums/e2e`          | Playwright journeys over the real stack                           |
 
 ## Context routing
 
-| If the change is about                                         | Go to                                                        |
-| -------------------------------------------------------------- | ------------------------------------------------------------ |
-| UI, routes, client state, i18n copy, theme                     | [apps/web/CONTEXT.md](apps/web/CONTEXT.md)                   |
-| The public landing site at `about.mytuums.com`                 | [apps/branding/CONTEXT.md](apps/branding/CONTEXT.md)         |
-| HTTP routing, env validation, headers, runtime, Docker         | [apps/server/CONTEXT.md](apps/server/CONTEXT.md)             |
-| Video probing, encoding, worker runtime, processing benchmarks | [apps/video-worker/CONTEXT.md](apps/video-worker/CONTEXT.md) |
-| Business rules, RPC procedures, moderation, media/storage      | [packages/api/CONTEXT.md](packages/api/CONTEXT.md)           |
-| Sign-in, OAuth providers, sessions, auth email                 | [packages/auth/CONTEXT.md](packages/auth/CONTEXT.md)         |
-| Schema, migrations, test databases                             | [packages/db/CONTEXT.md](packages/db/CONTEXT.md)             |
-| End-to-end journeys                                            | [e2e/CONTEXT.md](e2e/CONTEXT.md)                             |
-| Workflows, CI jobs                                             | [.github/CONTEXT.md](.github/CONTEXT.md)                     |
-| Repository lint and TypeScript tooling                         | root configs, `package.json`, `tools/oxlint/`                |
+| If the change is about                                    | Go to                                                        |
+| --------------------------------------------------------- | ------------------------------------------------------------ |
+| UI, routes, client state, i18n copy, theme                | [apps/web/CONTEXT.md](apps/web/CONTEXT.md)                   |
+| The public landing site at `about.mytuums.com`            | [apps/branding/CONTEXT.md](apps/branding/CONTEXT.md)         |
+| HTTP routing, config validation, headers, Worker runtime  | [apps/server/CONTEXT.md](apps/server/CONTEXT.md)             |
+| Cloudflare background execution and scheduled recovery    | [apps/jobs/CONTEXT.md](apps/jobs/CONTEXT.md)                 |
+| Outbound rich-link networking                             | [apps/link-fetcher/CONTEXT.md](apps/link-fetcher/CONTEXT.md) |
+| Business rules, RPC procedures, moderation, media/storage | [packages/api/CONTEXT.md](packages/api/CONTEXT.md)           |
+| Sign-in, OAuth providers, sessions, auth email            | [packages/auth/CONTEXT.md](packages/auth/CONTEXT.md)         |
+| Schema, migrations, test databases                        | [packages/db/CONTEXT.md](packages/db/CONTEXT.md)             |
+| End-to-end journeys                                       | [e2e/CONTEXT.md](e2e/CONTEXT.md)                             |
+| Workflows, CI jobs                                        | [.github/CONTEXT.md](.github/CONTEXT.md)                     |
+| Repository lint and TypeScript tooling                    | root configs, `package.json`, `tools/oxlint/`                |
 
 Cross-package questions — how the pieces fit, what a request does end to end —
 are answered in [docs/architecture.md](docs/architecture.md).
@@ -99,20 +111,26 @@ to the owning context.
 These artifacts are generator-owned. Run the generator and commit its output
 (or nothing where the artifact is git-ignored).
 
-| Artefact                         | Produced by                                                |
-| -------------------------------- | ---------------------------------------------------------- |
-| `apps/web/src/routeTree.gen.ts`  | the TanStack Router Vite plugin (git-ignored)              |
-| `apps/web/src/paraglide`         | `pnpm --filter @my-tuums/web paraglide` (git-ignored)      |
-| `apps/branding/src/paraglide`    | `pnpm --filter @my-tuums/branding paraglide` (git-ignored) |
-| `packages/db/src/schema/auth.ts` | `pnpm --filter @my-tuums/db db:generate:auth`              |
-| `packages/db/drizzle`            | `pnpm db:generate` (committed, shipped in the image)       |
+| Artefact                                             | Produced by                                                               |
+| ---------------------------------------------------- | ------------------------------------------------------------------------- |
+| `apps/web/src/routeTree.gen.ts`                      | the TanStack Router Vite plugin (git-ignored)                             |
+| `apps/web/src/paraglide`                             | `pnpm --filter @my-tuums/web paraglide` (git-ignored)                     |
+| `apps/branding/src/paraglide`                        | `pnpm --filter @my-tuums/branding paraglide` (git-ignored)                |
+| `packages/db/src/schema/auth.ts`                     | `pnpm --filter @my-tuums/db db:generate:auth`                             |
+| `packages/api/src/unicode-case-folding.generated.ts` | `pnpm --filter @my-tuums/api generate:case-folding`, then `pnpm format`   |
+| `packages/api/src/search-folding.generated.ts`       | `pnpm --filter @my-tuums/api generate:search-folding`, then `pnpm format` |
+| `packages/db/drizzle-d1`                             | `pnpm db:generate` (committed, applied before Worker deployment)          |
+| `apps/link-fetcher/worker/worker-configuration.d.ts` | `pnpm --filter @my-tuums/link-fetcher types`, then `pnpm format`          |
+| `apps/jobs/worker-configuration.d.ts`                | `pnpm --filter @my-tuums/jobs types`, then `pnpm format`                  |
+| `apps/branding/worker/worker-configuration.d.ts`     | `pnpm --filter @my-tuums/branding types`, then `pnpm format`              |
+| `apps/server/worker/worker-configuration.d.ts`       | `pnpm --filter @my-tuums/server types`, then `pnpm format`                |
 
 The two git-ignored web artefacts are why `lint` and `typecheck` depend on
 `build` in `turbo.json`: `tsc` cannot resolve a route target or a message
 function until one build has run.
 
-The pinned pg-boss schema uses a committed custom migration; its generation
-workflow is in [video operations](docs/video-operations.md#migrations).
+The PostgreSQL migration history is preserved for comparison. Native jobs use
+the D1 outbox and Workflows; see [video operations](docs/video-operations.md#migrations).
 
 ## Verification matrix
 
@@ -128,17 +146,18 @@ you iterate, and `pnpm verify` before you call the work done.
 `pnpm verify` is exactly what CI's `Verify` job runs — one script, so the two
 cannot drift. While iterating, go narrower still:
 
-| Change touches                  | Run                                                   |
-| ------------------------------- | ----------------------------------------------------- |
-| one file                        | `pnpm --filter <pkg> exec vitest run <path>`          |
-| pure logic, atoms, components   | `pnpm test:unit`                                      |
-| procedures, queries, schema     | `pnpm db:test:setup` then `pnpm test:integration`     |
-| a user journey                  | `pnpm test:e2e` (slow; use only for end-to-end proof) |
-| the Dockerfile or the SPA build | `pnpm build`, and let CI's `image` job boot the image |
-| documentation                   | `pnpm docs:check`                                     |
+| Change touches                | Run                                                               |
+| ----------------------------- | ----------------------------------------------------------------- |
+| one file                      | `pnpm --filter <pkg> exec vitest run <path>`                      |
+| pure logic, atoms, components | `pnpm test:unit`                                                  |
+| procedures, queries, schema   | `pnpm db:test:setup` then `pnpm test:integration`                 |
+| a user journey                | `pnpm test:e2e` (slow; use only for end-to-end proof)             |
+| Worker or SPA artifact        | `pnpm build`, then native artifact tests through `pnpm test:unit` |
+| documentation                 | `pnpm docs:check`                                                 |
 
-`.env` must exist first — copy `.env.example`. Integration and E2E tests need
-a reachable Postgres (`pnpm docker:up`).
+API integration tests create ephemeral local D1 databases and need no Postgres
+or credentials. E2E now uses local Worker/D1/R2/Workflow bindings with a synthetic
+Stream transport fixture. Hosted provider checks and interactive local development remain outstanding.
 
 What belongs in which suite, and when a test deserves to exist at all:
 [TESTING_STRATEGY.md](TESTING_STRATEGY.md).
@@ -148,6 +167,7 @@ What belongs in which suite, and when a test deserves to exist at all:
 - [README.md](README.md) — human setup and commands.
 - [docs/architecture.md](docs/architecture.md) — boundaries and executable flows.
 - [docs/product.md](docs/product.md) — implemented behaviour and vocabulary.
+- [docs/cloudflare-poc-report.md](docs/cloudflare-poc-report.md) — migration parity evidence and remaining hosted gates.
 - [docs/operations.md](docs/operations.md) — environments, deploys, CI.
 - [docs/security.md](docs/security.md) — trust boundaries and sensitive invariants.
 - [TESTING_STRATEGY.md](TESTING_STRATEGY.md) — the test portfolio and its rules.

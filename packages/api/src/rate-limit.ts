@@ -1,32 +1,7 @@
 /**
- * Rate limiting for oRPC procedures.
- *
- * BetterAuth's own `rateLimit` (packages/auth/src/index.ts) only covers the
- * `/api/auth/*` routes it serves. Everything under `/rpc` — including every
- * write in this package — was unthrottled, so a single signed-in caller could
- * flood the `post` table as fast as the network allowed. This closes that.
- *
- * Fixed window rather than a token bucket: the failure mode of a fixed window
- * is that a caller can burst up to 2x the limit across a window boundary,
- * which for "stop someone hammering the write path" is irrelevant, and it
- * costs one map lookup instead of per-key timers.
- *
- * State lives in this process's memory, not in Postgres. That is a deliberate
- * trade: the alternative is a database round trip on every single RPC call,
- * to defend a single-container deployment (see docker-compose.yml). The
- * consequences are worth stating plainly — limits reset on deploy, and if the
- * server is ever scaled to N replicas each one keeps its own counters, so the
- * effective limit becomes N x `limit`. Both are fine while the intent is
- * "bound the damage one client can do"; neither is fine if these limits ever
- * become a billing or abuse boundary, at which point this wants to move to
- * Postgres or Redis behind the same `consume` interface.
- *
- * This module is a pure factory — it does not instantiate a limiter of its
- * own. `context.ts` owns the one instance production procedures share
- * (created once, threaded onto every `Context` via `createContext`), and
- * `testing/harness.ts` owns a separate one scoped to the test run. Neither
- * has to import the other's, which is what makes a test's rate-limit state
- * fully independent of anything the request layer does.
+ * Shared fixed-window policies and the asynchronous admission contract.
+ * Production uses Durable Objects; the memory factory is for isolated tests.
+ * Callers must await admission before executing protected work.
  */
 
 /** A per-caller budget for one named operation. */
@@ -49,10 +24,7 @@ export interface RateLimitResult {
 
 /** The counter procedures consume budget from and tests substitute. */
 export interface RateLimiter {
-  consume(key: string, policy: RateLimitPolicy): RateLimitResult;
-  /** Drops all counters. Exposed for tests and for a deliberate operational reset. */
-  clear(): void;
-  readonly size: number;
+  consume(key: string, policy: RateLimitPolicy): Promise<RateLimitResult>;
 }
 
 const MINUTE = 60_000;
@@ -116,7 +88,7 @@ export function createRateLimiter(
      */
     capacityWarnCooldownMs?: number;
   } = {},
-): RateLimiter {
+): RateLimiter & { clear(): void; readonly size: number } {
   const now = options.now ?? Date.now;
   const maxKeys = options.maxKeys ?? 10_000;
   const capacityWarnCooldownMs = options.capacityWarnCooldownMs ?? MINUTE;
@@ -167,11 +139,11 @@ export function createRateLimiter(
 
       const allowed = bucket.count <= policy.limit;
 
-      return {
+      return Promise.resolve({
         allowed,
         remaining: Math.max(0, policy.limit - bucket.count),
         retryAfterSeconds: allowed ? 0 : Math.max(1, Math.ceil((bucket.resetAt - at) / 1000)),
-      };
+      });
     },
 
     clear() {

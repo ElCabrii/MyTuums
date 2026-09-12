@@ -1,3 +1,4 @@
+import { closeDb } from "./testing/runtime.js";
 /**
  * `moderation.appealPreview` — the author-gated look at the post an appeal is
  * about.
@@ -14,11 +15,11 @@
  */
 import { randomUUID } from "node:crypto";
 import { call, ORPCError } from "@orpc/server";
-import { closeDb } from "@my-tuums/db";
+
 import { desc, eq } from "drizzle-orm";
 import { moderationAction, post, postAttachment } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { appealToken } from "./appeal-token.js";
+import { appealToken } from "./testing/runtime.js";
 import { removePostEffect, suspendUserEffect } from "./moderation-actions.js";
 import { appRouter } from "./router.js";
 import {
@@ -40,7 +41,7 @@ afterAll(async () => {
 });
 
 /** An email link for an action, minted the way `makeAppealUrl` does. */
-function link(actionId: string, userId: string): string {
+function link(actionId: string, userId: string): Promise<string> {
   return appealToken.sign({
     purpose: "appeal",
     actionId,
@@ -83,7 +84,7 @@ async function removedPost(
       height: 64,
     });
   }
-  await removePostEffect(anonContext.db, {
+  await removePostEffect(anonContext, {
     postId: row.id,
     actorId: moderator.id,
     reason: "spam",
@@ -101,7 +102,7 @@ describe("moderation.appealPreview", () => {
     const { postId, actionId } = await removedPost(author, "the removed words", 2);
 
     // Both identifiers the appeal page carries resolve to the same post.
-    for (const input of [{ token: link(actionId, author.id) }, { postId }]) {
+    for (const input of [{ token: await link(actionId, author.id) }, { postId }]) {
       const result = await preview(author, input);
       expect(result.post?.id).toBe(postId);
       expect(result.post?.content).toBe("the removed words");
@@ -132,14 +133,14 @@ describe("moderation.appealPreview", () => {
     const { postId, actionId } = await removedPost(author, "not yours", 1);
 
     // A token handed onward is not a capability here: the session decides.
-    await expect(preview(stranger, { token: link(actionId, author.id) })).rejects.toThrow(
+    await expect(preview(stranger, { token: await link(actionId, author.id) })).rejects.toThrow(
       /no longer valid/,
     );
     await expect(preview(stranger, { postId })).rejects.toThrow(/no longer valid/);
 
     // Nor can a stranger mint themselves one — the HMAC still has to verify,
     // and the payload's own claim about who it belongs to buys nothing.
-    await expect(preview(stranger, { token: link(actionId, stranger.id) })).rejects.toThrow(
+    await expect(preview(stranger, { token: await link(actionId, stranger.id) })).rejects.toThrow(
       /no longer valid/,
     );
     await expect(preview(stranger, { token: "not.a.token" })).rejects.toThrow(
@@ -152,16 +153,16 @@ describe("moderation.appealPreview", () => {
     const { postId, actionId } = await removedPost(author, "one or the other");
 
     await expect(preview(author, {})).rejects.toThrow(/either an appeal link or the removed post/);
-    await expect(preview(author, { token: link(actionId, author.id), postId })).rejects.toThrow(
-      /either an appeal link or the removed post/,
-    );
+    await expect(
+      preview(author, { token: await link(actionId, author.id), postId }),
+    ).rejects.toThrow(/either an appeal link or the removed post/);
   });
 
   it("previews nothing — successfully — for an action with no post behind it", async () => {
     const suspended = await createTestUser();
     const moderator = await createTestUser();
     await setUserRole(moderator.id, "moderator");
-    const { pending } = await suspendUserEffect(anonContext.db, {
+    const { pending } = await suspendUserEffect(anonContext, {
       userId: suspended.id,
       actorId: moderator.id,
       actorRole: "moderator",
@@ -178,7 +179,7 @@ describe("moderation.appealPreview", () => {
 
     // Not a refusal: the appeal form renders alone, exactly as it did before
     // this procedure existed.
-    const result = await preview(suspended, { token: link(action.id, suspended.id) });
+    const result = await preview(suspended, { token: await link(action.id, suspended.id) });
     expect(result.post).toBeNull();
   });
 

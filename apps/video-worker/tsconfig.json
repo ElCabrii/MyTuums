@@ -1,5 +1,0 @@
-{
-  "extends": "@my-tuums/tsconfig/node.json",
-  "compilerOptions": { "outDir": "dist", "rootDir": "." },
-  "include": ["src", "tsup.config.ts", "vitest.config.ts"]
-}

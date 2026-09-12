@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1789066382722,
+      "tag": "0000_cloudflare_initial",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789066424238,
+      "tag": "0001_database_invariants",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789066424796,
+      "tag": "0002_game_favorite_counts",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789066425397,
+      "tag": "0003_media_cleanup_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789066425984,
+      "tag": "0004_game_cover_cleanup",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789066426589,
+      "tag": "0005_stream_cleanup_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789122317474,
+      "tag": "0006_durable_moderation_email",
+      "breakpoints": true
+    }
+  ]
+}

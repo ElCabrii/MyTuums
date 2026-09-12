@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, gt, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 import {
   moderationAction,
@@ -13,11 +13,16 @@ import {
   CURSOR_MAX_ENCODED_LENGTH,
   NOTIFICATION_PAGE_SIZE,
   NOTIFICATION_PAGE_SIZE_MAX,
-  NOTIFICATION_RETENTION_DAYS,
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { keysetPage } from "./pagination.js";
-import { postAttachmentsSelection, type PostAttachment } from "./post-media.js";
+import {
+  postAttachmentsSelection,
+  postAttachmentSchema,
+  type PostAttachment,
+} from "./post-media.js";
+import { jsonDecoder } from "./sql.js";
+import { withinNotificationRetention } from "./notification-retention.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
 import { effectivelyBanned, invisibleUser, privatePostHidden } from "./visibility.js";
@@ -29,8 +34,7 @@ import { effectivelyBanned, invisibleUser, privatePostHidden } from "./visibilit
  *
  * Writes never happen here — they ride the cause's own transaction at each
  * call site (`post.like`, `post.repost`, `post.create`, `user.follow`,
- * `logAction`), through
- * {@link insertNotification}. This module owns the read side: the
+ * the moderation statement builders), through `notificationInsert`. This module owns the read side: the
  * newest-first keyset list, the damped unread count, and the mark-read
  * cursor stamp.
  */
@@ -87,21 +91,6 @@ export { insertNotification } from "./notification-writer.js";
 const notificationCursor = createCursorCodec(z.uuid());
 
 /**
- * The retention horizon shared by the list and the badge: older user-caused
- * rows are not served and not counted, so the two can never disagree about
- * what still exists. The rows themselves are pruned on the same boundary
- * (see `scripts/prune-notifications.ts`). Moderation rows are exempt on both
- * sides — they are rare, individually meaningful, and mirror an audit row
- * that lives forever.
- */
-function withinRetention() {
-  return sql`(
-    ${notification.type} = 'moderation'
-    or ${notification.createdAt} > now() - make_interval(days => ${NOTIFICATION_RETENTION_DAYS})
-  )`;
-}
-
-/**
  * What the recipient is allowed to see of their own list — one predicate,
  * applied identically by the list and the unread count so the badge can never
  * disagree with the page it opens.
@@ -137,8 +126,9 @@ function visibleNotification(viewerId: string) {
  * equal, so like/reply/follow rows from one actor collapse exactly as
  * intended.
  */
-const BURST_BUCKET_SECONDS = sql`floor(extract(epoch from ${notification.createdAt}) / ${BURST_WINDOW_SECONDS})`;
-const badgeTickKey = sql`(
+const BURST_BUCKET_SECONDS = sql`floor(1.0 * ${notification.createdAt} / ${BURST_WINDOW_SECONDS * 1000})`;
+// JSON preserves tuple boundaries and nulls without delimiter collisions.
+const badgeTickKey = sql`json_array(
   case when ${notification.type} in ('moderation', 'follow_request', 'video_failed') then ${notification.id} end,
   ${notification.actorId},
   ${notification.type},
@@ -178,7 +168,9 @@ export const notificationRouter = {
       const selection = {
         id: notification.id,
         type: notification.type,
-        read: sql<boolean>`${notificationLastSeen.seenAt} is not null and ${notification.createdAt} <= ${notificationLastSeen.seenAt}`,
+        read: sql<boolean>`${notificationLastSeen.seenAt} is not null and ${notification.createdAt} <= ${notificationLastSeen.seenAt}`.mapWith(
+          Boolean,
+        ),
         createdAt: notification.createdAt,
         postId: notification.postId,
         // The post's own words and images, previewed under the row's sentence
@@ -203,9 +195,9 @@ export const notificationRouter = {
           else ${post.content}
         end`,
         postAttachments: sql<PostAttachment[]>`case
-          when ${privatePostHidden(context.user.id)} then '[]'::jsonb
+          when ${privatePostHidden(context.user.id)} then '[]'
           else ${postAttachmentsSelection()}
-        end`,
+        end`.mapWith(jsonDecoder(z.array(postAttachmentSchema))),
         actor: {
           id: user.id,
           name: user.name,
@@ -261,7 +253,7 @@ export const notificationRouter = {
               and(
                 eq(notification.recipientId, context.user.id),
                 visibleNotification(context.user.id),
-                withinRetention(),
+                withinNotificationRetention(),
                 cursorFilter,
               ),
             )
@@ -288,7 +280,7 @@ export const notificationRouter = {
     .handler(async ({ context }) => {
       const [row] = await context.db
         .select({
-          count: sql<number>`count(distinct ${badgeTickKey})::int`,
+          count: sql<number>`count(distinct ${badgeTickKey})`,
         })
         .from(notification)
         .leftJoin(user, eq(user.id, notification.actorId))
@@ -304,7 +296,7 @@ export const notificationRouter = {
             // nothing has been seen.
             sql`(${notificationLastSeen.seenAt} is null or ${notification.createdAt} > ${notificationLastSeen.seenAt})`,
             visibleNotification(context.user.id),
-            withinRetention(),
+            withinNotificationRetention(),
           ),
         );
 
@@ -313,10 +305,11 @@ export const notificationRouter = {
 
   /**
    * Advances the caller's read cursor to now — "opening the page is what
-   * read means". Requires a session; idempotent, and O(1): one upsert on
+   * read means". Requires a session; idempotent, with one upsert on
    * `notification_last_seen` rather than a stamp per unread row, so a
-   * recipient with thousands of unread notifications pays the same as one
-   * with none. The cursor only ever moves forward — see the stamp below.
+   * recipient with thousands of unread notifications still writes one row.
+   * The returned count requires scanning unread entries; the cursor only
+   * ever moves forward — see the stamp below.
    *
    * Rows that arrive after the stamp are unread by definition — the cursor
    * comparison, not a row rewrite, decides. The returned count is the number
@@ -328,39 +321,41 @@ export const notificationRouter = {
     .use(rateLimit(RATE_LIMITS.markRead))
     .input(z.object({}))
     .handler(async ({ context }) => {
-      const stamped = await context.db.transaction(async (tx) => {
-        const [previous] = await tx
-          .select({ seenAt: notificationLastSeen.seenAt })
-          .from(notificationLastSeen)
-          .where(eq(notificationLastSeen.recipientId, context.user.id));
-        // The DB clock, not `new Date()`: `created_at` is stamped by the
-        // database, and a cursor minted from the app clock on a host that
-        // drifts ahead of it would silently read rows minted afterwards.
-        // The stamp is monotonic on top of that: `now()` reads the
-        // transaction's start time, so two concurrent page opens that
-        // commit out of order would otherwise leave the older stamp as the
-        // cursor and resurrect rows the newer one had already read.
-        await tx
+      const countUnread = () =>
+        context.db
+          .select({ count: sql<number>`count(*)` })
+          .from(notification)
+          .leftJoin(
+            notificationLastSeen,
+            eq(notificationLastSeen.recipientId, notification.recipientId),
+          )
+          .where(
+            and(
+              eq(notification.recipientId, context.user.id),
+              sql`(${notificationLastSeen.seenAt} is null or ${notification.createdAt} > ${notificationLastSeen.seenAt})`,
+            ),
+          );
+      // The two counts and monotonic database-clock stamp share one atomic
+      // batch. Concurrent events cannot inflate the response after commit;
+      // even a future-dated row is counted only when the stamp reaches it.
+      const [before, , after] = await context.db.batch([
+        countUnread(),
+        context.db
           .insert(notificationLastSeen)
-          .values({ recipientId: context.user.id, seenAt: sql`now()` })
+          .values({
+            recipientId: context.user.id,
+            seenAt: sql`cast(unixepoch('subsec') * 1000 as integer)`,
+          })
           .onConflictDoUpdate({
             target: notificationLastSeen.recipientId,
-            set: { seenAt: sql`greatest(${notificationLastSeen.seenAt}, now())` },
-          });
-        return previous?.seenAt ?? null;
-      });
+            set: {
+              seenAt: sql`max(${notificationLastSeen.seenAt}, cast(unixepoch('subsec') * 1000 as integer))`,
+            },
+          }),
+        countUnread(),
+      ]);
 
-      const [row] = await context.db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(notification)
-        .where(
-          and(
-            eq(notification.recipientId, context.user.id),
-            stamped === null ? sql`true` : gt(notification.createdAt, stamped),
-          ),
-        );
-
-      return { read: row?.count ?? 0 };
+      return { read: (before[0]?.count ?? 0) - (after[0]?.count ?? 0) };
     }),
 
   /**

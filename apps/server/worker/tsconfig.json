@@ -1,0 +1,16 @@
+{
+  "extends": "@my-tuums/tsconfig/base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "jsx": "react-jsx",
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": [
+    "**/*.ts",
+    "../src/worker-request-handler.ts",
+    "../src/worker-response-headers.ts",
+    "../src/worker-document.ts",
+    "../src/public-heads.ts",
+    "../src/access.ts"
+  ]
+}

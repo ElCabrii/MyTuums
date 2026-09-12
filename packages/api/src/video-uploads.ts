@@ -1,146 +1,145 @@
-import { and, desc, eq } from "drizzle-orm";
-import type { PgBoss } from "pg-boss";
+import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
-import { video, videoSubmission } from "@my-tuums/db/schema";
-import {
-  cancelVideo,
-  completeVideoUpload,
-  createVideoUpload,
-  registerVideoMultipart,
-  submitVideo,
-  VideoLifecycleError,
-} from "./video-lifecycle.js";
-import { VIDEO_PART_BYTES, type VideoPart, type VideoUploadStorage } from "./video-storage.js";
+import { video, videoCleanup, videoSubmission } from "@my-tuums/db/schema";
+import { submitVideo, VideoLifecycleError } from "./video-lifecycle.js";
+import type { JobDispatcher } from "./jobs.js";
+import type { StreamService } from "./stream.js";
+import { VIDEO_MAX_BYTES } from "./constants.js";
 
-function expectedPartSize(total: number, number: number): number {
-  return Math.min(VIDEO_PART_BYTES, total - (number - 1) * VIDEO_PART_BYTES);
-}
-
-function completeParts(parts: VideoPart[], byteSize: number): boolean {
-  const count = Math.ceil(byteSize / VIDEO_PART_BYTES);
-  return (
-    parts.length === count &&
-    parts.every(
-      (part, index) =>
-        part.number === index + 1 && part.byteSize === expectedPartSize(byteSize, part.number),
-    )
-  );
-}
-
-/** Owns the multipart protocol; procedures pass authenticated intent only. */
-export function createVideoUploads(
-  db: Database,
-  storage: VideoUploadStorage,
-  queue: Pick<PgBoss, "send">,
-) {
+/** Native Stream uploads; post text is stored only by explicit submission. */
+export function createVideoUploads(db: Database, stream: StreamService, jobs: JobDispatcher) {
   async function owned(id: string, authorId: string) {
     const [row] = await db
       .select()
       .from(video)
       .where(and(eq(video.id, id), eq(video.authorId, authorId)));
     if (!row) throw new VideoLifecycleError("not_found");
-    if (row.state === "failed" || row.state === "cancelled" || row.state === "deleted")
+    if (!row.streamCreatorId || ["failed", "cancelled", "deleted"].includes(row.state))
       throw new VideoLifecycleError("unavailable");
-    if (
-      (row.state === "uploading" || row.state === "uploaded") &&
-      row.expiresAt.getTime() <= Date.now()
-    )
+    if (["uploading", "uploaded"].includes(row.state) && row.expiresAt.getTime() <= Date.now())
       throw new VideoLifecycleError("unavailable");
     return row;
   }
+
+  async function cancel(id: string, authorId: string): Promise<void> {
+    const [before] = await db.batch([
+      db
+        .select({ state: video.state })
+        .from(video)
+        .where(and(eq(video.id, id), eq(video.authorId, authorId))),
+      db
+        .update(video)
+        .set({
+          state: "cancelled",
+          uploadUrl: null,
+          playback: null,
+        })
+        .where(
+          and(
+            eq(video.id, id),
+            eq(video.authorId, authorId),
+            notInArray(video.state, ["published", "failed", "cancelled", "deleted"]),
+          ),
+        ),
+      db.delete(videoSubmission).where(sql`${videoSubmission.videoId} in (select id from video
+        where id = ${id} and author_id = ${authorId} and state = 'cancelled')`),
+    ]);
+    if (!before[0]) throw new VideoLifecycleError("not_found");
+    if (before[0].state === "published") throw new VideoLifecycleError("unavailable");
+  }
+
   return {
     async begin(authorId: string, byteSize: number) {
-      const row = await createVideoUpload(db, authorId, byteSize);
-      let multipartId: string | undefined;
+      if (!Number.isSafeInteger(byteSize) || byteSize <= 0 || byteSize > VIDEO_MAX_BYTES)
+        throw new VideoLifecycleError("unavailable");
+      const id = crypto.randomUUID();
+      const [row] = await db
+        .insert(video)
+        .values({
+          id,
+          authorId,
+          byteSize,
+          streamCreatorId: stream.creatorId(id),
+          expiresAt: sql`cast(unixepoch('subsec') * 1000 as integer) + 86400000`,
+        })
+        .returning();
+      if (!row) throw new VideoLifecycleError("unavailable");
       try {
-        multipartId = await storage.startMultipart(row.sourceKey);
-        if (!(await registerVideoMultipart(db, row.id, authorId, multipartId))) {
-          await storage.abortMultipart(row.sourceKey, multipartId);
+        const capability = await stream.createUpload(id, byteSize, row.expiresAt);
+        const registered = await db
+          .update(video)
+          .set({ streamUid: capability.uid, uploadUrl: capability.uploadUrl })
+          .where(
+            and(
+              eq(video.id, id),
+              eq(video.authorId, authorId),
+              eq(video.state, "uploading"),
+              sql`${video.expiresAt} > cast(unixepoch('subsec') * 1000 as integer)`,
+            ),
+          )
+          .returning({ id: video.id });
+        if (!registered.length) {
+          // Account deletion/cleanup can win while Stream is creating the resource.
+          await db
+            .insert(videoCleanup)
+            .values({ videoId: id, prefix: `stream-upload/${id}`, streamUid: capability.uid })
+            .onConflictDoUpdate({
+              target: videoCleanup.prefix,
+              set: {
+                streamUid: capability.uid,
+                nextAttemptAt: sql`cast(unixepoch('subsec') * 1000 as integer)`,
+              },
+            });
           throw new VideoLifecycleError("unavailable");
         }
+        return { id, byteSize, expiresAt: row.expiresAt };
       } catch (error) {
-        await cancelVideo(db, row.id, authorId);
+        // Even an unknown provider UID is recoverable through the pre-recorded creator ID.
+        await cancel(id, authorId).catch(() => {
+          console.error({ event: "video_cancel_deferred", videoId: id });
+        });
         throw error;
       }
-      return { id: row.id, byteSize, partBytes: VIDEO_PART_BYTES, expiresAt: row.expiresAt };
     },
     async status(id: string, authorId: string) {
       const row = await owned(id, authorId);
-      let completedParts: number[] = [];
-      if (row.state === "uploading" && row.multipartId) {
-        const size = await storage.sourceSize(row.sourceKey);
-        if (size === row.byteSize) {
-          completedParts = Array.from(
-            { length: Math.ceil(row.byteSize / VIDEO_PART_BYTES) },
-            (_, index) => index + 1,
-          );
-        } else if (size === null) {
-          const parts = await storage.listParts(row.sourceKey, row.multipartId);
-          completedParts = parts
-            .filter((part) => part.byteSize === expectedPartSize(row.byteSize, part.number))
-            .map((part) => part.number);
-        } else throw new VideoLifecycleError("unavailable");
-      }
       return {
         id,
         state: row.state,
         byteSize: row.byteSize,
-        partBytes: VIDEO_PART_BYTES,
-        completedParts,
         expiresAt: row.expiresAt,
         postId: row.postId,
-      };
-    },
-    async part(id: string, authorId: string, number: number) {
-      const row = await owned(id, authorId);
-      if (row.state !== "uploading" || !row.multipartId) throw new VideoLifecycleError("not_ready");
-      if (
-        !Number.isInteger(number) ||
-        number < 1 ||
-        number > Math.ceil(row.byteSize / VIDEO_PART_BYTES)
-      )
-        throw new VideoLifecycleError("unavailable");
-      return {
-        url: await storage.signPart(
-          row.sourceKey,
-          row.multipartId,
-          number,
-          expectedPartSize(row.byteSize, number),
-        ),
+        uploadUrl: row.state === "uploading" ? row.uploadUrl : null,
       };
     },
     async finish(id: string, authorId: string) {
       const row = await owned(id, authorId);
       if (row.state !== "uploading") return { id, state: row.state };
-      if (!row.multipartId) throw new VideoLifecycleError("not_ready");
-      let size = await storage.sourceSize(row.sourceKey);
-      if (size === null) {
-        const parts = await storage.listParts(row.sourceKey, row.multipartId);
-        if (!completeParts(parts, row.byteSize)) throw new VideoLifecycleError("not_ready");
-        try {
-          await storage.completeMultipart(row.sourceKey, row.multipartId, parts);
-        } catch (error) {
-          // Completion may have committed before its response was lost, or
-          // another completion request may have won. The object proves which.
-          if ((await storage.sourceSize(row.sourceKey)) !== row.byteSize) throw error;
-        }
-        size = await storage.sourceSize(row.sourceKey);
-      }
-      if (size !== row.byteSize) {
-        await cancelVideo(db, id, authorId);
+      if (!row.streamUid) throw new VideoLifecycleError("not_ready");
+      const status = await stream.status(id, row.streamUid);
+      if (!status || status.failed) {
+        await cancel(id, authorId);
         throw new VideoLifecycleError("unavailable");
       }
-      if (!(await completeVideoUpload(db, id, authorId))) {
-        const current = await owned(id, authorId);
-        if (current.state === "uploading") throw new VideoLifecycleError("not_ready");
-      }
-      return { id, state: "uploaded" as const };
+      if (!status.uploaded) throw new VideoLifecycleError("not_ready");
+      await db
+        .update(video)
+        .set({ state: "uploaded", uploadUrl: null })
+        .where(
+          and(
+            eq(video.id, id),
+            eq(video.authorId, authorId),
+            eq(video.state, "uploading"),
+            sql`${video.expiresAt} > cast(unixepoch('subsec') * 1000 as integer)`,
+          ),
+        );
+      const current = await owned(id, authorId);
+      if (current.state === "uploading") throw new VideoLifecycleError("not_ready");
+      return { id, state: current.state };
     },
-    cancel(id: string, authorId: string) {
-      return cancelVideo(db, id, authorId);
-    },
+    cancel,
     submit(args: Parameters<typeof submitVideo>[2]) {
-      return submitVideo(db, queue, args);
+      return submitVideo(db, jobs, args);
     },
     pending(authorId: string) {
       return db
@@ -160,5 +159,4 @@ export function createVideoUploads(
     },
   };
 }
-
 export type VideoUploads = ReturnType<typeof createVideoUploads>;

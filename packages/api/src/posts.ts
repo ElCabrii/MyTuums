@@ -1,7 +1,6 @@
 import { ORPCError } from "@orpc/server";
-import { randomUUID } from "node:crypto";
-import { and, desc, eq, ilike, inArray, isNull, not, or, sql } from "drizzle-orm";
-import { alias, type PgColumn } from "drizzle-orm/pg-core";
+import { and, desc, eq, isNull, not, or, sql } from "drizzle-orm";
+import { alias, type SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { Database } from "@my-tuums/db";
 import {
   follow,
@@ -9,7 +8,6 @@ import {
   post,
   postAttachment,
   postBookmark,
-  postEdit,
   postLike,
   postRepost,
   user,
@@ -17,8 +15,6 @@ import {
 } from "@my-tuums/db/schema";
 import type { FeedRankSnapshotItem } from "@my-tuums/db/schema";
 import { z } from "zod";
-import { postLikeBadgeTierFor, POST_LIKE_BADGE_TIERS } from "./badges.js";
-import { stampBadgeTier } from "./badge-stamping.js";
 import {
   POST_MAX_LENGTH,
   POST_ATTACHMENT_MAX_BYTES,
@@ -48,12 +44,12 @@ import {
 } from "./feed-rank.js";
 import { gameMentionsFor } from "./games.js";
 import { resolveLinkCard } from "./link-card.js";
-import { insertNotification } from "./notifications.js";
-import { publishPost, resolvePostTarget, type CreatedPost } from "./post-publication.js";
-import { deletePostVideo } from "./video-lifecycle.js";
+import { addPostReaction } from "./post-reactions.js";
+import { publishPost, resolvePostTarget } from "./post-publication.js";
+import { editPost, deletePost } from "./post-mutations.js";
 import { requireVideoUploads, videoAction } from "./videos.js";
 import { keysetPage } from "./pagination.js";
-import { acquirePostMediaLifecycleLock } from "./post-media-lock.js";
+import { beginPostMediaUpload } from "./post-media-upload.js";
 import {
   protectedProcedure,
   publicRateLimit,
@@ -61,7 +57,8 @@ import {
   rateLimit,
 } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
-import { runSql } from "./sql.js";
+import { jsonDecoder, runSql, textIn } from "./sql.js";
+import { containsText } from "./search-text.js";
 import {
   invisibleAuthor,
   privatePostHidden,
@@ -70,14 +67,13 @@ import {
 } from "./visibility.js";
 import { acceptPostImage, type ImageRejection } from "./post-image.js";
 import {
-  discardPostAttachments,
   cleanupDeletedPostAttachments,
   outerPost,
   postAttachmentRows,
+  postAttachmentSchema,
   postAttachments,
   preparePostAttachments,
   writePostAttachments,
-  type PostAttachment,
   type PostAttachmentInput,
 } from "./post-media.js";
 import { requireStorage } from "./profile-media.js";
@@ -119,7 +115,7 @@ const postRankCursor = createRankCursorCodec();
  * the API returns.
  */
 const likeCount = sql<number>`(
-  select count(*)::int from ${postLike} where ${postLike.postId} = ${post.id}
+  select count(*) from ${postLike} where ${postLike.postId} = ${post.id}
 )`;
 
 /**
@@ -129,7 +125,7 @@ const likeCount = sql<number>`(
  * the post, not to any one feed it appears in.
  */
 const repostCount = sql<number>`(
-  select count(*)::int from ${postRepost} where ${postRepost.postId} = ${post.id}
+  select count(*) from ${postRepost} where ${postRepost.postId} = ${post.id}
 )`;
 
 /**
@@ -146,7 +142,7 @@ const repostCount = sql<number>`(
  * invisibility, and their tombstone cards stay in the thread.
  */
 const replyCount = sql<number>`(
-  select count(*)::int from ${post} as reply
+  select count(*) from ${post} as reply
   where reply.parent_id = ${post.id} and reply.deleted_at is null
 )`;
 
@@ -156,19 +152,21 @@ const replyCount = sql<number>`(
  * and thread reader gets the same visibility and tombstone semantics without
  * a second request per reply.
  */
-type ParentPreview = {
-  id: string;
-  excerpt: string | null;
-  truncated: boolean;
-  removed: boolean;
-  author: {
-    id: string;
-    name: string | null;
-    username: string | null;
-    displayUsername: string | null;
-    image: string | null;
-  };
-};
+const previewAuthorSchema = z.object({
+  id: z.string(),
+  name: z.string().nullable(),
+  username: z.string().nullable(),
+  displayUsername: z.string().nullable(),
+  image: z.string().nullable(),
+});
+const parentPreviewSchema = z.object({
+  id: z.string(),
+  excerpt: z.string().nullable(),
+  truncated: z.boolean(),
+  removed: z.boolean(),
+  author: previewAuthorSchema,
+});
+type ParentPreview = z.infer<typeof parentPreviewSchema>;
 
 /** Keep the profile-feed context compact even when the parent is a full post. */
 const PARENT_EXCERPT_LENGTH = 140;
@@ -256,18 +254,17 @@ function parentPreview(viewerId: string | null) {
           )
         )`;
   return sql<ParentPreview | null>`(
-    select jsonb_build_object(
+    select json_object(
       'id', ${parentPost.id},
       'excerpt', case
         when ${parentPost.removedAt} is not null then null
-        else left(${parentPost.content}, ${PARENT_EXCERPT_LENGTH})
+        else substr(${parentPost.content}, 1, ${PARENT_EXCERPT_LENGTH})
       end,
-      'truncated', case
-        when ${parentPost.removedAt} is not null then false
-        else char_length(${parentPost.content}) > ${PARENT_EXCERPT_LENGTH}
-      end,
-      'removed', ${parentPost.removedAt} is not null,
-      'author', jsonb_build_object(
+      'truncated', json(case
+        when ${parentPost.removedAt} is null and length(${parentPost.content}) > ${PARENT_EXCERPT_LENGTH}
+        then 'true' else 'false' end),
+      'removed', json(case when ${parentPost.removedAt} is not null then 'true' else 'false' end),
+      'author', json_object(
         'id', ${parentAuthor.id},
         'name', ${parentAuthor.name},
         'username', ${parentAuthor.username},
@@ -282,7 +279,7 @@ function parentPreview(viewerId: string | null) {
       and not (
         (
           ${parentAuthor.banned}
-          and (${parentAuthor.banExpires} is null or ${parentAuthor.banExpires} > now())
+          and (${parentAuthor.banExpires} is null or ${parentAuthor.banExpires} > cast(unixepoch('subsec') * 1000 as integer))
         )
         or exists (
           select 1 from ${userBlock}
@@ -297,7 +294,7 @@ function parentPreview(viewerId: string | null) {
       )
       and not (${privateHidden})
     limit 1
-  )`;
+  )`.mapWith(jsonDecoder(parentPreviewSchema.nullable()));
 }
 
 /**
@@ -315,7 +312,7 @@ function parentPrivateFlag(viewerId: string | null) {
       inner join ${user} as "parent_author" on ${parentAuthor.id} = ${parentPost.authorId}
       where ${parentPost.id} = ${post.parentId}
         and (${parentAuthor.isPrivate} is true or ${parentPost.isPrivate} is true)
-    )`;
+    )`.mapWith(Boolean);
   }
   return sql<boolean>`exists (
     select 1 from ${post} as "parent_post"
@@ -327,7 +324,7 @@ function parentPrivateFlag(viewerId: string | null) {
           select 1 from ${follow}
           where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${parentPost.authorId}
         ))
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /** Whether the viewer has liked this post — an EXISTS subquery. */
@@ -335,7 +332,7 @@ function viewerHasLiked(viewerId: string | null) {
   return sql<boolean>`exists (
     select 1 from ${postLike}
     where ${postLike.postId} = ${post.id} and ${postLike.userId} = ${viewerId}
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /** Whether the viewer has reposted this post — the same shape as `viewerHasLiked`. */
@@ -343,25 +340,20 @@ function viewerHasReposted(viewerId: string | null) {
   return sql<boolean>`exists (
     select 1 from ${postRepost}
     where ${postRepost.postId} = ${post.id} and ${postRepost.userId} = ${viewerId}
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /** The embedded quoted post a quote renders inside itself (issue #261). */
-export type QuotedPostPreview = {
-  id: string;
-  content: string | null;
-  removed: boolean;
-  deleted: boolean;
-  removedReason: string | null;
-  attachments: PostAttachment[];
-  author: {
-    id: string;
-    name: string | null;
-    username: string | null;
-    displayUsername: string | null;
-    image: string | null;
-  };
-};
+const quotedPostPreviewSchema = z.object({
+  id: z.string(),
+  content: z.string().nullable(),
+  removed: z.boolean(),
+  deleted: z.boolean(),
+  removedReason: z.string().nullable(),
+  attachments: z.array(postAttachmentSchema),
+  author: previewAuthorSchema,
+});
+export type QuotedPostPreview = z.infer<typeof quotedPostPreviewSchema>;
 
 /**
  * The quoted post, embedded as a correlated projection so every surface that
@@ -396,22 +388,22 @@ function quotedPreview(viewerId: string | null) {
           )
         )`;
   return sql<QuotedPostPreview | null>`(
-    select jsonb_build_object(
+    select json_object(
       'id', ${quotedPostTable.id},
       'content', case
         when ${quotedPostTable.removedAt} is not null or ${quotedPostTable.deletedAt} is not null then null
         else ${quotedPostTable.content}
       end,
-      'removed', ${quotedPostTable.removedAt} is not null,
-      'deleted', ${quotedPostTable.deletedAt} is not null,
+      'removed', json(case when ${quotedPostTable.removedAt} is not null then 'true' else 'false' end),
+      'deleted', json(case when ${quotedPostTable.deletedAt} is not null then 'true' else 'false' end),
       'removedReason', case
         when ${quotedPostTable.removedAt} is not null and ${quotedPostTable.authorId} = ${viewerId}
         then ${quotedPostTable.removedReason}
         else null
       end,
-      'attachments', coalesce((
-        select jsonb_agg(
-          jsonb_build_object(
+      'attachments', json(coalesce((
+        select json_group_array(
+          json_object(
             'id', ${postAttachment.id},
             'url', ${postAttachment.mediaPath},
             'position', ${postAttachment.position},
@@ -425,8 +417,8 @@ function quotedPreview(viewerId: string | null) {
         where ${postAttachment.postId} = ${quotedPostTable.id}
           and ${quotedPostTable.removedAt} is null
           and ${quotedPostTable.deletedAt} is null
-      ), '[]'::jsonb),
-      'author', jsonb_build_object(
+      ), '[]')),
+      'author', json_object(
         'id', ${quotedAuthor.id},
         'name', ${quotedAuthor.name},
         'username', ${quotedAuthor.username},
@@ -440,7 +432,7 @@ function quotedPreview(viewerId: string | null) {
       and not (
         (
           ${quotedAuthor.banned}
-          and (${quotedAuthor.banExpires} is null or ${quotedAuthor.banExpires} > now())
+          and (${quotedAuthor.banExpires} is null or ${quotedAuthor.banExpires} > cast(unixepoch('subsec') * 1000 as integer))
         )
         or exists (
           select 1 from ${userBlock}
@@ -455,7 +447,7 @@ function quotedPreview(viewerId: string | null) {
       )
       and not (${privateHidden})
     limit 1
-  )`;
+  )`.mapWith(jsonDecoder(quotedPostPreviewSchema.nullable()));
 }
 
 /**
@@ -472,7 +464,7 @@ function quotedPrivateFlag(viewerId: string | null) {
       inner join ${user} as "quoted_author" on ${quotedAuthor.id} = ${quotedPostTable.authorId}
       where ${quotedPostTable.id} = ${outerPost("quoted_post_id")}
         and (${quotedAuthor.isPrivate} is true or ${quotedPostTable.isPrivate} is true)
-    )`;
+    )`.mapWith(Boolean);
   }
   return sql<boolean>`exists (
     select 1 from ${post} as "quoted_post"
@@ -484,7 +476,7 @@ function quotedPrivateFlag(viewerId: string | null) {
           select 1 from ${follow}
           where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${quotedPostTable.authorId}
         ))
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /**
@@ -511,15 +503,15 @@ export type RepostAttribution = {
  */
 export function quotedPostEvidence() {
   return sql<QuotedPostPreview | null>`(
-    select jsonb_build_object(
+    select json_object(
       'id', ${quotedPostTable.id},
       'content', ${quotedPostTable.content},
-      'removed', ${quotedPostTable.removedAt} is not null,
-      'deleted', ${quotedPostTable.deletedAt} is not null,
+      'removed', json(case when ${quotedPostTable.removedAt} is not null then 'true' else 'false' end),
+      'deleted', json(case when ${quotedPostTable.deletedAt} is not null then 'true' else 'false' end),
       'removedReason', ${quotedPostTable.removedReason},
-      'attachments', coalesce((
-        select jsonb_agg(
-          jsonb_build_object(
+      'attachments', json(coalesce((
+        select json_group_array(
+          json_object(
             'id', ${postAttachment.id},
             'url', ${postAttachment.mediaPath},
             'position', ${postAttachment.position},
@@ -531,8 +523,8 @@ export function quotedPostEvidence() {
         )
         from ${postAttachment}
         where ${postAttachment.postId} = ${quotedPostTable.id}
-      ), '[]'::jsonb),
-      'author', jsonb_build_object(
+      ), '[]')),
+      'author', json_object(
         'id', ${quotedAuthor.id},
         'name', ${quotedAuthor.name},
         'username', ${quotedAuthor.username},
@@ -544,7 +536,7 @@ export function quotedPostEvidence() {
     inner join ${user} as "quoted_author" on ${quotedAuthor.id} = ${quotedPostTable.authorId}
     where ${quotedPostTable.id} = ${outerPost("quoted_post_id")}
     limit 1
-  )`;
+  )`.mapWith(jsonDecoder(quotedPostPreviewSchema.nullable()));
 }
 
 /**
@@ -557,7 +549,7 @@ function viewerHasBookmarked(viewerId: string | null) {
   return sql<boolean>`exists (
     select 1 from ${postBookmark}
     where ${postBookmark.postId} = ${post.id} and ${postBookmark.userId} = ${viewerId}
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /**
@@ -576,12 +568,12 @@ export const postSelection = (viewerId: string | null) => ({
   content: sql<
     string | null
   >`case when ${post.removedAt} is not null or ${post.deletedAt} is not null then null else ${post.content} end`,
-  removed: sql<boolean>`${post.removedAt} is not null`,
+  removed: sql<boolean>`${post.removedAt} is not null`.mapWith(Boolean),
   // Two flags rather than one, because the two tombstones mean different
   // things to the reader: a removal is a moderation action the author can
   // appeal, a deletion is the author's own doing and has nothing to appeal.
   // The stub copy differs accordingly (see `post-card.tsx`).
-  deleted: sql<boolean>`${post.deletedAt} is not null`,
+  deleted: sql<boolean>`${post.deletedAt} is not null`.mapWith(Boolean),
   removedReason: sql<
     string | null
   >`case when ${post.removedAt} is not null and ${post.authorId} = ${viewerId} then ${post.removedReason} else null end`,
@@ -592,7 +584,7 @@ export const postSelection = (viewerId: string | null) => ({
   // including a deliberately non-nullable sentinel `author` (see the
   // redaction in `feedEventPage`): read `unavailable` before ever reading
   // `author` off a feed item.
-  unavailable: sql<boolean>`false`,
+  unavailable: sql<boolean>`false`.mapWith(Boolean),
   // True when this row is hidden from the viewer specifically by privacy
   // (followers-only post or private account). Direct readers filter such rows
   // before this projection, so it is always false there; the merged feed's
@@ -689,37 +681,34 @@ async function visiblePostAuthorId(
 async function replyContinuationPages(args: ReplyContinuationPageArgs) {
   if (args.rootPostIds.length === 0) return [];
 
-  const rootsValues = sql.join(
-    args.rootPostIds.map((id) => sql`(${sql.param(id, post.id)}::uuid)`),
-    sql`, `,
-  );
   const descendantIds = await runSql<{ id: string; root_id: string }>(
     args.db,
     sql`
     with recursive roots(root_id) as (
-      values ${rootsValues}
+      select value from json_each(${JSON.stringify(args.rootPostIds)})
     ),
     descendants as (
       select child.id, child.parent_id, roots.root_id, 1 as depth
       from roots
-      join lateral (
-        select id, parent_id
+      join ${post} as child on child.id in (
+        select id
         from ${post}
         where parent_id = roots.root_id
         order by created_at asc, id asc
         limit ${THREAD_REPLY_BRANCH_CHILD_FANOUT}
-      ) as child on true
+      )
       union all
       select child.id, child.parent_id, descendants.root_id, descendants.depth + 1
       from descendants
-      join lateral (
-        select id, parent_id
+      join ${post} as child on child.id in (
+        select id
         from ${post}
         where parent_id = descendants.id
         order by created_at asc, id asc
         limit ${THREAD_REPLY_BRANCH_CHILD_FANOUT}
-      ) as child on true
+      )
       where descendants.depth < ${THREAD_REPLY_BRANCH_MAX_DEPTH}
+      limit ${THREAD_REPLY_BRANCH_DESCENDANT_BUDGET}
     )
     select id, root_id from descendants
     limit ${THREAD_REPLY_BRANCH_DESCENDANT_BUDGET}
@@ -737,7 +726,7 @@ async function replyContinuationPages(args: ReplyContinuationPageArgs) {
     })
     .from(post)
     .where(
-      inArray(
+      textIn(
         post.id,
         descendantIds.map((row) => row.id),
       ),
@@ -768,7 +757,7 @@ async function replyContinuationPages(args: ReplyContinuationPageArgs) {
     .innerJoin(user, eq(user.id, post.authorId))
     .where(
       and(
-        inArray(post.id, selectedIds),
+        textIn(post.id, selectedIds),
         not(invisibleAuthor(args.viewerId)),
         not(privatePostHidden(args.viewerId)),
       ),
@@ -816,10 +805,10 @@ const feedOriginalAuthor = alias(user, "feed_original_author");
 
 /** The columns the per-alias visibility predicates read — any `alias(user, …)` provides them. */
 type UserVisibilityColumns = {
-  id: PgColumn;
-  banned: PgColumn;
-  banExpires: PgColumn;
-  isPrivate: PgColumn;
+  id: SQLiteColumn;
+  banned: SQLiteColumn;
+  banExpires: SQLiteColumn;
+  isPrivate: SQLiteColumn;
 };
 
 /**
@@ -830,7 +819,7 @@ type UserVisibilityColumns = {
  */
 function aliasVisibleTo(viewerId: string | null, u: UserVisibilityColumns) {
   return sql<boolean>`not (
-    (${u.banned} and (${u.banExpires} is null or ${u.banExpires} > now()))
+    (${u.banned} and (${u.banExpires} is null or ${u.banExpires} > cast(unixepoch('subsec') * 1000 as integer)))
     or exists (
       select 1 from ${userBlock}
       where ${userBlock.blockerId} = ${u.id} and ${userBlock.blockedId} = ${viewerId}
@@ -839,7 +828,7 @@ function aliasVisibleTo(viewerId: string | null, u: UserVisibilityColumns) {
       select 1 from ${userBlock}
       where ${userBlock.blockerId} = ${viewerId} and ${userBlock.blockedId} = ${u.id}
     )
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /**
@@ -851,7 +840,7 @@ function aliasVisibleTo(viewerId: string | null, u: UserVisibilityColumns) {
  */
 function aliasPrivateUserHidden(viewerId: string | null, u: UserVisibilityColumns) {
   if (viewerId === null) {
-    return sql<boolean>`${u.isPrivate} is true`;
+    return sql<boolean>`${u.isPrivate} is true`.mapWith(Boolean);
   }
   return sql<boolean>`(
     ${u.isPrivate} is true
@@ -860,13 +849,13 @@ function aliasPrivateUserHidden(viewerId: string | null, u: UserVisibilityColumn
       select 1 from ${follow}
       where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${u.id}
     )
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /** The columns the aliased post-privacy predicate reads — any `alias(post, …)` provides them. */
 type PostVisibilityColumns = {
-  isPrivate: PgColumn;
-  authorId: PgColumn;
+  isPrivate: SQLiteColumn;
+  authorId: SQLiteColumn;
 };
 
 /**
@@ -883,7 +872,7 @@ function aliasPrivatePostHidden(
   u: UserVisibilityColumns,
 ) {
   if (viewerId === null) {
-    return sql<boolean>`(${u.isPrivate} is true or ${p.isPrivate} is true)`;
+    return sql<boolean>`(${u.isPrivate} is true or ${p.isPrivate} is true)`.mapWith(Boolean);
   }
   return sql<boolean>`(
     (${u.isPrivate} is true or ${p.isPrivate} is true)
@@ -892,17 +881,15 @@ function aliasPrivatePostHidden(
       select 1 from ${follow}
       where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${u.id}
     )
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /** One row of the merged event timeline the home feeds walk (raw keys, as selected). */
 type FeedEventRow = {
   /**
-   * `db.execute` hands back the driver's value for a timestamptz — a string,
-   * unlike the drizzle-mapped `Date` a built query returns — so it is parsed
-   * once, right after the fetch.
+   * Raw D1 queries return epoch milliseconds; convert once after the fetch.
    */
-  event_at: Date | string;
+  event_at: number;
   post_id: string;
   /** Null for an authored-post event; the reposter's id for a repost event. */
   reposter_id: string | null;
@@ -965,15 +952,6 @@ function pageTextsForMentions(page: {
   return texts;
 }
 
-/**
- * Escapes LIKE metacharacters so a caller's `%`, `_` and `\` match literally.
- * Local to this module (search.ts and games.ts carry their own three-line
- * copy) because importing either would cycle through `postSelection`.
- */
-function escapeFeedLikePattern(pattern: string): string {
-  return pattern.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
-
 async function feedEventPage(
   db: Database,
   args: {
@@ -1016,10 +994,8 @@ async function feedEventPage(
     // keeps the feed's normal stub rules (removed stays as a stub); only `q`
     // needs the exclusion.
     args.q ? isNull(post.removedAt) : undefined,
-    args.q ? ilike(post.content, `%${escapeFeedLikePattern(args.q)}%`) : undefined,
-    args.gameHashtagKey
-      ? ilike(post.content, `%#${escapeFeedLikePattern(args.gameHashtagKey)}%`)
-      : undefined,
+    args.q ? containsText(post.content, args.q) : undefined,
+    args.gameHashtagKey ? containsText(post.content, `#${args.gameHashtagKey}`) : undefined,
     args.authorId ? eq(post.authorId, args.authorId) : undefined,
     args.kind === "shares" ? not(isNull(post.quotedPostId)) : undefined,
     args.kind === "posts"
@@ -1067,10 +1043,8 @@ async function feedEventPage(
     args.q || args.gameHashtagKey
       ? not(aliasPrivatePostHidden(args.viewerId, feedOriginal, feedOriginalAuthor))
       : undefined,
-    args.q ? ilike(feedOriginal.content, `%${escapeFeedLikePattern(args.q)}%`) : undefined,
-    args.gameHashtagKey
-      ? ilike(feedOriginal.content, `%#${escapeFeedLikePattern(args.gameHashtagKey)}%`)
-      : undefined,
+    args.q ? containsText(feedOriginal.content, args.q) : undefined,
+    args.gameHashtagKey ? containsText(feedOriginal.content, `#${args.gameHashtagKey}`) : undefined,
     // The profile feed's mirror of the authored arm's author filter: a
     // profile that opts into repost events carries the ones its owner
     // caused, never other people's amplifications of the owner's posts.
@@ -1106,7 +1080,7 @@ async function feedEventPage(
       db,
       sql`
       with events as (
-        select ${post.createdAt} as event_at, ${post.id} as post_id, null::text as reposter_id, '' as reposter_key
+        select ${post.createdAt} as event_at, ${post.id} as post_id, null as reposter_id, '' as reposter_key
         from ${post}
         inner join ${user} on ${user.id} = ${post.authorId}
         where ${and(...authoredArmFilters)}
@@ -1137,11 +1111,14 @@ async function feedEventPage(
       // still disappear exactly like every other feed surface. Private
       // originals (issue #328) redact the same way — the event stays, the
       // content does not cross to non-followers.
-      originalUnavailable: sql<boolean>`${invisibleAuthor(args.viewerId)} or ${privatePostHidden(args.viewerId)}`,
+      originalUnavailable:
+        sql<boolean>`${invisibleAuthor(args.viewerId)} or ${privatePostHidden(args.viewerId)}`.mapWith(
+          Boolean,
+        ),
     })
     .from(post)
     .innerJoin(user, eq(user.id, post.authorId))
-    .where(inArray(post.id, [...new Set(page.map((event) => event.post_id))]));
+    .where(textIn(post.id, [...new Set(page.map((event) => event.post_id))]));
   const rowById = new Map(postRows.map((row) => [row.id, row]));
 
   const reposterIds = [
@@ -1159,7 +1136,7 @@ async function feedEventPage(
         .from(user)
         .where(
           and(
-            inArray(user.id, reposterIds),
+            textIn(user.id, reposterIds),
             visibleUser(args.viewerId),
             not(privateUserHidden(args.viewerId)),
           ),
@@ -1303,7 +1280,8 @@ async function hydrateRankedSlice(args: {
     .innerJoin(user, eq(user.id, post.authorId))
     .where(
       and(
-        inArray(post.id, postIds),
+        textIn(post.id, postIds),
+        args.q ? containsText(post.content, args.q) : undefined,
         not(invisibleAuthor(args.viewerId)),
         not(privatePostHidden(args.viewerId)),
       ),
@@ -1319,7 +1297,7 @@ async function hydrateRankedSlice(args: {
     const found = await args.db
       .select({ followingId: follow.followingId })
       .from(follow)
-      .where(and(eq(follow.followerId, args.viewerId), inArray(follow.followingId, [...ids])));
+      .where(and(eq(follow.followerId, args.viewerId), textIn(follow.followingId, [...ids])));
     return new Set(found.map((row) => row.followingId));
   };
   const repostPairs = args.slice.filter(
@@ -1357,18 +1335,14 @@ async function hydrateRankedSlice(args: {
           .from(user)
           .where(
             and(
-              inArray(user.id, reposterIds),
+              textIn(user.id, reposterIds),
               visibleUser(args.viewerId),
               not(privateUserHidden(args.viewerId)),
             ),
           );
   const reposterById = new Map(reposterRows.map((row) => [row.id, row]));
 
-  const matchesFilters = (rawContent: string | null, removedAt: Date | null): boolean => {
-    if (args.q !== undefined) {
-      if (removedAt) return false;
-      if (!rawContent || !rawContent.toLowerCase().includes(args.q.toLowerCase())) return false;
-    }
+  const matchesFilters = (rawContent: string | null): boolean => {
     if (args.gameHashtagKey) {
       const key: string = args.gameHashtagKey;
       if (!rawContent || !extractRankHashtagKeys([rawContent]).includes(key)) return false;
@@ -1397,7 +1371,7 @@ async function hydrateRankedSlice(args: {
     void deletedAt;
     void removedAt;
 
-    if (!matchesFilters(rawContent, row.removedAt)) continue;
+    if (!matchesFilters(rawContent)) continue;
 
     if (entry.reposterId) {
       const reposter = reposterById.get(entry.reposterId);
@@ -1451,29 +1425,11 @@ async function hydrateRankSuggestions(
       hasRequested: viewerHasRequested(viewerId),
     })
     .from(user)
-    .where(inArray(user.id, [...authorIds]));
+    .where(textIn(user.id, [...authorIds]));
   const byId = new Map(rows.map((row) => [row.id, row]));
   return authorIds
     .map((id) => byId.get(id))
     .filter((row): row is NonNullable<typeof row> => row !== undefined);
-}
-
-async function countLikes(db: Pick<Database, "select">, postId: string): Promise<number> {
-  const [row] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(postLike)
-    .where(eq(postLike.postId, postId));
-
-  return row?.count ?? 0;
-}
-
-async function countReposts(db: Database, postId: string): Promise<number> {
-  const [row] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(postRepost)
-    .where(eq(postRepost.postId, postId));
-
-  return row?.count ?? 0;
 }
 
 /**
@@ -1482,17 +1438,6 @@ async function countReposts(db: Database, postId: string): Promise<number> {
  * is what keeps whitespace from persisting as fake content on either path.
  */
 const postContentInput = z.string().trim().max(POST_MAX_LENGTH);
-
-/**
- * `post.edit`'s two state refusals, thrown from the fast-path guard and again
- * under the row lock inside the transaction. Module constants because each
- * refusal is thrown from two places that must not drift; the literals are
- * shared byte-for-byte with the keys of `localizeEditPostError`
- * (apps/web/src/lib/edit-post-error.ts), so restating one anywhere else
- * renders the refusal untranslated.
- */
-const EDIT_REMOVED_MESSAGE = "This post was removed by a moderator and can no longer be edited.";
-const EDIT_DELETED_MESSAGE = "This post was deleted and can no longer be edited.";
 
 /**
  * The `post` procedure group: create (posts, replies and quotes), edit,
@@ -1524,7 +1469,7 @@ export const postRouter = {
            */
           quotedPostId: z.uuid().optional(),
           /** The same ordered image capability is available to posts and replies. */
-          attachments: z.array(z.file()).max(POST_ATTACHMENT_MAX_COUNT).default([]),
+          attachments: z.array(z.instanceof(File)).max(POST_ATTACHMENT_MAX_COUNT).default([]),
           videoId: z.uuid().optional(),
           // Reject obsolete clients explicitly instead of silently dropping their subtitles.
           captions: z.never().optional(),
@@ -1604,7 +1549,7 @@ export const postRouter = {
       }
 
       const mediaInputs = await readPostAttachments(input.attachments);
-      const postId = randomUUID();
+      const postId = crypto.randomUUID();
       const prepared = preparePostAttachments(context.user.id, postId, mediaInputs);
       const storage = prepared.length > 0 ? requireStorage(context) : null;
 
@@ -1674,48 +1619,38 @@ export const postRouter = {
         };
       }
 
-      let created: CreatedPost | undefined;
-      try {
-        created = await context.db.transaction(async (tx) => {
-          if (storage) {
-            // The reconciler takes this same lock around its list/read/delete
-            // pass. Holding it until this transaction commits closes the
-            // upload-before-row window without adding lifecycle state to the
-            // attachment schema. Text-only posts skip the lock and storage
-            // work entirely.
-            await acquirePostMediaLifecycleLock(tx);
-            try {
-              await writePostAttachments(storage, prepared);
-            } catch {
-              // writePostAttachments already removes every attempted key,
-              // including a provider PUT that failed after committing.
-              throw new ORPCError("INTERNAL_SERVER_ERROR", {
-                message: "Failed to store post images.",
-              });
-            }
-          }
-
-          return publishPost(tx, {
-            postId,
-            authorId: context.user.id,
-            content: input.content,
-            parentId: input.parentId ?? null,
-            quotedPostId: input.quotedPostId ?? null,
-            isPrivate,
-            attachments: postAttachmentRows(prepared),
-            parentAuthorId,
-            quotedAuthorId,
+      if (storage) {
+        await beginPostMediaUpload(
+          context.db,
+          postId,
+          prepared.map(({ key }) => key),
+        );
+        try {
+          await writePostAttachments(storage, prepared);
+        } catch {
+          // The intent survives failed best-effort deletion and account
+          // deletion, so recovery can finish cleaning every attempted key.
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: "Failed to store post images.",
           });
-        });
-      } catch (error) {
-        if (storage) await discardPostAttachments(storage, prepared);
-        throw error;
+        }
       }
 
-      if (!created) {
-        if (storage) await discardPostAttachments(storage, prepared);
-        throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Failed to create post." });
-      }
+      // Never delete objects on an ambiguous database response: D1 may have
+      // committed before its acknowledgement was lost. A failed batch leaves
+      // the intent for recovery; a committed batch leaves live attachments.
+      const created = await publishPost(context.db, {
+        postId,
+        authorId: context.user.id,
+        content: input.content,
+        parentId: input.parentId ?? null,
+        quotedPostId: input.quotedPostId ?? null,
+        isPrivate,
+        attachments: postAttachmentRows(prepared),
+        parentAuthorId,
+        quotedAuthorId,
+        imageUpload: storage !== null,
+      });
 
       return {
         ...created,
@@ -1774,16 +1709,9 @@ export const postRouter = {
    * than restamping it (and records no history row), so a retry after a lost
    * response must not bump the marker.
    *
-   * Unlike `post.delete`, the write IS a transaction that opens with a
-   * `SELECT … FOR UPDATE` on the post row: the post row, its `editedAt`
-   * marker and its history row must all agree, and — more than that — the
-   * history row must record the text this edit *actually* superseded.
-   * Concurrent editors serialize on the row lock, so no version can be lost
-   * between two overlapping edits (an unlocked pair could record the same
-   * superseded text twice and leave the first edit's wording surviving
-   * nowhere). The unlocked compare-and-set `post.delete` uses is enough
-   * there because a tombstone idempotently absorbs races; a version history
-   * does not.
+   * Ownership, tombstone and nonempty-content guards run inside the same D1
+   * batch as the history insert and content update. Concurrent editors each
+   * record the text they actually replace; retries keep the original marker.
    *
    * `createdAt` never moves: feeds keyset on `(created_at, id)` and search
    * matches the raw `content` column, so the edited text is simply what
@@ -1793,121 +1721,9 @@ export const postRouter = {
   edit: protectedProcedure
     .use(rateLimit(RATE_LIMITS.write))
     .input(z.object({ postId: z.uuid(), content: postContentInput }))
-    .handler(async ({ input, context }) => {
-      const [target] = await context.db
-        .select({
-          authorId: post.authorId,
-          content: post.content,
-          removedAt: post.removedAt,
-          deletedAt: post.deletedAt,
-          editedAt: post.editedAt,
-          // The attachment existence half of the cross-field rule. A count
-          // rather than a read: only "is there at least one" decides whether
-          // empty text is a legal edit. The outer id is table-qualified via
-          // `outerPost` — this select has no join, so a bare `post.id` would
-          // render unqualified and resolve against the inner scope
-          // (post_attachment), matching nothing.
-          attachmentCount: sql<number>`(
-            select count(*)::int from ${postAttachment} where ${postAttachment.postId} = ${outerPost("id")}
-          )`,
-        })
-        .from(post)
-        .where(eq(post.id, input.postId))
-        .limit(1);
-
-      if (!target) {
-        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
-      }
-
-      // FORBIDDEN rather than NOT_FOUND, same as `post.delete`: the post's
-      // existence is not a secret, and "not yours" is the answer that explains
-      // the refusal.
-      if (target.authorId !== context.user.id) {
-        throw new ORPCError("FORBIDDEN", { message: "You can only edit your own posts." });
-      }
-
-      if (target.removedAt) {
-        throw new ORPCError("BAD_REQUEST", { message: EDIT_REMOVED_MESSAGE });
-      }
-
-      if (target.deletedAt) {
-        throw new ORPCError("BAD_REQUEST", { message: EDIT_DELETED_MESSAGE });
-      }
-
-      if (input.content.length === 0 && target.attachmentCount === 0) {
-        throw new ORPCError("BAD_REQUEST", { message: "Post cannot be empty." });
-      }
-
-      // The idempotent no-op: same content in, same row out. Crucially this
-      // sits AFTER the guards — a removed or deleted post is refused even for
-      // a content-equal retry, because the refusal is about the post's state,
-      // not about this particular payload.
-      if (target.content === input.content) {
-        return { postId: input.postId, content: target.content, editedAt: target.editedAt };
-      }
-
-      const editedAt = new Date();
-      const updated = await context.db.transaction(async (tx) => {
-        // The authoritative read, under the row lock. Concurrent editors
-        // serialize here, so the history row below records the text this
-        // edit *actually* superseded — never the stale text the guard read
-        // above may have seen. Without the lock, two overlapping edits both
-        // record the same superseded text and the first edit's wording
-        // survives nowhere (not in `content`, not in history) — the one
-        // hole a mid-case rewrite could otherwise hide a version through.
-        const [current] = await tx
-          .select({
-            content: post.content,
-            editedAt: post.editedAt,
-            removedAt: post.removedAt,
-            deletedAt: post.deletedAt,
-          })
-          .from(post)
-          .where(eq(post.id, input.postId))
-          .for("update")
-          .limit(1);
-        if (!current) return undefined;
-
-        // The guard above is a fast path; the state is re-checked under the
-        // lock, where no moderator removal or delete can land between the
-        // check and the write.
-        if (current.removedAt) {
-          throw new ORPCError("BAD_REQUEST", { message: EDIT_REMOVED_MESSAGE });
-        }
-        if (current.deletedAt) {
-          throw new ORPCError("BAD_REQUEST", { message: EDIT_DELETED_MESSAGE });
-        }
-
-        // The idempotent no-op, re-checked under the lock: another edit may
-        // have landed since the guard read, and if it wrote this same text
-        // the retry is a no-op against *that* row — keeping its editedAt
-        // and writing no history row.
-        if (current.content === input.content) {
-          return { content: current.content, editedAt: current.editedAt };
-        }
-
-        const [row] = await tx
-          .update(post)
-          .set({ content: input.content, editedAt })
-          .where(eq(post.id, input.postId))
-          .returning({ content: post.content, editedAt: post.editedAt });
-        // The superseded text becomes history in the same transaction, stamped
-        // with the same instant as the marker — the newest history row's
-        // `createdAt` and the post's `editedAt` are the same edit.
-        await tx
-          .insert(postEdit)
-          .values({ postId: input.postId, content: current.content, createdAt: editedAt });
-        return row;
-      });
-
-      // A missing row cannot happen (the guard read found it and nothing
-      // deletes post rows); the branch keeps the return honest if it ever did.
-      if (!updated) {
-        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
-      }
-
-      return { postId: input.postId, content: updated.content, editedAt: updated.editedAt };
-    }),
+    .handler(({ input, context }) =>
+      editPost(context.db, context.user.id, input.postId, input.content),
+    ),
 
   /**
    * Deletes the caller's own post (issue #148). Requires a session.
@@ -1916,98 +1732,25 @@ export const postRouter = {
    * row stays, so replies, likes and the conversation above it keep their
    * shape. Its non-restorable attachment rows/objects are cleaned after the
    * tombstone commits; moderation removal keeps its attachments for restore.
-   * `post.parent_id` still cascades on a real delete (see the schema comment),
-   * so that would silently take the whole reply subtree with it.
+   * Hard subtree deletion belongs to the account-deletion trigger; an
+   * individual post deletion preserves the conversation's structure.
    *
    * It is deliberately NOT a moderation action: no `moderation_action` row,
    * no email, nothing to appeal. `postSelection` renders the stub, and
    * `search.posts` excludes the row outright — the one surface where matching
    * on text the viewer can no longer read would leak it back.
    *
-   * The read-then-write is not locked. Instead, the update is a compare-and-set
-   * against both tombstones. A racing author delete or moderator removal can
-   * win the row first; a zero-row update re-reads that winner and returns the
-   * original author tombstone or refuses the moderator tombstone. That is why
-   * this needs neither the transaction nor the `FOR UPDATE` every moderation
-   * effect takes: there is no audit row to double-write and no email to
-   * double-send.
+   * Ownership and removal checks run inside the D1 batch that stamps the
+   * tombstone and records durable video cleanup. Repeated deletes keep the
+   * original timestamp and safely retry attachment cleanup after commit.
    */
   delete: protectedProcedure
     .use(rateLimit(RATE_LIMITS.write))
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
-      const [target] = await context.db
-        .select({ authorId: post.authorId, removedAt: post.removedAt, deletedAt: post.deletedAt })
-        .from(post)
-        .where(eq(post.id, input.postId))
-        .limit(1);
-
-      if (!target) {
-        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
-      }
-
-      // Ownership is the whole authorisation rule: moderators take posts down
-      // through `moderation.removePost`, which is audited, appealable and
-      // reversible. FORBIDDEN rather than NOT_FOUND because the post's
-      // existence is not a secret — anyone who can see it in a feed already
-      // knows — and "not yours" is the answer that explains the refusal.
-      if (target.authorId !== context.user.id) {
-        throw new ORPCError("FORBIDDEN", { message: "You can only delete your own posts." });
-      }
-
-      // A moderator got there first. Deleting on top would strip the stub of
-      // the removal reason and the appeal link the author is owed, and gain
-      // them nothing: the content is already hidden from everyone.
-      if (target.removedAt) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: "This post was removed by a moderator and can no longer be deleted.",
-        });
-      }
-
-      // Idempotent, like `like`/`unlike`: repeating states the same end state,
-      // so a double-click or a retry is a no-op that keeps the original
-      // tombstone rather than restamping it.
-      if (target.deletedAt) {
-        await cleanupDeletedPostAttachments(context.db, context.storage, input.postId);
-        return { postId: input.postId, deletedAt: target.deletedAt };
-      }
-
-      const updated = await context.db.transaction(async (tx) => {
-        const [row] = await tx
-          .update(post)
-          .set({ deletedAt: new Date() })
-          .where(and(eq(post.id, input.postId), isNull(post.removedAt), isNull(post.deletedAt)))
-          .returning({ deletedAt: post.deletedAt });
-        if (row) await deletePostVideo(tx, input.postId);
-        return row;
-      });
-
-      if (updated?.deletedAt) {
-        await cleanupDeletedPostAttachments(context.db, context.storage, input.postId);
-        return { postId: input.postId, deletedAt: updated.deletedAt };
-      }
-
-      // Another writer changed a tombstone after the guard read. PostgreSQL
-      // re-evaluates this UPDATE's predicate after waiting on that writer, so
-      // no returned row means the winner's committed state decides the result.
-      const [winner] = await context.db
-        .select({ removedAt: post.removedAt, deletedAt: post.deletedAt })
-        .from(post)
-        .where(eq(post.id, input.postId))
-        .limit(1);
-
-      if (winner?.removedAt) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: "This post was removed by a moderator and can no longer be deleted.",
-        });
-      }
-
-      if (winner?.deletedAt) {
-        await cleanupDeletedPostAttachments(context.db, context.storage, input.postId);
-        return { postId: input.postId, deletedAt: winner.deletedAt };
-      }
-
-      throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Failed to delete post." });
+      const result = await deletePost(context.db, context.user.id, input.postId);
+      await cleanupDeletedPostAttachments(context.db, context.storage, input.postId);
+      return result;
     }),
 
   /**
@@ -2629,7 +2372,7 @@ export const postRouter = {
         .innerJoin(user, eq(user.id, post.authorId))
         .where(
           and(
-            inArray(post.id, ancestorIds),
+            textIn(post.id, ancestorIds),
             not(invisibleAuthor(viewerId)),
             not(privatePostHidden(viewerId)),
           ),
@@ -2699,65 +2442,12 @@ export const postRouter = {
     .use(rateLimit(RATE_LIMITS.like))
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
-      const [target] = await context.db
-        .select({ id: post.id, authorId: post.authorId })
-        .from(post)
-        .innerJoin(user, eq(user.id, post.authorId))
-        .where(
-          and(
-            eq(post.id, input.postId),
-            not(invisibleAuthor(context.user.id)),
-            not(privatePostHidden(context.user.id)),
-          ),
-        )
-        .limit(1);
-
-      if (!target) {
-        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
-      }
-
-      // The like and its notification commit together: `.returning()` is
-      // empty exactly when the (post_id, user_id) primary key swallowed the
-      // insert as a duplicate, so a retried like mints no second
-      // notification — the notification's exactly-once rides the like's own
-      // idempotency instead of a second unique key a like→unlike→like
-      // sequence would wrongly collapse.
-      await context.db.transaction(async (tx) => {
-        const inserted = await tx
-          .insert(postLike)
-          .values({ postId: input.postId, userId: context.user.id })
-          .onConflictDoNothing()
-          .returning({ postId: postLike.postId });
-
-        if (inserted.length > 0) {
-          // A no-op for the author's own like — `insertNotification` drops
-          // self-caused events so this needs no branch here.
-          await insertNotification(tx, {
-            recipientId: target.authorId,
-            actorId: context.user.id,
-            type: "like",
-            postId: input.postId,
-          });
-
-          // Like-tier badge stamping (issue #308). A successful like is the
-          // only moment a threshold can first be passed, so the stamping cost
-          // is one index-only count per new like and nothing anywhere else —
-          // a retried like never reaches this branch. The count read and the
-          // stamp ride the like's own transaction, so a rollback leaves
-          // neither half; the tier upgrades in place (see ./badge-stamping.ts
-          // — one row per family, kept on a recede, `unlike` never unstamps).
-          const badge = postLikeBadgeTierFor(await countLikes(tx, input.postId));
-          if (badge) {
-            await stampBadgeTier(tx, target.authorId, POST_LIKE_BADGE_TIERS, badge);
-          }
-        }
-      });
-
-      return {
+      const likeCount = await addPostReaction(context.db, {
         postId: input.postId,
-        likeCount: await countLikes(context.db, input.postId),
-        viewerHasLiked: true,
-      };
+        actorId: context.user.id,
+        kind: "like",
+      });
+      return { postId: input.postId, likeCount, viewerHasLiked: true };
     }),
 
   /**
@@ -2779,7 +2469,7 @@ export const postRouter = {
 
       const [target] = await context.db
         .select({
-          likeCount: sql<number>`(select count(*)::int from ${postLike} where ${postLike.postId} = ${post.id})`,
+          likeCount: sql<number>`(select count(*) from ${postLike} where ${postLike.postId} = ${post.id})`,
         })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))
@@ -2818,53 +2508,12 @@ export const postRouter = {
     .use(rateLimit(RATE_LIMITS.repost))
     .input(z.object({ postId: z.uuid() }))
     .handler(async ({ input, context }) => {
-      const [target] = await context.db
-        .select({ id: post.id, authorId: post.authorId })
-        .from(post)
-        .innerJoin(user, eq(user.id, post.authorId))
-        .where(
-          and(
-            eq(post.id, input.postId),
-            not(invisibleAuthor(context.user.id)),
-            not(privatePostHidden(context.user.id)),
-          ),
-        )
-        .limit(1);
-
-      if (!target) {
-        throw new ORPCError("NOT_FOUND", { message: "Post not found." });
-      }
-
-      // The repost and its notification commit together — the like's shape
-      // exactly. `.returning()` is empty exactly when the (post_id, user_id)
-      // primary key swallowed the insert as a duplicate, so a retried repost
-      // mints no second notification, and repost → unrepost → repost is
-      // honestly three events. `unrepost` removes nothing: the rows are
-      // historical, the same deal like notifications already get.
-      await context.db.transaction(async (tx) => {
-        const inserted = await tx
-          .insert(postRepost)
-          .values({ postId: input.postId, userId: context.user.id })
-          .onConflictDoNothing()
-          .returning({ postId: postRepost.postId });
-
-        if (inserted.length > 0) {
-          // A no-op for the author's own repost (allowed, and dropped by
-          // `insertNotification`'s self guard, like the like handler's).
-          await insertNotification(tx, {
-            recipientId: target.authorId,
-            actorId: context.user.id,
-            type: "repost",
-            postId: input.postId,
-          });
-        }
-      });
-
-      return {
+      const repostCount = await addPostReaction(context.db, {
         postId: input.postId,
-        repostCount: await countReposts(context.db, input.postId),
-        viewerHasReposted: true,
-      };
+        actorId: context.user.id,
+        kind: "repost",
+      });
+      return { postId: input.postId, repostCount, viewerHasReposted: true };
     }),
 
   /**
@@ -2883,7 +2532,7 @@ export const postRouter = {
 
       const [target] = await context.db
         .select({
-          repostCount: sql<number>`(select count(*)::int from ${postRepost} where ${postRepost.postId} = ${post.id})`,
+          repostCount: sql<number>`(select count(*) from ${postRepost} where ${postRepost.postId} = ${post.id})`,
         })
         .from(post)
         .innerJoin(user, eq(user.id, post.authorId))

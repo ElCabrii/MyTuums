@@ -1,5 +1,6 @@
+import { closeDb, db } from "./testing/runtime.js";
 import { call } from "@orpc/server";
-import { closeDb, db } from "@my-tuums/db";
+
 import { post } from "@my-tuums/db/schema";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -94,6 +95,12 @@ describe("extractHashtagKeys", () => {
 });
 
 describe("gameMentionsFor", () => {
+  it("resolves the full 200-key budget within D1's parameter limit", async () => {
+    const tags = Array.from({ length: 199 }, (_, index) => `#unknown${index}`);
+    tags.push("#doom", "#hades");
+    expect(await gameMentionsFor(db, tags)).toEqual({ doom: "game-doom" });
+  });
+
   it("maps only the keys the catalog answers", async () => {
     const map = await gameMentionsFor(db, ["#doom!", "no tags here", "#unknownthing #hades"]);
     expect(map).toEqual({ doom: "game-doom", hades: "game-hades" });

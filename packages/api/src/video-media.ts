@@ -3,73 +3,67 @@ import { z } from "zod";
 import type { Database } from "@my-tuums/db";
 import { video } from "@my-tuums/db/schema";
 import { canViewPostMedia } from "./post-media.js";
-import type { Storage } from "./storage.js";
-import { videoAttemptPrefix } from "./video-lifecycle.js";
+import type { StreamService } from "./stream.js";
 
 export type VideoMedia = { url: string } | { body: string; contentType: string };
 const uuid = z.uuid();
 
-/** Every manifest, segment, cover, preview and caption inherits the post gate. */
+/**
+ * Token issuance and every thumbnail/caption request use the ordinary post
+ * authorizer. Direct Stream playback is a bearer capability valid for one hour;
+ * subsequent segments do not pass through Access or the application again.
+ */
 export async function resolveVideoMedia(
   db: Database,
-  storage: Storage | null,
+  stream: Pick<StreamService, "signedVideoUrl" | "readCaptions"> | null,
   key: string,
   viewerId: string | null,
 ): Promise<VideoMedia | null> {
-  if (!storage) return null;
-  const match = /^videos\/([0-9a-f-]{36})\/attempts\/([0-9a-f-]{36})\/([a-z0-9_.-]+)$/.exec(key);
-  if (!match?.[1] || !match[2] || !match[3]) return null;
-  if (!uuid.safeParse(match[1]).success || !uuid.safeParse(match[2]).success) return null;
+  if (!stream) return null;
+  const match =
+    /^videos\/([0-9a-f-]{36})\/(master\.m3u8|cover\.jpg|previews\.vtt|captions\.vtt|preview-(0|[1-9]\d{0,2})\.jpg)$/.exec(
+      key,
+    );
+  if (!match?.[1] || !uuid.safeParse(match[1]).success) return null;
   const [row] = await db
     .select()
     .from(video)
-    .where(
-      and(eq(video.id, match[1]), eq(video.attemptId, match[2]), eq(video.state, "published")),
-    );
-  if (!row?.attemptId) return null;
-  const prefix = videoAttemptPrefix(row.id, row.attemptId);
-  const asset = row.assets.find((item) => item.name === match[3]);
-  if (!asset || !(await canViewPostMedia(db, `${prefix}master.m3u8`, viewerId))) return null;
-  if (!asset.name.endsWith(".m3u8") && !asset.name.endsWith(".vtt")) {
-    return { url: await storage.signedGetUrl(key) };
-  }
-  // Only small text assets pass through the API. Large bytes go directly from
-  // the private bucket to the player after this request's authorization.
-  if (asset.byteSize > 1024 * 1024) return null;
-  const object = await storage.get(key);
-  if (!object || object.bytes.byteLength !== asset.byteSize) return null;
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(object.bytes);
-  const names = new Set(row.assets.map((item) => item.name));
-  function assetPath(reference: string): string {
-    const [filename, fragment] = reference.split("#");
-    if (
-      !filename ||
-      !names.has(filename) ||
-      (fragment !== undefined && !/^xywh=\d+,\d+,\d+,\d+$/.test(fragment))
-    ) {
-      throw new Error("Invalid video asset reference.");
+    .where(and(eq(video.id, match[1]), eq(video.state, "published")));
+  if (!row?.streamUid || !row.playback || !row.postId) return null;
+  const prefix = `videos/${row.id}/`;
+  const master = `${prefix}master.m3u8`;
+  if (!(await canViewPostMedia(db, master, viewerId))) return null;
+  const name = match[2];
+  if (name === "previews.vtt") {
+    // Stream provides time-addressed thumbnails. This small authorized index
+    // preserves timeline previews without a separately encoded sprite inventory.
+    const stamp = (seconds: number) => new Date(seconds * 1000).toISOString().slice(11, 23);
+    let body = "WEBVTT\n\n";
+    for (let time = 0; time < row.playback.duration; time += 2) {
+      body += `${stamp(time)} --> ${stamp(Math.min(time + 2, row.playback.duration))}\n`;
+      body += `/media/${prefix}preview-${time}.jpg#xywh=0,0,160,90\n\n`;
     }
-    return `/media/${prefix}${filename}${fragment ? `#${fragment}` : ""}`;
+    return { body, contentType: "text/vtt" };
   }
-  let body = text;
-  if (asset.name.endsWith(".m3u8")) {
-    body = text
-      .split("\n")
-      .map((line) => {
-        if (!line) return line;
-        return line.startsWith("#")
-          ? line.replace(
-              /URI="([^"]+)"/g,
-              (_match: string, reference: string) => `URI="${assetPath(reference)}"`,
-            )
-          : assetPath(line);
-      })
-      .join("\n");
-  } else if (asset.name === "previews.vtt") {
-    body = text
-      .split("\n")
-      .map((line) => (line.includes("#xywh=") ? assetPath(line) : line))
-      .join("\n");
+  let result: VideoMedia;
+  if (name === "captions.vtt") {
+    if (!row.playback.captionLanguage) return null;
+    result = {
+      body: await stream.readCaptions(row.id, row.streamUid, row.playback.captionLanguage),
+      contentType: "text/vtt",
+    };
+  } else {
+    const time = match[3] === undefined ? 0 : Number(match[3]);
+    if (match[3] !== undefined && (time >= row.playback.duration || time % 2 !== 0)) return null;
+    result = {
+      url: await stream.signedVideoUrl(
+        row.id,
+        row.streamUid,
+        name === "master.m3u8" ? "manifest" : name === "cover.jpg" ? "cover" : "preview",
+        time,
+      ),
+    };
   }
-  return { body, contentType: asset.contentType };
+  // A provider round-trip must not grant a fresh capability after access changed.
+  return (await canViewPostMedia(db, master, viewerId)) ? result : null;
 }

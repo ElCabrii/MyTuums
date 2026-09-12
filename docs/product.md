@@ -1,9 +1,13 @@
 # Product
 
-What MyTuums actually does today, and the words the code uses for it. Every
-statement here describes shipped behaviour; where a feature depends on
-configuration, that is marked **Configuration-dependent**. For the mechanics
-behind any of it, see [architecture.md](architecture.md).
+The application behavior targeted by this Cloudflare PoC, and the words the code
+uses for it. Hosted parity is still being verified; see
+[the validation report](cloudflare-poc-report.md). For the mechanics behind the
+behavior, see [architecture.md](architecture.md).
+
+Once deployed, owner-only Cloudflare Access protects the entire PoC, including
+the app's otherwise public pages described below. Application authentication
+and content authorization remain underneath that outer gate.
 
 MyTuums is a Twitter-style social app: short posts, replies, likes, a follow
 graph, profiles, search, and a moderation system with appeals. **The site is
@@ -36,10 +40,11 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
   it is offered only to visitors who have had a session before.
 - OAuth sign-ups arrive without a handle or date of birth, so `/welcome`
   claims both before the account can be used, then offers two-factor once.
-- Email verification and password reset. _Configuration-dependent_ on
-  `RESEND_API_KEY`: without it, messages are logged to the server console in
-  development and throw in production rather than being silently dropped.
-  TOTP two-factor, sign-up and sign-in work fully without it.
+- Email verification and password reset use the configured Cloudflare Email
+  Service sender. Delivery failures are logged without recipients or capabilities;
+  documented temporary failures receive bounded retries. Password accounts need
+  verification before sign-in. Local tests use synthetic delivery; hosted mail
+  remains to be verified.
 - Sessions are revoked on password reset, and a revoked session stops
   authenticating immediately — there is no session cookie cache.
 
@@ -347,6 +352,10 @@ safe-area inset.
   users, plus up to three games), a full user search, and a full post search.
   User results rank handle-prefix matches ahead of substring matches; game
   results match on name or hashtag key in the catalog's popularity order.
+  Text matching ignores case using locale-independent Unicode simple case rules,
+  retaining accents and literal punctuation. It does not strip accents or expand
+  letters into multiple characters: `É` matches `é`, and `ẞ` matches `ß`, while
+  `e` and `SS` remain different.
   Private accounts appear in user search and the typeahead like any other
   account — only their posts are hidden from non-followers.
 
@@ -382,8 +391,8 @@ one dependency-free module shared by server and browser
   exists, and the count is capped so the check costs the same forever after),
   with migration 0028 backfilling accounts that predate the stamping hook.
 - **Founder** (`founder`): granted out of band to the three founder accounts
-  by the committed one-off script (`pnpm db:grant:founder` locally,
-  `node apps/server/dist/grant-founder-badge.js` in production); no API, no
+  by the committed one-off script (`pnpm db:grant:founder <username>` locally,
+  adding `--remote` for the isolated Cloudflare PoC D1 database); no API, no
   UI, and the mechanism refuses a re-grant and refuses once three accounts
   hold it.
 

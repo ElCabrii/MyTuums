@@ -1,5 +1,232 @@
 # packages/api context
 
+## Cloudflare migration in progress
+
+`src/sql.ts` decodes SQLite JSON projections from text or SQL null through the
+caller's Zod schema. It does not retain the old PostgreSQL already-decoded-object
+fallback. Existing feed/media/notification/moderation reads verify the native
+representations. Badge fixtures use bounded JSON batches for D1 parameter limits.
+The founder command accepts an explicit database and atomically limits grants;
+the badge suite exercises competing grants. `bootstrap.int.test.ts` checks that
+concurrent promotion cannot appoint multiple admins or change roles afterward.
+
+`src/object-storage.ts` owns the native object contract. API context, profile/post
+uploads, game fixtures and cleanup use it directly; signed URLs belong only to
+legacy S3 delivery. `createR2Storage` implements the maintenance extension, while
+API context exposes no listing or bulk deletion. `src/cloudflare-app.ts` is the
+application Worker's import surface; `apps/server/worker/api.ts` binds its real
+router and per-request auth context through oRPC's fetch adapter, preserving the
+client's CSRF header requirement. Native file inputs use `z.instanceof(File)` so
+they retain the actual Worker File type and reject non-file values.
+
+Moderation mail delivery, including appeal review, carries the generated request
+ID through its context and logs only `moderation_email_failed` plus that ID.
+Provider errors and recipients must not enter diagnostics. Failed post-upload
+cleanup likewise emits only `post_attachment_cleanup_deferred` while preserving
+the original upload failure. The existing moderation-effects integration case and
+`src/post-media-write.test.ts` exercise those failure paths.
+
+The shared link guard and parser remain in `src/link-card-http.ts`; its Node
+DNS/Undici transport is isolated in `src/link-card-node.ts`. The private Cloudflare
+Container in `apps/link-fetcher` reuses this transport. Never import it into the
+application Worker. `openGuardedLinkResponse` and `readCappedLinkBody` expose the
+same one-hop admission and bounded body rules to that internal HTTP bridge.
+
+The shared fetch deadline includes DNS resolution. A late lookup cannot initiate
+a request, and a late response is cancelled. Redirects and status/content-type
+refusals cancel unread bodies; cancellation is not awaited past the deadline.
+Native transports should consume the optional lookup AbortSignal. They still
+must enforce the address policy at connection time, independently of preflight.
+
+Appeal capabilities use asynchronous Web Crypto HMAC signing/verification in
+`src/appeal-token.ts`. The entrypoint must construct a signer with its explicit
+secret and supply `ApiServices.appealToken`; there is no environment lookup or
+built-in fallback. Moderation effects also receive this deployment's `webOrigin`
+for emailed appeal links. All moderation builders now receive the same explicit
+origin from `renderModerationEmail` at delivery, including inverse,
+case-resolution and appeal-review notices. `PendingEmail` identifies a committed
+D1 notice; it no longer contains a request-local callback. The format and seven-day expiry are preserved. Unit
+compatibility checks use Node HMAC independently; the server's native appeal
+fixture executes the real signer in workerd without Node compatibility.
+
+Rate admission is asynchronous. All procedure middleware and both appeal
+branches await `RateLimiter.consume` before continuing. The interface exposes
+only admission; memory reset/size belong to the isolated test factory.
+`src/distributed-rate-limit.ts` maps policy/caller keys to opaque Durable Object
+names and propagates failed admission. `apps/server/worker/rate-limit-counter.ts`
+owns the persistent atomic counter. The native application entrypoint now injects it alongside the separate
+persistent Better Auth counter; hosted enforcement remains unverified.
+
+Immediate post publication now uses D1's atomic batch API in
+`src/post-publication.ts`. Post/attachment inserts, reply or quote notices,
+and consumption of an image upload intent succeed or roll back together.
+`src/post-media-upload.ts` records immutable image keys before storage writes;
+the intent has no account/post foreign key and expires after 30 minutes.
+Publication checks expiry inside its batch. Cleanup retains failed work for
+retry, and inventory reconciliation covers late storage writes.
+
+Reconciliation must read `readMediaReferences` after listing objects. Its
+single SQL snapshot covers pending uploads and all committed image references;
+separate reads can miss the handoff. Never delete uploaded objects on a failed
+publication acknowledgement, since the database might already have committed.
+Profile and link-card uploads use `src/media-intents.ts` with the same expiry
+rule. Database triggers capture superseded images and account/post cascade
+cleanup in that transition's transaction. Post tombstones remove image
+attachments in the tombstone batch. Cleanup debt has no owner foreign key;
+failed storage removals remain retryable. The jobs Worker wires bounded recovery and native R2 operations.
+The native Images/R2 delivery adapter lives in `apps/server/worker/media.ts`;
+HTTP entrypoint integration and the link transport remain to port. The narrow
+`@my-tuums/api/image` export shares key and raster validation with that Worker
+without importing the legacy S3/Sharp media resolver. See
+[the migration record](../../docs/cloudflare-migration.md).
+
+`src/jobs.ts` records scheduling intent in the source transition's D1 batch.
+Video submission now commits private text, its queued state and a stable
+`video-<id>` job together, with a database-clock 30-minute deadline. Dispatch
+follows commit. If creation acknowledgement is lost, the dispatcher checks the
+existing Workflow's status before marking it dispatched; unconfirmed work backs
+off and remains due. Recovery considers at most 50 jobs. The intent has no owner
+foreign key and contains only IDs. A dispatched stamp proves instance creation,
+not job completion. `monitorDispatchedJobs` visits fifty due instances, retires
+confirmed completion and restarts errored instances with backoff. Unknown status
+retains the intent; paused/terminated instances require operator action. Each
+dispatcher/monitor selects only the kinds for which its Worker has bindings.
+`apps/jobs` wires video, game-sync and maintenance Workflows plus minute Cron
+recovery, daily game sync and daily R2 inventory reconciliation.
+
+`src/stream.ts` is the native provider adapter: status, caption upload and deletion
+use the Stream binding. Tus creation and creator-filtered recovery use the REST
+API because the binding lacks those operations. Videos require signed playback
+from creation; creator metadata is an environment namespace plus opaque video ID.
+Status refuses a public or differently owned video; deletion cannot cross that
+ownership boundary. The adapter uses bounded responses and content-free errors.
+`src/video-uploads.ts` and the video router now use this adapter. A 24-hour
+D1 owner/creator record precedes provider creation. Only the author can obtain
+the tus capability, and upload completion checks authenticated provider status;
+it never submits a post. The browser resumes HEAD/PATCH uploads from Stream's
+confirmed byte offset. Worker entrypoint construction remains to wire.
+
+`src/stream-cleanup.ts` expires up to 50 abandoned uploads and handles ten due
+cleanup records per pass. The regenerated baseline and migration 0005 capture provider identity and
+cleanup in cancellation/account/post transitions, including late create replies.
+Deletion retries use the pre-recorded creator identity to find unknown UIDs.
+Keep empty cleanup records for 24 hours from creation, checking hourly, to catch
+late visibility after an ambiguous create; failed deletions back off and retain
+their record. This is a conservative recovery window to validate remotely, not
+an asserted provider consistency guarantee.
+
+`src/stream-processing.ts` owns terminal failure and 30-minute deadline recovery.
+Its D1 batch records cleanup through the transition trigger, emits one link-free
+notice and erases pending text/captions. Concurrent retries cannot notify twice;
+cancelled/published states cannot be failed. Recovery rechecks expiry in the
+write and considers at most 50 overdue rows. `src/stream-publication.ts` records
+validated ready metadata and publishes through the shared post statement builder.
+Author eligibility, target privacy/blocks and the database deadline are latched
+in the batch's first transition; no clock is rechecked between post and effects.
+Publication and duplicate delivery are atomic; an ineligible draft fails privately.
+
+`src/video-media.ts` gates manifest-token issuance, posters, captions and timeline
+previews on current post visibility, rechecking after provider I/O. Native Stream
+tokens expire after one hour; direct segments do not revisit Access/the app.
+Previews use a bounded local VTT index (two-second steps, at most 150) pointing to
+separately authorized Stream thumbnails. Captions are privately fetched with a
+1 MiB response bound. The player discovers quality levels from the HLS manifest;
+the database no longer stores an FFmpeg rendition inventory. `src/stream-job.ts`
+implements one current-state poll, validates readiness, rechecks cancellation and
+expiry before captions, and publishes through the atomic API boundary. The native
+Workflow in `apps/jobs` creates caption streams and sanitizes all errors inside
+each step; private values never appear in persisted step results. HTTP Worker
+entrypoint construction remains outstanding.
+
+Post projections use SQLite JSON functions, schema-validated JSON decoding and
+explicit boolean conversion. Raw event times are epoch milliseconds. ID-set
+queries use `textIn` to bind one JSON array within D1's parameter limit; reply
+continuation queries retain their child fanout, depth and total-output bounds.
+Text search uses `src/search-text.ts` for literal accent-insensitive substrings.
+ASCII columns use SQLite lower(); other columns use a code-point walk over the
+bound PostgreSQL 18 unaccent / Unicode 17 simple-case dictionary. Filtering
+remains in SQL before visibility, ordering and keysets. `%`, `_` and backslashes
+are literal text. Ligatures follow PostgreSQL unaccent behavior (ß → ss).
+`generate:search-folding` regenerates the dictionary from SHA-256-pinned upstream
+rules and the existing generated Unicode case groups. Both licenses must remain.
+No PostgreSQL extension, shadow column or asynchronous search index is required.
+
+Game favorite/unfavorite writes use a D1 mutation/count-read batch; migration
+0002 owns count changes through triggers, including account cascades. Game
+reads explicitly decode viewer booleans and compare upcoming release seconds
+with the database clock. Hashtag resolution binds its 200-key budget as JSON.
+`src/game-catalog.ts` acquires a 30-minute database-clock lease before sync or
+seeding, stages invisible version rows in bounded JSON pages, and atomically
+updates the indexed live `game` projection and active-version pointer. An
+expired/replaced publisher cannot write or publish; missing incumbents or
+changed hashtag identities refuse publication. Favorites and creation times
+remain on stable game rows. Version cleanup removes at most 250 staged rows
+and ten empty versions per pass, excluding active and running versions.
+`upsertGames` is now only a direct integration-fixture helper.
+
+Game-cover paths include an immutable catalog version. Upload intents protect
+PUTs; publication checks expiry and consumes referenced intents in its batch.
+Migration 0004 captures superseded covers as durable cleanup debt. Reconciliation
+includes games and pending uploads in its one reference snapshot. Sync attempts
+cleanup after commit; the jobs Worker also schedules recovery. Scheduled sync
+skips an identical or newer active snapshot before external work. The Node
+fixture reader now lives separately in `src/games-fixture.ts`; native sync
+imports no filesystem implementation. `src/r2-storage.ts` uses native private
+bucket bindings and follows listing cursors and bounded deletion batches.
+Buffered reads are size-limited; HTTP delivery must stream from the bucket.
+
+`src/post-reactions.ts` owns like/repost writes. Its D1 batch rechecks target
+visibility and emits effects only while the reaction is absent, then inserts
+the reaction. Concurrent retries notify once; remove/add produces a new event.
+`badgeTierStatements` joins that batch and preserves only the highest earned
+tier without changing its timestamp on a recede. `notificationInsert` is the
+conditional mint point; the async `insertNotification` wrapper remains for
+unported callers. Blocks atomically sever follows and pending requests before
+adding their edge. `src/follow-lifecycle.ts` handles public follows, private
+requests and approval with block/privacy checks inside the write batch.
+Unfollow atomically removes the edge and request; cancel/reject are single
+conditional deletes. No relationship writer uses PostgreSQL advisory locks.
+
+Notification reads use SQLite JSON tuple keys for burst damping and explicitly
+decode attachment JSON and booleans. `markRead` counts unread rows before and
+after its monotonic database-clock upsert in one D1 batch, so concurrent opens
+cannot count the same newly read row twice. `src/notification-retention.ts`
+shares the 90-day boundary across list, badge and bounded 250-row pruning;
+moderation notices and read cursors survive. The jobs Worker now schedules Monday
+04:00 UTC pruning, bounds each Workflow to 100 batches and commits continuation
+intent when more rows remain. The manual pruning CLI uses the same D1 operation
+and predicate. It defaults to a dry run on local PoC storage, requires
+`--retention-days=90`, and accepts explicit `--apply` and `--remote` switches.
+It uses the guarded PoC database helper and never loads `.env` or Postgres.
+
+`src/post-mutations.ts` owns D1 edit/delete batches. Edits record the actual
+superseded text before updating and copy that history row's database timestamp
+to the marker. Ownership, tombstone and text-or-attachment guards share the
+batch; concurrent retries neither lose versions nor duplicate history. Author
+deletion commits its tombstone with video cleanup debt, then retries image
+cleanup after commit. Cleanup debt survives account deletion. Native Stream cleanup retains its UID or creator lookup target; its state
+trigger shares the post tombstone batch.
+
+`src/moderation-post.ts` owns post removal/restoration batches: the guard,
+audit row, in-app notice, report stamps and optional manual appeal closure
+commit together. The batch snapshot supplies the removal email's content.
+Wrappers send only after commit; concurrent restores create one audit row and
+one email. Author-deleted legacy posts withdraw open appeals before refusal.
+`src/moderation-user.ts` owns account sanction and role batches: rank checks,
+old-role capture, database-owned expiry, session revocation, report stamps,
+audit/notice and optional family-specific appeal closure share one commit.
+Case resolution also uses a guarded audit/report D1 batch; queue reads decode
+SQLite JSON and epoch milliseconds. Appeal intake uses a conditional insert
+and refusal read in one D1 batch. `src/moderation-action-state.ts` owns the
+shared current/latest/recipient SQL; suspension currency uses the database clock.
+`src/appeal-review.ts` composes guarded post/user inverse statements with its
+review stamp, audit and notices in one D1 batch. The batch rechecks open status,
+original actor, latest/current state and target rank. Its audit marker identifies
+the winning reviewer; only that caller sends email after commit. No moderation
+path uses interactive transactions or row locks. Latest-action probes compare
+both target keys with null-safe equality to use the full target index; the real
+D1 EXPLAIN contract in `src/moderation-query-plan.int.test.ts` guards issue #55.
+
 ## Responsibility
 
 The oRPC contract and the business rules behind it: every procedure the server
@@ -12,17 +239,17 @@ over HTTP and imports only its browser-safe subpaths.
 
 ## Start here
 
-| File                        | Why                                                                                                                                                                                      |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/router.ts`             | The six groups and what owns each.                                                                                                                                                       |
-| `src/procedures.ts`         | The four gates, the legal consent and onboarding gates, the two rate-limit mechanisms, the one exception.                                                                                |
-| `src/context.ts`            | What every handler is handed, and why nothing is a module global.                                                                                                                        |
-| `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                                                                                                                                  |
-| `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                                                                                                                       |
-| `src/notifications.ts`      | The notification inbox (list, unread count, mark-read, delete, clear-all) and `insertNotification`, the single mint point every cause's transaction calls.                               |
-| `src/moderation-actions.ts` | The forward and inverse moderation effects: transaction, guards, audit, owed notices. The one entry point (`applyModerationEffect`) and the per-action wrappers own "commit, then send". |
-| `src/appeal-intake.ts`      | The appeal intake lifecycle: the two sources, the budgets, the gates, the replay policy.                                                                                                 |
-| `src/profile-media.ts`      | The avatar/banner lifecycle: replace/remove, the locked swap, best-effort cleanup.                                                                                                       |
+| File                        | Why                                                                                                                                                        |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/router.ts`             | The six groups and what owns each.                                                                                                                         |
+| `src/procedures.ts`         | The four gates, the legal consent and onboarding gates, the two rate-limit mechanisms, the one exception.                                                  |
+| `src/context.ts`            | What every handler is handed, and why nothing is a module global.                                                                                          |
+| `src/pagination.ts`         | The keyset skeleton every paginated list is built from.                                                                                                    |
+| `src/visibility.ts`         | The one filter that keeps banned and blocked content from leaking.                                                                                         |
+| `src/notifications.ts`      | The notification inbox (list, unread count, mark-read, delete, clear-all) and `insertNotification`, the single mint point every cause's transaction calls. |
+| `src/moderation-actions.ts` | Moderation wrappers and email builders; `moderation-post`, `moderation-user` and `appeal-review` own guarded D1 batches.                                   |
+| `src/appeal-intake.ts`      | The appeal intake lifecycle: the two sources, the budgets, the gates, the replay policy.                                                                   |
+| `src/profile-media.ts`      | The avatar/banner lifecycle: replace/remove, the locked swap, best-effort cleanup.                                                                         |
 
 ## Change map
 
@@ -35,23 +262,23 @@ over HTTP and imports only its browser-safe subpaths.
 | Add or change a badge                                                 | `src/badges.ts` (the catalog — one definition, server and browser)                                         | `src/badges.test.ts`; the `user_badge` check constraint and the family's stamping site (`post.like`, `user.follow`, the auth create hook) keep in step                                                             |
 | Add a moderation action                                               | `src/moderation-actions.ts` (the effect) and `src/moderation.ts` (the procedure)                           | `src/constants.ts` (action code), `docs/product.md` glossary                                                                                                                                                       |
 | Change the queue or a case view                                       | `src/moderation-queue.ts`                                                                                  | `src/moderation-inputs.ts` if the input shape moves                                                                                                                                                                |
-| Change how a user is matched by text                                  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`)                                                      | all three search surfaces share matching; the accent-fold helpers live in `src/text-match.ts` (shared with `matchesGameQuery`); typeahead and `moderation.searchUsers` share relevance ranking                     |
+| Change how a user is matched by text                                  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`), `src/search-text.ts`                                | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking                                                                                                           |
 | Change the IGDB wire rules                                            | `src/igdb.ts` (the client — transport, retry, pacing)                                                      | `src/igdb.test.ts`; the IGDB_* constants in `src/constants.ts`                                                                                                                                                     |
 | Change the catalog sync                                               | `src/games-sync.ts` (stage → validate → covers → one transaction)                                          | `src/games-sync.int.test.ts`; `apps/server/src/games-sync.ts`; `docs/operations.md` Maintenance                                                                                                                    |
 | Change a game read (page, listing, matcher)                           | `src/games.ts` — the public directory's two procedures, its per-sort keysets and `matchesGameQuery`        | `src/games.int.test.ts`; the typeahead's games half in `src/search.ts` shares the matcher; a new sort needs its cursor-mirroring index in `packages/db/src/schema/app.ts`                                          |
 | Change hashtag-key derivation                                         | `src/games-hashtag.ts` (the only definition; keys are sticky once written)                                 | `src/games-hashtag.test.ts`                                                                                                                                                                                        |
 | Add or change the games fixture                                       | `packages/db/fixtures/games.json` (hand-authored)                                                          | `src/games-fixture.test.ts` pins its contract; the `games:seed` script uploads its covers                                                                                                                          |
 | Change how an appeal is opened                                        | `src/appeal-intake.ts` (`openAppeal`), `src/appeal-token.ts`                                               | `src/appeal-intake.int.test.ts`; `docs/security.md` — this is the one anonymous surface                                                                                                                            |
-| Change how an appeal is reviewed                                      | `src/moderation-appeals.ts` (`appealReview`)                                                               | `src/moderation-actions.ts` if the inverse effect changes                                                                                                                                                          |
+| Change how an appeal is reviewed                                      | `src/appeal-review.ts`, routed by `src/moderation-appeals.ts`                                              | `src/moderation-actions.ts` if the inverse effect changes                                                                                                                                                          |
 | Change what an appellant is shown                                     | `src/moderation-appeals.ts` (`appealPreview`), `src/post-media.ts` (`canViewPostMedia`)                    | `src/appeal-preview.int.test.ts`, `src/post-media.int.test.ts`; `docs/security.md` — media retrieval                                                                                                               |
 | Change profile-image upload rules                                     | `src/image.ts`, `src/constants.ts` (`IMAGE_LIMITS`)                                                        | `src/image.test.ts`; `src/dimensions.ts` for a new format                                                                                                                                                          |
 | Change post-attachment upload rules                                   | `src/post-image.ts`, `src/constants.ts` (`POST_ATTACHMENT_*`)                                              | `src/image.test.ts`; `src/posts.int.test.ts`                                                                                                                                                                       |
 | Change the profile upload lifecycle                                   | `src/profile-media.ts`                                                                                     | `src/profile-media.int.test.ts`; `src/users.ts` only if the procedure shape changes                                                                                                                                |
-| Change the post attachment lifecycle                                  | `src/post-media.ts`, `src/post-media-lock.ts`                                                              | `src/posts.int.test.ts`; `src/reconcile-media.ts`; `scripts/reconcile-media.ts`                                                                                                                                    |
+| Change the post attachment lifecycle                                  | `src/post-media.ts`, `src/post-media-upload.ts`, `src/post-publication.ts`                                 | `src/posts.int.test.ts`; `src/post-publication.int.test.ts`; `src/reconcile-media.ts`; `scripts/reconcile-media.ts`                                                                                                |
 | Change the ranked feeds (candidate set, score, snapshot, suggestions) | `src/feed-rank.ts` (the pipeline — sourcing, `scorePost`, snapshot persist/resume, `suggestRankAuthorIds`) | `src/posts.ts` (the ranked `post.list` branch, hydration, `ranking` metadata); `src/cursor.ts` (`createRankCursorCodec`); `src/constants.ts` (`FEED_RANK_*`); `src/feed-rank.test.ts`, `src/feed-rank.int.test.ts` |
-| Change follow, block or unblock                                       | `src/users.ts`, `src/moderation.ts`                                                                        | `src/relationship-lock.ts` — every relationship writer must take the pair lock                                                                                                                                     |
+| Change follow, block or unblock                                       | `src/follow-lifecycle.ts`, `src/users.ts`, `src/moderation.ts`                                             | `src/follow-lifecycle.int.test.ts`; every multi-statement relationship write uses one D1 batch                                                                                                                     |
 | Change the notifications inbox                                        | `src/notifications.ts`                                                                                     | `src/notifications.int.test.ts`; the read-time filters live with the table in `packages/db`                                                                                                                        |
-| Change when an event notifies                                         | the cause's own file (`src/posts.ts`, `src/users.ts`, `logAction` in `src/moderation-actions.ts`)          | `insertNotification` is the only mint point, and it rides the cause's transaction                                                                                                                                  |
+| Change when an event notifies                                         | the cause's own file (`src/posts.ts`, `src/users.ts`, the moderation statement builders)                   | `notificationInsert` is the conditional mint point inside the cause's D1 batch                                                                                                                                     |
 | Change media URLs or caching                                          | `src/media.ts`, `src/storage.ts`                                                                           | `apps/server/src/request-handler.ts`                                                                                                                                                                               |
 | Change image variant widths                                           | `src/constants.ts` (`MEDIA_VARIANT_WIDTHS`)                                                                | `src/media-variants.ts`, `src/reconcile-media.ts`, the web app's `srcset` builders, `reconcile-media.test.ts`                                                                                                      |
 | Change the link-card wire rules                                       | `src/link-card-http.ts`                                                                                    | `src/link-card-http.test.ts`                                                                                                                                                                                       |
@@ -61,31 +288,26 @@ over HTTP and imports only its browser-safe subpaths.
 
 ## Invariants
 
-- **Video submissions are not posts.** `src/video-uploads.ts` owns multipart
-  sessions; `src/video-lifecycle.ts` owns submission, leases, publication,
-  cancellation and failure. Only explicit submission stores pending text and
-  queues work. Publication inserts the ordinary post/attachment/notifications
-  atomically after all assets exist and source deletion is confirmed.
-- **Video cleanup is durable and independent of retries.** `video_cleanup`
-  survives account cascades and stores identifiers/keys only. Terminal failure
-  erases pending text/captions and creates exactly one `video_failed` notice.
-  `src/video-maintenance.ts` reconciles both rows and actual objects to catch
-  stale writers after cleanup. Moderation removal retains successful assets;
-  author deletion schedules their removal.
-- **Every video asset passes the existing post authorizer.** `src/video-media.ts`
-  validates the published attempt and inventory before calling
-  `canViewPostMedia`. HLS and VTT are bounded, privately served text with rewritten
-  local references; binary assets use signed redirects. Raw input is never served.
-- **Queue enqueue participates in submission's transaction.** `src/video-queue.ts`
-  adapts pg-boss to the existing postgres-js/Drizzle pool, including JSON/array
-  binding and reserved transactions. `./video-worker` is a server-only leaf
-  export with no auth-instance construction; never import it from the SPA.
+- **Video submissions are not posts.** Native tus upload completion cannot
+  publish. Explicit submission stores private text and a Workflow intent;
+  verified ready metadata and in-transaction eligibility checks precede
+  atomic post/attachment/notification publication.
+- **Cleanup and failure survive retries and account deletion.** Stream debt
+  stores IDs only. Terminal failure erases private text/captions and creates
+  one link-free notice. Moderation removal retains playable evidence for the
+  existing author/moderator gates; author deletion owes provider deletion.
+- **Fresh playback capabilities require current authorization.** Manifest,
+  poster, preview and caption routes share `canViewPostMedia`. Stream bearer
+  tokens last one hour, so already-issued capabilities have bounded continued
+  validity after changes. Source download is not exposed.
+- **Workflow dispatch follows commit.** `src/jobs.ts` recovers IDs-only intents
+  and ambiguous acknowledgements. Native Workflow classes now live in `apps/jobs`;
+  port the remaining Node callers to those bindings and remove the legacy modules.
 
-Video regression checks: `src/video-lifecycle.int.test.ts`,
-`src/video-uploads.int.test.ts`, `src/video-media.int.test.ts` and
-`src/posts.int.test.ts`. New post submissions reject separate subtitle files;
-existing stored captions remain readable and processable. Native validation
-belongs to `apps/video-worker`.
+Video checks: `src/video-lifecycle.int.test.ts`, `src/video-uploads.int.test.ts`,
+`src/video-media.int.test.ts`, `src/stream-processing.int.test.ts` and the shared
+post suites. The Stream adapter's provider interactions remain synthetic until
+account access and deployment allow remote validation.
 
 - **The rate limiter, storage client, and email sender are threaded on `Context`,
   never module globals.** Tests substitute all three; one suite's limiter state
@@ -140,26 +362,23 @@ belongs to `apps/video-worker`.
   gates, the replay policy and the insert are source-blind. The ordering is
   load-bearing: the HMAC comparison happens before any database work, each
   budget is consumed at the exact point its key comes into existence, and the
-  common tail locks the contested `moderation_action` through validation and
-  insert. Intake never sends a notice and never reverses an action — that is
+  common tail checks eligibility inside its conditional D1 insert. Intake never sends a notice and never reverses an action — that is
   `appealReview`'s half, in `src/moderation-appeals.ts`.
-- **Appeal intake is exactly-once at two layers.** The action-row lock
-  serializes concurrent application opens before their replay read. The
-  unique `token_nonce` and partial unique open-per-action indexes remain the
-  database authority for outside writers and collisions; `isUniqueViolation`
-  walks Drizzle's wrapped `cause` chain so a constraint rejection still reads
-  as a caller-facing refusal.
+- **Appeal intake is exactly-once at two layers.** D1 serializes each
+  conditional insert with its refusal read. A competing intake or reversal
+  cannot pass between eligibility and persistence. Nonce reuse takes precedence
+  even when the action match belongs to a different row; a reviewed appeal is
+  final for fresh links too. The unique `token_nonce` and partial unique
+  open-per-action indexes remain the database backstop.
 - **User matching has one definition.** `matchesUserQuery` in `src/search.ts`
   is what "this account matches what you typed" means — a left-anchored match
   on the normalised `username`, or an accent-folded substring of either
   display field. `search.typeahead`, `search.users` and `moderation.searchUsers`
   all filter through it, so widening a match lands on all three instead of
   drifting. Accent folding is shared with the game matcher through
-  `src/text-match.ts`: display-text columns and their patterns fold through
-  the `search_unaccent` SQL function (migration `0039_search_unaccent`, the
-  immutable `unaccent` wrapper — typing "pokemon" finds "Pokémon"), while the
-  ASCII-only `username` arm folds its pattern in JS so the left-anchored
-  `like` keeps using the username btree index.
+  `src/search-text.ts`: display text uses the pinned native dictionary, while
+  the ASCII-only username arm folds its query in JS and retains its indexed
+  prefix range. PostgreSQL migration 0039 is historical reference only.
   The two bounded lookup surfaces (`search.typeahead` and
   `moderation.searchUsers`) also share `userQueryRank`: exact handle, other
   handle prefixes, then display-only matches. `search.users` deliberately
@@ -224,11 +443,10 @@ belongs to `apps/video-worker`.
   three events and an unrepost removes nothing (rows are historical); a
   reply's or quote's notification rides `insertPost`'s transaction pointing
   at the new post itself (the quote's recipient is the quoted author); and
-  the moderation half lives in `logAction`'s optional `notifyUserId`, which
-  every effect passes — the locked, guarded paths that keep the audit log
-  append-only are what keep it exactly-once, with a null actor because the
-  branded email never names the moderator either.
-  `case_resolved` deliberately passes none: its notices go to the reporters,
+  moderation builders gate each notice on their own newly minted audit ID.
+  A losing concurrent caller creates neither audit nor notice; the null actor
+  keeps the moderator anonymous, matching the branded email.
+  `case_resolved` creates no recipient notice: its notices go to the reporters,
   and email stays that channel. The silence is enumerated too: edits never
   notify (an edit is not an event about the recipient), bookmarks never
   notify (private by design; no emission point exists), and link-card
@@ -252,7 +470,8 @@ belongs to `apps/video-worker`.
   state is a
   per-recipient seen-at cursor (`notification_last_seen`), not a per-row
   stamp: a row is read exactly when its `created_at` is at or before the
-  cursor, `markRead` is one idempotent upsert, and no notification is ever
+  cursor, `markRead` performs one idempotent upsert between two counts in an
+  atomic D1 batch, and no notification is ever
   _born_ read — what the recipient has and has not seen stays truthful. A
   same-type burst from one actor is damped in the badge, not in the rows:
   `unreadCount` counts one tick per actor, type and minute bucket (moderation
@@ -264,21 +483,17 @@ belongs to `apps/video-worker`.
   visibility predicate _and_ one retention horizon
   (`NOTIFICATION_RETENTION_DAYS`; moderation rows exempt on both sides), so
   the badge can never show a number the page behind it cannot reconcile;
-  `pnpm --filter @my-tuums/api prune:notifications` deletes rows past that
-  same horizon and never deletes read cursors — moderation rows being
+  `pruneExpiredNotifications` deletes at most 250 rows past that
+  same horizon per call and never deletes read cursors — moderation rows being
   exempt means a recipient returning past the horizon still has retained
   rows to show, and their cursor is what keeps those notices read (one row
   per recipient is nothing).
-- **Relationship writes for a pair are serialized by one advisory lock.**
-  "A blocked pair has no follow edge" spans `follow` and `user_block`, so no
-  database constraint can hold it. `follow`, `block` and `unblock` all take
-  `acquireRelationshipLock` (`src/relationship-lock.ts`) on the _unordered_
-  pair, inside the transaction that does the write. Unlocked, `follow`'s block
-  check and its insert straddle a concurrent `block`: the block severs the
-  existing edges, `follow` inserts a new one, and a prohibited edge stands
-  behind the block until the unblock puts it back in view. Any future writer
-  of either table must take the same lock — the key must come from the sorted
-  pair, or the two directions would take different locks and never meet.
+- **Relationship decisions and effects share one D1 batch.** A block must
+  leave neither a follow edge nor a pending request in either direction.
+  Public/private branching and block checks execute in the same atomic batch
+  as inserts, notifications and badges. Approval consumes its request in that
+  batch; unfollow deletes the edge and request together. Every future writer
+  must preserve this boundary instead of reading permission and writing later.
 - **A post has two independent tombstones, and neither is a row delete.**
   `moderation.removePost` stamps `removed_at`; `post.delete` (the author's own,
   issue #148) stamps `deleted_at`. `postSelection` nulls the content for
@@ -289,10 +504,10 @@ belongs to `apps/video-worker`.
   would otherwise stay probeable. `post.list` also excludes author-deleted
   rows (including compact reply-parent previews), while `post.thread` keeps
   their focused/ancestor stubs. Keeping the row is what lets replies, likes and
-  the thread above survive, and it is why `post.parent_id` can still cascade.
-  `post.delete` is deliberately NOT a moderation effect: no
-  transaction, no `FOR UPDATE`, no `moderation_action` row, no email, nothing
-  appealable — it is author-owned and idempotent, and it refuses a post a
+  the thread above survive; hard account deletion instead removes its complete
+  descendant set through the committed D1 trigger.
+  `post.delete` is author-owned and idempotent. Its D1 batch creates no
+  `moderation_action` row or email, and nothing appealable. It refuses a post a
   moderator already removed so the author keeps the stub's reason and appeal
   link. The moderation effects make the inverse check too: a deleted post is
   refused before `post_removed` or `post_restored` can be logged, including a
@@ -302,11 +517,10 @@ belongs to `apps/video-worker`.
   so their deletion ends the grievance, and an appeal that could be upheld but
   never overturned must not sit open in the queue. That pre-check runs outside
   the effect transaction (a thrown refusal would roll it back); it is idempotent
-  and re-run on every attempt, while the effects' locked guards remain the
-  authority on whether the operation itself proceeds. Its unlocked read/write
-  pair is safe because the update compares both tombstones; after losing to a
-  concurrent delete or removal, it re-reads the winner and preserves that
-  outcome.
+  and re-run on every attempt, while the effects' D1 batch guards remain the
+  authority on whether the moderation operation proceeds. Author deletion
+  checks ownership and both tombstones within its atomic D1 batch, preserving
+  a competing removal or the original author-deletion timestamp.
 - **`post.edit` rewrites text and nothing else (issue #264).** The body field
   is the shared `postContentInput` — the same trim and bound `post.create`
   enforces, never restated — and attachments are immutable through it; the
@@ -334,9 +548,8 @@ belongs to `apps/video-worker`.
   returns the quoted original's own `post_edit` history (same cap, same
   helper) spliced into the `quoted` evidence beside its live content, and a
   rewrite of the original after being quoted is no more hiding than a rewrite
-  of the target. That is also why the write opens
-  with `SELECT … FOR UPDATE` where `post.delete` needs no lock: concurrent
-  editors serialize on the row, so each history row records the text its
+  of the target. The history insert and content replacement share one D1
+  batch: concurrent editors serialize, so each history row records the text its
   edit _actually_ superseded and no version can be lost between two
   overlapping edits — an unlocked pair would record the same superseded
   text twice and the first edit's wording would survive nowhere.
@@ -405,27 +618,32 @@ reposter_key)`, where the reposter half is absent for post events and binds
   paths in `post_attachment`; `postSelection` is the authoritative projection
   for every reader. Ordinary media reads follow post tombstones, author bans,
   and blocks, while moderators retain access to removed evidence. Author
-  deletion removes the non-restorable relation and objects; failed writes and
-  hard account cascades are reaped by `reconcile-media`.
+  deletion removes the non-restorable relation and records object cleanup in
+  the same D1 batch. Hard account cascades also record durable cleanup; failed
+  uploads expire, with inventory reconciliation covering late storage writes.
 - **The profile-media lifecycle lives in `src/profile-media.ts`, and only
   there.** `user.uploadImage` and `user.removeImage` call
   `replaceProfileMedia`/`removeProfileMedia` and own nothing else: the
-  prepare-write-swap-discard ordering, the `FOR UPDATE` row lock, the
-  avatar/banner pair-key mapping and the best-effort cleanup are the
+  upload intent, guarded D1 publication batch, avatar/banner pair-key mapping
+  and best-effort cleanup are the
   module's, so the two procedures cannot drift. The display and original
   variants share one uuid with an `.orig` infix, and `objectKeyFromMediaPath`
-  returns `null` for provider URLs — cleanup never touches them. Without the
-  row lock, two racing replacements could both read the same old keys and
-  each delete them after its own swap, orphaning the pair the first to
-  commit wrote. The lifecycle interface accepts the bare `Database` handle,
-  not a transaction handle, so its swap commits before object cleanup begins.
-- **`scripts/reconcile-media.ts` must list the bucket BEFORE reading the
-  `user` rows, and it holds the shared post-media advisory transaction lock
-  through list/read/delete. Post attachment writers acquire that same lock
-  across storage upload and attachment-row commit, closing the
-  upload-before-row window without a pending schema state. The reverse order
-  still treats a profile upload landing between the two steps as an orphan
-  (issue #52; pinned by `src/reconcile-media.test.ts`).
+  returns `null` for provider URLs — cleanup never touches them. Triggers
+  capture the actual superseded pair inside each serialized update, including
+  concurrent replacements and account deletion. No request deletes fresh
+  objects after an ambiguous database acknowledgement. Managed object paths
+  are immutable and cannot be reattached through a general profile update.
+- **Reconciliation lists the bucket BEFORE reading references.**
+  `readMediaReferences` reads profile, post, link-card and pending-upload paths
+  in one SQL snapshot after the listing. Register intents before any PUT and
+  consume them atomically with publication so that this reader cannot miss a
+  pending-to-published handoff (issue #52). `cleanupMediaIntents` processes at
+  most 50 ready intents per pass and retains failures. The reconciliation CLI
+  uses the guarded PoC D1/EU-R2 pair and requires the exact bucket name; local
+  storage is the default, with `--remote` selecting the isolated hosted pair.
+  Game fixture seeding uses that same pair, always uploads covers to R2, and
+  requires the exact PoC database name. Neither command loads `.env` or S3
+  credentials. The jobs Worker schedules daily inventory recovery.
 - **Link preview fetching lives in `src/link-card-http.ts` (the wire) and
   `src/link-card.ts` (the cache), and the SSRF guard is not optional
   (issue #260).** Every outbound fetch goes through `guardedLinkFetch`: the
@@ -436,8 +654,8 @@ reposter_key)`, where the reposter half is absent for post events and binds
   spelling, which is the form the URL parser actually produces from
   `[::ffff:127.0.0.1]` — redirects are followed manually with each hop
   re-checked, and size, time and content-type caps bound the response.
-  The pre-flight resolution is a fast refusal, not the boundary: the default
-  transport's fetches ride a dispatcher whose connect-time lookup
+  The pre-flight resolution is a fast refusal, not the boundary: the legacy
+  `src/link-card-node.ts` transport's fetches ride a dispatcher whose connect-time lookup
   (`createConnectValidatedLookup`) re-applies the same range table to the
   address the socket is about to open, so a rebinding resolver cannot pass
   the check with a public answer and connect with a private one (IP literals
@@ -451,7 +669,7 @@ reposter_key)`, where the reposter half is absent for post events and binds
   refetched on every view. Every failure degrades to `{ card: null }`; a
   failing revalidation keeps serving the stale card. A lead image is fetched
   through the same guard, sniffed like an upload, stored under `link-cards/`
-  inside the post-media lifecycle lock, and authorized by
+  with an upload intent and expiry-guarded D1 publication, and authorized by
   `canViewLinkCardMedia` (any signed-in viewer — the session the `/media`
   route already demands). Every card field, `domain` included, is capped at
   its `LINK_CARD_*_MAX_LENGTH`.
@@ -467,40 +685,29 @@ reposter_key)`, where the reposter half is absent for post events and binds
   log a `moderation_action` row: that table's target columns are post- and
   user-shaped by schema, and stretching them to hold a URL would ripple
   through the queue, the audit view and their tests. The who/why/when lives
-  on the row instead, guarded `FOR UPDATE` inside one transaction like every
-  other moderation effect.
-- **Every moderation effect reads its guard `FOR UPDATE`, inside its own
-  transaction** (`removePostEffect`, `suspendUserEffect`, `banUserEffect`,
-  `setRoleEffect`, `restorePostEffect`, `unbanEffect`, `restoreRoleEffect`).
-  The audit log is append-only, so a double log is a lie about what happened;
-  an unlocked pre-read is a TOCTOU two concurrent restores both pass (issue
-  #51). The role overturn checks the contested grant under that same lock, so
-  a racing role change can never be clobbered by an appeal that already passed
-  its currency check. The effects return the notices they owe (`PendingEmail`)
-  instead of sending them. The module's single entry point
-  (`applyModerationEffect`, and the per-action wrappers `removePost`,
-  `restorePost`, `suspendUser`, `banUser`, `unbanUser`, `setRole`) opens the
-  transaction itself, runs the effect inside it, and sends the owed notices
-  only after it commits — so a rollback produces no audit row, no partial
-  state and no email, and the send can never be forgotten by a caller that
-  goes through the wrappers. The raw effects remain exported for the appeal
-  intake and the tests, which compose them directly; a new procedure must go
-  through the wrappers, not call an effect and hand-thread the send.
-- **Forward sanctions supersede older appeals in their control family.** The
-  `removePost`, `suspendUser` and `banUser` wrappers lock the prior action rows
-  and stamp their open appeals `superseded` in the same transaction as the new
-  action. Suspension and ban are one account-sanction family; role changes
-  remain a separate family. Review checks both live state and action ordering
-  for either outcome, and the queue/case response carries every independently
-  open appeal rather than one appeal slot per target.
-- **A manual inverse action closes appeals under a shared action lock.** The
-  `restorePost`, `unbanUser` and `setRole` wrappers lock the contested action
-  rows, then stamp linked open appeals `reversed`, then lock/change the target,
-  all in one transaction. Intake takes the same action lock through its insert,
-  so reversal cannot miss an appeal being created. The wrappers do not fill
-  review fields or log `appeal_resolved`; the inverse action's audit row and
-  notice are the source of truth. The remaining appeal-before-target order
-  matches `appealReview`, avoiding a review/reversal deadlock.
+  on the row instead, updated in a guarded D1 batch. The media trigger records
+  cleanup atomically with purge. A concurrent fetch returns the committed row,
+  so neither a successful fetch nor stale-cache fallback can undo the purge.
+- **Moderation state, audit and notifications commit in guarded D1 batches.**
+  Post removal/restoration and account sanctions/role changes evaluate target
+  state inside the batch. The audit row's ID gates dependent writes, so a failed
+  guard or rollback cannot leave reports closed, sessions revoked or a notice
+  without its action. A role restore only applies while the contested grant
+  still holds. A durable email snapshot commits in that same batch. Wrappers
+  attempt delivery after commit and minute maintenance recovers pending notices; a failed
+  email transport cannot undo committed moderation. Appeal review composes
+  inverse statements into the review batch; it never invokes a separately
+  committed effect.
+- **Forward sanctions supersede older appeals in their control family.**
+  Removal, suspension and ban stamp their older open appeals `superseded` in
+  the same D1 batch. Suspension and ban share one family; role changes govern
+  a different field and stay independent. The case response carries every open
+  appeal. Intake/review must revalidate both current state and action ordering.
+- **Manual inverses close appeals without inventing a review.** Restore, unban
+  and role-change wrappers stamp only their family's open appeals `reversed`
+  in their D1 batch. Review fields remain null; no `appeal_resolved` event is
+  invented. Case resolution instead stamps open reports and records their exact
+  count with `case_resolved`, then emails their reporters after commit.
 - **Cursors are bounded before they are decoded.** Every cursor input schema
   caps the encoded value at `CURSOR_MAX_ENCODED_LENGTH`, and the shared codec
   repeats that check before base64 decoding or JSON parsing. Decoded textual
@@ -530,7 +737,7 @@ reposter_key)` — so it hand-rolls the same three parts the skeleton owns
   success may still include per-key S3 failures or omit an acknowledgement;
   preserve the confirmed count and throw `StorageDeleteError` for every
   requested key not confirmed as deleted.
-- **PostgreSQL owns suspension expiry time.** `suspendUser` returns the
+- **D1 owns suspension expiry time.** `suspendUser` returns the
   `banExpires` value from the update and uses that exact timestamp in both the
   response and notification; do not calculate a second application-clock
   value.
@@ -567,9 +774,13 @@ reposter_key)` — so it hand-rolls the same three parts the skeleton owns
   drop, and Discover includes followed authors while excluding the viewer. Chronological
   branches carry `ranking: null`; `discover` is ranked-only and every other
   ranked/scoping combination is refused by the input refinement. Maintenance
-  is request-time only (a bounded global sweep per build under a per-viewer
-  advisory lock, per-viewer trim on resume): no impressions, no Redis, no
-  cron.
+  is request-time only: snapshot insertion, a 100-row global expired sweep,
+  viewer expiry cleanup and one-row overflow trim share an atomic D1 batch.
+  The batch protects the new row from expiry ties and keeps the ten-row cap
+  across concurrent builds. Expiry is database-clock based; resumes only read
+  and validate. SQLite row-number partitions select each original's latest
+  visible repost before applying the candidate budget. History/author ID sets
+  bind through JSON to stay within D1 limits. No locks or cron are required.
 - **`src/moderation-inputs.ts` is a leaf on purpose.** The moderation router
   files must never import each other — a cycle fails at module evaluation.
 
@@ -592,9 +803,9 @@ reposter_key)` — so it hand-rolls the same three parts the skeleton owns
 | Command                                                                       | Covers                                                           |
 | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `pnpm --filter @my-tuums/api test:unit`                                       | pure logic; must pass with no database                           |
-| `pnpm --filter @my-tuums/api test:integration`                                | real Postgres (`pnpm docker:up` first)                           |
+| `pnpm --filter @my-tuums/api test:integration`                                | ephemeral local D1, no external credentials                      |
 | `pnpm --filter @my-tuums/api lint` / `typecheck`                              | this package alone                                               |
-| `pnpm --filter @my-tuums/api reconcile:media`                                 | reap objects no row points at                                    |
+| `pnpm --filter @my-tuums/api reconcile:media --bucket=mytuums-poc-media`      | reap objects no row points at                                    |
 | `pnpm --filter @my-tuums/api prune:notifications --apply --retention-days=90` | delete notifications past the shared horizon (moderation exempt) |
 
 Suites split by filename: `*.test.ts` is unit (no I/O), `*.int.test.ts` is

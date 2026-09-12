@@ -47,9 +47,13 @@ app's build from the same origin.
 
 - **Video upload state outlives its composer component, not the tab.**
   `src/atoms/video-upload.ts` owns scoped File/progress/cancellation state;
-  `src/lib/video-upload.ts` sends sequential 8 MiB parts with XHR and resumes
-  from server-confirmed parts. Selection/completion never submits a post.
-  Successful submission clears the draft; explicit removal cancels the upload.
+  `src/lib/video-upload.ts` sends sequential 8 MiB tus PATCH chunks with XHR,
+  using Stream's HEAD-confirmed byte offset on each retry. A lost PATCH response
+  must not cause already-accepted bytes to be resent. Upload session IDs survive
+  cancellation during begin so the caller can cancel the durable obligation.
+  Selection/completion never submits a post. Successful submission clears the
+  draft; explicit removal cancels the upload. The native API/client protocol is
+  implemented; the Cloudflare Worker entrypoint remains to wire.
 - **Composer video previews use the original local file.**
   `src/components/local-video-preview.tsx` owns the native player and its blob
   URL, released on replacement or unmount. Previewing never uploads, encodes,
@@ -62,7 +66,10 @@ app's build from the same origin.
 - **Playback has one visible owner.** `src/atoms/video-playback.ts` coordinates
   all full players and the persisted autoplay preference. Autoplay is muted;
   sound requires explicit interaction. `src/components/video-player.tsx` loads
-  HLS.js on demand. Playback ownership and source ownership are separate: an
+  HLS.js on demand. Stream's manifest supplies the available quality levels;
+  the UI never constructs encoder-specific rendition filenames. Timeline VTT
+  references authorized time-based thumbnails rather than an FFmpeg sprite set.
+  Playback ownership and source ownership are separate: an
   explicitly paused, visible player retains its source/buffers until another
   player takes ownership or it leaves view. Pause/resume must not reload the
   stream; the control reflects playback intent even while loading.
@@ -273,8 +280,8 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   `/verify-email` itself rather than waiting on `useRedirectWhenSignedIn`, and
   `/login` does the same on the `EMAIL_NOT_VERIFIED` outcome.
 - In dev, Vite proxies `/rpc`, `/api/auth` and `/media` to the API on `:3001`.
-- Only three `VITE_*` variables are read: `VITE_SOCIAL_PROVIDERS`,
-  `VITE_GOOGLE_CLIENT_ID`, and `VITE_GA_MEASUREMENT_ID`. All are inlined at build time — see
+- Four `VITE_*` variables are read: `VITE_SOCIAL_PROVIDERS`,
+  `VITE_GOOGLE_CLIENT_ID`, `VITE_GA_MEASUREMENT_ID`, and `VITE_WEB_ORIGIN`. All are inlined at build time — see
   [docs/operations.md](../../docs/operations.md).
 
 ## Generated files
@@ -355,3 +362,24 @@ per consumer.
 - [docs/architecture.md](../../docs/architecture.md) — state ownership, dev proxies.
 - [docs/product.md](../../docs/product.md) — what each screen is supposed to do.
 - [docs/security.md](../../docs/security.md) — the redirect guard and the gates.
+
+## Cloudflare PoC build
+
+Static metadata, document heads and copied post links use `VITE_WEB_ORIGIN`.
+Vite accepts only the PoC, preview candidate and final preview origins, defaulting
+to `https://cf-poc.mytuums.com`. The ordered preview deployment derives this public
+build input from its Worker configuration, keeping links within that database's
+environment. All hosted origins remain behind Access.
+Crawler files refuse indexing and the sitemap contains no public URLs. Vite
+pins the Google/Discord/Twitch button list to the three credential pairs required
+by the native application entrypoint. The matching public Google client ID for
+One Tap must be supplied by Workers Builds before hosted authentication checks.
+Root Turbo builds this SPA before the application Worker that packages it.
+
+## Environment-specific crawler documents
+
+`crawler-documents/` retains main's public robots, sitemap and llms documents.
+`crawler-documents-plugin.ts` emits them only when Vite builds for
+`https://mytuums.com`; preview and PoC get disallow/empty documents instead.
+The production origin is an explicit public build input and part of Turbo's
+build cache key. The branding build shares this plugin.

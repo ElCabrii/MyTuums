@@ -29,8 +29,8 @@ import { follow, post, user, userBlock } from "@my-tuums/db/schema";
  * `SQL | undefined`, which nothing downstream accepts.
  */
 export const effectivelyBanned = sql<boolean>`(
-  ${user.banned} and (${user.banExpires} is null or ${user.banExpires} > now())
-)`;
+  ${user.banned} and (${user.banExpires} is null or ${user.banExpires} > cast(unixepoch('subsec') * 1000 as integer))
+)`.mapWith(Boolean);
 
 /**
  * True when the author of the `post` row an outer query is over must be
@@ -54,7 +54,7 @@ export function invisibleAuthor(viewerId: string | null) {
       select 1 from ${userBlock}
       where ${userBlock.blockerId} = ${viewerId} and ${userBlock.blockedId} = ${post.authorId}
     )
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /**
@@ -74,7 +74,7 @@ export function invisibleUser(viewerId: string | null) {
       select 1 from ${userBlock}
       where ${userBlock.blockerId} = ${viewerId} and ${userBlock.blockedId} = ${user.id}
     )
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /**
@@ -84,7 +84,9 @@ export function invisibleUser(viewerId: string | null) {
  * `invisibleUser` for what that means.
  */
 export function visibleUser(viewerId: string | null) {
-  return sql<boolean>`(not ${effectivelyBanned} and not ${invisibleUser(viewerId)})`;
+  return sql<boolean>`(not ${effectivelyBanned} and not ${invisibleUser(viewerId)})`.mapWith(
+    Boolean,
+  );
 }
 
 /**
@@ -107,7 +109,7 @@ export function privatePostHidden(viewerId: string | null) {
   if (viewerId === null) {
     return sql<boolean>`(
       ${user.isPrivate} is true or ${post.isPrivate} is true
-    )`;
+    )`.mapWith(Boolean);
   }
   return sql<boolean>`(
     (${user.isPrivate} is true or ${post.isPrivate} is true)
@@ -116,7 +118,7 @@ export function privatePostHidden(viewerId: string | null) {
       select 1 from ${follow}
       where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${post.authorId}
     )
-  )`;
+  )`.mapWith(Boolean);
 }
 
 /**
@@ -130,7 +132,7 @@ export function privatePostHidden(viewerId: string | null) {
  */
 export function privateUserHidden(viewerId: string | null) {
   if (viewerId === null) {
-    return sql<boolean>`${user.isPrivate} is true`;
+    return sql<boolean>`${user.isPrivate} is true`.mapWith(Boolean);
   }
   return sql<boolean>`(
     ${user.isPrivate} is true
@@ -139,5 +141,5 @@ export function privateUserHidden(viewerId: string | null) {
       select 1 from ${follow}
       where ${follow.followerId} = ${viewerId} and ${follow.followingId} = ${user.id}
     )
-  )`;
+  )`.mapWith(Boolean);
 }

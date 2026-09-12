@@ -1,5 +1,6 @@
+import { closeDb } from "./testing/runtime.js";
 import { call } from "@orpc/server";
-import { closeDb } from "@my-tuums/db";
+
 import { follow, post, user } from "@my-tuums/db/schema";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

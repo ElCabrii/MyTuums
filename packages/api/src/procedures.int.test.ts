@@ -1,5 +1,8 @@
+import { closeDb, db } from "./testing/runtime.js";
+import { post } from "@my-tuums/db/schema";
+import { eq } from "drizzle-orm";
 import { call } from "@orpc/server";
-import { closeDb } from "@my-tuums/db";
+
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { LEGAL_CONSENT_REQUIRED_MESSAGE, LEGAL_VERSION } from "@my-tuums/auth/rules";
@@ -33,6 +36,24 @@ afterAll(async () => {
 });
 
 describe("rate limiting", () => {
+  it("does not publish when asynchronous admission storage is unavailable", async () => {
+    const actor = await createTestUser();
+    await expect(
+      call(
+        appRouter.post.create,
+        { content: "must not publish" },
+        {
+          context: {
+            ...contextFor(actor),
+            rateLimiter: { consume: () => Promise.reject(new Error("synthetic admission outage")) },
+          },
+        },
+      ),
+    ).rejects.toThrow("synthetic admission outage");
+    expect(
+      await db.select({ id: post.id }).from(post).where(eq(post.authorId, actor.id)),
+    ).toHaveLength(0);
+  });
   it("keys signed-in callers on user:<id> — exhausting one user's write budget doesn't touch a second user's", async () => {
     const alice = await createTestUser();
     const bob = await createTestUser();

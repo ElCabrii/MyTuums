@@ -1,5 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
-import type { PgColumn } from "drizzle-orm/pg-core";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { CursorCodec } from "./cursor.js";
 
 type StringKeys<T> = { [K in keyof T]: T[K] extends string ? K : never }[keyof T];
@@ -15,10 +15,10 @@ type StringKeys<T> = { [K in keyof T]: T[K] extends string ? K : never }[keyof T
 type ColumnKey<S, C> = { [K in keyof S]: S[K] extends C ? K : never }[keyof S];
 
 /** A column whose JS value is a Date — what the cursor's timestamp half must be. */
-type DateColumn = PgColumn & { _: { data: Date } };
+type DateColumn = SQLiteColumn & { _: { data: Date } };
 
 /** A column whose JS value is a string — what the cursor's id half must be. */
-type StringColumn = PgColumn & { _: { data: string } };
+type StringColumn = SQLiteColumn & { _: { data: string } };
 
 /**
  * The keyset page skeleton every paginated list in this package is built
@@ -31,11 +31,10 @@ type StringColumn = PgColumn & { _: { data: string } };
  *
  * - the cursor filter: a row-value comparison strictly "older than the
  *   cursor" under the same (created_at DESC, id DESC) ordering the index
- *   provides, so Postgres can seek straight to the cursor position. The
+ *   provides, so SQLite can seek straight to the cursor position. The
  *   bound values go through `sql.param` with their column as the encoder —
- *   interpolating them directly hands postgres.js a raw JS `Date`, which it
- *   cannot serialise (`mapToDriverValue` on the column is what turns it into
- *   the ISO string Postgres expects).
+ *   D1 accepts scalar bindings, so the column encoder converts each Date
+ *   into epoch milliseconds before execution.
  * - the hasMore decision: one row beyond the page, purely to learn whether
  *   another page exists without a second COUNT query. It is dropped before
  *   returning.

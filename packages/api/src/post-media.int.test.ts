@@ -1,6 +1,7 @@
+import { closeDb } from "./testing/runtime.js";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { closeDb } from "@my-tuums/db";
+
 import { post, postAttachment, user, userBlock } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { canViewPostMedia } from "./post-media.js";

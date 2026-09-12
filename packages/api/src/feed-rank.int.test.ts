@@ -1,5 +1,6 @@
+import { closeDb, db } from "./testing/runtime.js";
 import { call } from "@orpc/server";
-import { closeDb, db } from "@my-tuums/db";
+
 import {
   feedRankSnapshot,
   follow,
@@ -772,6 +773,16 @@ describe("ranked cold start", () => {
   });
 });
 
+/** Each statement stays inside D1's binding limit for the 500-event fixtures. */
+async function seedReposts(rows: (typeof postRepost.$inferInsert)[]) {
+  for (let offset = 0; offset < rows.length; offset += 50) {
+    const [first, ...rest] = rows
+      .slice(offset, offset + 50)
+      .map((row) => db.insert(postRepost).values(row));
+    await db.batch([first, ...rest]);
+  }
+}
+
 describe("ranked candidate limits (#356)", () => {
   it.each(["authored", "reposts"] as const)(
     "finds exact game matches beyond a full batch of %s false positives",
@@ -780,19 +791,21 @@ describe("ranked candidate limits (#356)", () => {
       const author = await createTestUser();
       const q = `game-limit-${reader.id}`;
       const createdAt = new Date(Date.now() - (arm === "authored" ? 1 : 24 * 40) * HOUR);
-      const noise = await db
-        .insert(post)
-        .values(
-          Array.from({ length: FEED_RANK_POOL_LIMIT }, () => ({
-            authorId: author.id,
-            content: `${q} #doom2016`,
-            createdAt,
-          })),
-        )
-        .returning({ id: post.id });
+      const noise = Array.from({ length: FEED_RANK_POOL_LIMIT }, () => ({
+        id: crypto.randomUUID(),
+        authorId: author.id,
+        content: `${q} #doom2016`,
+        createdAt,
+      }));
+      for (let offset = 0; offset < noise.length; offset += 50) {
+        const [first, ...rest] = noise
+          .slice(offset, offset + 50)
+          .map((row) => db.insert(post).values(row));
+        await db.batch([first, ...rest]);
+      }
       const exactId = await makePost(author.id, `${q} #DOOM!`, arm === "authored" ? 2 : 24 * 41);
       if (arm === "reposts") {
-        await db.insert(postRepost).values([
+        await seedReposts([
           ...noise.map(({ id }) => ({
             postId: id,
             userId: reader.id,
@@ -818,17 +831,18 @@ describe("ranked candidate limits (#356)", () => {
     const viralId = await makePost(author.id, `${q} viral`, 24 * 40);
     const otherId = await makePost(author.id, `${q} other`, 24 * 40);
     // These actors need no sessions; bulk seeding keeps the 500-event regression cheap.
-    const actors = await db
-      .insert(user)
-      .values(
-        Array.from({ length: FEED_RANK_POOL_LIMIT }, (_, i) => ({
-          id: `${reader.id}-reposter-${i}`,
-          name: `Reposter ${i}`,
-          email: `${reader.id}-reposter-${i}@example.com`,
-        })),
-      )
-      .returning({ id: user.id });
-    await db.insert(postRepost).values([
+    const actors = Array.from({ length: FEED_RANK_POOL_LIMIT }, (_, i) => ({
+      id: `${reader.id}-reposter-${i}`,
+      name: `Reposter ${i}`,
+      email: `${reader.id}-reposter-${i}@example.com`,
+    }));
+    for (let offset = 0; offset < actors.length; offset += 50) {
+      const [first, ...rest] = actors
+        .slice(offset, offset + 50)
+        .map((row) => db.insert(user).values(row));
+      await db.batch([first, ...rest]);
+    }
+    await seedReposts([
       ...actors.map(({ id }, i) => ({
         postId: viralId,
         userId: id,

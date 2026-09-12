@@ -7,13 +7,6 @@ import { ALICE } from "../../support/users";
 const COMPOSER_PLACEHOLDER = "Share a gaming update, clip, or tournament result...";
 const REPLY_PLACEHOLDER = "Post your reply...";
 
-/** Object storage is all-or-nothing in the E2E stack; partial credentials boot without uploads. */
-function storageBucketConfigured(): boolean {
-  return ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"].every((key) =>
-    Boolean(process.env[key]),
-  );
-}
-
 test.describe("composing a post", () => {
   test("posting from / appears in the ranked feed only after Refresh", async ({ page, db }) => {
     const aliceId = await db.getUserId(ALICE.username);
@@ -138,8 +131,6 @@ test.describe("composing a post", () => {
 });
 
 test.describe("post image attachments", () => {
-  test.skip(!storageBucketConfigured(), "no Storage Bucket configured (S3_* unset)");
-
   test("uploads a post image and renders the stored /media/posts object", async ({ page }) => {
     await page.goto("/");
     const content = `Post with image ${Date.now().toString()}`;

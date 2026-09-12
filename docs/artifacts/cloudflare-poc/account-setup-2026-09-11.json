@@ -1,0 +1,35 @@
+{
+  "verifiedDate": "2026-09-11",
+  "accountId": "734f3b84571b1967e6940140a0b7d75f",
+  "repository": "ElCabrii/MyTuums",
+  "branch": "codex/cloudflare-poc",
+  "repoConnectionId": "edb3ba42-0325-417c-a75a-34634c78f67d",
+  "repositoryConfigLookupSucceeded": true,
+  "stream": { "storageLimitMinutes": 1000, "usedMinutes": 0, "videos": 0 },
+  "email": {
+    "sendingDomain": "mytuums.com",
+    "sendingDomainId": "ca19f51cad5640ca8ce433836ee5dafd",
+    "enabled": true,
+    "dnsStatus": "ready",
+    "dailyQuota": 200,
+    "sent": 0
+  },
+  "workers": [
+    {
+      "name": "mytuums-poc-branding",
+      "id": "30084ec561d443bfbf116fb0a6925b7a",
+      "deployedOn": null
+    },
+    { "name": "mytuums-poc-jobs", "id": "bf56e929429944a5a872ca1e6824d282", "deployedOn": null },
+    { "name": "mytuums-poc-app", "id": "ef25a24f4c934298bf75460f4e57a55c", "deployedOn": null }
+  ],
+  "allWorkersDevDisabled": true,
+  "allPreviewUrlsDisabled": true,
+  "buildTokens": 0,
+  "buildTriggersCreated": 0,
+  "brandingBootstrapVersion": "590ec5f2-041c-42ea-b1d5-e9b1d8764e69",
+  "brandingDeployments": 0,
+  "brandingCustomDomains": 0,
+  "accountTokenPermissionLookupError": 9109,
+  "scope": "Repository connection, product readiness and Worker setup. Branding has one undeployed, unbound 503 bootstrap version to unlock dashboard settings. No application deployments, runtime secrets, video encoding or real email delivery tested."
+}

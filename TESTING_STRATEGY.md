@@ -8,11 +8,11 @@ one they skip.
 
 ## The three levels
 
-| Level    | Command            | Needs                       | Use it                                                 |
-| -------- | ------------------ | --------------------------- | ------------------------------------------------------ |
-| **fast** | `pnpm test:unit`   | nothing                     | while editing                                          |
-| **PR**   | `pnpm verify`      | Postgres (`pnpm docker:up`) | before you call the work done                          |
-| **full** | `pnpm verify:full` | Postgres, ideally a bucket  | before a release, or when a change crosses the browser |
+| Level    | Command            | Needs                             | Use it                                                 |
+| -------- | ------------------ | --------------------------------- | ------------------------------------------------------ |
+| **fast** | `pnpm test:unit`   | local runtime for native fixtures | while editing                                          |
+| **PR**   | `pnpm verify`      | local workerd/D1/R2               | before you call the work done                          |
+| **full** | `pnpm verify:full` | local workerd/D1/R2 + Chromium    | before a release, or when a change crosses the browser |
 
 `pnpm verify` is byte-for-byte what CI's `Verify` job runs. Narrower still
 while iterating: `pnpm --filter @my-tuums/web exec vitest run src/atoms/like.test.ts`.
@@ -26,8 +26,8 @@ it probably should not exist.
 1. **Authorization and the moderation hierarchy.** Nobody acts at or above
    their own rank; nobody acts on themselves; `/api/auth/admin/*` stays 404'd
    so `/rpc` is the only path to a moderation action.
-2. **The audit log is append-only and truthful.** Every effect reads its guard
-   `FOR UPDATE`; concurrent inverse actions log exactly one row and send
+2. **The audit log is append-only and truthful.** Every effect latches its guard
+   in the same atomic D1 batch; concurrent inverse actions log exactly one row and send
    exactly one email; a rollback leaves no row, no state change and no mail.
 3. **Appeals cannot be replayed or aimed at a superseded action.**
 4. **Media authorization.** A viewer can resolve a display object they are
@@ -46,9 +46,9 @@ it probably should not exist.
 9. **No open redirects** out of `?redirect=`.
 10. **The privacy projection.** No email address reaches a rendered page or an
     RPC response.
-11. **The production artefact boots.** The image serves the SPA, answers
+11. **The deployment artefact boots.** The Worker serves the SPA, answers
     `/health` against a real database, redirects the page gate, and registers
-    exactly the OAuth providers the bundle offers.
+    the configured OAuth providers. Hosted provider exchange remains a separate check.
 
 ## Target architecture
 
@@ -83,15 +83,15 @@ gate and the security headers are pinned.
 
 ### Integration — `*.int.test.ts` in `packages/api`
 
-**Where the boundary lives.** Real Postgres, the real Better Auth instance,
+**Where the boundary lives.** Real local D1, the real Better Auth instance,
 the real oRPC procedures. Reach for it when the property _is_ the boundary:
-transactions, `FOR UPDATE` guards, keyset pagination, visibility predicates,
+atomic batches, latched guards, keyset pagination, visibility predicates,
 cascades, rate-limit tiers, the auth database hooks.
 
 Do not re-enumerate domain edge cases here that a unit test already owns.
 
 Object storage is the one boundary deliberately faked (`testStorage` in the
-harness): it is outside the truncate helper's control, costs money, and
+harness): the D1 domain suite owns no provider resources, and
 "the row points at the object we wrote" needs no bucket.
 
 ### Contract — `e2e/tests/api/*`
@@ -123,11 +123,15 @@ What is currently there and why it is there:
 | `moderation`                                                                             | report → queue → remove → appeal across two signed-in people               |
 | `a11y`, `csp`, `i18n`, `theme`                                                           | properties of a rendered document                                          |
 
-### The image job
+### Native runtime and artifact tests
 
-The only place the production artefact is ever started. It exists because two
-production breakages reached users through a fully green pipeline, and neither
-was reachable without building the image.
+The actual Wrangler application/branding bundles and Vite assets execute in
+workerd; the jobs suite executes real compiled Workflows with D1/R2. This retains
+the deployment-boundary coverage formerly owned by the Docker image job. Email
+builders also run with React Email's workerd export to catch bundling regressions.
+These tests use local runtime I/O and synthetic providers; they do not prove
+hosted Stream codec fidelity or Email Service delivery. They run through the
+existing `test:unit` orchestration despite being runtime integration checks.
 
 ## When does a test deserve to exist?
 

@@ -2,93 +2,23 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/cloudflare-poc]
   pull_request:
 
-# One run per ref at a time: a newer push to the same branch/PR cancels
-# the in-flight run instead of queuing behind it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
-# The default GITHUB_TOKEN would otherwise inherit the repo's default
-# permissions. Everything CI does — checkout, install, test, build, the
-# playwright-report artifact — is satisfied by read-only contents; nothing
-# here pushes or writes issues/releases.
 permissions:
   contents: read
 
-# Three jobs, not five, because every job on this repo's self-hosted runner
-# costs about a minute of pure setup (runner handshake, checkout, Node, pnpm,
-# install, container init, post-steps) and the jobs run SERIALLY — there is
-# effectively one runner slot, so the critical path is their sum, not their
-# max. Five jobs spent roughly a third of a 15-minute pipeline re-doing the
-# same setup. What is left is split by what a failure means and by what a job
-# is trusted with, not by test taxonomy:
-#
-#   verify  — everything that needs only the source: static checks, the unit
-#             suites, the integration suite. Takes no secrets. This is the
-#             signal a contributor waits for.
-#   e2e     — the browser journeys. The ONLY job with secrets (the `ci`
-#             bucket), which is why it stays separate from `image`.
-#   image   — the production artefact: built, inspected, booted, probed. Takes
-#             no secrets on purpose.
-#
-# See docs/operations.md and TESTING_STRATEGY.md.
-env:
-  # Kept in one place so the jobs cannot drift apart. The password is a
-  # throwaway for the ephemeral service container.
-  POSTGRES_PASSWORD: ci-postgres-password
-  BETTER_AUTH_SECRET: ci-better-auth-secret-at-least-32-characters
-  BETTER_AUTH_URL: http://localhost:3001
-  WEB_ORIGIN: http://localhost:5173
-
-# DATABASE_URL is deliberately NOT in the block above: it belongs to the jobs
-# and steps that actually own a database, so nothing inherits one by accident.
-#
-# The "unit tests must pass with no database reachable" invariant no longer
-# depends on CI arranging that at all — it used to be "the unit job has no
-# service container", which held only in CI and only until someone merged the
-# jobs. The unit projects now blank DATABASE_URL themselves
-# (packages/api/vitest.config.ts, packages/auth/vitest.config.ts), so the
-# guarantee holds on a developer's machine too, where the dev database is
-# always reachable.
-#
-# Port 5433, not 5432: the self-hosted runner also runs the dev stack
-# (`pnpm docker:up` binds 5432), so the CI service container would collide
-# with it. The `image` job reaches this port through Docker's host-gateway
-# alias, which works on Docker Desktop as well as native Linux.
-
+# Native artifact and Workflows checks belong to pnpm verify. CI uses isolated
+# local resources and synthetic providers; it never deploys or needs secrets.
 jobs:
-  # Third-party actions are pinned to the full commit SHA their major tag
-  # points at (supply-chain hygiene: mutable tags can be silently repointed —
-  # see the trivy-action and kics-github-action compromises). The trailing
-  # `# vN` comment records the tag for the next bump: re-resolve the tag,
-  # update the SHA, keep the comment in step. Every checkout also sets
-  # `persist-credentials: false` — CI never pushes, and the default leaves
-  # the GITHUB_TOKEN in .git/config, where an uploaded artifact could leak it.
   verify:
     name: Verify
     runs-on: self-hosted
     timeout-minutes: 30
-
-    services:
-      # Ephemeral Postgres — same image (postgres:16-alpine) as
-      # docker-compose.yml, so CI exercises the same major version as dev.
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ci-postgres-password
-          POSTGRES_DB: mytuums
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d mytuums"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -98,82 +28,14 @@ jobs:
           runtime: node@24
           cache: true
           require-lockfile: true
-
-      # pnpm/setup reads the exact pnpm version from package.json and installs
-      # with --frozen-lockfile because require-lockfile is true. The committed
-      # lockfile is authoritative: manifest drift fails before verification.
-
-      # The db:* scripts all run through `dotenv -e .env`, which errors on a
-      # missing file. Writing the workflow env out is simpler than
-      # special-casing the scripts, and dotenv does not override variables
-      # that are already set, so the two stay consistent either way.
-      - name: Write .env
-        run: |
-          cat > .env <<EOF
-          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-          DATABASE_URL=${DATABASE_URL}
-          DATABASE_URL_TEST=${DATABASE_URL_TEST}
-          BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
-          BETTER_AUTH_URL=${BETTER_AUTH_URL}
-          WEB_ORIGIN=${WEB_ORIGIN}
-          EOF
-        env:
-          DATABASE_URL: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums
-          DATABASE_URL_TEST: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums_test
-
-      # ONE step, running the same `pnpm verify` a contributor runs before
-      # pushing. That is the point: a check that belongs in CI belongs in
-      # package.json first, and a single script is the only way the two
-      # cannot drift. It is, in order:
-      #
-      #   build         — `routeTree.gen.ts` and `src/paraglide/**` are
-      #                   generated by Vite plugins and git-ignored, so
-      #                   `typecheck` cannot resolve a route `to=` target or a
-      #                   message function until a build has run once.
-      #   lint          — oxlint + eslint across the workspace.
-      #   typecheck     — tsc, project by project.
-      #   format:check  — Prettier is the only formatting authority; `pnpm
-      #                   format` is the one-command fix for whatever it says.
-      #   docs:check    — the agent-facing docs against the code they describe.
-      #   test:unit     — the unit projects. They pass with no database
-      #                   reachable, and cannot reach one even here: the unit
-      #                   projects blank DATABASE_URL themselves
-      #                   (packages/api/vitest.config.ts).
-      #   db:check      — a schema edit that never had `db:generate` run.
-      #   db:test:setup — builds the test database from the migrations.
-      #   test:integration
-      #
-      # There is deliberately no Turbo cache. It was measured on this runner
-      # at 22s to restore and 26s to save against a 9s build — a net loss of
-      # about 40 seconds per run, because sources change every commit and the
-      # tasks mostly miss. A persistent self-hosted runner wants a
-      # workspace-local or remote cache, not a round trip through GitHub's
-      # cache service.
       - run: pnpm verify
+        env:
+          TMPDIR: ${{ runner.temp }}
 
   e2e:
     name: E2E tests
     runs-on: self-hosted
-    # The default job timeout is 6 hours — far past what this suite can take.
-    # A hung spec would otherwise burn runner time before failing on its own.
     timeout-minutes: 30
-
-    services:
-      # Same ephemeral Postgres as the verify job.
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ci-postgres-password
-          POSTGRES_DB: mytuums
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d mytuums"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -183,87 +45,19 @@ jobs:
           runtime: node@24
           cache: true
           require-lockfile: true
-
-      - name: Write .env
-        run: |
-          cat > .env <<EOF
-          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-          DATABASE_URL=${DATABASE_URL}
-          DATABASE_URL_TEST=${DATABASE_URL_TEST}
-          BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
-          BETTER_AUTH_URL=${BETTER_AUTH_URL}
-          WEB_ORIGIN=${WEB_ORIGIN}
-          S3_ENDPOINT=${S3_ENDPOINT}
-          S3_BUCKET=${S3_BUCKET}
-          S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}
-          S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}
-          S3_REGION=${S3_REGION}
-          EOF
-        env:
-          DATABASE_URL: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums
-          DATABASE_URL_TEST: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums_test
-          # A bucket of its own — NOT the dev one. `truncateAll()` in
-          # e2e/support/db.ts deletes objects by prefix, so sharing a bucket
-          # with a developer's local `pnpm test:e2e` would let the two runs
-          # delete each other's objects mid-test.
-          #
-          # Absent on a fork PR, where secrets are not exposed. The upload specs
-          # then skip themselves (settings.spec.ts's `storageBucketConfigured()`
-          # — the same all-or-nothing group check `s3Env()` applies) and the
-          # rest of the suite runs unchanged, rather than the job failing on
-          # something a fork cannot supply.
-          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
-          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
-          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
-          S3_REGION: ${{ secrets.S3_REGION }}
-
-      - name: Configure CI bucket browser access
-        run: |
-          if [ -z "$S3_ENDPOINT" ] || [ -z "$S3_BUCKET" ] || [ -z "$S3_ACCESS_KEY_ID" ] || [ -z "$S3_SECRET_ACCESS_KEY" ]; then
-            exit 0
-          fi
-          case "$S3_BUCKET" in
-            ci|ci-*|*-ci|*-ci-*) ;;
-            *) echo "::error::Browser access setup requires the CI bucket."; exit 1 ;;
-          esac
-          pnpm --filter @my-tuums/api storage:video-cors http://localhost:5273 --apply
-        env:
-          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
-          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
-          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
-          S3_REGION: ${{ secrets.S3_REGION }}
-
-      - run: pnpm db:test:setup
-        env:
-          DATABASE_URL: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums
-          DATABASE_URL_TEST: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums_test
-
-      # Keyed on the resolved Playwright version rather than the lockfile hash:
-      # the browser build only changes when Playwright itself does, so this
-      # stays warm across ordinary dependency bumps.
       - name: Resolve Playwright version
         id: pw
         run: echo "version=$(pnpm --filter @my-tuums/e2e exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
-
-      # No `--with-deps`: that flag runs `sudo` to install system libraries,
-      # which the self-hosted runner's user cannot do non-interactively. The
-      # deps are already installed on the machine (the browser runs), and they
-      # persist across runs — unlike an ephemeral GitHub-hosted runner.
+      # Browser system libraries are installed on the self-hosted runner.
       - name: Install Chromium
         run: pnpm --filter @my-tuums/e2e exec playwright install chromium
-
       - run: pnpm test:e2e
-
-      # Uploaded even when the job failed — that is when the report matters.
-      # Kept 7 days for flake triage, then auto-expired.
+        env:
+          TMPDIR: ${{ runner.temp }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
         with:
@@ -271,311 +65,20 @@ jobs:
           path: e2e/playwright-report/
           retention-days: 7
 
-  # The Dockerfile is load-bearing and nothing above touches it: `pnpm build`
-  # builds the apps, but the image is where the web bundle, the migration SQL
-  # and the VITE_* build args actually come together. Two production breakages
-  # got past a fully green CI before this job existed — a missing `ARG` that
-  # shipped a bundle with no OAuth buttons, and a static-file rule that 404'd
-  # the whole site — because neither is reachable without building the image.
-  #
-  # Beyond the static assertions below, the image is BOOTED with its real CMD
-  # (`node apps/server/dist/index.js` — the exact process Railway starts)
-  # against a real Postgres, and probed over HTTP. The E2E suite runs the dev
-  # server; only this job ever starts the production artifact, so a broken
-  # one-origin setup or a boot-time env failure would otherwise first be seen
-  # by a real user.
-  #
-  # Build only, no push: Railway builds its own image on deploy. This exists to
-  # fail the commit, not to produce an artifact. It takes no secrets, which is
-  # why it is not folded into the `e2e` job despite both needing Postgres.
-  image:
+  docker:
     name: Docker image builds
     runs-on: self-hosted
     timeout-minutes: 30
-
-    services:
-      # Same ephemeral Postgres as the other jobs. Docker Desktop runs
-      # containers inside its VM, so the container reaches the runner's
-      # published port through the `ci-host` host-gateway alias below.
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ci-postgres-password
-          POSTGRES_DB: mytuums_test
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d mytuums_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      DATABASE_URL: postgresql://postgres:ci-postgres-password@localhost:5433/mytuums_test
-
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
-      - name: Build the server image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
         with:
-          context: .
-          file: apps/server/Dockerfile
-          push: false
-          # Dummy values: this proves the ARGs are declared and the build
-          # consumes them, without putting real client ids in CI. The bundle
-          # assertion below is what checks they actually land.
-          build-args: |
-            VITE_SOCIAL_PROVIDERS=google,discord,twitch
-            VITE_GOOGLE_CLIENT_ID=ci-placeholder.apps.googleusercontent.com
-            VITE_GA_MEASUREMENT_ID=G-CI306TEST
-          load: true
-          tags: mytuums-server:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and test the native video worker image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: apps/video-worker/Dockerfile
-          push: false
-          load: true
-          tags: mytuums-video-worker:ci
-          cache-from: type=gha,scope=video-worker
-          cache-to: type=gha,mode=max,scope=video-worker
-
-      # The regression that motivated this job. Vite inlines VITE_* at build
-      # time, so a missing `ARG` in the Dockerfile yields an image that starts
-      # cleanly and silently renders no OAuth buttons. Grepping the built
-      # bundle is the only place that is observable.
-      - name: Assert build args reached the web bundle
-        run: |
-          docker create --name ci-check mytuums-server:ci
-          docker cp ci-check:/app/apps/web/dist ./image-web-dist
-          docker rm ci-check
-          grep -rq "google,discord,twitch" ./image-web-dist/assets             || { echo "::error::VITE_SOCIAL_PROVIDERS did not reach the bundle - is the ARG declared in the builder stage?"; exit 1; }
-          grep -rq "ci-placeholder.apps.googleusercontent.com" ./image-web-dist/assets             || { echo "::error::VITE_GOOGLE_CLIENT_ID did not reach the bundle - is the ARG declared in the builder stage?"; exit 1; }
-          grep -rq "G-CI306TEST" ./image-web-dist/assets             || { echo "::error::VITE_GA_MEASUREMENT_ID did not reach the bundle - is the ARG declared on the base stage?"; exit 1; }
-          echo "All VITE_* build args are baked into the bundle."
-
-      # The footer's version is baked in from package.json by vite.config.ts's
-      # `define`; a broken define would leave the raw `__APP_VERSION__`
-      # identifier in the bundle and crash the footer at runtime — visible
-      # nowhere but here (same failure mode as the VITE_* ARGs above). `.js`
-      # only on purpose: assets/ also holds sourcemaps, whose sourcesContent
-      # contains the original sources.
-      #
-      # First grep: the raw identifier must be GONE — found means a broken
-      # define (grep -q exits 0 on a match, so `&&` fails the step).
-      # Second grep: the version must be present, anchored on the stage
-      # literals from app-version.ts because the minifier hoists the version
-      # into a module constant and renders the footer as a template
-      # (`v${na}`), so there is no single version literal to match. The
-      # alpha:beta marker is unique to our module, which rules out the
-      # version literals that vendored chunks ship, and the x.y.z pattern is
-      # bump-robust — no hardcoded version to edit on release, and an
-      # empty/garbage define fails because there is no digits.digits.digits
-      # literal left next to the marker. Each string may be quoted with
-      # double quotes, single quotes, or backticks: esbuild picks double
-      # quotes while Rolldown (Vite 8) emits backticks, and the check pins
-      # the module's shape, not one minifier's quoting.
-      - name: Assert the app version reached the web bundle
-        run: |
-          grep -rq --include="*.js" "__APP_VERSION__" ./image-web-dist/assets             && { echo "::error::__APP_VERSION__ was not replaced - is define set in apps/web/vite.config.ts?"; exit 1; }
-          grep -rqE --include="*.js" "['\"\`]alpha['\"\`]:['\"\`]beta['\"\`][^'\"\`]{0,80}['\"\`][0-9]+\.[0-9]+\.[0-9]+['\"\`]" ./image-web-dist/assets             || { echo "::error::the version string did not reach the bundle"; exit 1; }
-          echo "App version is baked into the bundle."
-
-      # The migration runner ships in the image and runs as Railway's
-      # pre-deploy step; the promote-user CLI is the production path for
-      # appointing the first moderators (issue #147). If either entry point
-      # stops being bundled or copied, the Railway console is where you would
-      # find out — a deploy that cannot migrate, or a console with no way to
-      # bootstrap moderation.
-      #
-      # The runner prune is the other regression here (issue #58): it used to
-      # `pnpm install --prod` over the both-workspaces prune, shipping the
-      # entire web dependency tree (react, jotai, shadcn, ...) into an image
-      # whose process never imports any of it — Vite already bundled the SPA.
-      # The first test fails on that old layout; the rest prove the server's
-      # own prod deps ARE installed, so the guarantee cannot be "satisfied" by
-      # pruning the runner down to nothing.
-      #
-      # One `docker run` rather than seven: each was a fresh container start
-      # for a single `test -f`.
-      - name: Assert the image's contents
-        run: |
-          docker run --rm --entrypoint sh mytuums-server:ci -c '
-            set -e
-            test -f apps/server/dist/migrate.js          || { echo "migrate.js missing from the image"; exit 1; }
-            test -f packages/db/drizzle/meta/_journal.json || { echo "packages/db/drizzle missing from the image"; exit 1; }
-            test -f apps/server/dist/promote.js          || { echo "promote.js missing - is it in tsup.config.ts entry list?"; exit 1; }
-            test -f apps/server/dist/games-sync.js       || { echo "games-sync.js missing - is it in tsup.config.ts entry list?"; exit 1; }
-            test ! -d apps/web/node_modules              || { echo "apps/web dependencies were installed into the runner - prune the runner to @my-tuums/server alone"; exit 1; }
-            test -d apps/server/node_modules/better-auth || { echo "the server production dependencies are missing from the runner"; exit 1; }
-            test -d apps/server/node_modules/@sentry/node || { echo "@sentry/node is missing from the runner"; exit 1; }
-            test -d apps/server/node_modules/@opentelemetry/core || { echo "@opentelemetry/core is missing from the runner"; exit 1; }
-          ' || { echo "::error::image contents assertion failed - see the message above"; exit 1; }
-          echo "Migration runner, promote CLI and the server prod deps are present; apps/web is not."
-
-      # Everything above inspects the image; this step RUNS it. The pre-deploy
-      # migration is the exact one-shot Railway runs before starting the app,
-      # and the boot below uses the image's real CMD with no overrides — the
-      # same process a deployed container runs.
-      #
-      # Docker Desktop's host network is inside its VM, not the runner's
-      # network namespace. Rewrite the runner URL to one host label and map it
-      # through Docker's host-gateway so migration reaches the service port.
-      # Keep the alias single-label because the private CI database does not
-      # terminate TLS.
-      - name: Run the pre-deploy migration
-        run: |
-          ci_database_url=${DATABASE_URL/localhost/ci-host}
-          docker run --rm --add-host ci-host=host-gateway \
-            -e "DATABASE_URL=${ci_database_url}" \
-            mytuums-server:ci node apps/server/dist/migrate.js
-
-      # The worker uses the same migrated test DB and a local empty S3 stub.
-      # No bucket credentials enter this job. Native encoding runs in its build.
-      - name: Boot the video worker and acknowledge a queue delivery
-        run: |
-          ci_database_url=${DATABASE_URL/localhost/ci-host}
-          docker run --rm --add-host ci-host=host-gateway \
-            -e "DATABASE_URL=${ci_database_url}" \
-            mytuums-video-worker:ci node apps/video-worker/dist/smoke.js
-
-      # The production smoke: boot the image (real CMD), then probe the same
-      # three surfaces a deployed app must serve — the DB-backed health
-      # endpoint, a signed-out page (static SPA shell through the real file
-      # handler), and the page gate's redirect. A failure anywhere here means
-      # the artifact is broken even though every assertion above passed.
-      #
-      # The social-provider probes at the end close the other half of the
-      # OAuth mirror: the bundle grep above proves the client list shipped,
-      # these prove the server registers exactly the same providers. That is
-      # why the boot carries dummy OAuth credential pairs (same philosophy as
-      # the dummy build args — proves the wiring without real client ids).
-      #
-      # Every curl carries `--max-time`: a Postgres that accepts TCP but never
-      # answers a query has no other bound (postgres.js has no default query
-      # timeout), so without it a half-open health probe would pin the loop
-      # until the job timeout.
-      - name: Boot the image and probe it over HTTP
-        run: |
-          # The smoke server binds port 3002, not 3001: the self-hosted runner
-          # also runs the dev stack (`pnpm dev` holds 3001), so the container
-          # would fail to bind and the probes would silently hit the dev server
-          # instead. BETTER_AUTH_URL is overridden to match.
-          #
-          # One IP drives all four social probes, and better-auth's default
-          # budget for /sign-in* is 3 per 10 seconds — the same reason the E2E
-          # stack sets this. It disables better-auth's own limiter only; the
-          # oRPC rate limits (packages/api) are a separate mechanism and stay
-          # on.
-          # A previous failed run can leave the container behind, and
-          # `docker run --name` then fails on the name conflict. Remove any
-          # stale one first, then guarantee cleanup if a probe fails.
-          docker rm -f ci-smoke-server >/dev/null 2>&1 || true
-          trap 'docker rm -f ci-smoke-server >/dev/null 2>&1 || true' EXIT
-
-          ci_database_url=${DATABASE_URL/localhost/ci-host}
-          docker run -d --name ci-smoke-server \
-            --add-host ci-host=host-gateway \
-            -p 127.0.0.1::3002 \
-            -e "DATABASE_URL=${ci_database_url}" \
-            -e "BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}" \
-            -e "WEB_ORIGIN=${WEB_ORIGIN}" \
-            -e "GOOGLE_CLIENT_ID=ci-placeholder.apps.googleusercontent.com" \
-            -e "GOOGLE_CLIENT_SECRET=ci-placeholder-google-client-secret" \
-            -e "DISCORD_CLIENT_ID=ci-placeholder-discord-client-id" \
-            -e "DISCORD_CLIENT_SECRET=ci-placeholder-discord-client-secret" \
-            -e "TWITCH_CLIENT_ID=ci-placeholder-twitch-client-id" \
-            -e "TWITCH_CLIENT_SECRET=ci-placeholder-twitch-client-secret" \
-            -e "AUTH_RATE_LIMIT=false" \
-            -e "BETTER_AUTH_URL=http://localhost:3002" \
-            -e PORT=3002 -e HOST=0.0.0.0 -e NODE_ENV=production \
-            mytuums-server:ci || {
-            echo "::error::docker run failed - the image could not be started";
-            exit 1; }
-
-          smoke_port=$(docker port ci-smoke-server 3002/tcp | awk -F: 'NR == 1 { print $NF }')
-          [ -n "$smoke_port" ] || {
-            echo "::error::Docker did not publish the smoke server's port";
-            exit 1; }
-          smoke_origin=http://127.0.0.1:${smoke_port}
-
-          for _ in $(seq 1 30); do
-            curl -f --max-time 10 "$smoke_origin/health" > /tmp/health.json 2>/dev/null && break
-            sleep 2
-          done
-
-          curl -fsS --max-time 10 "$smoke_origin/health" > /tmp/health.json || {
-            echo "::error::the image's CMD did not become healthy after 30 attempts - the production process does not boot";
-            docker logs ci-smoke-server;
-            exit 1; }
-          grep -q '"status":"ok"' /tmp/health.json || {
-            echo "::error::health endpoint did not report ok: $(cat /tmp/health.json)";
-            docker logs ci-smoke-server;
-            exit 1; }
-
-          login_code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "$smoke_origin/login")
-          [ "$login_code" = "200" ] || {
-            echo "::error::/login returned $login_code instead of 200 - the static SPA is not being served";
-            docker logs ci-smoke-server;
-            exit 1; }
-          login_type=$(curl -s --max-time 10 -o /dev/null -w '%{content_type}' "$smoke_origin/login")
-          echo "$login_type" | grep -q 'text/html' || {
-            echo "::error::/login served content-type $login_type instead of text/html";
-            docker logs ci-smoke-server;
-            exit 1; }
-
-          root_code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "$smoke_origin/")
-          [ "$root_code" = "302" ] || {
-            echo "::error::/ returned $root_code instead of 302 - the page gate is not live";
-            docker logs ci-smoke-server;
-            exit 1; }
-          root_target=$(curl -s --max-time 10 -o /dev/null -w '%{redirect_url}' "$smoke_origin/")
-          echo "$root_target" | grep -q '/login?redirect=' || {
-            echo "::error::/ redirected to $root_target instead of /login?redirect=...";
-            docker logs ci-smoke-server;
-            exit 1; }
-
-          # The server half of the provider mirror (the client half is the
-          # bundle grep above). The image carries dummy OAuth credential
-          # pairs, so each provider the bundle offers must answer the social
-          # sign-in endpoint with its own authorize URL. A provider the
-          # server has no credentials for 404s here; a credential the client
-          # never offers is caught by the bundle grep. The github probe is
-          # the control: a provider the config does NOT register must be
-          # refused, or every positive probe above could pass vacuously.
-          social_probe_failed() {
-            echo "::error::$1";
-            docker logs ci-smoke-server;
-            exit 1;
-          }
-          for entry in "google accounts.google.com" "discord discord.com" "twitch id.twitch.tv"; do
-            set -- $entry
-            provider=$1
-            host=$2
-            code=$(curl -s --max-time 10 -o "/tmp/social-$provider.json" -w '%{http_code}' \
-              -X POST -H 'Content-Type: application/json' \
-              -d "{\"provider\":\"$provider\"}" \
-              "$smoke_origin/api/auth/sign-in/social")
-            [ "$code" = "200" ] || social_probe_failed "social sign-in for $provider returned $code - the server does not hold that provider's credentials"
-            grep -q '"redirect":true' "/tmp/social-$provider.json" || social_probe_failed "social sign-in for $provider did not offer a redirect"
-            grep -q "$host" "/tmp/social-$provider.json" || social_probe_failed "social sign-in for $provider did not target $host (authorize URL mismatch)"
-          done
-
-          github_code=$(curl -s --max-time 10 -o /tmp/social-github.json -w '%{http_code}' \
-            -X POST -H 'Content-Type: application/json' \
-            -d '{"provider":"github"}' \
-            "$smoke_origin/api/auth/sign-in/social")
-          [ "$github_code" = "404" ] || social_probe_failed "unregistered provider github returned $github_code instead of 404 - the registration check is vacuous"
-          grep -q 'PROVIDER_NOT_FOUND' /tmp/social-github.json || social_probe_failed "unregistered provider github did not report PROVIDER_NOT_FOUND"
-          echo "Social providers agree: server registers google, discord, twitch; unregistered providers are refused."
-
-          echo "Image boots with its real CMD: health ok, SPA served, page gate redirects."
+          runtime: node@24
+          cache: true
+          require-lockfile: true
+      - run: pnpm --filter @my-tuums/link-fetcher exec tsup
+      - run: docker build --tag mytuums-link-fetcher-ci apps/link-fetcher
+      # Exercise the deployed non-root user's ability to read the generated bundle.
+      - run: docker run --rm --network none --entrypoint node mytuums-link-fetcher-ci --check /app/server.cjs

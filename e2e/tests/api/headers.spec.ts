@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { E2E_STREAM_ORIGIN } from "../../stream-fixture";
 import { test, expect } from "@playwright/test";
 import { request as httpRequest } from "node:http";
 import { gunzipSync } from "node:zlib";
@@ -26,7 +28,7 @@ function expectSecurityHeaders(headers: Record<string, string | string[] | undef
 
 /**
  * Asserts the enforced (not report-only — issue #61) CSP header is present
- * and carries the directives `apps/server/src/response-decorators.ts`
+ * and carries the directives `apps/server/src/worker-response-headers.ts`
  * derives from what the app actually loads: same-origin by default, `https:`
  * images (own uploads via the `/media` redirect, plus OAuth avatar URLs
  * rendered verbatim), and the `accounts.google.com` allowance Google One Tap
@@ -34,24 +36,16 @@ function expectSecurityHeaders(headers: Record<string, string | string[] | undef
  * moves whenever the shared onload-handler constant does.
  */
 function expectContentSecurityPolicy(headers: Record<string, string | string[] | undefined>): void {
-  const csp = headers["content-security-policy"];
-  expect(csp).toEqual(expect.any(String));
-  // SAFETY: The runtime assertion above establishes the Node header value as a string.
-  const directives = (csp as string).split("; ");
-  const mediaOrigins: string[] = [];
-  if (process.env.S3_ENDPOINT && process.env.S3_BUCKET) {
-    const endpoint = new URL(process.env.S3_ENDPOINT);
-    mediaOrigins.push(endpoint.origin);
-    endpoint.hostname = `${process.env.S3_BUCKET}.${endpoint.hostname}`;
-    mediaOrigins.push(endpoint.origin);
-  }
+  const csp = z.string().parse(headers["content-security-policy"]);
+  const directives = csp.split("; ");
+  const mediaOrigins = [E2E_STREAM_ORIGIN];
 
   expect(directives).toContain("default-src 'self'");
   expect(directives).toContain("base-uri 'self'");
   expect(directives).toContain("object-src 'none'");
   expect(directives).toContain("img-src 'self' https: blob:");
   expect(directives).toContain("style-src 'self' 'unsafe-inline' https://accounts.google.com");
-  // Issue #368: direct video transport adds only the configured bucket origins.
+  // Issue #368: direct video transport adds only the configured Stream origin.
   expect(directives).toContain(
     ["connect-src 'self' https://accounts.google.com", ...mediaOrigins].join(" "),
   );
@@ -124,7 +118,7 @@ test.describe("security headers", () => {
   });
 
   test("a 404 carries them too, on the plain-text path", async ({ request }) => {
-    const response = await request.get("/definitely-not-a-route");
+    const response = await request.get("/assets/definitely-not-a-route.js");
 
     expect(response.status()).toBe(404);
     expectSecurityHeaders(response.headers());
@@ -144,9 +138,8 @@ test.describe("security headers", () => {
 test.describe("request body cap", () => {
   test("a signed-in chunked /rpc body over the cap is refused with 413", async ({ request }) => {
     // After the pre-auth gate, only an authenticated caller can put a chunked
-    // body in flight at all; its byte-counting cap remains oRPC's
-    // BodyLimitPlugin (apps/server/src/index.ts), which refuses at the same
-    // ceiling as the declared-length check. This test signs in precisely so it
+    // body in flight at all; the native Worker bounds actual bytes
+    // at the same ceiling as its declared-length check. This test signs in precisely so it
     // can reach that plugin past the gate.
     //
     // RPC_MAX_BODY_BYTES is imported rather than mirrored: it derives from
@@ -167,7 +160,9 @@ test.describe("request body cap", () => {
     });
 
     expect(wire.status).toBe(413);
-    expect(wire.body.toString()).toContain("PAYLOAD_TOO_LARGE");
+    expect(JSON.parse(wire.body.toString())).toMatchObject({
+      json: { code: "PAYLOAD_TOO_LARGE", status: 413 },
+    });
   });
 });
 

@@ -48,9 +48,33 @@
       "types": "./src/games-sync.ts",
       "default": "./src/games-sync.ts"
     },
-    "./video-worker": {
-      "types": "./src/video-worker.ts",
-      "default": "./src/video-worker.ts"
+    "./cloudflare-jobs": {
+      "types": "./src/cloudflare-jobs.ts",
+      "default": "./src/cloudflare-jobs.ts"
+    },
+    "./games-fixture": {
+      "types": "./src/games-fixture.ts",
+      "default": "./src/games-fixture.ts"
+    },
+    "./r2-storage": {
+      "types": "./src/r2-storage.ts",
+      "default": "./src/r2-storage.ts"
+    },
+    "./image": {
+      "types": "./src/image.ts",
+      "default": "./src/image.ts"
+    },
+    "./rate-limit": {
+      "types": "./src/rate-limit.ts",
+      "default": "./src/rate-limit.ts"
+    },
+    "./distributed-rate-limit": {
+      "types": "./src/distributed-rate-limit.ts",
+      "default": "./src/distributed-rate-limit.ts"
+    },
+    "./cloudflare-app": {
+      "types": "./src/cloudflare-app.ts",
+      "default": "./src/cloudflare-app.ts"
     }
   },
   "scripts": {
@@ -59,10 +83,11 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
-    "reconcile:media": "dotenv -e ../../.env -- tsx scripts/reconcile-media.ts",
-    "prune:notifications": "dotenv -e ../../.env -- tsx scripts/prune-notifications.ts",
-    "games:seed": "dotenv -e ../../.env -- tsx scripts/seed-games.ts",
-    "storage:video-cors": "dotenv -e ../../.env -- tsx scripts/configure-video-cors.ts"
+    "reconcile:media": "tsx scripts/reconcile-media.ts",
+    "prune:notifications": "tsx scripts/prune-notifications.ts",
+    "games:seed": "tsx scripts/seed-games.ts",
+    "generate:case-folding": "tsx scripts/generate-case-folding.ts",
+    "generate:search-folding": "tsx scripts/generate-search-folding.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1101.0",
@@ -71,18 +96,16 @@
     "@my-tuums/db": "workspace:*",
     "@orpc/server": "^1.5.0",
     "drizzle-orm": "^0.45.2",
-    "pg-boss": "12.26.0",
     "sharp": "^0.35.4",
     "undici": "^7.29.0",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@better-auth/utils": "catalog:",
+    "@cloudflare/workers-types": "5.20260908.1",
     "@my-tuums/tsconfig": "workspace:*",
     "@types/node": "catalog:",
     "@typescript/native": "catalog:",
-    "dotenv": "^17.2.3",
-    "dotenv-cli": "^11.0.0",
     "tsx": "4.23.1",
     "vitest": "^4.1.10"
   }

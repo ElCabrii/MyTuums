@@ -1,0 +1,64 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "mytuums-poc-jobs",
+  "account_id": "734f3b84571b1967e6940140a0b7d75f",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-10",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "upload_source_maps": true,
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "limits": { "cpu_ms": 300000, "subrequests": 50000 },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mytuums-poc",
+      "database_id": "f4334c85-cca9-4437-976e-b52038047c62",
+      "migrations_dir": "../../packages/db/drizzle-d1",
+    },
+  ],
+  "stream": { "binding": "STREAM", "remote": false },
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["noreply@mytuums.com"],
+      "remote": false,
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "mytuums-poc-media",
+      "jurisdiction": "eu",
+      "remote": false,
+    },
+  ],
+  "vars": {
+    "WEB_ORIGIN": "https://cf-poc.mytuums.com",
+    "EMAIL_FROM": "noreply@mytuums.com",
+    "STREAM_NAMESPACE": "mytuums-poc",
+    "CLOUDFLARE_ACCOUNT_ID": "734f3b84571b1967e6940140a0b7d75f",
+  },
+  "secrets": {
+    "required": ["STREAM_API_TOKEN", "IGDB_CLIENT_ID", "IGDB_CLIENT_SECRET", "APPEAL_TOKEN_SECRET"],
+  },
+  "triggers": { "crons": ["* * * * *"] },
+  "workflows": [
+    {
+      "binding": "VIDEO_WORKFLOW",
+      "name": "mytuums-poc-video",
+      "class_name": "VideoWorkflow",
+    },
+    {
+      "binding": "MAINTENANCE_WORKFLOW",
+      "name": "mytuums-poc-maintenance",
+      "class_name": "MaintenanceWorkflow",
+    },
+    {
+      "binding": "GAME_SYNC_WORKFLOW",
+      "name": "mytuums-poc-game-sync",
+      "class_name": "GameSyncWorkflow",
+    },
+  ],
+}

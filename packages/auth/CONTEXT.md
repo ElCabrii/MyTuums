@@ -1,15 +1,65 @@
 # packages/auth context
 
+Cloudflare PoC: `createAuth(options)` replaces the module-global instance.
+It receives the database, origin, secret, social-provider credentials and mail
+transport. `createEmailSender(binding, from)` uses native Cloudflare Email Service.
+It snapshots each rendered message and permits three attempts for the documented
+rate-limit and internal-service errors, waiting 500 ms then 1 second. Permanent
+refusals, daily limits and unclassified failures are not retried. Terminal errors
+contain no provider message or cause. `src/email-delivery.test.ts` exercises this
+transport contract with synthetic provider outcomes and fake timers.
+The server-only `./email` export exposes transport and rendering without loading
+the auth factory; the jobs Worker uses it for moderation delivery. Its sanitized
+`EmailDeliveryError.retryable` distinguishes documented transient refusal from
+permanent or ambiguous failure without retaining provider diagnostics.
+Every email builder receives this deployment's explicit origin as its first
+argument, including OTP messages with no action URL. There is no fallback logo
+origin or module-load environment access. `src/env.ts` now only defines the
+OAuth credential type. `schema.config.ts` shares the actual auth configuration with the SQLite generator.
+`createTestAuth` replaces the fixture singleton. Application callers are still
+being ported; see [migration status](../../docs/cloudflare-migration.md).
+
 The server-only `./client-ip` export owns the internal HTTP identity header,
 Better Auth IP options and the shared reader used by anonymous RPC limiting.
 Only the HTTP boundary may mint that header; see `docs/security.md` for proxy
 trust requirements. The instance's `advanced.ipAddress` uses this configuration
 so real visitors do not collapse into Better Auth's shared fallback bucket.
 
+## Cloudflare rate-limit storage
+
+`createAuth` accepts optional atomic `rateLimitStorage`. The native Worker must
+pass `createAuthRateLimitStorage` from `src/rate-limit-storage.ts`, backed by the
+`AuthRateLimitCounter` Durable Object in `apps/server/worker`. Existing endpoint
+rules, plugin rules and trusted IP normalization remain Better Auth-owned.
+The adapter preserves the current inactivity window, hashes counter names and
+propagates failures. The default database storage remains for isolated auth
+integration tests and unported callers; production Worker binding setup remains
+outstanding. The adapter's required `consume` prevents selecting the older
+non-atomic get/set request path. No auth schema change is needed.
+
+## Failure diagnostics
+
+`configureAuth` supplies a content-free Better Auth logger and API-error handler.
+Provider and database messages may contain recipients, credentials, SQL parameters
+or email capabilities and must never be forwarded. Unexpected HTTP failures emit
+`auth_request_failed` and become a generic `INTERNAL_SERVER_ERROR` response.
+Known API errors retain their status; framework warnings/errors emit
+`auth_diagnostic` with severity only.
+
+Better Call 1.3.7 logs non-API failures after Better Auth's callback returns.
+Converting those failures to a sanitized APIError prevents that second leak;
+configuring Better Auth's logger alone is insufficient. The actual workerd/D1
+regression in `apps/server/src/native-auth-email.test.ts` captures runtime logs,
+forces a synthetic mail failure and a missing-table error, and checks both the
+retained failure signals and absence of private data. Better Auth still catches
+mail-delivery rejection internally, so signup can return 200 despite failed
+mail. Bounded transport retries now cover documented temporary failures; durable
+intent and recovery for interrupted delivery remain a separate migration requirement.
+
 ## Responsibility
 
 The single better-auth instance the whole app authenticates against, plus its
-supporting modules: env resolution, outgoing mail, the user-validation
+supporting modules: explicit configuration, outgoing mail, the user-validation
 database hooks, and French translations of better-auth's own messages. It owns
 nothing else — no routes, no UI, no queries beyond the adapter.
 
@@ -20,23 +70,23 @@ nothing else — no routes, no UI, no queries beyond the adapter.
 | `src/index.ts`         | The production instance. Every non-default setting is load-bearing and carries an inline comment.                        |
 | `src/rules.ts`         | The account rules, stated once. Browser-safe, import-free, read by the whole repo.                                       |
 | `src/social.ts`        | Provider registration and `trustedProviders`, the account-linking control.                                               |
-| `src/env.ts`           | Quiet env resolution — missing values make a feature absent, never a crash.                                              |
+| `src/env.ts`           | OAuth credential type; runtime values come from the entrypoint.                                                          |
 | `src/email.ts`         | The only place mail is sent, plus the en/fr copy.                                                                        |
 | `src/email-templates/` | The owned emailcn-style templates (`theme-mytuums`, shell, button, copy renderer) that render the HTML part.             |
 | `src/legal.ts`         | The email/password sign-up consent hook; OAuth/passkey consent is recorded by the web app's global legal consent dialog. |
 
 ## Change map
 
-| Intent                            | Primary                                                      | Also touch                                                                                                       |
-| --------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| Add or change an OAuth provider   | `src/social.ts`                                              | `../../apps/server/src/env.ts`, `../../.env.example`, `VITE_SOCIAL_PROVIDERS`, `apps/web/src/lib/auth-client.ts` |
-| Change an auth email              | `src/email.ts` for copy, `src/email-templates/` for the look | both locales in the same file, and `src/email.test.ts` when the rendering changes                                |
-| Translate an auth error           | `src/i18n.ts`                                                | `apps/web/src/lib/auth-error-message.ts`                                                                         |
-| Change a user-field rule          | `src/rules.ts`                                               | nothing — the hooks, both handle forms and `packages/api` all read it. Keep the file import-free                 |
-| Change how a violation is refused | `src/dob.ts`, `src/profile.ts`, `src/legal.ts`               | the `APIError` translation only; the rule itself belongs in `src/rules.ts`                                       |
-| Change session or plugin config   | `src/index.ts`                                               | read the inline comment first; several settings are pinned                                                       |
-| Change an auth rate limit         | `src/index.ts` (`customRules`)                               | these are security controls, not tuning                                                                          |
-| Add a test-only helper            | `src/testing.ts`                                             | never import it from application code                                                                            |
+| Intent                            | Primary                                                      | Also touch                                                                                                                          |
+| --------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Add or change an OAuth provider   | `src/social.ts`                                              | `../../apps/server/worker/index.ts`, `../../apps/server/wrangler.jsonc`, `VITE_SOCIAL_PROVIDERS`, `apps/web/src/lib/auth-client.ts` |
+| Change an auth email              | `src/email.ts` for copy, `src/email-templates/` for the look | both locales in the same file, and `src/email.test.ts` when the rendering changes                                                   |
+| Translate an auth error           | `src/i18n.ts`                                                | `apps/web/src/lib/auth-error-message.ts`                                                                                            |
+| Change a user-field rule          | `src/rules.ts`                                               | nothing — the hooks, both handle forms and `packages/api` all read it. Keep the file import-free                                    |
+| Change how a violation is refused | `src/dob.ts`, `src/profile.ts`, `src/legal.ts`               | the `APIError` translation only; the rule itself belongs in `src/rules.ts`                                                          |
+| Change session or plugin config   | `src/index.ts`                                               | read the inline comment first; several settings are pinned                                                                          |
+| Change an auth rate limit         | `src/index.ts` (`customRules`)                               | these are security controls, not tuning                                                                                             |
+| Add a test-only helper            | `src/testing.ts`                                             | never import it from application code                                                                                               |
 
 ## Invariants
 
@@ -94,9 +144,8 @@ Each of these is a deliberate, non-default setting. The inline comment in
   record is absent or stale; both read `hasCurrentLegalConsent` from
   `src/rules.ts`.
 - **OAuth credentials are all-or-nothing per provider.** A half-set pair must
-  never render a button that fails at the token exchange; `src/env.ts` treats
-  an empty string as absent, and `apps/server/src/env.ts` refuses to boot on a
-  partial pair.
+  never render a button that fails at the token exchange. The entrypoint must
+  validate optional pairs before passing `createAuth` its provider configuration.
 - **`trustedProviders` is the account-linking control**, not a convenience
   list: google and discord only, intersected with the providers actually
   configured, and gated per account by a verified email.
@@ -113,9 +162,8 @@ Each of these is a deliberate, non-default setting. The inline comment in
   that whole suite.
 - **`lastLoginMethod` is stored but deliberately not in `publicUserColumns`.**
   Sign-in provider is reconnaissance, not profile data.
-- **`src/env.ts` never throws.** This is the quiet reader;
-  `apps/server/src/env.ts` is the loud boot-time validator. The split is what
-  lets the better-auth CLI import this package with no server around.
+- **No module reads process environment.** Factories receive explicit values;
+  the schema CLI can import the package without an application environment.
 - **Every outgoing email is multipart.** `src/email.ts` keeps the English and
   French plain-text copy as the source of truth, then renders the same
   content to HTML through the owned emailcn-style templates in
@@ -123,7 +171,7 @@ Each of these is a deliberate, non-default setting. The inline comment in
   primitives — table-based, inline styles, deliberately no Tailwind runtime
   in the server bundle). The builders are async because `react-email`'s
   `render` inlines styles asynchronously, which is also why
-  `PendingEmail.build` in `packages/api` returns a promise. The
+  `PendingEmail.build(locale, webOrigin)` in `packages/api` returns a promise. The
   verification, password-reset and moderation-appeal capability URLs must
   remain absolute and present in both parts, but appear only as escaped anchor
   `href` values behind localized HTML CTA labels; arbitrary URLs in quoted user
@@ -165,7 +213,8 @@ Each of these is a deliberate, non-default setting. The inline comment in
 
 ## Dependencies and boundaries
 
-- `apps/server/src/index.ts` mounts `auth` at `/api/auth` via `toNodeHandler`.
+- `apps/server/worker/application.ts` mounts `auth.handler` at `/api/auth`
+  behind the native Worker admission boundary.
 - `packages/api/src/context.ts` resolves every request's session with
   `auth.api.getSession`.
 - **`src/rules.ts` is the one module `apps/web` imports from this package**, as
@@ -218,12 +267,13 @@ emphasis. There is deliberately no integration project here: delivery
 behaviour already has one in `packages/api`, and giving this package a second
 would hand it a database dependency its modules do not have. Nothing in the
 unit project may read the root `.env`: `vitest.config.ts`, unlike
-`packages/api`'s, never dotenv-loads it, and `src/env.ts` resolves every
-variable at module load with a usable default, which is what keeps the package
-import-safe with no environment at all. `src/email.test.ts` re-imports the
-module under a stubbed `WEB_ORIGIN` when it needs to pin a value; the
-malformed-origin fallback those tests pin lives in `src/email.ts`'s
-`emailLogoUrl`, not in `env.ts`.
+`packages/api`'s, never dotenv-loads it. Email unit tests pass origins explicitly
+and verify that concurrent deployments do not share rendering configuration.
+Malformed origins reject instead of falling back to localhost. The native
+`apps/server/src/native-auth-email.test.ts` fixture bundles the real auth factory
+and renderer with the `workerd` export condition, then exercises signup,
+verification and sign-in against isolated local D1. Its delivery transport only
+captures synthetic messages; it is not evidence of hosted email delivery.
 
 ## Further reading
 

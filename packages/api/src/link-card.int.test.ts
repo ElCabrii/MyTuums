@@ -1,3 +1,4 @@
+import { closeDb, db } from "./testing/runtime.js";
 /**
  * Integration pins for link preview cards (issue #260).
  *
@@ -13,14 +14,15 @@
 import { createServer, type Server } from "node:http";
 import { eq } from "drizzle-orm";
 import { call } from "@orpc/server";
-import { closeDb, db } from "@my-tuums/db";
+
 import { linkCard } from "@my-tuums/db/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Context } from "./context.js";
 import { appRouter } from "./router.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { resolveLinkCard } from "./link-card.js";
-import { createLinkFetchTransport, type LinkFetchTransport } from "./link-card-http.js";
+import { createLinkFetchTransport } from "./link-card-node.js";
+import type { LinkFetchTransport } from "./link-card-http.js";
 import {
   anonContext,
   contextFor,

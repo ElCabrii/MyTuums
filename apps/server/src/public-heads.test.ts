@@ -27,9 +27,16 @@ const FALLBACK_HEAD = [
 // turns into "leave the document untouched" rather than a broken one.
 const unreachableDb = {} as Database;
 
-const transform = createPublicHeadTransform(unreachableDb);
+const transform = createPublicHeadTransform(unreachableDb, "https://mytuums.com");
 
 describe("createPublicHeadTransform", () => {
+  it("uses the isolated deployment origin for canonical and preview-image URLs", async () => {
+    const render = createPublicHeadTransform(unreachableDb, "https://cf-poc.mytuums.com");
+    const html = await render("/login", FALLBACK_HEAD);
+    expect(html).toContain('href="https://cf-poc.mytuums.com/login"');
+    expect(html).toContain('content="https://cf-poc.mytuums.com/');
+    expect(html).not.toContain('"https://mytuums.com/');
+  });
   it("replaces the fallback block for a known static route with route-specific tags", async () => {
     const html = await transform("/login", FALLBACK_HEAD);
 

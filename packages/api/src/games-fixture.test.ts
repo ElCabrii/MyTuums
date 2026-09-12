@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { bareHashtagKey } from "./games-hashtag.js";
-import { stagedGameFixtureSchema } from "./games-sync.js";
+import { stagedGameFixtureSchema } from "./games-fixture.js";
 
 /**
  * The fixture's own contract (issue Q27): the file is hand-authored data

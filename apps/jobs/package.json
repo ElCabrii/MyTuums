@@ -1,0 +1,28 @@
+{
+  "name": "@my-tuums/jobs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "types": "wrangler types --include-runtime false",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tests/tsconfig.json",
+    "lint": "eslint src tests",
+    "test:unit": "pnpm build && vitest run tests",
+    "dev": "wrangler dev --local"
+  },
+  "dependencies": {
+    "@my-tuums/api": "workspace:*",
+    "@my-tuums/db": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260908.1",
+    "@my-tuums/tsconfig": "workspace:*",
+    "@typescript/native": "catalog:",
+    "vitest": "^4.1.10",
+    "wrangler": "4.130.0",
+    "miniflare": "5.20260908.0-alpha",
+    "@types/node": "catalog:"
+  }
+}

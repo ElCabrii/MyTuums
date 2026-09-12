@@ -2,138 +2,114 @@
 
 ## Responsibility
 
-Playwright coverage of the whole stack over real HTTP: the real server, the
-real Postgres, and — when the `S3_*` group is present — a real bucket. Its own
-workspace package so Playwright never enters the root manifest.
+Playwright journeys through the React/Vite frontend and the real Worker
+application services, using local workerd D1, R2, Images and API rate-limit
+Durable Objects. No PostgreSQL connection, remote bucket, application secrets
+or `.env` is loaded by the test scripts. Video uploads use the real Stream
+adapter and Video Workflow with a synthetic provider boundary. Hosted Stream
+processing and playback remain unverified; the browser test covers transport
+recovery and pending-post behavior.
 
-The suite is slow (browser install, real sign-ups, two servers). Reach for
-`pnpm test:unit`, `pnpm test:integration`, or a `tests/api` spec first — that
-last one hits the real server over real HTTP with no browser at all, and the
-whole project runs in about a second and a half.
-
-**Add a browser spec here only for something that genuinely crosses the
-browser**: a real WebAuthn or TOTP ceremony, a canvas re-encode reaching a
-bucket, an optimistic cache surviving a navigation, a CSS composition at a
-real viewport width, an axe scan. A rule that already has an owner in
-`packages/auth/src/rules.ts`, `packages/api` or a component test must not be
-re-proved here — see [../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
+Use API integration or unit tests for rules that do not require a browser.
+See [../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
 
 ## Start here
 
-| File                   | Why                                                                            |
-| ---------------------- | ------------------------------------------------------------------------------ |
-| `playwright.config.ts` | The three projects, both `webServer` entries, `stackEnv`, the `E2E` constants. |
-| `global-setup.ts`      | The once-per-run truncate, and the canonical `DATABASE_URL` fix-up.            |
-| `support/db.ts`        | Every seeding helper, plus `truncateAll()` and the bucket purge.               |
-| `support/fixtures.ts`  | The extended `test` handle: `bobPage`, `signedOutPage`, `db`.                  |
-| `tests/auth.setup.ts`  | How alice and bob come to exist, and how alice becomes the moderator.          |
+| File                                       | Owns                                                                           |
+| ------------------------------------------ | ------------------------------------------------------------------------------ |
+| `constants.ts`                             | Synthetic origins, auth secret, Access issuer/audience and test resource names |
+| `playwright.config.ts`                     | Projects, fixture account state and the two local processes                    |
+| `support/platform.ts`                      | Shared local D1/R2 registry clients and their disposal                         |
+| `support/db.ts`                            | Database fixtures and the once-per-run local reset                             |
+| `global-setup.ts`                          | Reset and committed game fixture, including R2 covers                          |
+| `support/fixtures.ts`                      | Browser contexts, consent defaults and per-worker platform cleanup             |
+| `tests/auth.setup.ts`                      | Real signup/signin, fixture roles and cookie storage state                     |
+| `../apps/server/src/e2e-server.ts`         | Native backend startup, migration readiness and shutdown                       |
+| `../apps/server/worker/tests/e2e-entry.ts` | Real application composition surrounded by synthetic provider boundaries       |
 
 ## Change map
 
-| Intent                              | Primary                                           | Also touch                                        |
-| ----------------------------------- | ------------------------------------------------- | ------------------------------------------------- |
-| Add a browser journey               | `tests/specs/<name>.spec.ts`                      | `support/db.ts` if it needs new seed data         |
-| Add a transport-level assertion     | `tests/api/<name>.spec.ts`                        | — (no browser, no auth state)                     |
-| Add a fixture account or seed shape | `support/users.ts`, `support/db.ts`               | `tests/auth.setup.ts` when it needs storage state |
-| Add a page-scoped locator helper    | `support/post-card.ts` or a new `support/` file   | —                                                 |
-| Wait for a post in a ranked feed    | `support/ranked-feed.ts` (`expectRankedPostText`) | — (ranked order has no first-page guarantee)      |
-| Change ports or stack env           | `playwright.config.ts`                            | `../docs/operations.md`                           |
-| Add a shared browser context        | `support/fixtures.ts`                             | —                                                 |
+| Change                                           | Owner                 | Also check                                        |
+| ------------------------------------------------ | --------------------- | ------------------------------------------------- |
+| Ports, synthetic identity or test resource names | `constants.ts`        | `playwright.config.ts`, Worker fixture            |
+| Local storage sharing or disposal                | `support/platform.ts` | backend startup, setup and worker fixture cleanup |
+| Fixture writes or reset                          | `support/db.ts`       | committed D1 schema, `global-setup.ts`            |
+| HTTP behavior                                    | `tests/api`           | native application boundary and runtime tests     |
+| Browser journey                                  | `tests/specs`         | `support/fixtures.ts` and the owning web feature  |
 
 ## Invariants
 
-- **The video upload regression owns only its observed capabilities.**
-  `tests/specs/video-upload.spec.ts` interrupts one multipart PUT, proves recovery
-  without resending confirmed parts, and checks explicit submission, private
-  pending state, reload and cancellation. Its transport fixture is not an encoder
-  fixture; native validation/playable-output tests run in the worker image. It
-  cleans exact session keys rather than scanning a bucket shared with local data.
-  CI configures and verifies its bucket's exact `http://localhost:5273` CORS
-  rule before the suite; local development uses the separately configured dev
-  bucket. Transport-level CSP assertions include only the configured bucket
-  origins and keep `blob:` out of script execution.
+- The backend binds only `127.0.0.1:3101`. Vite preview binds `localhost:5273` and
+  proxies API/media requests as before. Browser navigation tests cover the
+  client gate; `tests/api` covers the Worker's own page and media gates.
+- D1 ID `mytuums_e2e_test`, R2 name `mytuums-e2e_test` and the
+  `.wrangler/e2e_test` root are fixed and checked. No connection string or
+  remote resource selector is accepted. Ordinary PoC development storage is
+  separate and cannot be reset through these helpers.
+- Miniflare's shared storage owner and dev registry coordinate processes.
+  Clients share `resourcePersistencePath` and `unsafeDevRegistryPath` but each
+  owns a temporary `isolatedResourcePersistencePath`. These are local test
+  runtime options, never deployment settings. A two-process D1/R2 probe verifies
+  reads/writes through the owner; do not open the underlying SQLite files directly.
+- The backend applies committed Drizzle D1 migrations before its HTTP port is
+  ready. Global setup then resets application tables and seeds games. It retains
+  `__drizzle_migrations`, SQLite internals and Cloudflare's `_cf_` metadata.
+  Foreign-key checks are deferred across the atomic reset, not disabled.
+  Owner-deletion cleanup debt is cleared last. Local R2 cleanup failures fail
+  setup, rather than allowing one run's uploads to leak into the next.
+- Both servers use `reuseExistingServer: false`; a test cannot silently attach
+  to an unrelated developer process. The setup process, authentication project,
+  each browser worker and the backend dispose their own registry clients.
+- The test Worker supplies a synthetic signed Access assertion and edge IP to
+  the real application boundary. Certificate lookup and synthetic Stream upload creation are the only permitted
+  outbound requests; both are fulfilled locally. This models an already-authenticated Access visitor;
+  production-entrypoint tests separately prove missing/invalid assertions fail.
+- Better Auth's limiter is disabled only in this fixture, preserving the old
+  one-client E2E policy. The API limiter uses the real Durable Object. Native
+  auth counter enforcement has its own runtime tests.
+- Email is captured in the local R2 bucket under `__e2e_emails/`, never sent or
+  printed. Fixture verification links use the fixed synthetic auth secret.
+- Avatar, banner and post-image tests always run against local R2; they no longer
+  skip based on S3 credentials. The video spec intercepts every request to the
+  synthetic Stream upload host. Local R2 stores only provider metadata. The
+  actual jobs Worker and Workflow engine observe upload completion, while the
+  provider remains in processing state. No Cron is configured in this harness.
+  Ready publication and captions belong to the separate jobs tests.
 
-- **`workers: 1`.** Every spec shares one Postgres and one in-process server
-  rate limiter; parallel workers 429 each other and fight over fixtures, and
-  the failure surfaces three specs away from its cause. Consequence: the
-  database is truncated exactly once, in `global-setup.ts`, so specs must seed
-  content unique enough to find and must never assume an empty database.
-- **Re-derive the `_test` database URL before importing `@my-tuums/db`.** That
-  package reads `DATABASE_URL` at module scope, and the `e2e` script loads the
-  repo `.env` — the _dev_ database. A static import hoists above the fix-up and
-  connects to the wrong database; `global-setup.ts` and `support/db.ts` both
-  use dynamic `import()` after the assignment. `assertTestDatabase()` is the
-  backstop: it refuses any database whose name does not end in `_test`.
-- **Never point the suite at the production bucket.** `truncateAll()` deletes
-  uploaded objects by prefix on every run. Use the `dev` bucket locally; CI
-  uses the `ci` bucket.
-- **The `S3_*` group is all-or-nothing.** `apps/server/src/env.ts` refuses to
-  boot on a partial group, so `s3Env()` forwards all of it or none; upload
-  specs skip themselves when it is absent (fork pull requests included).
-- **`RESEND_API_KEY` is blanked in `stackEnv`.** `webServer.env` merges over
-  `process.env`, so a developer with a real key had every fixture sign-up
-  firing a live send — which exhausts the quota and slows sign-up enough to
-  race the session-store wait on `/welcome`. Blanked rather than deleted,
-  because merging cannot remove a key; `packages/auth` treats `""` as absent
-  and logs the message, which is where reset and verification links are read.
-- **`AUTH_RATE_LIMIT=false` in `stackEnv` only.** One IP drives the whole run,
-  which is exactly the shape better-auth's `customRules` exist to stop. The
-  app's own `/rpc` limiter stays on and has its own spec.
-- **Locators are structural or accessibility-based.** `data-testid` is banned
-  across the app; use `getByRole`/`getByLabel`/`getByTitle`, or a helper in
-  `support/`. `postCardWithText` documents the deepest-div heuristic that
-  stands in for a missing role.
-- **Storage state is cookies only.** `auth.setup.ts` captures it through an
-  `APIRequestContext`, which has no page and therefore no `localStorage`. A
-  spec asserting "nothing stored" must open a fresh `browser.newContext`.
-- **Unrelated browser journeys start with the current release notes seen.**
-  `support/fixtures.ts` seeds the version from `apps/web/package.json` for
-  the default, bob, and signed-out contexts. Release-note journeys opt out
-  with `showReleaseNotes: true`; `tests/specs/changelog.spec.ts` checks the
-  bundled notes and dismissal across a real reload. This keeps a version
-  bump from placing a modal over every unrelated journey.
-- **The setup project's file must live under `tests/`.** `testMatch` only
-  filters files the `testDir` scan already found; it cannot reach outside it.
-- **Fixture sign-up goes through `E2E.webUrl`, not `E2E.serverUrl`.** The
-  session cookie has no explicit `Domain`, so it is scoped to the host that
-  received the request — which must be the origin the browser will later use.
+## Test conventions
 
-## Dependencies and boundaries
-
-- `@my-tuums/api` is a dependency (destructive storage cleanup in
-  `support/db.ts`); `@my-tuums/db` and `@my-tuums/auth` are devDependencies.
-- Specs mirror shared constants rather than importing them where importing
-  would make the spec agree with the code by construction — see the note on
-  `THREAD_ANCESTOR_MAX` in `tests/specs/thread.spec.ts`.
-- `setUserRole` writes the row directly. The better-auth admin plugin's
-  endpoints are 404'd by the server, so this is the only way a spec gets a
-  moderator; alice is promoted in `tests/auth.setup.ts`.
-- `moderation.spec.ts` stops at "appeal submitted" on purpose: reviewing an
-  appeal excludes the moderator who took the action, so uphold and overturn
-  need a second moderator fixture and stay covered by
-  `packages/api/src/moderation.int.test.ts`.
-
-## Generated files
-
-`.auth/*.json` (storage state), `test-results/`, `playwright-report/` — all
-git-ignored, all rebuilt by a run.
+- Keep `workers: 1`. Tests share one application database and rate-limit state.
+  Global setup resets once; each spec seeds unique content and owns its cleanup.
+- Use real HTTP signup when password acceptance matters. `setUserRole` is a
+  fixture-only direct update; production role changes remain audited RPC calls.
+- Seed posts in batches of twenty: Drizzle binds five values per row, including
+  defaults, within D1's 100-parameter ceiling. Raw times
+  are epoch milliseconds, including notification backdating.
+- Locators use roles, labels and structure; no `data-testid` attributes.
+- For optimistic controls, a persistence check waits for the final write response
+  before reloading. Optimistic UI state alone does not mean the mutation queue
+  has finished; an immediate reload can cancel queued requests.
+- Storage state contains cookies only. Fresh-storage assertions need a new
+  browser context. Unrelated journeys start with analytics refused and the
+  current release notes already seen; relevant journeys explicitly opt out.
+- Browser fixtures release the platform connection with a worker-scoped auto
+  fixture. Specs that need database helpers should use `support/fixtures.ts`.
+  The standalone authentication setup registers its own `afterAll` disposal.
 
 ## Verification
 
-| Command                                                        | Covers                      |
-| -------------------------------------------------------------- | --------------------------- |
-| `pnpm test:e2e`                                                | the whole suite             |
-| `pnpm --filter @my-tuums/e2e e2e -- tests/specs/theme.spec.ts` | one spec                    |
-| `pnpm --filter @my-tuums/e2e e2e:ui`                           | the interactive runner      |
-| `pnpm --filter @my-tuums/e2e e2e:report`                       | reopen the last HTML report |
-| `pnpm --filter @my-tuums/e2e lint` / `typecheck`               | this package alone          |
+`pnpm test:e2e` builds the SPA with the synthetic analytics measurement ID,
+then starts Playwright against Vite preview and the native backend. Both use the
+built assets. This avoids Chromium resource exhaustion during repeated cold loads
+of Vite's development module graph. For direct focused Playwright commands, first
+run `VITE_GA_MEASUREMENT_ID=G-E2E306TEST pnpm --filter @my-tuums/web build`.
+The build generates frontend route and locale artifacts.
 
-Needs a reachable Postgres (`pnpm docker:up` or a local one) and, for the
-upload specs, the dev bucket's `S3_*` values in `.env`.
+- `pnpm --filter @my-tuums/e2e exec playwright test --project api`: HTTP contracts.
+- `pnpm --filter @my-tuums/e2e e2e`: all browser projects and setup.
+- `pnpm --filter @my-tuums/e2e lint` / `typecheck`: harness checks.
+- The native application, auth/Access, RPC/media and jobs suites remain separate
+  evidence for the deployed Worker artifact and real Workflows execution.
 
-## Further reading
-
-- [docs/architecture.md](../docs/architecture.md) — what the stack this suite
-  drives actually looks like.
-- [docs/operations.md](../docs/operations.md) — ports, buckets, environments.
-- [.github/CONTEXT.md](../.github/CONTEXT.md) — how CI runs this job.
+Generated `.auth`, `test-results`, `playwright-report` and `.wrangler` data are
+ignored. Never commit captured messages, cookies, keys or local database files.

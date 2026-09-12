@@ -8,18 +8,32 @@
  */
 import { randomUUID } from "node:crypto";
 import { beforeEach, vi } from "vitest";
-import { eq, sql } from "drizzle-orm";
-import { auth } from "@my-tuums/auth";
-import { db } from "@my-tuums/db";
-import { assertTestDatabase } from "@my-tuums/db/testing";
-import { testHelpers } from "@my-tuums/auth/testing";
-import { post, user } from "@my-tuums/db/schema";
+import { and, eq } from "drizzle-orm";
+import { auth, db, testHelpers, webOrigin, appealToken } from "./runtime.js";
+import {
+  post,
+  user,
+  game,
+  jobIntent,
+  gameCatalogState,
+  gameCatalogVersion,
+  videoCleanup,
+  moderationAction,
+  moderationEmail,
+  verification,
+  rateLimit,
+  postMediaUpload,
+  mediaIntent,
+  linkCard,
+} from "@my-tuums/db/schema";
 import { LEGAL_VERSION } from "@my-tuums/auth/rules";
+import type { EmailLocale } from "@my-tuums/auth";
+import { makeAppealUrl, type PendingEmail } from "../moderation-actions.js";
+import { moderationEmailContent, renderModerationEmail } from "../moderation-email-content.js";
 import type { Context, EmailSender } from "../context.js";
-import { createLinkFetchTransport } from "../link-card-http.js";
+import { createLinkFetchTransport } from "../link-card-node.js";
 import { createRateLimiter, type RateLimiter } from "../rate-limit.js";
 import type { UserRole } from "../roles.js";
-import { runSql } from "../sql.js";
 import type { DestructiveStorage, Storage } from "../storage.js";
 
 /**
@@ -79,12 +93,6 @@ beforeEach(() => {
 
 const forwardingRateLimiter: RateLimiter = {
   consume: (key, policy) => currentTestRateLimiter.consume(key, policy),
-  clear: () => {
-    currentTestRateLimiter.clear();
-  },
-  get size() {
-    return currentTestRateLimiter.size;
-  },
 };
 
 /**
@@ -98,6 +106,30 @@ const defaultTestLinkTransport = createLinkFetchTransport();
 export const testEmailSender: EmailSender = {
   send: vi.fn(() => Promise.resolve()),
 };
+
+/** Render the committed notice without acknowledging or delivering it. */
+export async function buildPendingEmail(
+  pending: PendingEmail,
+  locale: EmailLocale,
+  origin: string,
+) {
+  const [notice] = await db
+    .select()
+    .from(moderationEmail)
+    .where(
+      and(
+        eq(moderationEmail.sourceId, pending.sourceId),
+        eq(moderationEmail.userId, pending.userId),
+      ),
+    );
+  if (!notice) throw new Error("Expected a committed moderation notice.");
+  return renderModerationEmail(moderationEmailContent.parse(notice.content), {
+    locale,
+    webOrigin: origin,
+    appealUrl: () =>
+      makeAppealUrl({ webOrigin: origin, appealToken }, pending.sourceId, pending.userId),
+  });
+}
 
 /**
  * An in-memory stand-in for a Storage Bucket.
@@ -254,6 +286,8 @@ export async function createTestUser(overrides?: {
     // behaviour anything actually exercises.
     context: {
       db,
+      webOrigin,
+      appealToken,
       session,
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
@@ -332,6 +366,8 @@ export async function createPasswordTestUser(): Promise<
     password,
     context: {
       db,
+      webOrigin,
+      appealToken,
       session,
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,
@@ -346,6 +382,8 @@ export async function createPasswordTestUser(): Promise<
 /** The context a signed-out caller gets — what `createContext` builds when there's no session. */
 export const anonContext: Context = {
   db,
+  webOrigin,
+  appealToken,
   session: null,
   requestId: "test-request-id",
   rateLimiter: forwardingRateLimiter,
@@ -369,6 +407,8 @@ export function contextFor(
 ): Context {
   return {
     db,
+    webOrigin,
+    appealToken,
     session: user.session,
     requestId: "test-request-id",
     rateLimiter,
@@ -379,20 +419,22 @@ export function contextFor(
   };
 }
 
-/**
- * Wipes every table these tests touch, in FK-safe order.
- *
- * `assertTestDatabase()` is the guard against this ever running against a
- * real database — every destructive helper in this file calls it first, so a
- * mis-set `DATABASE_URL` fails loudly instead of truncating someone's dev
- * data.
- */
+/** Clear the file's ephemeral D1 database, including records that intentionally outlive users. */
 export async function truncateAll(): Promise<void> {
-  assertTestDatabase();
-  await runSql(
-    db,
-    sql`TRUNCATE TABLE "video_cleanup", "post_like", "post_repost", "post_bookmark", "post_edit", "follow", "report", "user_block", "appeal", "moderation_action", "notification", "notification_last_seen", "post", "link_card", "game_favorite", "game", "feed_rank_snapshot", "session", "account", "verification", "rate_limit", "two_factor", "passkey", "user" RESTART IDENTITY CASCADE`,
-  );
+  await db.batch([
+    db.delete(user),
+    db.delete(game),
+    db.delete(jobIntent),
+    db.delete(gameCatalogState),
+    db.delete(gameCatalogVersion),
+    db.delete(videoCleanup),
+    db.delete(moderationAction),
+    db.delete(verification),
+    db.delete(rateLimit),
+    db.delete(postMediaUpload),
+    db.delete(linkCard),
+    db.delete(mediaIntent),
+  ]);
 }
 
 /**
@@ -429,10 +471,17 @@ export async function seedPosts(
     return row;
   });
 
-  const seeded = await db
-    .insert(post)
-    .values(rows)
-    .returning({ id: post.id, createdAt: post.createdAt });
+  const seeded: { id: string; createdAt: Date }[] = [];
+  // Each statement stays below D1's bound-parameter limit, while batches
+  // avoid a round trip for every fixture row. Preserve the requested size.
+  for (let offset = 0; offset < rows.length; offset += 50) {
+    const [first, ...rest] = rows
+      .slice(offset, offset + 50)
+      .map((row) =>
+        db.insert(post).values(row).returning({ id: post.id, createdAt: post.createdAt }),
+      );
+    seeded.push(...(await db.batch([first, ...rest])).flat());
+  }
 
   // The contract every caller destructures against ("give me N posts, get N
   // rows"), refused here rather than guarded at each call site — the e2e
@@ -483,6 +532,8 @@ export async function freshSessionFor(testUser: TestUser): Promise<TestUser> {
     sessionCookie: testUser.sessionCookie,
     context: {
       db,
+      webOrigin,
+      appealToken,
       session,
       requestId: "test-request-id",
       rateLimiter: forwardingRateLimiter,

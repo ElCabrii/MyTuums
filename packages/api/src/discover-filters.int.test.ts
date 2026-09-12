@@ -1,5 +1,6 @@
+import { closeDb, db } from "./testing/runtime.js";
 import { call } from "@orpc/server";
-import { closeDb, db } from "@my-tuums/db";
+
 import { post } from "@my-tuums/db/schema";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

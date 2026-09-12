@@ -1,6 +1,6 @@
 import { expect, test } from "../../support/fixtures";
 import { postCardWithText } from "../../support/post-card";
-import { expectRankedPostText } from "../../support/ranked-feed";
+import { ALICE } from "../../support/users";
 
 // The favorite journey (issue #314, stage 3), signed in as the project's
 // default fixture account (alice). The catalog comes from the committed
@@ -48,11 +48,10 @@ test.describe("hashtag resolution", () => {
     await composer.fill(content);
     await page.getByRole("button", { name: "Post", exact: true }).click();
     await expect(composer).toHaveValue("");
-    await page.getByRole("button", { name: "Refresh" }).first().click();
-
-    // The home feed is ranked (issue #305): the new post has no first-page
-    // guarantee, so page forward until it lands before asserting on its tags.
-    await expectRankedPostText(page, content);
+    // Tag links belong to the post card. The author's chronological feed keeps
+    // this assertion independent of accumulated global ranking snapshots.
+    await page.goto(`/@${ALICE.username}`);
+    await expect(page.getByText(content, { exact: true })).toBeVisible();
 
     const card = postCardWithText(page, content);
     const resolved = card.getByRole("link", { name: "#doom", exact: true });

@@ -1,279 +1,213 @@
-import { call } from "@orpc/server";
-import { and, eq, sql } from "drizzle-orm";
-import { db, closeDb } from "@my-tuums/db";
-import { assertTestDatabase } from "@my-tuums/db/testing";
 import {
   notification,
   post,
   postAttachment,
   user,
+  userBlock,
   video,
   videoCleanup,
   videoSubmission,
 } from "@my-tuums/db/schema";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { appRouter } from "./router.js";
-import { contextFor, createTestUser, seedPosts, truncateAll } from "./testing/harness.js";
-import { createVideoQueue, configureVideoQueues, VIDEO_PROCESS_QUEUE } from "./video-queue.js";
-import {
-  cancelVideo,
-  claimVideo,
-  completeVideoUpload,
-  confirmVideoSourceDeleted,
-  createVideoUpload,
-  failVideoWork,
-  finishVideoEncoding,
-  publishVideo,
-  renewVideoLease,
-  submitVideo,
-  type VideoWork,
-} from "./video-lifecycle.js";
+import { eq, sql } from "drizzle-orm";
+import { afterAll, beforeEach, expect, it } from "vitest";
+import { submitVideo } from "./video-lifecycle.js";
+import { publishStreamVideo, recordStreamReady } from "./stream-publication.js";
+import { failStreamVideo } from "./stream-processing.js";
+import { createTestUser, seedPosts, truncateAll } from "./testing/harness.js";
+import { closeDb, db } from "./testing/runtime.js";
 
-const queue = createVideoQueue(db, false);
-beforeAll(async () => {
-  assertTestDatabase();
-  await queue.start();
-  await configureVideoQueues(queue);
-});
 beforeEach(async () => {
-  await queue.deleteAllJobs();
   await truncateAll();
+  await db.delete(video);
 });
-afterAll(async () => {
-  await queue.deleteAllJobs();
-  await queue.stop();
-  await truncateAll();
-  await closeDb();
-});
+afterAll(closeDb);
+const metadata = { width: 640, height: 360, duration: 6, captionLanguage: null };
 
-async function submittedVideo(authorId: string, parentId: string | null = null) {
-  const upload = await createVideoUpload(db, authorId, 1000);
-  await completeVideoUpload(db, upload.id, authorId);
-  const submission = await submitVideo(db, queue, {
-    videoId: upload.id,
+async function submitted(
+  authorId: string,
+  target: { parentId?: string; quotedPostId?: string } = {},
+) {
+  const id = crypto.randomUUID();
+  const uid = id.replaceAll("-", "");
+  await db.insert(video).values({
+    id,
     authorId,
-    content: "private pending text",
-    parentId,
-    quotedPostId: null,
-    isPrivate: false,
-    caption: "WEBVTT\n\n00:00.000 --> 00:01.000\nprivate caption",
-    captionLanguage: "en",
+    streamCreatorId: `mytuums-poc:${id}`,
+    streamUid: uid,
+    state: "uploaded",
+    byteSize: 1000,
+    expiresAt: new Date(Date.now() + 86_400_000),
   });
-  return { upload, submission };
+  const submission = await submitVideo(
+    db,
+    { dispatch: () => Promise.resolve(false) },
+    {
+      videoId: id,
+      authorId,
+      content: "Confirmed private draft",
+      parentId: target.parentId ?? null,
+      quotedPostId: target.quotedPostId ?? null,
+      isPrivate: true,
+      caption: null,
+      captionLanguage: null,
+    },
+  );
+  return { id, uid, postId: submission.id };
 }
 
-async function encodedVideo(work: VideoWork, width = 640, height = 360) {
-  expect(
-    await finishVideoEncoding(
-      db,
-      work,
-      {
-        width,
-        height,
-        duration: 6,
-        frameRate: 30,
-        renditions: [{ name: "360", width: 640, height: 360, frameRate: 30, bandwidth: 1_128_000 }],
-      },
-      [{ name: "master.m3u8", contentType: "application/vnd.apple.mpegurl", byteSize: 100 }],
-    ),
-  ).toBe(true);
-}
+it("requires verified readiness and publishes one post, attachment and reply notice across duplicate delivery", async () => {
+  const author = await createTestUser();
+  const target = await createTestUser();
+  const [parent] = await seedPosts(target.id, 1);
+  const item = await submitted(author.id, { parentId: parent.id });
+  expect(await publishStreamVideo(db, item.id)).toBe(false);
+  expect(await db.select().from(post).where(eq(post.authorId, author.id))).toHaveLength(0);
+  expect(await recordStreamReady(db, item.id, "a".repeat(32), metadata)).toBe(false);
+  expect(await recordStreamReady(db, item.id, item.uid, metadata)).toBe(true);
+  const results = await Promise.all(
+    Array.from({ length: 5 }, () => publishStreamVideo(db, item.id)),
+  );
+  expect(results.filter(Boolean)).toHaveLength(1);
+  expect(await db.select().from(post).where(eq(post.id, item.postId))).toMatchObject([
+    {
+      authorId: author.id,
+      content: "Confirmed private draft",
+      parentId: parent.id,
+      isPrivate: true,
+    },
+  ]);
+  expect(await db.select().from(postAttachment)).toMatchObject([
+    { postId: item.postId, videoId: item.id, width: 640, height: 360, byteSize: 1000 },
+  ]);
+  expect(await db.select().from(video)).toMatchObject([
+    { state: "published", postId: item.postId, playback: metadata },
+  ]);
+  expect(await db.select().from(notification)).toMatchObject([
+    { type: "reply", recipientId: target.id, actorId: author.id, postId: item.postId },
+  ]);
+  expect(await db.select().from(videoSubmission)).toHaveLength(0);
+  expect(await db.select().from(videoCleanup)).toHaveLength(0);
+  expect(await failStreamVideo(db, item.id)).toBe(false);
+});
 
-describe("video lifecycle (issue #368)", () => {
-  it("publishes anamorphic video with integer rendition dimensions (issue #368)", async () => {
-    const author = await createTestUser();
-    const { upload, submission } = await submittedVideo(author.id);
-    const work = await claimVideo(db, upload.id);
-    if (!work) throw new Error("Expected processing work.");
-    await encodedVideo(work, 720 * (32 / 27), 480);
-    await confirmVideoSourceDeleted(db, work);
-    expect(await publishVideo(db, work)).toBe(true);
-    const thread = await call(
-      appRouter.post.thread,
-      { postId: submission.id },
-      { context: contextFor(author) },
-    );
-    expect(thread.post.attachments).toMatchObject([{ width: 640, height: 360 }]);
-  });
+it("rolls back the ready state and all post effects if notification insertion fails", async () => {
+  const author = await createTestUser();
+  const target = await createTestUser();
+  const [quoted] = await seedPosts(target.id, 1);
+  const item = await submitted(author.id, { quotedPostId: quoted.id });
+  await recordStreamReady(db, item.id, item.uid, metadata);
+  await db.run(sql`create trigger reject_video_publication_test before insert on notification
+    begin select raise(abort, 'injected late publication failure'); end`);
+  try {
+    await expect(publishStreamVideo(db, item.id)).rejects.toThrow();
+  } finally {
+    await db.run(sql`drop trigger reject_video_publication_test`);
+  }
+  expect(await db.select().from(video)).toMatchObject([{ state: "ready", postId: null }]);
+  expect(await db.select().from(videoSubmission)).toHaveLength(1);
+  expect(await db.select().from(post).where(eq(post.id, item.postId))).toHaveLength(0);
+  expect(await db.select().from(postAttachment)).toHaveLength(0);
+  expect(await db.select().from(notification)).toHaveLength(0);
+  expect(await publishStreamVideo(db, item.id)).toBe(true);
+  expect(await db.select().from(notification)).toMatchObject([
+    { type: "quote", postId: item.postId },
+  ]);
+});
 
-  it("persists the recurring cleanup schedule through the application database adapter", async () => {
-    await queue.schedule("video-maintenance", "* * * * *");
-    expect(await queue.getSchedules("video-maintenance")).toMatchObject([
-      { name: "video-maintenance", cron: "* * * * *" },
-    ]);
-    await queue.unschedule("video-maintenance");
-  });
-  it("stores nothing publicly until upload, explicit submission, encoding and source deletion complete", async () => {
+it.each([
+  "author-ban",
+  "target-ban",
+  "target-private",
+  "post-private",
+  "block-author",
+  "block-target",
+  "missing-target",
+] as const)(
+  "rechecks %s at publication and fails privately with recoverable cleanup",
+  async (change) => {
     const author = await createTestUser();
     const target = await createTestUser();
     const [parent] = await seedPosts(target.id, 1);
-    const { upload, submission } = await submittedVideo(author.id, parent.id);
-    expect(await db.select().from(post).where(eq(post.authorId, author.id))).toEqual([]);
-    expect(await db.select().from(notification)).toEqual([]);
-    const [job] = await queue.fetch<{ videoId: string }>(VIDEO_PROCESS_QUEUE);
-    expect(job?.data).toEqual({ videoId: upload.id });
-    const work = await claimVideo(db, upload.id);
-    expect(work).not.toBeNull();
-    if (!work) throw new Error("Expected processing work.");
-    await encodedVideo(work);
-    expect(await publishVideo(db, work)).toBe(false);
-    if (job) await queue.complete(VIDEO_PROCESS_QUEUE, [job.id]);
-    await confirmVideoSourceDeleted(db, work);
-    expect(await publishVideo(db, work)).toBe(true);
-    expect(await publishVideo(db, work)).toBe(false);
-    const [published] = await db.select().from(post).where(eq(post.id, submission.id));
-    expect(published).toMatchObject({ content: "private pending text", parentId: parent.id });
-    expect(published?.createdAt.getTime()).toBeGreaterThanOrEqual(upload.createdAt.getTime());
-    expect(await db.select().from(videoSubmission)).toEqual([]);
-    expect(await db.select().from(notification)).toMatchObject([
-      { type: "reply", recipientId: target.id, postId: submission.id },
-    ]);
-    expect(await db.select().from(postAttachment)).toMatchObject([
-      { postId: submission.id, videoId: upload.id },
-    ]);
-  });
-
-  it("rolls back pending text when queue scheduling fails", async () => {
-    const author = await createTestUser();
-    const upload = await createVideoUpload(db, author.id, 1000);
-    await completeVideoUpload(db, upload.id, author.id);
-    await expect(
-      submitVideo(
-        db,
-        {
-          send: () => Promise.reject(new Error("queue unavailable")),
-        },
-        {
-          videoId: upload.id,
-          authorId: author.id,
-          content: "must roll back",
-          parentId: null,
-          quotedPostId: null,
-          isPrivate: false,
-          caption: null,
-          captionLanguage: null,
-        },
-      ),
-    ).rejects.toThrow("queue unavailable");
-    expect(await db.select().from(videoSubmission)).toEqual([]);
-    expect(await db.select().from(video)).toMatchObject([{ state: "uploaded" }]);
-  });
-
-  it("fences duplicate deliveries and an expired worker after another worker takes over", async () => {
-    const author = await createTestUser();
-    const { upload } = await submittedVideo(author.id);
-    const first = await claimVideo(db, upload.id);
-    if (!first) throw new Error("Expected first work.");
-    expect(await claimVideo(db, upload.id)).toBeNull();
-    await db
-      .update(video)
-      .set({ leaseExpiresAt: new Date(0) })
-      .where(eq(video.id, upload.id));
-    const second = await claimVideo(db, upload.id);
-    if (!second) throw new Error("Expected replacement work.");
-    expect(second.attemptId).not.toBe(first.attemptId);
-    expect(await renewVideoLease(db, first)).toBe(false);
-    expect(await failVideoWork(db, first, false)).toBe(true);
-    expect(await db.select().from(video)).toMatchObject([
-      { state: "processing", attemptId: second.attemptId },
-    ]);
-    expect(await db.select().from(videoCleanup)).toMatchObject([{ prefix: first.prefix }]);
-  });
-
-  it("erases failed text and captions and leaves exactly one durable, link-free notification", async () => {
-    const author = await createTestUser();
-    const { upload } = await submittedVideo(author.id);
-    const work = await claimVideo(db, upload.id);
-    if (!work) throw new Error("Expected work.");
-    await Promise.all([failVideoWork(db, work, false), failVideoWork(db, work, false)]);
-    expect(await db.select().from(videoSubmission)).toEqual([]);
-    expect(await db.select().from(post)).toEqual([]);
-    expect(await db.select().from(videoCleanup)).toMatchObject([
-      { videoId: upload.id, sourceKey: upload.sourceKey },
-    ]);
-    const page = await call(appRouter.notification.list, {}, { context: contextFor(author) });
-    expect(page.items).toHaveLength(1);
-    expect(page.items[0]).toMatchObject({ type: "video_failed", actor: null, postId: null });
-    expect(await db.select({ actionId: notification.actionId }).from(notification)).toEqual([
-      { actionId: null },
-    ]);
-    await db.delete(video).where(eq(video.id, upload.id));
-    expect(await db.select().from(notification)).toHaveLength(1);
-    expect(await db.select().from(videoCleanup)).toHaveLength(1);
-  });
-
-  it("cancellation prevents in-flight publication and sends no failure notification", async () => {
-    const author = await createTestUser();
-    const { upload } = await submittedVideo(author.id);
-    const work = await claimVideo(db, upload.id);
-    if (!work) throw new Error("Expected work.");
-    await encodedVideo(work);
-    await confirmVideoSourceDeleted(db, work);
-    await cancelVideo(db, upload.id, author.id);
-    expect(await publishVideo(db, work)).toBe(false);
-    expect(await db.select().from(post)).toEqual([]);
-    expect(await db.select().from(videoSubmission)).toEqual([]);
-    expect(await db.select().from(notification)).toEqual([]);
-  });
-
-  it("an account cascade removes pending content while retaining the keys needed for cleanup", async () => {
-    const author = await createTestUser();
-    const { upload } = await submittedVideo(author.id);
-    const work = await claimVideo(db, upload.id);
-    if (!work) throw new Error("Expected work.");
-    await db.delete(user).where(eq(user.id, author.id));
-    expect(await renewVideoLease(db, work)).toBe(false);
-    expect(await publishVideo(db, work)).toBe(false);
-    expect(await db.select().from(videoSubmission)).toEqual([]);
-    expect(await db.select().from(video)).toMatchObject([
-      { authorId: null, sourceKey: upload.sourceKey },
-    ]);
-  });
-
-  it("retries transient processing failures, then fails after the bounded attempt budget", async () => {
-    const author = await createTestUser();
-    const { upload } = await submittedVideo(author.id);
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      const work = await claimVideo(db, upload.id);
-      if (!work) throw new Error("Expected retry work.");
-      expect(await failVideoWork(db, work, true)).toBe(attempt === 3);
-    }
-    expect(await claimVideo(db, upload.id)).toBeNull();
-    expect(await db.select().from(videoSubmission)).toEqual([]);
-    expect(await db.select().from(notification)).toHaveLength(1);
-  });
-
-  it("rechecks account eligibility at publication and keeps ordinary deletion atomic with cleanup debt", async () => {
-    const author = await createTestUser();
-    const first = await submittedVideo(author.id);
-    const work = await claimVideo(db, first.upload.id);
-    if (!work) throw new Error("Expected work.");
-    await encodedVideo(work);
-    await confirmVideoSourceDeleted(db, work);
-    await db.update(user).set({ banned: true }).where(eq(user.id, author.id));
-    expect(await publishVideo(db, work)).toBe(false);
-    expect(await db.select().from(post)).toEqual([]);
-    await db.update(user).set({ banned: false }).where(eq(user.id, author.id));
-    const second = await submittedVideo(author.id);
-    const next = await claimVideo(db, second.upload.id);
-    if (!next) throw new Error("Expected second work.");
-    await encodedVideo(next);
-    await confirmVideoSourceDeleted(db, next);
-    await publishVideo(db, next);
-    await call(
-      appRouter.post.delete,
-      { postId: second.submission.id },
-      { context: contextFor(author) },
-    );
-    expect(await db.select().from(postAttachment)).toEqual([]);
-    expect(
-      await db.select().from(videoCleanup).where(eq(videoCleanup.videoId, second.upload.id)),
-    ).toHaveLength(1);
-    expect(
+    const item = await submitted(author.id, { parentId: parent.id });
+    await recordStreamReady(db, item.id, item.uid, metadata);
+    if (change === "author-ban" || change === "target-ban")
       await db
-        .select()
-        .from(post)
-        .where(and(eq(post.id, second.submission.id), sql`${post.deletedAt} is not null`)),
-    ).toHaveLength(1);
-  });
+        .update(user)
+        .set({ banned: true })
+        .where(eq(user.id, change === "author-ban" ? author.id : target.id));
+    if (change === "target-private")
+      await db.update(user).set({ isPrivate: true }).where(eq(user.id, target.id));
+    if (change === "post-private")
+      await db.update(post).set({ isPrivate: true }).where(eq(post.id, parent.id));
+    if (change === "block-author")
+      await db.insert(userBlock).values({ blockerId: author.id, blockedId: target.id });
+    if (change === "block-target")
+      await db.insert(userBlock).values({ blockerId: target.id, blockedId: author.id });
+    if (change === "missing-target") await db.delete(user).where(eq(user.id, target.id));
+    expect(await publishStreamVideo(db, item.id)).toBe(false);
+    expect(await db.select().from(post).where(eq(post.id, item.postId))).toHaveLength(0);
+    expect(await db.select().from(video)).toMatchObject([{ state: "failed" }]);
+    expect(await db.select().from(videoSubmission)).toHaveLength(0);
+    expect(await db.select().from(notification)).toMatchObject([
+      { type: "video_failed", recipientId: author.id },
+    ]);
+    expect(await db.select().from(videoCleanup)).toMatchObject([
+      { videoId: item.id, streamUid: item.uid },
+    ]);
+  },
+);
+
+it("keeps tombstone replies valid and suppresses self-notifications like ordinary publication", async () => {
+  const author = await createTestUser();
+  const [parent] = await seedPosts(author.id, 1);
+  const item = await submitted(author.id, { parentId: parent.id });
+  await recordStreamReady(db, item.id, item.uid, metadata);
+  await db.update(post).set({ removedAt: new Date() }).where(eq(post.id, parent.id));
+  expect(await publishStreamVideo(db, item.id)).toBe(true);
+  expect(await db.select().from(notification)).toHaveLength(0);
+});
+
+it("refuses expired, cancelled and account-deleted work without resurrecting its text", async () => {
+  const owner = await createTestUser();
+  const expired = await submitted(owner.id);
+  await recordStreamReady(db, expired.id, expired.uid, metadata);
+  await db
+    .update(video)
+    .set({ expiresAt: new Date(0) })
+    .where(eq(video.id, expired.id));
+  expect(await publishStreamVideo(db, expired.id)).toBe(false);
+  expect(await db.select().from(notification)).toHaveLength(1);
+  const cancelled = await submitted(owner.id);
+  await recordStreamReady(db, cancelled.id, cancelled.uid, metadata);
+  await db.batch([
+    db.update(video).set({ state: "cancelled", playback: null }).where(eq(video.id, cancelled.id)),
+    db.delete(videoSubmission).where(eq(videoSubmission.videoId, cancelled.id)),
+  ]);
+  expect(await publishStreamVideo(db, cancelled.id)).toBe(false);
+  const orphan = await submitted(owner.id);
+  await db.delete(user).where(eq(user.id, owner.id));
+  expect(await recordStreamReady(db, orphan.id, orphan.uid, metadata)).toBe(false);
+  expect(await publishStreamVideo(db, orphan.id)).toBe(false);
+  expect(await db.select().from(post)).toHaveLength(0);
+  expect(await db.select().from(videoSubmission)).toHaveLength(0);
+  expect(await db.select().from(videoCleanup)).toHaveLength(3);
+});
+
+it("refuses missing or out-of-policy Stream metadata in both the adapter and database", async () => {
+  const owner = await createTestUser();
+  const item = await submitted(owner.id);
+  await expect(
+    recordStreamReady(db, item.id, item.uid, { ...metadata, width: 1.5 }),
+  ).rejects.toThrow();
+  await expect(
+    recordStreamReady(db, item.id, item.uid, { ...metadata, duration: 301 }),
+  ).rejects.toThrow();
+  for (const malformed of [{}, { ...metadata, width: 0 }, { ...metadata, duration: 301 }]) {
+    await expect(
+      db.run(
+        sql`update video set state = 'ready', playback = ${JSON.stringify(malformed)} where id = ${item.id}`,
+      ),
+    ).rejects.toThrow();
+  }
+  expect((await db.select().from(video))[0].state).toBe("queued");
 });

@@ -21,22 +21,8 @@
  */
 import { ORPCError } from "@orpc/server";
 import { isAllowedUsernameCharset } from "@my-tuums/auth/rules";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gt,
-  gte,
-  ilike,
-  inArray,
-  isNull,
-  lte,
-  ne,
-  not,
-  sql,
-} from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { and, desc, eq, gt, gte, isNull, ne, not, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { Database } from "@my-tuums/db";
 import {
   feedRankSnapshot,
@@ -84,18 +70,15 @@ import {
   FEED_RANK_WINDOW_DAYS,
   FEED_RANK_WINDOW_MAX_DAYS,
 } from "./constants.js";
-import { runSql } from "./sql.js";
+import { textIn } from "./sql.js";
+import { containsText } from "./search-text.js";
 import { invisibleAuthor, privatePostHidden } from "./visibility.js";
 
 /** The ranked scopes — the `feed` values a ranked `post.list` call may carry. */
 export type RankScope = "global" | "following" | "discover";
 
-/**
- * The store slice this module reads and writes: selects, inserts, deletes,
- * and raw fragments. A transaction handle satisfies it, so the snapshot
- * persist serializes its insert, sweep, and trim in one transaction.
- */
-type RankStore = Pick<Database, "select" | "selectDistinctOn" | "insert" | "delete" | "execute">;
+/** Ranked reads only need selects; snapshot persistence accepts the full D1 store. */
+type RankStore = Pick<Database, "select">;
 
 /**
  * The features one candidate post is scored from. Counts are raw — capping
@@ -320,15 +303,6 @@ export function extractRankHashtagKeys(
   return [...keys];
 }
 
-/**
- * Escapes LIKE metacharacters so a caller's `%`, `_` and `\` match
- * literally. Local to this module (posts.ts, search.ts and games.ts carry
- * their own copy) because importing any of them would cycle.
- */
-function escapeRankLikePattern(pattern: string): string {
-  return pattern.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
-
 /** One SQL-sourced candidate: the post, its counts, and its surfacing event. */
 interface RankCandidate {
   postId: string;
@@ -364,11 +338,11 @@ async function collectRankCandidates(
 }
 
 const candidateLikeCount = sql<number>`(
-  select count(*)::int from ${postLike} where ${postLike.postId} = ${post.id}
+  select count(*) from ${postLike} where ${postLike.postId} = ${post.id}
 )`;
 
 const candidateRepostCount = sql<number>`(
-  select count(*)::int from ${postRepost} where ${postRepost.postId} = ${post.id}
+  select count(*) from ${postRepost} where ${postRepost.postId} = ${post.id}
 )`;
 
 /**
@@ -377,7 +351,7 @@ const candidateRepostCount = sql<number>`(
  * counts what a feed would render.
  */
 const candidateReplyCount = sql<number>`(
-  select count(*)::int from ${post} as reply
+  select count(*) from ${post} as reply
   where reply.parent_id = ${post.id} and reply.deleted_at is null
 )`;
 
@@ -394,7 +368,7 @@ function aliasHiddenFromViewer(
   u: { id: unknown; banned: unknown; banExpires: unknown },
 ): ReturnType<typeof sql<boolean>> {
   return sql<boolean>`(
-    (${u.banned} and (${u.banExpires} is null or ${u.banExpires} > now()))
+    (${u.banned} and (${u.banExpires} is null or ${u.banExpires} > cast(unixepoch('subsec') * 1000 as integer)))
     or exists (
       select 1 from ${userBlock}
       where ${userBlock.blockerId} = ${u.id} and ${userBlock.blockedId} = ${viewerId}
@@ -469,13 +443,11 @@ async function fetchAuthoredCandidates(
           // words no reader may see, and the game filter would oracle them.
           isNull(post.removedAt),
           gte(post.createdAt, args.cutoff),
-          args.q ? ilike(post.content, `%${escapeRankLikePattern(args.q)}%`) : undefined,
-          // A selectivity prefilter only: the superset `%#key%` spelling also
+          args.q ? containsText(post.content, args.q) : undefined,
+          // A selectivity prefilter only: the substring `#key` also
           // matches `#key2016`, so the collector checks exact tokens before
           // consuming the budget and scans further when necessary.
-          args.gameHashtagKey
-            ? ilike(post.content, `%#${escapeRankLikePattern(args.gameHashtagKey)}%`)
-            : undefined,
+          args.gameHashtagKey ? containsText(post.content, `#${args.gameHashtagKey}`) : undefined,
           scopeFilter,
           not(invisibleAuthor(args.viewerId)),
           not(privatePostHidden(args.viewerId)),
@@ -531,7 +503,9 @@ async function fetchRepostCandidates(
   // Pick the latest visible amplification per original before limiting;
   // otherwise one viral post can consume the entire repost budget.
   const latestReposts = db
-    .selectDistinctOn([post.id], {
+    .select({
+      position: sql<number>`row_number() over (partition by ${post.id}
+        order by ${postRepost.createdAt} desc, ${postRepost.userId} desc)`.as("position"),
       postId: post.id,
       authorId: post.authorId,
       content: post.content,
@@ -552,10 +526,8 @@ async function fetchRepostCandidates(
         isNull(post.deletedAt),
         isNull(post.removedAt),
         gte(postRepost.createdAt, args.cutoff),
-        args.q ? ilike(post.content, `%${escapeRankLikePattern(args.q)}%`) : undefined,
-        args.gameHashtagKey
-          ? ilike(post.content, `%#${escapeRankLikePattern(args.gameHashtagKey)}%`)
-          : undefined,
+        args.q ? containsText(post.content, args.q) : undefined,
+        args.gameHashtagKey ? containsText(post.content, `#${args.gameHashtagKey}`) : undefined,
         reposterRule,
         originalAuthorRule,
         not(invisibleAuthor(args.viewerId)),
@@ -564,7 +536,6 @@ async function fetchRepostCandidates(
         not(aliasPrivateHidden(args.viewerId, rankReposter)),
       ),
     )
-    .orderBy(post.id, desc(postRepost.createdAt), desc(postRepost.userId))
     .as("latest_rank_reposts");
   return collectRankCandidates(
     async (after) =>
@@ -572,9 +543,12 @@ async function fetchRepostCandidates(
         .select()
         .from(latestReposts)
         .where(
-          after
-            ? sql`(${latestReposts.eventAt}, ${latestReposts.postId}) < (${sql.param(after.eventAt, postRepost.createdAt)}, ${after.postId})`
-            : undefined,
+          and(
+            eq(latestReposts.position, 1),
+            after
+              ? sql`(${latestReposts.eventAt}, ${latestReposts.postId}) < (${sql.param(after.eventAt, postRepost.createdAt)}, ${after.postId})`
+              : undefined,
+          ),
         )
         .orderBy(desc(latestReposts.eventAt), desc(latestReposts.postId))
         .limit(FEED_RANK_POOL_LIMIT),
@@ -685,7 +659,7 @@ async function fetchViewerHistory(db: RankStore, viewerId: string): Promise<View
       .innerJoin(user, eq(user.id, post.authorId))
       .where(
         and(
-          inArray(post.id, distinct),
+          textIn(post.id, distinct),
           isNull(post.deletedAt),
           isNull(post.removedAt),
           not(invisibleAuthor(viewerId)),
@@ -720,7 +694,7 @@ async function fetchViewerHistory(db: RankStore, viewerId: string): Promise<View
       const found = await db
         .select({ id: post.id, parentId: post.parentId })
         .from(post)
-        .where(inArray(post.id, frontier));
+        .where(textIn(post.id, frontier));
       const next: string[] = [];
       for (const row of found) {
         parentOf.set(row.id, row.parentId);
@@ -784,7 +758,7 @@ async function fetchFollowedAuthors(
   const rows = await db
     .select({ followingId: follow.followingId })
     .from(follow)
-    .where(and(eq(follow.followerId, viewerId), inArray(follow.followingId, distinct)));
+    .where(and(eq(follow.followerId, viewerId), textIn(follow.followingId, distinct)));
   return new Set(rows.map((row) => row.followingId));
 }
 
@@ -973,17 +947,13 @@ async function persistRankSnapshot(
   hasInterests: boolean;
   gameHashtagKey: string | null;
 }> {
-  const expiresAt = new Date(Date.now() + FEED_RANK_SNAPSHOT_TTL_MS);
-  const row = await db.transaction(async (tx) => {
-    // One advisory lock per viewer serializes concurrent snapshot builds so
-    // the per-viewer cap below holds under races.
-    await runSql(
-      tx,
-      sql`select pg_advisory_xact_lock(hashtext('feed_rank_snapshot:' || ${args.viewerId}))`,
-    );
-    const [inserted] = await tx
+  const id = crypto.randomUUID();
+  const now = sql`cast(unixepoch('subsec') * 1000 as integer)`;
+  const [inserted] = await db.batch([
+    db
       .insert(feedRankSnapshot)
       .values({
+        id,
         viewerId: args.viewerId,
         scope: args.scope,
         q: args.q ?? null,
@@ -991,31 +961,36 @@ async function persistRankSnapshot(
         gameHashtagKey: args.gameHashtagKey,
         items: args.items,
         hasInterests: args.hasInterests,
-        expiresAt,
+        expiresAt: sql`${now} + ${FEED_RANK_SNAPSHOT_TTL_MS}`,
       })
-      .returning({ id: feedRankSnapshot.id, expiresAt: feedRankSnapshot.expiresAt });
-    if (!inserted) {
-      throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Failed to build ranking." });
-    }
-    // Bounded global opportunistic sweep: the oldest expired rows go on every
-    // build, so abandoned viewers' snapshots cannot accumulate indefinitely.
-    const stale = await tx
-      .select({ id: feedRankSnapshot.id })
-      .from(feedRankSnapshot)
-      .where(lte(feedRankSnapshot.expiresAt, new Date()))
-      .orderBy(asc(feedRankSnapshot.expiresAt))
-      .limit(100);
-    if (stale.length > 0) {
-      await tx.delete(feedRankSnapshot).where(
-        inArray(
-          feedRankSnapshot.id,
-          stale.map((entry) => entry.id),
+      .returning({ id: feedRankSnapshot.id, expiresAt: feedRankSnapshot.expiresAt }),
+    // Subquery selection and deletion share the batch: no stale list or
+    // interactive lock is needed between concurrent builds.
+    db.delete(feedRankSnapshot).where(sql`${feedRankSnapshot.id} in (
+      select id from feed_rank_snapshot where expires_at <= ${now}
+      order by expires_at, id limit 100
+    )`),
+    db
+      .delete(feedRankSnapshot)
+      .where(
+        and(
+          eq(feedRankSnapshot.viewerId, args.viewerId),
+          sql`${feedRankSnapshot.expiresAt} <= ${now}`,
         ),
-      );
-    }
-    await maintainRankSnapshots(tx, args.viewerId, inserted.id);
-    return inserted;
-  });
+      ),
+    // A build adds one row; removing at most one overflow preserves the cap.
+    // Protect the new row explicitly when expiries tie at millisecond precision.
+    db.delete(feedRankSnapshot).where(sql`${feedRankSnapshot.id} in (
+      select id from feed_rank_snapshot
+      where viewer_id = ${args.viewerId} and id <> ${id}
+      order by expires_at desc, id desc
+      limit 1 offset ${FEED_RANK_MAX_SNAPSHOTS_PER_VIEWER - 1}
+    )`),
+  ]);
+  const row = inserted[0];
+  if (!row) {
+    throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Failed to build ranking." });
+  }
   return {
     id: row.id,
     expiresAt: row.expiresAt,
@@ -1023,43 +998,6 @@ async function persistRankSnapshot(
     hasInterests: args.hasInterests,
     gameHashtagKey: args.gameHashtagKey,
   };
-}
-
-/**
- * Bounded request-time maintenance: deletes the viewer's expired snapshots
- * and trims past the per-viewer live cap, oldest first. Both halves ride the
- * viewer's expiry index. `protectId` shields the row just built from the
- * trim — with timestamp ties, ordering alone could sacrifice it.
- */
-async function maintainRankSnapshots(
-  db: RankStore,
-  viewerId: string,
-  protectId?: string,
-): Promise<void> {
-  const now = new Date();
-  await db
-    .delete(feedRankSnapshot)
-    .where(and(eq(feedRankSnapshot.viewerId, viewerId), lte(feedRankSnapshot.expiresAt, now)));
-  const keep =
-    protectId !== undefined
-      ? FEED_RANK_MAX_SNAPSHOTS_PER_VIEWER - 1
-      : FEED_RANK_MAX_SNAPSHOTS_PER_VIEWER;
-  const live = await db
-    .select({ id: feedRankSnapshot.id })
-    .from(feedRankSnapshot)
-    .where(
-      and(
-        eq(feedRankSnapshot.viewerId, viewerId),
-        gt(feedRankSnapshot.expiresAt, now),
-        protectId !== undefined ? ne(feedRankSnapshot.id, protectId) : undefined,
-      ),
-    )
-    .orderBy(desc(feedRankSnapshot.expiresAt), desc(feedRankSnapshot.id))
-    .limit(keep + 1);
-  if (live.length > keep) {
-    const overflow = live.slice(keep).map((entry) => entry.id);
-    await db.delete(feedRankSnapshot).where(inArray(feedRankSnapshot.id, overflow));
-  }
 }
 
 export interface LoadedRankSnapshot {
@@ -1095,12 +1033,16 @@ export async function loadRankSnapshot(
   const [row] = await db
     .select()
     .from(feedRankSnapshot)
-    .where(eq(feedRankSnapshot.id, args.snapshotId))
+    .where(
+      and(
+        eq(feedRankSnapshot.id, args.snapshotId),
+        gt(feedRankSnapshot.expiresAt, sql`cast(unixepoch('subsec') * 1000 as integer)`),
+      ),
+    )
     .limit(1);
   if (!row || row.viewerId !== args.viewerId) invalidSnapshot();
   if (row.scope !== args.scope) invalidSnapshot();
   if ((args.q ?? null) !== row.q || (args.gameSlug ?? null) !== row.gameSlug) invalidSnapshot();
-  if (row.expiresAt.getTime() <= Date.now()) invalidSnapshot();
   return {
     id: row.id,
     scope: row.scope,
@@ -1139,7 +1081,8 @@ export async function suggestRankAuthorIds(
     .innerJoin(user, eq(user.id, post.authorId))
     .where(
       and(
-        inArray(post.id, postIds),
+        textIn(post.id, postIds),
+        filters.q ? containsText(post.content, filters.q) : undefined,
         isNull(post.deletedAt),
         isNull(post.removedAt),
         not(invisibleAuthor(viewerId)),
@@ -1154,9 +1097,6 @@ export async function suggestRankAuthorIds(
     const row = rowByPost.get(item.postId);
     if (!row || seen.has(row.authorId)) continue;
     seen.add(row.authorId);
-    if (filters.q !== undefined && !row.content.toLowerCase().includes(filters.q.toLowerCase())) {
-      continue;
-    }
     if (
       filters.gameHashtagKey &&
       !extractRankHashtagKeys([row.content]).includes(filters.gameHashtagKey)
@@ -1173,7 +1113,7 @@ export async function suggestRankAuthorIds(
       .select({ targetId: followRequest.targetId })
       .from(followRequest)
       .where(
-        and(eq(followRequest.requesterId, viewerId), inArray(followRequest.targetId, candidates)),
+        and(eq(followRequest.requesterId, viewerId), textIn(followRequest.targetId, candidates)),
       ),
   ]);
   const requestedIds = new Set(requested.map((row) => row.targetId));

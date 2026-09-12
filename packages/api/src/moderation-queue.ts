@@ -1,17 +1,17 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { moderationCaseResolutionEmail, type EmailLocale } from "@my-tuums/auth";
+import { localeFromRequest } from "@my-tuums/auth";
 import type { Database } from "@my-tuums/db";
 import { appeal, moderationAction, post, postEdit, report, user } from "@my-tuums/db/schema";
 import { EDIT_HISTORY_CASE_LIMIT } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
-import { applyModerationEffect, logAction, stampReports } from "./moderation-actions.js";
+import { deliverModerationEmails, moderationEmailInsert } from "./moderation-email.js";
 import { noteInput, queueInput } from "./moderation-inputs.js";
 import { postAttachmentsSelection, type PostAttachment } from "./post-media.js";
 import { moderatorProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
-import { runSql } from "./sql.js";
+import { jsonDecoder, runSql, textIn } from "./sql.js";
 import { publicUserColumns } from "./users.js";
 import { effectivelyBanned } from "./visibility.js";
 import { quotedPostEvidence } from "./posts.js";
@@ -32,24 +32,22 @@ import { quotedPostEvidence } from "./posts.js";
 const caseCursor = createCursorCodec(z.string().min(1));
 
 /** One group of unresolved reports, raw from the GROUP BY. */
-// Raw `db.execute` rows carry postgres.js's own timestamptz string format
-// (`2026-08-06 06:33:09.451822+00`), not a `Date` — drizzle's `select()`
-// maps columns back to Date, raw SQL does not. The timestamp fields below
-// are typed as what the driver actually returns, and the queue handler
-// converts them at the row boundary.
+// Raw D1 timestamps are epoch milliseconds; JSON aggregates arrive as text.
 type ReportGroupRow = {
   target_type: "post" | "user";
   target_id: string;
-  newest_at: string;
+  newest_at: number;
   report_count: number;
-  reasons: string[];
+  reasons: string;
 };
+
+const decodeReasons = jsonDecoder(z.array(z.string()));
 
 /** One open appeal, joined to its action's target. */
 type OpenAppealRow = {
   id: string;
   reason: string;
-  created_at: string;
+  created_at: number;
   target_type: "post" | "user";
   target_id: string;
 };
@@ -148,8 +146,8 @@ export const queueRouter = {
                where ${moderationAction.id} = ${appeal.actionId}
                  and ${appeal.status} = 'open'
                  and ${moderationAction.targetType} = ${report.targetType}
-                 and coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId}) = ${report.targetId}
-                 and (${appeal.createdAt}, coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId}))
+                 and coalesce(${moderationAction.targetPostId}, ${moderationAction.targetUserId}) = ${report.targetId}
+                 and (${appeal.createdAt}, coalesce(${moderationAction.targetPostId}, ${moderationAction.targetUserId}))
                      >= (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, report.targetId)})
              )`
         : sql``;
@@ -159,7 +157,7 @@ export const queueRouter = {
                from ${report}
                where ${report.resolvedAt} is null
                  and ${report.targetType} = ${moderationAction.targetType}
-                 and ${report.targetId} = coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})
+                 and ${report.targetId} = coalesce(${moderationAction.targetPostId}, ${moderationAction.targetUserId})
                group by ${report.targetType}, ${report.targetId}
                having (max(${report.createdAt}), ${report.targetId})
                    >= (${sql.param(decoded.createdAt, appeal.createdAt)}, ${sql.param(decoded.id, user.id)})
@@ -172,8 +170,8 @@ export const queueRouter = {
         select ${report.targetType} as target_type,
                ${report.targetId} as target_id,
                max(${report.createdAt}) as newest_at,
-               count(*)::int as report_count,
-               array_agg(${report.reason}) as reasons
+               count(*) as report_count,
+               json_group_array(${report.reason}) as reasons
         from ${report}
         where ${report.resolvedAt} is null ${reportSideExclusion}
         group by ${report.targetType}, ${report.targetId}
@@ -190,7 +188,7 @@ export const queueRouter = {
       // The appeal half's case key and its group-by, shared by the grouped
       // CTE (both cursor branches) and the having clause's row comparison —
       // restating the coalesce inline in each spot is how drift would start.
-      const appealCaseKey = sql`coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})`;
+      const appealCaseKey = sql`coalesce(${moderationAction.targetPostId}, ${moderationAction.targetUserId})`;
       const appealCaseGroupBy = sql`group by ${moderationAction.targetType}, ${appealCaseKey}`;
 
       const openAppeals = await runSql<OpenAppealRow>(
@@ -198,7 +196,7 @@ export const queueRouter = {
         sql`
         with appeal_cases as (
           select ${moderationAction.targetType} as target_type,
-                 coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId}) as target_id,
+                 coalesce(${moderationAction.targetPostId}, ${moderationAction.targetUserId}) as target_id,
                  max(${appeal.createdAt}) as newest_at
           from ${appeal}
           inner join ${moderationAction} on ${moderationAction.id} = ${appeal.actionId}
@@ -221,7 +219,7 @@ export const queueRouter = {
         inner join ${moderationAction} on ${moderationAction.id} = ${appeal.actionId}
         inner join appeal_cases
           on appeal_cases.target_type = ${moderationAction.targetType}
-         and appeal_cases.target_id = coalesce(${moderationAction.targetPostId}::text, ${moderationAction.targetUserId})
+         and appeal_cases.target_id = coalesce(${moderationAction.targetPostId}, ${moderationAction.targetUserId})
         where ${appeal.status} = 'open'
         order by appeal_cases.newest_at desc,
                  appeal_cases.target_id desc,
@@ -239,7 +237,7 @@ export const queueRouter = {
           targetId: group.target_id,
           newestAt: new Date(group.newest_at),
           reportCount: group.report_count,
-          reasons: [...new Set(group.reasons)],
+          reasons: [...new Set(decodeReasons(group.reasons))],
           appeals: [],
         });
       }
@@ -449,49 +447,55 @@ export const queueRouter = {
     .use(rateLimit(RATE_LIMITS.moderate))
     .input(resolveInput)
     .handler(async ({ input, context }) => {
-      // The report stamps and the `case_resolved` audit row commit together:
-      // if the log insert failed after the stamps, the case would read as
-      // resolved with no trail of who resolved it — and the reporters were
-      // already stamped, so a retry would email nobody. The reporters' emails
-      // go out after the commit through `applyModerationEffect`, the same
-      // "mail after the transaction" rule every other moderation action
-      // follows.
-      //
-      // Zero stamped reports makes the whole thing a no-op that would only
-      // write a misleading `case_resolved` row (`reporterCount: 0`) — the
-      // queue's appeal-only cases reach this otherwise (issue #59) — so it
-      // is refused inside the transaction, audit row and all.
-      const resolved = await applyModerationEffect(context, async (db) => {
-        const stamped = await stampReports(db, {
-          targetType: input.targetType,
-          targetId: input.targetId,
-          outcome: input.outcome,
-          resolvedBy: context.user.id,
-          note: input.note,
+      const actionId = crypto.randomUUID();
+      const openReports = and(
+        eq(report.targetType, input.targetType),
+        eq(report.targetId, input.targetId),
+        sql`${report.resolvedAt} is null`,
+      );
+      // Count and audit the open reports before stamping them. The marker
+      // gates the stamp, and both statements commit atomically in D1.
+      const [, , stamped] = await context.db.batch([
+        context.db.insert(moderationAction).select(sql`select ${actionId}, 'case_resolved',
+          ${context.user.id}, ${input.targetType},
+          ${input.targetType === "post" ? input.targetId : null},
+          ${input.targetType === "user" ? input.targetId : null}, null, ${input.note ?? null},
+          json_object('outcome', ${input.outcome}, 'reporterCount',
+            (select count(*) from ${report} where ${openReports})),
+          cast(unixepoch('subsec') * 1000 as integer)
+          where exists (select 1 from ${report} where ${openReports})`),
+        moderationEmailInsert(
+          context.db,
+          {
+            sourceId: actionId,
+            recipients: sql`select ${report.reporterId} from ${report} where ${openReports}`,
+            fallbackLocale: localeFromRequest(context.headers),
+            content: sql`json_object('kind', 'case_resolved', 'outcome', ${input.outcome}, 'note', ${input.note ?? null})`,
+          },
+          sql`exists (select 1 from ${moderationAction} where ${moderationAction.id} = ${actionId})`,
+        ),
+        context.db
+          .update(report)
+          .set({
+            resolvedAt: sql`cast(unixepoch('subsec') * 1000 as integer)`,
+            resolvedBy: context.user.id,
+            resolvedOutcome: input.outcome,
+            resolutionNote: input.note,
+          })
+          .where(
+            and(
+              openReports,
+              sql`exists (select 1 from ${moderationAction} where ${moderationAction.id} = ${actionId})`,
+            ),
+          )
+          .returning({ reporterId: report.reporterId }),
+      ]);
+      if (stamped.length === 0)
+        throw new ORPCError("BAD_REQUEST", {
+          message: "This case has no open reports to resolve.",
         });
-        if (stamped.reporterIds.length === 0) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: "This case has no open reports to resolve.",
-          });
-        }
-        await logAction(db, {
-          action: "case_resolved",
-          actorId: context.user.id,
-          targetType: input.targetType,
-          targetPostId: input.targetType === "post" ? input.targetId : undefined,
-          targetUserId: input.targetType === "user" ? input.targetId : undefined,
-          note: input.note,
-          details: { outcome: input.outcome, reporterCount: stamped.reporterIds.length },
-        });
-        return {
-          result: stamped.reporterIds.length,
-          pending: stamped.reporterIds.map((reporterId) => ({
-            userId: reporterId,
-            build: (locale: EmailLocale) =>
-              moderationCaseResolutionEmail({ outcome: input.outcome, note: input.note }, locale),
-          })),
-        };
-      });
+      await deliverModerationEmails(context, actionId);
+      const resolved = stamped.length;
       return {
         targetType: input.targetType,
         targetId: input.targetId,
@@ -507,7 +511,7 @@ export const queueRouter = {
  * two different control families at once — a ban appeal and a role-change
  * appeal are separate grievances against the same account, and superseding
  * one because of the other would close a complaint that still stands (see
- * `SUPERSEDING_FAMILY` in ./moderation-actions.ts). Keeping a single appeal
+ * the control families in ./moderation-user.ts). Keeping a single appeal
  * per case key silently hid whichever one the merge happened to overwrite,
  * so a moderator could never see it existed. Ordered newest first, matching
  * the query.
@@ -630,7 +634,7 @@ async function loadPreviews(
       })
       .from(post)
       .innerJoin(user, eq(user.id, post.authorId))
-      .where(inArray(post.id, postIds));
+      .where(textIn(post.id, postIds));
     for (const row of rows) {
       previews.set(`post:${row.id}`, {
         kind: "post",
@@ -655,7 +659,7 @@ async function loadPreviews(
         banExpires: user.banExpires,
       })
       .from(user)
-      .where(inArray(user.id, userIds));
+      .where(textIn(user.id, userIds));
     for (const row of rows) {
       previews.set(`user:${row.id}`, {
         kind: "user",

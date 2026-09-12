@@ -21,8 +21,8 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { testUtils, username } from "better-auth/plugins";
-import { db } from "@my-tuums/db";
-import { webOrigin } from "./env.js";
+import type { Database } from "@my-tuums/db";
+
 import {
   isAllowedUsernameCharset,
   normalizeUsername,
@@ -31,68 +31,72 @@ import {
 } from "./rules.js";
 
 /** The test-only Better Auth instance, carrying the privileged testUtils helpers (file header explains why). */
-export const authTest = betterAuth({
-  appName: "MyTuums",
-  database: drizzleAdapter(db, { provider: "pg" }),
-  emailAndPassword: { enabled: true },
+export function createTestAuth(db: Database, webOrigin: string, secret: string) {
+  return betterAuth({
+    baseURL: webOrigin,
+    secret,
+    appName: "MyTuums",
+    database: drizzleAdapter(db, { provider: "sqlite" }),
+    emailAndPassword: { enabled: true },
 
-  // Same additionalFields as production (./index.ts), for the same reason
-  // `username()` is in the plugin list below: the user table has the columns
-  // and the adapter needs to know about them. No databaseHooks here on purpose
-  // — fixture creation must be able to mint rows the production rules would
-  // reject (an under-15 date of birth, an over-long bio) when that is exactly
-  // what a test needs to hold.
-  user: {
-    additionalFields: {
-      // `role` comes from the admin() plugin on the production instance, which
-      // this one deliberately does not carry (see the plugin note below). It is
-      // declared here anyway because the column exists and every real account
-      // has a value in it — a fixture with a null role is a shape production
-      // never produces, and the moderation suites read it.
-      role: { type: "string", required: false },
-      dateOfBirth: { type: "date", required: false },
-      bio: { type: "string", required: false },
-      bannerImage: { type: "string", required: false },
-      imageOriginal: { type: "string", required: false },
-      bannerImageOriginal: { type: "string", required: false },
-      themePreference: { type: "string", required: false },
-      localePreference: { type: "string", required: false },
-      legalAcceptedAt: { type: "date", required: false },
-      legalVersion: { type: "string", required: false },
+    // Same additionalFields as production (./index.ts), for the same reason
+    // `username()` is in the plugin list below: the user table has the columns
+    // and the adapter needs to know about them. No databaseHooks here on purpose
+    // — fixture creation must be able to mint rows the production rules would
+    // reject (an under-15 date of birth, an over-long bio) when that is exactly
+    // what a test needs to hold.
+    user: {
+      additionalFields: {
+        // `role` comes from the admin() plugin on the production instance, which
+        // this one deliberately does not carry (see the plugin note below). It is
+        // declared here anyway because the column exists and every real account
+        // has a value in it — a fixture with a null role is a shape production
+        // never produces, and the moderation suites read it.
+        role: { type: "string", required: false },
+        dateOfBirth: { type: "date", required: false },
+        bio: { type: "string", required: false },
+        bannerImage: { type: "string", required: false },
+        imageOriginal: { type: "string", required: false },
+        bannerImageOriginal: { type: "string", required: false },
+        themePreference: { type: "string", required: false },
+        localePreference: { type: "string", required: false },
+        legalAcceptedAt: { type: "date", required: false },
+        legalVersion: { type: "string", required: false },
+      },
     },
-  },
 
-  /**
-   * Deliberately a much smaller plugin list than production's.
-   *
-   * This instance exists to *create* fixtures, not to reproduce the app —
-   * anything a test wants to assert about two-factor, passkeys or rate limits
-   * has to go through the real `auth`, or it would be asserting against a
-   * configuration nothing ships. `username()` is here only because the user
-   * table has the columns and the adapter needs to know about them.
-   *
-   * `captureOTP` records codes as they are generated, so an email-OTP flow is
-   * testable without stubbing Resend.
-   */
-  plugins: [
-    username({
-      minUsernameLength: USERNAME_MIN_LENGTH,
-      maxUsernameLength: USERNAME_MAX_LENGTH,
-      usernameValidator: isAllowedUsernameCharset,
-      usernameNormalization: normalizeUsername,
-      displayUsernameNormalization: normalizeUsername,
-    }),
-    testUtils({ captureOTP: true }),
-  ],
+    /**
+     * Deliberately a much smaller plugin list than production's.
+     *
+     * This instance exists to *create* fixtures, not to reproduce the app —
+     * anything a test wants to assert about two-factor, passkeys or rate limits
+     * has to go through the real `auth`, or it would be asserting against a
+     * configuration nothing ships. `username()` is here only because the user
+     * table has the columns and the adapter needs to know about them.
+     *
+     * `captureOTP` records codes as they are generated, so an email-OTP flow is
+     * testable without stubbing Resend.
+     */
+    plugins: [
+      username({
+        minUsernameLength: USERNAME_MIN_LENGTH,
+        maxUsernameLength: USERNAME_MAX_LENGTH,
+        usernameValidator: isAllowedUsernameCharset,
+        usernameNormalization: normalizeUsername,
+        displayUsernameNormalization: normalizeUsername,
+      }),
+      testUtils({ captureOTP: true }),
+    ],
 
-  trustedOrigins: [webOrigin],
-  // Never rate-limit fixture creation: a suite that seeds forty users in a
-  // loop is not the traffic the production limits are aimed at.
-  rateLimit: { enabled: false },
-});
+    trustedOrigins: [webOrigin],
+    // Never rate-limit fixture creation: a suite that seeds forty users in a
+    // loop is not the traffic the production limits are aimed at.
+    rateLimit: { enabled: false },
+  });
+}
 
 /** Resolves the privileged helpers (session minting, OTP capture, row writes) off the test instance. */
-export async function testHelpers() {
+export async function testHelpers(authTest: ReturnType<typeof createTestAuth>) {
   const ctx = await authTest.$context;
   return ctx.test;
 }

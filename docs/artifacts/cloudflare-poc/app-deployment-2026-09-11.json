@@ -1,0 +1,19 @@
+{
+  "date": "2026-09-11",
+  "worker": "mytuums-poc-app",
+  "source_branch": "codex/cloudflare-poc",
+  "requested_commit": "07c7ce2cfb23f5293afbf2e654a8fa4492e9bdb3",
+  "build_uuid": "4d74fa4c-6fac-45d8-90e9-2e84a8d09855",
+  "trigger_uuid": "a9ff1120-2cff-4f0a-a2ac-073cec224b99",
+  "deployment_id": "57be63ab-1fde-49b5-8454-99b7df8eeb39",
+  "version_id": "4c47cee5-6e74-4cf3-8607-dda18070d839",
+  "deployed_at": "2026-09-11T13:58:05.778798Z",
+  "domain": "cf-poc.mytuums.com",
+  "anonymous_homepage_status": 302,
+  "anonymous_auth_session_status": 302,
+  "redirect_host": "mytuums.cloudflareaccess.com",
+  "workers_dev_status": 404,
+  "preview_urls": false,
+  "authenticated_checks": "pending",
+  "google_build_variable": "Copied public VITE_GOOGLE_CLIENT_ID from the owner-supplied runtime plain-text variable into Workers Builds. No credential value recorded."
+}

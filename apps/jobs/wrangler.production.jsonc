@@ -1,0 +1,75 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "mytuums-production-jobs",
+  "account_id": "734f3b84571b1967e6940140a0b7d75f",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-10",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "upload_source_maps": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "limits": {
+    "cpu_ms": 300000,
+    "subrequests": 50000,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mytuums-production",
+      "database_id": "e80d3f42-4fe5-41fb-90b7-32de79d25e0b",
+      "migrations_dir": "../../packages/db/drizzle-d1",
+    },
+  ],
+  "stream": {
+    "binding": "STREAM",
+    "remote": false,
+  },
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["noreply@mytuums.com"],
+      "remote": false,
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "mytuums-production-media",
+      "jurisdiction": "eu",
+      "remote": false,
+    },
+  ],
+  "vars": {
+    "WEB_ORIGIN": "https://mytuums.com",
+    "EMAIL_FROM": "noreply@mytuums.com",
+    "STREAM_NAMESPACE": "mytuums-production",
+    "CLOUDFLARE_ACCOUNT_ID": "734f3b84571b1967e6940140a0b7d75f",
+  },
+  "secrets": {
+    "required": ["STREAM_API_TOKEN", "IGDB_CLIENT_ID", "IGDB_CLIENT_SECRET", "APPEAL_TOKEN_SECRET"],
+  },
+  "triggers": {
+    "crons": [],
+  },
+  "workflows": [
+    {
+      "binding": "VIDEO_WORKFLOW",
+      "name": "mytuums-production-video",
+      "class_name": "VideoWorkflow",
+    },
+    {
+      "binding": "MAINTENANCE_WORKFLOW",
+      "name": "mytuums-production-maintenance",
+      "class_name": "MaintenanceWorkflow",
+    },
+    {
+      "binding": "GAME_SYNC_WORKFLOW",
+      "name": "mytuums-production-game-sync",
+      "class_name": "GameSyncWorkflow",
+    },
+  ],
+}

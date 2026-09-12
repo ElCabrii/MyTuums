@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   moderationRemovalEmail,
   otpEmail,
@@ -52,7 +52,11 @@ function visibleHtml(html: string): string {
 
 describe("branded email HTML", () => {
   it("uses a branded, table-based letter layout", async () => {
-    const email = await verificationEmail("https://mytuums.test/verify", "en");
+    const email = await verificationEmail(
+      "https://mytuums.test",
+      "https://mytuums.test/verify",
+      "en",
+    );
 
     expect(email.html).toContain('lang="en"');
     expect(email.html).toContain('id="email-title"');
@@ -62,6 +66,7 @@ describe("branded email HTML", () => {
 
   it("keeps supplied moderator and author content escaped in the HTML part", async () => {
     const email = await moderationRemovalEmail(
+      "https://mytuums.test",
       {
         postText: '<img src="x" onerror="alert(1)"> & "quoted"',
         attachmentCount: 0,
@@ -81,6 +86,7 @@ describe("branded email HTML", () => {
 
   it("escapes & first, so an & next to markup is not double-escaped", async () => {
     const email = await moderationRemovalEmail(
+      "https://mytuums.test",
       {
         postText: "remove me",
         attachmentCount: 0,
@@ -97,22 +103,42 @@ describe("branded email HTML", () => {
   it.each([
     {
       name: "English verification",
-      build: () => verificationEmail("https://mytuums.test/action?token=one&next=%2Fhome", "en"),
+      build: () =>
+        verificationEmail(
+          "https://mytuums.test",
+          "https://mytuums.test/action?token=one&next=%2Fhome",
+          "en",
+        ),
       label: "Verify my email address",
     },
     {
       name: "French verification",
-      build: () => verificationEmail("https://mytuums.test/action?token=one&next=%2Fhome", "fr"),
+      build: () =>
+        verificationEmail(
+          "https://mytuums.test",
+          "https://mytuums.test/action?token=one&next=%2Fhome",
+          "fr",
+        ),
       label: "Vérifier mon adresse e-mail",
     },
     {
       name: "English password reset",
-      build: () => passwordResetEmail("https://mytuums.test/action?token=two&next=%2Fhome", "en"),
+      build: () =>
+        passwordResetEmail(
+          "https://mytuums.test",
+          "https://mytuums.test/action?token=two&next=%2Fhome",
+          "en",
+        ),
       label: "Reset my password",
     },
     {
       name: "French password reset",
-      build: () => passwordResetEmail("https://mytuums.test/action?token=two&next=%2Fhome", "fr"),
+      build: () =>
+        passwordResetEmail(
+          "https://mytuums.test",
+          "https://mytuums.test/action?token=two&next=%2Fhome",
+          "fr",
+        ),
       label: "Réinitialiser mon mot de passe",
     },
   ])("renders a localized $name CTA instead of visible URL text", async ({ build, label }) => {
@@ -136,6 +162,7 @@ describe("branded email HTML", () => {
       "https://mytuums.test/appeal?token=signed-capability&callbackURL=%2Fmoderation%3Ftab%3Dappeals";
 
     const email = await moderationRemovalEmail(
+      "https://mytuums.test",
       { postText: "remove me", attachmentCount: 0, reason: "spam", appealUrl },
       "en",
     );
@@ -150,7 +177,11 @@ describe("branded email HTML", () => {
   });
 
   it("places the primary action before the fallback safety note", async () => {
-    const email = await verificationEmail("https://mytuums.test/verify", "en");
+    const email = await verificationEmail(
+      "https://mytuums.test",
+      "https://mytuums.test/verify",
+      "en",
+    );
 
     expect(email.html.indexOf(">Verify my email address</a>")).toBeLessThan(
       email.html.indexOf("If you didn&#x27;t create a MyTuums account"),
@@ -161,6 +192,7 @@ describe("branded email HTML", () => {
     const postUrl = "https://author.test/post?ref=moderation&part=quote";
     const appealUrl = "https://mytuums.test/appeal?token=signed-capability";
     const email = await moderationRemovalEmail(
+      "https://mytuums.test",
       {
         postText: `See ${postUrl}`,
         attachmentCount: 0,
@@ -184,6 +216,7 @@ describe("branded email HTML", () => {
 
   it("preserves the plain text's paragraph structure while placing the CTA after the copy", async () => {
     const email = await moderationRemovalEmail(
+      "https://mytuums.test",
       {
         postText: "remove me",
         attachmentCount: 0,
@@ -204,6 +237,7 @@ describe("branded email HTML", () => {
 
   it("renders the French subject into <title> and <h1> while the header stays unescaped", async () => {
     const email = await moderationRemovalEmail(
+      "https://mytuums.test",
       {
         postText: "remove me",
         attachmentCount: 0,
@@ -220,16 +254,8 @@ describe("branded email HTML", () => {
 });
 
 describe("otpEmail", () => {
-  // `src/env.ts` resolves `WEB_ORIGIN` when the module loads, so the malformed
-  // value has to be in place before a fresh import — and must not outlive the
-  // test that needed it.
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.resetModules();
-  });
-
   it("keeps the code in the text fallback and gives it restrained emphasis in HTML", async () => {
-    const email = await otpEmail("123456", "en");
+    const email = await otpEmail("https://mytuums.test", "123456", "en");
 
     expect(email.text).toContain("123456");
     expect(email.html).toContain(">123456</strong>");
@@ -237,27 +263,18 @@ describe("otpEmail", () => {
     expect(email.html).not.toContain("href=");
   });
 
-  it("falls back to a usable absolute logo URL when WEB_ORIGIN is malformed", async () => {
-    vi.stubEnv("WEB_ORIGIN", "not an origin");
-    vi.resetModules();
-    const { otpEmail: freshOtpEmail } = await import("./email.js");
-
-    const email = await freshOtpEmail("123456", "en");
-
-    expect(email.html).toContain('src="http://localhost:5173/mytuums-192.png"');
+  it("rejects a malformed explicit origin instead of falling back to another deployment", async () => {
+    await expect(otpEmail("not an origin", "123456", "en")).rejects.toThrow();
   });
 
-  // Positive control for the fallback test above: the fallback URL equals
-  // `env.ts`'s default `WEB_ORIGIN` (and the one CI exports), so only a
-  // distinct valid origin proves the stub actually reached the module and the
-  // logo is resolved against it — on the happy path, not just the catch.
-  it("resolves the logo against a valid WEB_ORIGIN", async () => {
-    vi.stubEnv("WEB_ORIGIN", "https://mail.example.test");
-    vi.resetModules();
-    const { otpEmail: freshOtpEmail } = await import("./email.js");
-
-    const email = await freshOtpEmail("123456", "en");
-
-    expect(email.html).toContain('src="https://mail.example.test/mytuums-192.png"');
+  it("keeps concurrent deployments' email origins separate", async () => {
+    const [first, second] = await Promise.all([
+      otpEmail("https://first.example.test", "123456", "en"),
+      otpEmail("https://second.example.test", "654321", "fr"),
+    ]);
+    expect(first.html).toContain('src="https://first.example.test/mytuums-192.png"');
+    expect(first.html).not.toContain("second.example.test");
+    expect(second.html).toContain('src="https://second.example.test/mytuums-192.png"');
+    expect(second.html).not.toContain("first.example.test");
   });
 });

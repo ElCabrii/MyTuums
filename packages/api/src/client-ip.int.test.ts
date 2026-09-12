@@ -1,6 +1,6 @@
+import { auth, closeDb } from "./testing/runtime.js";
 import { call, os } from "@orpc/server";
-import { auth } from "@my-tuums/auth";
-import { closeDb } from "@my-tuums/db";
+
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Context } from "./context.js";
 import { publicRateLimit } from "./procedures.js";

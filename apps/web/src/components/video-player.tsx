@@ -46,6 +46,9 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(true);
   const [quality, setQuality] = useState(-1);
+  const [levels, setLevels] = useState<
+    Pick<import("hls.js").Level, "width" | "height" | "frameRate">[]
+  >([]);
   const [speed, setSpeed] = useState(1);
   const [captions, setCaptions] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,10 +56,7 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
   const [previews, setPreviews] = useState<VideoPreview[]>([]);
   const [previewsRequested, setPreviewsRequested] = useState(false);
   const duration = metadata?.duration ?? 0;
-  const rendition = metadata?.renditions[quality];
-  const source = rendition
-    ? new URL(`${rendition.name}.m3u8`, new URL(attachment.url, window.location.origin)).href
-    : attachment.url;
+  const source = attachment.url;
 
   const onSourceReady = useEffectEvent(() => {
     const video = videoRef.current;
@@ -97,7 +97,16 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
             capLevelToPlayerSize: quality === -1,
           });
           hls.on(HlsPlayer.Events.MEDIA_ATTACHED, () => hls?.loadSource(source));
-          hls.on(HlsPlayer.Events.MANIFEST_PARSED, start);
+          hls.on(HlsPlayer.Events.MANIFEST_PARSED, () => {
+            if (!hls) return;
+            // Stream owns the rendition ladder. Select the provider's current
+            // HLS levels instead of constructing legacy encoder filenames.
+            setLevels(
+              hls.levels.map(({ width, height, frameRate }) => ({ width, height, frameRate })),
+            );
+            hls.currentLevel = quality < hls.levels.length ? quality : -1;
+            start();
+          });
           hls.on(HlsPlayer.Events.ERROR, (_event, data) => {
             if (data.fatal) {
               setError(m.video_playback_error());
@@ -350,7 +359,7 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
             value={quality}
             items={[
               { value: -1, label: m.video_quality_auto() },
-              ...metadata.renditions.map((level, index) => ({
+              ...levels.map((level, index) => ({
                 value: index,
                 label: `${Math.min(level.width, level.height)}p${level.frameRate > 30 ? "60" : ""}`,
               })),
@@ -366,9 +375,9 @@ export function VideoPlayer({ attachment }: { attachment: VideoAttachment }) {
             <SelectPrimitive.Portal container={fullscreen ? containerRef : undefined}>
               <SelectContent>
                 <SelectItem value={-1}>{m.video_quality_auto()}</SelectItem>
-                {metadata.renditions.map((level, index) => (
+                {levels.map((level, index) => (
                   <SelectItem
-                    key={level.name}
+                    key={index}
                     value={index}
                   >{`${Math.min(level.width, level.height)}p${level.frameRate > 30 ? "60" : ""}`}</SelectItem>
                 ))}

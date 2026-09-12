@@ -1,22 +1,6 @@
-// Post-processes the schema that `@better-auth/cli generate` writes to
-// src/schema/auth.ts.
-//
-// The CLI hardcodes `timestamp('<name>')` for every Postgres date field —
-// there is no option to change it (see packages/cli/src/generators/drizzle.ts
-// upstream). That produces `timestamp without time zone`, and Drizzle reads
-// those columns back by appending `+0000`, i.e. as if they were UTC, while
-// Postgres resolves the `defaultNow()` on them to the *database server's*
-// local wall clock. On any server not running UTC the two disagree and every
-// generated timestamp comes back shifted by the offset.
-//
-// This is a separate script rather than a hand-edit because auth.ts is
-// generated: an edit made by hand is an edit the next `db:generate:auth`
-// silently throws away. Running it twice is a no-op, so it is safe to invoke
-// on its own to check the file is in the expected state.
-//
-// Better Auth itself is unaffected by the switch — its Drizzle adapter
-// normalises every date field through `new Date(data)` on the way out,
-// whichever column type it came from.
+// Keep the generated-file marker and refuse an accidental return to the
+// PostgreSQL or second-resolution auth schema. The CLI's SQLite generator
+// already emits timestamp_ms columns and millisecond SQL defaults.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -40,14 +24,14 @@ const original = readFileSync(schemaPath, "utf8");
 // Drop whatever header is currently there, so re-running doesn't stack them.
 const body = original.slice(original.indexOf("import "));
 
-let patched = body.replace(/timestamp\("([a-z_]+)"\)/g, 'timestamp("$1", { withTimezone: true })');
-
-patched = HEADER + patched;
+if (!body.includes('"drizzle-orm/sqlite-core"') || /mode:\s*"timestamp"/.test(body)) {
+  throw new Error("Auth schema must use SQLite with millisecond timestamps");
+}
+const patched = HEADER + body;
 
 if (patched === original) {
   console.log("auth.ts already patched; nothing to do.");
 } else {
   writeFileSync(schemaPath, patched);
-  const converted = (patched.match(/withTimezone: true/g) ?? []).length;
-  console.log(`Patched auth.ts: ${String(converted)} timestamp columns now timestamptz.`);
+  console.log("Marked generated D1 auth schema.");
 }

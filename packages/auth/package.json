@@ -19,6 +19,14 @@
     "./client-ip": {
       "types": "./src/client-ip.ts",
       "default": "./src/client-ip.ts"
+    },
+    "./rate-limit-storage": {
+      "types": "./src/rate-limit-storage.ts",
+      "default": "./src/rate-limit-storage.ts"
+    },
+    "./email": {
+      "types": "./src/email.ts",
+      "default": "./src/email.ts"
     }
   },
   "scripts": {
@@ -34,8 +42,7 @@
     "better-auth": "catalog:",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-email": "^6.9.3",
-    "resend": "^6.18.1"
+    "react-email": "^6.9.3"
   },
   "devDependencies": {
     "@my-tuums/tsconfig": "workspace:*",
@@ -43,6 +50,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@typescript/native": "catalog:",
+    "drizzle-orm": "0.45.2",
     "vitest": "^4.1.10"
   }
 }
