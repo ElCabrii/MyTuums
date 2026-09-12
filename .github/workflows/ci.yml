@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, codex/cloudflare-poc, codex/cloudflare-production]
+    branches: [main, codex/cloudflare-poc]
   pull_request:
 
 concurrency:

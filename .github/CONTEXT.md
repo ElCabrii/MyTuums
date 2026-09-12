@@ -52,7 +52,9 @@ when this branch is pushed; local success does not prove the runner is available
 
 ## Authorized production migration
 
-CI now also runs on `codex/cloudflare-production`. The verified integration may
+Migration changes on `codex/cloudflare-production` run through the pull-request
+trigger only. Do not also trigger pushes for that branch: GitHub can treat the
+cancelled duplicate push checks as unmet required checks even after PR CI passes. The verified integration may
 merge into main under the production migration authorization, with all three
 existing required checks retained. Source disconnection, main
 merge and final production deployment remain gated by candidate validation; see

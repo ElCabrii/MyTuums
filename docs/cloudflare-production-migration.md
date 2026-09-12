@@ -330,3 +330,10 @@ Automatic approval review rejected removing the Docker required check. The safer
 release implementation retains main's protections and restores that CI job with
 a real build of the Cloudflare Container plus a non-root bundle-read check.
 No branch-protection setting was changed.
+
+The final revision passed Verify, E2E and Docker CI and deployed successfully to
+preview. GitHub nevertheless refused its merge because the cancelled duplicate
+push run supplied the required checks while the PR run supplied separate passing
+checks. The production migration branch now runs CI through its PR trigger only;
+main retains push CI. All existing required checks and branch protections remain
+unchanged. The resulting commit must pass its own complete CI before merge.
