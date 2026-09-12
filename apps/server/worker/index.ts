@@ -26,6 +26,7 @@ const configuration = z
     CLOUDFLARE_ACCOUNT_ID: z.literal("734f3b84571b1967e6940140a0b7d75f"),
     STREAM_NAMESPACE: z.enum(["mytuums-poc", "mytuums-preview"]),
     EMAIL_FROM: z.literal("noreply@mytuums.com"),
+    GOOGLE_ANALYTICS: z.enum(["enabled", "disabled"]).default("disabled"),
     BETTER_AUTH_SECRET: z.string().min(32),
     APPEAL_TOKEN_SECRET: z.string().min(32),
     STREAM_API_TOKEN: z.string().min(1),
@@ -88,6 +89,7 @@ async function application(env: AppEnv) {
     images: env.IMAGES,
     stream,
     assets: env.ASSETS,
+    googleAnalytics: config.GOOGLE_ANALYTICS === "enabled",
     access: { teamDomain: config.ACCESS_TEAM_DOMAIN, audience: config.ACCESS_AUDIENCE },
     streamOrigins: [
       "https://videodelivery.net",

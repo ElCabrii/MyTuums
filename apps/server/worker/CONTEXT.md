@@ -210,3 +210,8 @@ paired with the `mytuums-preview` Stream namespace. The default configuration
 remains PoC. `../wrangler.preview.jsonc` binds only the isolated EU preview D1/R2
 pair and owner-only candidate Access audience. Final-origin cutover must change
 origin, route and audience together; see [the execution record](../../../docs/cloudflare-preview-migration.md).
+
+Preview sets `GOOGLE_ANALYTICS=enabled` to preserve its existing consent-gated
+analytics. The deployment command requires the matching public GA measurement ID
+at build time; the Worker flag controls the corresponding CSP sources. PoC defaults
+to disabled.
