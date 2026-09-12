@@ -215,3 +215,16 @@ Preview sets `GOOGLE_ANALYTICS=enabled` to preserve its existing consent-gated
 analytics. The deployment command requires the matching public GA measurement ID
 at build time; the Worker flag controls the corresponding CSP sources. PoC defaults
 to disabled.
+
+## Production candidate and public release
+
+The production candidate uses the fixed production resource tuple behind the
+candidate Access audience. `index.ts` permits `ACCESS_MODE=public` only with
+`https://mytuums.com` and `mytuums-production`; every preview/PoC/candidate origin
+still requires Access. The HTTP boundary still checks the exact host, edge IP,
+application session and media permissions. Public responses preserve their normal
+cache/metadata policy; private environments additionally enforce no-store/noindex.
+`native-application.test.ts` checks public login, signed-out page redirects,
+admin denial, alternate-host refusal and rejection of a public candidate config.
+Rich link networking still declines requests after the hosted transport experiment
+failed; see the production migration record for evidence and the outstanding gate.

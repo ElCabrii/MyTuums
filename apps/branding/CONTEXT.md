@@ -21,7 +21,9 @@ and query-string redaction is enabled in native observability.
 
 `pnpm --filter @my-tuums/branding build` builds Vite assets and performs a Wrangler
 dry run. It does not publish. `pnpm --filter @my-tuums/branding types` regenerates
-`worker/worker-configuration.d.ts`; run `pnpm format` afterward. Typechecking covers
+`worker/worker-configuration.d.ts` with string-valued variables for the explicit
+PoC and production configurations; runtime exact-origin validation remains
+authoritative. Run `pnpm format` afterward. Typechecking covers
 the browser and Worker independently. The native security/build test lives at
 `apps/server/src/native-branding.test.ts`; run it through the server's Vitest
 command after building branding. It executes the actual Wrangler bundle with
@@ -72,9 +74,9 @@ pipeline. The native branding Worker serves the build after Access validation.
   footer's `SOCIAL_LINKS` (`src/components/social-links.tsx`) and the app's
   Organization JSON-LD `sameAs` (`apps/web/index.html`); the JSON-LD in this
   app's own `index.html` mirrors the same list.
-- **`public/robots.txt`, `sitemap.xml` and `llms.txt` are the crawler- and
-  agent-facing surface** — they use PoC URLs and remain behind Access.
-  `robots.txt` disallows crawling for this private experiment.
+- **`crawler-documents/` owns the production robots, sitemap and llms documents.**
+  The shared Vite crawler-documents plugin emits these only for production;
+  private builds emit a disallow policy and empty sitemap.
 
 ## Generated files
 
@@ -95,3 +97,10 @@ Git-ignored, and why `lint` and `typecheck` depend on `build` in
 
 The browser remains presentational. The native branding test described above
 pins its deployed artifact and asset admission boundary.
+
+## Production build
+
+`VITE_WEB_ORIGIN=https://mytuums.com` selects production app links and branding
+metadata. `wrangler.production.jsonc` serves `about.mytuums.com` publicly, with
+exact-host and GET/HEAD guards. Only that fixed origin with `ACCESS_MODE=public`
+can omit Access. PoC continues to require its Access JWT on every asset.

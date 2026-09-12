@@ -106,17 +106,18 @@ to the owning context.
 These artifacts are generator-owned. Run the generator and commit its output
 (or nothing where the artifact is git-ignored).
 
-| Artefact                                             | Produced by                                                             |
-| ---------------------------------------------------- | ----------------------------------------------------------------------- |
-| `apps/web/src/routeTree.gen.ts`                      | the TanStack Router Vite plugin (git-ignored)                           |
-| `apps/web/src/paraglide`                             | `pnpm --filter @my-tuums/web paraglide` (git-ignored)                   |
-| `apps/branding/src/paraglide`                        | `pnpm --filter @my-tuums/branding paraglide` (git-ignored)              |
-| `packages/db/src/schema/auth.ts`                     | `pnpm --filter @my-tuums/db db:generate:auth`                           |
-| `packages/api/src/unicode-case-folding.generated.ts` | `pnpm --filter @my-tuums/api generate:case-folding`, then `pnpm format` |
-| `packages/db/drizzle-d1`                             | `pnpm db:generate` (committed, applied before Worker deployment)        |
-| `apps/jobs/worker-configuration.d.ts`                | `pnpm --filter @my-tuums/jobs types`, then `pnpm format`                |
-| `apps/branding/worker/worker-configuration.d.ts`     | `pnpm --filter @my-tuums/branding types`, then `pnpm format`            |
-| `apps/server/worker/worker-configuration.d.ts`       | `pnpm --filter @my-tuums/server types`, then `pnpm format`              |
+| Artefact                                             | Produced by                                                               |
+| ---------------------------------------------------- | ------------------------------------------------------------------------- |
+| `apps/web/src/routeTree.gen.ts`                      | the TanStack Router Vite plugin (git-ignored)                             |
+| `apps/web/src/paraglide`                             | `pnpm --filter @my-tuums/web paraglide` (git-ignored)                     |
+| `apps/branding/src/paraglide`                        | `pnpm --filter @my-tuums/branding paraglide` (git-ignored)                |
+| `packages/db/src/schema/auth.ts`                     | `pnpm --filter @my-tuums/db db:generate:auth`                             |
+| `packages/api/src/unicode-case-folding.generated.ts` | `pnpm --filter @my-tuums/api generate:case-folding`, then `pnpm format`   |
+| `packages/api/src/search-folding.generated.ts`       | `pnpm --filter @my-tuums/api generate:search-folding`, then `pnpm format` |
+| `packages/db/drizzle-d1`                             | `pnpm db:generate` (committed, applied before Worker deployment)          |
+| `apps/jobs/worker-configuration.d.ts`                | `pnpm --filter @my-tuums/jobs types`, then `pnpm format`                  |
+| `apps/branding/worker/worker-configuration.d.ts`     | `pnpm --filter @my-tuums/branding types`, then `pnpm format`              |
+| `apps/server/worker/worker-configuration.d.ts`       | `pnpm --filter @my-tuums/server types`, then `pnpm format`                |
 
 The two git-ignored web artefacts are why `lint` and `typecheck` depend on
 `build` in `turbo.json`: `tsc` cannot resolve a route target or a message

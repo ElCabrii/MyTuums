@@ -3,6 +3,22 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import path from "node:path";
+import { crawlerDocuments } from "../web/crawler-documents-plugin.ts";
+
+const appOrigin = process.env.VITE_WEB_ORIGIN ?? "https://cf-poc.mytuums.com";
+const production = appOrigin === "https://mytuums.com";
+if (
+  ![
+    "https://cf-poc.mytuums.com",
+    "https://preview-candidate.mytuums.com",
+    "https://preview.mytuums.com",
+    "https://mytuums.com",
+  ].includes(appOrigin)
+)
+  throw new Error("Unsupported branding application origin.");
+const brandingOrigin = production
+  ? "https://about.mytuums.com"
+  : "https://about-cf-poc.mytuums.com";
 
 // The branding site is a second, tiny Vite app — deliberately NOT part of
 // apps/web. The SPA is a signed-in application whose every route assumes a
@@ -17,7 +33,19 @@ import path from "node:path";
 // The native Worker serves this branch's build at about-cf-poc.mytuums.com
 // after Access validation — see worker/index.ts and wrangler.jsonc.
 export default defineConfig({
+  define: { "import.meta.env.VITE_WEB_ORIGIN": JSON.stringify(appOrigin) },
   plugins: [
+    crawlerDocuments(path.resolve(import.meta.dirname, "crawler-documents"), production),
+    {
+      name: "mytuums-branding-origin",
+      transformIndexHtml: {
+        order: "pre",
+        handler: (html) =>
+          html
+            .replaceAll("https://about-cf-poc.mytuums.com", brandingOrigin)
+            .replaceAll("https://cf-poc.mytuums.com", appOrigin),
+      },
+    },
     tailwindcss(),
     react(),
     paraglideVitePlugin({

@@ -145,13 +145,13 @@ test("mobile navigation reaches all four destinations and exposes moderation onl
     await expect(link).toHaveAttribute("aria-current", "page");
   }
   await expectInsideViewport(
-    page.getByRole("banner").getByRole("link", { name: "Moderation", exact: true }),
+    page.getByRole("banner").getByRole("button", { name: "Moderation", exact: true }),
     page,
   );
   await bobPage.setViewportSize({ width: 320, height: 740 });
   await bobPage.goto("/");
   await expect(
-    bobPage.getByRole("banner").getByRole("link", { name: "Moderation", exact: true }),
+    bobPage.getByRole("banner").getByRole("button", { name: "Moderation", exact: true }),
   ).toHaveCount(0);
 });
 

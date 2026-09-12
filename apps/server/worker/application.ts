@@ -25,7 +25,8 @@ export async function createWorkerApplication(options: {
   bucket: R2Bucket;
   images: ImagesBinding;
   stream: StreamService | null;
-  access: { teamDomain: string; audience: string };
+  /** Null is reserved for the validated public production origin. */
+  access: { teamDomain: string; audience: string } | null;
   streamOrigins: readonly string[];
   googleAnalytics?: boolean;
 }) {
@@ -44,7 +45,9 @@ export async function createWorkerApplication(options: {
   });
   return createWorkerRequestHandler({
     origin: webOrigin,
-    authorizeAccess: createAccessVerifier(options.access),
+    authorizeAccess: options.access
+      ? createAccessVerifier(options.access)
+      : () => Promise.resolve(true),
     pingDb: () => pingDb(db),
     async resolveSession(request) {
       try {

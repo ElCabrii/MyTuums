@@ -1,3 +1,0 @@
-# Synthetic Cloudflare PoC; every path is protected by owner-only Access.
-User-agent: *
-Disallow: /

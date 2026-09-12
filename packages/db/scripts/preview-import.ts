@@ -76,7 +76,31 @@ export function preparePreviewImport(
   streamInput: string,
   migrationsFolder: string,
 ) {
-  const source = sourceSchema.parse(JSON.parse(sourceInput));
+  return prepareImport(sourceInput, streamInput, migrationsFolder, "preview");
+}
+
+/** Production uses the same conversion, with a distinct source and Stream identity. */
+export function prepareProductionImport(
+  sourceInput: string,
+  streamInput: string,
+  migrationsFolder: string,
+) {
+  return prepareImport(sourceInput, streamInput, migrationsFolder, "production");
+}
+
+function prepareImport(
+  sourceInput: string,
+  streamInput: string,
+  migrationsFolder: string,
+  environment: "preview" | "production",
+) {
+  const environmentId =
+    environment === "preview"
+      ? "d6bc4115-1b88-4c56-abc6-f50b150da78c"
+      : "814c546d-cae5-4e1f-bd9f-7930eae09ea8";
+  const source = sourceSchema
+    .extend({ environmentId: z.literal(environmentId) })
+    .parse(JSON.parse(sourceInput));
   const streams = streamSchema.parse(JSON.parse(streamInput));
   const db = new DatabaseSync(":memory:");
   try {
@@ -156,14 +180,16 @@ export function preparePreviewImport(
             !["published", "failed", "cancelled", "deleted"].includes(z.string().parse(row.state))
           )
             throw new Error("Drain active legacy videos before importing.");
-          row.stream_creator_id = `mytuums-preview:${id}`;
+          row.stream_creator_id = `mytuums-${environment}:${id}`;
           row.stream_uid = null;
           row.upload_url = null;
           row.playback = null;
           if (row.state === "published") {
             const mapped = streams[id];
             if (!mapped || mapped.creator !== row.stream_creator_id)
-              throw new Error("Published video needs a verified preview Stream mapping.");
+              throw new Error(
+                "Published video needs a verified environment-specific Stream mapping.",
+              );
             row.stream_uid = mapped.uid;
             row.playback = JSON.stringify({
               width: mapped.width,

@@ -10,7 +10,7 @@ import {
 import { createCursorCodec } from "./cursor.js";
 import { gameMentionsFor, matchesGameQuery } from "./games.js";
 import { keysetPage } from "./pagination.js";
-import { containsText, matchesUsernamePrefix } from "./search-text.js";
+import { containsText, matchesUsernamePrefix, foldHandleQuery } from "./search-text.js";
 import { postSelection } from "./posts.js";
 import { protectedProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
@@ -53,11 +53,11 @@ const searchUserSelection = (viewerId: string) => ({
 /**
  * Whether a user row matches a free-text query — the app's one definition of
  * "this account is the one you typed": a left-anchored match on the
- * normalised `username`, or a case-insensitive substring of either display
- * field. The typeahead, the results page and the moderation team's account
- * lookup all match on exactly this, so widening what counts as a match (a
- * third column, trigram similarity) lands on all three at once instead of
- * drifting between them.
+ * normalised `username`, or a case-insensitive, accent-folded substring of
+ * either display field. The typeahead, the results page and the moderation
+ * team's account lookup all match on exactly this, so widening what counts
+ * as a match (a third column, trigram similarity) lands on all three at
+ * once instead of drifting between them.
  */
 export function matchesUserQuery(q: string): SQL | undefined {
   return or(
@@ -79,7 +79,7 @@ export function matchesUserQuery(q: string): SQL | undefined {
 export function userQueryRank(q: string): SQL<number> {
   const prefix = matchesUsernamePrefix(user.username, q);
   return sql`case
-    when ${user.username} = ${q.toLowerCase()} then 0
+    when ${user.username} = ${foldHandleQuery(q)} then 0
     when ${prefix} then 1
     else 2
   end`;

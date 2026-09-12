@@ -6,7 +6,7 @@
  * the PoC app origin. This experimental branch deliberately targets only
  * the isolated Cloudflare deployment; production retains its own main branch.
  */
-export const APP_ORIGIN = "https://cf-poc.mytuums.com";
+export const APP_ORIGIN = import.meta.env.VITE_WEB_ORIGIN ?? "https://cf-poc.mytuums.com";
 
 export const signInUrl = `${APP_ORIGIN}/login`;
 export const signUpUrl = `${APP_ORIGIN}/register`;

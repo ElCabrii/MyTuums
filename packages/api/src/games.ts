@@ -224,11 +224,13 @@ type GameReader = Pick<Database, "select">;
 
 /**
  * Whether a game row matches a free-text query — the game half of "this is
- * the thing you typed" (issue #314, Q24): a case-insensitive substring of
- * the display name or of the hashtag key, so both `world of` and
- * `worldofwarcraft` find World of Warcraft. Defined here, beside the game
- * reads that share it; `search.typeahead` imports it so the dropdown and
- * the directory pages match on exactly one predicate.
+ * the thing you typed" (issue #314, Q24): a case-insensitive, accent-folded
+ * substring of the display name or of the hashtag key, so both `world of`
+ * and `worldofwarcraft` find World of Warcraft — and `pokemon` finds
+ * Pokémon. Defined here, beside the game reads that share it;
+ * `search.typeahead` imports it so the dropdown and the directory pages
+ * match on exactly one predicate. The folding helpers live in
+ * ./search-text.ts, the leaf module this file and search.ts share.
  */
 export function matchesGameQuery(q: string): SQL | undefined {
   return or(containsText(game.name, q), containsText(game.hashtagKey, q));

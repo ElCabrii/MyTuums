@@ -142,20 +142,14 @@ Post projections use SQLite JSON functions, schema-validated JSON decoding and
 explicit boolean conversion. Raw event times are epoch milliseconds. ID-set
 queries use `textIn` to bind one JSON array within D1's parameter limit; reply
 continuation queries retain their child fanout, depth and total-output bounds.
-Text search now uses `src/search-text.ts`: literal INSTR matching with Unicode
-17 simple case groups and an ASCII handle-prefix range. It converts only the
-query's non-ASCII case variants, with a bound recursive JSON sequence for long
-alphabets to stay within D1's expression and parameter limits. No LIKE/GLOB
-pattern limit, shadow columns or asynchronous search index is involved. Matching
-stays inside SQL before visibility/keyset limits. Accents and code-point count
-remain significant; this is locale-independent simple folding, not accent
-stripping or full folds such as ß → SS. Ranked candidates, live hydration,
-suggestions and chronological feed filters use the same matcher.
-
-`src/unicode-case-folding.generated.ts` comes from pinned, SHA-256-verified Unicode
-17 data via `pnpm --filter @my-tuums/api generate:case-folding` (optional local
-source-file argument), then `pnpm format`. Its adjacent license must remain.
-Substring search still scans candidate text; measure real D1 usage before cutover.
+Text search uses `src/search-text.ts` for literal accent-insensitive substrings.
+ASCII columns use SQLite lower(); other columns use a code-point walk over the
+bound PostgreSQL 18 unaccent / Unicode 17 simple-case dictionary. Filtering
+remains in SQL before visibility, ordering and keysets. `%`, `_` and backslashes
+are literal text. Ligatures follow PostgreSQL unaccent behavior (ß → ss).
+`generate:search-folding` regenerates the dictionary from SHA-256-pinned upstream
+rules and the existing generated Unicode case groups. Both licenses must remain.
+No PostgreSQL extension, shadow column or asynchronous search index is required.
 
 Game favorite/unfavorite writes use a D1 mutation/count-read batch; migration
 0002 owns count changes through triggers, including account cascades. Game
@@ -378,9 +372,13 @@ account access and deployment allow remote validation.
   open-per-action indexes remain the database backstop.
 - **User matching has one definition.** `matchesUserQuery` in `src/search.ts`
   is what "this account matches what you typed" means — a left-anchored match
-  on the normalised `username`, or a substring of either display field.
-  `search.typeahead`, `search.users` and `moderation.searchUsers` all filter
-  through it, so widening a match lands on all three instead of drifting.
+  on the normalised `username`, or an accent-folded substring of either
+  display field. `search.typeahead`, `search.users` and `moderation.searchUsers`
+  all filter through it, so widening a match lands on all three instead of
+  drifting. Accent folding is shared with the game matcher through
+  `src/search-text.ts`: display text uses the pinned native dictionary, while
+  the ASCII-only username arm folds its query in JS and retains its indexed
+  prefix range. PostgreSQL migration 0039 is historical reference only.
   The two bounded lookup surfaces (`search.typeahead` and
   `moderation.searchUsers`) also share `userQueryRank`: exact handle, other
   handle prefixes, then display-only matches. `search.users` deliberately

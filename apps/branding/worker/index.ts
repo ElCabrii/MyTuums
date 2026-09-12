@@ -1,10 +1,18 @@
 import { createAccessVerifier } from "../../server/src/access.js";
 
 function createHandler(env: BrandingEnv) {
-  const authorizeAccess = createAccessVerifier({
-    teamDomain: env.ACCESS_TEAM_DOMAIN,
-    audience: env.ACCESS_AUDIENCE,
-  });
+  const publicSite =
+    env.BRANDING_ORIGIN === "https://about.mytuums.com" &&
+    "ACCESS_MODE" in env &&
+    env.ACCESS_MODE === "public";
+  if (!publicSite && env.BRANDING_ORIGIN !== "https://about-cf-poc.mytuums.com")
+    throw new Error("Unsupported branding configuration.");
+  const authorizeAccess = publicSite
+    ? () => Promise.resolve(true)
+    : createAccessVerifier({
+        teamDomain: env.ACCESS_TEAM_DOMAIN,
+        audience: env.ACCESS_AUDIENCE,
+      });
   return async (request: Request): Promise<Response> => {
     const requestId = crypto.randomUUID();
     let response: Response;
@@ -29,9 +37,9 @@ function createHandler(env: BrandingEnv) {
       if (request.body && !request.body.locked) request.body.cancel().catch(() => {});
     }
     const headers = new Headers(response.headers);
-    headers.set("cache-control", "private, no-store");
+    if (!publicSite || response.status !== 200) headers.set("cache-control", "private, no-store");
     headers.set("x-request-id", requestId);
-    headers.set("x-robots-tag", "noindex, nofollow");
+    if (!publicSite) headers.set("x-robots-tag", "noindex, nofollow");
     headers.set("x-content-type-options", "nosniff");
     headers.set("x-frame-options", "DENY");
     headers.set("referrer-policy", "strict-origin-when-cross-origin");

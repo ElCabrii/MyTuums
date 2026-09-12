@@ -1,0 +1,156 @@
+# Production migration execution
+
+## Authorization and release gates
+
+Gabriel authorized the six-step production migration on September 12, 2026:
+integrate current main, finish preview validation, provision isolated production
+resources, rehearse and reconcile production data, perform a coordinated cutover,
+then retain the old Railway data for 14 days. Permanent deletion requires a new
+approval. The cutover is authorized after automated checks and owner verification
+of the candidate pass, within a rehearsed 30-minute maintenance budget.
+
+The validated native implementation may be merged into main, including removal of
+legacy Node server, Docker and PostgreSQL runtime files there. This supersedes the
+earlier branch-only restriction; other branches remain untouched. Exactly one
+clearly labelled production-migration test email to the owner's approved address
+is authorized. Cloudflare accepted the single authorized production migration test at approximately 12:08 UTC; Gabriel confirmed inbox delivery in conversation.
+
+Production remains live on Railway. Do not disconnect sources, freeze writes,
+change production DNS, or merge the native runtime into main until the release
+gates below pass. Railway currently auto-deploys main, and branch protection still
+requires Verify, E2E tests and Docker image builds. Coordinate replacement of the
+obsolete Docker gate with actual native artifact validation at release time.
+
+## Working state
+
+- Isolated branch: `codex/cloudflare-production` in `/tmp/mytuums-cloudflare-production`.
+- Starting native revision: `d0f2c3341e967c64fc1e4165f8bb543d86a28fb0`.
+- Incoming main revision: `dd220dd50cbbc9f0cd32db62676ca1525decdd1f`.
+- Merge is in progress. Four files required conflict resolution; the incoming UI
+  changes merged cleanly. Native accent-insensitive search is being verified.
+- The production PostgreSQL 18 unaccent dictionary was captured read-only. Its
+  SHA-256 is `ecf4c41c0883dee17d02431e0a7f24a2611aadf8fe1da06e98c6ccb4acc4a981`.
+  The port now uses that exact dictionary; 51 focused search tests pass.
+- Preview owner sign-in/media verification was confirmed in conversation.
+  Preview Cron was enabled at 12:12 UTC. Eight recovery Workflow instances had
+  completed successfully by 12:22 UTC; production schedules remain disabled.
+
+## Resource identities
+
+Cloudflare Ops account: `734f3b84571b1967e6940140a0b7d75f`.
+Zone: `e596b15a6c397986f91c737c156b7100`.
+
+| Resource      | Identity                                                     | Current state                                                         |
+| ------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Production D1 | `mytuums-production`, `e80d3f42-4fe5-41fb-90b7-32de79d25e0b` | Rehearsal imported and reconciled; EU/EEUR; replication disabled      |
+| Runtime R2    | `mytuums-production-media`                                   | EU/private; 6,246 runtime objects checksum-verified                   |
+| Archive R2    | `mytuums-production-archive`                                 | EU/private; 6,256 original objects and six snapshot archives verified |
+
+The archive bucket must never be bound to runtime cleanup. The production
+database/bucket/Stream namespace must remain isolated from preview and PoC.
+App/jobs Worker slots contain deny-all bootstrap code and production secrets, including the user-provided Stream tokens. No real production runtime, Workflow or domain has been deployed. The temporary network diagnostic Worker was removed.
+
+Railway project: `ffdcd3e4-918b-4d72-aae3-971a3c6b1438`.
+Production environment: `814c546d-cae5-4e1f-bd9f-7930eae09ea8`.
+Source PostgreSQL service: `c8bfea31-83fb-4ef4-b833-65ec0984aa2d`.
+Source bucket: `3e59642c-5ae0-4254-bb45-b8bfeea36516` (`mytuums-media`).
+Both `mytuums.com` and `about.mytuums.com` must move before retiring the server.
+
+## Rehearsal snapshot
+
+Private files are under `/tmp/mytuums-production-migration-private`, mode 0700;
+credentials, snapshots and media are excluded from Git. Rehearsal snapshots and
+media have also been checksum-verified under
+`/home/gabriel/.local/share/mytuums/production-migration-20260912`. API tokens and
+SSH keys are excluded from that durable backup. Six snapshot files are verified
+in private archive R2 under `migration/20260912-initial/`.
+
+The first full PostgreSQL dump is 4,912,953 bytes. The separate repeatable-read,
+read-only application snapshot contains 29 tables and 6,355 rows: 13 users,
+56 posts, 6,015 games and one published video, including passkey, two-factor and
+moderation/appeal data. This online snapshot is a rehearsal, not the final state.
+The initial source readiness check found zero unfinished videos, submissions,
+video cleanup obligations or active legacy jobs.
+
+Media inventory: 6,256 objects, 165,245,601 bytes. All originals are backed up
+locally with size, ETag and SHA-256 checks. All 12,502 destination copies are
+verified. The existing video was remuxed without re-encoding from its surviving
+360×640 HLS rendition, imported as private Stream video
+`6b53813e4fe7887892e9680ba870b94d`, and verified ready (12.67 seconds).
+All 29 D1 tables / 6,355 converted rows match the rehearsal checksums, all seven
+migration hashes match, and the foreign-key check returns zero violations.
+
+Temporary Railway SSH key registration:
+`e5569bac-6f26-4fb7-b7ee-be9fb7afe5a0`, named
+`mytuums-production-migration-20260912`. Remove this registration, the private key
+files and the private SSH agent when migration access is no longer needed.
+The database has no usable public endpoint; use the private SSH export path.
+
+## Remaining gates
+
+1. Complete main integration, search parity, local development/browser validation,
+   full Verify and native E2E, then deploy the verified revision to preview.
+2. Enable and observe preview schedules; prove link-preview transport safety and
+   hosted functionality. Preserve production's public routes, metadata, caching,
+   authentication, client-IP trust and media authorization in native configuration.
+3. Prepare isolated app/jobs/branding configurations, CI-gated deployment, native
+   production secrets, alerts, email suppression handling and provider capacity.
+   Preserve the existing auth secret; legacy appeal signatures use that same secret.
+4. Adapt the strict importer for the production source/resource identities. Import
+   into isolated D1, reconcile every converted row and every media object, and test
+   Stream playback. Suppress incidental mail and schedules during rehearsal.
+5. Complete owner candidate verification and measure final export/import and
+   reconciliation within the maintenance budget. Recheck main for new commits.
+6. At the coordinated cutover, freeze every source writer, drain jobs, capture and
+   reconcile final data, verify native services, switch both production domains,
+   reopen native writes and schedules, and record exact deployed versions.
+7. Observe production, retain source database/media for 14 days, remove migration
+   access, and ask before permanent source deletion. Resend must have no remaining
+   application dependency before its credentials are retired.
+
+After Cloudflare accepts new writes, DNS-only rollback is unsafe. Prefer a forward
+fix or reconcile new D1/media state back to the source before reopening Railway.
+D1 recovery alone does not restore R2, Stream, Workflow or rate-counter state.
+
+## Candidate configuration and remaining parity issue
+
+`apps/server/wrangler.production-candidate.jsonc` and the matching jobs file use
+only the production D1/R2/Stream identities. The candidate uses
+`preview-candidate.mytuums.com` with mandatory Access and noindex. Jobs have no
+Cron triggers. The production files use `mytuums.com` and `about.mytuums.com`;
+public admission is accepted only for those fixed origins. Private application
+routes still require sessions, and media retains its per-object authorization.
+Workers.dev and version preview URLs remain disabled.
+
+The deployment command accepts `--target=preview|production-candidate|production`.
+Candidate requires a clean `codex/cloudflare-production` checkout; final production
+requires clean `main`. Both Verify and E2E must pass on the exact commit. Preview
+may deploy either verified native branch. Builds include the target's explicit
+public origin in Turbo's cache key. Production has no configured GA measurement
+ID, so its analytics/CSP flag is disabled. Preview retains its existing setting.
+
+Crawler source documents are retained from main under each app's
+`crawler-documents/`. Vite emits those only for the public production build;
+private builds emit disallow/noindex-oriented documents. Production branding
+links point to `mytuums.com`.
+
+Rich link previews remain a release decision. The old Undici client requires
+runtime Wasm compilation, which Workers forbids. An experimental pure-JavaScript
+HTTP parser with sockets passed local framing, rebinding and certificate-refusal
+checks, but the hosted diagnostic failed valid-site TLS handshakes and could not
+fetch those sites. The unsuccessful transport and dependency were removed.
+Existing stored cards are preserved; new links currently use the same plain-link
+fallback as preview. Do not replace connection-time validation with DNS preflight
+plus ordinary fetch. A feature-complete alternative needs a separately validated
+transport; do not claim this gap is resolved.
+
+Email Service currently allows 200 messages/day. Resend's available history has
+28 delivered messages and zero suppressions (complete responses, no next page).
+Cloudflare's suppression list is empty. The authorized production test has been
+accepted by Cloudflare and confirmed in Gabriel’s inbox; do not send another migration test.
+
+Before merging into main, disconnect Railway's source deployments only after
+candidate approval, while leaving the running production services available.
+Then merge and validate the resulting main commit before beginning maintenance;
+CI time must not consume the 30-minute data cutover budget. Production Cron and
+source retirement remain later coordinated steps, not effects of preparation.

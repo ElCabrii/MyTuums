@@ -225,3 +225,15 @@ latest GitHub Actions Verify and E2E results, then builds and deploys migrations
 jobs and application in order. `preview-deploy-checks.test.ts` covers refusals
 for missing, foreign, superseded and failed checks. This operator command does
 not automatically cut over domains, freeze source writes or start schedules.
+
+## Production migration administration
+
+`openProductionDatabase` validates the fixed production Worker/account/D1/R2
+configuration before opening D1 alone. It cannot bind the archive bucket.
+`db:migrate --environment=production --remote` applies the existing committed
+native migrations. `db:prepare:preview --environment=production` runs the same
+offline converter with the production Railway environment UUID and
+`mytuums-production` Stream creator namespace; cross-environment snapshots fail.
+The command name remains compatible with the completed preview migration.
+See [production execution](../../docs/cloudflare-production-migration.md) for
+resource identities, backups and cutover gates.

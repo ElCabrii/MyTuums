@@ -46,3 +46,11 @@ no provider credentials. Production Railway configuration and required checks on
 Run `pnpm verify` and `pnpm test:e2e` locally. Validate workflow YAML and compare
 its commands with those scripts. Hosted CI execution remains a separate check
 when this branch is pushed; local success does not prove the runner is available.
+
+## Authorized production migration
+
+CI now also runs on `codex/cloudflare-production`. The verified integration may
+merge into main under the production migration authorization, with the obsolete
+Docker required check coordinated at release time. Source disconnection, main
+merge and final production deployment remain gated by candidate validation; see
+[the execution record](../docs/cloudflare-production-migration.md).

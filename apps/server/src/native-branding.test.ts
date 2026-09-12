@@ -43,53 +43,73 @@ it("serves the built branding site only after Access, including real static asse
   })
     .setProtectedHeader({ alg: "RS256", kid: jwk.kid })
     .sign(key.privateKey);
+  const bundle = await readFile(resolve(directory, ".wrangler/dist/index.js"), "utf8");
   const runtime = new Miniflare({
-    workers: [
-      {
-        config: {
-          type: "worker",
-          name: "branding-test",
-          compatibilityDate: config.compatibility_date,
-          compatibilityFlags: config.compatibility_flags,
-          manifest: {
-            mainModule: "index.js",
-            modules: {
-              "index.js": {
-                type: "esm",
-                contents: await readFile(resolve(directory, ".wrangler/dist/index.js"), "utf8"),
-              },
+    workers: ["private", "public", "private-with-public-flag"].map((mode) => ({
+      config: {
+        type: "worker",
+        name: `branding-${mode}-test`,
+        compatibilityDate: config.compatibility_date,
+        compatibilityFlags: config.compatibility_flags,
+        manifest: {
+          mainModule: "index.js",
+          modules: {
+            "index.js": {
+              type: "esm",
+              contents: bundle,
             },
-          },
-          env: {
-            ASSETS: { type: "assets" },
-            BRANDING_ORIGIN: { type: "json", value: vars.BRANDING_ORIGIN },
-            ACCESS_TEAM_DOMAIN: { type: "json", value: vars.ACCESS_TEAM_DOMAIN },
-            ACCESS_AUDIENCE: { type: "json", value: vars.ACCESS_AUDIENCE },
-          },
-          assets: {
-            directory: resolve(directory, config.assets.directory),
-            hasUserWorker: true,
-            runWorkerFirst: config.assets.run_worker_first,
-            htmlHandling: config.assets.html_handling,
-            notFoundHandling: config.assets.not_found_handling,
           },
         },
-        dev: {
-          outboundService: {
-            type: "fetcher",
-            handler(request) {
-              return Promise.resolve(
-                request.url === `${vars.ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`
-                  ? LocalResponse.json({ keys: [jwk] })
-                  : new LocalResponse(null, { status: 502 }),
-              );
-            },
+        env: {
+          ASSETS: { type: "assets" },
+          BRANDING_ORIGIN: {
+            type: "json",
+            value: mode === "public" ? "https://about.mytuums.com" : vars.BRANDING_ORIGIN,
+          },
+          ACCESS_MODE: { type: "json", value: mode === "private" ? "required" : "public" },
+          ACCESS_TEAM_DOMAIN: { type: "json", value: vars.ACCESS_TEAM_DOMAIN },
+          ACCESS_AUDIENCE: { type: "json", value: vars.ACCESS_AUDIENCE },
+        },
+        assets: {
+          directory: resolve(directory, config.assets.directory),
+          hasUserWorker: true,
+          runWorkerFirst: config.assets.run_worker_first,
+          htmlHandling: config.assets.html_handling,
+          notFoundHandling: config.assets.not_found_handling,
+        },
+      },
+      dev: {
+        outboundService: {
+          type: "fetcher",
+          handler(request) {
+            return Promise.resolve(
+              request.url === `${vars.ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`
+                ? LocalResponse.json({ keys: [jwk] })
+                : new LocalResponse(null, { status: 502 }),
+            );
           },
         },
       },
-    ],
+    })),
   });
   try {
+    const production = await runtime.getWorker("branding-public-test");
+    const publicOrigin = "https://about.mytuums.com";
+    const publicPage = await production.fetch(publicOrigin);
+    expect(publicPage.status).toBe(200);
+    expect(publicPage.headers.get("x-robots-tag")).toBeNull();
+    expect(publicPage.headers.get("content-security-policy")).toContain("script-src 'self'");
+    expect((await production.fetch(`${publicOrigin}/mytuums.svg`)).status).toBe(200);
+    expect((await production.fetch(`${publicOrigin}/unknown`)).status).toBe(404);
+    expect((await production.fetch(vars.BRANDING_ORIGIN)).status).toBe(404);
+    expect((await production.fetch(publicOrigin, { method: "POST", body: "ignored" })).status).toBe(
+      405,
+    );
+    const productionHead = await production.fetch(publicOrigin, { method: "HEAD" });
+    expect(productionHead.status).toBe(200);
+    expect(await productionHead.text()).toBe("");
+    const privateWithFlag = await runtime.getWorker("branding-private-with-public-flag-test");
+    expect((await privateWithFlag.fetch(vars.BRANDING_ORIGIN)).status).toBe(404);
     const origin = vars.BRANDING_ORIGIN;
     const headers = { "cf-access-jwt-assertion": token };
     for (const path of ["/", "/index.html", "/mytuums.svg", "/robots.txt"])

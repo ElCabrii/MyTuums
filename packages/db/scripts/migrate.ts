@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { runMigrations } from "../src/migrate.js";
-import { openPocDatabase, openPreviewDatabase } from "./poc-database.js";
+import { openPocDatabase, openPreviewDatabase, openProductionDatabase } from "./poc-database.js";
 
 async function run() {
   const { values } = parseArgs({
@@ -10,11 +10,19 @@ async function run() {
       environment: { type: "string", default: "poc" },
     },
   });
-  if (values.environment !== "poc" && values.environment !== "preview")
+  if (
+    values.environment !== "poc" &&
+    values.environment !== "preview" &&
+    values.environment !== "production"
+  )
     throw new Error("Unknown migration environment.");
-  const database = await (values.environment === "preview" ? openPreviewDatabase : openPocDatabase)(
-    values.remote,
-  );
+  const open =
+    values.environment === "production"
+      ? openProductionDatabase
+      : values.environment === "preview"
+        ? openPreviewDatabase
+        : openPocDatabase;
+  const database = await open(values.remote);
   try {
     console.log(
       `Applying committed D1 migrations to mytuums-${values.environment} (${values.remote ? "remote" : "local"}).`,
@@ -30,7 +38,7 @@ try {
   await run();
 } catch {
   console.error(
-    "D1 migration failed. Usage: pnpm --filter @my-tuums/db db:migrate [--remote] [--environment=poc|preview]. Check Wrangler authentication, the selected configuration and migration state before retrying.",
+    "D1 migration failed. Usage: pnpm --filter @my-tuums/db db:migrate [--remote] [--environment=poc|preview|production]. Check Wrangler authentication, the selected configuration and migration state before retrying.",
   );
   process.exitCode = 1;
 }

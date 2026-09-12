@@ -3,7 +3,11 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { preparePreviewImport, type PreviewSnapshot } from "./preview-import.js";
+import {
+  preparePreviewImport,
+  prepareProductionImport,
+  type PreviewSnapshot,
+} from "./preview-import.js";
 
 const migrations = fileURLToPath(new URL("../drizzle-d1", import.meta.url));
 const names = [
@@ -67,6 +71,17 @@ function sourceFromSeed(sql: string) {
   }
 }
 const user = `INSERT INTO user (id, name, email, created_at, updated_at, username, display_username) VALUES ('u', 'L''été 🎮', 'fixture@example.invalid', 1789171200123, 1789171200123, 'fixture', 'fixture');`;
+
+await test("production and preview imports reject each other's source snapshots", () => {
+  const preview = JSON.stringify(fixture());
+  const production = JSON.stringify({
+    ...fixture(),
+    environmentId: "814c546d-cae5-4e1f-bd9f-7930eae09ea8",
+  });
+  assert.throws(() => prepareProductionImport(preview, "{}", migrations));
+  assert.throws(() => preparePreviewImport(production, "{}", migrations));
+  assert.equal(prepareProductionImport(production, "{}", migrations).report.totalRows, 0);
+});
 
 await test("preview import preserves auth values, Unicode, JSON arrays and millisecond timestamps, then restores triggers", () => {
   const source = sourceFromSeed(`${user}
@@ -167,6 +182,6 @@ await test("preview import refuses unfinished video work and unpublished Stream 
   videos.rows[0] = { id: "9438c133-0f6f-4048-a443-3cebea04e420", state: "published" };
   assert.throws(
     () => preparePreviewImport(JSON.stringify(source), "{}", migrations),
-    /verified preview Stream mapping/,
+    /verified environment-specific Stream mapping/,
   );
 });

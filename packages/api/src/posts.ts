@@ -1210,7 +1210,7 @@ async function feedEventPage(
 }
 
 /**
- * A Discover ranked page's follow suggestion: a followable user summary. The
+ * A ranked page's follow suggestion: a followable user summary. The
  * name/handle nullability mirrors `publicUserColumns` — `name` is never
  * null, the handle and image are.
  */
@@ -1231,7 +1231,7 @@ export interface RankingMetadata {
   expiresAt: string;
   /** False marks a cold start — the client prompts for game interests. */
   hasInterests: boolean;
-  /** Follow suggestions; empty unless a Discover ranked page. */
+  /** Follow suggestions; empty on the Following feed and every chronological page. */
   suggestions: RankSuggestion[];
 }
 
@@ -1403,8 +1403,8 @@ async function hydrateRankedSlice(args: {
 }
 
 /**
- * Hydrates Discover's follow suggestions: the snapshot-derived author ids in
- * rank order, resolved to followable user summaries with the viewer's live
+ * Hydrates a ranked feed's follow suggestions: the snapshot-derived author ids
+ * in rank order, resolved to followable user summaries with the viewer's live
  * follow/request state. Order follows the input ids — snapshot position IS
  * the rank, there is no second ranker.
  */
@@ -2044,8 +2044,12 @@ export const postRouter = {
           items,
           nextCursor: hasMore ? postRankCursor.encode(snapshot.id, offset) : null,
         };
+        // For you and Discover derive their follow suggestions from the same
+        // frozen order; Following carries none by design — its candidates are
+        // the viewer and followed authors, which the live follow filter
+        // leaves empty.
         const suggestions =
-          scope === "discover"
+          scope !== "following"
             ? await hydrateRankSuggestions(
                 context.db,
                 viewerId,

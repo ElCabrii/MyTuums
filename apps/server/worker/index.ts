@@ -20,11 +20,16 @@ const configuration = z
       "https://cf-poc.mytuums.com",
       "https://preview-candidate.mytuums.com",
       "https://preview.mytuums.com",
+      "https://mytuums.com",
     ]),
     ACCESS_TEAM_DOMAIN: z.literal("https://mytuums.cloudflareaccess.com"),
-    ACCESS_AUDIENCE: z.string().regex(/^[0-9a-f]{64}$/),
+    ACCESS_AUDIENCE: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+    ACCESS_MODE: z.enum(["required", "public"]).default("required"),
     CLOUDFLARE_ACCOUNT_ID: z.literal("734f3b84571b1967e6940140a0b7d75f"),
-    STREAM_NAMESPACE: z.enum(["mytuums-poc", "mytuums-preview"]),
+    STREAM_NAMESPACE: z.enum(["mytuums-poc", "mytuums-preview", "mytuums-production"]),
     EMAIL_FROM: z.literal("noreply@mytuums.com"),
     GOOGLE_ANALYTICS: z.enum(["enabled", "disabled"]).default("disabled"),
     BETTER_AUTH_SECRET: z.string().min(32),
@@ -37,12 +42,16 @@ const configuration = z
     TWITCH_CLIENT_ID: z.string().min(1),
     TWITCH_CLIENT_SECRET: z.string().min(1),
   })
-  .refine(
-    (config) =>
-      (config.WEB_ORIGIN === "https://cf-poc.mytuums.com") ===
-      (config.STREAM_NAMESPACE === "mytuums-poc"),
-    "Origin and Stream namespace must belong to the same environment.",
-  );
+  .refine((config) => {
+    if (config.WEB_ORIGIN === "https://mytuums.com")
+      return config.STREAM_NAMESPACE === "mytuums-production" && config.ACCESS_MODE === "public";
+    if (config.ACCESS_MODE !== "required" || !config.ACCESS_AUDIENCE) return false;
+    if (config.WEB_ORIGIN === "https://cf-poc.mytuums.com")
+      return config.STREAM_NAMESPACE === "mytuums-poc";
+    if (config.WEB_ORIGIN === "https://preview.mytuums.com")
+      return config.STREAM_NAMESPACE === "mytuums-preview";
+    return config.STREAM_NAMESPACE !== "mytuums-poc";
+  }, "Origin and Stream namespace must belong to the same environment.");
 
 async function application(env: AppEnv) {
   const config = configuration.parse(env);
@@ -67,7 +76,7 @@ async function application(env: AppEnv) {
       twitch: { clientId: config.TWITCH_CLIENT_ID, clientSecret: config.TWITCH_CLIENT_SECRET },
     },
   });
-  return createWorkerApplication({
+  const handle = await createWorkerApplication({
     auth,
     services: {
       db,
@@ -77,9 +86,9 @@ async function application(env: AppEnv) {
       rateLimiter: createDistributedRateLimiter(env.API_COUNTERS),
       appealToken: createAppealTokenSigner(config.APPEAL_TOKEN_SECRET),
       emailSender: { send: sendEmail },
-      // Until connection-time destination checks are proven on Workers, decline
-      // network previews. The existing card resolver degrades to the plain link.
-      // DNS preflight followed by ordinary fetch would permit DNS rebinding.
+      // Hosted Workers could not complete hostname-verified TLS when connecting
+      // to a validated IP. Keep the existing plain-link fallback until a safe
+      // transport passes hosted tests; ordinary fetch after DNS preflight is unsafe.
       linkTransport: {
         lookup: () => Promise.reject(new Error("Preview networking unavailable.")),
         fetch: () => Promise.reject(new Error("Preview networking unavailable.")),
@@ -90,7 +99,13 @@ async function application(env: AppEnv) {
     stream,
     assets: env.ASSETS,
     googleAnalytics: config.GOOGLE_ANALYTICS === "enabled",
-    access: { teamDomain: config.ACCESS_TEAM_DOMAIN, audience: config.ACCESS_AUDIENCE },
+    access:
+      config.ACCESS_MODE === "public"
+        ? null
+        : {
+            teamDomain: config.ACCESS_TEAM_DOMAIN,
+            audience: z.string().parse(config.ACCESS_AUDIENCE),
+          },
     streamOrigins: [
       "https://videodelivery.net",
       "https://*.videodelivery.net",
@@ -98,6 +113,14 @@ async function application(env: AppEnv) {
       "https://*.cloudflarestream.com",
     ],
   });
+  return async (request: Request) => {
+    const response = await handle(request);
+    if (config.ACCESS_MODE === "public") return response;
+    const headers = new Headers(response.headers);
+    headers.set("cache-control", "private, no-store");
+    headers.set("x-robots-tag", "noindex, nofollow");
+    return new Response(response.body, { status: response.status, headers });
+  };
 }
 
 let handler: ReturnType<typeof application> | undefined;
@@ -106,11 +129,7 @@ export default {
     try {
       handler ??= application(env);
       const handle = await handler;
-      const response = await handle(request);
-      const headers = new Headers(response.headers);
-      headers.set("cache-control", "private, no-store");
-      headers.set("x-robots-tag", "noindex, nofollow");
-      return new Response(response.body, { status: response.status, headers });
+      return await handle(request);
     } catch {
       // Configuration errors can include secrets. Never expose their raw message,
       // cause or validation details; a failed initialization must remain retryable.

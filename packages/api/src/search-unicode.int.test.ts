@@ -11,7 +11,7 @@ afterAll(truncateAll);
 
 it("Unicode matching reaches user, post and game callers, including one-character queries", async () => {
   const author = await createTestUser({ name: "ÉLÈNE" });
-  const viewer = await createTestUser();
+  const viewer = await createTestUser({ name: "Bob", username: "bob" });
   const context = contextFor(viewer);
   const [written] = await db
     .insert(post)

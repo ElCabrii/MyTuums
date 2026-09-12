@@ -236,12 +236,25 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   the query key stays snapshot-free so the optimistic sweeps keep matching;
   Refresh (`refreshRankedFeedAtomFamily`) resets exactly that feed's query so
   the next fetch mints a new snapshot. `RankedFeed` owns the Refresh control,
-  the expiry recovery card (an expired snapshot offers Refresh, never retry —
-  retry would resend the same id), the optional Who-to-Follow module (top
+  the expiry auto-recovery (an expired snapshot with retained rows resets
+  itself once — the same reset Refresh performs; the recovery card is the
+  fallback for a snapshot that refuses with no rows retained, where an
+  automatic reset could loop, and expiry never renders the ordinary retry —
+  retry would resend the same id), the optional Who-to-Follow module above
+  Discover's posts (top
   three live-filtered candidates, no refill until Refresh; follow clicks patch
   suggestion rows in place through `src/lib/follow-cache.ts`) and the
   cold-start games prompt (For you and Discover only — Following keeps its
-  catch-up empty state).
+  catch-up empty state). The Home sidebar (`home-page.tsx`) mounts the same
+  `WhoToFollow` from the For-you feed's own atom — never on Following, which
+  would subscribe an unwatched global feed — beside the static legal-links
+  block. The rail is 2xl-and-up only, centered in a grid gutter track beside
+  the centered feed column: below 2xl the gutter is narrower than the rail,
+  and seating it anyway makes it compete with the feed for width — the
+  feed's content can then push it off-screen (an 8px overflow CI caught at
+  1024px). Home deliberately shows no suggestions module below 2xl
+  (Discover's inline one serves every width), and the legal links stay
+  footer-only there.
 
 ## Dependencies and boundaries
 
@@ -281,6 +294,16 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
 Both are git-ignored, and both are why `lint` and `typecheck` depend on
 `build` in `turbo.json`. The package's own `test` script compiles Paraglide
 first.
+
+The committed install icons are rendered assets too, produced from
+`public/mytuums.svg` by hand-run commands (no build hook): the `maskable`
+pair and `apple-touch-icon.png` are the mark at 60% centered on a full-bleed
+`#09090b` tile (the dark `--background` token — 60% keeps the hexagon's
+corners inside every launcher's mask circle), and the `monochrome` pair is
+the mark colorized to a white glyph on transparency for Android 13+ themed
+icons. Regenerate with `rsvg-convert` + ImageMagick when the logo changes;
+the `any` pair (`mytuums-192.png` and `mytuums-512.png` — also the unfurl
+image) stays the bare transparent mark.
 
 ## Verification
 
@@ -352,3 +375,11 @@ pins the Google/Discord/Twitch button list to the three credential pairs require
 by the native application entrypoint. The matching public Google client ID for
 One Tap must be supplied by Workers Builds before hosted authentication checks.
 Root Turbo builds this SPA before the application Worker that packages it.
+
+## Environment-specific crawler documents
+
+`crawler-documents/` retains main's public robots, sitemap and llms documents.
+`crawler-documents-plugin.ts` emits them only when Vite builds for
+`https://mytuums.com`; preview and PoC get disallow/empty documents instead.
+The production origin is an explicit public build input and part of Turbo's
+build cache key. The branding build shares this plugin.

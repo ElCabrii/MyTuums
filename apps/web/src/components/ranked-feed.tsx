@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { AlertCircle, MessageSquare, RefreshCw } from "lucide-react";
 import { postFeedAtom, postFeedKey, refreshRankedFeedAtomFamily } from "@/atoms/post-feed";
@@ -14,16 +14,21 @@ import { m } from "@/paraglide/messages.js";
  * list.
  *
  * The order is fixed per browsing snapshot — focus and mutation refetches
- * hydrate the same snapshot in place — and only Refresh starts a new
+ * hydrate the same snapshot in place — and only a query reset starts a new
  * sequence: it resets exactly this feed's query (cancelling the in-flight
  * fetch, whose late resolution the retryer discards) and the still-mounted
  * observer restarts on the same key. The skeleton between reset and first
- * page is the intentional explicit-refresh affordance.
+ * page is the intentional refresh affordance.
  *
- * Snapshot expiry renders its own recovery card, never the ordinary retry:
- * retrying would resend the same expired snapshot and loop the same refusal
- * forever. Every other error keeps the ordinary path untouched (including
- * auth errors, which must never render retained rows).
+ * A snapshot that expired under the viewer recovers itself: the effect below
+ * performs the same reset Refresh performs, once, because the user did
+ * nothing wrong and "Refresh to start a new one" is a chore, not information.
+ * The recovery card remains the fallback for the one case the effect must
+ * not loop on — a freshly minted snapshot refusing too (clock skew, a
+ * snapshot that cannot ever satisfy its own load). Expiry never renders the
+ * ordinary retry: retrying would resend the same expired snapshot and loop
+ * the same refusal forever. Every other error keeps the ordinary path
+ * untouched (including auth errors, which must never render retained rows).
  */
 export function RankedFeed({
   params,
@@ -43,7 +48,7 @@ export function RankedFeed({
   emptyIcon?: typeof MessageSquare;
   /** Render the immediate-parent preview used by profile activity cards. */
   showParentContext?: boolean;
-  /** `"discover"` renders Who-to-Follow above the posts; home feeds carry none. */
+  /** `"discover"` renders Who-to-Follow above the posts; the Home sidebar mounts its own beside the feed. */
   suggestions?: "none" | "discover";
   /**
    * Whether the cold-start games prompt may render. The Following feed opts
@@ -56,6 +61,26 @@ export function RankedFeed({
   const refresh = useSetAtom(refreshRankedFeedAtomFamily(postFeedKey(params)));
   const ranking = getFeedRanking(feed.data?.pages);
   const expired = feed.isError && isSnapshotExpiredError(feed.error);
+
+  // One automatic recovery per expiry episode. The guard is the pairing of
+  // "expired" with retained pages: a resumed snapshot that aged out still
+  // holds its (now stale) rows in `feed.data`, so dropping the pinned id and
+  // refetching is guaranteed progress — the build branch mints a snapshot
+  // that did not exist a second ago. A reset fetch that ALSO refuses expiry
+  // has no retained pages (the reset cleared them), so the `feed.data` check
+  // fails and the card renders instead of the reset looping. A success
+  // re-arms the effect: the next genuine 30-minute expiry recovers itself
+  // too, not just the first one on a mount.
+  const autoRecoveredRef = useRef(false);
+  useEffect(() => {
+    if (feed.isSuccess) {
+      autoRecoveredRef.current = false;
+      return;
+    }
+    if (!expired || !feed.data || autoRecoveredRef.current) return;
+    autoRecoveredRef.current = true;
+    void refresh();
+  }, [feed.isSuccess, feed.data, expired, refresh]);
 
   return (
     <div className="space-y-4">

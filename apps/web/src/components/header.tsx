@@ -17,7 +17,7 @@ export function Header() {
   if (!user) return null;
   const unreadCount = unread.data?.unreadCount ?? 0;
   return (
-    <header className="bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40 w-full border-b backdrop-blur">
+    <header className="bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40 w-full border-b pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] backdrop-blur">
       <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 px-4 sm:gap-x-4 sm:px-8 md:grid-cols-[minmax(0,1fr)_auto] 2xl:grid-cols-[minmax(0,1fr)_28rem_minmax(0,1fr)]">
         <div className="flex min-h-16 min-w-0 items-center gap-4 xl:min-w-fit">
           <Link
@@ -85,16 +85,26 @@ export function Header() {
               </span>
             )}
           </Button>
+          {/* The moderation entry is the same ghost icon button as the bell —
+              hand-rolling it as a bare link left it a size and a hit-area
+              apart from every icon around it. The unsized Shield picks up the
+              Button's 16px SVG rule, matching the rest of the row. */}
           {isModerator && (
-            <Link
-              to="/moderation"
-              title={m.moderation_nav()}
-              aria-label={m.moderation_nav()}
-              activeProps={{ className: "bg-muted text-primary" }}
-              className="hover:bg-muted focus-visible:ring-ring flex size-11 items-center justify-center rounded-full outline-none focus-visible:ring-2"
+            <Button
+              variant="ghost"
+              size="icon"
+              nativeButton={false}
+              render={
+                <Link
+                  to="/moderation"
+                  title={m.moderation_nav()}
+                  aria-label={m.moderation_nav()}
+                  activeProps={{ className: "bg-muted text-primary" }}
+                />
+              }
             >
-              <Shield className="size-5" />
-            </Link>
+              <Shield />
+            </Button>
           )}
           <div className="hidden items-center gap-2 md:flex">
             <AccountMenu />

@@ -68,7 +68,11 @@ it("boots the Wrangler application artifact with native bindings behind Access",
         : `synthetic-${name}`,
     ]),
   );
-  function worker(name: string, secret: string): WorkerOptions {
+  function worker(
+    name: string,
+    secret: string,
+    variables: Record<string, string> = {},
+  ): WorkerOptions {
     return {
       config: {
         type: "worker",
@@ -82,9 +86,12 @@ it("boots the Wrangler application artifact with native bindings behind Access",
         },
         env: {
           ...Object.fromEntries(
-            Object.entries({ ...config.vars, ...secretValues, BETTER_AUTH_SECRET: secret }).map(
-              ([name, value]) => [name, { type: "json" as const, value }],
-            ),
+            Object.entries({
+              ...config.vars,
+              ...variables,
+              ...secretValues,
+              BETTER_AUTH_SECRET: secret,
+            }).map(([name, value]) => [name, { type: "json" as const, value }]),
           ),
           DB: { type: "d1", id: "application_entry_test" },
           MEDIA: { type: "r2", name: "application-entry-test", jurisdiction: "eu" },
@@ -127,6 +134,16 @@ it("boots the Wrangler application artifact with native bindings behind Access",
     workers: [
       worker("application", "synthetic-app-secret-at-least-32-characters"),
       worker("invalid-application", "secret-must-not-leak"),
+      worker("production", "synthetic-app-secret-at-least-32-characters", {
+        WEB_ORIGIN: "https://mytuums.com",
+        STREAM_NAMESPACE: "mytuums-production",
+        ACCESS_MODE: "public",
+      }),
+      worker("invalid-public-candidate", "synthetic-app-secret-at-least-32-characters", {
+        WEB_ORIGIN: "https://preview-candidate.mytuums.com",
+        STREAM_NAMESPACE: "mytuums-production",
+        ACCESS_MODE: "public",
+      }),
       {
         config: {
           type: "worker",
@@ -161,6 +178,37 @@ it("boots the Wrangler application artifact with native bindings behind Access",
       resolve(directory, "../../packages/db/drizzle-d1"),
     );
     await binding.exec("create table captured_email (sender text, recipient text, body text)");
+    const production = await runtime.getWorker("production");
+    const edgeHeaders = { "cf-connecting-ip": "203.0.113.28" };
+    const publicPage = await production.fetch("https://mytuums.com/login", {
+      headers: edgeHeaders,
+    });
+    expect(publicPage.status).toBe(200);
+    expect(publicPage.headers.get("x-robots-tag")).toBeNull();
+    expect(await publicPage.text()).toContain("https://mytuums.com/login");
+    expect(
+      (await production.fetch("https://mytuums.com/", { headers: edgeHeaders, redirect: "manual" }))
+        .status,
+    ).toBe(302);
+    expect(
+      (
+        await production.fetch("https://mytuums.com/api/auth/admin/list-users", {
+          headers: edgeHeaders,
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (await production.fetch("https://preview.mytuums.com/login", { headers: edgeHeaders }))
+        .status,
+    ).toBe(404);
+    const invalidCandidate = await runtime.getWorker("invalid-public-candidate");
+    expect(
+      (
+        await invalidCandidate.fetch("https://preview-candidate.mytuums.com/login", {
+          headers: edgeHeaders,
+        })
+      ).status,
+    ).toBe(503);
     const headers = { "cf-access-jwt-assertion": token, "cf-connecting-ip": "203.0.113.28" };
     for (const path of [
       "/login",

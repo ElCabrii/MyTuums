@@ -544,9 +544,11 @@ pure JS function scores them, and a snapshot freezes the order for paging.
    visibility, follow/privacy state, scope and filter membership per item:
    tombstoned rows drop (ranked pages never stub), withdrawn amplifications
    downgrade to the original in place or drop. Following an author keeps their
-   posts in Discover; the viewer's own posts remain excluded. Discover's page also carries the first three
+   posts in Discover; the viewer's own posts remain excluded. The For you and
+   Discover pages also carry the first three
    snapshot-derived follow suggestions, filtered live with no refill until
-   Refresh. Chronological branches of `post.list` (profiles, bookmarks,
+   Refresh — Following carries none, its candidates being accounts already
+   followed. Chronological branches of `post.list` (profiles, bookmarks,
    search, replies, continuations) carry `ranking: null` and are untouched;
    `discover` has no chronological mode and a non-ranked `discover` call is
    refused.

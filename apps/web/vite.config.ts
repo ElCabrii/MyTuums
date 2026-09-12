@@ -5,6 +5,7 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import { preloadInjectionPlugin } from "./build-inject-plugin.ts";
 import { pwaPlugin } from "./pwa-plugin.ts";
+import { crawlerDocuments } from "./crawler-documents-plugin.ts";
 import { loadBuiltChangelog } from "./src/build/changelog.ts";
 import path from "node:path";
 import pkg from "./package.json" with { type: "json" };
@@ -19,6 +20,7 @@ if (
     "https://cf-poc.mytuums.com",
     "https://preview-candidate.mytuums.com",
     "https://preview.mytuums.com",
+    "https://mytuums.com",
   ].includes(siteOrigin)
 ) {
   throw new Error("Unsupported Cloudflare frontend origin.");
@@ -46,6 +48,10 @@ export default defineConfig({
     __APP_CHANGELOG__: JSON.stringify(changelog),
   },
   plugins: [
+    crawlerDocuments(
+      path.resolve(import.meta.dirname, "crawler-documents"),
+      siteOrigin === "https://mytuums.com",
+    ),
     {
       name: "mytuums-site-origin",
       transformIndexHtml: {

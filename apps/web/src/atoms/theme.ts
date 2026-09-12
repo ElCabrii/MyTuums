@@ -112,10 +112,34 @@ systemThemeAtom.onMount = (set) => {
   return () => mql.removeEventListener("change", listener);
 };
 
-/** What actually gets painted: the explicit choice, or the live OS value when `"system"`. */
-export const resolvedThemeAtom = atom((get) =>
-  get(themeAtom) === "system" ? get(systemThemeAtom) : get(themeAtom),
-);
+/**
+ * What actually gets painted: the explicit choice, or the live OS value when
+ * `"system"`. Written as a guard-return rather than a ternary so the
+ * inferred value type narrows to `"light" | "dark"` — the type the theme
+ * class, the bar colors and the Toaster all actually receive — instead of
+ * dragging `"system"` along as a value that can never occur here.
+ */
+export const resolvedThemeAtom = atom((get) => {
+  const preference = get(themeAtom);
+  if (preference === "system") return get(systemThemeAtom);
+  return preference;
+});
+
+/**
+ * The bar colors, hardcoded from the `--background` tokens in src/index.css
+ * (`:root` and `.dark`) — the page's own background, so browser chrome
+ * (an installed PWA's status/title bar) meets the page with no seam. The
+ * same hand-copy the cold-load splash in index.html makes: a computed-style
+ * read would hand back the raw `oklch(...)` declaration, and theme-color
+ * consumers predate color-function parsing, so resolved hex it is. The
+ * manifest's static `theme_color` (launch-time status bar and splash,
+ * before any JS can run) carries the light value; keep all three places in
+ * step when a token moves.
+ */
+const BAR_COLORS = {
+  light: "#f6f7f8",
+  dark: "#09090b",
+} as const;
 
 /**
  * The one side effect in this module. `atomEffect` (from `jotai-effect`)
@@ -124,6 +148,15 @@ export const resolvedThemeAtom = atom((get) =>
  * for derived state rather than an external source. It is mounted once, at
  * the root layout, so the class is applied exactly once per theme change no
  * matter how many components care about the theme.
+ *
+ * It also restamps the `theme-color` metas with the resolved page
+ * background. index.html ships a static pair keyed to the OS scheme because
+ * they must paint before any JS can run — but the app theme is often an
+ * explicit choice that deliberately diverges from the OS (see `themeAtom`'s
+ * precedence), and an OS-light device running the app dark would otherwise
+ * keep white system bars over a dark page. Writing both metas makes
+ * whichever media branch the browser consults carry the app's color, while
+ * the pre-JS pair stays the signed-out splash's OS-scheme fallback.
  */
 export const themeClassEffect = atomEffect((get) => {
   const resolved = get(resolvedThemeAtom);
@@ -131,4 +164,8 @@ export const themeClassEffect = atomEffect((get) => {
 
   root.classList.remove("light", "dark");
   root.classList.add(resolved);
+
+  for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+    meta.setAttribute("content", BAR_COLORS[resolved]);
+  }
 });

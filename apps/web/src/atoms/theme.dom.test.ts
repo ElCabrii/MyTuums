@@ -187,4 +187,43 @@ describe("themeClassEffect", () => {
 
     unsub();
   });
+
+  // index.html ships the theme-color metas keyed to the OS scheme because
+  // they must paint before JS — but the app theme is often an explicit
+  // choice that diverges from it, and the static pair left an OS-light
+  // device running the app dark with white system bars. The effect restamps
+  // every meta with the resolved page background so browser chrome follows
+  // the app, not the OS.
+  it("restamps every theme-color meta with the resolved page background", () => {
+    document.documentElement.className = "";
+    const light = document.createElement("meta");
+    light.setAttribute("name", "theme-color");
+    light.setAttribute("media", "(prefers-color-scheme: light)");
+    light.setAttribute("content", "#ffffff");
+    const dark = document.createElement("meta");
+    dark.setAttribute("name", "theme-color");
+    dark.setAttribute("media", "(prefers-color-scheme: dark)");
+    dark.setAttribute("content", "#171719");
+    document.head.append(light, dark);
+
+    try {
+      const store = createStore();
+      store.set(themeAtom, "dark");
+      const unsub = store.sub(themeClassEffect, () => {});
+
+      // Both metas carry the app's color: whichever media branch the browser
+      // consults, it meets the page with no seam.
+      expect(light.getAttribute("content")).toBe("#09090b");
+      expect(dark.getAttribute("content")).toBe("#09090b");
+
+      store.set(themeAtom, "light");
+      expect(light.getAttribute("content")).toBe("#f6f7f8");
+      expect(dark.getAttribute("content")).toBe("#f6f7f8");
+
+      unsub();
+    } finally {
+      light.remove();
+      dark.remove();
+    }
+  });
 });

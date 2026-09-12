@@ -27,6 +27,6 @@ export function requirePreviewChecks(commit: string, responseBody: string) {
       )
       .sort((a, b) => b.id - a.id)[0];
     if (latest?.status !== "completed" || latest.conclusion !== "success")
-      throw new Error(`The ${name} check must pass on the exact preview commit before deployment.`);
+      throw new Error(`The ${name} check must pass on the exact commit before deployment.`);
   }
 }

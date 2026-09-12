@@ -7,6 +7,12 @@
     },
     "build": {
       "dependsOn": ["^build"],
+      "env": [
+        "VITE_WEB_ORIGIN",
+        "VITE_GOOGLE_CLIENT_ID",
+        "VITE_SOCIAL_PROVIDERS",
+        "VITE_GA_MEASUREMENT_ID"
+      ],
       // The web build writes the git-ignored generated files (the TanStack
       // route tree and the Paraglide messages) into `src/`, not `dist/`, so
       // they must be declared here too or a cached build restores only the

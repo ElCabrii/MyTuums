@@ -13,6 +13,9 @@ export const POC_MEDIA_BUCKET_NAME = "mytuums-poc-media";
 const previewConfigPath = fileURLToPath(
   new URL("../../../apps/server/wrangler.preview.jsonc", import.meta.url),
 );
+const productionConfigPath = fileURLToPath(
+  new URL("../../../apps/server/wrangler.production.jsonc", import.meta.url),
+);
 const targets = {
   poc: {
     app: "mytuums-poc-app",
@@ -25,6 +28,12 @@ const targets = {
     database: "mytuums-preview",
     id: "c8ce4268-2a4c-4175-b574-93c1c45aac92",
     bucket: "mytuums-preview-media",
+  },
+  production: {
+    app: "mytuums-production-app",
+    database: "mytuums-production",
+    id: "e80d3f42-4fe5-41fb-90b7-32de79d25e0b",
+    bucket: "mytuums-production-media",
   },
 } as const;
 
@@ -64,7 +73,14 @@ async function openBindings(
   environment: keyof typeof targets,
 ) {
   const app = configuration(environment).parse(
-    unstable_readConfig({ config: environment === "poc" ? appConfigPath : previewConfigPath }),
+    unstable_readConfig({
+      config:
+        environment === "poc"
+          ? appConfigPath
+          : environment === "preview"
+            ? previewConfigPath
+            : productionConfigPath,
+    }),
   );
   // Admin commands load no application secrets, Stream, email or job bindings.
   // Database-only callers do not start R2 or need its remote permissions.
@@ -85,7 +101,9 @@ async function openBindings(
       configPath,
       envFiles: [],
       remoteBindings: remote,
-      persist: { path: environment === "poc" ? localStatePath : `${localStatePath}-preview` },
+      persist: {
+        path: environment === "poc" ? localStatePath : `${localStatePath}-${environment}`,
+      },
     });
     return {
       db: createDatabase(proxy.env.DB),
@@ -123,5 +141,11 @@ export async function openPocMedia(remote: boolean) {
 /** Preview migrations never inherit PoC or production resource identities. */
 export async function openPreviewDatabase(remote: boolean) {
   const { db, dispose } = await openBindings(remote, false, "preview");
+  return { db, dispose };
+}
+
+/** Production database maintenance cannot open preview resources or an archive bucket. */
+export async function openProductionDatabase(remote: boolean) {
+  const { db, dispose } = await openBindings(remote, false, "production");
   return { db, dispose };
 }
