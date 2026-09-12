@@ -12,8 +12,8 @@ concurrency:
 permissions:
   contents: read
 
-# Native artifact and Workflows checks belong to pnpm verify. Both jobs use
-# isolated local D1/R2 and synthetic providers; CI never deploys or needs secrets.
+# Native artifact and Workflows checks belong to pnpm verify. CI uses isolated
+# local resources and synthetic providers; it never deploys or needs secrets.
 jobs:
   verify:
     name: Verify
@@ -64,3 +64,21 @@ jobs:
           name: playwright-report
           path: e2e/playwright-report/
           retention-days: 7
+
+  docker:
+    name: Docker image builds
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        with:
+          runtime: node@24
+          cache: true
+          require-lockfile: true
+      - run: pnpm --filter @my-tuums/link-fetcher exec tsup
+      - run: docker build --tag mytuums-link-fetcher-ci apps/link-fetcher
+      # Exercise the deployed non-root user's ability to read the generated bundle.
+      - run: docker run --rm --network none --entrypoint node mytuums-link-fetcher-ci --check /app/server.cjs

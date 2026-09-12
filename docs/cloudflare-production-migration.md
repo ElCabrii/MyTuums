@@ -317,11 +317,16 @@ must still stop source writers and recheck the delta immediately before import.
 All four legacy app/job services exist only in the production environment; dev
 and CI have no Railway service instances, and preview uses distinct service IDs.
 Before main merge, disconnect those four repository sources without stopping
-the running deployments. Keep Verify and E2E required, replacing the obsolete
-Railway Docker image check; Verify builds the private Cloudflare Container.
+the running deployments. Keep all three existing required checks. The Docker image check now builds
+and checks the private Cloudflare Container; branch protection stays intact.
 Wait for exact main CI before starting the maintenance timer. During cutover,
 use temporary maintenance routes on both production hosts, stop and drain every
 legacy writer, back up the candidate, import/reconcile final data, deploy the
 verified main revision and perform read-only smoke checks before reopening.
 Cloudflare [Worker routes take precedence over Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/routes/),
 so the maintenance route can remain in place throughout domain replacement.
+
+Automatic approval review rejected removing the Docker required check. The safer
+release implementation retains main's protections and restores that CI job with
+a real build of the Cloudflare Container plus a non-root bundle-read check.
+No branch-protection setting was changed.

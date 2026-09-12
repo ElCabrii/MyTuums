@@ -8,11 +8,11 @@ no provider credentials. Production Railway configuration and required checks on
 
 ## Start here
 
-| File                     | Owns                                           |
-| ------------------------ | ---------------------------------------------- |
-| `workflows/ci.yml`       | `Verify` and `E2E tests`                       |
-| `workflows/opencode.yml` | comment-triggered agent, separate from CI      |
-| `../docs/operations.md`  | native build, deployment and test requirements |
+| File                     | Owns                                             |
+| ------------------------ | ------------------------------------------------ |
+| `workflows/ci.yml`       | `Verify`, `E2E tests`, and `Docker image builds` |
+| `workflows/opencode.yml` | comment-triggered agent, separate from CI        |
+| `../docs/operations.md`  | native build, deployment and test requirements   |
 
 ## Change map
 
@@ -29,7 +29,7 @@ no provider credentials. Production Railway configuration and required checks on
   Workflow checks. Builds precede lint/typecheck because Vite generates sources.
 - `E2E tests` builds the SPA before starting its disposable Worker/D1/R2 stack.
   It uses synthetic Access/mail/Stream providers and never loads bucket secrets.
-- Both jobs use the self-hosted runner, Node 24 and the frozen pnpm lockfile.
+- All three jobs use the self-hosted runner, Node 24 and the frozen pnpm lockfile.
   Browser system libraries must already be installed on that runner.
 - Each job has a 30-minute timeout. Push and pull-request events share the head
   branch concurrency key, so duplicate runs cannot occupy the runner queue.
@@ -37,11 +37,10 @@ no provider credentials. Production Railway configuration and required checks on
   `/tmp` quota that previously caused SQLite write failures during badge tests.
   Turbo explicitly passes `TMPDIR` through its strict environment filter; setting
   it only on the workflow step does not reach nested Worker tests. Playwright reports survive test failure and expire after seven days.
-- The Node Docker image job and PostgreSQL services are removed on this branch.
-  Actual Wrangler artifacts are tested through the local workerd runtime.
-- Main's historical `Docker image builds` required check is unchanged. Do not
-  change branch protection as part of the PoC; a future merge needs a separate
-  decision about that check.
+- `Docker image builds` builds the private Cloudflare link-fetcher Container
+  and checks that its non-root user can read the generated bundle. It preserves
+  main's existing required check without restoring the removed Node app/video
+  images or PostgreSQL services. Branch protection remains unchanged.
 - The comment-triggered `opencode` workflow retains its own authorization and
   provider configuration; it is not part of native CI migration.
 
@@ -54,7 +53,7 @@ when this branch is pushed; local success does not prove the runner is available
 ## Authorized production migration
 
 CI now also runs on `codex/cloudflare-production`. The verified integration may
-merge into main under the production migration authorization, with the obsolete
-Docker required check coordinated at release time. Source disconnection, main
+merge into main under the production migration authorization, with all three
+existing required checks retained. Source disconnection, main
 merge and final production deployment remain gated by candidate validation; see
 [the execution record](../docs/cloudflare-production-migration.md).
