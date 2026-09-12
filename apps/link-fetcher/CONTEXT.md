@@ -38,4 +38,6 @@ validation must additionally exercise cold startup, valid and invalid TLS,
 metadata and image downloads through the private service binding.
 
 The CI-gated deployment command deploys this helper before each application
-release. Application Worker configuration binds the named private entrypoint.
+release and waits for a real lookup through the private service binding. Initial
+Container provisioning may take several minutes; readiness failure stops the
+application deployment before a first card can be negatively cached. Application Worker configuration binds the named private entrypoint.

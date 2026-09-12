@@ -1,3 +1,4 @@
+import { waitForLinkFetcher } from "./link-fetcher-ready.js";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -90,6 +91,7 @@ run([
   "--config",
   `wrangler.${environment}.jsonc`,
 ]);
+await waitForLinkFetcher(environment);
 run(["--filter", "@my-tuums/jobs", "exec", "wrangler", "deploy", "--config", appConfiguration]);
 run(["--filter", "@my-tuums/server", "exec", "wrangler", "deploy", "--config", appConfiguration]);
 if (target === "production")

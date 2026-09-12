@@ -55,6 +55,10 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return chunks;
 }
 
+// The largest payload (5,000 bare users) is about 675 KB, below D1's 2 MB
+// value limit. Larger batches avoid hundreds of test binding round trips.
+const FIXTURE_BATCH_SIZE = 5_000;
+
 type BareUser = typeof user.$inferInsert;
 
 /** Bare `user` rows in bulk — no session, no credential; presence is all a badge reads. */
@@ -64,7 +68,7 @@ async function seedBareUsers(count: number): Promise<string[]> {
     name: "Badge Fixture",
     email: `badges+${randomUUID()}@example.com`,
   }));
-  for (const part of chunk(rows, 500)) {
+  for (const part of chunk(rows, FIXTURE_BATCH_SIZE)) {
     await runSql(
       db,
       sql`insert into "user" (id, name, email)
@@ -117,7 +121,7 @@ async function signUpFresh(username: string): Promise<string> {
 }
 
 async function seedFollows(followerIds: readonly string[], followingId: string): Promise<void> {
-  for (const part of chunk(followerIds, 500)) {
+  for (const part of chunk(followerIds, FIXTURE_BATCH_SIZE)) {
     await runSql(
       db,
       sql`insert into follow (follower_id, following_id)
@@ -127,7 +131,7 @@ async function seedFollows(followerIds: readonly string[], followingId: string):
 }
 
 async function seedLikes(postId: string, likerIds: readonly string[]): Promise<void> {
-  for (const part of chunk(likerIds, 500)) {
+  for (const part of chunk(likerIds, FIXTURE_BATCH_SIZE)) {
     await runSql(
       db,
       sql`insert into post_like (post_id, user_id)

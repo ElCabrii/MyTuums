@@ -223,3 +223,11 @@ GitHub identified the interrupted Verify job as runner communication loss; it
 was rerun and both Verify and all 107 E2E checks passed on `f047e39`. New
 link-fetcher changes require their own exact
 commit checks before application deployment.
+
+The first full local run of the rich-link revision passed 661 integration tests
+but timed out while seeding the 100,000-account badge fixture. A local benchmark
+reduced 10,000-row setup from 562 ms to 181 ms by increasing the JSON batch from
+500 to 5,000 rows; its largest parameter is 675,001 bytes, within D1's 2 MB value
+limit. The unchanged seven badge assertions then passed in 32 seconds. Thresholds,
+account counts and the 120-second deadline are unchanged. Deployment now also
+waits for the newly provisioned private fetcher before exposing an application.
