@@ -43,8 +43,6 @@ jobs:
           runtime: node@24
           cache: true
           require-lockfile: true
-      # The Worker fixture serves Vite's built assets as well as the dev proxy.
-      - run: pnpm --filter @my-tuums/web build
       - name: Resolve Playwright version
         id: pw
         run: echo "version=$(pnpm --filter @my-tuums/e2e exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"

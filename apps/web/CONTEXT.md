@@ -267,8 +267,8 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   `/verify-email` itself rather than waiting on `useRedirectWhenSignedIn`, and
   `/login` does the same on the `EMAIL_NOT_VERIFIED` outcome.
 - In dev, Vite proxies `/rpc`, `/api/auth` and `/media` to the API on `:3001`.
-- Only three `VITE_*` variables are read: `VITE_SOCIAL_PROVIDERS`,
-  `VITE_GOOGLE_CLIENT_ID`, and `VITE_GA_MEASUREMENT_ID`. All are inlined at build time — see
+- Four `VITE_*` variables are read: `VITE_SOCIAL_PROVIDERS`,
+  `VITE_GOOGLE_CLIENT_ID`, `VITE_GA_MEASUREMENT_ID`, and `VITE_WEB_ORIGIN`. All are inlined at build time — see
   [docs/operations.md](../../docs/operations.md).
 
 ## Generated files
@@ -342,8 +342,11 @@ per consumer.
 
 ## Cloudflare PoC build
 
-This branch's static metadata and `src/lib/document-head.ts` use
-`https://cf-poc.mytuums.com`; all public URLs remain behind owner-only Access.
+Static metadata, document heads and copied post links use `VITE_WEB_ORIGIN`.
+Vite accepts only the PoC, preview candidate and final preview origins, defaulting
+to `https://cf-poc.mytuums.com`. The ordered preview deployment derives this public
+build input from its Worker configuration, keeping links within that database's
+environment. All hosted origins remain behind Access.
 Crawler files refuse indexing and the sitemap contains no public URLs. Vite
 pins the Google/Discord/Twitch button list to the three credential pairs required
 by the native application entrypoint. The matching public Google client ID for

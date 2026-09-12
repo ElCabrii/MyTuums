@@ -67,13 +67,23 @@ keeps its existing callbacks and passkey relying-party hostname.
   The real application is not deployed yet.
 - Copied preview auth/OAuth, IGDB and appeal secrets directly into the new Worker
   secret bindings without displaying their values. The existing auth secret is
-  preserved. `STREAM_API_TOKEN` is the remaining runtime secret: Cloudflare does
-  not return the stored PoC value, so the owner must supply it to both Workers.
+  preserved. The owner added `STREAM_API_TOKEN` to both Workers and completed
+  local Wrangler OAuth authentication; both requirements are verified.
 - Overnight PoC maintenance now shows successful automatic executions. The earlier
   absence of Cron evidence is no longer an established blocker.
-- Cloudflare's plugin rejects requests to Railway's `t3.storageapi.dev` host.
-  Local Wrangler authentication was requested for bulk R2 transfer and deployment.
-  Creating resources through the plugin does not authenticate the local CLI.
+- Bulk R2 transfer uses authenticated Wrangler remote bindings, checking every
+  destination against the local SHA-256 backup ledger. A private append-only
+  verification journal permits resuming after transient connection failures.
+- The first migration CI run passed Verify but exposed Chromium resource
+  exhaustion while repeatedly loading the Vite development module graph.
+  Browser tests now build the frontend before serving it through Vite preview.
+  The existing handle-change regression passes against this deployment-shaped
+  bundle. The tag-link journey uses its author's chronological feed to avoid
+  depending on unrelated global ranking snapshots; ranked refresh retains its
+  own dedicated journey.
+- Preview deployments derive `VITE_WEB_ORIGIN` from their Worker configuration.
+  Static metadata, client document heads and copied post URLs therefore stay
+  within the candidate or final preview environment, rather than linking to PoC.
 
 ## Verification
 

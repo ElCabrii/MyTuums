@@ -109,21 +109,14 @@ export default defineConfig({
       stderr: "pipe",
     },
     {
-      // `vite dev`, not `vite preview`: `server.proxy` does not apply to
-      // preview (that needs its own `preview.proxy` block), and dev generates
-      // `routeTree.gen.ts` and `src/paraglide/**` — both git-ignored — as a
-      // side effect, so a clean checkout needs no separate build step.
-      // Runs from apps/web via its local bin shim for the same process-group
-      // reason as the server above. `--host localhost` keeps the frontend on loopback while allowing Node and
-      // the browser to resolve the same host;
-      // the proxy target is the 127.0.0.1 literal for the same reason in
-      // reverse.
-      command: `node_modules/.bin/vite --host localhost --port ${String(WEB_PORT)} --strictPort`,
+      // Exercise the built bundle. Repeated cold navigations through Vite's
+      // development module graph exhausted Chromium resources before app boot.
+      // Vite preview inherits server.proxy, preserving the real Worker backend.
+      command: `node_modules/.bin/vite preview --host localhost --port ${String(WEB_PORT)} --strictPort`,
       cwd: path.join(repoRoot, "apps", "web"),
       url: webUrl,
       env: {
         RPC_TARGET: nodeServerUrl,
-        VITE_GA_MEASUREMENT_ID: "G-E2E306TEST",
       },
       reuseExistingServer: false,
       timeout: 120_000,

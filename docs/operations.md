@@ -117,11 +117,15 @@ Vite embeds public `VITE_*` inputs at build time. The typed browser contract in
 - `VITE_SOCIAL_PROVIDERS`
 - `VITE_GOOGLE_CLIENT_ID`
 - `VITE_GA_MEASUREMENT_ID`
+- `VITE_WEB_ORIGIN`
 
 The PoC Vite configuration fixes the provider list to Google, Discord and Twitch.
 Workers Builds must supply the public Google client ID matching the runtime's
 Google credentials for One Tap. Runtime credentials remain Worker secrets;
-changing them cannot change an already built frontend.
+changing them cannot change an already built frontend. `VITE_WEB_ORIGIN` selects
+the isolated PoC, preview candidate or final preview origin for metadata and
+copied links. It defaults to PoC; the preview deployment command derives it from
+`apps/server/wrangler.preview.jsonc`.
 
 When `VITE_GA_MEASUREMENT_ID` is set, configure that GA4 property under
 **Admin → Data collection and modification → Data retention** for 14 months.

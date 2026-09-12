@@ -13,6 +13,16 @@ import pkg from "./package.json" with { type: "json" };
 // can point the web app at its own server on a different port and run beside
 // a live `pnpm dev` instead of fighting it for 3001.
 const rpcTarget = process.env.RPC_TARGET ?? "http://localhost:3001";
+const siteOrigin = process.env.VITE_WEB_ORIGIN ?? "https://cf-poc.mytuums.com";
+if (
+  ![
+    "https://cf-poc.mytuums.com",
+    "https://preview-candidate.mytuums.com",
+    "https://preview.mytuums.com",
+  ].includes(siteOrigin)
+) {
+  throw new Error("Unsupported Cloudflare frontend origin.");
+}
 const changelog = loadBuiltChangelog(path.resolve(import.meta.dirname, "changelog"), pkg.version);
 
 export default defineConfig({
@@ -20,6 +30,7 @@ export default defineConfig({
   // secrets are bindings and are never loaded from this file.
   envDir: path.resolve(import.meta.dirname, "../.."),
   define: {
+    "import.meta.env.VITE_WEB_ORIGIN": JSON.stringify(siteOrigin),
     // This PoC entrypoint requires all three provider credential pairs. Keep the
     // browser list aligned; One Tap still requires its matching public client ID.
     "import.meta.env.VITE_SOCIAL_PROVIDERS": JSON.stringify("google,discord,twitch"),
@@ -35,6 +46,13 @@ export default defineConfig({
     __APP_CHANGELOG__: JSON.stringify(changelog),
   },
   plugins: [
+    {
+      name: "mytuums-site-origin",
+      transformIndexHtml: {
+        order: "pre",
+        handler: (html) => html.replaceAll("https://cf-poc.mytuums.com", siteOrigin),
+      },
+    },
     tailwindcss(),
     tanstackRouter({
       target: "react",

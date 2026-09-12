@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { unstable_readConfig } from "wrangler";
 import { requirePreviewChecks } from "./preview-deploy-checks.js";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -44,6 +45,14 @@ function run(args: string[]) {
   assertCheckout();
   execFileSync("pnpm", args, { cwd: root, stdio: "inherit" });
 }
+const config = z
+  .object({
+    vars: z.object({
+      WEB_ORIGIN: z.enum(["https://preview-candidate.mytuums.com", "https://preview.mytuums.com"]),
+    }),
+  })
+  .parse(unstable_readConfig({ config: `${root}apps/server/wrangler.preview.jsonc` }));
+process.env.VITE_WEB_ORIGIN = config.vars.WEB_ORIGIN;
 console.log(`Deploying verified preview commit ${commit}: build, migrations, jobs, application.`);
 run(["build"]);
 run(["db:migrate", "--remote", "--environment=preview"]);

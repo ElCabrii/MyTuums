@@ -39,7 +39,7 @@ See [../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
 
 ## Invariants
 
-- The backend binds only `127.0.0.1:3101`. Vite binds `localhost:5273` and
+- The backend binds only `127.0.0.1:3101`. Vite preview binds `localhost:5273` and
   proxies API/media requests as before. Browser navigation tests cover the
   client gate; `tests/api` covers the Worker's own page and media gates.
 - D1 ID `mytuums_e2e_test`, R2 name `mytuums-e2e_test` and the
@@ -95,9 +95,12 @@ See [../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
 
 ## Verification
 
-Build the SPA first (`pnpm --filter @my-tuums/web build`); the backend fixture
-uses those assets for server-side page checks. Vite regenerates frontend route
-and locale artifacts during browser runs.
+`pnpm test:e2e` builds the SPA with the synthetic analytics measurement ID,
+then starts Playwright against Vite preview and the native backend. Both use the
+built assets. This avoids Chromium resource exhaustion during repeated cold loads
+of Vite's development module graph. For direct focused Playwright commands, first
+run `VITE_GA_MEASUREMENT_ID=G-E2E306TEST pnpm --filter @my-tuums/web build`.
+The build generates frontend route and locale artifacts.
 
 - `pnpm --filter @my-tuums/e2e exec playwright test --project api`: HTTP contracts.
 - `pnpm --filter @my-tuums/e2e e2e`: all browser projects and setup.

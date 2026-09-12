@@ -6,8 +6,8 @@ const META_DESCRIPTION_MAX_LENGTH = 160;
 /** The brand name as shared metadata; not localized, like the logo. */
 const SITE_NAME = "MyTuums";
 
-/** The isolated PoC origin. Keep the static index metadata in step with this value. */
-export const SITE_ORIGIN = "https://cf-poc.mytuums.com";
+/** The deployment origin, shared with static metadata by the Vite build. */
+export const SITE_ORIGIN = import.meta.env.VITE_WEB_ORIGIN ?? "https://cf-poc.mytuums.com";
 
 /**
  * The square brand mark shared as the card image. Chosen over the 4096 px

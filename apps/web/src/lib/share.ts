@@ -4,9 +4,8 @@ import { m } from "@/paraglide/messages.js";
 
 /**
  * The absolute permalink the share dialog offers (issue #307). Built from
- * `SITE_ORIGIN` — never `window.location` — so a link copied from a preview
- * environment still lands on the canonical public post page, exactly like
- * the og:url/canonical tags `document-head.ts` emits for the same route.
+ * the configured `SITE_ORIGIN`, so preview links stay with preview's data,
+ * matching the og:url/canonical tags emitted for the same route.
  */
 export function postPermalinkUrl(postId: string): string {
   return `${SITE_ORIGIN}/post/${postId}`;
