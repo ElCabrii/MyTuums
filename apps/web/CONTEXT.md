@@ -241,7 +241,13 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   catch-up empty state). The Home sidebar (`home-page.tsx`) mounts the same
   `WhoToFollow` from the For-you feed's own atom — never on Following, which
   would subscribe an unwatched global feed — beside the static legal-links
-  block.
+  block. The rail is 2xl-and-up only, centered in a grid gutter track beside
+  the centered feed column: below 2xl the gutter is narrower than the rail,
+  and seating it anyway makes it compete with the feed for width — the
+  feed's content can then push it off-screen (an 8px overflow CI caught at
+  1024px). Home deliberately shows no suggestions module below 2xl
+  (Discover's inline one serves every width), and the legal links stay
+  footer-only there.
 
 ## Dependencies and boundaries
 

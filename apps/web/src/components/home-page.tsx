@@ -29,8 +29,8 @@ export function HomePage() {
   const scope = useAtomValue(homeFeedScopeAtom);
 
   return (
-    <div className="flex w-full items-start gap-6 px-4 py-8">
-      <div className="mx-auto w-full max-w-2xl space-y-4">
+    <div className="mx-auto grid w-full max-w-2xl grid-cols-1 px-4 py-8 2xl:max-w-none 2xl:grid-cols-[1fr_minmax(0,42rem)_1fr] 2xl:items-start">
+      <div className="min-w-0 space-y-4 2xl:col-start-2">
         <div className="border-border flex items-baseline justify-between gap-3 border-b pb-2">
           <h1 className="text-lg font-bold tracking-tight">{m.feed_title()}</h1>
           <SegmentedControl label={m.feed_label()}>
@@ -84,18 +84,28 @@ export function HomePage() {
       </div>
 
       {/*
-        The right rail (lg and up), docked against the viewport's right edge:
-        the feed column's own auto margins center it exactly as it stood
-        before the sidebar existed, and the free space they leave to its
-        right is where the rail lands — not a centered two-column group,
-        which would drag the feed off center. Who-to-Follow mounts only on
-        For you: it reads the same global-feed atom the feed column reads —
-        structurally one observer — while mounting it on Following would
-        fetch a second, unwatched feed. Following's own suggestions are empty
-        by contract, so there is nothing to lose: the sidebar keeps the legal
-        links alone.
+        The right rail (2xl and up), seated at the midpoint of the gutter.
+        The grid keeps the feed column exactly where it stood before the
+        rail existed — a centered 42rem column between two equal tracks —
+        and centers the rail in the right track, so its gaps to the feed and
+        to the screen edge match. Below 2xl there is no seat at all: the
+        gutter track would be narrower than the rail, and the only other
+        flexbox seat (feed auto-margins, rail flush right) makes the rail
+        compete with the feed for width — a feed whose content refuses to
+        shrink (CI: an 8px overflow at 1024px) pushes the rail off-screen,
+        and whether it refuses depends on the feed's fixture content. At 2xl
+        the gutter track (416px at the smallest 2xl viewport) always fits the
+        320px rail with room to spare, so the layout never depends on the
+        feed shrinking. Who-to-Follow mounts
+        only on For you: it reads the same global-feed atom the feed column
+        reads — structurally one observer — while mounting it on Following
+        would fetch a second, unwatched feed. Following's own suggestions
+        are empty by contract, so there is nothing to lose: the sidebar
+        keeps the legal links alone. Below 2xl the rail is hidden on
+        purpose — Discover's inline module serves suggestions at every
+        width, and the footer already carries the legal links.
       */}
-      <aside className="hidden w-80 shrink-0 space-y-6 lg:block">
+      <aside className="hidden w-80 shrink-0 space-y-6 2xl:col-start-3 2xl:block 2xl:justify-self-center">
         {scope === "global" && (
           <WhoToFollow feedAtom={postFeedAtom({ feed: "global", ranked: true })} />
         )}
