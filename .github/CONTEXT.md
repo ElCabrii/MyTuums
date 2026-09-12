@@ -2,9 +2,10 @@
 
 ## Responsibility
 
-This branch's CI verifies the Cloudflare-native PoC. It never deploys and needs
-no provider credentials. Production Railway configuration and required checks on
-`main` are outside this branch's changes.
+CI verifies the Cloudflare application, Workflows and private link-fetcher Container.
+It never deploys and needs no provider credentials. Production and preview use
+the explicit deployment command in `packages/db/scripts/deploy-preview.ts`, which
+requires all three checks to pass on the exact release commit.
 
 ## Start here
 
@@ -19,7 +20,7 @@ no provider credentials. Production Railway configuration and required checks on
 - Add repository-wide checks to `../package.json`'s `verify` script.
 - Change browser setup in the `e2e` job and `../e2e/CONTEXT.md` together.
 - Update an action by resolving its full commit and retaining the version comment.
-- Deployment belongs to branch-specific Workers Builds, not this workflow.
+- Production and preview deployment uses the CI-gated operator command, not this workflow. PoC Workers Builds are separate.
 
 ## Invariants
 

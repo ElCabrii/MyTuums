@@ -1,15 +1,16 @@
 # Native HTTP Worker runtime
 
-This directory contains the Cloudflare replacement for the Node server runtime.
-The deployment entrypoint is `index.ts`; hosted activation and full verification remain
-outstanding. The complete scope is in
-[the migration record](../../../docs/cloudflare-migration.md).
+This directory contains the deployed Cloudflare application runtime for production,
+preview and PoC. The deployment entrypoint is `index.ts`; verification and resource
+identities are in [the production execution record](../../../docs/cloudflare-production-migration.md).
 
 `../src/worker-request-handler.ts` owns the Web Request/Response routing boundary:
-Access and exact origin first, trusted edge identity, health, normalized admin
-endpoint denial, auth, RPC, media and finally gated static assets. The entrypoint binds Access, auth/RPC/media services and static assets from its
-Wrangler configuration. Hosted behavior remains unverified.
-A local signing-key fixture is not evidence of a configured Access application.
+exact-origin and environment admission first, trusted edge identity, health,
+normalized admin endpoint denial, auth, RPC, media and gated static assets.
+Preview and PoC require a verified Access assertion; public mode is restricted to
+the fixed production origin. The entrypoint supplies auth/RPC/media services and
+assets from validated Worker bindings. Local fixtures do not configure hosted
+Access policies or prove hosted behavior; release checks provide that evidence.
 
 Reuse one handler per isolate/environment. It permits one upload-sized RPC at a
 time, while small RPCs remain independent. Both declared and actual bytes are
@@ -33,7 +34,7 @@ Crypto and permits only configured Stream origins for video transport.
 
 `rate-limit-counter.ts` owns the SQLite-backed `RateLimitCounter` Durable Object.
 The HTTP entrypoint must export it and bind a namespace configured with a
-`new_sqlite_classes` migration before using it. No deployed binding exists yet.
+`new_sqlite_classes` migration before using it. Each hosted environment has its own deployed namespace.
 Use `createDistributedRateLimiter` from `@my-tuums/api/distributed-rate-limit`
 to inject it into API context. The same policy/caller pair hashes to the same
 object; SQL stores only a count and reset timestamp. Never put a raw IP,
@@ -165,15 +166,15 @@ and preview URLs, and sends every asset request through the handler. Every
 response is private/no-store and noindex. Source maps are uploaded; automatic
 invocation logs are disabled and query strings redacted to avoid logging auth
 capabilities. Provider credentials belong in secret bindings, never source.
-The configured sender domain still needs Email Service activation/verification.
+The sender domain is active in Email Service, and the authorized production test was received; see the production execution record.
 
 Run `pnpm --filter @my-tuums/server types` after configuration changes. The
 binding types are generated into `worker-configuration.d.ts`. Build the web
 workspace before `pnpm --filter @my-tuums/server build:worker`; root Turbo builds
 now enforce that order. The server's normal build is the native Worker dry run;
 Node deployment entrypoints and Docker configuration have been removed on this
-branch. Native E2E and maintenance tools use local D1/R2; interactive development
-and hosted deployment remain outstanding.
+main. Native E2E uses disposable D1/R2, interactive development uses separate
+persistent local resources, and hosted production/preview are deployed and verified.
 
 `../src/native-application.test.ts` runs the actual Wrangler bundle and Vite
 assets in Miniflare with committed D1 migrations and real counter namespaces.

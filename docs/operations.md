@@ -1,8 +1,9 @@
 # Operations
 
-This document describes `codex/cloudflare-poc`. It does not change Railway
-production or the deployment files on `main` or other branches. The full scope
-and remaining gates are in [the migration record](cloudflare-migration.md).
+Production and preview run on Cloudflare. The current release, data reconciliation,
+retention deadline and rollback constraints are in
+[the production execution record](cloudflare-production-migration.md).
+The PoC setup history below is historical and is not the production release procedure.
 
 ## Configuration
 
@@ -49,20 +50,35 @@ loopback requests on port 3001 and appears in no deployment configuration.
 
 ## Cloudflare deployment
 
-The intended deployment is branch-specific Workers Builds for
-`codex/cloudflare-poc`, with `cf-poc.mytuums.com` and
-`about-cf-poc.mytuums.com` behind owner-only Cloudflare Access. Public workers.dev
-and preview URLs are disabled. Jobs have no public HTTP handler.
+Production uses `mytuums.com` and `about.mytuums.com`; preview uses
+`preview.mytuums.com` behind Cloudflare Access. Workers.dev and version preview
+URLs remain disabled. App, jobs, D1, private R2, Stream and rich-link Container
+resources are isolated by environment. Application email uses Cloudflare Email
+Service. Railway and Resend are not runtime dependencies.
 
-The app and branding bundles, D1 schema, R2 adapters and Workflows are implemented
-locally. The remote D1 migrations and synthetic game/R2 fixtures are applied.
-GitHub is connected, Stream has 1,000 storage minutes, and Email Sending's domain
-DNS is ready. The three Worker entries exist without deployed versions, with
-workers.dev and preview URLs disabled. A Builds deployment token, runtime
-credentials, build triggers and deployed parity tests remain outstanding. No production
-import, cutover or branch-protection update belongs to this PoC.
+Production and preview releases are explicit operator commands, not automatic
+GitHub push deployments. From a clean `main` checkout whose exact commit has
+successful Verify, E2E tests and Docker image builds checks, supply the target's
+public `VITE_GOOGLE_CLIENT_ID` and `VITE_SOCIAL_PROVIDERS=google,discord,twitch`, then
+run `pnpm --filter @my-tuums/db deploy:preview --target=production` or
+`pnpm --filter @my-tuums/db deploy:preview --target=preview`. Preview additionally
+needs its configured `VITE_GA_MEASUREMENT_ID`; production analytics are disabled.
+The command derives `VITE_WEB_ORIGIN` from the target configuration, builds,
+applies committed D1 migrations, deploys and verifies the private link fetcher,
+then deploys jobs and app. Production also deploys branding.
 
-### Workers Builds configuration draft
+Keep the minute Cron in both environment configurations. The former
+production-candidate target and its configuration files are retired: it shared
+the production database and must never be used for another import or deployment.
+Never run the full-snapshot converter/importer against a live environment.
+Normal schema evolution uses committed incremental migrations.
+
+The initial DNS handoff required replacing the saved Railway CNAME records before
+attaching Worker Custom Domains; the API rejected Wrangler's overwrite flags.
+Those records are now Cloudflare-managed. Subsequent deployments must preserve
+the existing native Custom Domains and do not need another DNS migration.
+
+### Historical PoC Workers Builds configuration
 
 Use the repository root (`/`) for all three builds so pnpm sees the workspace
 lockfile. Set build variables `NODE_VERSION=24`, `PNPM_VERSION=12.1.0` and

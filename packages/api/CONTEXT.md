@@ -1,6 +1,6 @@
 # packages/api context
 
-## Cloudflare migration in progress
+## Cloudflare runtime
 
 `src/sql.ts` decodes SQLite JSON projections from text or SQL null through the
 caller's Zod schema. It does not retain the old PostgreSQL already-decoded-object
@@ -55,7 +55,7 @@ only admission; memory reset/size belong to the isolated test factory.
 `src/distributed-rate-limit.ts` maps policy/caller keys to opaque Durable Object
 names and propagates failed admission. `apps/server/worker/rate-limit-counter.ts`
 owns the persistent atomic counter. The native application entrypoint now injects it alongside the separate
-persistent Better Auth counter; hosted enforcement remains unverified.
+persistent Better Auth counter. Production and preview each bind independent namespaces.
 
 Immediate post publication now uses D1's atomic batch API in
 `src/post-publication.ts`. Post/attachment inserts, reply or quote notices,
@@ -135,8 +135,8 @@ the database no longer stores an FFmpeg rendition inventory. `src/stream-job.ts`
 implements one current-state poll, validates readiness, rechecks cancellation and
 expiry before captions, and publishes through the atomic API boundary. The native
 Workflow in `apps/jobs` creates caption streams and sanitizes all errors inside
-each step; private values never appear in persisted step results. HTTP Worker
-entrypoint construction remains outstanding.
+each step; private values never appear in persisted step results. The deployed
+HTTP Worker composes these adapters through `src/cloudflare-app.ts`.
 
 Post projections use SQLite JSON functions, schema-validated JSON decoding and
 explicit boolean conversion. Raw event times are epoch milliseconds. ID-set

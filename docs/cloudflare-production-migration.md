@@ -1,5 +1,15 @@
 # Production migration execution
 
+Production moved to Cloudflare on September 12, 2026 at 18:59:33 UTC. Both public
+domains are live, existing data is preserved, and the minute jobs schedule is
+enabled. Railway application writers and schedules are stopped; its database is
+read-only. Retain the source database and media until September 26 at 18:59 UTC.
+Permanent source deletion still requires a separate approval.
+
+The former production-candidate target is retired. Never rerun a full snapshot
+import or deploy the old candidate against these now-live production resources.
+The preparation sections below describe the historical release gates.
+
 ## Authorization and release gates
 
 Gabriel authorized the six-step production migration on September 12, 2026:
@@ -119,7 +129,7 @@ D1 recovery alone does not restore R2, Stream, Workflow or rate-counter state.
 
 ## Candidate configuration and remaining parity issue
 
-`apps/server/wrangler.production-candidate.jsonc` and the matching jobs file use
+The retired apps/server/wrangler.production-candidate.jsonc and matching jobs file used
 only the production D1/R2/Stream identities. The candidate uses
 `preview-candidate.mytuums.com` with mandatory Access and noindex. Jobs have no
 Cron triggers. The production files use `mytuums.com` and `about.mytuums.com`;
@@ -127,7 +137,7 @@ public admission is accepted only for those fixed origins. Private application
 routes still require sessions, and media retains its per-object authorization.
 Workers.dev and version preview URLs remain disabled.
 
-The deployment command accepts `--target=preview|production-candidate|production`.
+During rehearsal the deployment command accepted the candidate target. It now accepts only `--target=preview|production`.
 Candidate requires a clean `codex/cloudflare-production` checkout; final production
 requires clean `main`. Verify, E2E and Docker image builds must pass on the exact commit. Preview
 may deploy either verified native branch. Builds include the target's explicit
@@ -337,3 +347,81 @@ push run supplied the required checks while the PR run supplied separate passing
 checks. The production migration branch now runs CI through its PR trigger only;
 main retains push CI. All existing required checks and branch protections remain
 unchanged. The resulting commit must pass its own complete CI before merge.
+
+## Completed cutover — September 12, 18:59 UTC
+
+PR #396 merged as `f61342b0baed6201b8cdd5eeba7a0e7d3b711e69`. Branch run
+`34708926477` and merged-main run `34710122279` passed Verify, E2E tests and
+Docker image builds with branch protection unchanged. The full suite includes
+662 API integration tests. The owner confirmed candidate sign-in and media
+behavior before release; the single authorized email reached the inbox.
+
+Maintenance began at 18:45:23 UTC and ended at 18:59:33 UTC: 849.659 seconds,
+within the 30-minute budget. The candidate hostname was frozen too. The legacy
+app and video processes exited; the two Cron schedules were removed and their
+instances were unstarted. The source database was then made read-only and
+remaining client connections were drained before export.
+
+The final snapshot contains 29 source tables and 6,355 rows: 13 users, 56 posts,
+6,015 games and one published video, plus authentication and moderation records.
+All converted table hashes, seven migration hashes and foreign keys reconciled.
+All 6,256 source objects were unchanged; 6,246 runtime image originals matched
+R2. Original video objects remain in the private archive and the published video
+uses the verified private Stream copy. A derived image cache and one disposable
+rich-card image were outside the source inventory; neither was included as source
+application data.
+
+Final source SQL/JSON, candidate D1 rollback SQL and reconciliation artifacts are
+checksum-verified in private archive R2 under `migration/final-20260912-1849/`.
+Private local copies remain under the protected migration directory; no
+credentials or application rows are committed to Git.
+
+| Component            | Released Worker version                |
+| -------------------- | -------------------------------------- |
+| App                  | `83178f9c-d8e2-4e4d-9d56-dc2901701fb2` |
+| Jobs                 | `f54276d3-44f8-4520-94f1-59f235269934` |
+| Branding             | `7e3182ba-2909-4f40-8fb4-7ab78f061bca` |
+| Private link fetcher | `d0b3172d-bd23-4790-861b-42452511548d` |
+
+Wrangler uploaded the app and branding but the Custom Domain API refused to
+replace existing Railway CNAMEs despite its overwrite flags. Each exact saved
+CNAME was removed immediately before attaching its uploaded Worker, with a
+restore-on-error path. Maintenance routes stayed active throughout. This resolved
+the infrastructure conflict without changing application code or weakening checks.
+
+Before reopening, hosted checks passed for maintenance refusal, native health,
+the preserved owner session, application pages, public crawler metadata, branding,
+a game cover, legacy video previews, signed thumbnail and HLS playback. Public
+health/login/crawler/branding checks passed again after reopening. The one-minute
+production recovery Cron was enabled at 19:00:12 UTC. No additional test email
+was sent.
+
+Both production domains now use Workers Custom Domains. Preview remains isolated
+and protected by its existing Access policy. Releases are manual, CI-gated
+operator commands as documented in [operations](operations.md#cloudflare-deployment);
+this migration did not add automatic production deployment on Git pushes.
+
+After reopening, DNS-only rollback would lose native writes. Use a forward fix
+or reconcile D1, R2 and Stream changes before any source rollback. Keep the
+retained Railway database read-only and its app/job writers stopped. The old
+source GitHub connections remain disconnected so new native main commits cannot
+restart a legacy deployment.
+
+## Retirement and steady operation
+
+Four consecutive scheduled production recovery Workflows completed successfully
+between 19:04 and 19:07 UTC after Cron propagation. The candidate Custom Domain,
+its Access application and the temporary maintenance Worker were removed; the
+existing preview Access application and domain remain unchanged.
+
+The retained source database password was rotated at 19:11 UTC because an earlier
+connection error had exposed the previous credential in local output. The new
+login was verified, the Railway variable updated without deployment, and database
+read-only mode retained. Source application processes were not restarted.
+The production-candidate CLI target and both shared-resource candidate configs
+are removed. Preview can now deploy a verified `main` checkout, and the production
+minute Cron is committed so later deployments preserve recovery.
+
+The temporary Railway export SSH key was revoked, its private agent stopped, and
+local key/token/variable copies removed after credential rotation. Durable
+data backups and non-secret reconciliation records remain protected and retained.

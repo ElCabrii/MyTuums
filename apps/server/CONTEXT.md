@@ -4,12 +4,11 @@
 
 The Cloudflare application Worker serves auth, oRPC, private media and the built
 SPA on one origin. Native runtime ownership and detailed invariants live in
-[worker/CONTEXT.md](worker/CONTEXT.md). The PoC is implemented locally; hosted
-activation and full verification remain outstanding. See
-[the migration record](../../docs/cloudflare-migration.md).
+[worker/CONTEXT.md](worker/CONTEXT.md). Production and preview are deployed and
+verified; see [the production execution record](../../docs/cloudflare-production-migration.md).
 
 The Node application entrypoint, Sentry adapter, Dockerfile and tsup production
-configuration were removed only on `codex/cloudflare-poc`. Older transport helpers
+configuration were removed from main with the verified native migration. Older transport helpers
 and their tests remain as reference coverage while their native counterparts are
 verified. They are not deployment entrypoints. Node still runs local test and
 administration tools.
@@ -36,13 +35,14 @@ administration tools.
 - Email/runtime dependency compatibility: `src/native-auth-email.test.ts` and its
   fixture in `worker/tests`; React Email must select its `workerd` export.
 - Deployable artifact: `build:worker`, native application/branding artifact tests,
-  and branch-specific Workers Builds configuration.
+  and the CI-gated deployment command in `packages/db/scripts/deploy-preview.ts`.
 - Admin commands and migrations: `../../packages/db/scripts` and its context.
 - Background processing: `../jobs/CONTEXT.md`; no encoding or Cron in this Worker.
 
 ## Invariants
 
-- Exact host and verified owner-only Access admission precede all routes/assets.
+- Exact-host admission precedes all routes/assets. Preview and PoC also require
+  verified Access JWTs; only the fixed production origin can use public mode.
   workers.dev and preview URLs stay disabled; application auth remains underneath.
 - Auth admin endpoints are denied before Better Auth dispatch. Moderation flows
   only through the API's hierarchy and audit guards.
@@ -51,8 +51,8 @@ administration tools.
 - Both rate-limit counters use separate SQLite Durable Objects. Failed counter
   access must not grant admission; no raw caller identifiers belong in logs.
 - Media authorization runs before storage access and again before delivery.
-  Every response is private/no-store; no public R2 URL bypasses Access.
-- No runtime migration or production data import. D1/R2 pairing is fixed to the PoC.
+  Media responses are private/no-store; no public R2 URL bypasses authorization.
+- No runtime migration or full data import. Each environment fixes its own D1/R2 pair; the archive is never bound to runtime cleanup.
 - Requests carry generated IDs. Logs must exclude capabilities, user content and
   provider errors; dependency logging still requires its deployment audit.
 

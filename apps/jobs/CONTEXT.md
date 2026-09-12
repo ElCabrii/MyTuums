@@ -1,8 +1,9 @@
 # Cloudflare jobs Worker
 
-This workspace owns `mytuums-poc-jobs`, the native background runtime for the
-synthetic-data migration PoC. The full migration scope and outstanding work
-remain in [the migration record](../../docs/cloudflare-migration.md).
+This workspace owns the isolated PoC, preview and production jobs Workers.
+Each environment has its own D1 database, private media bucket, Stream namespace
+and Workflow names. Production activation and retained source data are recorded
+in [the production execution record](../../docs/cloudflare-production-migration.md).
 
 ## Entry points and ownership
 
@@ -57,11 +58,10 @@ remain in [the migration record](../../docs/cloudflare-migration.md).
 
 ## Configuration and checks
 
-Wrangler targets the Ops account's isolated `mytuums-poc` D1 database, provisioned
-September 11 with EU jurisdiction and read replication disabled. Its seven
-committed migrations are applied; it has no application users or seeded data yet. The
-private EU R2 bucket is also provisioned. Stream availability is outstanding. See the verified resource
-inventory in the migration record before any remote operation. No migration or
+Wrangler's environment-specific configurations target isolated resources in the
+Ops account. Preview and production minute Cron schedules are enabled and must
+remain in their committed configurations so a deployment cannot silently disable
+recovery. The archive bucket is never a runtime binding. No migration or
 deployment command belongs in the build script. The account ID is a non-secret
 variable; the Stream token, IGDB client credentials and shared app/jobs
 `APPEAL_TOKEN_SECRET` are required secrets. The jobs Worker has no authentication
@@ -91,12 +91,11 @@ D1 game-sync intent shape as Cron. It takes its timestamp from D1 and relies on
 scheduled recovery for dispatch. It never invokes IGDB outside this Worker and
 its success means queued, not completed. Stable Workflow IDs and staged catalog
 fencing are unchanged. Local administrative requests need recovery connected to
-the same local D1 persistence; remote execution awaits the PoC jobs deployment.
+the same local D1 persistence. The guarded remote CLI selects the deployed PoC pair; production and preview have their own scheduled recovery.
 
 ## Preview migration
 
 `wrangler.preview.jsonc` declares the isolated preview database, private media
-bucket, Stream creator namespace and three Workflow names. Cron is deliberately
-empty during the import rehearsal. The archive bucket is never bound to this
+bucket, Stream creator namespace and three Workflow names. Minute Cron is enabled after the completed migration. The archive bucket is never bound to this
 Worker. Deploy preview jobs before its app from the same CI-verified commit;
 see [the execution record](../../docs/cloudflare-preview-migration.md).
