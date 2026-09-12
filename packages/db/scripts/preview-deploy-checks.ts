@@ -19,7 +19,7 @@ export function requirePreviewChecks(commit: string, responseBody: string) {
     .parse(JSON.parse(responseBody));
   if (checks.total_count > 100)
     throw new Error("Too many check runs; inspect CI before deploying.");
-  for (const name of ["Verify", "E2E tests"]) {
+  for (const name of ["Verify", "E2E tests", "Docker image builds"]) {
     const latest = checks.check_runs
       .filter(
         (check) =>

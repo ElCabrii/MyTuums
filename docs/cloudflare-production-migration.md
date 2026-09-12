@@ -129,7 +129,7 @@ Workers.dev and version preview URLs remain disabled.
 
 The deployment command accepts `--target=preview|production-candidate|production`.
 Candidate requires a clean `codex/cloudflare-production` checkout; final production
-requires clean `main`. Both Verify and E2E must pass on the exact commit. Preview
+requires clean `main`. Verify, E2E and Docker image builds must pass on the exact commit. Preview
 may deploy either verified native branch. Builds include the target's explicit
 public origin in Turbo's cache key. Production has no configured GA measurement
 ID, so its analytics/CSP flag is disabled. Preview retains its existing setting.
