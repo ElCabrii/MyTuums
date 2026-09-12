@@ -55,7 +55,7 @@
   "services": [
     {
       "binding": "LINK_FETCHER",
-      "service": "mytuums-link-fetcher",
+      "service": "mytuums-poc-link-fetcher",
       "entrypoint": "LinkFetchService",
     },
   ],

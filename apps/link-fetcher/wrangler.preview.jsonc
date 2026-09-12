@@ -1,5 +1,5 @@
 {
-  "name": "mytuums-poc-link-fetcher",
+  "name": "mytuums-preview-link-fetcher",
   "account_id": "734f3b84571b1967e6940140a0b7d75f",
   "main": "worker/index.ts",
   "compatibility_date": "2026-09-12",

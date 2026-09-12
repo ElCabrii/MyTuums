@@ -72,7 +72,7 @@
   "services": [
     {
       "binding": "LINK_FETCHER",
-      "service": "mytuums-link-fetcher",
+      "service": "mytuums-production-link-fetcher",
       "entrypoint": "LinkFetchService",
     },
   ],

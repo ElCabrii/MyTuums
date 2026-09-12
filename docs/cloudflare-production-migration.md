@@ -207,7 +207,8 @@ the image in 1.3 seconds (1.9 seconds including the local proxy round trip).
 `apps/link-fetcher` now provides the private service and Container. Only bounded
 URL requests cross the service binding; no user cookies or provider secrets are
 forwarded. D1 caching, moderation and R2 card images stay in the application.
-One shared stateless instance sleeps after 60 seconds. Current platform pricing
+Each environment has its own stateless instance, sleeping after 60 seconds.
+Preview releases cannot update the production fetcher. Current platform pricing
 includes Container memory, CPU and disk allowances in Workers Paid; actual
 incremental cost depends on awake time and the account's other usage.
 

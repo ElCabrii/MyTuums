@@ -6,7 +6,7 @@ storage, moderation and authorization. The fetcher has no database, media, email
 or authentication bindings and no public route, workers.dev or preview URL.
 
 `worker/index.ts` exports the service-only `LinkFetchService` entrypoint and one
-`LinkFetcherContainer`. The shared service accepts only small POST bodies for
+`LinkFetcherContainer`. The service accepts only small POST bodies for
 `/lookup` and `/fetch`. Requests forwarded to Node contain only that body and its
 content type, never browser cookies, authorization or Access headers.
 
@@ -19,10 +19,12 @@ retains the five-second network deadline. The application's smaller HTML limit
 and total redirect deadline still apply. Failure leaves the ordinary plain-link
 fallback. Cold startup counts toward that application deadline.
 
-The `lite` Container sleeps after 60 seconds without requests. It is shared by
-preview, candidate, production and future PoC deployments because it processes
-only public URLs and retains no application data. It never selects a database or
-bucket. Its image runs the bundled Node 24 fetcher as a non-root user. The new
+Each environment has a separate `lite` Container that sleeps after 60 seconds
+without requests. Default, preview and production Wrangler files name separate
+Workers; the protected production candidate uses the production fetcher. This
+keeps preview releases from changing production networking. The stable `links`
+instance name must not change during a routine deployment. The service retains
+no application data and never selects a database or bucket. Its image runs the bundled Node 24 fetcher as a non-root user. The new
 Dockerfile belongs only to this Cloudflare helper; the Railway app image is not
 restored.
 
