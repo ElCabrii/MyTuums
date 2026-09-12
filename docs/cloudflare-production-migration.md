@@ -23,7 +23,7 @@ obsolete Docker gate with actual native artifact validation at release time.
 
 ## Working state
 
-- Isolated branch: `codex/cloudflare-production` in `/tmp/mytuums-cloudflare-production`.
+- Isolated branch: `codex/cloudflare-production` in `/home/gabriel/.local/share/mytuums/worktrees/cloudflare-production`.
 - Starting native revision: `d0f2c3341e967c64fc1e4165f8bb543d86a28fb0`.
 - Incoming main revision: `dd220dd50cbbc9f0cd32db62676ca1525decdd1f`.
 - Main integration was committed as `6d3fff25e4c88f4887f66faca4c1cd3e5fc27239`
@@ -42,11 +42,11 @@ obsolete Docker gate with actual native artifact validation at release time.
 Cloudflare Ops account: `734f3b84571b1967e6940140a0b7d75f`.
 Zone: `e596b15a6c397986f91c737c156b7100`.
 
-| Resource      | Identity                                                     | Current state                                                         |
-| ------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
-| Production D1 | `mytuums-production`, `e80d3f42-4fe5-41fb-90b7-32de79d25e0b` | Rehearsal imported and reconciled; EU/EEUR; replication disabled      |
-| Runtime R2    | `mytuums-production-media`                                   | EU/private; 6,246 runtime objects checksum-verified                   |
-| Archive R2    | `mytuums-production-archive`                                 | EU/private; 6,256 original objects and six snapshot archives verified |
+| Resource      | Identity                                                     | Current state                                                            |
+| ------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| Production D1 | `mytuums-production`, `e80d3f42-4fe5-41fb-90b7-32de79d25e0b` | Rehearsal imported and reconciled; EU/EEUR; replication disabled         |
+| Runtime R2    | `mytuums-production-media`                                   | EU/private; 6,246 runtime objects checksum-verified                      |
+| Archive R2    | `mytuums-production-archive`                                 | EU/private; 6,256 original objects and twelve snapshot archives verified |
 
 The archive bucket must never be bound to runtime cleanup. The production
 database/bucket/Stream namespace must remain isolated from preview and PoC.
@@ -189,3 +189,36 @@ before the final like was sent. A controlled 500 ms network delay reproduced the
 failure; waiting for the final like response made the same probe pass. The delay
 was removed, and the persistence assertion remains. No application rate limits
 or mutation behavior were relaxed.
+
+## Rich-link implementation and reboot recovery
+
+Gabriel requested rich links be resolved before production switches. The pure
+Workers socket experiment remains unsuitable. A private Cloudflare `lite`
+Container successfully reused the existing Node fetcher: hosted valid HTTPS
+requests passed, mismatched/expired/self-signed certificates failed, and loopback
+and metadata addresses were refused. An eight-target cold probe completed in
+3.6 seconds. The deployed private service subsequently returned the Cloudflare Workers card
+metadata and its 917,439-byte PNG image through the application adapter. The
+first cold request completed in 1.9 seconds. Browser verification against the
+production candidate remains pending. A separate deployed caller Worker then
+ran the actual adapter through a service binding and fetched both metadata and
+the image in 1.3 seconds (1.9 seconds including the local proxy round trip).
+
+`apps/link-fetcher` now provides the private service and Container. Only bounded
+URL requests cross the service binding; no user cookies or provider secrets are
+forwarded. D1 caching, moderation and R2 card images stay in the application.
+One shared stateless instance sleeps after 60 seconds. Current platform pricing
+includes Container memory, CPU and disk allowances in Workers Paid; actual
+incremental cost depends on awake time and the account's other usage.
+
+The September 12 reboot cleared `/tmp`. Committed work was restored to the
+persistent worktree above. The durable migration snapshot and media directory
+survived under `/home/gabriel/.local/share/mytuums/production-migration-20260912`,
+and the private R2 archive remains available. Temporary credentials and scripts
+must be recreated from current provider state before deployment or final export.
+The lost candidate Service Auth policy and token were revoked; the owner policy
+was preserved. The old temporary Railway SSH registration was also removed.
+GitHub identified the interrupted Verify job as runner communication loss; it
+was rerun and both Verify and all 107 E2E checks passed on `f047e39`. New
+link-fetcher changes require their own exact
+commit checks before application deployment.

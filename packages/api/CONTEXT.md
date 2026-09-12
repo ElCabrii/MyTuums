@@ -27,10 +27,10 @@ the original upload failure. The existing moderation-effects integration case an
 `src/post-media-write.test.ts` exercise those failure paths.
 
 The shared link guard and parser remain in `src/link-card-http.ts`; its Node
-DNS/Undici transport is isolated in `src/link-card-node.ts`, used only by legacy
-callers and existing integration fixtures. Never import that transport into the
-Worker. Its replacement remains outstanding: separating imports is not evidence
-of native link-preview network behavior.
+DNS/Undici transport is isolated in `src/link-card-node.ts`. The private Cloudflare
+Container in `apps/link-fetcher` reuses this transport. Never import it into the
+application Worker. `openGuardedLinkResponse` and `readCappedLinkBody` expose the
+same one-hop admission and bounded body rules to that internal HTTP bridge.
 
 The shared fetch deadline includes DNS resolution. A late lookup cannot initiate
 a request, and a late response is cancelled. Redirects and status/content-type

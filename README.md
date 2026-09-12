@@ -26,6 +26,9 @@ This README is about developing it. What the product _does_ is
 
 ## Prerequisites
 
+Docker must be running for the private Cloudflare link-fetcher image build. The
+application, database and background jobs use Workers, D1 and Workflows.
+
 - Node 24 (`.nvmrc`) and pnpm 12
 - Chromium and its system libraries for browser tests
 

@@ -133,9 +133,8 @@ origin, identity and body-admission gates; it does not duplicate those gates.
 `application.ts` composes Access validation, the HTTP boundary, real auth/RPC,
 image authorizers and video capability delivery, database health and public page
 metadata. Construct it with one environment's services, asset binding and media
-resources. `index.ts` constructs those services from validated PoC configuration. It declines
-external preview requests, yielding plain links, until a connection-time guarded
-network transport is proven in Workers.
+resources. `index.ts` constructs those services from validated PoC configuration. `link-transport.ts` delegates outbound HTTP to the private `LINK_FETCHER` service;
+its Cloudflare Container preserves Node connection-time DNS and TLS validation.
 
 `tests/rpc-media-entry.ts` exercises this composition with real RPC/auth, D1, R2,
 Images and both Durable Object counters. Access uses ephemeral RSA keys served
@@ -226,5 +225,6 @@ application session and media permissions. Public responses preserve their norma
 cache/metadata policy; private environments additionally enforce no-store/noindex.
 `native-application.test.ts` checks public login, signed-out page redirects,
 admin denial, alternate-host refusal and rejection of a public candidate config.
-Rich link networking still declines requests after the hosted transport experiment
-failed; see the production migration record for evidence and the outstanding gate.
+Rich link networking uses the private Cloudflare Container described in
+[its context](../../link-fetcher/CONTEXT.md). Hosted card verification remains a
+release gate; no browser credentials cross that binding.

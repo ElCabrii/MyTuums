@@ -81,6 +81,7 @@ if (config.vars.GOOGLE_ANALYTICS === "enabled") {
 console.log(`Deploying verified ${target} commit ${commit}: build, migrations, jobs, application.`);
 run(["build"]);
 run(["db:migrate", "--remote", `--environment=${environment}`]);
+run(["--filter", "@my-tuums/link-fetcher", "exec", "wrangler", "deploy"]);
 run(["--filter", "@my-tuums/jobs", "exec", "wrangler", "deploy", "--config", appConfiguration]);
 run(["--filter", "@my-tuums/server", "exec", "wrangler", "deploy", "--config", appConfiguration]);
 if (target === "production")

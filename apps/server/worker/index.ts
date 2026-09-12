@@ -1,3 +1,4 @@
+import { createWorkerLinkTransport } from "./link-transport.js";
 import { z } from "zod";
 import { createAuth, createEmailSender } from "@my-tuums/auth";
 import { createDatabase } from "@my-tuums/db";
@@ -86,13 +87,7 @@ async function application(env: AppEnv) {
       rateLimiter: createDistributedRateLimiter(env.API_COUNTERS),
       appealToken: createAppealTokenSigner(config.APPEAL_TOKEN_SECRET),
       emailSender: { send: sendEmail },
-      // Hosted Workers could not complete hostname-verified TLS when connecting
-      // to a validated IP. Keep the existing plain-link fallback until a safe
-      // transport passes hosted tests; ordinary fetch after DNS preflight is unsafe.
-      linkTransport: {
-        lookup: () => Promise.reject(new Error("Preview networking unavailable.")),
-        fetch: () => Promise.reject(new Error("Preview networking unavailable.")),
-      },
+      linkTransport: createWorkerLinkTransport(env.LINK_FETCHER),
     },
     bucket: env.MEDIA,
     images: env.IMAGES,

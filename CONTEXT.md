@@ -19,31 +19,33 @@ MyTuums — a Twitter-style social app (posts, replies, likes, bookmarks,
 follows, profiles, moderation) with real authentication. pnpm 12 + Turborepo
 on Node 24, TypeScript strict everywhere.
 
-| Workspace       | Package              | Owns                                                              |
-| --------------- | -------------------- | ----------------------------------------------------------------- |
-| `apps/web`      | `@my-tuums/web`      | React 19 + Vite SPA, TanStack Router, Jotai                       |
-| `apps/branding` | `@my-tuums/branding` | the public landing site served at about.mytuums.com               |
-| `apps/server`   | `@my-tuums/server`   | Cloudflare application Worker and native maintenance CLIs         |
-| `apps/jobs`     | `@my-tuums/jobs`     | Cloudflare Workflows, video processing, Cron recovery and pruning |
-| `packages/api`  | `@my-tuums/api`      | oRPC procedures, business rules, media, moderation                |
-| `packages/auth` | `@my-tuums/auth`     | the single better-auth instance                                   |
-| `packages/db`   | `@my-tuums/db`       | Drizzle schema, migrations, test-database guards                  |
-| `e2e`           | `@my-tuums/e2e`      | Playwright journeys over the real stack                           |
+| Workspace           | Package                  | Owns                                                              |
+| ------------------- | ------------------------ | ----------------------------------------------------------------- |
+| `apps/web`          | `@my-tuums/web`          | React 19 + Vite SPA, TanStack Router, Jotai                       |
+| `apps/branding`     | `@my-tuums/branding`     | the public landing site served at about.mytuums.com               |
+| `apps/server`       | `@my-tuums/server`       | Cloudflare application Worker and native maintenance CLIs         |
+| `apps/link-fetcher` | `@my-tuums/link-fetcher` | private Cloudflare Container for guarded rich-link HTTP           |
+| `apps/jobs`         | `@my-tuums/jobs`         | Cloudflare Workflows, video processing, Cron recovery and pruning |
+| `packages/api`      | `@my-tuums/api`          | oRPC procedures, business rules, media, moderation                |
+| `packages/auth`     | `@my-tuums/auth`         | the single better-auth instance                                   |
+| `packages/db`       | `@my-tuums/db`           | Drizzle schema, migrations, test-database guards                  |
+| `e2e`               | `@my-tuums/e2e`          | Playwright journeys over the real stack                           |
 
 ## Context routing
 
-| If the change is about                                    | Go to                                                |
-| --------------------------------------------------------- | ---------------------------------------------------- |
-| UI, routes, client state, i18n copy, theme                | [apps/web/CONTEXT.md](apps/web/CONTEXT.md)           |
-| The public landing site at `about.mytuums.com`            | [apps/branding/CONTEXT.md](apps/branding/CONTEXT.md) |
-| HTTP routing, config validation, headers, Worker runtime  | [apps/server/CONTEXT.md](apps/server/CONTEXT.md)     |
-| Cloudflare background execution and scheduled recovery    | [apps/jobs/CONTEXT.md](apps/jobs/CONTEXT.md)         |
-| Business rules, RPC procedures, moderation, media/storage | [packages/api/CONTEXT.md](packages/api/CONTEXT.md)   |
-| Sign-in, OAuth providers, sessions, auth email            | [packages/auth/CONTEXT.md](packages/auth/CONTEXT.md) |
-| Schema, migrations, test databases                        | [packages/db/CONTEXT.md](packages/db/CONTEXT.md)     |
-| End-to-end journeys                                       | [e2e/CONTEXT.md](e2e/CONTEXT.md)                     |
-| Workflows, CI jobs                                        | [.github/CONTEXT.md](.github/CONTEXT.md)             |
-| Repository lint and TypeScript tooling                    | root configs, `package.json`, `tools/oxlint/`        |
+| If the change is about                                    | Go to                                                        |
+| --------------------------------------------------------- | ------------------------------------------------------------ |
+| UI, routes, client state, i18n copy, theme                | [apps/web/CONTEXT.md](apps/web/CONTEXT.md)                   |
+| The public landing site at `about.mytuums.com`            | [apps/branding/CONTEXT.md](apps/branding/CONTEXT.md)         |
+| HTTP routing, config validation, headers, Worker runtime  | [apps/server/CONTEXT.md](apps/server/CONTEXT.md)             |
+| Cloudflare background execution and scheduled recovery    | [apps/jobs/CONTEXT.md](apps/jobs/CONTEXT.md)                 |
+| Outbound rich-link networking                             | [apps/link-fetcher/CONTEXT.md](apps/link-fetcher/CONTEXT.md) |
+| Business rules, RPC procedures, moderation, media/storage | [packages/api/CONTEXT.md](packages/api/CONTEXT.md)           |
+| Sign-in, OAuth providers, sessions, auth email            | [packages/auth/CONTEXT.md](packages/auth/CONTEXT.md)         |
+| Schema, migrations, test databases                        | [packages/db/CONTEXT.md](packages/db/CONTEXT.md)             |
+| End-to-end journeys                                       | [e2e/CONTEXT.md](e2e/CONTEXT.md)                             |
+| Workflows, CI jobs                                        | [.github/CONTEXT.md](.github/CONTEXT.md)                     |
+| Repository lint and TypeScript tooling                    | root configs, `package.json`, `tools/oxlint/`                |
 
 Cross-package questions — how the pieces fit, what a request does end to end —
 are answered in [docs/architecture.md](docs/architecture.md).
@@ -117,6 +119,7 @@ These artifacts are generator-owned. Run the generator and commit its output
 | `packages/api/src/unicode-case-folding.generated.ts` | `pnpm --filter @my-tuums/api generate:case-folding`, then `pnpm format`   |
 | `packages/api/src/search-folding.generated.ts`       | `pnpm --filter @my-tuums/api generate:search-folding`, then `pnpm format` |
 | `packages/db/drizzle-d1`                             | `pnpm db:generate` (committed, applied before Worker deployment)          |
+| `apps/link-fetcher/worker/worker-configuration.d.ts` | `pnpm --filter @my-tuums/link-fetcher types`, then `pnpm format`          |
 | `apps/jobs/worker-configuration.d.ts`                | `pnpm --filter @my-tuums/jobs types`, then `pnpm format`                  |
 | `apps/branding/worker/worker-configuration.d.ts`     | `pnpm --filter @my-tuums/branding types`, then `pnpm format`              |
 | `apps/server/worker/worker-configuration.d.ts`       | `pnpm --filter @my-tuums/server types`, then `pnpm format`                |

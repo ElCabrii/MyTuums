@@ -52,6 +52,13 @@
       "new_sqlite_classes": ["RateLimitCounter", "AuthRateLimitCounter"],
     },
   ],
+  "services": [
+    {
+      "binding": "LINK_FETCHER",
+      "service": "mytuums-link-fetcher",
+      "entrypoint": "LinkFetchService",
+    },
+  ],
   "workflows": [
     {
       "binding": "VIDEO_WORKFLOW",

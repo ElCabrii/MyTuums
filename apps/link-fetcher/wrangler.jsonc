@@ -1,0 +1,37 @@
+{
+  "name": "mytuums-link-fetcher",
+  "account_id": "734f3b84571b1967e6940140a0b7d75f",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-12",
+  "workers_dev": false,
+  "preview_urls": false,
+  "containers": [
+    {
+      "class_name": "LinkFetcherContainer",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 1,
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CONTAINER",
+        "class_name": "LinkFetcherContainer",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["LinkFetcherContainer"],
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": {
+      "invocation_logs": false,
+    },
+  },
+}

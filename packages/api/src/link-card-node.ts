@@ -1,4 +1,4 @@
-/** Legacy Node transport. Never import this module into the application Worker. */
+/** Node transport for the private Cloudflare Container and local tests. Never import into the application Worker. */
 import { lookup as dnsLookup } from "node:dns/promises";
 import type { LookupAddress, LookupAllOptions } from "node:dns";
 import { isIP } from "node:net";

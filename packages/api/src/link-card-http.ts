@@ -283,16 +283,21 @@ export async function guardedLinkFetch(
     }
 
     if (current.hostname.length === 0) return { ok: false, reason: "address" };
-    let response: Response | "timeout" | "address" | "port";
+    let response: Response | "timeout" | "address" | "port" | "scheme";
     try {
-      response = await fetchRacingDeadline(options.transport, current, deadline);
+      response = await openGuardedLinkResponse(options.transport, current, deadline);
     } catch {
       // A refused/dropped/reset connection is an ordinary dead target. The
       // guard degrades to "no card"; a transport error must never surface as
       // a procedure failure the post inherits.
       return { ok: false, reason: "network" };
     }
-    if (response === "timeout" || response === "address" || response === "port")
+    if (
+      response === "timeout" ||
+      response === "address" ||
+      response === "port" ||
+      response === "scheme"
+    )
       return { ok: false, reason: response };
 
     try {
@@ -324,7 +329,7 @@ export async function guardedLinkFetch(
       const contentType = normalizeContentType(response.headers.get("content-type"));
       if (!options.acceptContentType(contentType)) return { ok: false, reason: "contentType" };
 
-      const bytes = await readCappedBody(response, options.maxBytes, deadline);
+      const bytes = await readCappedLinkBody(response, options.maxBytes, deadline);
       if (bytes === "timeout") return { ok: false, reason: "timeout" };
       if (bytes === "oversized") return { ok: false, reason: "oversized" };
       if (bytes === "network") return { ok: false, reason: "network" };
@@ -345,11 +350,12 @@ function normalizeContentType(header: string | null): string {
   return ((header ?? "").split(";")[0] ?? "").trim().toLowerCase();
 }
 
-async function fetchRacingDeadline(
+export async function openGuardedLinkResponse(
   transport: LinkFetchTransport,
   url: URL,
   deadline: number,
-): Promise<Response | "timeout" | "address" | "port"> {
+): Promise<Response | "timeout" | "address" | "port" | "scheme"> {
+  if (url.protocol !== "http:" && url.protocol !== "https:") return "scheme";
   const remaining = deadline - Date.now();
   if (remaining <= 0) return "timeout";
 
@@ -402,7 +408,7 @@ async function fetchRacingDeadline(
  * deadline. A body that drips one byte per tick is as refused as one that
  * never answers: the deadline is total, not per-read.
  */
-async function readCappedBody(
+export async function readCappedLinkBody(
   response: Response,
   maxBytes: number,
   deadline: number,

@@ -1,0 +1,4 @@
+{
+  "extends": "@my-tuums/tsconfig/node.json",
+  "include": ["src", "tsup.config.ts"]
+}
