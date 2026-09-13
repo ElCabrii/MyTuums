@@ -138,9 +138,11 @@ app's build from the same origin.
 - **Persisted atoms read `localStorage` as `unknown`, sanitise on read, and
   set `getOnInit: true`** — without it the first render flashes the default.
 - **Analytics has one root-mounted controller.** `AnalyticsConsent` alone
-  loads/stops GA and emits SPA page views; `analyticsConsentAtom` owns the
-  sanitised, six-month per-device choice. With no measurement id there is no
-  banner, storage write, script, page view, or analytics-specific CSP source.
+  loads/stops the same-origin Zaraz client and emits sanitised SPA page views;
+  `analyticsConsentAtom` owns the six-month per-device choice. When
+  `VITE_GOOGLE_ANALYTICS` is not `enabled` there is no banner, storage write,
+  script or page view. The GA4 measurement ID lives only in the zone's Zaraz
+  tool configuration.
 - **Release notes travel with their release.** Vite compiles only
   `changelog/<version>.<locale>.md` matching `package.json`; the browser ships
   rendered HTML, not Marked or historical notes. `ChangelogDialog` shows it
@@ -281,7 +283,7 @@ head (`apps/server/src/public-heads.ts`substitutes the`[data-app-fallback]`block
   `/login` does the same on the `EMAIL_NOT_VERIFIED` outcome.
 - In dev, Vite proxies `/rpc`, `/api/auth` and `/media` to the API on `:3001`.
 - Four `VITE_*` variables are read: `VITE_SOCIAL_PROVIDERS`,
-  `VITE_GOOGLE_CLIENT_ID`, `VITE_GA_MEASUREMENT_ID`, and `VITE_WEB_ORIGIN`. All are inlined at build time — see
+  `VITE_GOOGLE_CLIENT_ID`, `VITE_GOOGLE_ANALYTICS`, and `VITE_WEB_ORIGIN`. All are inlined at build time — see
   [docs/operations.md](../../docs/operations.md).
 
 ## Generated files

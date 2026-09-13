@@ -28,7 +28,6 @@ export async function createWorkerApplication(options: {
   /** Null is reserved for validated public production and the separate loopback-only development entrypoint. */
   access: { teamDomain: string; audience: string } | null;
   streamOrigins: readonly string[];
-  googleAnalytics?: boolean;
 }) {
   const { auth, services } = options;
   const { db, webOrigin } = services;

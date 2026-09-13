@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { z } from "zod";
 import { bestEncoding, type Compression } from "./compression.js";
-import { isBrandingHostRequest } from "./branding-host.js";
 import { NONBLOCKING_STYLESHEET_ONLOAD_HANDLER } from "@my-tuums/api/constants";
 
 /**
@@ -130,13 +129,9 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  *   loaded script makes its own requests (credential fetch, FedCM
  *   `.well-known` discovery) back to Google from the page's origin context,
  *   so it needs the same host as `script-src`.
- * - When `VITE_GA_MEASUREMENT_ID` was baked into the bundled app, the app
- *   host's policy additionally permits `www.googletagmanager.com` for the
- *   external tag and Google's documented GA4 collection origins in
- *   `connect-src`. Those sources are absent when analytics is unconfigured
- *   and always absent on the script-free branding host. `img-src https:`
- *   already covers GA's fallback beacons, so repeating narrower Google image
- *   origins would not tighten or widen that existing directive.
+ * - Consent-gated analytics use Cloudflare Zaraz's same-origin `/cdn-cgi/`
+ *   transport. Google never receives a browser request, so analytics adds no
+ *   third-party CSP source.
  * - `worker-src 'self' blob:` allows the same-origin offline service worker
  *   and HLS.js's bundled transmuxing worker. Script sources remain restricted.
  * - `media-src 'self' blob:` plus the configured bucket origins allows native
@@ -174,14 +169,7 @@ const STYLESHEET_SWAP_HANDLER_HASH = `sha256-${createHash("sha256")
  * `cacheHeaderFor` in ./static-files.ts). Do not treat that directive as a
  * cache tuning knob — it is what keeps this policy true. See docs/security.md.
  */
-function contentSecurityPolicy(
-  googleAnalytics: boolean,
-  mediaOrigins: readonly string[] = [],
-): string {
-  const analyticsScript = googleAnalytics ? " https://www.googletagmanager.com" : "";
-  const analyticsConnections = googleAnalytics
-    ? " https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com"
-    : "";
+function contentSecurityPolicy(mediaOrigins: readonly string[] = []): string {
   const bucketSources = mediaOrigins.map((origin) => ` ${new URL(origin).origin}`).join("");
 
   return [
@@ -190,9 +178,9 @@ function contentSecurityPolicy(
     "object-src 'none'",
     "img-src 'self' https: blob:",
     "font-src 'self'",
-    `script-src 'self' https://accounts.google.com${analyticsScript} 'unsafe-hashes' '${STYLESHEET_SWAP_HANDLER_HASH}'`,
+    `script-src 'self' https://accounts.google.com 'unsafe-hashes' '${STYLESHEET_SWAP_HANDLER_HASH}'`,
     "style-src 'self' 'unsafe-inline' https://accounts.google.com",
-    `connect-src 'self' https://accounts.google.com${analyticsConnections}${bucketSources}`,
+    `connect-src 'self' https://accounts.google.com${bucketSources}`,
     `media-src 'self' blob:${bucketSources}`,
     "worker-src 'self' blob:",
     "frame-src https://accounts.google.com",
@@ -224,8 +212,6 @@ const SECURITY_HEADERS = {
 } satisfies OutgoingHttpHeaders;
 
 export interface ResponseDecoratorOptions {
-  /** Whether the bundled SPA contains the consent-gated GA4 integration. */
-  googleAnalytics?: boolean;
   /** Exact bucket origins used for direct multipart uploads and HLS segments. */
   mediaOrigins?: readonly string[];
 }
@@ -358,12 +344,7 @@ class DecoratedResponse {
       ...SECURITY_HEADERS,
       // Applied on every response, as before. Non-document response policies
       // are inert; using one decision everywhere keeps the choke point honest.
-      // The branding document stays on the base policy even when the SPA has
-      // analytics because that separate site loads no third-party script.
-      "Content-Security-Policy": contentSecurityPolicy(
-        Boolean(this.options.googleAnalytics) && !isBrandingHostRequest(this.req),
-        this.options.mediaOrigins,
-      ),
+      "Content-Security-Policy": contentSecurityPolicy(this.options.mediaOrigins),
     } satisfies OutgoingHttpHeaders;
 
     for (const [name, value] of Object.entries(headers)) {

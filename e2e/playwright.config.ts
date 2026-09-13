@@ -78,9 +78,9 @@ export default defineConfig({
       dependencies: ["setup"],
     },
     // Runs only the analytics gate against the same app, without the refusal
-    // seed the normal browser project installs. The Vite process below has a
-    // placeholder measurement id; every other browser spec explicitly starts
-    // denied so the new banner cannot perturb unrelated journeys.
+    // seed the normal browser project installs. The analytics build flag is on;
+    // every other browser spec explicitly starts denied so the banner cannot
+    // perturb unrelated journeys.
     {
       name: "analytics",
       testMatch: /analytics-consent\.spec\.ts/,

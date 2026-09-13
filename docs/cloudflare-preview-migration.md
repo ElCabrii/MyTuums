@@ -199,9 +199,9 @@ After the migration branch has been committed, pushed and passed both GitHub CI
 checks, run `pnpm --filter @my-tuums/db deploy:preview` from a clean checkout.
 Supply the preview `VITE_GOOGLE_CLIENT_ID` and
 `VITE_SOCIAL_PROVIDERS=google,discord,twitch` as build environment variables.
-Preserve preview's existing public `VITE_GA_MEASUREMENT_ID`; its
-`GOOGLE_ANALYTICS=enabled` Worker setting enables the matching CSP sources.
-The browser retains the existing opt-in consent behavior.
+The `GOOGLE_ANALYTICS=enabled` Worker setting supplies the frontend's public
+analytics feature flag. Cloudflare Zaraz owns the GA4 measurement ID and loads
+from the same origin only after the browser records opt-in consent.
 The command refuses another branch, a dirty or changed checkout, or missing/failed
 `Verify` and `E2E tests` checks for the exact commit. It builds, applies committed
 preview migrations, deploys jobs, then deploys the application. A failed step stops

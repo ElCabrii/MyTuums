@@ -211,10 +211,11 @@ isolated EU preview D1/R2 pair and preview Access audience. Origin, route,
 audience and resource tuple must change together; see
 [the execution record](../../../docs/cloudflare-preview-migration.md).
 
-Preview sets `GOOGLE_ANALYTICS=enabled` to preserve its existing consent-gated
-analytics. The deployment command requires the matching public GA measurement ID
-at build time; the Worker flag controls the corresponding CSP sources. Production
-analytics remain disabled.
+Preview and production set `GOOGLE_ANALYTICS=enabled`. The deployment command
+turns that Worker setting into the public build flag that exposes the consent UI
+and same-origin Zaraz loader. The GA4 measurement ID, action and consent purpose
+live in the `mytuums.com` zone's Zaraz configuration. The browser never needs
+Google Analytics origins in the application CSP.
 
 ## Production public release
 

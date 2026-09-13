@@ -62,12 +62,11 @@ pnpm --filter @my-tuums/db deploy:preview --target=preview
 pnpm --filter @my-tuums/db deploy:preview --target=production
 ```
 
-The command derives the target origin, builds the repository, applies committed
-D1 migrations, deploys and verifies the link fetcher, then deploys jobs and the
-application. Production also deploys branding. Preview requires its GA
-measurement ID; production analytics are disabled. Both hosted jobs Workers
-keep their minute Cron schedule so durable video, notification and game-sync
-recovery continues after deployment.
+The command derives the target origin and analytics build flag, builds the
+repository, applies committed D1 migrations, deploys and verifies the link
+fetcher, then deploys jobs and the application. Production also deploys
+branding. Both hosted jobs Workers keep their minute Cron schedule so durable
+video, notification and game-sync recovery continues after deployment.
 
 Never run the full snapshot importer against an environment accepting writes.
 Normal releases use incremental committed migrations. The retired migration
@@ -83,14 +82,23 @@ in `apps/web/src/vite-env.d.ts` is checked against this list:
 
 - `VITE_SOCIAL_PROVIDERS`
 - `VITE_GOOGLE_CLIENT_ID`
-- `VITE_GA_MEASUREMENT_ID`
+- `VITE_GOOGLE_ANALYTICS`
 - `VITE_WEB_ORIGIN`
 
 `VITE_SOCIAL_PROVIDERS` must agree with the credentials configured on the app
 Worker. `VITE_GOOGLE_CLIENT_ID` is Google's public client identifier for One
 Tap. `VITE_WEB_ORIGIN` controls metadata and copied links and is derived by the
-deployment command. `VITE_GA_MEASUREMENT_ID` enables consent-gated analytics in
-preview when the Worker also enables analytics.
+deployment command. `VITE_GOOGLE_ANALYTICS` is also derived from the target
+Worker's `GOOGLE_ANALYTICS` setting; `enabled` exposes the consent UI and
+same-origin Zaraz loader. The public GA4 measurement ID lives in Cloudflare's
+zone-level Zaraz tool configuration instead of the browser bundle.
+
+The `mytuums.com` Zaraz configuration uses manual script injection, disables
+automatic history tracking, and fires one GA4 page-view action only for the
+custom `MyTuumsPageview` event. The GA4 tool is assigned to the hidden
+`analytics` consent purpose. Keep both safeguards: the app strips query strings
+before it emits the event, and its consent controller is the only code allowed
+to load `/cdn-cgi/zaraz/i.js` or update that purpose.
 
 Runtime secrets include authentication, OAuth, Stream, IGDB and appeal-signing
 credentials. The app and jobs Workers share the same independently generated

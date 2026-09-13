@@ -1,46 +1,60 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-interface TestAnalyticsWindow extends Window {
-  dataLayer?: ArrayLike<unknown>[];
-  gtag?: (...args: unknown[]) => void;
+interface TestZarazApi {
+  consent: { APIReady: boolean; set: ReturnType<typeof vi.fn> };
+  track: ReturnType<typeof vi.fn>;
 }
 
-// SAFETY: test-only view of the jsdom window; analytics.ts adds these
-// optional fields at runtime when the command queue is installed.
+interface TestAnalyticsWindow extends Window {
+  zaraz?: TestZarazApi;
+}
+
+// SAFETY: the test only adds and removes the same optional runtime field that
+// analytics.ts owns on Window.
 const testWindow = window as TestAnalyticsWindow;
 
 afterEach(() => {
-  for (const script of document.head.querySelectorAll("script#my-tuums-google-analytics")) {
-    script.remove();
-  }
-  delete testWindow.dataLayer;
-  delete testWindow.gtag;
+  document.getElementById("my-tuums-zaraz")?.remove();
+  delete testWindow.zaraz;
+  vi.resetModules();
 });
 
-describe("googleAnalytics command queue", () => {
-  it("queues gtag commands as arguments objects for gtag.js", async () => {
-    vi.resetModules();
-    const { googleAnalytics } = await import("@/lib/analytics");
+describe("Cloudflare Zaraz analytics", () => {
+  it("loads from the same origin after consent and forwards only enabled page views", async () => {
+    const { zarazAnalytics } = await import("@/lib/analytics");
 
-    void googleAnalytics.start("G-TEST");
+    document.cookie = "cfz_google-analytics-4_ga4=visitor; Path=/";
+    document.cookie = "mytuums_zaraz_consent=granted; Path=/";
+    zarazAnalytics.stop();
+    expect(document.getElementById("my-tuums-zaraz")).toBeNull();
+    expect(document.cookie).not.toContain("cfz_google-analytics-4_ga4");
+    expect(document.cookie).not.toContain("mytuums_zaraz_consent");
 
-    const queue = testWindow.dataLayer ?? [];
-    expect(queue).toHaveLength(2);
-    for (const entry of queue) {
-      expect(Array.isArray(entry)).toBe(false);
-      expect(Object.prototype.toString.call(entry)).toBe("[object Arguments]");
-    }
-    expect(queue[0]?.[0]).toBe("js");
-    expect(queue[1]?.[0]).toBe("config");
+    const started = zarazAnalytics.start();
+    const script = document.getElementById("my-tuums-zaraz");
+    expect(script).toBeInstanceOf(HTMLScriptElement);
+    if (!(script instanceof HTMLScriptElement)) throw new Error("Zaraz script was not created");
+    expect(script.src).toBe(new URL("/cdn-cgi/zaraz/i.js", window.location.origin).href);
 
-    googleAnalytics.trackPageView("G-TEST", {
+    const consentSet = vi.fn();
+    const track = vi.fn();
+    testWindow.zaraz = { consent: { APIReady: true, set: consentSet }, track };
+    document.dispatchEvent(new Event("zarazConsentAPIReady"));
+    await started;
+
+    expect(consentSet).toHaveBeenCalledWith({ analytics: true });
+    zarazAnalytics.trackPageView({
       location: "https://example.com/search",
       title: "Search",
     });
+    expect(track).toHaveBeenCalledWith("MyTuumsPageview", {
+      dl: "https://example.com/search",
+      dt: "Search",
+    });
 
-    const afterPageView = testWindow.dataLayer ?? [];
-    expect(afterPageView).toHaveLength(3);
-    expect(Array.isArray(afterPageView[2])).toBe(false);
-    expect(Object.prototype.toString.call(afterPageView[2])).toBe("[object Arguments]");
+    zarazAnalytics.stop();
+    expect(consentSet).toHaveBeenLastCalledWith({ analytics: false });
+    zarazAnalytics.trackPageView({ location: "https://example.com/private", title: "Private" });
+    expect(track).toHaveBeenCalledTimes(1);
   });
 });

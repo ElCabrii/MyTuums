@@ -163,28 +163,6 @@ describe("decorateResponse", () => {
     );
   });
 
-  it("adds GA4 sources only when configured and never on the branding host", async () => {
-    await withServer(
-      (_req, res) => {
-        res.writeHead(200, { "Content-Type": "text/html" });
-        res.end("ok");
-      },
-      async (raw) => {
-        const app = await raw("/", { headers: { Host: "mytuums.com" } });
-        const appPolicy = String(app.headers["content-security-policy"]);
-        expect(appPolicy).toContain("https://www.googletagmanager.com");
-        expect(appPolicy).toContain("https://*.google-analytics.com");
-        expect(appPolicy).toContain("https://*.analytics.google.com");
-
-        const branding = await raw("/", { headers: { Host: "about.mytuums.com" } });
-        const brandingPolicy = String(branding.headers["content-security-policy"]);
-        expect(brandingPolicy).not.toContain("googletagmanager.com");
-        expect(brandingPolicy).not.toContain("google-analytics.com");
-      },
-      { googleAnalytics: true },
-    );
-  });
-
   it("labels a small JSON body with Content-Length when compression is skipped", async () => {
     // Browsers always send `accept-encoding: gzip`, so small responses
     // (me/like/follow) are compression candidates that end up uncompressed —

@@ -8,13 +8,13 @@ import {
   type AnalyticsConsent as AnalyticsConsentDecision,
 } from "@/atoms/analytics-consent";
 import { Button } from "@/components/ui/button";
-import { googleAnalytics, type AnalyticsAdapter } from "@/lib/analytics";
-import { ANALYTICS_MEASUREMENT_ID } from "@/lib/analytics-config";
+import { zarazAnalytics, type AnalyticsAdapter } from "@/lib/analytics";
+import { ANALYTICS_ENABLED } from "@/lib/analytics-config";
 import { m } from "@/paraglide/messages.js";
 
 interface AnalyticsConsentProps {
   analytics?: AnalyticsAdapter;
-  measurementId?: string | null;
+  enabled?: boolean;
 }
 
 // setTimeout overflows past 2^31-1 ms, so a six-month expiry is scheduled in
@@ -23,25 +23,19 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /**
  * The single owner of analytics consent, tag lifecycle, and SPA page views.
- * It is mounted unconditionally at the root; an absent measurement id makes
+ * It is mounted unconditionally at the root; a disabled build flag makes
  * the entire feature disappear without touching storage or the network.
  */
 export function AnalyticsConsent({
-  analytics = googleAnalytics,
-  measurementId = ANALYTICS_MEASUREMENT_ID,
+  analytics = zarazAnalytics,
+  enabled = ANALYTICS_ENABLED,
 }: AnalyticsConsentProps) {
-  if (!measurementId) return null;
+  if (!enabled) return null;
 
-  return <ConfiguredAnalyticsConsent analytics={analytics} measurementId={measurementId} />;
+  return <ConfiguredAnalyticsConsent analytics={analytics} />;
 }
 
-function ConfiguredAnalyticsConsent({
-  analytics,
-  measurementId,
-}: {
-  analytics: AnalyticsAdapter;
-  measurementId: string;
-}) {
+function ConfiguredAnalyticsConsent({ analytics }: { analytics: AnalyticsAdapter }) {
   const { pathname, searchStr } = useLocation();
   const consent = useAtomValue(analyticsConsentAtom);
   const expiresAt = useAtomValue(analyticsConsentExpiresAtAtom);
@@ -49,15 +43,16 @@ function ConfiguredAnalyticsConsent({
   const [preferencesOpen, setPreferencesOpen] = useAtom(analyticsPreferencesOpenAtom);
 
   useEffect(() => {
-    if (consent === "denied") {
-      analytics.stop(measurementId);
+    if (consent !== "granted") {
+      // This also runs when a stored decision has expired. It removes any
+      // identifiers left by the previous consent without loading Zaraz.
+      analytics.stop();
       return;
     }
-    if (consent !== "granted") return;
 
     let current = true;
     void analytics
-      .start(measurementId)
+      .start()
       .then(() => {
         if (!current) return;
         // Capability tokens live in the query string (`/reset-password`,
@@ -65,19 +60,19 @@ function ConfiguredAnalyticsConsent({
         // `searchStr` is still a dependency below so query-only navigations
         // (`/search?q=one` to `/search?q=two`) emit a page view for the new
         // state while the reported location stays sanitized.
-        analytics.trackPageView(measurementId, {
+        analytics.trackPageView({
           location: new URL(pathname, window.location.origin).href,
           title: document.title,
         });
       })
       .catch(() => {
-        console.error("Google Analytics failed to start");
+        console.error("Cloudflare Zaraz analytics failed to start");
       });
 
     return () => {
       current = false;
     };
-  }, [analytics, consent, pathname, searchStr, measurementId]);
+  }, [analytics, consent, pathname, searchStr]);
 
   // The consent atom caches until storage changes, so without this a tab open
   // across the six-month boundary would keep a granted choice (and a running
@@ -87,7 +82,7 @@ function ConfiguredAnalyticsConsent({
     if (consent === null || expiresAt === null) return;
 
     if (expiresAt - Date.now() <= 0) {
-      if (consent === "granted") analytics.stop(measurementId);
+      if (consent === "granted") analytics.stop();
       setConsent(null);
       return;
     }
@@ -102,7 +97,7 @@ function ConfiguredAnalyticsConsent({
         () => {
           if (cancelled) return;
           if (Date.now() >= expiresAt) {
-            if (consent === "granted") analytics.stop(measurementId);
+            if (consent === "granted") analytics.stop();
             setConsent(null);
             return;
           }
@@ -118,7 +113,7 @@ function ConfiguredAnalyticsConsent({
       cancelled = true;
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     };
-  }, [analytics, consent, expiresAt, measurementId, pathname, searchStr, setConsent]);
+  }, [analytics, consent, expiresAt, pathname, searchStr, setConsent]);
 
   if (consent !== null && !preferencesOpen) return null;
 
@@ -169,7 +164,7 @@ function ConfiguredAnalyticsConsent({
 
 /** The shared footer affordance for reopening the app-wide preference banner. */
 export function AnalyticsPreferencesButton({ className }: { className?: string }) {
-  if (!ANALYTICS_MEASUREMENT_ID) return null;
+  if (!ANALYTICS_ENABLED) return null;
 
   return <ConfiguredAnalyticsPreferencesButton className={className} />;
 }
