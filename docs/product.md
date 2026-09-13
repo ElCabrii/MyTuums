@@ -1,13 +1,10 @@
 # Product
 
-The application behavior targeted by this Cloudflare PoC, and the words the code
-uses for it. Hosted parity is still being verified; see
-[the validation report](cloudflare-poc-report.md). For the mechanics behind the
-behavior, see [architecture.md](architecture.md).
-
-Once deployed, owner-only Cloudflare Access protects the entire PoC, including
-the app's otherwise public pages described below. Application authentication
-and content authorization remain underneath that outer gate.
+The application behavior and the words the code uses for it. Production and
+preview run on Cloudflare; preview has an outer owner-only Cloudflare Access
+gate. Application authentication and content authorization remain underneath
+that gate. For the mechanics behind the behavior, see
+[architecture.md](architecture.md).
 
 MyTuums is a Twitter-style social app: short posts, replies, likes, a follow
 graph, profiles, search, and a moderation system with appeals. **The site is
@@ -514,12 +511,14 @@ app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
   are built into that version of the app and shown once per device, including
   on a first or signed-out visit. Dismissal is local to the device; a rollback
   never replays older notes, and a release without notes stays silent.
-- **Google Analytics 4 is configuration-dependent and opt-in.** With no
-  `VITE_GA_MEASUREMENT_ID`, no banner or analytics code runs. With one, every
-  signed-in and signed-out surface offers equally prominent accept/refuse
-  choices, remembers either choice on that device for at most six months, and
-  loads GA only after acceptance. The footer and account settings can reopen
-  the choice at any time; refusing changes no product behavior.
+- **Google Analytics 4 is configuration-dependent and opt-in.** Unless
+  `VITE_GOOGLE_ANALYTICS=enabled`, no banner or analytics code runs. When
+  enabled, every signed-in and signed-out surface offers equally prominent
+  accept/refuse choices and remembers either choice on that device for at most
+  six months. Acceptance loads Cloudflare Zaraz from the same origin and enables
+  only its consent-bound GA4 action; the browser never loads Google's analytics
+  script. The footer and account settings can reopen the choice at any time;
+  refusing changes no product behavior.
 
 ## Blocks
 

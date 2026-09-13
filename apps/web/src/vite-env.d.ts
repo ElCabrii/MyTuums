@@ -31,12 +31,8 @@ interface ImportMetaEnv {
    */
   readonly VITE_SOCIAL_PROVIDERS?: string;
 
-  /**
-   * Public GA4 measurement id. Unset disables analytics and its consent UI.
-   * The Docker image also retains this public flag so the server can emit the
-   * matching conditional Content-Security-Policy.
-   */
-  readonly VITE_GA_MEASUREMENT_ID?: string;
+  /** Enables consent-gated GA4 page views through Cloudflare Zaraz. */
+  readonly VITE_GOOGLE_ANALYTICS?: "enabled";
 }
 
 interface ImportMeta {

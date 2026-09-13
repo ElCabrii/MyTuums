@@ -3,11 +3,11 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { analyticsConsentAtom, analyticsPreferencesOpenAtom } from "@/atoms/analytics-consent";
 import { Button } from "@/components/ui/button";
 import { Section } from "@/components/settings/section";
-import { ANALYTICS_MEASUREMENT_ID } from "@/lib/analytics-config";
+import { ANALYTICS_ENABLED } from "@/lib/analytics-config";
 import { m } from "@/paraglide/messages.js";
 
 export function AnalyticsSection() {
-  if (!ANALYTICS_MEASUREMENT_ID) return null;
+  if (!ANALYTICS_ENABLED) return null;
 
   return <ConfiguredAnalyticsSection />;
 }

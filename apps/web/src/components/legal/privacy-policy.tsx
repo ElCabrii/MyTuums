@@ -149,7 +149,9 @@ export function PrivacyPolicy() {
           {m.legal_privacy_sharing_li1_mid()}
           <Link to="/mentions-legales">{m.legal_notice_link()}</Link>
           {m.legal_privacy_sharing_li1_after()}
-          <a href="https://railway.com/legal/dpa">railway.com/legal/dpa</a>
+          <a href="https://www.cloudflare.com/cloudflare-customer-dpa/">
+            cloudflare.com/cloudflare-customer-dpa
+          </a>
           {m.legal_privacy_sharing_li1_tail()}
         </li>
         <li>

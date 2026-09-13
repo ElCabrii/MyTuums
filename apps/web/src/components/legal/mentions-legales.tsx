@@ -32,7 +32,7 @@ export function MentionsLegales() {
         {m.legal_notice_s3_host_country()}
         <br />
         {m.legal_notice_s3_host_contact()}
-        <a href="https://railway.com">railway.com</a>
+        <a href="https://www.cloudflare.com">cloudflare.com</a>
       </p>
       <p>
         {m.legal_notice_s3_p2_before()}

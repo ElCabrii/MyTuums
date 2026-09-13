@@ -6,8 +6,7 @@
 export const ANALYTICS_CONSENT_LIFETIME_MS = 180 * 24 * 60 * 60 * 1000;
 
 /**
- * The public GA4 measurement id baked into the web bundle by Vite. An absent
- * or blank value disables the whole feature: no banner, script, storage write,
- * page-view call, or analytics-specific CSP source.
+ * The public build flag for the consent-gated Cloudflare Zaraz integration.
+ * The GA4 measurement ID lives in Zaraz rather than in the browser bundle.
  */
-export const ANALYTICS_MEASUREMENT_ID = import.meta.env.VITE_GA_MEASUREMENT_ID?.trim() || null;
+export const ANALYTICS_ENABLED = import.meta.env.VITE_GOOGLE_ANALYTICS === "enabled";

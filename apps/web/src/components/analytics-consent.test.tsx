@@ -18,10 +18,10 @@ function analyticsDouble() {
 }
 
 describe("AnalyticsConsent", () => {
-  it("does nothing when no measurement id is configured", async () => {
+  it("does nothing when analytics is disabled", async () => {
     const analytics = analyticsDouble();
 
-    await renderWithProviders(<AnalyticsConsent analytics={analytics} measurementId={null} />, {
+    await renderWithProviders(<AnalyticsConsent analytics={analytics} enabled={false} />, {
       initialPath: "/login",
     });
 
@@ -37,7 +37,7 @@ describe("AnalyticsConsent", () => {
     const analytics = analyticsDouble();
     const user = userEvent.setup();
 
-    await renderWithProviders(<AnalyticsConsent analytics={analytics} measurementId="G-TEST" />, {
+    await renderWithProviders(<AnalyticsConsent analytics={analytics} enabled />, {
       initialPath: "/login",
     });
 
@@ -51,21 +51,21 @@ describe("AnalyticsConsent", () => {
       screen.queryByRole("region", { name: m.analytics_consent_title() }),
     ).not.toBeInTheDocument();
     expect(analytics.start).not.toHaveBeenCalled();
-    expect(analytics.stop).toHaveBeenCalledWith("G-TEST");
+    expect(analytics.stop).toHaveBeenCalledWith();
   });
 
   it("starts after acceptance, tracks SPA navigation, and stops after withdrawal", async () => {
     const analytics = analyticsDouble();
     const store = createStore();
     const user = userEvent.setup();
-    const rendered = await renderWithProviders(
-      <AnalyticsConsent analytics={analytics} measurementId="G-TEST" />,
-      { initialPath: "/login", store },
-    );
+    const rendered = await renderWithProviders(<AnalyticsConsent analytics={analytics} enabled />, {
+      initialPath: "/login",
+      store,
+    });
 
     await user.click(screen.getByRole("button", { name: m.analytics_consent_accept() }));
 
-    await waitFor(() => expect(analytics.start).toHaveBeenCalledWith("G-TEST"));
+    await waitFor(() => expect(analytics.start).toHaveBeenCalledWith());
     await waitFor(() => expect(analytics.trackPageView).toHaveBeenCalledTimes(1));
 
     await act(async () => {
@@ -77,21 +77,21 @@ describe("AnalyticsConsent", () => {
     await user.click(screen.getByRole("button", { name: m.analytics_consent_refuse() }));
 
     expect(store.get(analyticsConsentAtom)).toBe("denied");
-    expect(analytics.stop).toHaveBeenCalledWith("G-TEST");
+    expect(analytics.stop).toHaveBeenCalledWith();
   });
 
   it("strips query and hash from the tracked page location (issue #345)", async () => {
     const analytics = analyticsDouble();
     const user = userEvent.setup();
 
-    await renderWithProviders(<AnalyticsConsent analytics={analytics} measurementId="G-TEST" />, {
+    await renderWithProviders(<AnalyticsConsent analytics={analytics} enabled />, {
       initialPath: "/reset-password?token=secret-token#hash",
     });
 
     await user.click(screen.getByRole("button", { name: m.analytics_consent_accept() }));
 
     await waitFor(() => expect(analytics.trackPageView).toHaveBeenCalledTimes(1));
-    const trackedLocation = String(analytics.trackPageView.mock.calls[0]?.[1]?.location ?? "");
+    const trackedLocation = String(analytics.trackPageView.mock.calls[0]?.[0]?.location ?? "");
     expect(trackedLocation).toBe(new URL("/reset-password", window.location.origin).href);
     expect(trackedLocation).not.toContain("secret-token");
   });
@@ -100,10 +100,9 @@ describe("AnalyticsConsent", () => {
     const analytics = analyticsDouble();
     const user = userEvent.setup();
 
-    const rendered = await renderWithProviders(
-      <AnalyticsConsent analytics={analytics} measurementId="G-TEST" />,
-      { initialPath: "/search?q=one" },
-    );
+    const rendered = await renderWithProviders(<AnalyticsConsent analytics={analytics} enabled />, {
+      initialPath: "/search?q=one",
+    });
 
     await user.click(screen.getByRole("button", { name: m.analytics_consent_accept() }));
 
@@ -114,7 +113,7 @@ describe("AnalyticsConsent", () => {
     });
 
     await waitFor(() => expect(analytics.trackPageView).toHaveBeenCalledTimes(2));
-    const secondLocation = String(analytics.trackPageView.mock.calls[1]?.[1]?.location ?? "");
+    const secondLocation = String(analytics.trackPageView.mock.calls[1]?.[0]?.location ?? "");
     expect(secondLocation).toBe(new URL("/search", window.location.origin).href);
     expect(secondLocation).not.toContain("two");
   });
@@ -130,7 +129,7 @@ describe("AnalyticsConsent", () => {
       }),
     );
 
-    await renderWithProviders(<AnalyticsConsent analytics={analytics} measurementId="G-TEST" />, {
+    await renderWithProviders(<AnalyticsConsent analytics={analytics} enabled />, {
       initialPath: "/login",
       store,
     });
@@ -146,6 +145,6 @@ describe("AnalyticsConsent", () => {
       ).toBeInTheDocument(),
     );
     await waitFor(() => expect(store.get(analyticsConsentAtom)).toBeNull());
-    expect(analytics.stop).toHaveBeenCalledWith("G-TEST");
+    expect(analytics.stop).toHaveBeenCalledWith();
   });
 });

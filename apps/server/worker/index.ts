@@ -87,7 +87,6 @@ async function application(env: AppEnv) {
     images: env.IMAGES,
     stream,
     assets: env.ASSETS,
-    googleAnalytics: config.GOOGLE_ANALYTICS === "enabled",
     access:
       config.ACCESS_MODE === "public"
         ? null

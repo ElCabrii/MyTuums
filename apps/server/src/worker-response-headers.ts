@@ -4,17 +4,12 @@ let stylesheetHash: Promise<string> | undefined;
 
 /** Native counterpart of the Node response decorator; Cloudflare handles compression. */
 export async function workerResponseHeaders(options: {
-  googleAnalytics?: boolean;
   streamOrigins: readonly string[];
 }): Promise<Readonly<Record<string, string>>> {
   // Compute lazily inside a request; Workers forbid startup-time asynchronous I/O.
   stylesheetHash ??= crypto.subtle
     .digest("SHA-256", new TextEncoder().encode(NONBLOCKING_STYLESHEET_ONLOAD_HANDLER))
     .then((hash) => `sha256-${btoa(String.fromCharCode(...new Uint8Array(hash)))}`);
-  const analyticsScript = options.googleAnalytics ? " https://www.googletagmanager.com" : "";
-  const analyticsConnections = options.googleAnalytics
-    ? " https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com"
-    : "";
   const media = options.streamOrigins
     .map((value) => {
       const url = new URL(value);
@@ -34,9 +29,9 @@ export async function workerResponseHeaders(options: {
       "object-src 'none'",
       "img-src 'self' https: blob:",
       "font-src 'self'",
-      `script-src 'self' https://accounts.google.com${analyticsScript} 'unsafe-hashes' '${await stylesheetHash}'`,
+      `script-src 'self' https://accounts.google.com 'unsafe-hashes' '${await stylesheetHash}'`,
       "style-src 'self' 'unsafe-inline' https://accounts.google.com",
-      `connect-src 'self' https://accounts.google.com${analyticsConnections}${media}`,
+      `connect-src 'self' https://accounts.google.com${media}`,
       `media-src 'self' blob:${media}`,
       "worker-src 'self' blob:",
       "frame-src https://accounts.google.com",

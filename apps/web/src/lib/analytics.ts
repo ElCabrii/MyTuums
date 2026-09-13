@@ -1,150 +1,142 @@
-import { ANALYTICS_CONSENT_LIFETIME_MS } from "@/lib/analytics-config";
+interface ZarazConsentApi {
+  APIReady: boolean;
+  set(preferences: Readonly<Record<string, boolean>>): void;
+}
 
-type Gtag = (...args: unknown[]) => void;
+interface ZarazApi {
+  consent?: ZarazConsentApi;
+  track(eventName: string, properties?: Readonly<Record<string, string>>): void;
+}
 
 interface AnalyticsWindow extends Window {
-  dataLayer?: IArguments[];
-  gtag?: Gtag;
+  zaraz?: ZarazApi;
 }
 
 export interface AnalyticsAdapter {
-  start(measurementId: string): Promise<void>;
-  stop(measurementId: string): void;
-  trackPageView(measurementId: string, page: { location: string; title: string }): void;
+  start(): Promise<void>;
+  stop(): void;
+  trackPageView(page: { location: string; title: string }): void;
 }
 
-const SCRIPT_ID = "my-tuums-google-analytics";
-const COOKIE_LIFETIME_SECONDS = Math.floor(ANALYTICS_CONSENT_LIFETIME_MS / 1000);
+const SCRIPT_ID = "my-tuums-zaraz";
+const SCRIPT_SOURCE = "/cdn-cgi/zaraz/i.js";
+const CONSENT_READY_EVENT = "zarazConsentAPIReady";
+const ANALYTICS_PURPOSE_ID = "analytics";
+const PAGE_VIEW_EVENT = "MyTuumsPageview";
+const CONSENT_COOKIE_NAME = "mytuums_zaraz_consent";
+const INITIALIZATION_TIMEOUT_MS = 10_000;
 
 let scriptLoad: Promise<void> | null = null;
-let configuredMeasurementId: string | null = null;
-const disabledMeasurementIds = new Set<string>();
+let collectionDisabled = true;
 
 const analyticsWindow = (): AnalyticsWindow => window;
 
-function setCollectionDisabled(measurementId: string, disabled: boolean): void {
-  // Google documents this measurement-id-scoped flag as the synchronous way
-  // to stop a loaded tag. Define the dynamic external property without
-  // weakening the static Window type with an open-ended dictionary.
-  Object.defineProperty(analyticsWindow(), `ga-disable-${measurementId}`, {
-    configurable: true,
-    value: disabled,
-    writable: true,
-  });
-
-  if (disabled) {
-    disabledMeasurementIds.add(measurementId);
-  } else {
-    disabledMeasurementIds.delete(measurementId);
-  }
-}
-
-function installCommandQueue(): Gtag {
-  const target = analyticsWindow();
-  target.dataLayer ??= [];
-  // Google's documented snippet queues the `arguments` object itself, not an
-  // array: gtag.js ignores array entries, so an arrow function spreading into
-  // `push(args)` loads the tag but never records config or page views.
-  target.gtag ??= function () {
-    // eslint-disable-next-line prefer-rest-params -- gtag.js requires the Arguments object; rest params would queue an Array it ignores, see above
-    target.dataLayer?.push(arguments);
-  };
-  return target.gtag;
-}
-
-function loadTag(measurementId: string): Promise<void> {
+function loadZaraz(): Promise<void> {
+  const existingApi = analyticsWindow().zaraz;
+  if (existingApi?.consent?.APIReady) return Promise.resolve();
   if (scriptLoad) return scriptLoad;
 
-  const existing = document.getElementById(SCRIPT_ID);
-  if (existing instanceof HTMLScriptElement && existing.dataset.loaded === "true") {
-    return Promise.resolve();
-  }
-
   scriptLoad = new Promise<void>((resolve, reject) => {
+    const existing = document.getElementById(SCRIPT_ID);
     const script =
       existing instanceof HTMLScriptElement ? existing : document.createElement("script");
+    let settled = false;
 
-    const loaded = () => {
-      script.dataset.loaded = "true";
+    const cleanup = () => {
+      clearTimeout(timeout);
+      document.removeEventListener(CONSENT_READY_EVENT, ready);
+      script.removeEventListener("load", ready);
+      script.removeEventListener("error", failed);
+    };
+    const ready = () => {
+      if (!analyticsWindow().zaraz?.consent?.APIReady || settled) return;
+      settled = true;
+      cleanup();
       resolve();
     };
     const failed = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       scriptLoad = null;
-      script.remove();
-      reject(new Error("Google Analytics failed to load"));
+      if (!(existing instanceof HTMLScriptElement)) script.remove();
+      reject(new Error("Cloudflare Zaraz failed to load"));
     };
+    const timeout = setTimeout(failed, INITIALIZATION_TIMEOUT_MS);
 
-    script.addEventListener("load", loaded, { once: true });
+    document.addEventListener(CONSENT_READY_EVENT, ready);
+    script.addEventListener("load", ready);
     script.addEventListener("error", failed, { once: true });
 
     if (!(existing instanceof HTMLScriptElement)) {
-      const source = new URL("https://www.googletagmanager.com/gtag/js");
-      source.searchParams.set("id", measurementId);
       script.id = SCRIPT_ID;
       script.async = true;
-      script.src = source.href;
+      script.referrerPolicy = "origin";
+      script.src = new URL(SCRIPT_SOURCE, window.location.origin).href;
       document.head.append(script);
     }
+
+    ready();
   });
 
   return scriptLoad;
+}
+
+function clearCookie(name: string): void {
+  const attributes = ["Path=/", "Max-Age=0", "SameSite=Lax"];
+  document.cookie = `${name}=; ${attributes.join("; ")}`;
+
+  const hostnameParts = window.location.hostname.split(".");
+  if (hostnameParts.length < 2) return;
+
+  // Zaraz is configured for the shared mytuums.com domain. Clear both the
+  // current host and the registrable domain when consent expires or changes.
+  const registrableDomain = hostnameParts.slice(-2).join(".");
+  for (const domain of new Set([window.location.hostname, registrableDomain])) {
+    document.cookie = `${name}=; ${attributes.join("; ")}; Domain=${domain}`;
+  }
 }
 
 function clearAnalyticsCookies(): void {
   const names = document.cookie
     .split(";")
     .map((part) => part.trim().split("=", 1)[0])
-    .filter((name) => name === "_ga" || name.startsWith("_ga_"));
+    .filter(
+      (name) =>
+        name === "_ga" ||
+        name.startsWith("_ga_") ||
+        name.startsWith("cfz_") ||
+        name === CONSENT_COOKIE_NAME,
+    );
 
-  for (const name of names) {
-    document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax`;
-
-    // GA normally scopes its first-party cookies to the highest usable domain.
-    // MyTuums runs at the apex, so deleting both host-only and explicit-domain
-    // shapes covers the configured tag without guessing at a parent suffix.
-    if (window.location.hostname.includes(".")) {
-      document.cookie = `${name}=; Max-Age=0; Path=/; Domain=${window.location.hostname}; SameSite=Lax`;
-    }
-  }
+  for (const name of names) clearCookie(name);
 }
 
-export const googleAnalytics: AnalyticsAdapter = {
-  start(measurementId) {
-    setCollectionDisabled(measurementId, false);
-    const gtag = installCommandQueue();
-
-    if (configuredMeasurementId !== measurementId) {
-      gtag("js", new Date());
-      // Manual SPA page views: `send_page_view: false` stops only the
-      // tag-load event. The GA4 property must also disable Enhanced
-      // Measurement's "Page changes based on browser history events"
-      // (see docs/operations.md), otherwise every TanStack Router
-      // navigation is counted twice — once automatically, once below.
-      // https://developers.google.com/analytics/devguides/collection/ga4/views#disable_page_changes_based_on_browser_history_events
-      gtag("config", measurementId, {
-        allow_ad_personalization_signals: false,
-        allow_google_signals: false,
-        cookie_expires: COOKIE_LIFETIME_SECONDS,
-        cookie_update: false,
-        send_page_view: false,
-      });
-      configuredMeasurementId = measurementId;
+/** Consent-gated page views sent through Cloudflare's native GA4 Managed Component. */
+export const zarazAnalytics: AnalyticsAdapter = {
+  async start() {
+    collectionDisabled = false;
+    try {
+      await loadZaraz();
+      analyticsWindow().zaraz?.consent?.set({ [ANALYTICS_PURPOSE_ID]: true });
+    } catch (error) {
+      collectionDisabled = true;
+      throw error;
     }
-
-    return loadTag(measurementId);
   },
 
-  stop(measurementId) {
-    setCollectionDisabled(measurementId, true);
+  stop() {
+    collectionDisabled = true;
+    const consent = analyticsWindow().zaraz?.consent;
+    if (consent?.APIReady) consent.set({ [ANALYTICS_PURPOSE_ID]: false });
     clearAnalyticsCookies();
   },
 
-  trackPageView(measurementId, page) {
-    if (disabledMeasurementIds.has(measurementId)) return;
-
-    analyticsWindow().gtag?.("event", "page_view", {
-      page_location: page.location,
-      page_title: page.title,
+  trackPageView(page) {
+    if (collectionDisabled) return;
+    analyticsWindow().zaraz?.track(PAGE_VIEW_EVENT, {
+      dl: page.location,
+      dt: page.title,
     });
   },
 };

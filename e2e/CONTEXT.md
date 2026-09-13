@@ -102,7 +102,7 @@ See [../TESTING_STRATEGY.md](../TESTING_STRATEGY.md).
 then starts Playwright against Vite preview and the native backend. Both use the
 built assets. This avoids Chromium resource exhaustion during repeated cold loads
 of Vite's development module graph. For direct focused Playwright commands, first
-run `VITE_GA_MEASUREMENT_ID=G-E2E306TEST pnpm --filter @my-tuums/web build`.
+run `VITE_GOOGLE_ANALYTICS=enabled pnpm --filter @my-tuums/web build`.
 The build generates frontend route and locale artifacts.
 
 - `pnpm --filter @my-tuums/e2e exec playwright test --project api`: HTTP contracts.

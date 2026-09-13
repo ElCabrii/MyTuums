@@ -90,7 +90,7 @@
     "CLOUDFLARE_ACCOUNT_ID": "734f3b84571b1967e6940140a0b7d75f",
     "STREAM_NAMESPACE": "mytuums-production",
     "EMAIL_FROM": "noreply@mytuums.com",
-    "GOOGLE_ANALYTICS": "disabled",
+    "GOOGLE_ANALYTICS": "enabled",
     "ACCESS_MODE": "public",
   },
   "secrets": {

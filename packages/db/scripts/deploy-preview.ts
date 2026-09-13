@@ -63,13 +63,7 @@ const config = z
   })
   .parse(unstable_readConfig({ config: `${root}apps/server/${appConfiguration}` }));
 process.env.VITE_WEB_ORIGIN = config.vars.WEB_ORIGIN;
-if (config.vars.GOOGLE_ANALYTICS === "enabled") {
-  z.string()
-    .regex(/^G-[A-Z0-9]+$/)
-    .parse(process.env.VITE_GA_MEASUREMENT_ID);
-} else if (process.env.VITE_GA_MEASUREMENT_ID) {
-  throw new Error("Analytics build input requires the matching Worker CSP setting.");
-}
+process.env.VITE_GOOGLE_ANALYTICS = config.vars.GOOGLE_ANALYTICS;
 console.log(`Deploying verified ${target} commit ${commit}: build, migrations, jobs, application.`);
 run(["build"]);
 run(["db:migrate", "--remote", `--environment=${environment}`]);
