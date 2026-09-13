@@ -66,6 +66,20 @@ function reply(status: number, text: string, headers?: Record<string, string>): 
   return new Response(text, { status, headers });
 }
 
+/** Cloudflare copies this CSP nonce onto the inline scripts it injects at the edge. */
+function addScriptNonce(policy: string): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const nonce = btoa(String.fromCharCode(...bytes));
+  return policy
+    .split("; ")
+    .map((directive) =>
+      directive.startsWith("script-src ")
+        ? `script-src 'nonce-${nonce}' ${directive.slice("script-src ".length)}`
+        : directive,
+    )
+    .join("; ");
+}
+
 function payloadTooLarge(request: Request): Response {
   if (!prefix(canonicalPath(new URL(request.url).pathname) ?? "", "/rpc"))
     return reply(413, "Payload too large");
@@ -304,6 +318,11 @@ export function createWorkerRequestHandler(deps: WorkerRequestDependencies) {
     const headers = new Headers(response.headers);
     for (const [name, value] of Object.entries(deps.responseHeaders))
       if (!headers.has(name)) headers.set(name, value);
+    if (headers.get("content-type")?.toLowerCase().startsWith("text/html")) {
+      const policy = headers.get("content-security-policy");
+      if (policy) headers.set("content-security-policy", addScriptNonce(policy));
+      headers.set("cache-control", "private, no-store");
+    }
     headers.set("x-request-id", requestId);
     const vary = (headers.get("vary") ?? "")
       .split(",")
