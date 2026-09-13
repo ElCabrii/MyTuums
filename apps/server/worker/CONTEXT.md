@@ -1,13 +1,13 @@
 # Native HTTP Worker runtime
 
-This directory contains the deployed Cloudflare application runtime for production,
-preview and PoC. The deployment entrypoint is `index.ts`; verification and resource
+This directory contains the deployed Cloudflare application runtime for production
+and preview. The deployment entrypoint is `index.ts`; verification and resource
 identities are in [the production execution record](../../../docs/cloudflare-production-migration.md).
 
 `../src/worker-request-handler.ts` owns the Web Request/Response routing boundary:
 exact-origin and environment admission first, trusted edge identity, health,
 normalized admin endpoint denial, auth, RPC, media and gated static assets.
-Preview and PoC require a verified Access assertion; public mode is restricted to
+Preview requires a verified Access assertion; public mode is restricted to
 the fixed production origin. The entrypoint supplies auth/RPC/media services and
 assets from validated Worker bindings. Local fixtures do not configure hosted
 Access policies or prove hosted behavior; release checks provide that evidence.
@@ -114,7 +114,7 @@ synthetic secret and payload. `../src/native-appeal-token.test.ts` verifies Node
 HMAC interoperability, Unicode, rejection and expiry inside workerd without
 Node compatibility. It is a local fixture, never a deployment target. The app
 entrypoint must construct the signer from its secret binding and pass it through
-API context alongside the PoC origin.
+API context alongside the configured origin.
 
 `tests/auth-email-entry.ts` bundles the real Better Auth configuration and email
 templates with isolated local D1 and captured synthetic delivery. The native
@@ -134,7 +134,8 @@ origin, identity and body-admission gates; it does not duplicate those gates.
 `application.ts` composes Access validation, the HTTP boundary, real auth/RPC,
 image authorizers and video capability delivery, database health and public page
 metadata. Construct it with one environment's services, asset binding and media
-resources. `index.ts` constructs those services from validated PoC configuration. `link-transport.ts` delegates outbound HTTP to the private `LINK_FETCHER` service;
+resources. `index.ts` constructs those services from validated environment
+configuration. `link-transport.ts` delegates outbound HTTP to the private `LINK_FETCHER` service;
 its Cloudflare Container preserves Node connection-time DNS and TLS validation.
 
 `tests/rpc-media-entry.ts` exercises this composition with real RPC/auth, D1, R2,
@@ -154,16 +155,16 @@ Hosted provider behavior remains unverified; this fixture is never deployed.
 
 `index.ts` creates one application handler per isolate, inside the first request.
 Initialization errors are content-free and retryable. Its configuration accepts
-only the PoC origin/account/Stream namespace and requires auth, Stream and all
-three OAuth credential pairs. Both Durable Object classes are exported. The
+only the preview or production origin/account/Stream tuple and requires auth,
+Stream and all three OAuth credential pairs. Both Durable Object classes are exported. The
 video binding targets the Workflow owned by the separate jobs Worker; the
 application does not run Cron or apply migrations.
 
-`../wrangler.jsonc` declares D1, private EU R2, Images, Stream, restricted-sender
-Email Service, both SQLite counters and the external video Workflow. It declares
-the already-provisioned Access audience and custom domain, disables workers.dev
-and preview URLs, and sends every asset request through the handler. Every
-response is private/no-store and noindex. Source maps are uploaded; automatic
+The Wrangler configurations declare D1, private EU R2, Images, Stream,
+restricted-sender Email Service, both SQLite counters and the external video
+Workflow. Hosted configurations declare their exact route and Access mode; the
+unqualified build configuration is non-routable. All disable workers.dev and
+preview URLs and send every asset request through the handler. Source maps are uploaded; automatic
 invocation logs are disabled and query strings redacted to avoid logging auth
 capabilities. Provider credentials belong in secret bindings, never source.
 The sender domain is active in Email Service, and the authorized production test was received; see the production execution record.
@@ -178,18 +179,17 @@ persistent local resources, and hosted production/preview are deployed and verif
 
 `../src/native-application.test.ts` runs the actual Wrangler bundle and Vite
 assets in Miniflare with committed D1 migrations and real counter namespaces.
-It proves asset/route Access gates, exact-host checks, configured PoC metadata,
-auth signup/sign-in/session, secret-safe initialization failure and PoC email
+It proves asset/route Access gates, exact-host checks, configured private metadata,
+auth signup/sign-in/session, secret-safe initialization failure and email
 links. Provider mail/Stream/Workflow delivery is synthetic in this test; the
 separate jobs suite covers the actual local Workflow engine. Run the web/server
 builds first, or root `pnpm test:unit`, whose Turbo dependency also builds branding.
 Do not rebuild assets while these artifact tests are running.
 
-The PoC frontend declares Google, Discord and Twitch because the entrypoint
-requires all three pairs. Workers Builds must supply the matching public Google
-client ID for One Tap. OAuth provider registration/callbacks, live email and
-Stream availability, secure preview networking
-and deployed parity tests remain required before the full PoC can be complete.
+Hosted frontends declare Google, Discord and Twitch because the entrypoint
+requires all three pairs. Deployments supply the matching public Google client
+ID for One Tap. OAuth callbacks, email, Stream and secure preview networking are
+covered by hosted release checks.
 
 The RPC handler retains the configured-origin CORS plugin before CSRF admission.
 Size rejections at the transport boundary use oRPC's documented JSON error
@@ -203,29 +203,27 @@ the real Stream adapter and jobs Video Workflow run unchanged. Browser routing
 handles synthetic tus HEAD/PATCH requests and lost-acknowledgement recovery.
 No actual codec processing, hosted playback or external provider request occurs.
 
-## Native preview candidate
+## Native preview
 
-The entrypoint now permits the fixed preview and migration-candidate origins,
-paired with the `mytuums-preview` Stream namespace. The default configuration
-remains PoC. `../wrangler.preview.jsonc` binds only the isolated EU preview D1/R2
-pair and owner-only candidate Access audience. Final-origin cutover must change
-origin, route and audience together; see [the execution record](../../../docs/cloudflare-preview-migration.md).
+The entrypoint permits the fixed preview origin paired with the
+`mytuums-preview` Stream namespace. `../wrangler.preview.jsonc` binds only the
+isolated EU preview D1/R2 pair and preview Access audience. Origin, route,
+audience and resource tuple must change together; see
+[the execution record](../../../docs/cloudflare-preview-migration.md).
 
 Preview sets `GOOGLE_ANALYTICS=enabled` to preserve its existing consent-gated
 analytics. The deployment command requires the matching public GA measurement ID
-at build time; the Worker flag controls the corresponding CSP sources. PoC defaults
-to disabled.
+at build time; the Worker flag controls the corresponding CSP sources. Production
+analytics remain disabled.
 
-## Production candidate and public release
+## Production public release
 
-The production candidate uses the fixed production resource tuple behind the
-candidate Access audience. `index.ts` permits `ACCESS_MODE=public` only with
-`https://mytuums.com` and `mytuums-production`; every preview/PoC/candidate origin
-still requires Access. The HTTP boundary still checks the exact host, edge IP,
+`index.ts` permits `ACCESS_MODE=public` only with `https://mytuums.com` and
+`mytuums-production`; preview still requires Access. The HTTP boundary checks the exact host, edge IP,
 application session and media permissions. Public responses preserve their normal
 cache/metadata policy; private environments additionally enforce no-store/noindex.
 `native-application.test.ts` checks public login, signed-out page redirects,
-admin denial, alternate-host refusal and rejection of a public candidate config.
+admin denial, alternate-host refusal and rejection of any unsupported public config.
 Rich link networking uses the private Cloudflare Container described in
 [its context](../../link-fetcher/CONTEXT.md). Hosted card verification remains a
 release gate; no browser credentials cross that binding.

@@ -1,29 +1,28 @@
 # packages/db context
 
-Cloudflare PoC: `src/index.ts` now exports `createDatabase(binding)`, `Database`
-and `pingDb(db)`, with no global connection. `Database` excludes interactive
+`src/index.ts` exports `createDatabase(binding)`, `Database` and `pingDb(db)`,
+with no global connection. `Database` excludes interactive
 transactions. SQLite schema and generated auth tables use epoch milliseconds.
 Generate/check D1 migrations through `drizzle.d1.config.ts`; the old `drizzle/`
 folder is historical PostgreSQL DDL. `src/testing/d1.ts` supplies ephemeral local
 workerd databases. Founder grants and bootstrap promotion use D1 through
 `scripts/admin.ts`; committed migrations use `scripts/migrate.ts`. `db:test:setup` validates an
-ephemeral D1 binding. `@my-tuums/db/poc-database` exposes the guarded, Node-only
-administration connections to maintenance CLIs; never import it into a Worker.
-`openPocDatabase` binds only D1; `openPocMedia` binds the matching D1 and EU R2
-bucket. Both validate the fixed PoC account/resource identities, share Wrangler's
-local development persistence and load no `.env` or unrelated app bindings.
-Remote access is explicit; media commands cannot combine one environment's
-bucket with another database.
+ephemeral D1 binding. `@my-tuums/db/maintenance-environment` exposes the guarded,
+Node-only administration connection to maintenance CLIs; never import it into a
+Worker. It binds local resources by default. Preview and production require
+both `--remote` and an explicit environment, validate their exact app/D1/R2
+tuple, and load no `.env` or unrelated app bindings. Media commands cannot
+combine one environment's bucket with another database.
 The PostgreSQL config, direct schema-push/Studio commands and test-URL helpers
 have been removed on this branch. Use committed native migrations.
 `scripts/rehearse-recovery.ts` owns the local SQL recovery rehearsal. It creates
 two fresh `_test` databases, exports/imports through the installed Wrangler CLI,
 compares schema/data and exercises restored triggers. It accepts no target or
 remote option, loads no environment files and removes its own temporary files.
-It does not open the application's local or hosted PoC resources.
+It does not open the application's local or hosted resources.
 See [migration status](../../docs/cloudflare-migration.md). The map below records native ownership and invariants.
 
-The deployed PoC migration baseline is `drizzle-d1/0000_cloudflare_initial.sql`;
+The native migration baseline is `drizzle-d1/0000_cloudflare_initial.sql`;
 `0001_database_invariants.sql` owns handle normalization, the two expression
 indexes Drizzle Kit cannot generate correctly, and `user_delete_post_tree`.
 Account deletion materializes its full reply descendant set and deletes that
@@ -45,9 +44,10 @@ Workflow intents and Stream state. The remaining migrations are custom SQL:
 `0005_stream_cleanup_triggers.sql` for video termination/orphan cleanup.
 The previous experimental migration sequence was never applied remotely. The
 current seven migrations, through `0006_durable_moderation_email.sql`, were applied
-to the isolated EU PoC database on September 11 from commit `9078e60`. All 114
-schema objects and ledger hashes match local migration output. Evolve this
-deployed baseline with new committed migrations; never regenerate or reset it.
+to the original isolated migration database on September 11 from commit
+`9078e60`. All 114 schema objects and ledger hashes matched local migration
+output before the preview and production cutovers. Evolve this deployed
+baseline with new committed migrations; never regenerate or reset it.
 Historical PostgreSQL migrations under `drizzle/` remain unchanged.
 
 Video rows require a creator identity and retain a private upload capability,
@@ -165,24 +165,24 @@ administrative scripts and deployment callers still require their runtime port.
 ## Dependencies and boundaries
 
 Source subpaths are compiled or inlined by their consumers. Admin commands use
-`scripts/poc-database.ts`: it validates the application config against the exact
-PoC account/database and opens a D1-only Wrangler proxy. Commands default to local
-state shared with `apps/server` Wrangler dev; `--remote` explicitly selects the
-isolated PoC database and requires Wrangler authentication. No `.env` is loaded.
+`scripts/maintenance-environment.ts`: it validates the selected application
+configuration and opens only its D1/R2 bindings. Commands default to isolated
+local state. Preview and production require explicit `--remote` selection and
+Wrangler authentication. No `.env` is loaded.
 They do not expose an HTTP administration route. Founder grants atomically enforce
 three holders; bootstrap promotion atomically refuses all changes after the first
 admin exists, including concurrent invocations. Provider/SQL errors are not printed.
 
-| Subpath                 | Exports                                 | Consumers                                       |
-| ----------------------- | --------------------------------------- | ----------------------------------------------- |
-| `.`                     | `createDatabase`, `Database`, `pingDb`  | `packages/api`, `packages/auth`, `apps/server`  |
-| `./schema`              | tables and relations                    | `packages/api`, `e2e`                           |
-| `./testing/d1`          | guarded ephemeral D1 runtime            | native integration fixtures                     |
-| `./poc-database`        | fixed PoC D1/R2 administration bindings | Node maintenance CLIs                           |
-| `./migrate`             | `runMigrations`                         | `scripts/migrate.ts`                            |
-| `./promote`             | `promoteUser`                           | `scripts/admin.ts`                              |
-| `./grant-founder-badge` | `grantFounderBadge`                     | `scripts/admin.ts`, API badge integration tests |
-| `./stamp-join-badges`   | `stampJoinBadges`                       | `packages/auth` (the user-create hook)          |
+| Subpath                     | Exports                                   | Consumers                                       |
+| --------------------------- | ----------------------------------------- | ----------------------------------------------- |
+| `.`                         | `createDatabase`, `Database`, `pingDb`    | `packages/api`, `packages/auth`, `apps/server`  |
+| `./schema`                  | tables and relations                      | `packages/api`, `e2e`                           |
+| `./testing/d1`              | guarded ephemeral D1 runtime              | native integration fixtures                     |
+| `./maintenance-environment` | guarded local/preview/production bindings | Node maintenance CLIs                           |
+| `./migrate`                 | `runMigrations`                           | `scripts/migrate.ts`                            |
+| `./promote`                 | `promoteUser`                             | `scripts/admin.ts`                              |
+| `./grant-founder-badge`     | `grantFounderBadge`                       | `scripts/admin.ts`, API badge integration tests |
+| `./stamp-join-badges`       | `stampJoinBadges`                         | `packages/auth` (the user-create hook)          |
 
 This package must not import `packages/api` or `packages/auth` — the
 dependency direction is one way.
@@ -216,14 +216,14 @@ all rows and foreign keys, and emits a new D1 SQL artifact with the native migra
 ledger. `scripts/prepare-preview-import.ts` is its guarded CLI; importer tests use
 Node’s test runner through `pnpm --filter @my-tuums/db test:unit`. See
 [the preview migration record](../../docs/cloudflare-preview-migration.md).
-`db:migrate --environment=preview` uses the exact preview resource pair from
-`apps/server/wrangler.preview.jsonc`; the default remains PoC. Never use the full
+`db:migrate --remote --environment=preview` uses the exact preview resource pair
+from `apps/server/wrangler.preview.jsonc`; the default remains local. Never use the full
 snapshot importer against an environment that is accepting writes.
 
 `deploy:preview` gates a clean allowed branch against the exact commit’s latest
 GitHub Actions Verify, E2E tests and Docker image builds results. Production
-requires `main`; preview also accepts `main` and the existing native migration
-branches. The retired production-candidate target is refused. It then builds and
+and preview require `main`; retired migration targets and branches are refused.
+It then builds and
 deploys migrations, the private link fetcher, jobs and app in order; production
 also deploys branding. `preview-deploy-checks.test.ts` covers refusals
 for missing, foreign, superseded and failed checks. This operator command does

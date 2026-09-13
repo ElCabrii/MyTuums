@@ -5,7 +5,7 @@ function createHandler(env: BrandingEnv) {
     env.BRANDING_ORIGIN === "https://about.mytuums.com" &&
     "ACCESS_MODE" in env &&
     env.ACCESS_MODE === "public";
-  if (!publicSite && env.BRANDING_ORIGIN !== "https://about-cf-poc.mytuums.com")
+  if (!publicSite && env.BRANDING_ORIGIN !== "https://branding-preview.invalid")
     throw new Error("Unsupported branding configuration.");
   const authorizeAccess = publicSite
     ? () => Promise.resolve(true)

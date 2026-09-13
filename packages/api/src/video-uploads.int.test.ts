@@ -17,7 +17,7 @@ afterAll(closeDb);
 function provider() {
   const objects = new Map<string, { owner: string; uploaded: boolean }>();
   const stream: StreamService = {
-    creatorId: (id) => `mytuums-poc:${id}`,
+    creatorId: (id) => `mytuums-test:${id}`,
     createUpload(id) {
       const uid = crypto.randomUUID().replaceAll("-", "");
       objects.set(uid, { owner: id, uploaded: false });

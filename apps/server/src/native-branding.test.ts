@@ -125,14 +125,14 @@ it("serves the built branding site only after Access, including real static asse
     expect(page.headers.get("x-request-id")).toMatch(/^[a-f0-9-]{36}$/);
     const html = await page.text();
     expect(html).toContain(`href="${origin}/"`);
-    expect(html).toContain('"url": "https://cf-poc.mytuums.com"');
+    expect(html).toContain('"url": "https://preview.mytuums.com"');
     expect(html).not.toContain("https://about.mytuums.com");
     const script = /<script[^>]+src="([^"]+)"/.exec(html)?.[1];
     if (!script) throw new Error("Missing built branding script.");
     expect((await runtime.dispatchFetch(new URL(script, origin))).status).toBe(404);
     const javascript = await runtime.dispatchFetch(new URL(script, origin), { headers });
     expect(javascript.status).toBe(200);
-    expect(await javascript.text()).toContain("https://cf-poc.mytuums.com");
+    expect(await javascript.text()).toContain("https://preview.mytuums.com");
     const head = await runtime.dispatchFetch(origin, { method: "HEAD", headers });
     expect(head.status).toBe(200);
     expect(await head.text()).toBe("");

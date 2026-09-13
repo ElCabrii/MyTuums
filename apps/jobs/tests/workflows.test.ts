@@ -77,10 +77,10 @@ const runtime = new Miniflare({
           MEDIA: { type: "r2", name: "mytuums_jobs_media_test", jurisdiction: "eu" },
           STREAM: { type: "worker", worker: "stream-fixture" },
           EMAIL: { type: "worker", worker: "stream-fixture" },
-          WEB_ORIGIN: { type: "json", value: "https://cf-poc.mytuums.com" },
+          WEB_ORIGIN: { type: "json", value: "https://preview.example.test" },
           EMAIL_FROM: { type: "json", value: "noreply@mytuums.com" },
           APPEAL_TOKEN_SECRET: { type: "json", value: appealSecret },
-          STREAM_NAMESPACE: { type: "json", value: "mytuums-poc" },
+          STREAM_NAMESPACE: { type: "json", value: "mytuums-test" },
           CLOUDFLARE_ACCOUNT_ID: { type: "json", value: "a".repeat(32) },
           STREAM_API_TOKEN: { type: "json", value: "synthetic-test-token" },
           IGDB_CLIENT_ID: { type: "json", value: "synthetic-client" },
@@ -227,7 +227,7 @@ it("recovers a committed moderation notice through the maintenance Workflow", as
   expect(messages.results).toHaveLength(1);
   expect(messages.results[0].body).toContain("Synthetic committed post");
   expect(messages.results[0].body).toContain("Votre publication");
-  expect(messages.results[0].body).toContain("https://cf-poc.mytuums.com/appeal?token=");
+  expect(messages.results[0].body).toContain("https://preview.example.test/appeal?token=");
   const capability = /\/appeal\?token=([A-Za-z0-9_.-]+)/.exec(messages.results[0].body)?.[1];
   expect(capability).toBeDefined();
   expect(await createAppealTokenSigner(appealSecret).verify(capability!)).toMatchObject({
@@ -263,7 +263,7 @@ it("executes the bundled video Workflow against D1 and a native stream through R
       authorId,
       state: "queued",
       byteSize: 10,
-      streamCreatorId: `mytuums-poc:${id}`,
+      streamCreatorId: `mytuums-test:${id}`,
       streamUid: id.replaceAll("-", ""),
       expiresAt: new Date(Date.now() + 1_800_000),
     }),
@@ -340,7 +340,7 @@ it("runs Cron dispatch, deadline recovery and Monday pruning through the schedul
       authorId,
       state: "queued",
       byteSize: 10,
-      streamCreatorId: `mytuums-poc:${id}`,
+      streamCreatorId: `mytuums-test:${id}`,
       streamUid: id.replaceAll("-", ""),
       expiresAt: new Date(0),
     }),

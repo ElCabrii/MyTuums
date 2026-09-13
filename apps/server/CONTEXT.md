@@ -24,7 +24,7 @@ administration tools.
 | `src/worker-document.ts`         | bounded HTML transformation and metadata                 |
 | `src/access.ts`                  | fixed issuer/audience Access JWT verification            |
 | `worker/media.ts`                | private R2 delivery and Images variants                  |
-| `wrangler.jsonc`                 | PoC domain, bindings, limits and observability           |
+| `wrangler*.jsonc`                | build, preview and production bindings and observability |
 | `src/e2e-server.ts`              | disposable local native E2E composition                  |
 | `src/games-sync.ts`              | guarded D1 CLI that queues GameSyncWorkflow intent       |
 
@@ -41,8 +41,8 @@ administration tools.
 
 ## Invariants
 
-- Exact-host admission precedes all routes/assets. Preview and PoC also require
-  verified Access JWTs; only the fixed production origin can use public mode.
+- Exact-host admission precedes all routes/assets. Preview requires a verified
+  Access JWT; only the fixed production origin can use public mode.
   workers.dev and preview URLs stay disabled; application auth remains underneath.
 - Auth admin endpoints are denied before Better Auth dispatch. Moderation flows
   only through the API's hierarchy and audit guards.

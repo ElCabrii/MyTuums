@@ -19,10 +19,10 @@ retains the five-second network deadline. The application's smaller HTML limit
 and total redirect deadline still apply. Failure leaves the ordinary plain-link
 fallback. Cold startup counts toward that application deadline.
 
-Each environment has a separate `lite` Container that sleeps after 60 seconds
-without requests. Default, preview and production Wrangler files name separate
-Workers; the protected production candidate uses the production fetcher. This
-keeps preview releases from changing production networking. The stable `links`
+Each hosted environment has a separate `lite` Container that sleeps after 60
+seconds without requests. The default Wrangler file is a non-routable build
+configuration; preview and production name their deployed Workers. This keeps
+preview releases from changing production networking. The stable `links`
 instance name must not change during a routine deployment. The service retains
 no application data and never selects a database or bucket. Its image runs the bundled Node 24 fetcher as a non-root user. The new
 Dockerfile belongs only to this Cloudflare helper; the Railway app image is not

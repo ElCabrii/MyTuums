@@ -1,13 +1,12 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "mytuums-poc-app",
+  "name": "mytuums-build-app",
   "account_id": "734f3b84571b1967e6940140a0b7d75f",
   "main": "worker/index.ts",
   "compatibility_date": "2026-09-11",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
-  "routes": [{ "pattern": "cf-poc.mytuums.com", "custom_domain": true }],
   "assets": {
     "directory": "../web/dist",
     "binding": "ASSETS",
@@ -18,15 +17,15 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "mytuums-poc",
-      "database_id": "f4334c85-cca9-4437-976e-b52038047c62",
+      "database_name": "mytuums-local",
+      "database_id": "00000000-0000-0000-0000-000000000001",
       "migrations_dir": "../../packages/db/drizzle-d1",
     },
   ],
   "r2_buckets": [
     {
       "binding": "MEDIA",
-      "bucket_name": "mytuums-poc-media",
+      "bucket_name": "mytuums-local-media",
       "jurisdiction": "eu",
       "remote": false,
     },
@@ -55,24 +54,24 @@
   "services": [
     {
       "binding": "LINK_FETCHER",
-      "service": "mytuums-poc-link-fetcher",
+      "service": "mytuums-build-link-fetcher",
       "entrypoint": "LinkFetchService",
     },
   ],
   "workflows": [
     {
       "binding": "VIDEO_WORKFLOW",
-      "name": "mytuums-poc-video",
+      "name": "mytuums-build-video",
       "class_name": "VideoWorkflow",
-      "script_name": "mytuums-poc-jobs",
+      "script_name": "mytuums-build-jobs",
     },
   ],
   "vars": {
-    "WEB_ORIGIN": "https://cf-poc.mytuums.com",
+    "WEB_ORIGIN": "https://preview.mytuums.com",
     "ACCESS_TEAM_DOMAIN": "https://mytuums.cloudflareaccess.com",
-    "ACCESS_AUDIENCE": "922c01438550e418bc92d4cbdfb4f43ace516d8e348bb45a390d5256fa933124",
+    "ACCESS_AUDIENCE": "6a8abc536bcca8df6a610bf39889bf089c297137124b0ce515dfb949130beca5",
     "CLOUDFLARE_ACCOUNT_ID": "734f3b84571b1967e6940140a0b7d75f",
-    "STREAM_NAMESPACE": "mytuums-poc",
+    "STREAM_NAMESPACE": "mytuums-preview",
     "EMAIL_FROM": "noreply@mytuums.com",
   },
   "secrets": {

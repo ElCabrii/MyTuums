@@ -33,7 +33,7 @@ async function pending(caption: string | null = null) {
       authorId: author.id,
       state: "queued",
       byteSize: 10,
-      streamCreatorId: `mytuums-poc:${id}`,
+      streamCreatorId: `mytuums-test:${id}`,
       streamUid: id.replaceAll("-", ""),
       expiresAt: new Date(Date.now() + 1_800_000),
     }),

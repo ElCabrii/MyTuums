@@ -1,7 +1,8 @@
 # MyTuums
 
-Preview runs on Cloudflare. Production migration preparation and release gates
-are tracked in [the production execution record](docs/cloudflare-production-migration.md).
+Production and preview run on Cloudflare. The completed cutover and rollback
+retention window are tracked in
+[the production execution record](docs/cloudflare-production-migration.md).
 
 MyTuums is a social app with posts, replies, likes, follows, profiles, search and
 moderation with appeals. This branch runs its backend on Workers with D1 and R2.
@@ -92,12 +93,13 @@ in the existing test suites; see [E2E context](e2e/CONTEXT.md).
 stack. App and jobs share its D1/R2 state. OAuth, Stream video processing and IGDB
 provider checks use hosted preview; the local stack has no provider credentials.
 
-The PoC maintenance commands use local D1/R2 by default, with `--remote` selecting
-only the isolated hosted PoC resources:
+Maintenance commands use local D1/R2 by default. A hosted command must select
+preview or production explicitly:
 
 ```bash
-pnpm games:seed --database=mytuums-poc
-pnpm --filter @my-tuums/api reconcile:media --bucket=mytuums-poc-media
+pnpm games:seed
+pnpm games:sync --remote --environment=preview
+pnpm --filter @my-tuums/api reconcile:media --remote --environment=production
 pnpm --filter @my-tuums/api prune:notifications --retention-days=90
 ```
 
@@ -113,9 +115,8 @@ change while you work, and `pnpm verify` before you push.
 | `pnpm verify`      | **PR** — build, lint, typecheck, format, docs, unit, integration |
 | `pnpm verify:full` | **full** — the above plus the Playwright suite                   |
 
-`pnpm verify` is exactly what CI's `Verify` job runs. This Cloudflare PoC branch
-is still being ported; see [the migration record](docs/cloudflare-migration.md)
-for current checks and the remaining development and hosted deployment work.
+`pnpm verify` is exactly what CI's `Verify` job runs. See
+[operations](docs/operations.md) for deployment and maintenance commands.
 
 | Command                                                         | What it does                                                   |
 | --------------------------------------------------------------- | -------------------------------------------------------------- |

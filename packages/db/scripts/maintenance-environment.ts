@@ -7,43 +7,64 @@ import { getPlatformProxy, unstable_readConfig } from "wrangler";
 import { z } from "zod";
 import { createDatabase } from "../src/index.js";
 
-export const POC_DATABASE_NAME = "mytuums-poc";
-export const POC_MEDIA_BUCKET_NAME = "mytuums-poc-media";
+export const MAINTENANCE_ENVIRONMENTS = ["local", "preview", "production"] as const;
+export type MaintenanceEnvironment = (typeof MAINTENANCE_ENVIRONMENTS)[number];
 
+const localConfigPath = fileURLToPath(
+  new URL("../../../apps/server/wrangler.jsonc", import.meta.url),
+);
 const previewConfigPath = fileURLToPath(
   new URL("../../../apps/server/wrangler.preview.jsonc", import.meta.url),
 );
 const productionConfigPath = fileURLToPath(
   new URL("../../../apps/server/wrangler.production.jsonc", import.meta.url),
 );
+const localStatePath = fileURLToPath(
+  new URL("../../../apps/server/.wrangler/maintenance", import.meta.url),
+);
+
 const targets = {
-  poc: {
-    app: "mytuums-poc-app",
-    database: POC_DATABASE_NAME,
-    id: "f4334c85-cca9-4437-976e-b52038047c62",
-    bucket: POC_MEDIA_BUCKET_NAME,
+  local: {
+    app: "mytuums-build-app",
+    database: "mytuums-local",
+    id: "00000000-0000-0000-0000-000000000001",
+    bucket: "mytuums-local-media",
+    config: localConfigPath,
   },
   preview: {
     app: "mytuums-preview-app",
     database: "mytuums-preview",
     id: "c8ce4268-2a4c-4175-b574-93c1c45aac92",
     bucket: "mytuums-preview-media",
+    config: previewConfigPath,
   },
   production: {
     app: "mytuums-production-app",
     database: "mytuums-production",
     id: "e80d3f42-4fe5-41fb-90b7-32de79d25e0b",
     bucket: "mytuums-production-media",
+    config: productionConfigPath,
   },
 } as const;
 
-const appConfigPath = fileURLToPath(
-  new URL("../../../apps/server/wrangler.jsonc", import.meta.url),
-);
-const localStatePath = fileURLToPath(
-  new URL("../../../apps/server/.wrangler/state/v3", import.meta.url),
-);
-function configuration(environment: keyof typeof targets) {
+export function resolveMaintenanceEnvironment(
+  environment: string | undefined,
+  remote: boolean,
+): MaintenanceEnvironment {
+  const selected = z.enum(MAINTENANCE_ENVIRONMENTS).parse(environment ?? "local");
+  if (selected === "local" && remote)
+    throw new Error("Local maintenance cannot use remote Cloudflare bindings.");
+  if (selected !== "local" && !remote)
+    throw new Error("Preview and production maintenance require --remote.");
+  return selected;
+}
+
+export function maintenanceResourceNames(environment: MaintenanceEnvironment) {
+  const target = targets[environment];
+  return { database: target.database, bucket: target.bucket };
+}
+
+function configuration(environment: MaintenanceEnvironment) {
   const target = targets[environment];
   return z.object({
     name: z.literal(target.app),
@@ -66,25 +87,15 @@ function configuration(environment: keyof typeof targets) {
   });
 }
 
-/** Open only requested environment resources; never inherit unrelated application bindings. */
+/** Open only the selected D1/R2 pair; never inherit application secrets or provider bindings. */
 async function openBindings(
+  environment: MaintenanceEnvironment,
   remote: boolean,
   includeMedia: boolean,
-  environment: keyof typeof targets,
 ) {
-  const app = configuration(environment).parse(
-    unstable_readConfig({
-      config:
-        environment === "poc"
-          ? appConfigPath
-          : environment === "preview"
-            ? previewConfigPath
-            : productionConfigPath,
-    }),
-  );
-  // Admin commands load no application secrets, Stream, email or job bindings.
-  // Database-only callers do not start R2 or need its remote permissions.
-  const directory = await mkdtemp(join(tmpdir(), "mytuums-poc-admin-"));
+  const target = targets[environment];
+  const app = configuration(environment).parse(unstable_readConfig({ config: target.config }));
+  const directory = await mkdtemp(join(tmpdir(), "mytuums-maintenance-"));
   try {
     const configPath = join(directory, "wrangler.json");
     await writeFile(
@@ -101,9 +112,7 @@ async function openBindings(
       configPath,
       envFiles: [],
       remoteBindings: remote,
-      persist: {
-        path: environment === "poc" ? localStatePath : `${localStatePath}-${environment}`,
-      },
+      persist: { path: localStatePath },
     });
     return {
       db: createDatabase(proxy.env.DB),
@@ -122,30 +131,20 @@ async function openBindings(
   }
 }
 
-/** D1-only administration. Local state is shared with Wrangler dev. */
-export async function openPocDatabase(remote: boolean) {
-  const { db, dispose } = await openBindings(remote, false, "poc");
+export async function openMaintenanceDatabase(
+  environment: MaintenanceEnvironment,
+  remote: boolean,
+) {
+  const { db, dispose } = await openBindings(environment, remote, false);
   return { db, dispose };
 }
 
-/** Media maintenance always uses the same validated D1/EU-R2 environment pair. */
-export async function openPocMedia(remote: boolean) {
-  const resources = await openBindings(remote, true, "poc");
+/** Media maintenance always uses the selected environment's matching D1/EU-R2 pair. */
+export async function openMaintenanceMedia(environment: MaintenanceEnvironment, remote: boolean) {
+  const resources = await openBindings(environment, remote, true);
   if (!resources.bucket) {
     await resources.dispose();
-    throw new Error("The PoC media binding is unavailable.");
+    throw new Error("The selected media binding is unavailable.");
   }
   return { db: resources.db, bucket: resources.bucket, dispose: resources.dispose };
-}
-
-/** Preview migrations never inherit PoC or production resource identities. */
-export async function openPreviewDatabase(remote: boolean) {
-  const { db, dispose } = await openBindings(remote, false, "preview");
-  return { db, dispose };
-}
-
-/** Production database maintenance cannot open preview resources or an archive bucket. */
-export async function openProductionDatabase(remote: boolean) {
-  const { db, dispose } = await openBindings(remote, false, "production");
-  return { db, dispose };
 }

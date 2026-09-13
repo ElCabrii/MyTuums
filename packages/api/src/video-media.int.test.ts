@@ -22,7 +22,7 @@ async function published() {
     authorId: author.id,
     postId: target.id,
     state: "published",
-    streamCreatorId: `mytuums-poc:${id}`,
+    streamCreatorId: `mytuums-test:${id}`,
     streamUid: id.replaceAll("-", ""),
     byteSize: 100,
     expiresAt: new Date(),

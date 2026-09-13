@@ -16,7 +16,7 @@ export default {
       streamOrigins: ["https://customer-test.cloudflarestream.com"],
     });
     handle ??= createWorkerRequestHandler({
-      origin: "https://cf-poc.example.com",
+      origin: "https://preview.example.test",
       authorizeAccess,
       pingDb: () => Promise.resolve(),
       resolveSession: () => Promise.resolve({ kind: "authenticated", userId: "synthetic-viewer" }),
