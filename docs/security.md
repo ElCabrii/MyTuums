@@ -436,13 +436,15 @@ local image preview in the crop editor), `frame-ancestors 'none'`,
 `X-Content-Type-Options: nosniff`,
 `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`
 and HSTS. Inner handlers win, so a handler setting its own header keeps it.
-The analytics controller loads Cloudflare Zaraz from the same-origin
-`/cdn-cgi/zaraz/i.js` path only after a valid per-device opt-in. It reports a
-sanitised URL through the same-origin Zaraz endpoint; the zone's native GA4
-Managed Component forwards the event server-side. Google's analytics script and
-collection origins therefore remain absent from `script-src` and `connect-src`.
-Zaraz's own hidden consent purpose independently blocks the GA4 action until the
-controller grants it and blocks it again on withdrawal.
+Cloudflare injects the Zaraz runtime from the same-origin `/cdn-cgi/zaraz/i.js`
+path so its Consent API is available to the analytics controller. The runtime
+does not emit a MyTuums analytics event before a valid per-device opt-in. After
+opt-in, the controller reports a sanitised URL through the same-origin Zaraz
+endpoint; the zone's native GA4 Managed Component forwards the event server-side.
+Google's analytics script and collection origins therefore remain absent from
+`script-src` and `connect-src`. Zaraz's hidden consent purpose independently
+blocks the GA4 action until the controller grants it and blocks it again on
+withdrawal.
 
 **The CSP is hash-based, which constrains the edge in front of the app.**
 Cloudflare's JavaScript Detections injects its own inline `<script>` into every

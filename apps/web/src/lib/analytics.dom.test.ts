@@ -14,28 +14,31 @@ interface TestAnalyticsWindow extends Window {
 const testWindow = window as TestAnalyticsWindow;
 
 afterEach(() => {
-  document.getElementById("my-tuums-zaraz")?.remove();
   delete testWindow.zaraz;
   vi.resetModules();
 });
 
 describe("Cloudflare Zaraz analytics", () => {
-  it("loads from the same origin after consent and forwards only enabled page views", async () => {
+  it("does not write a Zaraz denial before collection has started", async () => {
+    const consentSet = vi.fn();
+    testWindow.zaraz = { consent: { APIReady: true, set: consentSet }, track: vi.fn() };
+    const { zarazAnalytics } = await import("@/lib/analytics");
+
+    zarazAnalytics.stop();
+
+    expect(consentSet).not.toHaveBeenCalled();
+  });
+
+  it("uses the native consent API and forwards only enabled page views", async () => {
     const { zarazAnalytics } = await import("@/lib/analytics");
 
     document.cookie = "cfz_google-analytics-4_ga4=visitor; Path=/";
     document.cookie = "mytuums_zaraz_consent=granted; Path=/";
     zarazAnalytics.stop();
-    expect(document.getElementById("my-tuums-zaraz")).toBeNull();
     expect(document.cookie).not.toContain("cfz_google-analytics-4_ga4");
     expect(document.cookie).not.toContain("mytuums_zaraz_consent");
 
     const started = zarazAnalytics.start();
-    const script = document.getElementById("my-tuums-zaraz");
-    expect(script).toBeInstanceOf(HTMLScriptElement);
-    if (!(script instanceof HTMLScriptElement)) throw new Error("Zaraz script was not created");
-    expect(script.src).toBe(new URL("/cdn-cgi/zaraz/i.js", window.location.origin).href);
-
     const consentSet = vi.fn();
     const track = vi.fn();
     testWindow.zaraz = { consent: { APIReady: true, set: consentSet }, track };

@@ -515,10 +515,11 @@ app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
   `VITE_GOOGLE_ANALYTICS=enabled`, no banner or analytics code runs. When
   enabled, every signed-in and signed-out surface offers equally prominent
   accept/refuse choices and remembers either choice on that device for at most
-  six months. Acceptance loads Cloudflare Zaraz from the same origin and enables
-  only its consent-bound GA4 action; the browser never loads Google's analytics
-  script. The footer and account settings can reopen the choice at any time;
-  refusing changes no product behavior.
+  six months. Cloudflare provides the Zaraz runtime from the same origin;
+  acceptance enables only its consent-bound GA4 action, while refusal emits no
+  analytics event. The browser never loads Google's analytics script. The footer
+  and account settings can reopen the choice at any time; refusing changes no
+  product behavior.
 
 ## Blocks
 

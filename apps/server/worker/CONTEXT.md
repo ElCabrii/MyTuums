@@ -213,9 +213,10 @@ audience and resource tuple must change together; see
 
 Preview and production set `GOOGLE_ANALYTICS=enabled`. The deployment command
 turns that Worker setting into the public build flag that exposes the consent UI
-and same-origin Zaraz loader. The GA4 measurement ID, action and consent purpose
-live in the `mytuums.com` zone's Zaraz configuration. The browser never needs
-Google Analytics origins in the application CSP.
+and connects it to the same-origin Zaraz runtime injected by the zone. The GA4
+measurement ID, action and consent purpose live in the `mytuums.com` zone's
+Zaraz configuration. The browser never needs Google Analytics origins in the
+application CSP.
 
 ## Production public release
 
