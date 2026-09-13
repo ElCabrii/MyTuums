@@ -438,14 +438,15 @@ local image preview in the crop editor), `frame-ancestors 'none'`,
 `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`
 and HSTS. Inner handlers win, so a handler setting its own header keeps it.
 Cloudflare injects the Zaraz runtime from its same-origin `/cdn-cgi/zaraz/`
-paths so its Consent API is available to the analytics controller. The runtime
-does not emit a MyTuums analytics event before a valid per-device opt-in. After
-opt-in, the controller reports a sanitised URL through the same-origin Zaraz
-endpoint; the zone's native GA4 Managed Component forwards the event server-side.
+paths. The runtime does not emit a MyTuums analytics event before a valid
+per-device opt-in. After opt-in, the controller reports a sanitised URL through
+the same-origin Zaraz endpoint; the zone's native GA4 Managed Component forwards
+the event server-side.
 Google's analytics script and collection origins therefore remain absent from
-`script-src` and `connect-src`. Zaraz's hidden consent purpose independently
-blocks the GA4 action until the controller grants it and blocks it again on
-withdrawal.
+`script-src` and `connect-src`. The GA4 action has no automatic page-load
+trigger: the app's consent controller is the only caller that emits its custom
+`MyTuumsPageview` event, and withdrawal disables that caller and clears existing
+analytics identifiers.
 
 **Executable inline scripts use per-response nonces.** Cloudflare's Zaraz and
 JavaScript Detections features inject inline `<script>` elements after the
@@ -455,7 +456,7 @@ CSP header and stamps it onto its injected scripts. The prebuilt `index.html`
 does not need templating because the app has no executable inline script of its
 own. Do not replace the nonce with `'unsafe-inline'`, reuse a nonce between
 responses, or add `Cache-Control: no-transform`: the latter suppresses the edge
-injection that supplies the Zaraz Consent API.
+injection that supplies the Zaraz runtime.
 
 The stylesheet-swap `onload` is an event handler, which nonces do not cover. It
 stays restricted by `'unsafe-hashes'` plus the hash of its exact handler bytes.
