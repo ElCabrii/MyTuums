@@ -67,7 +67,7 @@ it("renders emails in workerd, verifies D1 accounts, and keeps provider/database
     );
     // HTTP ingress preserves the browser Origin header without using the local RPC proxy.
     const dispatch = runtime.dispatchFetch;
-    const origin = "https://auth-poc.example.test";
+    const origin = "https://auth-private.example.test";
     // The former Node ESM regression now executes all three auth builders in workerd.
     const templates = z
       .array(emailSchema)

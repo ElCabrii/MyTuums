@@ -3,14 +3,13 @@
 ## Cloudflare deployment
 
 Production serves `about.mytuums.com` with product links to `mytuums.com`.
-The separate PoC serves `about-cf-poc.mytuums.com` with links to
-`cf-poc.mytuums.com`, a disallow crawler policy and mandatory Access.
 Production emits its public crawler documents and uses the fixed public origin.
 
-`wrangler.production.jsonc` and `wrangler.jsonc` declare separate Worker names
-and Custom Domains. Both disable workers.dev and version preview URLs.
-`worker/index.ts` verifies the exact origin and, for PoC, the Access JWT before
-serving any asset. Public admission is restricted to the fixed production host.
+`wrangler.production.jsonc` declares the deployed Worker and Custom Domain.
+The unqualified `wrangler.jsonc` is a non-routable build configuration. Both
+disable workers.dev and version preview URLs. `worker/index.ts` verifies the
+exact origin before serving any asset. Public admission is restricted to the
+fixed production host.
 It reuses the server's Access verifier as a server-side dependency only.
 Keep `run_worker_first: true`, `html_handling: none` and `not_found_handling: none`.
 Only `/` maps to `/index.html`; missing paths stay 404. Responses are private,
@@ -21,19 +20,18 @@ and query-string redaction is enabled in native observability.
 `pnpm --filter @my-tuums/branding build` builds Vite assets and performs a Wrangler
 dry run. It does not publish. `pnpm --filter @my-tuums/branding types` regenerates
 `worker/worker-configuration.d.ts` with string-valued variables for the explicit
-PoC and production configurations; runtime exact-origin validation remains
+build and production configurations; runtime exact-origin validation remains
 authoritative. Run `pnpm format` afterward. Typechecking covers
 the browser and Worker independently. The native security/build test lives at
 `apps/server/src/native-branding.test.ts`; run it through the server's Vitest
 command after building branding. It executes the actual Wrangler bundle with
 the built Vite assets and real local asset routing, using ephemeral Access keys.
-This proves local behavior, not live Access or Workers Builds configuration.
-Remote deployment and the branch-restricted build still need setup.
+This proves local behavior, not live hosted routing.
 
 ## Responsibility
 
-The Access-protected landing site served at `about-cf-poc.mytuums.com` ("The social media, for
-gamers"). A second, deliberately tiny Vite app — one page, no router, no
+The public landing site served at `about.mytuums.com` ("The social media, for
+gamers"). A deliberately tiny Vite app — one page, no router, no
 state library, no API client — that shares the SPA's entire visual system
 (Tailwind v4, the shadcn preset in `components.json`, Inter Variable, the
 theme tokens copied verbatim into `src/index.css`) and its Paraglide en/fr
@@ -102,4 +100,5 @@ pins its deployed artifact and asset admission boundary.
 `VITE_WEB_ORIGIN=https://mytuums.com` selects production app links and branding
 metadata. `wrangler.production.jsonc` serves `about.mytuums.com` publicly, with
 exact-host and GET/HEAD guards. Only that fixed origin with `ACCESS_MODE=public`
-can omit Access. PoC continues to require its Access JWT on every asset.
+can omit Access. The default build configuration uses an invalid private origin
+and cannot be routed.

@@ -104,7 +104,7 @@ describe("D1 post read contracts", () => {
       postId: published.id,
       state: "published",
       byteSize: 100,
-      streamCreatorId: `mytuums-poc:${videoId}`,
+      streamCreatorId: `mytuums-test:${videoId}`,
       streamUid: videoId.replaceAll("-", ""),
       expiresAt: new Date(),
       playback,

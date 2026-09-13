@@ -32,7 +32,7 @@ async function submitted(
   await db.insert(video).values({
     id,
     authorId,
-    streamCreatorId: `mytuums-poc:${id}`,
+    streamCreatorId: `mytuums-test:${id}`,
     streamUid: uid,
     state: "uploaded",
     byteSize: 1000,

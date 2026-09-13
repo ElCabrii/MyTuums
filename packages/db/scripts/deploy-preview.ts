@@ -11,10 +11,7 @@ const { values } = parseArgs({ options: { target: { type: "string", default: "pr
 const target = z.enum(["preview", "production"]).parse(values.target);
 const environment = target === "preview" ? "preview" : "production";
 const appConfiguration = `wrangler.${target}.jsonc`;
-const allowedBranches =
-  target === "production"
-    ? ["main"]
-    : ["main", "codex/cloudflare-poc", "codex/cloudflare-production"];
+const allowedBranches = ["main"];
 const git = (...args: string[]) =>
   execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 const commit = z

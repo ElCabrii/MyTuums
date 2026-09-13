@@ -195,9 +195,10 @@ shares the 90-day boundary across list, badge and bounded 250-row pruning;
 moderation notices and read cursors survive. The jobs Worker now schedules Monday
 04:00 UTC pruning, bounds each Workflow to 100 batches and commits continuation
 intent when more rows remain. The manual pruning CLI uses the same D1 operation
-and predicate. It defaults to a dry run on local PoC storage, requires
-`--retention-days=90`, and accepts explicit `--apply` and `--remote` switches.
-It uses the guarded PoC database helper and never loads `.env` or Postgres.
+and predicate. It defaults to a dry run on local storage, requires
+`--retention-days=90`, and accepts explicit `--apply`. Hosted runs require
+`--remote --environment=preview|production`. It uses the guarded maintenance
+environment helper and never loads `.env` or Postgres.
 
 `src/post-mutations.ts` owns D1 edit/delete batches. Edits record the actual
 superseded text before updating and copy that history row's database timestamp
@@ -639,10 +640,10 @@ reposter_key)`, where the reposter half is absent for post events and binds
   consume them atomically with publication so that this reader cannot miss a
   pending-to-published handoff (issue #52). `cleanupMediaIntents` processes at
   most 50 ready intents per pass and retains failures. The reconciliation CLI
-  uses the guarded PoC D1/EU-R2 pair and requires the exact bucket name; local
-  storage is the default, with `--remote` selecting the isolated hosted pair.
+  uses the guarded environment's D1/EU-R2 pair; local storage is the default,
+  while hosted use requires `--remote --environment=preview|production`.
   Game fixture seeding uses that same pair, always uploads covers to R2, and
-  requires the exact PoC database name. Neither command loads `.env` or S3
+  cannot accept an independent database or bucket name. Neither command loads `.env` or S3
   credentials. The jobs Worker schedules daily inventory recovery.
 - **Link preview fetching lives in `src/link-card-http.ts` (the wire) and
   `src/link-card.ts` (the cache), and the SSRF guard is not optional
@@ -805,7 +806,7 @@ reposter_key)` — so it hand-rolls the same three parts the skeleton owns
 | `pnpm --filter @my-tuums/api test:unit`                                       | pure logic; must pass with no database                           |
 | `pnpm --filter @my-tuums/api test:integration`                                | ephemeral local D1, no external credentials                      |
 | `pnpm --filter @my-tuums/api lint` / `typecheck`                              | this package alone                                               |
-| `pnpm --filter @my-tuums/api reconcile:media --bucket=mytuums-poc-media`      | reap objects no row points at                                    |
+| `pnpm --filter @my-tuums/api reconcile:media`                                 | reap local objects no row points at                              |
 | `pnpm --filter @my-tuums/api prune:notifications --apply --retention-days=90` | delete notifications past the shared horizon (moderation exempt) |
 
 Suites split by filename: `*.test.ts` is unit (no I/O), `*.int.test.ts` is

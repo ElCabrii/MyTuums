@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "mytuums-poc-jobs",
+  "name": "mytuums-build-jobs",
   "account_id": "734f3b84571b1967e6940140a0b7d75f",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-10",
@@ -13,8 +13,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "mytuums-poc",
-      "database_id": "f4334c85-cca9-4437-976e-b52038047c62",
+      "database_name": "mytuums-local",
+      "database_id": "00000000-0000-0000-0000-000000000001",
       "migrations_dir": "../../packages/db/drizzle-d1",
     },
   ],
@@ -29,35 +29,34 @@
   "r2_buckets": [
     {
       "binding": "MEDIA",
-      "bucket_name": "mytuums-poc-media",
+      "bucket_name": "mytuums-local-media",
       "jurisdiction": "eu",
       "remote": false,
     },
   ],
   "vars": {
-    "WEB_ORIGIN": "https://cf-poc.mytuums.com",
+    "WEB_ORIGIN": "https://preview.mytuums.com",
     "EMAIL_FROM": "noreply@mytuums.com",
-    "STREAM_NAMESPACE": "mytuums-poc",
+    "STREAM_NAMESPACE": "mytuums-preview",
     "CLOUDFLARE_ACCOUNT_ID": "734f3b84571b1967e6940140a0b7d75f",
   },
   "secrets": {
     "required": ["STREAM_API_TOKEN", "IGDB_CLIENT_ID", "IGDB_CLIENT_SECRET", "APPEAL_TOKEN_SECRET"],
   },
-  "triggers": { "crons": ["* * * * *"] },
   "workflows": [
     {
       "binding": "VIDEO_WORKFLOW",
-      "name": "mytuums-poc-video",
+      "name": "mytuums-build-video",
       "class_name": "VideoWorkflow",
     },
     {
       "binding": "MAINTENANCE_WORKFLOW",
-      "name": "mytuums-poc-maintenance",
+      "name": "mytuums-build-maintenance",
       "class_name": "MaintenanceWorkflow",
     },
     {
       "binding": "GAME_SYNC_WORKFLOW",
-      "name": "mytuums-poc-game-sync",
+      "name": "mytuums-build-game-sync",
       "class_name": "GameSyncWorkflow",
     },
   ],

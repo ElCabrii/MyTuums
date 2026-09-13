@@ -139,8 +139,8 @@ it("boots the Wrangler application artifact with native bindings behind Access",
         STREAM_NAMESPACE: "mytuums-production",
         ACCESS_MODE: "public",
       }),
-      worker("invalid-public-candidate", "synthetic-app-secret-at-least-32-characters", {
-        WEB_ORIGIN: "https://preview-candidate.mytuums.com",
+      worker("invalid-public-origin", "synthetic-app-secret-at-least-32-characters", {
+        WEB_ORIGIN: "https://unsupported.example.test",
         STREAM_NAMESPACE: "mytuums-production",
         ACCESS_MODE: "public",
       }),
@@ -201,10 +201,10 @@ it("boots the Wrangler application artifact with native bindings behind Access",
       (await production.fetch("https://preview.mytuums.com/login", { headers: edgeHeaders }))
         .status,
     ).toBe(404);
-    const invalidCandidate = await runtime.getWorker("invalid-public-candidate");
+    const invalidOrigin = await runtime.getWorker("invalid-public-origin");
     expect(
       (
-        await invalidCandidate.fetch("https://preview-candidate.mytuums.com/login", {
+        await invalidOrigin.fetch("https://unsupported.example.test/login", {
           headers: edgeHeaders,
         })
       ).status,

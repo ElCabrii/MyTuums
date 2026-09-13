@@ -14,7 +14,7 @@
  * and no client secret does.
  */
 interface ImportMetaEnv {
-  /** Public deployment origin for metadata and links; defaults to the isolated PoC. */
+  /** Public deployment origin for metadata and links; defaults to private preview. */
   readonly VITE_WEB_ORIGIN?: string;
 
   /**

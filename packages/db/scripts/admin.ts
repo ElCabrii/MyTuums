@@ -1,21 +1,31 @@
 import { parseArgs } from "node:util";
 import { FounderGrantError, grantFounderBadge } from "../src/grant-founder-badge.js";
 import { PromotionError, promoteUser } from "../src/promote.js";
-import { openPocDatabase } from "./poc-database.js";
+import {
+  maintenanceResourceNames,
+  openMaintenanceDatabase,
+  resolveMaintenanceEnvironment,
+} from "./maintenance-environment.js";
 
 const usage =
-  "Usage: pnpm db:promote <username> <moderator|staff|admin> [--remote]\n       pnpm db:grant:founder <username> [--remote]";
+  "Usage: pnpm db:promote <username> <moderator|staff|admin> [--remote --environment=preview|production]\n       pnpm db:grant:founder <username> [--remote --environment=preview|production]";
 
-async function run() {
-  let args: ReturnType<typeof parseArgs>;
+function options() {
   try {
-    args = parseArgs({
-      options: { remote: { type: "boolean", default: false } },
+    return parseArgs({
+      options: {
+        remote: { type: "boolean", default: false },
+        environment: { type: "string", default: "local" },
+      },
       allowPositionals: true,
     });
   } catch {
     throw new PromotionError(usage);
   }
+}
+
+async function run() {
+  const args = options();
   const [command, username, role] = args.positionals;
   if (
     !username ||
@@ -27,8 +37,11 @@ async function run() {
     throw new PromotionError(usage);
 
   const remote = args.values.remote === true;
-  console.log(`Database: mytuums-poc (${remote ? "remote" : "local"})`);
-  const database = await openPocDatabase(remote);
+  const environment = resolveMaintenanceEnvironment(args.values.environment, remote);
+  console.log(
+    `Database: ${maintenanceResourceNames(environment).database} (${remote ? "remote" : "local"})`,
+  );
+  const database = await openMaintenanceDatabase(environment, remote);
   try {
     const message =
       command === "promote" && role
@@ -46,7 +59,7 @@ try {
   console.error(
     error instanceof FounderGrantError || error instanceof PromotionError
       ? error.message
-      : "PoC database command failed. Check Wrangler authentication, the PoC configuration and applied D1 migrations.",
+      : "Database command failed. Check Wrangler authentication, the selected environment and applied D1 migrations.",
   );
   process.exitCode = 1;
 }

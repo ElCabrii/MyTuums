@@ -32,9 +32,9 @@
       "types": "./src/testing/d1.ts",
       "default": "./src/testing/d1.ts"
     },
-    "./poc-database": {
-      "types": "./scripts/poc-database.ts",
-      "default": "./scripts/poc-database.ts"
+    "./maintenance-environment": {
+      "types": "./scripts/maintenance-environment.ts",
+      "default": "./scripts/maintenance-environment.ts"
     }
   },
   "scripts": {

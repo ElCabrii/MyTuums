@@ -17,15 +17,11 @@ const rpcTarget = process.env.RPC_TARGET ?? "http://localhost:3001";
 const localDevelopment = process.env.MYTUUMS_LOCAL_DEV === "1";
 const siteOrigin = localDevelopment
   ? "http://localhost:5173"
-  : (process.env.VITE_WEB_ORIGIN ?? "https://cf-poc.mytuums.com");
+  : (process.env.VITE_WEB_ORIGIN ?? "https://preview.mytuums.com");
 if (
-  ![
-    "http://localhost:5173",
-    "https://cf-poc.mytuums.com",
-    "https://preview-candidate.mytuums.com",
-    "https://preview.mytuums.com",
-    "https://mytuums.com",
-  ].includes(siteOrigin)
+  !["http://localhost:5173", "https://preview.mytuums.com", "https://mytuums.com"].includes(
+    siteOrigin,
+  )
 ) {
   throw new Error("Unsupported Cloudflare frontend origin.");
 }
@@ -37,7 +33,7 @@ export default defineConfig({
   envDir: path.resolve(import.meta.dirname, "../.."),
   define: {
     "import.meta.env.VITE_WEB_ORIGIN": JSON.stringify(siteOrigin),
-    // This PoC entrypoint requires all three provider credential pairs. Keep the
+    // Hosted entrypoints require all three provider credential pairs. Keep the
     // browser list aligned; One Tap still requires its matching public client ID.
     "import.meta.env.VITE_SOCIAL_PROVIDERS": JSON.stringify(
       localDevelopment ? "" : "google,discord,twitch",
@@ -62,7 +58,7 @@ export default defineConfig({
       name: "mytuums-site-origin",
       transformIndexHtml: {
         order: "pre",
-        handler: (html) => html.replaceAll("https://cf-poc.mytuums.com", siteOrigin),
+        handler: (html) => html.replaceAll("https://preview.mytuums.com", siteOrigin),
       },
     },
     tailwindcss(),

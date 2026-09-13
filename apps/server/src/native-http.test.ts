@@ -77,27 +77,28 @@ it("runs admission, bounded bodies, private routing and headers in the actual Wo
       "cf-access-jwt-assertion": token,
       "cf-connecting-ip": "192.0.2.8",
     };
-    expect((await dispatch("https://cf-poc.example.com/login")).status).toBe(404);
-    const shell = await dispatch("https://cf-poc.example.com/login", { headers });
+    expect((await dispatch("https://preview.example.test/login")).status).toBe(404);
+    const shell = await dispatch("https://preview.example.test/login", { headers });
     expect(await shell.text()).toContain("synthetic shell");
     expect(shell.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(
-      (await dispatch("https://cf-poc.example.com/assets/missing.js", { headers })).status,
+      (await dispatch("https://preview.example.test/assets/missing.js", { headers })).status,
     ).toBe(404);
     expect(
-      (await dispatch("https://cf-poc.example.com/api/auth/admin%2Fban-user", { headers })).status,
+      (await dispatch("https://preview.example.test/api/auth/admin%2Fban-user", { headers }))
+        .status,
     ).toBe(404);
     const largeBody = "x".repeat(RPC_SMALL_BODY_BYTES + 1);
     expect(
       (
-        await dispatch("https://cf-poc.example.com/rpc/profile/uploadImage", {
+        await dispatch("https://preview.example.test/rpc/profile/uploadImage", {
           method: "POST",
           headers,
           body: largeBody,
         })
       ).status,
     ).toBe(401);
-    const uploaded = await dispatch("https://cf-poc.example.com/rpc/profile/uploadImage", {
+    const uploaded = await dispatch("https://preview.example.test/rpc/profile/uploadImage", {
       method: "POST",
       headers: { ...headers, cookie: "__Secure-better-auth.session_token=valid" },
       body: largeBody,

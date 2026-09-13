@@ -1,15 +1,17 @@
 # Cloudflare jobs Worker
 
-This workspace owns the isolated PoC, preview and production jobs Workers.
-Each environment has its own D1 database, private media bucket, Stream namespace
-and Workflow names. Production activation and retained source data are recorded
+This workspace owns the isolated preview and production jobs Workers plus a
+non-routable build configuration. Each hosted environment has its own D1
+database, private media bucket, Stream namespace and Workflow names. Production
+activation and retained source data are recorded
 in [the production execution record](../../docs/cloudflare-production-migration.md).
 
 ## Entry points and ownership
 
 - `src/index.ts` exports `VideoWorkflow`, `GameSyncWorkflow`, `MaintenanceWorkflow` and the Cron
-  handler. It has no HTTP handler. `wrangler.jsonc` disables workers.dev and
-  preview URLs and declares the one-minute Cron, D1, private EU R2, Stream and Workflow bindings.
+  handler. It has no HTTP handler. All configurations disable workers.dev and
+  preview URLs. Preview and production declare the one-minute Cron; the default
+  build configuration has no schedule and uses local resource identities.
 - `packages/api/src/cloudflare-jobs.ts` is the runtime's import boundary. It
   excludes the router, auth instance, S3, Sharp and legacy queue modules.
 - `packages/api/src/stream-job.ts` owns one restartable video poll, caption
@@ -86,12 +88,14 @@ The FFmpeg application and its Docker checks have been removed from this branch.
 The native app and E2E harness now use Cloudflare bindings. Hosted verification
 and interactive local development remain required.
 
-The manual `pnpm games:sync [--remote]` administration command writes the same
+The manual `pnpm games:sync [--remote --environment=preview|production]`
+administration command writes the same
 D1 game-sync intent shape as Cron. It takes its timestamp from D1 and relies on
 scheduled recovery for dispatch. It never invokes IGDB outside this Worker and
 its success means queued, not completed. Stable Workflow IDs and staged catalog
 fencing are unchanged. Local administrative requests need recovery connected to
-the same local D1 persistence. The guarded remote CLI selects the deployed PoC pair; production and preview have their own scheduled recovery.
+the same local D1 persistence. A remote request must select preview or
+production explicitly; each has its own scheduled recovery.
 
 ## Preview migration
 

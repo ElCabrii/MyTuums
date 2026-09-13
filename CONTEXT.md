@@ -165,7 +165,7 @@ What belongs in which suite, and when a test deserves to exist at all:
 - [README.md](README.md) — human setup and commands.
 - [docs/architecture.md](docs/architecture.md) — boundaries and executable flows.
 - [docs/product.md](docs/product.md) — implemented behaviour and vocabulary.
-- [docs/cloudflare-poc-report.md](docs/cloudflare-poc-report.md) — migration parity evidence and remaining hosted gates.
+- [docs/cloudflare-poc-report.md](docs/cloudflare-poc-report.md) — archived migration parity evidence.
 - [docs/operations.md](docs/operations.md) — environments, deploys, CI.
 - [docs/security.md](docs/security.md) — trust boundaries and sensitive invariants.
 - [TESTING_STRATEGY.md](TESTING_STRATEGY.md) — the test portfolio and its rules.

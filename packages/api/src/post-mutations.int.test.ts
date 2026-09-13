@@ -59,7 +59,7 @@ describe("atomic D1 post mutations", () => {
       postId: target.id,
       byteSize: 100,
       state: "published",
-      streamCreatorId: `mytuums-poc:${videoId}`,
+      streamCreatorId: `mytuums-test:${videoId}`,
       streamUid,
       playback: { width: 640, height: 480, duration: 4, captionLanguage: null },
       expiresAt: new Date(Date.now() + 3600000),

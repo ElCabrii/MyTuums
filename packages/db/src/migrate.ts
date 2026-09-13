@@ -1,6 +1,6 @@
 /**
  * Apply the committed D1 migrations through the explicit target binding.
- * Local tests and the PoC deployment command share Drizzle's migration ledger.
+ * Local tests and hosted deployment commands share Drizzle's migration ledger.
  */
 import { migrate } from "drizzle-orm/d1/migrator";
 import { drizzle } from "drizzle-orm/d1";

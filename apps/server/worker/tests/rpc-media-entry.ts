@@ -21,7 +21,7 @@ interface Env {
 const emails: OutgoingEmail[] = [];
 async function application(env: Env) {
   const db = createDatabase(env.DB);
-  const webOrigin = "https://rpc-poc.example.test";
+  const webOrigin = "https://rpc-private.example.test";
   const secret = "native-rpc-media-test-secret-at-least-32-chars";
   const sendEmail = (email: OutgoingEmail) => {
     emails.push(email);

@@ -19,7 +19,7 @@ async function pending(authorId: string, expiresAt = new Date(Date.now() + 1_800
       authorId,
       state: "processing",
       byteSize: 10,
-      streamCreatorId: `mytuums-poc:${id}`,
+      streamCreatorId: `mytuums-test:${id}`,
       streamUid: id.replaceAll("-", ""),
       expiresAt,
     }),
@@ -97,7 +97,7 @@ it("bounds each recovery pass and keeps overdue work due for the next pass", asy
       authorId: owner.id,
       state: "queued",
       byteSize: 10,
-      streamCreatorId: `mytuums-poc:${id}`,
+      streamCreatorId: `mytuums-test:${id}`,
       expiresAt: new Date(0),
     });
   });

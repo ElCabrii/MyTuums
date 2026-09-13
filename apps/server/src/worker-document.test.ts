@@ -15,7 +15,7 @@ it("replaces a document without retaining stale length, compression, validators 
         "cache-control": "public, max-age=3600",
       },
     }),
-    new Request("https://cf-poc.example.com/login"),
+    new Request("https://preview.example.test/login"),
   );
   expect(await response.text()).toContain("<title>/login</title>");
   expect(response.headers.get("cache-control")).toBe("private, no-store");
@@ -25,7 +25,7 @@ it("replaces a document without retaining stale length, compression, validators 
 
 it("refuses oversized and compressed asset bodies instead of treating them as HTML", async () => {
   const transform = createWorkerDocumentTransform((path, html) => Promise.resolve(html));
-  const request = new Request("https://cf-poc.example.com/login");
+  const request = new Request("https://preview.example.test/login");
   await expect(
     transform(
       new Response("x".repeat(1024 * 1024 + 1), {

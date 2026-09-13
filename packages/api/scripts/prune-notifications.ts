@@ -1,6 +1,10 @@
 import { parseArgs } from "node:util";
 import { sql } from "drizzle-orm";
-import { openPocDatabase } from "@my-tuums/db/poc-database";
+import {
+  maintenanceResourceNames,
+  openMaintenanceDatabase,
+  resolveMaintenanceEnvironment,
+} from "@my-tuums/db/maintenance-environment";
 import { notification } from "@my-tuums/db/schema";
 import { NOTIFICATION_RETENTION_DAYS } from "../src/constants.js";
 import {
@@ -8,7 +12,7 @@ import {
   withinNotificationRetention,
 } from "../src/notification-retention.js";
 
-const usage = `Usage: pnpm --filter @my-tuums/api prune:notifications --retention-days=${NOTIFICATION_RETENTION_DAYS} [--apply] [--remote]`;
+const usage = `Usage: pnpm --filter @my-tuums/api prune:notifications --retention-days=${NOTIFICATION_RETENTION_DAYS} [--apply] [--remote --environment=preview|production]`;
 class PruneUsageError extends Error {}
 
 function options() {
@@ -17,6 +21,7 @@ function options() {
       options: {
         apply: { type: "boolean", default: false },
         remote: { type: "boolean", default: false },
+        environment: { type: "string", default: "local" },
         "retention-days": { type: "string" },
       },
       allowPositionals: false,
@@ -31,8 +36,12 @@ function options() {
 
 async function run() {
   const args = options();
-  console.log(`Database: mytuums-poc (${args.remote ? "remote" : "local"})`);
-  const database = await openPocDatabase(args.remote);
+  const remote = args.remote === true;
+  const environment = resolveMaintenanceEnvironment(args.environment, remote);
+  console.log(
+    `Database: ${maintenanceResourceNames(environment).database} (${remote ? "remote" : "local"})`,
+  );
+  const database = await openMaintenanceDatabase(environment, remote);
   try {
     const [row] = await database.db
       .select({ count: sql<number>`count(*)` })
@@ -66,7 +75,7 @@ try {
   console.error(
     error instanceof PruneUsageError
       ? error.message
-      : "PoC notification pruning failed. Check Wrangler authentication, the PoC configuration and applied D1 migrations.",
+      : "Notification pruning failed. Check Wrangler authentication, the selected environment and applied D1 migrations.",
   );
   process.exitCode = 1;
 }

@@ -48,7 +48,7 @@ async function upload() {
     authorId: owner.id,
     state: "uploaded",
     byteSize: 10,
-    streamCreatorId: `mytuums-poc:${videoId}`,
+    streamCreatorId: `mytuums-test:${videoId}`,
     streamUid: videoId.replaceAll("-", ""),
     expiresAt: new Date(Date.now() + 86_400_000),
   });

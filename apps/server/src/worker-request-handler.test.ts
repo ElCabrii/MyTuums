@@ -11,7 +11,7 @@ import {
 } from "./worker-request-handler.js";
 import { workerResponseHeaders } from "./worker-response-headers.js";
 
-const origin = "https://cf-poc.example.com";
+const origin = "https://preview.example.test";
 const accessHeaders = {
   "cf-access-jwt-assertion": "synthetic-access",
   "cf-connecting-ip": "192.0.2.8",

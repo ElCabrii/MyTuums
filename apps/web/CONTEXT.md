@@ -367,10 +367,10 @@ per consumer.
 
 Static metadata, document heads and copied post links use `VITE_WEB_ORIGIN`.
 The ordered deployment command derives this public input from the target Worker
-configuration; production uses `https://mytuums.com`, while preview and PoC stay
-within their isolated environments. The default remains the PoC origin. Preview
-and PoC require Access and refuse indexing; production is public and emits the
-production crawler documents below.
+configuration. Production uses `https://mytuums.com`; preview remains within its
+isolated environment. The non-routable default build uses the preview origin for
+private metadata. Preview requires Access and refuses indexing; production is
+public and emits the production crawler documents below.
 
 Vite pins Google/Discord/Twitch buttons to the three credential pairs required by
 the native entrypoint. Supply the matching public Google client ID at build time
@@ -381,6 +381,7 @@ the SPA before the application Worker that packages it.
 
 `crawler-documents/` retains main's public robots, sitemap and llms documents.
 `crawler-documents-plugin.ts` emits them only when Vite builds for
-`https://mytuums.com`; preview and PoC get disallow/empty documents instead.
+`https://mytuums.com`; preview and local build artifacts get disallow/empty
+documents instead.
 The production origin is an explicit public build input and part of Turbo's
 build cache key. The branding build shares this plugin.

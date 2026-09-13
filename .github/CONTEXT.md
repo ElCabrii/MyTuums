@@ -20,7 +20,7 @@ requires all three checks to pass on the exact release commit.
 - Add repository-wide checks to `../package.json`'s `verify` script.
 - Change browser setup in the `e2e` job and `../e2e/CONTEXT.md` together.
 - Update an action by resolving its full commit and retaining the version comment.
-- Production and preview deployment uses the CI-gated operator command, not this workflow. PoC Workers Builds are separate.
+- Production and preview deployment uses the CI-gated operator command, not this workflow.
 
 ## Invariants
 
@@ -51,12 +51,10 @@ Run `pnpm verify` and `pnpm test:e2e` locally. Validate workflow YAML and compar
 its commands with those scripts. Hosted CI execution remains a separate check
 when this branch is pushed; local success does not prove the runner is available.
 
-## Authorized production migration
+## Authorized production deployment
 
-Migration changes on `codex/cloudflare-production` run through the pull-request
-trigger only. Do not also trigger pushes for that branch: GitHub can treat the
-cancelled duplicate push checks as unmet required checks even after PR CI passes. The verified integration may
-merge into main under the production migration authorization, with all three
-existing required checks retained. Source disconnection, main
-merge and final production deployment remain gated by candidate validation; see
-[the execution record](../docs/cloudflare-production-migration.md).
+The completed migration is recorded in
+[the execution record](../docs/cloudflare-production-migration.md). Routine
+production and preview releases now start from a clean `main` commit and retain
+all three required checks. The operator command remains the only deployment
+entrypoint; CI itself has no Cloudflare credentials and does not publish.

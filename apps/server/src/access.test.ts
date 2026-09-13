@@ -24,7 +24,7 @@ function token(claims: JWTPayload = {}, signingKey = key.privateKey) {
     .sign(signingKey);
 }
 function request(token?: string) {
-  return new Request("https://cf-poc.example.com/", {
+  return new Request("https://preview.example.test/", {
     headers: token ? { "cf-access-jwt-assertion": token } : {},
   });
 }

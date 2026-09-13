@@ -17,12 +17,7 @@ export { AuthRateLimitCounter } from "./auth-rate-limit-counter.js";
 
 const configuration = z
   .object({
-    WEB_ORIGIN: z.enum([
-      "https://cf-poc.mytuums.com",
-      "https://preview-candidate.mytuums.com",
-      "https://preview.mytuums.com",
-      "https://mytuums.com",
-    ]),
+    WEB_ORIGIN: z.enum(["https://preview.mytuums.com", "https://mytuums.com"]),
     ACCESS_TEAM_DOMAIN: z.literal("https://mytuums.cloudflareaccess.com"),
     ACCESS_AUDIENCE: z
       .string()
@@ -30,7 +25,7 @@ const configuration = z
       .optional(),
     ACCESS_MODE: z.enum(["required", "public"]).default("required"),
     CLOUDFLARE_ACCOUNT_ID: z.literal("734f3b84571b1967e6940140a0b7d75f"),
-    STREAM_NAMESPACE: z.enum(["mytuums-poc", "mytuums-preview", "mytuums-production"]),
+    STREAM_NAMESPACE: z.enum(["mytuums-preview", "mytuums-production"]),
     EMAIL_FROM: z.literal("noreply@mytuums.com"),
     GOOGLE_ANALYTICS: z.enum(["enabled", "disabled"]).default("disabled"),
     BETTER_AUTH_SECRET: z.string().min(32),
@@ -47,11 +42,10 @@ const configuration = z
     if (config.WEB_ORIGIN === "https://mytuums.com")
       return config.STREAM_NAMESPACE === "mytuums-production" && config.ACCESS_MODE === "public";
     if (config.ACCESS_MODE !== "required" || !config.ACCESS_AUDIENCE) return false;
-    if (config.WEB_ORIGIN === "https://cf-poc.mytuums.com")
-      return config.STREAM_NAMESPACE === "mytuums-poc";
-    if (config.WEB_ORIGIN === "https://preview.mytuums.com")
-      return config.STREAM_NAMESPACE === "mytuums-preview";
-    return config.STREAM_NAMESPACE !== "mytuums-poc";
+    return (
+      config.WEB_ORIGIN === "https://preview.mytuums.com" &&
+      config.STREAM_NAMESPACE === "mytuums-preview"
+    );
   }, "Origin and Stream namespace must belong to the same environment.");
 
 async function application(env: AppEnv) {

@@ -136,7 +136,7 @@ it("runs real multipart RPC uploads, D1 visibility, R2 delivery and cleanup in w
         ...init,
         headers: { ...edgeHeaders, ...Object.fromEntries(new Headers(init.headers)) },
       });
-    const origin = "https://rpc-poc.example.test";
+    const origin = "https://rpc-private.example.test";
     expect((await rawDispatch(`${origin}/login`)).status).toBe(404);
     expect((await dispatch("https://alternate.workers.dev/login")).status).toBe(404);
     const shell = await dispatch(`${origin}/login`);

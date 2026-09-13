@@ -48,17 +48,17 @@ async function seedPost(authorId: string, content: string): Promise<string> {
 
 describe("forward moderation effects", () => {
   it("uses the deployment's origin and signer for emailed appeal capabilities", async () => {
-    const appealToken = createAppealTokenSigner("isolated-poc-appeal-secret-at-least-32-chars");
+    const appealToken = createAppealTokenSigner("isolated-test-appeal-secret-at-least-32-chars");
     const actionId = randomUUID();
     const userId = randomUUID();
     const url = new URL(
       await makeAppealUrl(
-        { webOrigin: "https://cf-poc.example.test", appealToken },
+        { webOrigin: "https://preview.example.test", appealToken },
         actionId,
         userId,
       ),
     );
-    expect(url.origin).toBe("https://cf-poc.example.test");
+    expect(url.origin).toBe("https://preview.example.test");
     expect(url.pathname).toBe("/appeal");
     const token = url.searchParams.get("token")!;
     expect(await appealToken.verify(token)).toMatchObject({ actionId, userId, purpose: "appeal" });

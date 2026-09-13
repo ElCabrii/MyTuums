@@ -1,19 +1,26 @@
 import { parseArgs } from "node:util";
-import { openPocMedia, POC_DATABASE_NAME, POC_MEDIA_BUCKET_NAME } from "@my-tuums/db/poc-database";
+import {
+  maintenanceResourceNames,
+  openMaintenanceMedia,
+  resolveMaintenanceEnvironment,
+} from "@my-tuums/db/maintenance-environment";
 import { readMediaReferences } from "../src/media-intents.js";
 import { reconcileMedia } from "../src/reconcile-media.js";
 import { createR2Storage } from "../src/r2-storage.js";
 
-const usage = `Usage: pnpm --filter @my-tuums/api reconcile:media --bucket=${POC_MEDIA_BUCKET_NAME} [--remote]`;
+const usage =
+  "Usage: pnpm --filter @my-tuums/api reconcile:media [--remote --environment=preview|production]";
 class ReconcileUsageError extends Error {}
 
 function options() {
   try {
     const { values } = parseArgs({
-      options: { bucket: { type: "string" }, remote: { type: "boolean", default: false } },
+      options: {
+        environment: { type: "string", default: "local" },
+        remote: { type: "boolean", default: false },
+      },
       allowPositionals: false,
     });
-    if (values.bucket !== POC_MEDIA_BUCKET_NAME) throw new ReconcileUsageError(usage);
     return values;
   } catch {
     throw new ReconcileUsageError(usage);
@@ -22,10 +29,13 @@ function options() {
 
 async function run() {
   const args = options();
+  const remote = args.remote === true;
+  const environment = resolveMaintenanceEnvironment(args.environment, remote);
+  const resources = maintenanceResourceNames(environment);
   console.log(
-    `Resources: ${POC_DATABASE_NAME} / ${POC_MEDIA_BUCKET_NAME} (${args.remote ? "remote" : "local"})`,
+    `Resources: ${resources.database} / ${resources.bucket} (${remote ? "remote" : "local"})`,
   );
-  const platform = await openPocMedia(args.remote);
+  const platform = await openMaintenanceMedia(environment, remote);
   try {
     // The existing reconciliation operation lists every managed prefix before
     // reading live and pending D1 references. Preserve that ordering here.
@@ -45,7 +55,7 @@ try {
   console.error(
     error instanceof ReconcileUsageError
       ? error.message
-      : "PoC media reconciliation failed. Check Wrangler authentication, the PoC configuration and applied D1 migrations.",
+      : "Media reconciliation failed. Check Wrangler authentication, the selected environment and applied D1 migrations.",
   );
   process.exitCode = 1;
 }

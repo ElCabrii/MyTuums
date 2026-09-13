@@ -4,7 +4,7 @@ import { createStreamService, StreamError, streamUploadUrl } from "./stream.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const uid = "a".repeat(32);
-const creator = `mytuums-poc:${id}`;
+const creator = `mytuums-test:${id}`;
 
 function provider() {
   let exists = true;
@@ -69,7 +69,7 @@ it("creates a resumable private upload with fixed limits and only opaque creator
     binding: fake.binding,
     accountId: "b".repeat(32),
     apiToken: "synthetic-token",
-    namespace: "mytuums-poc",
+    namespace: "mytuums-test",
     fetch: (url, options) => {
       requests.push(new Request(url, options));
       return Promise.resolve(
@@ -107,7 +107,7 @@ it("rejects a provider redirect without issuing an upload capability", async () 
     binding: provider().binding,
     accountId: "b".repeat(32),
     apiToken: "synthetic-token",
-    namespace: "mytuums-poc",
+    namespace: "mytuums-test",
     fetch: () =>
       Promise.resolve(
         new Response(null, {
@@ -127,7 +127,7 @@ it("refuses public or differently owned video metadata and cannot delete another
     binding: fake.binding,
     accountId: "b".repeat(32),
     apiToken: "synthetic-token",
-    namespace: "mytuums-poc",
+    namespace: "mytuums-test",
   });
   fake.value.creator = `production:${id}`;
   await expect(service.status(id, uid)).rejects.toMatchObject({ reason: "ownership" });
@@ -158,7 +158,7 @@ it("recovers unknown create results only within the exact creator namespace", as
     binding: fake.binding,
     accountId: "b".repeat(32),
     apiToken: "synthetic-token",
-    namespace: "mytuums-poc",
+    namespace: "mytuums-test",
     fetch: (url) => {
       const target = new URL(new Request(url).url);
       expect(target.searchParams.get("creator")).toBe(creator);
@@ -180,7 +180,7 @@ it("bounds provider responses and keeps provider diagnostics out of application 
     binding: fake.binding,
     accountId: "b".repeat(32),
     apiToken: "synthetic-token",
-    namespace: "mytuums-poc",
+    namespace: "mytuums-test",
     fetch: () => Promise.resolve(response),
   });
   await expect(service.findUploads(id)).rejects.toThrow(
@@ -208,7 +208,7 @@ it("issues playback and thumbnail URLs only for private ready videos on the prov
     binding: fake.binding,
     accountId: "b".repeat(32),
     apiToken: "synthetic-token",
-    namespace: "mytuums-poc",
+    namespace: "mytuums-test",
   });
   expect(await service.signedVideoUrl(id, uid, "manifest")).toBe(
     "https://customer-synthetic.cloudflarestream.com/synthetic.header.signature/manifest/video.m3u8",
@@ -239,7 +239,7 @@ it("fetches bounded private captions using the stored language and refuses malfo
     binding: fake.binding,
     accountId: "b".repeat(32),
     apiToken: "synthetic-token",
-    namespace: "mytuums-poc",
+    namespace: "mytuums-test",
     fetch: (url) => {
       expect(new Request(url).url).toBe(
         `https://api.cloudflare.com/client/v4/accounts/${"b".repeat(32)}/stream/${uid}/captions/en/vtt`,

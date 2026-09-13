@@ -13,7 +13,7 @@ const emails: OutgoingEmail[] = [];
 let auth: ReturnType<typeof createAuth> | undefined;
 export default {
   async fetch(request: Request, env: { DB: D1Database }): Promise<Response> {
-    const origin = "https://auth-poc.example.test";
+    const origin = "https://auth-private.example.test";
     const path = new URL(request.url).pathname;
     if (path === "/captured-emails") return Response.json(emails);
     if (path === "/auth-templates") {
