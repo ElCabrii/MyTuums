@@ -96,12 +96,10 @@ bundle.
 
 The `mytuums.com` Zaraz configuration uses automatic script injection, disables
 automatic history tracking, and fires one GA4 page-view action only for the
-custom `MyTuumsPageview` event. The GA4 tool is assigned to the hidden
-`analytics` consent purpose. The runtime must be injected for Cloudflare to
-provide its Consent API, but the GA4 action remains blocked until the app grants
-that purpose. Keep both safeguards: the app strips query strings before it emits
-the event, and its consent controller is the only code allowed to update the
-purpose or emit `MyTuumsPageview`.
+custom `MyTuumsPageview` event. It has no automatic page-load trigger or
+Cloudflare consent-purpose gate; the app's six-month consent decision is the
+single gate. The app strips query strings before it emits the event, and its
+consent controller is the only code allowed to emit `MyTuumsPageview`.
 
 Runtime secrets include authentication, OAuth, Stream, IGDB and appeal-signing
 credentials. The app and jobs Workers share the same independently generated

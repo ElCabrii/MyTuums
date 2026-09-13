@@ -1,10 +1,4 @@
-interface ZarazConsentApi {
-  APIReady: boolean;
-  set(preferences: Readonly<Record<string, boolean>>): void;
-}
-
 interface ZarazApi {
-  consent?: ZarazConsentApi;
   track(eventName: string, properties?: Readonly<Record<string, string>>): void;
 }
 
@@ -18,45 +12,12 @@ export interface AnalyticsAdapter {
   trackPageView(page: { location: string; title: string }): void;
 }
 
-const CONSENT_READY_EVENT = "zarazConsentAPIReady";
-const ANALYTICS_PURPOSE_ID = "analytics";
 const PAGE_VIEW_EVENT = "MyTuumsPageview";
 const CONSENT_COOKIE_NAME = "mytuums_zaraz_consent";
-const INITIALIZATION_TIMEOUT_MS = 10_000;
 
 let collectionDisabled = true;
 
 const analyticsWindow = (): AnalyticsWindow => window;
-
-function waitForConsentApi(): Promise<void> {
-  const existingApi = analyticsWindow().zaraz;
-  if (existingApi?.consent?.APIReady) return Promise.resolve();
-
-  return new Promise<void>((resolve, reject) => {
-    let settled = false;
-
-    const cleanup = () => {
-      clearTimeout(timeout);
-      document.removeEventListener(CONSENT_READY_EVENT, ready);
-    };
-    const ready = () => {
-      if (!analyticsWindow().zaraz?.consent?.APIReady || settled) return;
-      settled = true;
-      cleanup();
-      resolve();
-    };
-    const failed = () => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(new Error("Cloudflare Zaraz consent API failed to initialize"));
-    };
-    const timeout = setTimeout(failed, INITIALIZATION_TIMEOUT_MS);
-
-    document.addEventListener(CONSENT_READY_EVENT, ready);
-    ready();
-  });
-}
 
 function clearCookie(name: string): void {
   const attributes = ["Path=/", "Max-Age=0", "SameSite=Lax"];
@@ -90,22 +51,13 @@ function clearAnalyticsCookies(): void {
 
 /** Consent-gated page views sent through Cloudflare's native GA4 Managed Component. */
 export const zarazAnalytics: AnalyticsAdapter = {
-  async start() {
+  start() {
     collectionDisabled = false;
-    try {
-      await waitForConsentApi();
-      analyticsWindow().zaraz?.consent?.set({ [ANALYTICS_PURPOSE_ID]: true });
-    } catch (error) {
-      collectionDisabled = true;
-      throw error;
-    }
+    return Promise.resolve();
   },
 
   stop() {
-    const wasCollecting = !collectionDisabled;
     collectionDisabled = true;
-    const consent = analyticsWindow().zaraz?.consent;
-    if (wasCollecting && consent?.APIReady) consent.set({ [ANALYTICS_PURPOSE_ID]: false });
     clearAnalyticsCookies();
   },
 

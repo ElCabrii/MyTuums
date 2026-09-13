@@ -201,8 +201,8 @@ Supply the preview `VITE_GOOGLE_CLIENT_ID` and
 `VITE_SOCIAL_PROVIDERS=google,discord,twitch` as build environment variables.
 The `GOOGLE_ANALYTICS=enabled` Worker setting supplies the frontend's public
 analytics feature flag. Cloudflare Zaraz owns the GA4 measurement ID and loads
-its runtime from the same origin; its GA4 action stays blocked until the browser
-records opt-in consent.
+its runtime from the same origin. Its GA4 action has no automatic trigger; only
+the app's consent-gated `MyTuumsPageview` event can run it.
 The command refuses another branch, a dirty or changed checkout, or missing/failed
 `Verify` and `E2E tests` checks for the exact commit. It builds, applies committed
 preview migrations, deploys jobs, then deploys the application. A failed step stops
