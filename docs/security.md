@@ -429,15 +429,16 @@ not the boundary:
 - Gating `/media` does **not** revoke a presigned URL already issued. That URL
   stays valid for its own TTL, because this server never sees it again.
 
-**Response headers** are set at one choke point,
-`apps/server/src/response-decorators.ts`: a Content-Security-Policy with
+**Response headers** are set at the native HTTP choke point in
+`apps/server/src/worker-response-headers.ts` and
+`apps/server/src/worker-request-handler.ts`: a Content-Security-Policy with
 `img-src 'self' https: blob:` (the `blob:` source is only for the transient
 local image preview in the crop editor), `frame-ancestors 'none'`,
 `X-Content-Type-Options: nosniff`,
 `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`
 and HSTS. Inner handlers win, so a handler setting its own header keeps it.
-Cloudflare injects the Zaraz runtime from the same-origin `/cdn-cgi/zaraz/i.js`
-path so its Consent API is available to the analytics controller. The runtime
+Cloudflare injects the Zaraz runtime from its same-origin `/cdn-cgi/zaraz/`
+paths so its Consent API is available to the analytics controller. The runtime
 does not emit a MyTuums analytics event before a valid per-device opt-in. After
 opt-in, the controller reports a sanitised URL through the same-origin Zaraz
 endpoint; the zone's native GA4 Managed Component forwards the event server-side.
@@ -446,37 +447,18 @@ Google's analytics script and collection origins therefore remain absent from
 blocks the GA4 action until the controller grants it and blocks it again on
 withdrawal.
 
-**The CSP is hash-based, which constrains the edge in front of the app.**
-Cloudflare's JavaScript Detections injects its own inline `<script>` into every
-HTML response at their edge, after our headers are written. Its source embeds
-the per-request ray ID, so no static hash can allow it; Cloudflare only
-nonce-matches when the policy itself uses nonces, which this policy does not.
-With JS Detections on, every page load logs an inline-script CSP violation and
-the injected script does not run.
+**Executable inline scripts use per-response nonces.** Cloudflare's Zaraz and
+JavaScript Detections features inject inline `<script>` elements after the
+Worker returns HTML. Every HTML response therefore receives a fresh random
+`script-src` nonce at the HTTP boundary. Cloudflare reads that nonce from the
+CSP header and stamps it onto its injected scripts. The prebuilt `index.html`
+does not need templating because the app has no executable inline script of its
+own. Do not replace the nonce with `'unsafe-inline'`, reuse a nonce between
+responses, or add `Cache-Control: no-transform`: the latter suppresses the edge
+injection that supplies the Zaraz Consent API.
 
-This is enforced **in code**, not by a dashboard setting: HTML responses carry
-`Cache-Control: no-transform` (`cacheHeaderFor` in
-`apps/server/src/static-files.ts`), which is the standard way to declare a body
-byte-exact, and which Cloudflare documents as suppressing that injection. The
-guarantee therefore ships with the policy it protects. It is deliberately not a
-statement about one vendor feature: any intermediary that rewrites the document
-invalidates a hash-based policy, and `no-transform` denies all of them at once.
-
-The dashboard toggle (Security → Bots → Configure Bot Management) is no longer
-load-bearing, which matters because it has regressed before — enabling **Bot
-Fight Mode force-enables JavaScript Detections and gives no way to turn it off
-independently**, so the zone drifted the moment someone turned Bot Fight Mode
-on. Bot Fight Mode may stay on; `no-transform` keeps the document intact
-regardless.
-
-If bot fingerprinting is ever genuinely needed, switch the policy to
-per-response nonces rather than adding `'unsafe-inline'`. Note that this would
-be cheaper than it sounds and than earlier revisions of this document claimed:
-the app has **no inline `<script>` of its own**, so the nonce would only need to
-appear in the CSP header — Cloudflare stamps its injected script with a nonce it
-parses from that header — and `index.html` would stay prebuilt and untemplated.
-The inline stylesheet-swap `onload` is an event handler, which nonces do not
-cover in any case; it stays on `'unsafe-hashes'` plus its hash.
+The stylesheet-swap `onload` is an event handler, which nonces do not cover. It
+stays restricted by `'unsafe-hashes'` plus the hash of its exact handler bytes.
 
 ## Privacy projection
 

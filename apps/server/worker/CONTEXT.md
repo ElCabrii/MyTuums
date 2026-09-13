@@ -29,8 +29,10 @@ fallback. The handler explicitly fetches an uncompressed index document after
 page admission, never for a missing asset or reserved API path. The native
 `worker-document.ts` bounds HTML and removes stale asset validators/lengths after
 transformation. `public-heads.ts` receives this deployment's explicit origin.
-`worker-response-headers.ts` computes the existing stylesheet CSP hash with Web
-Crypto and permits only configured Stream origins for video transport.
+`worker-response-headers.ts` computes the stylesheet event-handler CSP hash with
+Web Crypto and permits only configured Stream origins for video transport.
+`worker-request-handler.ts` adds a fresh script nonce to every HTML policy so
+Cloudflare can nonce-match the Zaraz and JavaScript Detections scripts it injects.
 
 `rate-limit-counter.ts` owns the SQLite-backed `RateLimitCounter` Durable Object.
 The HTTP entrypoint must export it and bind a namespace configured with a

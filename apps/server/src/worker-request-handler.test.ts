@@ -338,6 +338,19 @@ it("adds security headers and safe cache defaults to errors, preserves asset cac
   );
 });
 
+it("gives every HTML response a fresh script nonce for Cloudflare edge injections", async () => {
+  const handle = await fixture();
+  const firstPolicy = (await handle(request("/login"))).headers.get("content-security-policy");
+  const directDocument = await handle(request("/index.html"));
+  const secondPolicy = directDocument.headers.get("content-security-policy");
+  const nonce = (policy: string | null) => /script-src 'nonce-([^']+)'/.exec(policy ?? "")?.[1];
+
+  expect(nonce(firstPolicy)).toMatch(/^[A-Za-z0-9+/]+=*$/);
+  expect(nonce(secondPolicy)).toMatch(/^[A-Za-z0-9+/]+=*$/);
+  expect(nonce(firstPolicy)).not.toBe(nonce(secondPolicy));
+  expect(directDocument.headers.get("cache-control")).toBe("private, no-store");
+});
+
 it("never reports query tokens or raw dependency errors", async () => {
   const events: object[] = [];
   const handle = await fixture({
