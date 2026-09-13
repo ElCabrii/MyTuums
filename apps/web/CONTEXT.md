@@ -138,11 +138,13 @@ app's build from the same origin.
 - **Persisted atoms read `localStorage` as `unknown`, sanitise on read, and
   set `getOnInit: true`** — without it the first render flashes the default.
 - **Analytics has one root-mounted controller.** `AnalyticsConsent` alone
-  loads/stops the same-origin Zaraz client and emits sanitised SPA page views;
+  updates the same-origin Zaraz client's consent and emits sanitised SPA page views;
   `analyticsConsentAtom` owns the six-month per-device choice. When
   `VITE_GOOGLE_ANALYTICS` is not `enabled` there is no banner, storage write,
-  script or page view. The GA4 measurement ID lives only in the zone's Zaraz
-  tool configuration.
+  consent update or page view. The production zone injects the runtime so the
+  Consent API is ready; its GA4 action remains blocked until the controller
+  grants the analytics purpose. The GA4 measurement ID lives only in the zone's
+  Zaraz tool configuration.
 - **Release notes travel with their release.** Vite compiles only
   `changelog/<version>.<locale>.md` matching `package.json`; the browser ships
   rendered HTML, not Marked or historical notes. `ChangelogDialog` shows it

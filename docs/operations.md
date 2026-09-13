@@ -90,15 +90,18 @@ Worker. `VITE_GOOGLE_CLIENT_ID` is Google's public client identifier for One
 Tap. `VITE_WEB_ORIGIN` controls metadata and copied links and is derived by the
 deployment command. `VITE_GOOGLE_ANALYTICS` is also derived from the target
 Worker's `GOOGLE_ANALYTICS` setting; `enabled` exposes the consent UI and
-same-origin Zaraz loader. The public GA4 measurement ID lives in Cloudflare's
-zone-level Zaraz tool configuration instead of the browser bundle.
+connects it to the same-origin Zaraz runtime. The public GA4 measurement ID
+lives in Cloudflare's zone-level Zaraz tool configuration instead of the browser
+bundle.
 
-The `mytuums.com` Zaraz configuration uses manual script injection, disables
+The `mytuums.com` Zaraz configuration uses automatic script injection, disables
 automatic history tracking, and fires one GA4 page-view action only for the
 custom `MyTuumsPageview` event. The GA4 tool is assigned to the hidden
-`analytics` consent purpose. Keep both safeguards: the app strips query strings
-before it emits the event, and its consent controller is the only code allowed
-to load `/cdn-cgi/zaraz/i.js` or update that purpose.
+`analytics` consent purpose. The runtime must be injected for Cloudflare to
+provide its Consent API, but the GA4 action remains blocked until the app grants
+that purpose. Keep both safeguards: the app strips query strings before it emits
+the event, and its consent controller is the only code allowed to update the
+purpose or emit `MyTuumsPageview`.
 
 Runtime secrets include authentication, OAuth, Stream, IGDB and appeal-signing
 credentials. The app and jobs Workers share the same independently generated

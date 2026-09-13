@@ -18,35 +18,26 @@ export interface AnalyticsAdapter {
   trackPageView(page: { location: string; title: string }): void;
 }
 
-const SCRIPT_ID = "my-tuums-zaraz";
-const SCRIPT_SOURCE = "/cdn-cgi/zaraz/i.js";
 const CONSENT_READY_EVENT = "zarazConsentAPIReady";
 const ANALYTICS_PURPOSE_ID = "analytics";
 const PAGE_VIEW_EVENT = "MyTuumsPageview";
 const CONSENT_COOKIE_NAME = "mytuums_zaraz_consent";
 const INITIALIZATION_TIMEOUT_MS = 10_000;
 
-let scriptLoad: Promise<void> | null = null;
 let collectionDisabled = true;
 
 const analyticsWindow = (): AnalyticsWindow => window;
 
-function loadZaraz(): Promise<void> {
+function waitForConsentApi(): Promise<void> {
   const existingApi = analyticsWindow().zaraz;
   if (existingApi?.consent?.APIReady) return Promise.resolve();
-  if (scriptLoad) return scriptLoad;
 
-  scriptLoad = new Promise<void>((resolve, reject) => {
-    const existing = document.getElementById(SCRIPT_ID);
-    const script =
-      existing instanceof HTMLScriptElement ? existing : document.createElement("script");
+  return new Promise<void>((resolve, reject) => {
     let settled = false;
 
     const cleanup = () => {
       clearTimeout(timeout);
       document.removeEventListener(CONSENT_READY_EVENT, ready);
-      script.removeEventListener("load", ready);
-      script.removeEventListener("error", failed);
     };
     const ready = () => {
       if (!analyticsWindow().zaraz?.consent?.APIReady || settled) return;
@@ -58,28 +49,13 @@ function loadZaraz(): Promise<void> {
       if (settled) return;
       settled = true;
       cleanup();
-      scriptLoad = null;
-      if (!(existing instanceof HTMLScriptElement)) script.remove();
-      reject(new Error("Cloudflare Zaraz failed to load"));
+      reject(new Error("Cloudflare Zaraz consent API failed to initialize"));
     };
     const timeout = setTimeout(failed, INITIALIZATION_TIMEOUT_MS);
 
     document.addEventListener(CONSENT_READY_EVENT, ready);
-    script.addEventListener("load", ready);
-    script.addEventListener("error", failed, { once: true });
-
-    if (!(existing instanceof HTMLScriptElement)) {
-      script.id = SCRIPT_ID;
-      script.async = true;
-      script.referrerPolicy = "origin";
-      script.src = new URL(SCRIPT_SOURCE, window.location.origin).href;
-      document.head.append(script);
-    }
-
     ready();
   });
-
-  return scriptLoad;
 }
 
 function clearCookie(name: string): void {
@@ -117,7 +93,7 @@ export const zarazAnalytics: AnalyticsAdapter = {
   async start() {
     collectionDisabled = false;
     try {
-      await loadZaraz();
+      await waitForConsentApi();
       analyticsWindow().zaraz?.consent?.set({ [ANALYTICS_PURPOSE_ID]: true });
     } catch (error) {
       collectionDisabled = true;
@@ -126,9 +102,10 @@ export const zarazAnalytics: AnalyticsAdapter = {
   },
 
   stop() {
+    const wasCollecting = !collectionDisabled;
     collectionDisabled = true;
     const consent = analyticsWindow().zaraz?.consent;
-    if (consent?.APIReady) consent.set({ [ANALYTICS_PURPOSE_ID]: false });
+    if (wasCollecting && consent?.APIReady) consent.set({ [ANALYTICS_PURPOSE_ID]: false });
     clearAnalyticsCookies();
   },
 
