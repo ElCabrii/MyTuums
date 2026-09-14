@@ -4,26 +4,24 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { unstable_readConfig } from "wrangler";
-import { requirePreviewChecks } from "./preview-deploy-checks.js";
+import { requireDeploymentBranch, requirePreviewChecks } from "./preview-deploy-checks.js";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const { values } = parseArgs({ options: { target: { type: "string", default: "preview" } } });
 const target = z.enum(["preview", "production"]).parse(values.target);
 const environment = target === "preview" ? "preview" : "production";
 const appConfiguration = `wrangler.${target}.jsonc`;
-const allowedBranches = ["main"];
 const git = (...args: string[]) =>
   execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+const branch =
+  process.env.WORKERS_CI_BRANCH ?? process.env.GITHUB_REF_NAME ?? git("branch", "--show-current");
 const commit = z
   .string()
   .regex(/^[a-f0-9]{40}$/)
-  .parse(git("rev-parse", "HEAD"));
+  .parse(process.env.WORKERS_CI_COMMIT_SHA ?? process.env.GITHUB_SHA ?? git("rev-parse", "HEAD"));
 function assertCheckout() {
-  if (
-    !allowedBranches.includes(git("branch", "--show-current")) ||
-    git("rev-parse", "HEAD") !== commit ||
-    git("status", "--porcelain")
-  ) {
+  requireDeploymentBranch(target, branch);
+  if (git("rev-parse", "HEAD") !== commit || git("status", "--porcelain")) {
     throw new Error(
       "Deployment requires an unchanged, clean checkout on the target's allowed branch.",
     );
@@ -38,10 +36,16 @@ if (
     "Supply the target's public Google client ID and VITE_SOCIAL_PROVIDERS=google,discord,twitch before building.",
   );
 }
+const githubHeaders = new Headers({
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+});
+if (process.env.GITHUB_TOKEN)
+  githubHeaders.set("Authorization", `Bearer ${process.env.GITHUB_TOKEN}`);
 const response = await fetch(
   `https://api.github.com/repos/ElCabrii/MyTuums/commits/${commit}/check-runs?per_page=100`,
   {
-    headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+    headers: githubHeaders,
     signal: AbortSignal.timeout(15000),
   },
 );

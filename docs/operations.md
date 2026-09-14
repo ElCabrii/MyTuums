@@ -53,9 +53,10 @@ URLs remain disabled. Each environment owns separate app/jobs Workers, D1,
 private EU R2, Stream namespace, Workflows, Durable Objects, and a private
 rich-link Container. Cloudflare Email Service sends application mail.
 
-Deployments are explicit operator actions. From a clean `main` checkout whose
-exact commit has successful `Verify`, `E2E tests`, and `Docker image builds`
-checks, provide the target's public Vite inputs and run:
+Hosted deployments normally run from GitHub Actions after an eligible push.
+For an operator fallback, use a clean checkout of the target's admitted branch
+whose exact commit has successful `Verify`, `E2E tests`, and
+`Docker image builds` checks, provide the target's public Vite inputs and run:
 
 ```bash
 pnpm --filter @my-tuums/db deploy:preview --target=preview
@@ -67,6 +68,15 @@ repository, applies committed D1 migrations, deploys and verifies the link
 fetcher, then deploys jobs and the application. Production also deploys
 branding. Both hosted jobs Workers keep their minute Cron schedule so durable
 video, notification and game-sync recovery continues after deployment.
+
+GitHub Actions runs that same command after Verify, E2E tests and Docker image
+builds pass for the exact pushed commit. `main` targets production and
+`release/**` targets preview. Deployments for each environment are serialized,
+and an in-progress push deployment is never cancelled halfway through. The
+repository Actions configuration requires a `CLOUDFLARE_API_TOKEN` secret with
+access to deploy the account's Workers, Container, Workflows, routes and D1
+migrations, plus a public `VITE_GOOGLE_CLIENT_ID` repository variable. Runtime
+application secrets remain on their Workers in Cloudflare.
 
 Never run the full snapshot importer against an environment accepting writes.
 Normal releases use incremental committed migrations. The retired migration
@@ -165,10 +175,12 @@ for hosted diagnosis.
 
 ## CI checks
 
-GitHub Actions verifies but does not deploy. `Verify` runs `pnpm verify`; the
-other required checks run native browser E2E and build the private Container
-image. All tests use local or disposable D1/R2 resources and synthetic provider
-transports. CI needs no Cloudflare, Railway or Resend credentials.
+GitHub Actions runs verification for pull requests and eligible pushes.
+`Verify` runs `pnpm verify`; the other required checks run native browser E2E
+and build the private Container image. All tests use local or disposable D1/R2
+resources and synthetic provider transports. Only the branch-gated deployment
+jobs receive the Cloudflare token after those checks pass; verification jobs do
+not receive deployment credentials.
 
 Before a hosted release, the deploy command confirms all three required checks
 passed on the exact clean `main` commit. Branch pushes do not create additional

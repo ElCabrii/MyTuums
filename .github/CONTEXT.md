@@ -3,15 +3,15 @@
 ## Responsibility
 
 CI verifies the Cloudflare application, Workflows and private link-fetcher Container.
-It never deploys and needs no provider credentials. Production and preview use
-the explicit deployment command in `packages/db/scripts/deploy-preview.ts`, which
-requires all three checks to pass on the exact release commit.
+After all three checks pass for a push, `main` deploys production and `release/**`
+deploys preview through the ordered command in
+`packages/db/scripts/deploy-preview.ts`. Pull requests only run verification.
 
 ## Start here
 
 | File                     | Owns                                             |
 | ------------------------ | ------------------------------------------------ |
-| `workflows/ci.yml`       | `Verify`, `E2E tests`, and `Docker image builds` |
+| `workflows/ci.yml`       | verification and branch-gated Cloudflare deploys |
 | `workflows/opencode.yml` | comment-triggered agent, separate from CI        |
 | `../docs/operations.md`  | native build, deployment and test requirements   |
 
@@ -20,7 +20,9 @@ requires all three checks to pass on the exact release commit.
 - Add repository-wide checks to `../package.json`'s `verify` script.
 - Change browser setup in the `e2e` job and `../e2e/CONTEXT.md` together.
 - Update an action by resolving its full commit and retaining the version comment.
-- Production and preview deployment uses the CI-gated operator command, not this workflow.
+- Change deployment ordering and branch admission in
+  `../packages/db/scripts/deploy-preview.ts`; the workflow only selects the target
+  after the required checks pass.
 
 ## Invariants
 
@@ -32,8 +34,10 @@ requires all three checks to pass on the exact release commit.
   It uses synthetic Access/mail/Stream providers and never loads bucket secrets.
 - All three jobs use the self-hosted runner, Node 24 and the frozen pnpm lockfile.
   Browser system libraries must already be installed on that runner.
-- Each job has a 30-minute timeout. Push and pull-request events share the head
-  branch concurrency key, so duplicate runs cannot occupy the runner queue.
+- Verification jobs have a 30-minute timeout. Push and pull-request events share
+  the head branch concurrency key. Pull requests cancel superseded runs; pushes
+  finish because cancellation during migrations or a multi-Worker deployment
+  could leave an environment on mixed versions.
   `TMPDIR` uses the runner-owned temporary directory, avoiding the host
   `/tmp` quota that previously caused SQLite write failures during badge tests.
   Turbo explicitly passes `TMPDIR` through its strict environment filter; setting
@@ -44,6 +48,10 @@ requires all three checks to pass on the exact release commit.
   images or PostgreSQL services. Branch protection remains unchanged.
 - The comment-triggered `opencode` workflow retains its own authorization and
   provider configuration; it is not part of native CI migration.
+- Production and preview deployments have separate concurrency groups. Different
+  release branches therefore serialize writes to the one preview environment.
+  The deploy jobs use the repository's `CLOUDFLARE_API_TOKEN` secret and public
+  `VITE_GOOGLE_CLIENT_ID` variable. Runtime Worker secrets stay in Cloudflare.
 
 ## Verification
 
@@ -51,10 +59,11 @@ Run `pnpm verify` and `pnpm test:e2e` locally. Validate workflow YAML and compar
 its commands with those scripts. Hosted CI execution remains a separate check
 when this branch is pushed; local success does not prove the runner is available.
 
-## Authorized production deployment
+## Cloudflare deployment
 
 The completed migration is recorded in
-[the execution record](../docs/cloudflare-production-migration.md). Routine
-production and preview releases now start from a clean `main` commit and retain
-all three required checks. The operator command remains the only deployment
-entrypoint; CI itself has no Cloudflare credentials and does not publish.
+[the execution record](../docs/cloudflare-production-migration.md). A successful
+push to `main` deploys production; a successful push to `release/**` deploys
+preview. The ordered command remains the only deployment implementation and
+rechecks the exact commit's required GitHub Actions results before applying D1
+migrations and publishing the Worker stack.

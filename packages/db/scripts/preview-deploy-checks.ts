@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+export type DeploymentTarget = "preview" | "production";
+
+/** Prevent a release branch from ever targeting production, or main from overwriting preview. */
+export function requireDeploymentBranch(target: DeploymentTarget, branch: string) {
+  const allowed = target === "production" ? branch === "main" : /^release\/.+/.test(branch);
+  if (!allowed)
+    throw new Error(`${target} deployment is not allowed from branch ${JSON.stringify(branch)}.`);
+}
+
 /** A newer failed run must supersede an older successful run for the same commit. */
 export function requirePreviewChecks(commit: string, responseBody: string) {
   const checks = z
