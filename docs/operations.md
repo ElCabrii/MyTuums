@@ -68,6 +68,15 @@ fetcher, then deploys jobs and the application. Production also deploys
 branding. Both hosted jobs Workers keep their minute Cron schedule so durable
 video, notification and game-sync recovery continues after deployment.
 
+GitHub Actions runs that same command after Verify, E2E tests and Docker image
+builds pass for the exact pushed commit. `main` targets production and
+`release/**` targets preview. Deployments for each environment are serialized,
+and an in-progress push deployment is never cancelled halfway through. The
+repository Actions configuration requires a `CLOUDFLARE_API_TOKEN` secret with
+access to deploy the account's Workers, Container, Workflows, routes and D1
+migrations, plus a public `VITE_GOOGLE_CLIENT_ID` repository variable. Runtime
+application secrets remain on their Workers in Cloudflare.
+
 Never run the full snapshot importer against an environment accepting writes.
 Normal releases use incremental committed migrations. The retired migration
 candidate and proof-of-concept targets must not be recreated or selected by

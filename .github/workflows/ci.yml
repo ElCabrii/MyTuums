@@ -2,18 +2,23 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - release/**
   pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  # A push may already be applying migrations or deploying one part of the
+  # Worker stack. Let it finish before a newer commit starts its release.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
+  checks: read
   contents: read
 
-# Native artifact and Workflows checks belong to pnpm verify. CI uses isolated
-# local resources and synthetic providers; it never deploys or needs secrets.
+# Verification uses isolated local resources and synthetic providers. Push
+# deployments receive Cloudflare credentials only after every check succeeds.
 jobs:
   verify:
     name: Verify
@@ -82,3 +87,55 @@ jobs:
       - run: docker build --tag mytuums-link-fetcher-ci apps/link-fetcher
       # Exercise the deployed non-root user's ability to read the generated bundle.
       - run: docker run --rm --network none --entrypoint node mytuums-link-fetcher-ci --check /app/server.cjs
+
+  deploy-production:
+    name: Deploy production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [verify, e2e, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: cloudflare-production-deployment
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        with:
+          runtime: node@24
+          cache: true
+          require-lockfile: true
+      - name: Deploy the verified Cloudflare stack
+        run: pnpm --filter @my-tuums/db deploy:preview --target=production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          VITE_SOCIAL_PROVIDERS: google,discord,twitch
+
+  deploy-preview:
+    name: Deploy preview
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
+    needs: [verify, e2e, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: cloudflare-preview-deployment
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        with:
+          runtime: node@24
+          cache: true
+          require-lockfile: true
+      - name: Deploy the verified Cloudflare stack
+        run: pnpm --filter @my-tuums/db deploy:preview --target=preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          VITE_SOCIAL_PROVIDERS: google,discord,twitch

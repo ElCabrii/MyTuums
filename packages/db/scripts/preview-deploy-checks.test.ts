@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { requirePreviewChecks } from "./preview-deploy-checks.js";
+import { requireDeploymentBranch, requirePreviewChecks } from "./preview-deploy-checks.js";
 
 const commit = "a".repeat(40);
 const checks = ["Verify", "E2E tests", "Docker image builds"].map((name, id) => ({
@@ -11,6 +11,15 @@ const checks = ["Verify", "E2E tests", "Docker image builds"].map((name, id) => 
   conclusion: "success",
   app: { slug: "github-actions" },
 }));
+
+await test("deployment targets accept only their designated release branches", () => {
+  assert.doesNotThrow(() => requireDeploymentBranch("production", "main"));
+  assert.doesNotThrow(() => requireDeploymentBranch("preview", "release/0.6.0"));
+  assert.throws(() => requireDeploymentBranch("production", "release/0.6.0"));
+  assert.throws(() => requireDeploymentBranch("preview", "main"));
+  assert.throws(() => requireDeploymentBranch("preview", "feature/video"));
+  assert.throws(() => requireDeploymentBranch("preview", "release/"));
+});
 await test("preview deployment requires all three successful GitHub Actions checks on the exact commit", () => {
   assert.doesNotThrow(() =>
     requirePreviewChecks(commit, JSON.stringify({ total_count: 3, check_runs: checks })),

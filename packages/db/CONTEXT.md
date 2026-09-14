@@ -222,12 +222,13 @@ snapshot importer against an environment that is accepting writes.
 
 `deploy:preview` gates a clean allowed branch against the exact commit’s latest
 GitHub Actions Verify, E2E tests and Docker image builds results. Production
-and preview require `main`; retired migration targets and branches are refused.
-It then builds and
+requires `main`; preview requires `release/**`. Retired migration targets and
+all other branches are refused. It then builds and
 deploys migrations, the private link fetcher, jobs and app in order; production
 also deploys branding. `preview-deploy-checks.test.ts` covers refusals
-for missing, foreign, superseded and failed checks. This operator command does
-not automatically cut over domains, freeze source writes or start schedules.
+for invalid target branches and missing, foreign, superseded or failed checks.
+GitHub Actions invokes the command automatically after the same three jobs pass
+on a push; it does not cut over domains, freeze source writes or start schedules.
 
 ## Production migration administration
 
