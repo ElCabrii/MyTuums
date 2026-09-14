@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ImagePlus } from "lucide-react";
-import { ALLOWED_IMAGE_TYPES, VIDEO_INPUT_TYPES } from "@my-tuums/api/constants";
+import { ALLOWED_IMAGE_TYPES, VIDEO_INPUT_TYPES, VIDEO_MAX_BYTES } from "@my-tuums/api/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -55,7 +55,7 @@ export function ComposerMediaDialog({
         </label>
         <div className="text-muted-foreground space-y-2 text-xs">
           <p>{m.post_images_hint()}</p>
-          <p>{m.video_input_hint()}</p>
+          <p>{m.video_input_hint({ maxMb: String(VIDEO_MAX_BYTES / 1_000_000) })}</p>
         </div>
       </DialogContent>
     </Dialog>

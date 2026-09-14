@@ -6,9 +6,12 @@ import {
   POST_ATTACHMENT_MAX_BYTES,
   POST_ATTACHMENT_MAX_TOTAL_BYTES,
   POST_MAX_LENGTH,
+  VIDEO_MAX_BYTES,
+  VIDEO_MAX_DURATION_SECONDS,
 } from "@my-tuums/api/constants";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc, orpc, type SearchTypeahead } from "@/lib/orpc";
+import type { VideoPreflightVerdict } from "@/lib/video-preflight";
 import { makeUserSummary } from "@/test/factories";
 import { renderWithProviders } from "@/test/render";
 import { ComposerForm } from "@/components/composer-form";
@@ -18,6 +21,16 @@ import { m } from "@/paraglide/messages.js";
 
 const fakeClient = { search: { typeahead: vi.fn() } };
 installTestOrpc(createTanstackQueryUtils(fakeClient));
+
+/**
+ * jsdom decodes no video, so the real preflight would only ever time out.
+ * The verdicts themselves are pinned in `video-preflight.test.ts`; here a
+ * verifier pinned to one verdict rides the component's injection point, the
+ * same interface production passes the real preflight through.
+ */
+function verifyingWith(verdict: VideoPreflightVerdict) {
+  return () => Promise.resolve(verdict);
+}
 
 /**
  * Every selection runs through the post-attachment pipeline (`lib/media.ts`)
@@ -383,6 +396,44 @@ describe("ComposerForm", () => {
     });
     expect(screen.getByRole("alert")).toHaveTextContent(m.post_media_hint());
     expect(onAttachmentsChange).not.toHaveBeenCalled();
+    expect(store.get(videoDraftAtomFamily("composer"))).toBeNull();
+  });
+
+  // Issue #404: a refused video must say specifically why — in the localized
+  // copy, with the shared decimal cap — and must never create the draft or
+  // reach the upload transport.
+  it("surfaces the specific localized refusal when the video preflight rejects the file", async () => {
+    const onAttachmentsChange = vi.fn();
+    const { store } = await renderComposer({
+      onAttachmentsChange,
+      verifyVideo: verifyingWith({ ok: false, reason: "duration" }),
+    });
+    const picker = await openMediaPicker();
+    fireEvent.change(picker, {
+      target: { files: [new File([new Uint8Array([1])], "long.mp4", { type: "video/mp4" })] },
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      m.video_reject_duration({ maxMinutes: String(VIDEO_MAX_DURATION_SECONDS / 60) }),
+    );
+    expect(onAttachmentsChange).not.toHaveBeenCalled();
+    expect(store.get(videoDraftAtomFamily("composer"))).toBeNull();
+  });
+
+  it("quotes the shared decimal cap in the composer's size refusal", async () => {
+    const onAttachmentsChange = vi.fn();
+    const { store } = await renderComposer({
+      onAttachmentsChange,
+      verifyVideo: verifyingWith({ ok: false, reason: "size" }),
+    });
+    const picker = await openMediaPicker();
+    fireEvent.change(picker, {
+      target: { files: [new File([new Uint8Array([1])], "huge.mp4", { type: "video/mp4" })] },
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      m.video_reject_size({ maxMb: String(VIDEO_MAX_BYTES / 1_000_000) }),
+    );
     expect(store.get(videoDraftAtomFamily("composer"))).toBeNull();
   });
 

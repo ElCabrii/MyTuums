@@ -54,6 +54,19 @@ app's build from the same origin.
   Selection/completion never submits a post. Successful submission clears the
   draft; explicit removal cancels the upload. The native API/client protocol is
   implemented; the Cloudflare Worker entrypoint remains to wire.
+- **A video selection is preflighted locally before it becomes state (issue
+  #404).** `src/lib/video-preflight.ts` checks the shared decimal byte cap,
+  duration, orientation-aware dimensions and the encoded frame rate before
+  `selectVideoAtomFamily` writes any draft or invokes the upload transport —
+  a refusal creates no server record, contacts no provider, and surfaces one
+  specific localized reason (composer-form owns the reason→copy map). The
+  frame rate comes from `src/lib/video-frame-rate.ts`, a bounded MP4/MOV/WebM
+  container parser lazy-imported so page startup pays neither its bundle nor
+  its parsing cost; `HTMLVideoElement.loadedmetadata` supplies duration and
+  dimensions only. An unreadable file is refused, never uploaded blind. The
+  server's byte cap and Stream's `maxDurationSeconds` remain the enforcement
+  boundary — the provider does not report source fps, which is why the local
+  read is the only 60 fps gate.
 - **Composer video previews use the original local file.**
   `src/components/local-video-preview.tsx` owns the native player and its blob
   URL, released on replacement or unmount. Previewing never uploads, encodes,

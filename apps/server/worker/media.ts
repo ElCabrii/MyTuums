@@ -1,11 +1,20 @@
 import { parseMediaVariantKey, RPC_MAX_BODY_BYTES } from "@my-tuums/api/constants";
 import { isAllowedImageType, isSafeObjectKey } from "@my-tuums/api/image";
 
+/** Schedules background work on the request's execution context (issue #405). */
+export type WaitUntil = (promise: Promise<unknown>) => void;
+
+export type MediaCacheEvent =
+  | { event: "media_cache_hit" }
+  | { event: "media_cache_miss" }
+  | { event: "media_cache_population_failed" }
+  | { event: "image_transform_failed" };
+
 interface MediaDependencies {
   bucket: R2Bucket;
   images: Pick<ImagesBinding, "input">;
   authorize(key: string, viewerId: string | null): Promise<boolean>;
-  observe(event: { event: "image_transform_failed" }): void;
+  observe(event: MediaCacheEvent): void;
 }
 
 async function imageBytes(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
@@ -31,6 +40,57 @@ async function imageBytes(stream: ReadableStream<Uint8Array>): Promise<Uint8Arra
     offset += chunk.byteLength;
   }
   return bytes;
+}
+
+/**
+ * How long an eligible edge-cache entry may live (issue #405). Object keys are
+ * immutable UUID paths, so bytes cannot go stale under a key; the bound exists
+ * only so an entry for a deleted object ages out of the datacenter instead of
+ * lingering indefinitely behind an authorization that will never pass again.
+ */
+const MEDIA_CACHE_TTL_SECONDS = 6 * 60 * 60;
+
+/** A synthetic path prefix that can never collide with a real media object key. */
+const MEDIA_CACHE_PATH_PREFIX = "/__media-edge-cache/";
+
+/**
+ * Profile originals (`.orig`) are owner-only source material with little
+ * repeat-view value; they stay out of the cache. Everything else the resolver
+ * serves — post images, profile displays, link-card and game-cover images,
+ * plus derived variants — lives under immutable UUID keys.
+ */
+function cacheEligible(key: string): boolean {
+  return !key.includes(".orig");
+}
+
+/**
+ * The canonical cache key (issue #405): a synthetic GET under the deployment's
+ * own origin, built from the object key alone. Cookies, session headers, query
+ * strings and viewer identity cannot vary it, because none of them participate
+ * in its construction; two authorized viewers in the same datacenter therefore
+ * share one entry, while the per-request D1 authorizations remain the only
+ * admission decision.
+ */
+function cacheRequestFor(key: string, request: Request): Request {
+  const url = new URL(`${MEDIA_CACHE_PATH_PREFIX}${encodeURIComponent(key)}`, request.url);
+  return new Request(url.href, { method: "GET" });
+}
+
+/** The browser-facing response is private regardless of what the cache holds. */
+function deliveredResponse(
+  body: ReadableStream<Uint8Array> | null,
+  contentType: string,
+  size: number,
+): Response {
+  return new Response(body, {
+    headers: {
+      "content-type": contentType,
+      "content-length": String(size),
+      "cache-control": "private, no-store",
+      "x-content-type-options": "nosniff",
+      "content-disposition": "inline",
+    },
+  });
 }
 
 /** Reuse per isolate. Private delivery always inherits the base's current visibility. */
@@ -105,6 +165,7 @@ export function createWorkerMediaResolver(deps: MediaDependencies) {
     key: string,
     viewerId: string | null,
     request: Request,
+    waitUntil?: WaitUntil,
   ): Promise<Response | null> => {
     if (!isSafeObjectKey(key)) return null;
     const variant = parseMediaVariantKey(key);
@@ -112,7 +173,53 @@ export function createWorkerMediaResolver(deps: MediaDependencies) {
     // allowlist may grant transformation work or retrieval of a derived object.
     if (/\.w\d+\.webp$/.test(key) && !variant) return null;
     const baseKey = variant?.baseKey ?? key;
+    // Authorization runs before any cache consultation (issue #405): the edge
+    // cache can never answer on behalf of the database, only after it.
     if (!(await deps.authorize(baseKey, viewerId))) return null;
+
+    const cacheable = cacheEligible(key);
+    const cacheRequest = cacheable ? cacheRequestFor(key, request) : undefined;
+    if (cacheRequest) {
+      let cached: Response | undefined;
+      try {
+        cached = await caches.default.match(cacheRequest);
+      } catch {
+        // Behind Cloudflare Access or on a runtime without the Cache API the
+        // resolver must keep serving from R2 exactly as before.
+        cached = undefined;
+      }
+      if (cached?.body) {
+        const contentType = cached.headers.get("content-type") ?? "";
+        const length = Number(cached.headers.get("content-length"));
+        // A block, ban, replacement or deletion during cache lookup must take
+        // effect before cached bytes are delivered — the same second
+        // authorization the R2 path applies after its I/O.
+        if (isAllowedImageType(contentType) && Number.isSafeInteger(length) && length >= 0) {
+          if (!(await deps.authorize(baseKey, viewerId))) {
+            await cached.body.cancel().catch(() => {});
+            return null;
+          }
+          try {
+            deps.observe({ event: "media_cache_hit" });
+          } catch {
+            /* Telemetry must not gate delivery. */
+          }
+          return deliveredResponse(
+            request.method === "HEAD" ? null : cached.body,
+            contentType,
+            length,
+          );
+        }
+        await cached.body.cancel().catch(() => {});
+      } else if (cached) {
+        try {
+          deps.observe({ event: "media_cache_miss" });
+        } catch {
+          /* Telemetry must not gate delivery. */
+        }
+      }
+    }
+
     const object = await objectFor(key);
     if (!object) return null;
     let delivered = false;
@@ -123,16 +230,41 @@ export function createWorkerMediaResolver(deps: MediaDependencies) {
       // effect before we issue the response, including already-cached variants.
       if (!(await deps.authorize(baseKey, viewerId))) return null;
       const head = request.method === "HEAD";
-      const response = new Response(head ? null : object.body, {
-        headers: {
-          "content-type": contentType,
-          "content-length": String(object.size),
-          "cache-control": "private, no-store",
-          "x-content-type-options": "nosniff",
-          "content-disposition": "inline",
-        },
-      });
+      // The browser gets one branch of the body and the edge cache the other,
+      // so population never delays or duplicates the R2 read. Ineligible keys
+      // and HEAD requests skip the split and stream the object directly.
+      const [outbound, stored] = head
+        ? [null, null]
+        : cacheRequest
+          ? object.body.tee()
+          : [object.body, null];
+      const response = deliveredResponse(outbound, contentType, object.size);
       delivered = !head;
+      if (cacheRequest && stored) {
+        // The stored copy is not the browser-facing response: it must carry a
+        // cacheable policy or the Cache API refuses to keep it, while every
+        // response this resolver returns to a viewer stays private.
+        const population = caches.default
+          .put(
+            cacheRequest,
+            new Response(stored, {
+              headers: {
+                "content-type": contentType,
+                "content-length": String(object.size),
+                "cache-control": `public, max-age=${MEDIA_CACHE_TTL_SECONDS}`,
+              },
+            }),
+          )
+          .catch(() => {
+            try {
+              deps.observe({ event: "media_cache_population_failed" });
+            } catch {
+              /* Telemetry must not gate delivery. */
+            }
+          });
+        if (waitUntil) waitUntil(population);
+        else await population;
+      }
       return response;
     } finally {
       if (!delivered) await object.body.cancel().catch(() => {});

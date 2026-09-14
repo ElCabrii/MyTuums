@@ -5,7 +5,17 @@
  * several ordered objects, and its visibility follows the post (including
  * moderation tombstones and blocks), not just the signed-in state.
  */
-import { and, eq, getTableName, isNull, not, or, sql, type AnyColumn } from "drizzle-orm";
+import {
+  and,
+  eq,
+  getTableName,
+  isNull,
+  not,
+  or,
+  sql,
+  type AnyColumn,
+  type SQLWrapper,
+} from "drizzle-orm";
 import type { Database } from "@my-tuums/db";
 import { post, postAttachment, user, video } from "@my-tuums/db/schema";
 import { z } from "zod";
@@ -211,13 +221,42 @@ function attachmentColumn(column: AnyColumn) {
 }
 
 /**
- * Attachments are ordered in one correlated aggregate so every post surface
- * shares the same shape. Lives here rather than in `posts.ts` so surfaces
- * that must not import the post router — the notification list, whose module
- * `posts.ts` already imports for `insertNotification` — still share the one
- * definition instead of cycling two modules or forking the projection.
+ * The post row a correlated attachment aggregate resolves against: the id the
+ * rows attach to and the two tombstones that decide whether they render.
+ * Defaults to the outer, unaliased `post` table; a projection correlated
+ * inside another post's subquery — the quoted preview — passes its own
+ * aliased columns instead, for the same scoping reason `outerPost` qualifies
+ * explicitly.
  */
-export function postAttachmentsSelection(includeTombstones = false) {
+export interface AttachmentOwnerPost {
+  id: SQLWrapper;
+  removedAt: SQLWrapper;
+  deletedAt: SQLWrapper;
+}
+
+function outerPostOwner(): AttachmentOwnerPost {
+  return {
+    id: outerPost("id"),
+    removedAt: outerPost("removed_at"),
+    deletedAt: outerPost("deleted_at"),
+  };
+}
+
+/**
+ * Attachments are ordered in one correlated aggregate so every post surface
+ * shares the same shape — including the `video` playback projection a quoted
+ * original needs just as much as an ordinary post (issue #403: a second
+ * hand-maintained copy in the quote preview omitted it, and the renderer
+ * treated the HLS manifest as an image). Lives here rather than in `posts.ts`
+ * so surfaces that must not import the post router — the notification list,
+ * whose module `posts.ts` already imports for `insertNotification` — still
+ * share the one definition instead of cycling two modules or forking the
+ * projection.
+ */
+export function postAttachmentsSelection(
+  includeTombstones = false,
+  owner: AttachmentOwnerPost = outerPostOwner(),
+) {
   const image = sql`json_object(
         'id', ${attachmentColumn(postAttachment.id)},
         'url', ${attachmentColumn(postAttachment.mediaPath)},
@@ -243,11 +282,11 @@ export function postAttachmentsSelection(includeTombstones = false) {
     )
     from ${postAttachment}
     left join ${video} on ${attachmentColumn(video.id)} = ${attachmentColumn(postAttachment.videoId)}
-    where ${attachmentColumn(postAttachment.postId)} = ${outerPost("id")}
+    where ${attachmentColumn(postAttachment.postId)} = ${owner.id}
       ${
         includeTombstones
           ? sql``
-          : sql`and ${outerPost("removed_at")} is null and ${outerPost("deleted_at")} is null`
+          : sql`and ${owner.removedAt} is null and ${owner.deletedAt} is null`
       }
   ), '[]')`.mapWith(jsonDecoder(z.array(postAttachmentSchema)));
 }

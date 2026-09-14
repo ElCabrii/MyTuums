@@ -131,4 +131,85 @@ describe("D1 post read contracts", () => {
       captionLanguage: null,
     });
   });
+
+  // Issue #403: the quote preview used to rebuild the attachment JSON by
+  // hand, omitting the `video` object. The field is optional in
+  // `postAttachmentSchema`, so decoding succeeded and the web renderer
+  // fetched the HLS manifest as an image. The quoted original must be served
+  // through the same shared aggregate an ordinary post reads.
+  it("serves a quoted video through the complete attachment projection", async () => {
+    const author = await createTestUser();
+    const viewer = await createTestUser();
+    const originalId = crypto.randomUUID();
+    const quoteId = crypto.randomUUID();
+    await db.insert(post).values({ id: originalId, authorId: author.id, content: "Original" });
+    await db
+      .insert(post)
+      .values({ id: quoteId, authorId: viewer.id, quotedPostId: originalId, content: "Quote" });
+    const videoId = crypto.randomUUID();
+    await db.insert(video).values({
+      id: videoId,
+      authorId: author.id,
+      postId: originalId,
+      state: "published",
+      byteSize: 100,
+      streamCreatorId: `mytuums-test:${videoId}`,
+      streamUid: videoId.replaceAll("-", ""),
+      expiresAt: new Date(),
+      playback: { width: 640, height: 360, duration: 4.5, captionLanguage: "en" },
+    });
+    const [attachment] = await db
+      .insert(postAttachment)
+      .values({
+        postId: originalId,
+        videoId,
+        position: 0,
+        mediaPath: `/media/videos/${videoId}/master.m3u8`,
+        contentType: "application/vnd.apple.mpegurl",
+        byteSize: 100,
+        width: 640,
+        height: 360,
+      })
+      .returning({ id: postAttachment.id });
+
+    const read = await call(
+      appRouter.post.list,
+      { authorId: viewer.id },
+      { context: contextFor(viewer) },
+    );
+    // `quoted` is `any` through the JSON-decoder projection, so it stays
+    // inline in the assertions — binding it to a name would trip the
+    // no-unsafe-assignment lint the same way a real consumer would deserve.
+    const quote = read.items.find((row) => row.id === quoteId);
+    expect(quote?.quoted?.attachments).toHaveLength(1);
+    expect(quote?.quoted?.attachments[0]).toEqual({
+      id: attachment?.id,
+      url: `/media/videos/${videoId}/master.m3u8`,
+      position: 0,
+      contentType: "application/vnd.apple.mpegurl",
+      byteSize: 100,
+      width: 640,
+      height: 360,
+      video: {
+        duration: 4.5,
+        posterUrl: `/media/videos/${videoId}/cover.jpg`,
+        previewUrl: `/media/videos/${videoId}/previews.vtt`,
+        captionUrl: `/media/videos/${videoId}/captions.vtt`,
+        captionLanguage: "en",
+      },
+    });
+
+    // The shared aggregate's tombstone rule rides along unchanged: a removed
+    // original keeps its rows for restore but renders none.
+    await db.update(post).set({ removedAt: new Date() }).where(eq(post.id, originalId));
+    const removedRead = await call(
+      appRouter.post.list,
+      { authorId: viewer.id },
+      { context: contextFor(viewer) },
+    );
+    expect(removedRead.items.find((row) => row.id === quoteId)?.quoted).toMatchObject({
+      removed: true,
+      attachments: [],
+    });
+  });
 });

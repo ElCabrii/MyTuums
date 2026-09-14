@@ -42,7 +42,7 @@ async function published() {
 }
 
 const delivery: Pick<StreamService, "signedVideoUrl" | "readCaptions"> = {
-  signedVideoUrl: (_id, _uid, kind, time) =>
+  signedVideoUrl: (_uid, kind, time) =>
     Promise.resolve(
       `https://customer-synthetic.cloudflarestream.com/signed-token/${kind}?time=${time}`,
     ),
