@@ -158,36 +158,45 @@ describe("D1 post read contracts", () => {
       expiresAt: new Date(),
       playback: { width: 640, height: 360, duration: 4.5, captionLanguage: "en" },
     });
-    await db.insert(postAttachment).values({
-      postId: originalId,
-      videoId,
-      position: 0,
-      mediaPath: `/media/videos/${videoId}/master.m3u8`,
-      contentType: "application/vnd.apple.mpegurl",
-      byteSize: 100,
-      width: 640,
-      height: 360,
-    });
+    const [attachment] = await db
+      .insert(postAttachment)
+      .values({
+        postId: originalId,
+        videoId,
+        position: 0,
+        mediaPath: `/media/videos/${videoId}/master.m3u8`,
+        contentType: "application/vnd.apple.mpegurl",
+        byteSize: 100,
+        width: 640,
+        height: 360,
+      })
+      .returning({ id: postAttachment.id });
 
     const read = await call(
       appRouter.post.list,
       { authorId: viewer.id },
       { context: contextFor(viewer) },
     );
-    const quoted = read.items.find((row) => row.id === quoteId)?.quoted;
-    expect(quoted?.attachments).toHaveLength(1);
-    expect(quoted?.attachments[0]).toMatchObject({
-      id: expect.any(String),
+    // `quoted` is `any` through the JSON-decoder projection, so it stays
+    // inline in the assertions — binding it to a name would trip the
+    // no-unsafe-assignment lint the same way a real consumer would deserve.
+    const quote = read.items.find((row) => row.id === quoteId);
+    expect(quote?.quoted?.attachments).toHaveLength(1);
+    expect(quote?.quoted?.attachments[0]).toEqual({
+      id: attachment?.id,
       url: `/media/videos/${videoId}/master.m3u8`,
       position: 0,
       contentType: "application/vnd.apple.mpegurl",
-    });
-    expect(quoted?.attachments[0].video).toEqual({
-      duration: 4.5,
-      posterUrl: `/media/videos/${videoId}/cover.jpg`,
-      previewUrl: `/media/videos/${videoId}/previews.vtt`,
-      captionUrl: `/media/videos/${videoId}/captions.vtt`,
-      captionLanguage: "en",
+      byteSize: 100,
+      width: 640,
+      height: 360,
+      video: {
+        duration: 4.5,
+        posterUrl: `/media/videos/${videoId}/cover.jpg`,
+        previewUrl: `/media/videos/${videoId}/previews.vtt`,
+        captionUrl: `/media/videos/${videoId}/captions.vtt`,
+        captionLanguage: "en",
+      },
     });
 
     // The shared aggregate's tombstone rule rides along unchanged: a removed
