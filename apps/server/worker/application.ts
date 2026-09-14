@@ -58,9 +58,11 @@ export async function createWorkerApplication(options: {
     },
     handleAuth: (request) => auth.handler(request),
     handleRpc: createWorkerApi(auth, services),
-    async resolveMedia(key, viewerId, request) {
-      if (!key.startsWith("videos/")) return images(key, viewerId, request);
-      const media = await resolveVideoMedia(db, options.stream, key, viewerId);
+    async resolveMedia(key, viewerId, request, waitUntil) {
+      if (!key.startsWith("videos/")) return images(key, viewerId, request, waitUntil);
+      const media = await resolveVideoMedia(db, options.stream, key, viewerId, (event) =>
+        console.log(event),
+      );
       if (!media) return null;
       const headers = { "cache-control": "private, no-store" };
       if ("url" in media)

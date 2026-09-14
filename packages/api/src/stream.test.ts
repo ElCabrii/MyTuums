@@ -1,5 +1,6 @@
 import type { StreamBinding, StreamVideo } from "@cloudflare/workers-types";
 import { expect, it } from "vitest";
+import { VIDEO_MAX_BYTES } from "./constants.js";
 import { createStreamService, StreamError, streamUploadUrl } from "./stream.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
@@ -84,7 +85,7 @@ it("creates a resumable private upload with fixed limits and only opaque creator
     },
   });
   const expiresAt = new Date("2026-09-11T00:00:00Z");
-  const result = await service.createUpload(id, 500_000_000, expiresAt);
+  const result = await service.createUpload(id, VIDEO_MAX_BYTES, expiresAt);
   expect(result.uid).toBe(uid);
   const request = requests[0];
   expect(request.url).toBe(
@@ -92,7 +93,7 @@ it("creates a resumable private upload with fixed limits and only opaque creator
   );
   expect(request.method).toBe("POST");
   expect(request.redirect).toBe("manual");
-  expect(request.headers.get("upload-length")).toBe("500000000");
+  expect(request.headers.get("upload-length")).toBe(String(VIDEO_MAX_BYTES));
   expect(request.headers.get("upload-creator")).toBe(creator);
   expect(request.headers.get("tus-resumable")).toBe("1.0.0");
   expect(request.headers.get("upload-metadata")).toBe(
@@ -201,19 +202,20 @@ it.each([
   expect(() => streamUploadUrl(url)).toThrow(StreamError);
 });
 
-it("issues playback and thumbnail URLs only for private ready videos on the provider origin", async () => {
+it("issues playback and thumbnail URLs from the binding alone on the fixed signed origin", async () => {
   const fake = provider();
-  fake.value.hlsPlaybackUrl = `https://customer-synthetic.cloudflarestream.com/${uid}/manifest/video.m3u8`;
   const service = createStreamService({
     binding: fake.binding,
     accountId: "b".repeat(32),
     apiToken: "synthetic-token",
     namespace: "mytuums-test",
   });
-  expect(await service.signedVideoUrl(id, uid, "manifest")).toBe(
-    "https://customer-synthetic.cloudflarestream.com/synthetic.header.signature/manifest/video.m3u8",
+  // Issue #405: no provider round-trip precedes signing — the published row,
+  // stored UID and signed-URL-at-creation invariant already gate the caller.
+  expect(await service.signedVideoUrl(uid, "manifest")).toBe(
+    "https://videodelivery.net/synthetic.header.signature/manifest/video.m3u8",
   );
-  const thumbnail = new URL(await service.signedVideoUrl(id, uid, "preview", 2));
+  const thumbnail = new URL(await service.signedVideoUrl(uid, "preview", 2));
   expect(thumbnail.pathname).toBe("/synthetic.header.signature/thumbnails/thumbnail.jpg");
   expect(Object.fromEntries(thumbnail.searchParams)).toEqual({
     time: "2s",
@@ -221,15 +223,10 @@ it("issues playback and thumbnail URLs only for private ready videos on the prov
     height: "90",
     fit: "crop",
   });
-  fake.value.requireSignedURLs = false;
-  await expect(service.signedVideoUrl(id, uid, "manifest")).rejects.toMatchObject({
-    reason: "not_private",
-  });
-  fake.value.requireSignedURLs = true;
-  fake.value.hlsPlaybackUrl = "https://attacker.invalid/manifest.m3u8";
-  await expect(service.signedVideoUrl(id, uid, "manifest")).rejects.toMatchObject({
+  await expect(service.signedVideoUrl(uid, "manifest", -1)).rejects.toMatchObject({
     reason: "invalid_response",
   });
+  await expect(service.signedVideoUrl("not-a-uid", "manifest")).rejects.toThrow();
 });
 
 it("fetches bounded private captions using the stored language and refuses malformed responses", async () => {

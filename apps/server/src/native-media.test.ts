@@ -118,11 +118,15 @@ it("serves authorized R2 images and derives bounded variants in the Worker runti
     ).toBe(404);
 
     await bucket.delete(variant);
-    const fallback = await worker.fetch(`https://media.test/${variant}`, {
+    // The requested variant's bytes are already in the edge cache, so an
+    // authorized request keeps receiving them after R2 no longer holds the
+    // object. In production a deletion removes the database authorization
+    // first; the revoked request below proves that gate still holds for
+    // cached bytes.
+    const cachedVariant = await worker.fetch(`https://media.test/${variant}`, {
       headers: { ...headers, "x-fail-images": "1" },
     });
-    expect(fallback.headers.get("content-type")).toBe("image/png");
-    expect(Buffer.from(await fallback.arrayBuffer())).toEqual(bytes);
+    expect(cachedVariant.headers.get("content-type")).toBe("image/webp");
     expect(await bucket.head(variant)).toBeNull();
     expect(
       (
@@ -130,6 +134,70 @@ it("serves authorized R2 images and derives bounded variants in the Worker runti
           headers: { ...headers, "x-fail-images": "1", "x-revoke": "1" },
         })
       ).status,
+    ).toBe(404);
+
+    // A variant never requested before was never cached, so its R2 deletion
+    // semantics stay provable on a fresh key: generation fails closed and the
+    // original is served.
+    const freshBase = "avatars/owner/22222222-2222-4222-8222-222222222222.png";
+    const freshVariant = `${freshBase}.w96.webp`;
+    await bucket.put(freshBase, bytes, {
+      httpMetadata: { contentType: "image/png" },
+    });
+    const freshFallback = await worker.fetch(`https://media.test/${freshVariant}`, {
+      headers: { "x-authorized-key": freshBase, "x-fail-images": "1" },
+    });
+    expect(freshFallback.headers.get("content-type")).toBe("image/png");
+    expect(await bucket.head(freshVariant)).toBeNull();
+
+    // Issue #405: eligible immutable image bytes are served from the
+    // datacenter's edge cache behind the same two authorizations. The proof is
+    // deletion — with the R2 object gone, an authorized request still receives
+    // byte-identical bytes that can only come from the cache, while a viewer
+    // the authorizer refuses never sees them.
+    const repeat = await worker.fetch(`https://media.test/${key}`, { headers });
+    expect(Buffer.from(await repeat.arrayBuffer())).toEqual(bytes);
+    expect(repeat.headers.get("cache-control")).toBe("private, no-store");
+    await bucket.delete(key);
+    await expect
+      .poll(async () => (await worker.fetch(`https://media.test/${key}`, { headers })).status)
+      .toBe(200);
+    const cachedOnly = await worker.fetch(`https://media.test/${key}`, { headers });
+    expect(Buffer.from(await cachedOnly.arrayBuffer())).toEqual(bytes);
+    expect(
+      (
+        await worker.fetch(`https://media.test/${key}`, {
+          headers: { ...headers, "x-revoke": "1" },
+        })
+      ).status,
+    ).toBe(404);
+    const cachedHead = await worker.fetch(`https://media.test/${key}`, { method: "HEAD", headers });
+    expect(cachedHead.status).toBe(200);
+    expect(Number(cachedHead.headers.get("content-length"))).toBeGreaterThan(0);
+    expect(await cachedHead.text()).toBe("");
+
+    // Profile originals are excluded by design: owner-only source material
+    // with little repeat-view value never enters the cache.
+    const originalKey = "avatars/owner/33333333-3333-4333-8333-333333333333.orig.png";
+    await bucket.put(originalKey, bytes, {
+      httpMetadata: { contentType: "image/png" },
+    });
+    const originalHeaders = { "x-authorized-key": originalKey };
+    expect(
+      (await worker.fetch(`https://media.test/${originalKey}`, { headers: originalHeaders }))
+        .status,
+    ).toBe(200);
+    await expect
+      .poll(
+        async () =>
+          (await worker.fetch(`https://media.test/${originalKey}`, { headers: originalHeaders }))
+            .status,
+      )
+      .toBe(200);
+    await bucket.delete(originalKey);
+    expect(
+      (await worker.fetch(`https://media.test/${originalKey}`, { headers: originalHeaders }))
+        .status,
     ).toBe(404);
 
     const gifKey = key.replace(/png$/, "gif");
@@ -141,8 +209,18 @@ it("serves authorized R2 images and derives bounded variants in the Worker runti
     expect(animation.headers.get("content-type")).toBe("image/gif");
     expect(Buffer.from(await animation.arrayBuffer())).toEqual(gif);
     expect(await bucket.head(`${gifKey}.w96.webp`)).toBeNull();
-    await bucket.put(key, "<svg></svg>", { httpMetadata: { contentType: "image/svg+xml" } });
-    expect((await worker.fetch(`https://media.test/${key}`, { headers })).status).toBe(404);
+    // MIME refusal on a fresh key: the immutable key this test cached earlier
+    // cannot be overwritten in production — replacement mints a new UUID path
+    // and removes the old row's authorization first.
+    const svgKey = "avatars/owner/44444444-4444-4444-8444-444444444444.png";
+    await bucket.put(svgKey, "<svg></svg>", { httpMetadata: { contentType: "image/svg+xml" } });
+    expect(
+      (
+        await worker.fetch(`https://media.test/${svgKey}`, {
+          headers: { "x-authorized-key": svgKey },
+        })
+      ).status,
+    ).toBe(404);
   } finally {
     await runtime?.dispose();
     await rm(path, { recursive: true, force: true });

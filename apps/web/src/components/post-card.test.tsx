@@ -57,6 +57,9 @@ function seedPostCache(queryClient: QueryClient, post: ReturnType<typeof makePos
 describe("PostCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // A test that stubs globals for one render (the quoted-video player)
+    // unstubbed here so the stub cannot leak into the next test.
+    vi.unstubAllGlobals();
   });
 
   describe("signed in", () => {
@@ -650,6 +653,62 @@ describe("PostCard", () => {
         "href",
         "https://example.com/",
       );
+    });
+
+    // Issue #403: a quoted video whose served projection lost the `video`
+    // playback object fell through the grid's image branch, so the browser
+    // requested the HLS manifest as an `<img>`. A quoted attachment that
+    // carries playback metadata must mount the shared player instead.
+    it("mounts the video player for a quoted video instead of rendering the manifest as an image", async () => {
+      vi.stubGlobal(
+        "IntersectionObserver",
+        class {
+          observe() {}
+          disconnect() {}
+        },
+      );
+      const quotedVideoUrl = "/media/videos/quoted-video/master.m3u8";
+      const post = makePost({
+        content: "look at this",
+        quotedPostId: "quoted-1",
+        quoted: {
+          id: "quoted-1",
+          content: null,
+          removed: false,
+          deleted: false,
+          removedReason: null,
+          attachments: [
+            {
+              id: "quoted-video",
+              url: quotedVideoUrl,
+              position: 0,
+              contentType: "application/vnd.apple.mpegurl",
+              byteSize: 100,
+              width: 640,
+              height: 360,
+              video: {
+                duration: 20,
+                posterUrl: "/media/videos/quoted-video/cover.jpg",
+                previewUrl: "/media/videos/quoted-video/previews.vtt",
+                captionUrl: null,
+                captionLanguage: null,
+              },
+            },
+          ],
+          author: makeAuthor({ name: "Quoted Author" }),
+        },
+      });
+      const { container } = await renderWithProviders(<PostCard post={post} />, {
+        signedInAs: true,
+      });
+
+      expect(screen.getByRole("group", { name: m.video_player_label() })).toBeInTheDocument();
+      const video = container.querySelector("video");
+      expect(video).toHaveAttribute("poster", "/media/videos/quoted-video/cover.jpg");
+      const imageSources = [...container.querySelectorAll("img")].map((img) =>
+        img.getAttribute("src"),
+      );
+      expect(imageSources).not.toContain(quotedVideoUrl);
     });
 
     it("renders a blocked original as unavailable while preserving only the reposter attribution", async () => {

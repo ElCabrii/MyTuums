@@ -101,8 +101,8 @@ async function application(env: AppEnv) {
       "https://*.cloudflarestream.com",
     ],
   });
-  return async (request: Request) => {
-    const response = await handle(request);
+  return async (request: Request, waitUntil?: (promise: Promise<unknown>) => void) => {
+    const response = await handle(request, waitUntil);
     if (config.ACCESS_MODE === "public") return response;
     const headers = new Headers(response.headers);
     headers.set("cache-control", "private, no-store");
@@ -113,11 +113,11 @@ async function application(env: AppEnv) {
 
 let handler: ReturnType<typeof application> | undefined;
 export default {
-  async fetch(request: Request, env: AppEnv): Promise<Response> {
+  async fetch(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
     try {
       handler ??= application(env);
       const handle = await handler;
-      return await handle(request);
+      return await handle(request, (promise) => ctx.waitUntil(promise));
     } catch {
       // Configuration errors can include secrets. Never expose their raw message,
       // cause or validation details; a failed initialization must remain retryable.

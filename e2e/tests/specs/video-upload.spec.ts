@@ -1,6 +1,28 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { test, expect } from "../../support/fixtures";
 import { testPlatform } from "../../support/platform";
 import { E2E_STREAM_ORIGIN, streamFixtureKey, streamFixtureUpload } from "../../stream-fixture";
+
+/** The committed fixture: a real 2 s, 320×240, 30 fps H.264/AAC MP4. */
+const transportFixture = fileURLToPath(new URL("../../fixtures/transport.mp4", import.meta.url));
+
+/**
+ * The fixture padded to `bytes` with a legal trailing `free` box. The
+ * composer's local preflight (issue #404) reads real container metadata
+ * before creating any upload, so synthetic zero bytes are refused; the
+ * padding keeps this spec's file above the 8 MiB chunk boundary so the tus
+ * transport still splits, gets interrupted and resumes across parts.
+ */
+function transportVideo(bytes: number): Buffer {
+  const base = readFileSync(transportFixture);
+  const padding = bytes - base.length - 8;
+  if (padding < 0) throw new Error("Transport fixture is larger than the requested size.");
+  const header = Buffer.alloc(8);
+  header.writeUInt32BE(padding + 8, 0);
+  header.write("free", 4, "ascii");
+  return Buffer.concat([base, header, Buffer.alloc(padding)]);
+}
 
 test("video tus recovery keeps explicit submission and durable pending UI (issue #368)", async ({
   page,
@@ -70,7 +92,7 @@ test("video tus recovery keeps explicit submission and durable pending UI (issue
     await page.getByLabel("Choose images or a video", { exact: true }).setInputFiles({
       name: "transport.mp4",
       mimeType: "video/mp4",
-      buffer: Buffer.alloc(9 * 1024 * 1024),
+      buffer: transportVideo(9 * 1024 * 1024),
     });
     await expect(
       page.getByText("Upload complete. Submit your post when you’re ready."),
