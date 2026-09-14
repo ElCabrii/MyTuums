@@ -1,6 +1,7 @@
 import { post, video, videoCleanup, videoSubmission } from "@my-tuums/db/schema";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, expect, it } from "vitest";
+import { VIDEO_MAX_BYTES } from "./constants.js";
 import type { StreamService } from "./stream.js";
 import { createVideoUploads } from "./video-uploads.js";
 import { cleanStreamUploads, expireStreamUploads } from "./stream-cleanup.js";
@@ -59,7 +60,7 @@ it("keeps the resumable capability owner-only and requires explicit submission a
   const owner = await createTestUser();
   const other = await createTestUser();
   const { objects, uploads } = provider();
-  const upload = await uploads.begin(owner.id, 500_000_000);
+  const upload = await uploads.begin(owner.id, VIDEO_MAX_BYTES);
   const status = await uploads.status(upload.id, owner.id);
   expect(status.uploadUrl).toMatch(/^https:\/\/upload.videodelivery.net\/tus\//);
   expect(status.expiresAt.getTime() - Date.now()).toBeGreaterThan(86_390_000);

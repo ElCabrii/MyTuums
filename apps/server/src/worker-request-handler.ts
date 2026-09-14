@@ -14,7 +14,12 @@ export interface WorkerRequestDependencies {
   /** Better Auth must retain its request-phase limiter, before parsing the bounded stream. */
   handleAuth(request: Request): Promise<Response>;
   handleRpc(request: Request, requestId: string): Promise<Response | null>;
-  resolveMedia(key: string, viewerId: string | null, request: Request): Promise<Response | null>;
+  resolveMedia(
+    key: string,
+    viewerId: string | null,
+    request: Request,
+    waitUntil?: (promise: Promise<unknown>) => void,
+  ): Promise<Response | null>;
   /** Explicit asset lookup; configure the binding without an automatic SPA fallback. */
   fetchAsset(request: Request): Promise<Response>;
   /** Public post/game metadata is injected only when serving the app document. */
@@ -184,7 +189,11 @@ export function createWorkerRequestHandler(deps: WorkerRequestDependencies) {
   const origin = new URL(deps.origin).origin;
   let largeRpcInFlight = 0;
 
-  async function route(request: Request, requestId: string): Promise<Response> {
+  async function route(
+    request: Request,
+    requestId: string,
+    waitUntil?: (promise: Promise<unknown>) => void,
+  ): Promise<Response> {
     const url = new URL(request.url);
     // Reject alternate hosts even if someone presents a valid Access token there.
     if (url.origin !== origin || !(await deps.authorizeAccess(request)))
@@ -263,6 +272,7 @@ export function createWorkerRequestHandler(deps: WorkerRequestDependencies) {
               key,
               session?.kind === "authenticated" ? session.userId : null,
               request,
+              waitUntil,
             )) ?? reply(404, "Not found"))
           : reply(404, "Not found");
       }
@@ -296,11 +306,14 @@ export function createWorkerRequestHandler(deps: WorkerRequestDependencies) {
     }
   }
 
-  return async (request: Request): Promise<Response> => {
+  return async (
+    request: Request,
+    waitUntil?: (promise: Promise<unknown>) => void,
+  ): Promise<Response> => {
     const requestId = crypto.randomUUID();
     let response: Response;
     try {
-      response = await route(request, requestId);
+      response = await route(request, requestId, waitUntil);
     } catch (error) {
       if (error instanceof BodyTooLarge) response = payloadTooLarge(request);
       else {

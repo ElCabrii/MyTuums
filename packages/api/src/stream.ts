@@ -186,35 +186,37 @@ export function createStreamService(config: {
         throw new StreamError("unavailable");
       }
     },
-    async signedVideoUrl(
-      videoId: string,
-      uid: string,
-      kind: "manifest" | "cover" | "preview",
-      time = 0,
-    ) {
-      const value = await details(videoId, uid);
-      if (
-        !value ||
-        value.requireSignedURLs !== true ||
-        !value.readyToStream ||
-        value.status.state === "error"
-      )
-        throw new StreamError("not_private");
+    /**
+     * Issues a signed playback URL without a provider round-trip (issue #405).
+     *
+     * The per-request `details()` call this used to make was re-proving facts
+     * the database already owns: a `published` row exists only after the
+     * processing workflow verified provider readiness, the stored UID came
+     * from the provider's own create/finish responses under this account's
+     * creator namespace, and `requiresignedurls` was an upload-creation
+     * invariant that `status()` refuses to complete without. The caller
+     * rechecks post-media authorization after this call, so a change of
+     * visibility still gates delivery. Nothing here can issue a non-token
+     * URL, which is what `requireSignedURLs` protects.
+     *
+     * The fixed origin is the provider's universal signed-playback domain —
+     * already in the deployment's CSP `media-src` allowlist — and the token
+     * authorizes exactly the stored UID.
+     */
+    async signedVideoUrl(uid: string, kind: "manifest" | "cover" | "preview", time = 0) {
+      const id = streamId.parse(uid);
       if (!Number.isInteger(time) || time < 0 || time > VIDEO_MAX_DURATION_SECONDS)
         throw new StreamError("invalid_response");
-      // Keep only the validated provider origin; do not forward metadata query
-      // strings or let a token alter the URL path. Native tokens expire in one hour.
-      const origin = new URL(streamUploadUrl(value.hlsPlaybackUrl)).origin;
       let token: string;
       try {
-        token = await config.binding.video(uid).generateToken();
+        token = await config.binding.video(id).generateToken();
       } catch {
         throw new StreamError("unavailable");
       }
       if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token))
         throw new StreamError("invalid_response");
       const path = kind === "manifest" ? "manifest/video.m3u8" : "thumbnails/thumbnail.jpg";
-      const url = new URL(`/${token}/${path}`, origin);
+      const url = new URL(`https://videodelivery.net/${token}/${path}`);
       if (kind !== "manifest") {
         url.searchParams.set("time", `${time}s`);
         url.searchParams.set("width", kind === "preview" ? "160" : "640");

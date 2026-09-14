@@ -339,6 +339,28 @@ requests do not revisit Cloudflare Access. The app exposes no raw-source or
 arbitrary media path. Captions have a 1 MiB bound; preview indexes contain at most
 150 local authorized thumbnail paths and no bearer token.
 
+Signing no longer re-reads provider state (issue #405): a `published` row, the
+stored Stream UID, the environment-scoped creator identity and the
+signed-URLs-at-creation invariant already gate issuance, so the manifest and
+poster path binds the stored UID to a freshly generated token on the fixed
+`videodelivery.net` origin without a `details()` round-trip, and the
+post-provider visibility recheck remains. Each phase of that path is timed in
+an identifier-free `video_media_timing` event for hosted before/after
+measurement. HLS manifests and segments are never cached or proxied; Stream's
+own CDN delivers them.
+
+Authorized R2 image bytes carry an authorization-preserving Workers Cache API
+layer (issue #405) in the application Worker: the per-request D1 authorization
+runs before any cache consultation and again before delivering cached bytes,
+the cache key is a synthetic canonical URL derived from the object key alone
+(no cookies, session headers, query strings or viewer identity), profile
+originals (`.orig`) are excluded, and every browser-facing response stays
+`private, no-store` — the stored cache copy is a separate internal response
+with a bounded TTL. No Cache Rule sits in front of `/media/*`, so no cache
+path can bypass the Worker authorization boundary. Only aggregate
+hit/miss/error events are recorded; media keys and viewer ids never enter
+logs.
+
 Worker routing, environment admission, exact Stream CSP destinations and
 scheduled recovery are deployed. Use [video operations](video-operations.md)
 for native recovery and maintenance procedures.

@@ -792,7 +792,7 @@ export function mediaVariantKeys(key: string): string[] {
 export const NONBLOCKING_STYLESHEET_ONLOAD_HANDLER = "this.media='all'";
 
 /** Issue #368: decimal MB, shared by server validation and localized UI copy. */
-export const VIDEO_MAX_BYTES = 500_000_000;
+export const VIDEO_MAX_BYTES = 100_000_000;
 export const VIDEO_MAX_DURATION_SECONDS = 300;
 export const VIDEO_MAX_LONG_EDGE = 1920;
 export const VIDEO_MAX_SHORT_EDGE = 1080;

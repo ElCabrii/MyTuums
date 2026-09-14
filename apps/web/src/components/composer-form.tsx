@@ -6,6 +6,11 @@ import {
   POST_ATTACHMENT_MAX_COUNT,
   POST_ATTACHMENT_MAX_TOTAL_BYTES,
   POST_MAX_LENGTH,
+  VIDEO_MAX_BYTES,
+  VIDEO_MAX_DURATION_SECONDS,
+  VIDEO_MAX_FPS,
+  VIDEO_MAX_LONG_EDGE,
+  VIDEO_MAX_SHORT_EDGE,
 } from "@my-tuums/api/constants";
 import { acceptPostImage } from "@my-tuums/api/post-image";
 import type { ComposerAttachment } from "@/atoms/composer";
@@ -13,6 +18,7 @@ import {
   selectVideoAtomFamily,
   videoDraftAtomFamily,
   type VideoAttachmentInput,
+  type VideoSelectionVerdict,
 } from "@/atoms/video-upload";
 import { ComposerMediaDialog } from "@/components/composer-media-dialog";
 import { ComposerVideo } from "@/components/composer-video";
@@ -20,7 +26,38 @@ import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { MentionTextarea } from "@/components/mention-textarea";
 import { createPostAttachment } from "@/lib/media";
+import {
+  preflightVideo,
+  type VideoPreflightRejection,
+  type VideoVerifier,
+} from "@/lib/video-preflight";
 import { m } from "@/paraglide/messages.js";
+
+/** Decimal MB — the copy and the byte limit share one definition (issue #404). */
+const VIDEO_MAX_MEGABYTES = VIDEO_MAX_BYTES / 1_000_000;
+
+/** Localized refusal copy for one preflight reason (issue #404). */
+function videoRejectionMessage(reason: VideoPreflightRejection): string {
+  switch (reason) {
+    case "size":
+      return m.video_reject_size({ maxMb: String(VIDEO_MAX_MEGABYTES) });
+    case "type":
+      return m.video_reject_type();
+    case "duration":
+      return m.video_reject_duration({
+        maxMinutes: String(VIDEO_MAX_DURATION_SECONDS / 60),
+      });
+    case "dimensions":
+      return m.video_reject_dimensions({
+        longEdge: String(VIDEO_MAX_LONG_EDGE),
+        shortEdge: String(VIDEO_MAX_SHORT_EDGE),
+      });
+    case "frameRate":
+      return m.video_reject_frame_rate({ maxFps: String(VIDEO_MAX_FPS) });
+    case "unreadable":
+      return m.video_reject_unreadable();
+  }
+}
 
 /** Reads selected bytes through the browser's FileReader contract. */
 function readFileBytes(file: File): Promise<Uint8Array> {
@@ -74,6 +111,7 @@ export function ComposerForm({
   attachments = [],
   onAttachmentsChange,
   existingAttachmentCount = 0,
+  verifyVideo = preflightVideo,
 }: {
   author: { name: string; image?: string | null };
   value: string;
@@ -106,6 +144,12 @@ export function ComposerForm({
    * empty text; zero (the default) keeps every other caller unchanged.
    */
   existingAttachmentCount?: number;
+  /**
+   * The local video preflight (issue #404). An injection point with the real
+   * default: jsdom decodes no video, so tests substitute verdicts through
+   * this interface instead of module mocks.
+   */
+  verifyVideo?: VideoVerifier;
 }) {
   const attachmentSelectionRef = useRef(0);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -161,7 +205,19 @@ export function ComposerForm({
         setAttachmentError(m.post_media_hint());
         return;
       }
-      setAttachmentError(selectVideo(video) ? null : m.video_input_hint());
+      // Local metadata is inspected between selection and acceptance; the
+      // validating state keeps the submit control honest and blocks a second
+      // selection while this one is being judged (issue #404). The draft and
+      // the upload transport start only after every check passes.
+      setAttachmentError(null);
+      setAttachmentsAreValidating(true);
+      let verdict: VideoSelectionVerdict;
+      try {
+        verdict = await selectVideo(video, verifyVideo);
+      } finally {
+        setAttachmentsAreValidating(false);
+      }
+      setAttachmentError(verdict.accepted ? null : videoRejectionMessage(verdict.reason));
       return;
     }
     const selectionId = attachmentSelectionRef.current + 1;

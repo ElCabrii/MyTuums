@@ -52,6 +52,9 @@ administration tools.
   access must not grant admission; no raw caller identifiers belong in logs.
 - Media authorization runs before storage access and again before delivery.
   Media responses are private/no-store; no public R2 URL bypasses authorization.
+  Eligible immutable R2 image bytes additionally serve from the Workers Cache
+  API behind those same two authorizations (issue #405); see
+  [worker/CONTEXT.md](worker/CONTEXT.md) for the cache-key and fallback rules.
 - No runtime migration or full data import. Each environment fixes its own D1/R2 pair; the archive is never bound to runtime cleanup.
 - Requests carry generated IDs. Logs must exclude capabilities, user content and
   provider errors; dependency logging still requires its deployment audit.

@@ -126,7 +126,11 @@ in the batch's first transition; no clock is rechecked between post and effects.
 Publication and duplicate delivery are atomic; an ineligible draft fails privately.
 
 `src/video-media.ts` gates manifest-token issuance, posters, captions and timeline
-previews on current post visibility, rechecking after provider I/O. Native Stream
+previews on current post visibility, rechecking after provider I/O. Signing makes
+no provider round-trip (issue #405): the published row, stored UID, creator
+identity and signed-URL-at-creation invariant gate issuance, the token binds the
+stored UID on the fixed `videodelivery.net` origin, and each phase of the path is
+timed in an identifier-free `video_media_timing` event. Native Stream
 tokens expire after one hour; direct segments do not revisit Access/the app.
 Previews use a bounded local VTT index (two-second steps, at most 150) pointing to
 separately authorized Stream thumbnails. Captions are privately fetched with a
@@ -566,7 +570,11 @@ account access and deployment allow remote validation.
   carrying every post rule and rendering its embedded `quoted` preview in
   every context through `postSelection` — feed, permalink, thread, search —
   plus the moderator's raw-content variant (`quotedPostEvidence`) in
-  `moderation.case`. The degradation matrix is decided and pinned in
+  `moderation.case`. Both quote projections serve attachments through the
+  shared `postAttachmentsSelection` aggregate, correlated against the aliased
+  quoted table (issue #403: a hand-maintained copy once omitted the `video`
+  playback object, and the renderer fetched the HLS manifest as an image).
+  The degradation matrix is decided and pinned in
   `src/reposts.int.test.ts`: author-deleted original → deletion stub in place
   of the embedded post (the repost event stays in the feed; the quote's own
   text survives); moderator-removed original → removal stub, with

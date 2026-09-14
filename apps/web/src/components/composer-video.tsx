@@ -1,5 +1,6 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { Film, X } from "lucide-react";
+import { VIDEO_MAX_BYTES } from "@my-tuums/api/constants";
 import {
   clearVideoDraft,
   resumeVideoUploadAtomFamily,
@@ -60,7 +61,9 @@ export function ComposerVideo({ scope, disabled }: { scope: string; disabled: bo
           {m.video_resume()}
         </Button>
       )}
-      <p className="text-muted-foreground text-xs">{m.video_input_hint()}</p>
+      <p className="text-muted-foreground text-xs">
+        {m.video_input_hint({ maxMb: String(VIDEO_MAX_BYTES / 1_000_000) })}
+      </p>
     </div>
   );
 }

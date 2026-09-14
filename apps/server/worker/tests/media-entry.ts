@@ -8,7 +8,7 @@ interface Env {
 // Synthetic admission decisions isolate delivery from the D1 authorization
 // suites. This entrypoint is never a deployment target.
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     let admissions = 0;
     const base = request.headers.get("x-authorized-key");
     const resolve = createWorkerMediaResolver({
@@ -35,6 +35,7 @@ export default {
         new URL(request.url).pathname.slice(1),
         request.headers.get("x-viewer"),
         request,
+        (promise) => ctx.waitUntil(promise),
       )) ?? new Response(null, { status: 404 })
     );
   },

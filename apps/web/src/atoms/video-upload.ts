@@ -3,6 +3,11 @@ import { atomFamily } from "jotai-family";
 import { VIDEO_INPUT_TYPES, VIDEO_MAX_BYTES } from "@my-tuums/api/constants";
 import { client } from "@/lib/orpc";
 import { store } from "@/lib/store";
+import {
+  preflightVideo,
+  type VideoPreflightRejection,
+  type VideoVerifier,
+} from "@/lib/video-preflight";
 import { uploadVideo } from "@/lib/video-upload";
 
 export interface VideoAttachmentInput {
@@ -19,6 +24,9 @@ interface VideoDraft {
 export const videoDraftAtomFamily = atomFamily<string, PrimitiveAtom<VideoDraft | null>>(() =>
   atom<VideoDraft | null>(null),
 );
+
+export type VideoSelectionVerdict =
+  { accepted: true } | { accepted: false; reason: VideoPreflightRejection };
 
 function cancelSession(videoId: string): void {
   void client.video.cancel({ videoId }).catch(() => {
@@ -63,28 +71,46 @@ export const resumeVideoUploadAtomFamily = atomFamily((scope: string) =>
   }),
 );
 
+/**
+ * Accepts a chosen video only after local preflight passes (issue #404):
+ * duration, orientation-aware dimensions and encoded frame rate are inspected
+ * before any draft state exists, so a refusal creates no server upload
+ * record and never contacts the provider. The synchronous size/type checks
+ * stay first — those refusals answer without waiting on metadata. The
+ * verifier rides on the write call — production passes nothing and gets the
+ * real preflight; tests substitute verdicts through that interface rather
+ * than module mocks.
+ */
 export const selectVideoAtomFamily = atomFamily((scope: string) =>
-  atom(null, (get, set, file: File) => {
-    if (
-      file.size <= 0 ||
-      file.size > VIDEO_MAX_BYTES ||
-      !VIDEO_INPUT_TYPES.some((type) => type === file.type)
-    )
-      return false;
-    const previous = get(videoDraftAtomFamily(scope));
-    previous?.controller.abort();
-    if (previous?.videoId) cancelSession(previous.videoId);
-    set(videoDraftAtomFamily(scope), {
-      selectionId: crypto.randomUUID(),
-      file,
-      videoId: null,
-      bytes: 0,
-      status: "uploading",
-      controller: new AbortController(),
-    });
-    void set(resumeVideoUploadAtomFamily(scope));
-    return true;
-  }),
+  atom(
+    null,
+    async (
+      get,
+      set,
+      file: File,
+      verify: VideoVerifier = preflightVideo,
+    ): Promise<VideoSelectionVerdict> => {
+      if (file.size <= 0 || file.size > VIDEO_MAX_BYTES) return { accepted: false, reason: "size" };
+      if (!VIDEO_INPUT_TYPES.some((type) => type === file.type)) {
+        return { accepted: false, reason: "type" };
+      }
+      const verdict = await verify(file);
+      if (!verdict.ok) return { accepted: false, reason: verdict.reason };
+      const previous = get(videoDraftAtomFamily(scope));
+      previous?.controller.abort();
+      if (previous?.videoId) cancelSession(previous.videoId);
+      set(videoDraftAtomFamily(scope), {
+        selectionId: crypto.randomUUID(),
+        file,
+        videoId: null,
+        bytes: 0,
+        status: "uploading",
+        controller: new AbortController(),
+      });
+      void set(resumeVideoUploadAtomFamily(scope));
+      return { accepted: true };
+    },
+  ),
 );
 
 /** Publication already owns the video; clearing a successful draft must not cancel it. */

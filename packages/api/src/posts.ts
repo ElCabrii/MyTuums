@@ -6,7 +6,6 @@ import {
   follow,
   game,
   post,
-  postAttachment,
   postBookmark,
   postLike,
   postRepost,
@@ -72,8 +71,10 @@ import {
   postAttachmentRows,
   postAttachmentSchema,
   postAttachments,
+  postAttachmentsSelection,
   preparePostAttachments,
   writePostAttachments,
+  type AttachmentOwnerPost,
   type PostAttachmentInput,
 } from "./post-media.js";
 import { requireStorage } from "./profile-media.js";
@@ -178,6 +179,20 @@ const parentAuthor = alias(user, "parent_author");
 /** Same reason as the parent aliases: the quoted preview is correlated inside `postSelection`. */
 const quotedPostTable = alias(post, "quoted_post");
 const quotedAuthor = alias(user, "quoted_author");
+
+/**
+ * The quoted row the shared attachment aggregate correlates against. Passing
+ * the aliased columns is what lets the quote preview reuse
+ * `postAttachmentsSelection` (issue #403) instead of forking a hand-maintained
+ * copy that once omitted the `video` playback object — an omission decoding
+ * happily accepted, and the renderer then fetched the HLS manifest as an
+ * image.
+ */
+const quotedAttachmentOwner = {
+  id: quotedPostTable.id,
+  removedAt: quotedPostTable.removedAt,
+  deletedAt: quotedPostTable.deletedAt,
+} satisfies AttachmentOwnerPost;
 
 const POST_IMAGE_REJECTIONS = {
   type: "That image format isn't supported. Use a PNG, JPEG, WebP or GIF.",
@@ -372,8 +387,10 @@ export type QuotedPostPreview = z.infer<typeof quotedPostPreviewSchema>;
  *   hiding it would take the quoting post's own words hostage to someone
  *   else's delete.
  * - Attachments ride along except under either tombstone, matching the outer
- *   post's `postAttachments` (a removed original keeps its rows for restore,
- *   but they must not render).
+ *   post's `postAttachments` — served through the same shared aggregate, so a
+ *   quoted video carries the full playback projection an ordinary one does
+ *   (issue #403). A removed original keeps its rows for restore, but they
+ *   must not render.
  */
 function quotedPreview(viewerId: string | null) {
   const privateHidden =
@@ -401,23 +418,7 @@ function quotedPreview(viewerId: string | null) {
         then ${quotedPostTable.removedReason}
         else null
       end,
-      'attachments', json(coalesce((
-        select json_group_array(
-          json_object(
-            'id', ${postAttachment.id},
-            'url', ${postAttachment.mediaPath},
-            'position', ${postAttachment.position},
-            'contentType', ${postAttachment.contentType},
-            'byteSize', ${postAttachment.byteSize},
-            'width', ${postAttachment.width},
-            'height', ${postAttachment.height}
-          ) order by ${postAttachment.position}
-        )
-        from ${postAttachment}
-        where ${postAttachment.postId} = ${quotedPostTable.id}
-          and ${quotedPostTable.removedAt} is null
-          and ${quotedPostTable.deletedAt} is null
-      ), '[]')),
+      'attachments', json(${postAttachmentsSelection(false, quotedAttachmentOwner)}),
       'author', json_object(
         'id', ${quotedAuthor.id},
         'name', ${quotedAuthor.name},
@@ -509,21 +510,7 @@ export function quotedPostEvidence() {
       'removed', json(case when ${quotedPostTable.removedAt} is not null then 'true' else 'false' end),
       'deleted', json(case when ${quotedPostTable.deletedAt} is not null then 'true' else 'false' end),
       'removedReason', ${quotedPostTable.removedReason},
-      'attachments', json(coalesce((
-        select json_group_array(
-          json_object(
-            'id', ${postAttachment.id},
-            'url', ${postAttachment.mediaPath},
-            'position', ${postAttachment.position},
-            'contentType', ${postAttachment.contentType},
-            'byteSize', ${postAttachment.byteSize},
-            'width', ${postAttachment.width},
-            'height', ${postAttachment.height}
-          ) order by ${postAttachment.position}
-        )
-        from ${postAttachment}
-        where ${postAttachment.postId} = ${quotedPostTable.id}
-      ), '[]')),
+      'attachments', json(${postAttachmentsSelection(true, quotedAttachmentOwner)}),
       'author', json_object(
         'id', ${quotedAuthor.id},
         'name', ${quotedAuthor.name},

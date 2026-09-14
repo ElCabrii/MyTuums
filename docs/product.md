@@ -440,10 +440,18 @@ notification when a badge is earned.
 ## Media
 
 - Posts, replies and quotes may contain one video or up to four images; mixing
-  them is refused. Videos accept MP4, MOV and WebM up to 500 decimal MB and five
+  them is refused. Videos accept MP4, MOV and WebM up to 100 decimal MB and five
   minutes, at most 60 fps and oriented dimensions fitting 1920×1080 or 1080×1920.
-  Actual formats/codecs and decoded frames are validated; scaling cannot make
-  an oversized input acceptable.
+  The composer inspects a selected file's duration, dimensions and encoded frame
+  rate locally before creating any upload or contacting the provider, refusing
+  with a specific localized reason; a file whose properties cannot be read is
+  refused rather than uploaded blind. Actual formats/codecs and decoded frames
+  are validated server- and provider-side too; scaling cannot make
+  an oversized input acceptable, and the local preflight is a cooperative early
+  refusal, not the enforcement boundary. The provider enforces the duration cap
+  at upload creation, but Cloudflare Stream does not report a source clip's
+  encoded frame rate, so the 60 fps limit is only observable through the
+  composer's local container read.
 - The composer's Add media button opens one dialog for images or a video. A
   selection can contain up to four images or one video, never both. Separate
   subtitle files cannot be uploaded.
