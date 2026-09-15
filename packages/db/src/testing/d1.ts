@@ -4,8 +4,21 @@ import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/d1";
 import { createDatabase } from "../index.js";
 
-/** Ephemeral workerd database: no production credentials, remote bindings or persistent path. */
-export async function createTestDatabase() {
+/** The committed migration set — the default `createTestDatabase` applies all of it. */
+export const committedMigrationsFolder = fileURLToPath(
+  new URL("../../drizzle-d1", import.meta.url),
+);
+
+/**
+ * Ephemeral workerd database: no production credentials, remote bindings or
+ * persistent path.
+ *
+ * `migrationsFolder` swaps the applied set — an upgrade test points it at a
+ * copy of `drizzle-d1` whose journal stops before the migration under test,
+ * seeds the old world's rows, then re-runs the migrator against the full
+ * folder to apply just that migration over real data.
+ */
+export async function createTestDatabase(options?: { migrationsFolder?: string }) {
   const runtime = new Miniflare({
     workers: [
       {
@@ -32,7 +45,7 @@ export async function createTestDatabase() {
   try {
     const binding = await runtime.getD1Database("DB", "database-test");
     await migrate(drizzle(binding), {
-      migrationsFolder: fileURLToPath(new URL("../../drizzle-d1", import.meta.url)),
+      migrationsFolder: options?.migrationsFolder ?? committedMigrationsFolder,
     });
     return { db: createDatabase(binding), dispose: () => runtime.dispose() };
   } catch (error) {

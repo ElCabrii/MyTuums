@@ -50,6 +50,13 @@
       "when": 1789122317474,
       "tag": "0006_durable_moderation_email",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1789500232964,
+      "tag": "0007_private_messages",
+      "breakpoints": true
     }
   ]
 }
