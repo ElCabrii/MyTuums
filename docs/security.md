@@ -556,6 +556,16 @@ view-history store to leak.
   appeal row and then the target row, matching review's appeal-before-target
   order.
 - Appeal review excludes the moderator who took the original action.
+- **Moderators never browse private conversations.** There is no surface —
+  queue, case view, audit or CLI — that lists or searches `conversation` or
+  `message` rows, and no per-message removal power. DM content reaches
+  moderation exactly one way: a participant files a report, whose snapshot
+  (the reported message plus up to ten before it) is the evidence a case view
+  renders and the only copy a moderator sees. Sanctions are sender-side
+  (warn-equivalent dismissals, suspension, ban) through the existing user
+  actions; a `case_resolved` audit row for a message case names the sender,
+  with the message id in its `details`. Deleting the reported message does
+  not withdraw the evidence — the report row is deliberately FK-less.
 - The bootstrap promotion (`pnpm db:promote`, with `--remote` for PoC D1)
   is the one deliberate exception to "role changes go through `/rpc`": it
   exists to appoint the first admin before anyone can moderate. It is
