@@ -1,4 +1,4 @@
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
@@ -6,6 +6,7 @@ import type { Database } from "@my-tuums/db";
 import {
   follow,
   followRequest,
+  message,
   moderationAction,
   post,
   report,
@@ -23,6 +24,7 @@ import {
 } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { purgeLinkCard } from "./link-card.js";
+import { buildMessageReportSnapshot, messageParticipationExists } from "./message-report.js";
 import { appealsRouter } from "./moderation-appeals.js";
 import {
   banUser,
@@ -79,6 +81,15 @@ const reportInput = z.discriminatedUnion("targetType", [
     targetType: z.literal("user"),
     targetId: z.string().min(1),
     reason: z.enum(USER_REPORT_REASONS),
+  }),
+  z.object({
+    targetType: z.literal("message"),
+    targetId: z.uuid(),
+    // A message is content: it reports with the post reason set (every code
+    // of which the report table's union check already accepts). The
+    // account-shaped codes — impersonation, underage — belong to a user
+    // report against the sender.
+    reason: z.enum(POST_REPORT_REASONS),
   }),
 ]);
 
@@ -143,6 +154,36 @@ export const moderationRouter = {
         throw new ORPCError("BAD_REQUEST", { message: "You can't report yourself." });
       }
 
+      // A message report authorizes BEFORE it reads evidence (issue #408):
+      // only a participant of the conversation can report one of its
+      // messages, and every participation status counts — hiding the
+      // conversation or blocking the sender must not stand in the way of
+      // reporting the exchange that caused it. The snapshot then carries the
+      // reported message plus its context window, the reporter's evidence,
+      // immune to the sender later deleting the message.
+      let messageSnapshotJson: string | null = null;
+      if (input.targetType === "message") {
+        const [mine] = await context.db
+          .select({ id: message.id })
+          .from(message)
+          .where(and(eq(message.id, input.targetId), messageParticipationExists(context.user.id)))
+          .limit(1);
+        if (!mine) {
+          throw new ORPCError("NOT_FOUND", {
+            message: "The thing you reported doesn't exist.",
+          });
+        }
+        const snapshot = await buildMessageReportSnapshot(context.db, input.targetId);
+        if (!snapshot) {
+          // The message vanished between the two reads; there is nothing left
+          // to snapshot, so it reads as missing exactly like a deleted post.
+          throw new ORPCError("NOT_FOUND", {
+            message: "The thing you reported doesn't exist.",
+          });
+        }
+        messageSnapshotJson = JSON.stringify(snapshot);
+      }
+
       // A post report also snapshots the content it is raised against
       // (issue #264): the reason code says *why*, this says *what* — the
       // reporter's own evidence, immune to any later edit of the post. The
@@ -154,11 +195,13 @@ export const moderationRouter = {
               .from(post)
               .where(eq(post.id, input.targetId))
               .limit(1)
-          : await context.db
-              .select({ id: user.id, snapshotContent: sql<string | null>`null` })
-              .from(user)
-              .where(eq(user.id, input.targetId))
-              .limit(1);
+          : input.targetType === "user"
+            ? await context.db
+                .select({ id: user.id, snapshotContent: sql<string | null>`null` })
+                .from(user)
+                .where(eq(user.id, input.targetId))
+                .limit(1)
+            : [{ id: input.targetId, snapshotContent: messageSnapshotJson }];
       if (!target)
         throw new ORPCError("NOT_FOUND", { message: "The thing you reported doesn't exist." });
 

@@ -3,11 +3,20 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { localeFromRequest } from "@my-tuums/auth";
 import type { Database } from "@my-tuums/db";
-import { appeal, moderationAction, post, postEdit, report, user } from "@my-tuums/db/schema";
+import {
+  appeal,
+  message,
+  moderationAction,
+  post,
+  postEdit,
+  report,
+  user,
+} from "@my-tuums/db/schema";
 import { EDIT_HISTORY_CASE_LIMIT } from "./constants.js";
 import { createCursorCodec } from "./cursor.js";
 import { deliverModerationEmails, moderationEmailInsert } from "./moderation-email.js";
 import { noteInput, queueInput } from "./moderation-inputs.js";
+import { messageCaseSender, parseMessageReportSnapshot } from "./message-report.js";
 import { postAttachmentsSelection, type PostAttachment } from "./post-media.js";
 import { moderatorProcedure, rateLimit } from "./procedures.js";
 import { RATE_LIMITS } from "./rate-limit.js";
@@ -34,7 +43,7 @@ const caseCursor = createCursorCodec(z.string().min(1));
 /** One group of unresolved reports, raw from the GROUP BY. */
 // Raw D1 timestamps are epoch milliseconds; JSON aggregates arrive as text.
 type ReportGroupRow = {
-  target_type: "post" | "user";
+  target_type: "post" | "user" | "message";
   target_id: string;
   newest_at: number;
   report_count: number;
@@ -48,13 +57,14 @@ type OpenAppealRow = {
   id: string;
   reason: string;
   created_at: number;
-  target_type: "post" | "user";
+  target_type: "post" | "user" | "message";
   target_id: string;
 };
 
 const targetInput = z.discriminatedUnion("targetType", [
   z.object({ targetType: z.literal("post"), targetId: z.uuid() }),
   z.object({ targetType: z.literal("user"), targetId: z.string().min(1) }),
+  z.object({ targetType: z.literal("message"), targetId: z.uuid() }),
 ]);
 
 const resolveInput = z.discriminatedUnion("targetType", [
@@ -67,6 +77,12 @@ const resolveInput = z.discriminatedUnion("targetType", [
   z.object({
     targetType: z.literal("user"),
     targetId: z.string().min(1),
+    outcome: z.enum(["actioned", "dismissed"]),
+    note: noteInput,
+  }),
+  z.object({
+    targetType: z.literal("message"),
+    targetId: z.uuid(),
     outcome: z.enum(["actioned", "dismissed"]),
     note: noteInput,
   }),
@@ -329,7 +345,11 @@ export const queueRouter = {
       const appealWhere =
         input.targetType === "post"
           ? eq(moderationAction.targetPostId, input.targetId)
-          : eq(moderationAction.targetUserId, input.targetId);
+          : input.targetType === "user"
+            ? eq(moderationAction.targetUserId, input.targetId)
+            : // Appeals attach to post/user moderation actions only; a
+              // message case's action is recorded against its sender.
+              sql`false`;
       // Every open appeal against this target, newest first — not just one.
       // Two control families can be appealed at once (a ban and a role
       // change against the same account), and the reviewer needs to see and
@@ -354,81 +374,127 @@ export const queueRouter = {
         .orderBy(desc(appeal.createdAt), desc(appeal.id));
 
       const target =
-        input.targetType === "post"
+        input.targetType === "message"
           ? await (async () => {
-              const [targetPost] = await context.db
+              // The live message and its sender, raw content included: this
+              // is the moderator projection — a sender-deleted message is
+              // exactly what a moderator may still be here to look at, and
+              // the reports' snapshots keep the same text forever. `message`
+              // is null when the row is gone (a hard-deleted sender cascades
+              // their messages away); `evidence` then carries the exchange
+              // alone, handles included.
+              const [row] = await context.db
                 .select({
-                  id: post.id,
-                  content: post.content,
-                  createdAt: post.createdAt,
-                  parentId: post.parentId,
-                  // The quoted post a quote targets (issue #261): raw content
-                  // regardless of tombstones, the same evidence rule as the
-                  // target's own content and attachments above. The edit
-                  // history is spliced in below (see `caseEditHistory`).
-                  quotedPostId: post.quotedPostId,
-                  quoted: quotedPostEvidence(),
-                  removedAt: post.removedAt,
-                  removedBy: post.removedBy,
-                  removedReason: post.removedReason,
-                  editedAt: post.editedAt,
-                  attachments: postAttachmentsSelection(true),
-                  author: {
+                  id: message.id,
+                  conversationId: message.conversationId,
+                  body: message.body,
+                  createdAt: message.createdAt,
+                  deletedAt: message.deletedAt,
+                  sender: {
                     id: user.id,
                     name: user.name,
                     username: user.username,
                     displayUsername: user.displayUsername,
                     image: user.image,
                   },
+                  // The sender's sentence state — the actions a message case
+                  // offers are the sender's, so the case view must show what
+                  // the sender is already under (the user target's own rule).
+                  senderBanned: effectivelyBanned,
+                  senderBanExpires: user.banExpires,
                 })
-                .from(post)
-                .innerJoin(user, eq(user.id, post.authorId))
-                .where(eq(post.id, input.targetId))
+                .from(message)
+                .innerJoin(user, eq(user.id, message.senderId))
+                .where(eq(message.id, input.targetId))
                 .limit(1);
-              if (!targetPost) {
-                throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
-              }
-              // Every superseded version of the text, newest first (issue
-              // #264). Editing stays open while a case is pending; this
-              // history is what lets the moderator judge what was written
-              // before each edit — the current `content` above is only the
-              // latest version.
-              const history = await caseEditHistory(context.db, input.targetId);
-              // The quoted original's own history rides the quoted evidence
-              // (issue #264 meets #261): a quote case is judged against the
-              // ORIGINAL's wording, but the report snapshots belong to the
-              // quoting post — the original may never have been reported
-              // itself. When its author edits it after being quoted, the
-              // pre-edit wording exists nowhere but its `post_edit` rows, so
-              // the case view carries them beside the quoted content exactly
-              // as it carries the target's own above.
-              const quotedHistory = targetPost.quoted
-                ? await caseEditHistory(context.db, targetPost.quoted.id)
-                : EMPTY_CASE_HISTORY;
+              const evidence = reports.flatMap((row) => {
+                const snapshot = parseMessageReportSnapshot(row.snapshotContent);
+                return snapshot ? [{ reporterId: row.reporterId, snapshot }] : [];
+              });
               return {
-                kind: "post" as const,
-                ...targetPost,
-                quoted: targetPost.quoted ? { ...targetPost.quoted, ...quotedHistory } : null,
-                ...history,
+                kind: "message" as const,
+                message: row ?? null,
+                sender: row?.sender ?? null,
+                senderBanned: row?.senderBanned ?? false,
+                senderBanExpires: row?.senderBanExpires ?? null,
+                evidence,
               };
             })()
-          : await (async () => {
-              const [targetUser] = await context.db
-                .select({
-                  ...publicUserColumns,
-                  role: user.role,
-                  banned: user.banned,
-                  banExpires: user.banExpires,
-                  banReason: user.banReason,
-                })
-                .from(user)
-                .where(eq(user.id, input.targetId))
-                .limit(1);
-              if (!targetUser) {
-                throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
-              }
-              return { kind: "user" as const, ...targetUser };
-            })();
+          : input.targetType === "post"
+            ? await (async () => {
+                const [targetPost] = await context.db
+                  .select({
+                    id: post.id,
+                    content: post.content,
+                    createdAt: post.createdAt,
+                    parentId: post.parentId,
+                    // The quoted post a quote targets (issue #261): raw content
+                    // regardless of tombstones, the same evidence rule as the
+                    // target's own content and attachments above. The edit
+                    // history is spliced in below (see `caseEditHistory`).
+                    quotedPostId: post.quotedPostId,
+                    quoted: quotedPostEvidence(),
+                    removedAt: post.removedAt,
+                    removedBy: post.removedBy,
+                    removedReason: post.removedReason,
+                    editedAt: post.editedAt,
+                    attachments: postAttachmentsSelection(true),
+                    author: {
+                      id: user.id,
+                      name: user.name,
+                      username: user.username,
+                      displayUsername: user.displayUsername,
+                      image: user.image,
+                    },
+                  })
+                  .from(post)
+                  .innerJoin(user, eq(user.id, post.authorId))
+                  .where(eq(post.id, input.targetId))
+                  .limit(1);
+                if (!targetPost) {
+                  throw new ORPCError("NOT_FOUND", { message: "This post doesn't exist." });
+                }
+                // Every superseded version of the text, newest first (issue
+                // #264). Editing stays open while a case is pending; this
+                // history is what lets the moderator judge what was written
+                // before each edit — the current `content` above is only the
+                // latest version.
+                const history = await caseEditHistory(context.db, input.targetId);
+                // The quoted original's own history rides the quoted evidence
+                // (issue #264 meets #261): a quote case is judged against the
+                // ORIGINAL's wording, but the report snapshots belong to the
+                // quoting post — the original may never have been reported
+                // itself. When its author edits it after being quoted, the
+                // pre-edit wording exists nowhere but its `post_edit` rows, so
+                // the case view carries them beside the quoted content exactly
+                // as it carries the target's own above.
+                const quotedHistory = targetPost.quoted
+                  ? await caseEditHistory(context.db, targetPost.quoted.id)
+                  : EMPTY_CASE_HISTORY;
+                return {
+                  kind: "post" as const,
+                  ...targetPost,
+                  quoted: targetPost.quoted ? { ...targetPost.quoted, ...quotedHistory } : null,
+                  ...history,
+                };
+              })()
+            : await (async () => {
+                const [targetUser] = await context.db
+                  .select({
+                    ...publicUserColumns,
+                    role: user.role,
+                    banned: user.banned,
+                    banExpires: user.banExpires,
+                    banReason: user.banReason,
+                  })
+                  .from(user)
+                  .where(eq(user.id, input.targetId))
+                  .limit(1);
+                if (!targetUser) {
+                  throw new ORPCError("NOT_FOUND", { message: "This account doesn't exist." });
+                }
+                return { kind: "user" as const, ...targetUser };
+              })();
 
       return {
         targetType: input.targetType,
@@ -448,6 +514,18 @@ export const queueRouter = {
     .input(resolveInput)
     .handler(async ({ input, context }) => {
       const actionId = crypto.randomUUID();
+      // A message case resolves against its SENDER (issue #408): the audit
+      // trail names the account that misbehaved — sanctions are sender-side
+      // by design, there is no per-message removal — and the message link
+      // rides the action's `details`. The sender survives even a hard-deleted
+      // account through the reports' own snapshots.
+      let messageSender: string | null = null;
+      if (input.targetType === "message") {
+        messageSender = await messageCaseSender(context.db, input.targetId);
+        if (!messageSender) {
+          throw new ORPCError("NOT_FOUND", { message: "This message doesn't exist." });
+        }
+      }
       const openReports = and(
         eq(report.targetType, input.targetType),
         eq(report.targetId, input.targetId),
@@ -457,11 +535,12 @@ export const queueRouter = {
       // gates the stamp, and both statements commit atomically in D1.
       const [, , stamped] = await context.db.batch([
         context.db.insert(moderationAction).select(sql`select ${actionId}, 'case_resolved',
-          ${context.user.id}, ${input.targetType},
+          ${context.user.id}, ${input.targetType === "message" ? "user" : input.targetType},
           ${input.targetType === "post" ? input.targetId : null},
-          ${input.targetType === "user" ? input.targetId : null}, null, ${input.note ?? null},
+          ${input.targetType === "post" ? null : input.targetType === "user" ? input.targetId : messageSender},
+          null, ${input.note ?? null},
           json_object('outcome', ${input.outcome}, 'reporterCount',
-            (select count(*) from ${report} where ${openReports})),
+            (select count(*) from ${report} where ${openReports})${input.targetType === "message" ? sql`, 'messageTargetId', ${input.targetId}` : sql``}),
           cast(unixepoch('subsec') * 1000 as integer)
           where exists (select 1 from ${report} where ${openReports})`),
         moderationEmailInsert(
@@ -517,7 +596,7 @@ export const queueRouter = {
  * the query.
  */
 type MergedCase = {
-  targetType: "post" | "user";
+  targetType: "post" | "user" | "message";
   targetId: string;
   newestAt: Date;
   reportCount: number;
@@ -585,6 +664,14 @@ type CasePreview =
       banned: boolean;
       /** Set only for a timed suspension; `null` on a permanent ban. */
       banExpires: Date | null;
+    }
+  | {
+      kind: "message";
+      excerpt: string;
+      truncated: boolean;
+      /** Sender-deleted: the row renders the tombstone, the reports keep the text. */
+      deleted: boolean;
+      sender: PreviewPerson;
     };
 
 /** The first `QUEUE_EXCERPT_LENGTH` characters of a post, split by code point. */
@@ -643,6 +730,36 @@ async function loadPreviews(
         removed: row.removedAt !== null,
         attachments: row.attachments,
         author: row.author,
+      });
+    }
+  }
+
+  const messageIds = cases
+    .filter((item) => item.targetType === "message")
+    .map((item) => item.targetId);
+  if (messageIds.length > 0) {
+    const rows = await db
+      .select({
+        id: message.id,
+        body: message.body,
+        deletedAt: message.deletedAt,
+        sender: {
+          id: user.id,
+          name: user.name,
+          username: user.username,
+          displayUsername: user.displayUsername,
+          image: user.image,
+        },
+      })
+      .from(message)
+      .innerJoin(user, eq(user.id, message.senderId))
+      .where(textIn(message.id, messageIds));
+    for (const row of rows) {
+      previews.set(`message:${row.id}`, {
+        kind: "message",
+        ...excerptOf(row.body),
+        deleted: row.deletedAt !== null,
+        sender: row.sender,
       });
     }
   }
