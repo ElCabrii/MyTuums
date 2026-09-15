@@ -121,6 +121,16 @@ export function clearViewerState(queryClient: QueryClient): void {
       clearThreadFamily();
     },
   );
+  // Private-message threads: the conversation's contents are viewer-private
+  // by definition, and the family would keep one stale atom per conversation
+  // id for the next viewer.
+  sweepFamily(
+    "message thread",
+    () => import("@/atoms/messages"),
+    ({ clearMessageThreadFamily }) => {
+      clearMessageThreadFamily();
+    },
+  );
   sweepFamily(
     "reply continuation",
     () => import("@/atoms/reply-continuation"),

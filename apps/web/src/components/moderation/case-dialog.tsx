@@ -10,6 +10,7 @@ import {
   Gavel,
   History,
   Hourglass,
+  MailQuestion,
   MessageSquareReply,
   Pencil,
   Trash2,
@@ -140,7 +141,9 @@ export function CaseDialog({ target, onClose }: { target: CaseRef; onClose: () =
           <DialogDescription>
             {target.targetType === "post"
               ? m.moderation_case_target_post()
-              : m.moderation_case_target_user()}
+              : target.targetType === "message"
+                ? m.moderation_case_target_message()
+                : m.moderation_case_target_user()}
           </DialogDescription>
         </DialogHeader>
 
@@ -194,12 +197,14 @@ function CaseSkeleton() {
 function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
   const targetPost = detail.target.kind === "post" ? detail.target : null;
   const targetUser = detail.target.kind === "user" ? detail.target : null;
+  const targetMessage = detail.target.kind === "message" ? detail.target : null;
 
   return (
     <div className="space-y-4">
       {/* The target, with the moderator projection: raw content even when removed. */}
       {targetPost && <TargetPostCard target={targetPost} />}
       {targetUser && <TargetUserCard target={targetUser} />}
+      {targetMessage && <TargetMessageCard target={targetMessage} />}
 
       <ReportsSection
         reports={detail.reports}
@@ -217,6 +222,92 @@ function CaseBody({ detail }: { detail: ModerationCaseDetail }) {
 
       <ActionsSection detail={detail} />
     </div>
+  );
+}
+
+/**
+ * The message being moderated (issue #408): the live row when it survives
+ * (raw content — the moderator projection), plus the exchange the reporter's
+ * evidence captured, both parties' handles included. There is deliberately no
+ * moderator browse surface for conversations: what renders here came from a
+ * user-submitted report, and nowhere else.
+ */
+function TargetMessageCard({
+  target,
+}: {
+  target: Extract<ModerationCaseDetail["target"], { kind: "message" }>;
+}) {
+  const senderHandle = handleOf(target.sender);
+  const locale = getLocale();
+  const evidence = target.evidence[0]?.snapshot ?? null;
+
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle className="flex min-w-0 items-center gap-2">
+          {target.sender ? (
+            <UserAvatar
+              user={target.sender}
+              alt={target.sender.name || senderHandle || m.user_unknown()}
+              className="size-8"
+              fallbackClassName="text-xs"
+            />
+          ) : (
+            <span className="bg-muted text-muted-foreground flex size-8 items-center justify-center rounded-full">
+              <MailQuestion className="size-4" />
+            </span>
+          )}
+          <span className="truncate">{target.sender?.name || m.user_unknown()}</span>
+          {senderHandle && (
+            <span className="text-muted-foreground truncate text-xs font-normal">
+              @{senderHandle}
+            </span>
+          )}
+        </CardTitle>
+        <CardDescription className="flex flex-wrap items-center gap-1.5">
+          {target.message && (
+            <span className="text-xs" title={formatDateTime(target.message.createdAt, locale)}>
+              {formatRelativeTime(target.message.createdAt, locale, m.post_just_now())}
+            </span>
+          )}
+          {target.message?.deletedAt && (
+            <Badge variant="outline">{m.moderation_case_deleted_badge()}</Badge>
+          )}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {target.message ? (
+          <p className="text-foreground/90 text-sm leading-relaxed break-words whitespace-pre-line">
+            {target.message.body}
+          </p>
+        ) : (
+          <p className="text-muted-foreground text-sm italic">{m.moderation_case_message_gone()}</p>
+        )}
+        {evidence && (
+          <div className="border-border/60 bg-muted/30 space-y-1.5 rounded-lg border p-3">
+            <p className="text-muted-foreground text-xs font-medium">
+              {m.moderation_case_context_title()}
+            </p>
+            {evidence.messages.map((row) => (
+              <p
+                key={row.id}
+                className={`text-sm leading-relaxed break-words ${
+                  row.id === evidence.reportedMessageId
+                    ? "text-foreground font-medium"
+                    : "text-muted-foreground"
+                }`}
+              >
+                <span className="text-xs font-normal">
+                  {row.senderHandle ? `@${row.senderHandle}` : m.user_unknown()}
+                  {": "}
+                </span>
+                {row.body}
+              </p>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -733,6 +824,7 @@ function AppealSection({ appeal }: { appeal: ModerationCaseDetail["appeals"][num
 function ActionsSection({ detail }: { detail: ModerationCaseDetail }) {
   const targetPost = detail.target.kind === "post" ? detail.target : null;
   const targetUser = detail.target.kind === "user" ? detail.target : null;
+  const targetMessage = detail.target.kind === "message" ? detail.target : null;
   const hasOpenReports = detail.reports.some(isOpenReport);
 
   return (
@@ -743,6 +835,18 @@ function ActionsSection({ detail }: { detail: ModerationCaseDetail }) {
       <CardContent className="space-y-4">
         {targetPost && <PostActions target={targetPost} />}
         {targetUser && <UserActions target={targetUser} />}
+        {/* Sanctions for a message case are sender-side by design (issue
+            #408): no per-message removal exists, so the actions are the
+            sender's own suspend/ban controls. */}
+        {targetMessage?.sender && (
+          <UserActions
+            target={{
+              id: targetMessage.sender.id,
+              banned: targetMessage.senderBanned,
+              banExpires: targetMessage.senderBanExpires,
+            }}
+          />
+        )}
         {hasOpenReports && (
           <>
             <Separator />
@@ -820,7 +924,8 @@ function PostActions({
 function UserActions({
   target,
 }: {
-  target: Extract<ModerationCaseDetail["target"], { kind: "user" }>;
+  // `banned` is nullable on the user row; null reads as not banned below.
+  target: { id: string; banned: boolean | null; banExpires: Date | null };
 }) {
   const isStaff = useAtomValue(isStaffAtom);
   const suspendUser = useAtomValue(suspendUserAtom);
@@ -955,6 +1060,12 @@ function UserActions({
  * without it the only feedback is a button that stops doing anything.
  */
 function DismissAction({ detail }: { detail: ModerationCaseDetail }) {
+  // A message case resolves by its message id, which survives the live row:
+  // the reports' snapshots carry it as their reportedMessageId.
+  const caseTargetId =
+    detail.target.kind === "message"
+      ? (detail.target.message?.id ?? detail.target.evidence[0]?.snapshot.reportedMessageId ?? null)
+      : detail.target.id;
   const resolve = useAtomValue(resolveAtom);
   const [dismissNote, setDismissNote] = useAtom(caseDismissNoteAtom);
 
@@ -988,15 +1099,16 @@ function DismissAction({ detail }: { detail: ModerationCaseDetail }) {
         <Button
           variant="outline"
           className="w-full"
-          disabled={resolve.isPending}
-          onClick={() =>
+          disabled={resolve.isPending || caseTargetId === null}
+          onClick={() => {
+            if (caseTargetId === null) return;
             resolve.mutate({
               targetType: detail.target.kind,
-              targetId: detail.target.id,
+              targetId: caseTargetId,
               outcome: "dismissed",
               note: dismissNote.trim() || undefined,
-            })
-          }
+            });
+          }}
         >
           <CheckCheck />
           {m.moderation_dismiss()}

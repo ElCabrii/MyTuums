@@ -140,6 +140,10 @@ function createTestRouteTree(ui: ReactNode) {
     stubRoute("/forgot-password"),
     stubRoute("/reset-password"),
     stubRoute("/discover"),
+    stubRoute("/messages"),
+    stubRoute("/messages/requests"),
+    stubRoute("/messages/$conversationId"),
+    stubRoute("/messages/new/$userId"),
     // The public game directory (issue #314): the hub index and the
     // `/games/$slug` pages the grid and search rows link into.
     stubRoute("/games/"),
