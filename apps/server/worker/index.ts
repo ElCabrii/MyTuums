@@ -10,10 +10,12 @@ import {
   createJobDispatcher,
 } from "@my-tuums/api/cloudflare-app";
 import { createDistributedRateLimiter } from "@my-tuums/api/distributed-rate-limit";
+import { createMessageNotifier } from "@my-tuums/api/message-events";
 import { createAuthRateLimitStorage } from "@my-tuums/auth/rate-limit-storage";
 import { createWorkerApplication } from "./application.js";
 export { RateLimitCounter } from "./rate-limit-counter.js";
 export { AuthRateLimitCounter } from "./auth-rate-limit-counter.js";
+export { MessageHub } from "./message-hub.js";
 
 const configuration = z
   .object({
@@ -81,8 +83,10 @@ async function application(env: AppEnv) {
       rateLimiter: createDistributedRateLimiter(env.API_COUNTERS),
       appealToken: createAppealTokenSigner(config.APPEAL_TOKEN_SECRET),
       emailSender: { send: sendEmail },
+      messageNotifier: createMessageNotifier(env.MESSAGE_HUB),
       linkTransport: createWorkerLinkTransport(env.LINK_FETCHER),
     },
+    messageHub: env.MESSAGE_HUB,
     bucket: env.MEDIA,
     images: env.IMAGES,
     stream,

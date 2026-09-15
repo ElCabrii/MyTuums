@@ -28,6 +28,12 @@ export default {
         });
       },
       resolveMedia: () => Promise.resolve(null),
+      streamMessageEvents: () =>
+        Promise.resolve(
+          new Response('event: unread\ndata: {"kind":"unread"}\n\n', {
+            headers: { "content-type": "text/event-stream; charset=utf-8" },
+          }),
+        ),
       fetchAsset: (request) =>
         Promise.resolve(
           new URL(request.url).pathname === "/index.html"

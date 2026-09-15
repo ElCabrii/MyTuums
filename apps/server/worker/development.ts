@@ -3,12 +3,14 @@ import { createAuth, type OutgoingEmail } from "@my-tuums/auth";
 import { createDatabase } from "@my-tuums/db";
 import { createAppealTokenSigner, createR2Storage } from "@my-tuums/api/cloudflare-app";
 import { createDistributedRateLimiter } from "@my-tuums/api/distributed-rate-limit";
+import { createMessageNotifier } from "@my-tuums/api/message-events";
 import { createAuthRateLimitStorage } from "@my-tuums/auth/rate-limit-storage";
 import { createWorkerApplication } from "./application.js";
 import { createWorkerLinkTransport } from "./link-transport.js";
 import { RateLimitCounter } from "./rate-limit-counter.js";
 import { AuthRateLimitCounter } from "./auth-rate-limit-counter.js";
-export { RateLimitCounter, AuthRateLimitCounter };
+import { MessageHub } from "./message-hub.js";
+export { RateLimitCounter, AuthRateLimitCounter, MessageHub };
 
 const origin = "http://localhost:5173";
 const secret = "mytuums-local-development-only-not-a-hosted-secret";
@@ -18,6 +20,7 @@ interface DevelopmentEnv {
   IMAGES: ImagesBinding;
   API_COUNTERS: DurableObjectNamespace<RateLimitCounter>;
   AUTH_COUNTERS: DurableObjectNamespace<AuthRateLimitCounter>;
+  MESSAGE_HUB: DurableObjectNamespace<MessageHub>;
   LINK_FETCHER: Fetcher;
   MAINTENANCE_WORKFLOW: Workflow<{ entityId: string }>;
 }
@@ -55,9 +58,11 @@ async function application(env: DevelopmentEnv) {
       videoUploads: null,
       rateLimiter: createDistributedRateLimiter(env.API_COUNTERS),
       emailSender: { send: sendEmail },
+      messageNotifier: createMessageNotifier(env.MESSAGE_HUB),
       appealToken: createAppealTokenSigner(secret),
       linkTransport: createWorkerLinkTransport(env.LINK_FETCHER),
     },
+    messageHub: env.MESSAGE_HUB,
     bucket: env.MEDIA,
     images: env.IMAGES,
     stream: null,

@@ -24,6 +24,7 @@ administration tools.
 | `src/worker-document.ts`         | bounded HTML transformation and metadata                 |
 | `src/access.ts`                  | fixed issuer/audience Access JWT verification            |
 | `worker/media.ts`                | private R2 delivery and Images variants                  |
+| `worker/message-hub.ts`          | the per-user SSE hub Durable Object (issue #408)         |
 | `wrangler*.jsonc`                | build, preview and production bindings and observability |
 | `src/e2e-server.ts`              | disposable local native E2E composition                  |
 | `src/games-sync.ts`              | guarded D1 CLI that queues GameSyncWorkflow intent       |
@@ -31,6 +32,11 @@ administration tools.
 ## Change map
 
 - HTTP gates or headers: native handler/header modules, native tests, E2E HTTP contracts.
+- The message-event stream (`GET /events/messages`, session-gated between
+  `/media` and the page gate): `worker/message-hub.ts`, the
+  `streamMessageEvents` dependency in `src/worker-request-handler.ts`, the
+  `MESSAGE_HUB` binding in every `wrangler*.jsonc` (migration tag `v2`), and
+  the `messageNotifier` service wired from `createMessageNotifier`.
 - Binding/configuration: entrypoint and Wrangler config; regenerate Worker types.
 - Email/runtime dependency compatibility: `src/native-auth-email.test.ts` and its
   fixture in `worker/tests`; React Email must select its `workerd` export.

@@ -2,11 +2,13 @@ import { createAuth, type OutgoingEmail } from "@my-tuums/auth";
 import { createDatabase } from "@my-tuums/db";
 import { createAppealTokenSigner, createR2Storage } from "@my-tuums/api/cloudflare-app";
 import { createDistributedRateLimiter } from "@my-tuums/api/distributed-rate-limit";
+import { createMessageNotifier } from "@my-tuums/api/message-events";
 import { createAuthRateLimitStorage } from "@my-tuums/auth/rate-limit-storage";
 import { createWorkerApplication } from "../application.js";
 import { RateLimitCounter } from "../rate-limit-counter.js";
 import { AuthRateLimitCounter } from "../auth-rate-limit-counter.js";
-export { RateLimitCounter, AuthRateLimitCounter };
+import { MessageHub } from "../message-hub.js";
+export { RateLimitCounter, AuthRateLimitCounter, MessageHub };
 
 interface Env {
   DB: D1Database;
@@ -14,6 +16,7 @@ interface Env {
   IMAGES: ImagesBinding;
   API_COUNTERS: DurableObjectNamespace<RateLimitCounter>;
   AUTH_COUNTERS: DurableObjectNamespace<AuthRateLimitCounter>;
+  MESSAGE_HUB: DurableObjectNamespace<MessageHub>;
 }
 
 // Synthetic delivery and network refusal surround the real RPC/auth/media services.
@@ -41,6 +44,7 @@ async function application(env: Env) {
     rateLimiter: createDistributedRateLimiter(env.API_COUNTERS),
     appealToken: createAppealTokenSigner(secret),
     emailSender: { send: sendEmail },
+    messageNotifier: createMessageNotifier(env.MESSAGE_HUB),
     videoUploads: null,
     linkTransport: {
       lookup: () => Promise.reject(new Error("External requests are outside this fixture.")),
@@ -50,6 +54,7 @@ async function application(env: Env) {
   const handle = await createWorkerApplication({
     auth,
     services,
+    messageHub: env.MESSAGE_HUB,
     bucket: env.MEDIA,
     images: env.IMAGES,
     stream: null,

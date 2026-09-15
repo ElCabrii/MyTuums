@@ -41,6 +41,12 @@ async function fixture(overrides: Partial<WorkerRequestDependencies> = {}) {
       });
     },
     resolveMedia: (key, viewer) => Promise.resolve(new Response(`${key}:${viewer}`)),
+    streamMessageEvents: () =>
+      Promise.resolve(
+        new Response("retry: 5000\n\n", {
+          headers: { "content-type": "text/event-stream; charset=utf-8" },
+        }),
+      ),
     fetchAsset(request) {
       const path = new URL(request.url).pathname;
       if (path === "/index.html")
@@ -299,6 +305,65 @@ it("fails media closed on a session outage while allowing only the page shell", 
   expect((await handle(request("/settings", { headers }))).status).toBe(200);
   expect((await handle(request("/media/public.jpg"))).status).toBe(200);
   expect((await handle(request("/media/public.jpg", { method: "POST" }))).status).toBe(405);
+});
+
+it("serves the message-event stream only to a GET with a live session, bound to that user", async () => {
+  const seen: string[] = [];
+  const handle = await fixture({
+    streamMessageEvents: (userId) => {
+      seen.push(userId);
+      return Promise.resolve(
+        new Response("retry: 5000\n\n", {
+          headers: { "content-type": "text/event-stream; charset=utf-8" },
+        }),
+      );
+    },
+  });
+  const session = { cookie: "__Secure-better-auth.session_token=valid" };
+  const stream = await handle(request("/events/messages", { headers: session }));
+  expect(stream.status).toBe(200);
+  expect(stream.headers.get("content-type")).toBe("text/event-stream; charset=utf-8");
+  expect(seen).toEqual(["viewer"]);
+  // No session cookie, anonymous session, and non-GET methods never reach
+  // the hub; an auth outage fails closed like media, not open like the shell.
+  expect((await handle(request("/events/messages"))).status).toBe(401);
+  expect(
+    (
+      await handle(
+        request("/events/messages", {
+          headers: session,
+          method: "POST",
+        }),
+      )
+    ).status,
+  ).toBe(405);
+  expect(
+    (
+      await handle(
+        request("/events/messages", {
+          headers: { cookie: "better-auth.session_token=valid" },
+        }),
+      )
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await (
+        await fixture({ resolveSession: () => Promise.resolve({ kind: "unavailable" }) })
+      )(request("/events/messages", { headers: session }))
+    ).status,
+  ).toBe(503);
+  expect(
+    (
+      await (
+        await fixture({ resolveSession: () => Promise.resolve({ kind: "anonymous" }) })
+      )(request("/events/messages", { headers: session }))
+    ).status,
+  ).toBe(401);
+  // Only the stream route family answers here; a sibling path is an
+  // ordinary gated page, and the route's own subpaths share its 401.
+  expect((await handle(request("/events/other"))).status).toBe(302);
+  expect((await handle(request("/events/messages/x"))).status).toBe(401);
 });
 
 it("preserves public page exceptions, gated redirects, public heads and missing asset 404s", async () => {

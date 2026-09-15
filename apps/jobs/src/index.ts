@@ -184,6 +184,9 @@ export class MaintenanceWorkflow extends WorkflowEntrypoint<Env, JobParams> {
           return await deliverModerationEmails({
             db,
             emailSender: { send: createEmailSender(this.env.EMAIL, this.env.EMAIL_FROM) },
+            // No message hub binding: the jobs app never sends messages, and
+            // the notifier seam is nullable for exactly this.
+            messageNotifier: null,
             webOrigin: this.env.WEB_ORIGIN,
             appealToken: createAppealTokenSigner(this.env.APPEAL_TOKEN_SECRET),
             requestId: entityId,
