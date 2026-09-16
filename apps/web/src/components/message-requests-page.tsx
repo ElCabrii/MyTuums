@@ -22,22 +22,26 @@ export function MessageRequestsPage() {
   const items = feed.data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
-    <div className="mx-auto w-full max-w-2xl px-4 py-8">
-      <h1 className="text-lg font-bold tracking-tight">{m.messages_requests()}</h1>
-      <p className="text-muted-foreground mt-1 mb-4 text-sm">{m.messages_requests_intro()}</p>
-      <PaginatedState
-        query={feed}
-        errorMessage={m.messages_load_error()}
-        emptyIcon={MailQuestion}
-        emptyMessage={m.messages_requests_empty()}
-        isEmpty={items.length === 0}
-        listClassName="space-y-3"
-        loadingFallback={<RequestsSkeleton />}
-      >
-        {items.map((item) => (
-          <RequestRow key={item.conversationId} item={item} />
-        ))}
-      </PaginatedState>
+    // Scrolls inside the bounded /messages pane — the route never scrolls
+    // the document (see MessagesPage).
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto w-full max-w-2xl px-4 py-8">
+        <h1 className="text-lg font-bold tracking-tight">{m.messages_requests()}</h1>
+        <p className="text-muted-foreground mt-1 mb-4 text-sm">{m.messages_requests_intro()}</p>
+        <PaginatedState
+          query={feed}
+          errorMessage={m.messages_load_error()}
+          emptyIcon={MailQuestion}
+          emptyMessage={m.messages_requests_empty()}
+          isEmpty={items.length === 0}
+          listClassName="space-y-3"
+          loadingFallback={<RequestsSkeleton />}
+        >
+          {items.map((item) => (
+            <RequestRow key={item.conversationId} item={item} />
+          ))}
+        </PaginatedState>
+      </div>
     </div>
   );
 }

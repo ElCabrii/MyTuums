@@ -40,15 +40,27 @@ export function MessagesPage() {
   }, [unreadCount, pathname]);
 
   return (
-    <div className="mx-auto grid w-full max-w-5xl flex-1 grid-cols-1 md:grid-cols-[minmax(300px,380px)_1fr]">
-      <aside className="border-border flex flex-col border-b md:border-r md:border-b-0">
+    // Fixed to the visible area — the shell publishes both chrome heights as
+    // `--header-height` and `--mobile-nav-height` — so the conversation list
+    // and the thread each scroll independently inside their own panes and the
+    // route itself never scrolls. The route is an app surface rather than a
+    // document, which is also why the site footer sits it out (`__root`).
+    <div className="mx-auto grid h-[calc(100dvh-var(--header-height)-var(--mobile-nav-height))] w-full max-w-5xl flex-1 grid-cols-1 grid-rows-1 overflow-hidden md:grid-cols-[minmax(300px,380px)_1fr]">
+      {/* A thread, request page or draft composer replaces the list on mobile
+          (the thread header's back arrow is the way back); desktop keeps both
+          panes side by side. */}
+      <aside
+        className={`border-border min-h-0 flex-col border-b md:border-r md:border-b-0 ${
+          threadRouteOpen ? "hidden md:flex" : "flex"
+        }`}
+      >
         <div className="flex items-center justify-between gap-3 px-4 pt-6 pb-3">
           <h1 className="text-lg font-bold tracking-tight">{m.messages_title()}</h1>
         </div>
         <RequestsEntry />
         <ConversationList />
       </aside>
-      <section className="min-w-0">
+      <section className="min-h-0 min-w-0">
         {!threadRouteOpen && (
           <div className="hidden md:block">
             <ThreadPlaceholder />
