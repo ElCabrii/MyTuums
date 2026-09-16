@@ -1,4 +1,4 @@
-import { test, expect } from "../../support/fixtures";
+import { openSessionAs, test, expect } from "../../support/fixtures";
 import type { Page } from "@playwright/test";
 import { ALICE, BOB } from "../../support/users";
 
@@ -88,5 +88,58 @@ test.describe("messages", () => {
     await page.reload();
     await expect(page.locator("section").getByText(reply)).toBeVisible();
     await expect.poll(async () => unreadOnMail(page), { timeout: 10_000 }).toBe(0);
+  });
+});
+
+test.describe("messages: multi-session", () => {
+  test("a message sent on one session of the account appears live on another open session", async ({
+    page,
+    bobPage,
+    browser,
+    db,
+  }, testInfo) => {
+    const aliceId = await db.getUserId(ALICE.username);
+    const bobId = await db.getUserId(BOB.username);
+    await db.deleteConversationBetween(aliceId, bobId);
+    // The sender's other device shares the same hub: one account, two live
+    // sessions, the same conversation open in the second one.
+    const secondSession = await openSessionAs(browser, "alice", testInfo);
+
+    try {
+      // An inbox thread for alice: she follows bob, he writes. The follow is
+      // seeded directly — a UI click races bob's send for the edge commit,
+      // and losing it lands the thread in requests instead of the inbox.
+      await db.seedFollow(aliceId, bobId);
+
+      const opener = `from bob ${Date.now()}`;
+      await bobPage.goto(`/@${ALICE.username}`);
+      await bobPage.getByRole("button", { name: "More", exact: true }).first().click();
+      await bobPage.getByRole("menuitem", { name: "Message" }).click();
+      await bobPage.getByRole("textbox", { name: "Write a message" }).fill(opener);
+      await bobPage.keyboard.press("Enter");
+
+      // Both alice sessions open the thread from the inbox.
+      const openThread = async (target: Page) => {
+        await target.goto("/messages");
+        const row = target.getByRole("button", { name: new RegExp(BOB.name) }).first();
+        await expect(row).toBeVisible();
+        await row.click();
+        await expect(target.locator("section").getByText(opener)).toBeVisible();
+      };
+      await openThread(secondSession);
+      await openThread(page);
+
+      // Alice sends from the FIRST session; the second one receives it over
+      // the event stream — no reload.
+      const fromOtherSession = `from the other session ${Date.now()}`;
+      await page.getByRole("textbox", { name: "Write a message" }).fill(fromOtherSession);
+      await page.keyboard.press("Enter");
+
+      await expect(secondSession.locator("section").getByText(fromOtherSession)).toBeVisible({
+        timeout: 10_000,
+      });
+    } finally {
+      await secondSession.close();
+    }
   });
 });
