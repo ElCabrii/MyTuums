@@ -283,8 +283,10 @@ defense against that is blocking, which refuses sends in both directions.
 Bodies are plain text up to 2,000 characters, rendered with the same safe
 linkification as posts. The sender can delete their own message — a tombstone
 reads "message deleted", the conversation's order and any report evidence
-survive. Each side can hide a conversation from their own list; sending to
-that person again is the one way back in.
+survive. Each side can hide a conversation from their own list. Hidden is not
+sealed: the profile's Message action re-opens the shared history under a
+banner saying the conversation is hidden, and sending a message is what
+returns it to the inbox.
 
 Unread state is per side: the header mail badge counts unread incoming
 messages in inbox conversations only (requests carry their own count on the

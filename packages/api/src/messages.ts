@@ -441,7 +441,10 @@ export const messageRouter = {
 
   /**
    * One conversation's messages, newest first, for an authorized participant
-   * whose side is not hidden and across no block. Tombstones return their
+   * across no block. A HIDDEN side may still read — hiding is the viewer's
+   * own list-curation gesture, and the explicit navigation back in (the
+   * profile's Message action) must show the history; the header flags
+   * `hidden` so the pane can say what sends will do. Tombstones return their
    * metadata with the body redacted; the other party's acceptance, hiding, or
    * read state is never part of the response.
    */
@@ -455,6 +458,7 @@ export const messageRouter = {
         .select({
           conversationId: conversation.id,
           lastReadAt: conversationParticipant.lastReadAt,
+          status: conversationParticipant.status,
           user: {
             id: user.id,
             name: user.name,
@@ -477,7 +481,6 @@ export const messageRouter = {
           and(
             eq(conversationParticipant.conversationId, input.conversationId),
             eq(conversationParticipant.userId, me),
-            ne(conversationParticipant.status, "hidden"),
             sql`not ${blockedBetween(me, other.userId)}`,
           ),
         )
@@ -485,6 +488,7 @@ export const messageRouter = {
       if (!header) {
         throw new ORPCError("NOT_FOUND", { message: "This conversation doesn't exist." });
       }
+      const { status, ...visible } = header;
 
       const selection = {
         id: message.id,
@@ -510,7 +514,12 @@ export const messageRouter = {
             .orderBy(desc(message.createdAt), desc(message.id))
             .limit(input.limit + 1),
       });
-      return { ...header, items: page.items, nextCursor: page.nextCursor };
+      return {
+        ...visible,
+        hidden: status === "hidden",
+        items: page.items,
+        nextCursor: page.nextCursor,
+      };
     }),
 
   /**
@@ -632,8 +641,9 @@ export const messageRouter = {
   /**
    * Hides a conversation from the caller's inbox — the same `hidden` state
    * declining writes, applied to an accepted thread. Idempotent: hiding an
-   * already-hidden side succeeds. Un-hiding has exactly one door: sending to
-   * that user again re-activates one's own side.
+   * already-hidden side succeeds. Hidden does not mean sealed: the profile's
+   * Message action re-opens the thread with its history, and SENDING is what
+   * returns it to the inbox.
    */
   hide: protectedProcedure
     .use(rateLimit(RATE_LIMITS.follow))
@@ -675,10 +685,13 @@ export const messageRouter = {
     }),
 
   /**
-   * The visible conversation with one user, if any — what the profile
-   * "Message" action resolves before composing. `null` when there is none,
-   * when this side hid it, or across a block (the pair then reads as
-   * contactable only one way, and a send will refuse).
+   * The conversation with one user, if any — what the profile "Message"
+   * action resolves before composing. `null` when there is none or across a
+   * block (the pair then reads as contactable only one way, and a send will
+   * refuse). A HIDDEN side still resolves, flagged: hiding is the viewer's
+   * own list-curation gesture, and their explicit navigation back into the
+   * thread (this lookup → `/messages/$id`) must show the history they share —
+   * only the send re-returns it to the inbox.
    *
    * The conversation resolves by a CORRELATED subselect, not a join: joining
    * the viewer's participation rows would leave one unrelated row per other
@@ -691,7 +704,7 @@ export const messageRouter = {
     .input(z.object({ userId: z.string().min(1) }))
     .handler(async ({ input, context }) => {
       const me = context.user.id;
-      if (input.userId === me) return { conversationId: null, user: null };
+      if (input.userId === me) return { conversationId: null, user: null, hidden: false };
       const [row] = await context.db
         .select({
           conversationId: sql<string | null>`(
@@ -700,12 +713,20 @@ export const messageRouter = {
               select 1 from ${conversationParticipant} p
               where p.conversation_id = c.id
                 and p.user_id = ${me}
-                and p.status <> 'hidden'
             )
               and ((c.user_a_id = ${me} and c.user_b_id = ${input.userId})
                 or (c.user_a_id = ${input.userId} and c.user_b_id = ${me}))
             limit 1
           )`,
+          hidden: sql<boolean>`(
+            select p.status = 'hidden'
+            from ${conversationParticipant} p
+            inner join ${conversation} c on c.id = p.conversation_id
+            where p.user_id = ${me}
+              and ((c.user_a_id = ${me} and c.user_b_id = ${input.userId})
+                or (c.user_a_id = ${input.userId} and c.user_b_id = ${me}))
+            limit 1
+          )`.mapWith(Boolean),
           user: {
             id: user.id,
             name: user.name,
@@ -719,6 +740,7 @@ export const messageRouter = {
         .limit(1);
       return {
         conversationId: row?.conversationId ?? null,
+        hidden: row?.conversationId ? (row.hidden ?? false) : false,
         user: row?.user ?? null,
       };
     }),
@@ -740,10 +762,12 @@ export const messageRouter = {
       const seenAt = sql`(select ${message.createdAt} from ${message}
         where ${message.id} = ${input.lastSeenMessageId}
           and ${message.conversationId} = ${input.conversationId})`;
+      // The hidden owner may acknowledge too: they are reading the thread
+      // (the thread read allows them), and a cursor left behind would tick
+      // the badge retroactively the moment a send re-activates the side.
       const participation = and(
         eq(conversationParticipant.conversationId, input.conversationId),
         eq(conversationParticipant.userId, me),
-        ne(conversationParticipant.status, "hidden"),
       );
       const advanced = await context.db
         .update(conversationParticipant)

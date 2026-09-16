@@ -987,7 +987,7 @@
   "messages_requests_decline": "Refuser",
   "messages_back": "Retour aux messages",
   "messages_hide": "Masquer la conversation",
-  "messages_hidden": "Conversation masquée",
+  "messages_hidden": "Masquée de vos messages",
   "messages_delete": "Supprimer le message",
   "messages_send": "Envoyer",
   "messages_send_error": "Votre message n'a pas été envoyé. Réessayez.",
@@ -1004,5 +1004,7 @@
   "moderation_case_message_gone": "Le message a été supprimé en même temps que le compte de son auteur ; la preuve du signalement figure ci-dessous.",
   "moderation_case_context_title": "L'échange tel que signalé",
   "moderation_case_deleted_badge": "Supprimé",
-  "moderation_queue_target_message": "Message"
+  "moderation_queue_target_message": "Message",
+  "messages_hidden_notice": "Vous avez masqué cette conversation — elle n'est pas dans vos messages. Envoyer un message la fait revenir.",
+  "messages_report_user": "Signaler l'utilisateur"
 }

@@ -987,7 +987,7 @@
   "messages_requests_decline": "Decline",
   "messages_back": "Back to messages",
   "messages_hide": "Hide conversation",
-  "messages_hidden": "Conversation hidden",
+  "messages_hidden": "Hidden from your messages",
   "messages_delete": "Delete message",
   "messages_send": "Send",
   "messages_send_error": "Your message wasn't sent. Try again.",
@@ -1004,5 +1004,7 @@
   "moderation_case_message_gone": "The message was deleted along with its sender's account; the report's evidence stands below.",
   "moderation_case_context_title": "The exchange as reported",
   "moderation_case_deleted_badge": "Deleted",
-  "moderation_queue_target_message": "Message"
+  "moderation_queue_target_message": "Message",
+  "messages_hidden_notice": "You hid this conversation — it is not in your messages. Sending a message brings it back.",
+  "messages_report_user": "Report user"
 }
