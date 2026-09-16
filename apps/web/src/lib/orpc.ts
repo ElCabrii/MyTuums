@@ -113,6 +113,21 @@ export type NotificationListPage = Awaited<ReturnType<typeof client.notification
 /** One notification row: its type, read state, actor summary, and the post or moderation action it references. */
 export type NotificationItem = NotificationListPage["items"][number];
 
+/** One page of `message.conversations` — the viewer's active inbox, newest activity first. */
+export type ConversationListPage = Awaited<ReturnType<typeof client.message.conversations>>;
+/** One inbox row: the other user, the last-message preview, and the unread flag. */
+export type ConversationItem = ConversationListPage["items"][number];
+/** One page of `message.requests` — pending first contact from non-followers. */
+export type MessageRequestPage = Awaited<ReturnType<typeof client.message.requests>>;
+/** One message-request row: the sender and their latest message's preview. */
+export type MessageRequestItem = MessageRequestPage["items"][number];
+/** The `message.thread` payload: the other user, the read cursor, and the messages. */
+export type MessageThread = Awaited<ReturnType<typeof client.message.thread>>;
+/** One message in a thread; `body` is null on a sender's tombstone. */
+export type MessageItem = MessageThread["items"][number];
+/** A stored message as `message.send` returns it — the optimistic row's authority. */
+export type SentMessage = Awaited<ReturnType<typeof client.message.send>>;
+
 /**
  * A handle that doesn't exist won't start existing on the second attempt, and
  * neither will one the server rejected as malformed — only retry the failures

@@ -264,6 +264,40 @@ menu; the navigation bar has no standalone theme button.
   game hashtag click lands here filtered on that game. Private posts never
   appear here for non-viewers.
 
+## Private messages
+
+One text-only conversation per pair of users, ever — whoever writes first, the
+thread is the same. Anyone signed in can message anyone except themselves and
+users across a block (either direction); private accounts are messageable like
+anyone else.
+
+**Message requests** are the anti-spam gate, and deliberately not a per-user
+setting: a first message from someone the recipient does not follow lands as a
+request — listed under Messages → Message requests, ticking no badge — until
+the recipient accepts it, declines it, or simply replies (an implicit accept).
+Accepting moves the conversation to the inbox; declining hides it silently and
+permanently: the sender is never told, their own thread keeps working, and
+messages they keep sending stay invisible to the decliner. The decliner's real
+defense against that is blocking, which refuses sends in both directions.
+
+Bodies are plain text up to 2,000 characters, rendered with the same safe
+linkification as posts. The sender can delete their own message — a tombstone
+reads "message deleted", the conversation's order and any report evidence
+survive. Each side can hide a conversation from their own list; sending to
+that person again is the one way back in.
+
+Unread state is per side: the header mail badge counts unread incoming
+messages in inbox conversations only (requests carry their own count on the
+requests entry), and opening a thread marks it read through the newest
+displayed message. Live delivery rides a server-sent event stream —
+`/events/messages` — that pushes thin refresh notices; a missed push loses
+nothing, and the badge and open thread refetch on reconnect and focus.
+
+Reporting a message works from the thread (tombstones included): the report
+snapshots the message plus up to ten before it, moderators see that snapshot
+with both parties' handles, and every sanction lands on the sender. There is
+deliberately no moderator browse surface for conversations.
+
 ## Notifications
 
 A like on your post, a reply to your post, a repost of your post, a quote of
@@ -323,8 +357,9 @@ Games, and Profile. The header shows the logo image, notifications, and a compac
 moderation icon for authorized roles. Global search sits between the logo and
 notification bell on the same mobile header row. The Profile tab uses the signed-in user’s
 avatar. The own-profile account menu provides settings, bookmarks, theme selection, and
-sign-out; profiles provide a pencil button for customization. Private messages remain hidden until
-implemented. Page content and consent notices clear the bottom navigation and
+sign-out; profiles provide a pencil button for customization. Private messages live behind the
+header's mail action, not a bottom-navigation slot: the four tabs stay as they are. Page content and
+consent notices clear the bottom navigation and
 safe-area inset.
 
 ## Profiles and search
@@ -623,6 +658,23 @@ case rather than creating a second one. _Avoid:_ flag, ticket, complaint.
 **Block** — a user's private, silent severing of their relationship with
 another user, in both directions. Not a moderation action. _Avoid:_ mute (a
 different thing), shadowban.
+
+**Message** — one private text row inside a conversation, at most 2,000
+characters, rendered with the same safe linkification as a post. A sender's
+deletion is a tombstone ("message deleted"), never a row delete. Reportable
+from the thread; reports carry the message plus its bounded context to
+moderation. _Avoid:_ DM (the whole feature), chat.
+
+**Conversation** — the single thread two users share, created idempotently by
+the first message and shared whichever of them wrote first. Exactly two
+participants in v1; the schema is participants-shaped so groups can arrive
+without a destructive migration. _Avoid:_ thread (that is the reading view),
+channel.
+
+**Message request** — a first message from someone the recipient does not
+follow, waiting under Message requests until accepted, declined, or answered.
+Never ticks the unread badge; declining is silent and permanent for the
+decliner. _Avoid:_ pending chat, invite.
 
 **Removed post** — a post whose content is hidden by a moderation action while
 the row remains. It renders as a stub, its replies stay visible, and restoring

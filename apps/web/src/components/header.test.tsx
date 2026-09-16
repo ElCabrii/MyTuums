@@ -25,6 +25,9 @@ const fakeClient = {
   notification: {
     unreadCount: vi.fn(),
   },
+  message: {
+    unreadCount: vi.fn(),
+  },
 };
 
 installTestOrpc(createTanstackQueryUtils(fakeClient));

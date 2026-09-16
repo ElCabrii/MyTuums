@@ -13,6 +13,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { resolvedThemeAtom, themeClassEffect } from "@/atoms/theme";
 import { localeDocumentEffect, localePreferenceEffect } from "@/atoms/locale";
 import { isSignedInAtom, sessionSettledAtom, sessionSettledEffect } from "@/atoms/session";
+import { useMessageEvents } from "@/hooks/use-message-events";
 import { useRequireHandle } from "@/hooks/use-require-handle";
 import { useRequireSignedIn } from "@/hooks/use-require-signed-in";
 import { fallbackHead } from "@/lib/document-head";
@@ -59,6 +60,12 @@ function RootLayout() {
   // The site is private — a signed-out visitor on any non-auth page is sent
   // to /login with their destination preserved in ?redirect=.
   useRequireSignedIn();
+
+  // The private-message event stream, mounted app-wide like the gates: the
+  // badge lives in the header, not on /messages, so the subscription must
+  // outlive any one route. Opens only once the protected product is ready
+  // and closes when the signed-in tree unmounts (sign-out included).
+  useMessageEvents();
 
   // All reads live above the splash branch below — a hook called after a
   // conditional return would be a rules-of-hooks violation the moment the

@@ -1,4 +1,5 @@
 import { gameRouter } from "./games.js";
+import { messageRouter } from "./messages.js";
 import { moderationRouter } from "./moderation.js";
 import { notificationRouter } from "./notifications.js";
 import { postRouter } from "./posts.js";
@@ -10,11 +11,11 @@ import { RATE_LIMITS } from "./rate-limit.js";
 
 /**
  * The oRPC router: `me`, plus the `post`, `user`, `game`, `search`,
- * `notification` and `moderation` procedure groups.
+ * `notification`, `message` and `moderation` procedure groups.
  *
  * Liveness/readiness is served over plain HTTP at GET /health (see
  * apps/server/src/index.ts) so orchestrators (Docker, k8s) that can't speak
- * oRPC can probe it directly, and so it can check the DB without paying for
+ * oRPC can probe it directly, and so it checks the DB without paying for
  * oRPC request matching. There is deliberately no RPC-level health check —
  * two health checks with different shapes was one too many.
  */
@@ -28,6 +29,7 @@ export const appRouter = {
   game: gameRouter,
   search: searchRouter,
   notification: notificationRouter,
+  message: messageRouter,
   moderation: moderationRouter,
   video: videoRouter,
 };

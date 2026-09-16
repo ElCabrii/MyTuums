@@ -78,7 +78,10 @@ try {
               "index.js": { type: "esm", contents: await readFile(`${output}/index.js`, "utf8") },
             },
           },
-          exports: { RateLimitCounter: { type: "durable-object", storage: "sqlite" } },
+          exports: {
+            RateLimitCounter: { type: "durable-object", storage: "sqlite" },
+            MessageHub: { type: "durable-object", storage: "sqlite" },
+          },
           env: {
             DB: { type: "d1", id: E2E_DATABASE_ID },
             MEDIA: { type: "r2", name: E2E_BUCKET_NAME, jurisdiction: "eu" },
@@ -87,6 +90,11 @@ try {
               type: "durable-object",
               worker: "e2e-application",
               exportName: "RateLimitCounter",
+            },
+            MESSAGE_HUB: {
+              type: "durable-object",
+              worker: "e2e-application",
+              exportName: "MessageHub",
             },
             STREAM: { type: "worker", worker: "e2e-stream" },
             VIDEO_WORKFLOW: {

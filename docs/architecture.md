@@ -106,9 +106,10 @@ edge identity admission precede dispatch, including health and static assets.
 | 3     | `/api/auth`                    | bounded lazy body, Better Auth admission and dispatch                   |
 | 4     | `/rpc`                         | declared/actual byte caps, large-body session gate, bounded concurrency |
 | 5     | `/media`                       | GET/HEAD, current per-key authorization                                 |
-| 6     | documents                      | shared signed-out allowlist, otherwise app-session page gate            |
-| 7     | assets                         | explicit asset binding lookup; no implicit SPA fallback                 |
-| 8     | missing/fault                  | private 404/500 with content-free event                                 |
+| 6     | `/events/messages`             | GET only, app-session gate, per-user MessageHub Durable Object stream   |
+| 7     | documents                      | shared signed-out allowlist, otherwise app-session page gate            |
+| 8     | assets                         | explicit asset binding lookup; no implicit SPA fallback                 |
+| 9     | missing/fault                  | private 404/500 with content-free event                                 |
 
 Media authorization runs before I/O and again before delivery; session-store
 failure denies media. Only the page shell retains its fail-open presentation
@@ -116,6 +117,14 @@ rule. Admin plugin endpoints remain inaccessible, keeping moderation behind RPC
 hierarchy and audit guards. Auth rate limiting precedes body reads; failed or
 unused request bodies are cancelled. Detailed limits and native regression
 coverage are in [Worker context](../apps/server/worker/CONTEXT.md).
+
+The message-event stream is the one non-RPC data route: `GET /events/messages`
+authorizes the app session itself (like `/media`), then proxies the user's
+`MessageHub` Durable Object — one instance per user id, holding that user's
+live SSE connections (bounded, keep-alive pings, lifetime-bounded so a revoked
+session reauthorizes on reconnect). Events are thin invalidation notices;
+every payload comes back from D1-backed procedures, and D1 remains the single
+source of truth (issue #408).
 
 ## oRPC context
 
@@ -138,6 +147,7 @@ The router's top-level groups:
 - `game` — `bySlug`, `list` (public: the `/games` directory, issue #314)
 - `search` — `typeahead`, `users`, `posts`
 - `notification` — `list`, `unreadCount`, `markRead`
+- `message` — `send`, `conversations`, `requests`, `thread`, `accept`, `decline`, `hide`, `markRead`, `unreadCount`, `deleteMessage`, `conversationWith` (private messages, issue #408)
 - `moderation` — reports, blocks, the queue, the staff actions, the audit log, appeals
 
 There is deliberately no RPC-level health check; liveness is plain HTTP at

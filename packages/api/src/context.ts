@@ -1,6 +1,7 @@
 import type { Auth, OutgoingEmail } from "@my-tuums/auth";
 import type { Database } from "@my-tuums/db";
 import type { LinkFetchTransport } from "./link-card-http.js";
+import type { MessageNotifier } from "./message-events.js";
 import type { RateLimiter } from "./rate-limit.js";
 import type { ObjectStorage } from "./object-storage.js";
 import type { VideoUploads } from "./video-uploads.js";
@@ -24,6 +25,8 @@ export interface ApiServices {
   videoUploads: VideoUploads | null;
   linkTransport: LinkFetchTransport;
   emailSender: EmailSender;
+  /** Null where no MessageHub binding exists (jobs, tests without one). */
+  messageNotifier: MessageNotifier | null;
   webOrigin: string;
   appealToken: AppealTokenSigner;
 }

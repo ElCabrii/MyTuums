@@ -67,6 +67,18 @@ export const NOTIFICATION_PAGE_SIZE = 20;
 export const NOTIFICATION_PAGE_SIZE_MAX = 50;
 
 /**
+ * Maximum length of a private message body, in characters, after trimming
+ * (issue #408). Mirrors the `message_body_length` check in
+ * packages/db/src/schema/app.ts — a JS length can only be longer than
+ * SQLite's count for the same string, so zod's bound is the binding one.
+ */
+export const MESSAGE_BODY_MAX_LENGTH = 2000;
+
+/** Default and maximum page sizes for the message lists and thread walks. */
+export const MESSAGE_PAGE_SIZE = 20;
+export const MESSAGE_PAGE_SIZE_MAX = 50;
+
+/**
  * The `post.list` ranked feeds' snapshot horizon (issue #305): a frozen
  * ordering stays servable this long, then resumes are refused and the client
  * builds a fresh one. Short enough that a feed never reads stale for long,

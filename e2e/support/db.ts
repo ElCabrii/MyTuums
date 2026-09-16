@@ -398,6 +398,22 @@ export async function deleteReport(input: {
 }
 
 /**
+ * Deletes the conversation between two users (issue #408) — cascades its
+ * participants and messages. Specs share one database, so the messages
+ * journey must reset the fixture pair's thread to make "first message lands
+ * as a request" repeatable across attempts and runs.
+ */
+export async function deleteConversationBetween(aId: string, bId: string): Promise<void> {
+  assertTestPlatform();
+  const db = await getDb();
+  const { conversation } = await schemaModulePromise;
+  const [lo, hi] = aId < bId ? [aId, bId] : [bId, aId];
+  await db
+    .delete(conversation)
+    .where(and(eq(conversation.userAId, lo), eq(conversation.userBId, hi)));
+}
+
+/**
  * Sets a user's role directly in the database.
  *
  * The admin plugin's own endpoints are 404'd in the request handler

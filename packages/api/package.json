@@ -72,6 +72,10 @@
       "types": "./src/distributed-rate-limit.ts",
       "default": "./src/distributed-rate-limit.ts"
     },
+    "./message-events": {
+      "types": "./src/message-events.ts",
+      "default": "./src/message-events.ts"
+    },
     "./cloudflare-app": {
       "types": "./src/cloudflare-app.ts",
       "default": "./src/cloudflare-app.ts"

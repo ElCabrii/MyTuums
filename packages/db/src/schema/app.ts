@@ -672,8 +672,8 @@ export const followRequest = sqliteTable(
 );
 
 /**
- * A report of a post or user (issue #38) — the raw material of the
- * moderation queue.
+ * A report of a post, user, or private message (issue #38, #408) — the raw
+ * material of the moderation queue.
  *
  * The composite primary key *is* the "one report per (reporter, target)
  * pair" rule, and it is what makes `report` idempotent: the procedure
@@ -694,8 +694,9 @@ export const report = sqliteTable(
     reporterId: text("reporter_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    // `'post'` or `'user'` (checked below). The pair (targetType, targetId)
-    // names the reported thing; `targetId` is a post uuid or a user id.
+    // `'post'`, `'user'` or `'message'` (checked below). The pair
+    // (targetType, targetId) names the reported thing; `targetId` is a post
+    // uuid, a user id, or a message uuid.
     targetType: text("target_type").notNull(),
     targetId: text("target_id").notNull(),
     // One of the stable reason codes from the design (issue #38), checked
@@ -704,15 +705,16 @@ export const report = sqliteTable(
     // illegal_content/nsfw; users: spam/harassment/impersonation/underage)
     // are enforced at input by the procedure's discriminated union.
     reason: text("reason").notNull(),
-    // The post's content at the moment it was reported (issue #264). Null on
-    // user-target reports and on rows reported before the column existed.
-    // A report row otherwise carries only a reason code; this snapshot is
-    // the exact evidence — what the reporter actually saw — independent of
-    // whether the author has since edited the post. `post_edit` keeps every
-    // version, but correlating versions to reports by timestamp is
-    // reconstruction; this is the quote itself. Refreshed on a repeat
-    // report alongside `createdAt`, since the reporter is re-reporting what
-    // they now see.
+    // The post's content at the moment it was reported (issue #264), or for
+    // a message report (issue #408) the JSON evidence window: the reported
+    // message plus the messages before it. Null on user-target reports and
+    // on rows reported before the column existed. A report row otherwise
+    // carries only a reason code; this snapshot is the exact evidence — what
+    // the reporter actually saw — independent of whether the author has
+    // since edited or deleted the content. `post_edit` keeps every version,
+    // but correlating versions to reports by timestamp is reconstruction;
+    // this is the quote itself. Refreshed on a repeat report alongside
+    // `createdAt`, since the reporter is re-reporting what they now see.
     snapshotContent: text("snapshot_content"),
     // Same millisecond precision as post.created_at for stable cursors.
     createdAt: integer("created_at", { mode: "timestamp_ms" })
@@ -730,7 +732,7 @@ export const report = sqliteTable(
     // This composite primary key *is* the "one report per (reporter, target)
     // pair" rule — see the table comment.
     primaryKey({ columns: [t.reporterId, t.targetType, t.targetId] }),
-    check("report_target_type", sql`${t.targetType} in ('post', 'user')`),
+    check("report_target_type", sql`${t.targetType} in ('post', 'user', 'message')`),
     // The union of both reason-code sets; the per-target split is input-
     // enforced by the procedure's discriminated union. One union check (not
     // two conditional ones) because the DB's job is to keep garbage out —
@@ -1123,6 +1125,157 @@ export const notificationLastSeen = sqliteTable("notification_last_seen", {
     .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
     .notNull(),
 });
+
+/**
+ * A 1:1 direct-message conversation (issue #408) — exactly one row per pair of
+ * users, ever. The pair is stored canonically ordered (`userAId < userBId` by
+ * SQLite's BINARY collation; BetterAuth ids are ASCII, so the API's `a < b`
+ * in JavaScript agrees with the database's comparison), and the unique pair
+ * index is the deterministic pair key: the same two users always share one
+ * thread, whichever of them wrote first.
+ *
+ * The pair columns are the v1 identity — one conversation per two users. Group
+ * conversations, if they ever arrive, will need these relaxed (nullable pair,
+ * membership moving wholly into `conversation_participant`), which is an
+ * additive migration, not a destructive one.
+ *
+ * `lastMessageAt` is the inbox's ordering cursor, advanced only when a message
+ * insert succeeds. It is denormalized on purpose — the inbox walks
+ * participants joined to this column, exactly like every other list here walks
+ * a `created_at`. It is not a counter; the db rules about derived counts do
+ * not apply to an ordering cursor.
+ */
+export const conversation = sqliteTable(
+  "conversation",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    // Both sides are `text` for the same reason follow's are: `user.id` is
+    // BetterAuth's own id format, not a uuid.
+    userAId: text("user_a_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    userBId: text("user_b_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
+    lastMessageAt: integer("last_message_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
+  },
+  (t) => [
+    // Canonical ordering IS the pair key's determinism, and it subsumes the
+    // not-self rule: `userAId = userBId` cannot satisfy a strict `<`.
+    check("conversation_pair_ordered", sql`${t.userAId} < ${t.userBId}`),
+    uniqueIndex("conversation_pair_unique").on(t.userAId, t.userBId),
+    // No (lastMessageAt, id) index here on purpose: the inbox walk scopes
+    // through the participant row (conversation_participant_user_idx is its
+    // covering index) and sorts that bounded set — a conversation-side
+    // ordering index has no access path, and an index without a query is
+    // table-scan weight on every write.
+  ],
+);
+
+/**
+ * One user's side of a conversation (issue #408): their membership row, the
+ * message-request state, and their read cursor.
+ *
+ * `status` is the request gate. The first message from someone the recipient
+ * does not follow lands as `pending` — listed under Message requests, ticking
+ * no badge, until the recipient accepts (`active`), declines (`hidden`), or
+ * replies (an implicit accept). `hidden` is also what hiding an accepted
+ * conversation writes: declining a request and hiding a thread are the same
+ * "not in my inbox" state. The other side is never told — declining is silent
+ * exactly like blocking, and the sender's own row is untouched so their
+ * thread keeps working for them.
+ *
+ * `lastReadAt` is the notification_last_seen shape: unread messages are the
+ * other party's rows newer than this cursor, derived on read. Absent means
+ * never opened the thread: everything from the other party is unread. It
+ * advances monotonically (`max`) to exactly the newest message the reader has
+ * actually seen, never to "now" — a message arriving mid-view must stay
+ * unread.
+ *
+ * The composite primary key is the "one membership per (conversation, user)"
+ * rule, and the write path enforces the matching invariant that only the
+ * conversation pair's two users ever get rows here (a cross-table rule the
+ * schema cannot express; `messages.int.test.ts` pins it).
+ */
+export const conversationParticipant = sqliteTable(
+  "conversation_participant",
+  {
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversation.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    status: text("status").$type<"pending" | "active" | "hidden">().notNull(),
+    lastReadAt: integer("last_read_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.conversationId, t.userId] }),
+    check("conversation_participant_status", sql`${t.status} in ('pending', 'active', 'hidden')`),
+    // The inbox and request walks: my rows for a status, then joined to the
+    // conversation for the (lastMessageAt, id) ordering. The primary key
+    // covers the third access path — "am I a participant of C", the thread
+    // guard.
+    index("conversation_participant_user_idx").on(t.userId, t.status, t.conversationId),
+  ],
+);
+
+/**
+ * One direct message (issue #408). Plain text only in v1 — no media, no
+ * edits, no per-row delivery state. D1 is the single source of truth; the
+ * real-time layer is a best-effort push on top.
+ *
+ * `createdAt` is assigned by the send batch as
+ * `max(clock, conversation.lastMessageAt + 1)`: timestamps strictly increase
+ * within a conversation, so the participant's timestamp-only `lastReadAt`
+ * cursor can never consume a later message that shares a timestamp with one
+ * the reader has seen. The keyset cursor still carries `id` as a tie-breaker
+ * for ordering, but the read cursor relies on strict monotonicity.
+ *
+ * Sender deletion is a tombstone (`deletedAt`), never a row delete — the
+ * conversation's order survives, and the stored body remains as report
+ * evidence. Normal API projections redact the body of a tombstoned row;
+ * `moderation.report` reads it back from the snapshot it captured anyway.
+ */
+export const message = sqliteTable(
+  "message",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversation.id, { onDelete: "cascade" }),
+    // `text` for the same reason every user reference here is text.
+    senderId: text("sender_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // SQLite's length() counts characters and JavaScript's `.length` counts
+    // UTF-16 units, so a zod-checked 2000-unit string is always within this
+    // bound — never longer.
+    body: text("body").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsec') * 1000 as integer))`)
+      .notNull(),
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [
+    check("message_body_length", sql`length(trim(${t.body})) between 1 and 2000`),
+    // The thread walk's keyset order: newest first, `id` breaking ties —
+    // mirrored by the thread cursor in packages/api/src/messages.ts.
+    index("message_conversation_created_idx").on(t.conversationId, desc(t.createdAt), desc(t.id)),
+  ],
+);
 
 /**
  * A resolved link preview card, keyed by the normalized URL it describes

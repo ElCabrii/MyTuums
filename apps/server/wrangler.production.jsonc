@@ -68,6 +68,7 @@
       "tag": "v1",
       "new_sqlite_classes": ["RateLimitCounter", "AuthRateLimitCounter"],
     },
+    { "tag": "v2", "new_sqlite_classes": ["MessageHub"] },
   ],
   "services": [
     {

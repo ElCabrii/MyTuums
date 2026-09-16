@@ -65,7 +65,9 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
         <DialogTitle>
           {target.targetType === "user"
             ? m.moderation_report_title_user()
-            : m.moderation_report_title_post()}
+            : target.targetType === "message"
+              ? m.moderation_report_title_message()
+              : m.moderation_report_title_post()}
         </DialogTitle>
         <DialogDescription>{m.moderation_report_choose()}</DialogDescription>
       </DialogHeader>
@@ -73,6 +75,7 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
         {/* The post being reported, so the reporter confirms what they are
             flagging before picking a reason. A user target has no post. */}
         {target.targetType === "post" && <ReportPreview post={target.post} />}
+        {target.targetType === "message" && <MessageReportPreview body={target.body} />}
         {/* `items` is what makes the trigger read "Hate speech" once a reason
             is picked: Base UI renders the raw code otherwise. */}
         <Select
@@ -115,11 +118,12 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
                 // from the Select items, so the cast is the schema's own
                 // union, not a coercion.
                 const trimmed = reason.trim();
-                if (target.targetType === "post") {
+                if (target.targetType === "post" || target.targetType === "message") {
                   // SAFETY: the Select items are built off the same literal reason
-                  // list, so the cast is the schema's own union, not a coercion.
+                  // list (a message reports with the post codes), so the cast is
+                  // the schema's own union, not a coercion.
                   report.mutate({
-                    targetType: "post",
+                    targetType: target.targetType,
                     targetId: target.targetId,
                     reason: trimmed as (typeof POST_REPORT_REASONS)[number],
                   });
@@ -156,6 +160,24 @@ function ReportDialogBody({ target }: { target: ReportDialogTarget }) {
  * hides them), and telling the reporter "images only" with no images below
  * would be a lie about what is gone.
  */
+/** A private message being reported: its text, or the tombstone note. */
+function MessageReportPreview({ body }: { body: string | null }) {
+  return (
+    <div className="border-border/60 bg-muted/30 space-y-2 rounded-lg border p-3 text-left">
+      <p className="text-muted-foreground text-xs font-medium">
+        {m.moderation_report_preview_title()}
+      </p>
+      {body ? (
+        <p className="text-foreground/90 text-sm leading-relaxed break-words whitespace-pre-line">
+          {body}
+        </p>
+      ) : (
+        <p className="text-muted-foreground text-sm italic">{m.messages_tombstone()}</p>
+      )}
+    </div>
+  );
+}
+
 function ReportPreview({ post }: { post: Post }) {
   return (
     <div className="border-border/60 bg-muted/30 space-y-2 rounded-lg border p-3 text-left">

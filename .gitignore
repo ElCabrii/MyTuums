@@ -46,3 +46,6 @@ playwright/.cache/
 # agent-browser saved sessions and inspection artifacts
 .agent-browser/
 lighthouse-reports/
+
+# ZCode session-local plans and artifacts
+.zcode/

@@ -173,6 +173,13 @@ export default defineConfig({
         target: rpcTarget,
         changeOrigin: true,
       },
+      // The private-message event stream (issue #408). SSE through the dev
+      // proxy works because http-proxy streams the response body as it
+      // arrives; in production this is same-origin, like /rpc above.
+      "/events": {
+        target: rpcTarget,
+        changeOrigin: true,
+      },
     },
   },
 });

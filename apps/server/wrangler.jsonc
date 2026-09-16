@@ -41,6 +41,7 @@
   ],
   "durable_objects": {
     "bindings": [
+      { "name": "MESSAGE_HUB", "class_name": "MessageHub" },
       { "name": "API_COUNTERS", "class_name": "RateLimitCounter" },
       { "name": "AUTH_COUNTERS", "class_name": "AuthRateLimitCounter" },
     ],
@@ -50,6 +51,7 @@
       "tag": "v1",
       "new_sqlite_classes": ["RateLimitCounter", "AuthRateLimitCounter"],
     },
+    { "tag": "v2", "new_sqlite_classes": ["MessageHub"] },
   ],
   "services": [
     {

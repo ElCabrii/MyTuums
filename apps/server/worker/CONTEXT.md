@@ -48,6 +48,21 @@ a delayed alarm checks the stored deadline so it cannot erase a fresh window.
 No counter failure may grant admission. There is no public counter HTTP endpoint
 or reset API.
 
+`message-hub.ts` owns the SQLite-backed `MessageHub` Durable Object — one
+instance per user id (deliberately the raw id, per issue #408's design: the
+name is never exposed cross-user), holding that user's live SSE connections
+for `GET /events/messages` and nothing else. Export it from the HTTP
+entrypoint, bind `MESSAGE_HUB` with its own `new_sqlite_classes` migration
+(tag `v2`), and inject it into API context through `createMessageNotifier`
+from `@my-tuums/api/message-events`. Unlike the counters, the hub holds no
+durable state at all: D1 is the single source of truth, events carry ids
+only, and a failed or missed push loses nothing — clients refetch on
+reconnect and focus. Connections are bounded (three per user, oldest
+evicted), keep-alive runs every 25 seconds, and each stream is closed by the
+server after ten minutes so EventSource reconnects through the route, which
+re-authorizes the session — that bound is the revocation cadence. A failed
+writer drops out of the fan-out set; it must never block the others.
+
 `auth-rate-limit-counter.ts` owns Better Auth's separate inactivity-window counter.
 Each accepted request moves the window; denied attempts never extend it. Its
 atomic `consume` is injected through `createAuthRateLimitStorage` from
