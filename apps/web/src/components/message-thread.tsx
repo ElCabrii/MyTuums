@@ -101,10 +101,11 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
   }
 
   return (
-    // The mobile height subtracts the fixed bottom nav (`--mobile-nav-height`
-    // on `.signed-in-shell`): a bare `min-h-dvh` overflows the shell's
-    // reserved nav padding and pushes the composer under the tab bar.
-    <div className="flex h-full min-h-[calc(100dvh-var(--mobile-nav-height))] flex-col md:min-h-0">
+    // The mobile height subtracts the global header (published as
+    // `--header-height`) and the fixed bottom nav (`--mobile-nav-height` on
+    // `.signed-in-shell`): a bare `min-h-dvh` overflows both and pushes the
+    // thread header under the app header and the composer under the tab bar.
+    <div className="flex h-full min-h-[calc(100dvh-var(--header-height)-var(--mobile-nav-height))] flex-col md:min-h-0">
       <ThreadHeader
         displayName={displayName}
         handle={handle}
@@ -163,7 +164,9 @@ function ThreadHeader({
   const setReport = useSetAtom(reportDialogAtom);
 
   return (
-    <header className="border-border bg-background/95 supports-[backdrop-filter]:bg-background/75 sticky top-0 z-10 flex items-center gap-3 border-b px-4 py-3 backdrop-blur">
+    // Pins below the global sticky header, never under it — its own z-index
+    // is lower, so `top-0` would let the app header cover it mid-scroll.
+    <header className="border-border bg-background/95 supports-[backdrop-filter]:bg-background/75 sticky top-[var(--header-height)] z-10 flex items-center gap-3 border-b px-4 py-3 backdrop-blur">
       <Button
         variant="ghost"
         size="icon"
@@ -487,7 +490,7 @@ export function NewMessagePane({ userId }: { userId: string }) {
   const displayName = user.name || handleOf(user) || m.user_unknown();
 
   return (
-    <div className="flex h-full min-h-[calc(100dvh-var(--mobile-nav-height))] flex-col md:min-h-0">
+    <div className="flex h-full min-h-[calc(100dvh-var(--header-height)-var(--mobile-nav-height))] flex-col md:min-h-0">
       <ThreadHeader
         displayName={displayName}
         handle={handleOf(user)}

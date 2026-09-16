@@ -186,3 +186,17 @@ describe("Header notifications bell", () => {
     expect(screen.queryByText(/unread/i)).not.toBeInTheDocument();
   });
 });
+
+describe("Header height publication", () => {
+  it("publishes its rendered height as the --header-height custom property", async () => {
+    document.documentElement.style.removeProperty("--header-height");
+    await renderWithProviders(<Header />, { signedInAs: { username: "alexmercer" } });
+
+    // Sticky sub-headers (the message thread's) pin below the global header
+    // through this variable — the wiring is the contract; jsdom performs no
+    // layout, so the measured value itself is the browser's to fill in.
+    expect(document.documentElement.style.getPropertyValue("--header-height")).toMatch(
+      /^[\d.]+px$/,
+    );
+  });
+});
