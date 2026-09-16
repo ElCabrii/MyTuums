@@ -187,12 +187,12 @@ it("deleting the caller's own message tombstones it optimistically and restores 
   expect(threadItems("c-1")[0].deletedAt).not.toBeNull();
 });
 
-it("markRead patches the inbox row's unread flag from the mutation's answer", async () => {
+it("markRead patches the inbox row's unread count from the mutation's answer", async () => {
   const row: ConversationItem = {
     conversationId: "c-1",
     lastMessageAt: new Date(),
     lastReadAt: null,
-    unread: true,
+    unreadCount: 2,
     lastMessage: { senderId: OTHER, body: "hello?", createdAt: new Date() },
     user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
   };
@@ -210,7 +210,7 @@ it("markRead patches the inbox row's unread flag from the mutation's answer", as
   const cache = singletonQueryClient.getQueryData(orpc.message.conversations.key()) as {
     pages: Array<{ items: ConversationItem[] }>;
   };
-  expect(cache.pages[0].items[0].unread).toBe(false);
+  expect(cache.pages[0].items[0].unreadCount).toBe(0);
   expect(cache.pages[0].items[0].lastReadAt).toEqual(cursor);
 });
 

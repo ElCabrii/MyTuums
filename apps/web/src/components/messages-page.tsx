@@ -1,5 +1,6 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
+import { useEffect } from "react";
 import { getLocale } from "@/paraglide/runtime.js";
 import { Inbox, MailQuestion, Users } from "lucide-react";
 import { conversationsAtom, messagesUnreadAtom } from "@/atoms/messages";
@@ -7,6 +8,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PaginatedState } from "@/components/paginated-state";
+import { documentTitle } from "@/lib/document-head";
 import type { ConversationItem } from "@/lib/orpc";
 import { formatRelativeTime } from "@/lib/format";
 import { handleOf } from "@/lib/user";
@@ -21,8 +23,21 @@ export function MessagesPage() {
   // The placeholder fills the right half only when no sub-route is open —
   // with a thread, a request page or the draft composer mounted, the outlet
   // owns that half outright.
-  const threadRouteOpen =
-    useRouterState({ select: (state) => state.location.pathname }) !== "/messages";
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const threadRouteOpen = pathname !== "/messages";
+
+  // The tab mirrors the header badge live: "(3) Messages - MyTuums" while
+  // mail is owed, plain otherwise. Every route in this tree ships the same
+  // static head, so the prefix re-stamps on in-tree navigation (where the
+  // router re-applies that head) as well as on count changes.
+  const unread = useAtomValue(messagesUnreadAtom);
+  const unreadCount = unread.data?.unreadCount ?? 0;
+  useEffect(() => {
+    document.title =
+      unreadCount > 0
+        ? `(${unreadCount}) ${documentTitle(m.messages_title())}`
+        : documentTitle(m.messages_title());
+  }, [unreadCount, pathname]);
 
   return (
     <div className="mx-auto grid w-full max-w-5xl flex-1 grid-cols-1 md:grid-cols-[minmax(300px,380px)_1fr]">
@@ -147,7 +162,7 @@ function ConversationRow({ item }: { item: ConversationItem }) {
       variant="ghost"
       nativeButton={false}
       className={`h-auto w-full items-start justify-start gap-3 p-3 text-left ${
-        item.unread ? "border-primary/40 bg-primary/5" : ""
+        item.unreadCount > 0 ? "border-primary/40 bg-primary/5" : ""
       }`}
       render={
         <Link to="/messages/$conversationId" params={{ conversationId: item.conversationId }} />
@@ -164,11 +179,10 @@ function ConversationRow({ item }: { item: ConversationItem }) {
         </span>
         <span className="mt-0.5 flex items-center gap-2">
           <span className="text-muted-foreground line-clamp-1 flex-1 text-sm">{preview}</span>
-          {item.unread && (
-            <span
-              className="bg-primary inline-block h-2 w-2 shrink-0 rounded-full"
-              aria-hidden="true"
-            />
+          {item.unreadCount > 0 && (
+            <span className="bg-primary text-primary-foreground shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold">
+              {item.unreadCount > 99 ? "99+" : item.unreadCount}
+            </span>
           )}
         </span>
       </span>

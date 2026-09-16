@@ -292,7 +292,7 @@ export const messageRouter = {
   /**
    * The caller's inbox: active conversations, newest activity first, with the
    * other user's summary, a last-message preview (tombstones redact), and the
-   * conversation's unread flag. Keyset-paginated on the conversation's
+   * conversation's unread count. Keyset-paginated on the conversation's
    * `(lastMessageAt, id)` — the cursor the inbox walk's index mirrors.
    */
   conversations: protectedProcedure
@@ -306,13 +306,14 @@ export const messageRouter = {
         lastMessageAt: conversation.lastMessageAt,
         lastReadAt: conversationParticipant.lastReadAt,
         // Unread is derived, never stored: the other party's live messages
-        // newer than my cursor. Same comparison `unreadCount` applies.
-        unread: sql<boolean>`exists (select 1 from ${message}
+        // newer than my cursor, counted per row for the list badge. Same
+        // comparison `unreadCount` applies — the two can never disagree.
+        unreadCount: sql<number>`(select count(*) from ${message}
           where ${message.conversationId} = ${conversation.id}
             and ${message.senderId} <> ${me}
             and ${message.deletedAt} is null
             and ${message.createdAt} > coalesce(${conversationParticipant.lastReadAt}, 0))`.mapWith(
-          Boolean,
+          Number,
         ),
         user: {
           id: user.id,
