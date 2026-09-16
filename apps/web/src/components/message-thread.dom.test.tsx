@@ -165,6 +165,30 @@ it("a hidden thread renders its history with the hidden notice above it", async 
   ).toBeVisible();
 });
 
+it("the header kebab carries report-user and hide-conversation, hide only for an open thread", async () => {
+  const { queryClient, render } = makePane(<MessageThreadPane conversationId="c-1" />);
+  const now = new Date();
+  seedThread(queryClient, "c-1", [], now);
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId: "c-1",
+    lastReadAt: now,
+    hidden: false,
+    user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+    items: [],
+    nextCursor: null,
+  });
+
+  const screen = await render();
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Write a message" })).toBeVisible(),
+  );
+
+  // Both actions live behind the one kebab — neither is a bare icon anymore.
+  fireEvent.click(screen.getByRole("button", { name: "More", exact: true }));
+  await waitFor(() => expect(screen.getByRole("menuitem", { name: "Report user" })).toBeVisible());
+  expect(screen.getByRole("menuitem", { name: "Hide conversation" })).toBeVisible();
+});
+
 it("switching conversations starts from an empty composer — a draft never crosses recipients", async () => {
   const { queryClient, render } = makePane(<ConversationSwitcher />);
   const now = new Date();

@@ -1005,5 +1005,6 @@
   "moderation_case_context_title": "The exchange as reported",
   "moderation_case_deleted_badge": "Deleted",
   "moderation_queue_target_message": "Message",
-  "messages_hidden_notice": "You hid this conversation — it is not in your messages. Sending a message brings it back."
+  "messages_hidden_notice": "You hid this conversation — it is not in your messages. Sending a message brings it back.",
+  "messages_report_user": "Report user"
 }

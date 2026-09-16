@@ -3,7 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { getLocale } from "@/paraglide/runtime.js";
 import { toast } from "sonner";
-import { ArrowLeft, EyeOff, Flag, Send, Trash2 } from "lucide-react";
+import { ArrowLeft, EyeOff, Flag, MoreHorizontal, Send, Trash2 } from "lucide-react";
 import {
   conversationWithFamily,
   deleteMessageAtom,
@@ -18,6 +18,13 @@ import { reportDialogAtom } from "@/atoms/dialog-targets";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { LinkedText } from "@/components/linked-text";
 import { formatRelativeTime } from "@/lib/format";
 import { handleOf } from "@/lib/user";
@@ -99,6 +106,7 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
         displayName={displayName}
         handle={handle}
         image={other?.image ?? null}
+        userId={other?.id ?? null}
         onHide={() =>
           hide.mutate(
             { conversationId },
@@ -135,6 +143,7 @@ function ThreadHeader({
   displayName,
   handle,
   image,
+  userId,
   onHide,
   hidePending,
   canHide = true,
@@ -142,10 +151,14 @@ function ThreadHeader({
   displayName: string;
   handle: string | null;
   image: string | null;
+  /** The other party — the target a "report user" files against. */
+  userId: string | null;
   onHide: () => void;
   hidePending: boolean;
   canHide?: boolean;
 }) {
+  const setReport = useSetAtom(reportDialogAtom);
+
   return (
     <header className="border-border bg-background/95 supports-[backdrop-filter]:bg-background/75 sticky top-0 z-10 flex items-center gap-3 border-b px-4 py-3 backdrop-blur">
       <Button
@@ -174,18 +187,41 @@ function ThreadHeader({
           <span className="truncate text-sm font-semibold">{displayName}</span>
         )}
       </div>
-      {canHide && (
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={m.messages_hide()}
-          title={m.messages_hide()}
-          disabled={hidePending}
-          onClick={onHide}
+      {/* The thread's overflow actions live behind one kebab, the same
+          pattern as the profile's: reporting the other party (the shared
+          user-report dialog) and, for an open conversation, hiding it. */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label={m.moderation_kebab()}
+          title={m.moderation_kebab()}
+          className="text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring flex h-9 w-9 cursor-pointer items-center justify-center rounded-full transition-colors outline-none focus-visible:ring-2"
         >
-          <EyeOff className="h-4 w-4" aria-hidden="true" />
-        </Button>
-      )}
+          <MoreHorizontal className="h-4 w-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-44">
+          {userId && (
+            <DropdownMenuItem
+              className="cursor-pointer"
+              onClick={() => setReport({ targetType: "user", targetId: userId })}
+            >
+              {m.messages_report_user()}
+            </DropdownMenuItem>
+          )}
+          {canHide && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="cursor-pointer"
+                variant="destructive"
+                disabled={hidePending}
+                onSelect={onHide}
+              >
+                {m.messages_hide()}
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </header>
   );
 }
@@ -446,6 +482,7 @@ export function NewMessagePane({ userId }: { userId: string }) {
         displayName={displayName}
         handle={handleOf(user)}
         image={user.image}
+        userId={user.id}
         onHide={() => {}}
         hidePending={false}
         canHide={false}

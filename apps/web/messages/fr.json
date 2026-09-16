@@ -1005,5 +1005,6 @@
   "moderation_case_context_title": "L'échange tel que signalé",
   "moderation_case_deleted_badge": "Supprimé",
   "moderation_queue_target_message": "Message",
-  "messages_hidden_notice": "Vous avez masqué cette conversation — elle n'est pas dans vos messages. Envoyer un message la fait revenir."
+  "messages_hidden_notice": "Vous avez masqué cette conversation — elle n'est pas dans vos messages. Envoyer un message la fait revenir.",
+  "messages_report_user": "Signaler l'utilisateur"
 }
