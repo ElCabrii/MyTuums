@@ -101,7 +101,10 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
   }
 
   return (
-    <div className="flex h-full min-h-dvh flex-col md:min-h-0">
+    // The mobile height subtracts the fixed bottom nav (`--mobile-nav-height`
+    // on `.signed-in-shell`): a bare `min-h-dvh` overflows the shell's
+    // reserved nav padding and pushes the composer under the tab bar.
+    <div className="flex h-full min-h-[calc(100dvh-var(--mobile-nav-height))] flex-col md:min-h-0">
       <ThreadHeader
         displayName={displayName}
         handle={handle}
@@ -398,7 +401,10 @@ function Composer({
   };
 
   return (
-    <footer className="border-border bg-background sticky bottom-0 border-t p-3">
+    // Sticky at the nav height, not the viewport bottom: the fixed mobile tab
+    // bar covers the bottom `--mobile-nav-height` of the viewport (0 on
+    // desktop), and an unoffset sticky footer would hide under it.
+    <footer className="border-border bg-background sticky bottom-[var(--mobile-nav-height)] border-t p-3">
       <div className="border-border focus-within:border-primary/50 flex items-end gap-2 rounded-2xl border p-2">
         <textarea
           value={draft}
@@ -481,7 +487,7 @@ export function NewMessagePane({ userId }: { userId: string }) {
   const displayName = user.name || handleOf(user) || m.user_unknown();
 
   return (
-    <div className="flex h-full min-h-dvh flex-col md:min-h-0">
+    <div className="flex h-full min-h-[calc(100dvh-var(--mobile-nav-height))] flex-col md:min-h-0">
       <ThreadHeader
         displayName={displayName}
         handle={handleOf(user)}

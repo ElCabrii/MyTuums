@@ -41,7 +41,14 @@ export function MessagesPage() {
 
   return (
     <div className="mx-auto grid w-full max-w-5xl flex-1 grid-cols-1 md:grid-cols-[minmax(300px,380px)_1fr]">
-      <aside className="border-border flex flex-col border-b md:border-r md:border-b-0">
+      {/* A thread, request page or draft composer replaces the list on mobile
+          (the thread header's back arrow is the way back); desktop keeps both
+          panes side by side. */}
+      <aside
+        className={`border-border flex-col border-b md:border-r md:border-b-0 ${
+          threadRouteOpen ? "hidden md:flex" : "flex"
+        }`}
+      >
         <div className="flex items-center justify-between gap-3 px-4 pt-6 pb-3">
           <h1 className="text-lg font-bold tracking-tight">{m.messages_title()}</h1>
         </div>
