@@ -266,7 +266,7 @@ interface MarkReadVariables {
 
 /**
  * Advances the thread's read cursor through the newest DISPLAYED message.
- * The list row's unread flag and cursor patch from the mutation's
+ * The list row's unread count and cursor patch from the mutation's
  * authoritative answer; the badge refetches (it sums every conversation, and
  * one row's change does not derive the new total).
  */
@@ -290,7 +290,7 @@ export const markThreadReadAtom = atomWithMutation<
                   ...page,
                   items: page.items.map((item) =>
                     item.conversationId === variables.conversationId
-                      ? { ...item, unread: false, lastReadAt: result.lastReadAt }
+                      ? { ...item, unreadCount: 0, lastReadAt: result.lastReadAt }
                       : item,
                   ),
                 })),

@@ -326,6 +326,20 @@ describe("unread state and markRead", () => {
       { context: contextFor(recipient) },
     );
     expect(asRecipient.unreadCount).toBe(2);
+
+    // The inbox row carries the same count for its badge — both sides'.
+    const senderInbox = await call(
+      appRouter.message.conversations,
+      {},
+      { context: contextFor(sender) },
+    );
+    expect(senderInbox.items[0]?.unreadCount).toBe(0);
+    const recipientInbox = await call(
+      appRouter.message.conversations,
+      {},
+      { context: contextFor(recipient) },
+    );
+    expect(recipientInbox.items[0]?.unreadCount).toBe(2);
   });
 
   it("advances the cursor through exactly the seen message — a later arrival stays unread", async () => {
