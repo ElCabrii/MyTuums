@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
+import { queryClientAtom } from "jotai-tanstack-query";
 import { getLocale } from "@/paraglide/runtime.js";
 import { toast } from "sonner";
 import { ArrowLeft, EyeOff, Flag, MoreHorizontal, Send, Trash2 } from "lucide-react";
@@ -9,8 +10,11 @@ import {
   deleteMessageAtom,
   hideConversationAtom,
   markThreadReadAtom,
+  messageDraftFor,
   messageThreadFamily,
+  seedFirstMessageThread,
   sendMessageAtom,
+  setMessageDraft,
 } from "@/atoms/messages";
 import type { ThreadItem } from "@/atoms/messages";
 import { viewerIdAtom } from "@/atoms/session";
@@ -28,6 +32,7 @@ import {
 import { LinkedText } from "@/components/linked-text";
 import { formatRelativeTime } from "@/lib/format";
 import { handleOf } from "@/lib/user";
+import type { ConversationItem } from "@/lib/orpc";
 import { m } from "@/paraglide/messages.js";
 import { MESSAGE_BODY_MAX_LENGTH } from "@my-tuums/api/constants";
 
@@ -101,11 +106,10 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
   }
 
   return (
-    // The mobile height subtracts the global header (published as
-    // `--header-height`) and the fixed bottom nav (`--mobile-nav-height` on
-    // `.signed-in-shell`): a bare `min-h-dvh` overflows both and pushes the
-    // thread header under the app header and the composer under the tab bar.
-    <div className="flex h-full min-h-[calc(100dvh-var(--header-height)-var(--mobile-nav-height))] flex-col md:min-h-0">
+    // Fills the bounded grid cell the /messages layout provides: the header
+    // and composer are plain flex children and MessageScroll owns the only
+    // scrolling inside the pane.
+    <div className="flex h-full flex-col">
       <ThreadHeader
         displayName={displayName}
         handle={handle}
@@ -366,27 +370,46 @@ function ReportMessageAction({ messageId, body }: { messageId: string; body: str
 
 /** Enter sends, Shift+Enter breaks a line, and an IME composition never sends. */
 function Composer({
-  conversationId,
   recipientId,
+  conversationId,
+  seedUser,
 }: {
-  conversationId?: string;
   recipientId: string;
+  /** The open thread the composer sits in, when there is one. */
+  conversationId?: string;
+  /** The recipient's summary — lets a first contact seed the new thread. */
+  seedUser?: ConversationItem["user"] | null;
 }) {
-  const [draft, setDraft] = useState("");
+  // Initialized from the per-recipient draft store so text typed around the
+  // first-send transition (the pane remounts when the URL changes) or while
+  // away from a conversation is still here on the next mount.
+  const [draft, setDraft] = useState(() => messageDraftFor(recipientId));
   const send = useAtomValue(sendMessageAtom);
   const navigate = useNavigate();
+  const queryClient = useAtomValue(queryClientAtom);
+
+  const editDraft = (body: string) => {
+    setDraft(body);
+    setMessageDraft(recipientId, body);
+  };
 
   const submit = () => {
     const body = draft.trim();
     if (!body || send.isPending) return;
     setDraft("");
+    setMessageDraft(recipientId, "");
     send.mutate(
       { recipientId, body, conversationId },
       {
         onSuccess: (message) => {
-          // First contact: the conversation id arrives with the message —
-          // move to the real thread route so refresh and history work.
+          // First contact: the conversation id arrives with the message.
+          // Seed the thread's cache so the route renders the sent message
+          // the moment the URL changes — no skeleton round-trip — then move
+          // there so refresh and history work.
           if (!conversationId) {
+            if (seedUser) {
+              seedFirstMessageThread(queryClient, message.conversationId, seedUser, message);
+            }
             void navigate({
               to: "/messages/$conversationId",
               params: { conversationId: message.conversationId },
@@ -395,7 +418,7 @@ function Composer({
           }
         },
         onError: () => {
-          setDraft(body);
+          editDraft(body);
           toast.error(m.messages_send_error());
           send.reset();
         },
@@ -404,16 +427,16 @@ function Composer({
   };
 
   return (
-    // Sticky at the nav height, not the viewport bottom: the fixed mobile tab
-    // bar covers the bottom `--mobile-nav-height` of the viewport (0 on
-    // desktop), and an unoffset sticky footer would hide under it.
-    <footer className="border-border bg-background sticky bottom-[var(--mobile-nav-height)] border-t p-3">
+    // A plain flex child at the pane's bottom: the /messages layout bounds
+    // the pane to the visible area, so the composer sits above the mobile
+    // tab bar by construction — nothing scrolls under it.
+    <footer className="border-border bg-background border-t p-3">
       <div className="border-border focus-within:border-primary/50 flex items-end gap-2 rounded-2xl border p-2">
         <textarea
           value={draft}
           rows={1}
           maxLength={MESSAGE_BODY_MAX_LENGTH}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => editDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key !== "Enter" || event.shiftKey) return;
             // A composition session owns Enter (confirming the candidate);
@@ -490,7 +513,10 @@ export function NewMessagePane({ userId }: { userId: string }) {
   const displayName = user.name || handleOf(user) || m.user_unknown();
 
   return (
-    <div className="flex h-full min-h-[calc(100dvh-var(--header-height)-var(--mobile-nav-height))] flex-col md:min-h-0">
+    // Fills the bounded grid cell the /messages layout provides: the header
+    // and composer pin as flex children while MessageScroll owns the only
+    // scrolling inside the pane.
+    <div className="flex h-full flex-col">
       <ThreadHeader
         displayName={displayName}
         handle={handleOf(user)}
@@ -503,7 +529,7 @@ export function NewMessagePane({ userId }: { userId: string }) {
       <div className="text-muted-foreground flex flex-1 items-center justify-center p-8 text-sm">
         {m.messages_new_intro({ name: displayName })}
       </div>
-      <Composer recipientId={userId} />
+      <Composer recipientId={userId} seedUser={user} />
     </div>
   );
 }

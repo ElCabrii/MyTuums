@@ -87,6 +87,59 @@ export type ThreadItem = MessageItem & { pending?: boolean };
 type ThreadCache = { pages: Array<{ items: ThreadItem[]; nextCursor: string | null }> };
 type ThreadSnapshot = Array<[readonly unknown[], ThreadCache | undefined]>;
 
+/**
+ * One draft per RECIPIENT, in memory: it survives the new-message → thread
+ * transition (both composers key the same recipient id) instead of being
+ * wiped by the remount mid-typing, and it survives leaving and returning to
+ * a conversation. Keying by recipient — never conversation — is what keeps a
+ * draft typed for one person from ever seeding another's composer. Swept at
+ * sign-out with the rest of the viewer's state.
+ */
+const messageDrafts = new Map<string, string>();
+
+export function messageDraftFor(recipientId: string): string {
+  return messageDrafts.get(recipientId) ?? "";
+}
+
+export function setMessageDraft(recipientId: string, body: string): void {
+  if (body) messageDrafts.set(recipientId, body);
+  else messageDrafts.delete(recipientId);
+}
+
+/** Part of the sign-out sweep (`atoms/session-teardown.ts`). */
+export function clearMessageDrafts(): void {
+  messageDrafts.clear();
+}
+
+/**
+ * Seeds the destination thread's cache at first contact, so the move from
+ * `/messages/new/$userId` to the real thread renders the sent message
+ * immediately instead of through a skeleton round-trip; the query's
+ * background refetch reconciles with the server right behind it. The key
+ * comes from the query options themselves — the one guaranteed-exact shape
+ * for the infinite query the thread route mounts.
+ */
+export function seedFirstMessageThread(
+  queryClient: QueryClient,
+  conversationId: string,
+  user: ConversationItem["user"],
+  message: SentMessage,
+): void {
+  queryClient.setQueryData(messageThreadQueryOptions(conversationId).queryKey, {
+    pages: [
+      {
+        conversationId,
+        lastReadAt: null,
+        hidden: false,
+        user,
+        items: [{ ...message, deletedAt: null }],
+        nextCursor: null,
+      },
+    ],
+    pageParams: [undefined],
+  });
+}
+
 type InboxCache = { pages: Array<{ items: ConversationItem[] }> };
 type RequestsCache = { pages: Array<{ items: MessageRequestItem[] }> };
 
