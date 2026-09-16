@@ -184,7 +184,10 @@ it("the header kebab carries report-user and hide-conversation, hide only for an
   );
 
   // Both actions live behind the one kebab — neither is a bare icon anymore.
-  fireEvent.click(screen.getByRole("button", { name: "More", exact: true }));
+  fireEvent.click(
+    // ByRole names match the full accessible name already — no exact flag.
+    screen.getByRole("button", { name: "More" }),
+  );
   await waitFor(() => expect(screen.getByRole("menuitem", { name: "Report user" })).toBeVisible());
   expect(screen.getByRole("menuitem", { name: "Hide conversation" })).toBeVisible();
 });
