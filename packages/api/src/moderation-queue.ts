@@ -376,6 +376,16 @@ export const queueRouter = {
       const target =
         input.targetType === "message"
           ? await (async () => {
+              // Report-gated by design (docs/security.md): a private message
+              // reaches this projection only through a participant-submitted
+              // report. Without this gate a moderator holding a bare message
+              // id could read — and delete-evidence — a conversation nobody
+              // reported, which is exactly the browse surface this feature
+              // refuses to have. Posts need no such gate: they are public
+              // content the moderator projection may always show.
+              if (reports.length === 0) {
+                throw new ORPCError("NOT_FOUND", { message: "This message doesn't exist." });
+              }
               // The live message and its sender, raw content included: this
               // is the moderator projection — a sender-deleted message is
               // exactly what a moderator may still be here to look at, and

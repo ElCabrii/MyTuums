@@ -679,6 +679,12 @@ export const messageRouter = {
    * "Message" action resolves before composing. `null` when there is none,
    * when this side hid it, or across a block (the pair then reads as
    * contactable only one way, and a send will refuse).
+   *
+   * The conversation resolves by a CORRELATED subselect, not a join: joining
+   * the viewer's participation rows would leave one unrelated row per other
+   * conversation in the result, and a `limit 1` could hand back that null
+   * conversation instead of the pair's real one. The subselect can only
+   * answer with the one conversation it names.
    */
   conversationWith: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
@@ -688,7 +694,18 @@ export const messageRouter = {
       if (input.userId === me) return { conversationId: null, user: null };
       const [row] = await context.db
         .select({
-          conversationId: conversation.id,
+          conversationId: sql<string | null>`(
+            select c.id from ${conversation} c
+            where exists (
+              select 1 from ${conversationParticipant} p
+              where p.conversation_id = c.id
+                and p.user_id = ${me}
+                and p.status <> 'hidden'
+            )
+              and ((c.user_a_id = ${me} and c.user_b_id = ${input.userId})
+                or (c.user_a_id = ${input.userId} and c.user_b_id = ${me}))
+            limit 1
+          )`,
           user: {
             id: user.id,
             name: user.name,
@@ -698,22 +715,6 @@ export const messageRouter = {
           },
         })
         .from(user)
-        .leftJoin(
-          conversationParticipant,
-          and(eq(conversationParticipant.userId, me), ne(conversationParticipant.status, "hidden")),
-        )
-        .leftJoin(
-          conversation,
-          and(
-            eq(conversation.id, conversationParticipant.conversationId),
-            // Parenthesized on purpose: drizzle joins `and()` chunks without
-            // wrapping them, so an unparenthesized `or` here would let the
-            // second pair branch escape the status filter above.
-            sql`((${conversation.userAId} = ${me} and ${conversation.userBId} = ${input.userId})
-              or (${conversation.userAId} = ${input.userId} and ${conversation.userBId} = ${me}))`,
-            sql`not ${blockedBetween(me, otherOfConversation(me))}`,
-          ),
-        )
         .where(and(eq(user.id, input.userId), sql`not ${blockedBetween(me, input.userId)}`))
         .limit(1);
       return {

@@ -16,5 +16,8 @@ export const Route = createFileRoute("/messages/$conversationId")({
 
 function ThreadRoute() {
   const { conversationId } = Route.useParams();
-  return <MessageThreadPane conversationId={conversationId} />;
+  // Keyed by conversation: the router keeps this component mounted across a
+  // param change, and without the key the composer's draft (local state)
+  // would survive the switch — typed for one person, sent to another.
+  return <MessageThreadPane key={conversationId} conversationId={conversationId} />;
 }

@@ -56,12 +56,17 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
   // foregrounded and only through the newest message actually on screen (the
   // newest loaded one; the pane scrolls to it). A background tab must not
   // burn the reader's unread state.
+  //
+  // The sender does NOT gate this: the cursor advances through the newest
+  // displayed message even when it is the viewer's own — `message.send`
+  // never moves `lastReadAt`, so a reply sitting above an unacknowledged
+  // incoming message must still clear it. The server accepts advancing
+  // through an owned message.
   useEffect(() => {
     const newest = messages[0];
     if (
       !newest ||
       newest.pending ||
-      newest.senderId === viewerId ||
       document.visibilityState !== "visible" ||
       acknowledged.current === newest.id ||
       (lastReadAt !== null && newest.createdAt <= lastReadAt)
@@ -70,7 +75,7 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
     }
     acknowledged.current = newest.id;
     markRead.mutate({ conversationId, lastSeenMessageId: newest.id });
-  }, [messages, viewerId, lastReadAt, markRead, conversationId]);
+  }, [messages, lastReadAt, markRead, conversationId]);
 
   if (thread.isPending) {
     return <ThreadSkeleton />;

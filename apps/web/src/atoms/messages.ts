@@ -109,11 +109,28 @@ interface SendVariables {
 }
 
 /**
+ * The key prefix of ONE conversation's thread query. Partial matching (the
+ * same mechanism the bare `.key()` prefixes rely on) selects exactly that
+ * conversation's pages — never another thread's cache, which a bare
+ * `thread.key()` would also hit.
+ */
+function threadKeyOf(conversationId: string) {
+  return orpc.message.thread.key({ input: { conversationId } });
+}
+
+/**
  * Sends one message. Inside an open thread the row appends optimistically and
  * rolls back on refusal; on success the server's row replaces every pending
  * one — reconciliation, not refetch, the response is authoritative — and the
  * inbox list re-derives from the server (its ordering is the conversation's,
  * which the client can patch toward but not re-sort honestly).
+ *
+ * Every cache write is scoped to the destination conversation's key: the
+ * thread family holds one query per conversation, and an unscoped prefix
+ * would append this message to every cached thread. Reconciliation is also
+ * idempotent by server id — the SSE push can refetch the committed message
+ * into the cache before the send response lands, and prepending it twice
+ * would show the same row side by side.
  */
 export const sendMessageAtom = atomWithMutation<
   SentMessage,
@@ -128,7 +145,7 @@ export const sendMessageAtom = atomWithMutation<
     ...orpc.message.send.mutationOptions(),
     onMutate: ({ conversationId, body }) => {
       if (!conversationId || !viewerId) return { snapshot: undefined };
-      const key = orpc.message.thread.key();
+      const key = threadKeyOf(conversationId);
       void queryClient.cancelQueries({ queryKey: key });
       const snapshot = snapshotOf(queryClient, key);
       queryClient.setQueriesData<ThreadCache>({ queryKey: key }, (data) =>
@@ -164,7 +181,8 @@ export const sendMessageAtom = atomWithMutation<
       restoreSnapshot(queryClient, context?.snapshot);
     },
     onSuccess: (message) => {
-      queryClient.setQueriesData<ThreadCache>({ queryKey: orpc.message.thread.key() }, (data) =>
+      const key = threadKeyOf(message.conversationId);
+      queryClient.setQueriesData<ThreadCache>({ queryKey: key }, (data) =>
         data
           ? {
               ...data,
@@ -174,7 +192,9 @@ export const sendMessageAtom = atomWithMutation<
                       ...page,
                       items: [
                         { ...message, deletedAt: null },
-                        ...page.items.filter((item) => !item.pending),
+                        // Drop the optimistic row AND any copy the SSE-driven
+                        // refetch may already have landed — one message, once.
+                        ...page.items.filter((item) => !item.pending && item.id !== message.id),
                       ],
                     }
                   : page,

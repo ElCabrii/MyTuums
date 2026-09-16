@@ -15,5 +15,7 @@ export const Route = createFileRoute("/messages/new/$userId")({
 
 function NewRoute() {
   const { userId } = Route.useParams();
-  return <NewMessagePane userId={userId} />;
+  // Keyed by recipient, for the same draft-carryover reason as the thread
+  // route: switching targets must never inherit the previous draft.
+  return <NewMessagePane key={userId} userId={userId} />;
 }

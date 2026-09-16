@@ -549,6 +549,41 @@ describe("thread reads and pagination", () => {
     );
     expect(restored.conversationId).toBe(sent.conversationId);
   });
+
+  it("resolves EVERY pair's conversation once the viewer has several — an unrelated participation row must not shadow the real one", async () => {
+    const viewer = await createTestUser();
+    const bob = await createTestUser();
+    const carol = await createTestUser();
+    const withBob = await send(contextFor(viewer), bob.id, "to bob");
+    const withCarol = await send(contextFor(viewer), carol.id, "to carol");
+    expect(withBob.conversationId).not.toBe(withCarol.conversationId);
+
+    // The regression: a join over the viewer's participation rows left one
+    // unrelated row per other conversation in the result, and limit 1 could
+    // answer with its null conversation for one of the two pairs.
+    const resolvedBob = await call(
+      appRouter.message.conversationWith,
+      { userId: bob.id },
+      { context: contextFor(viewer) },
+    );
+    const resolvedCarol = await call(
+      appRouter.message.conversationWith,
+      { userId: carol.id },
+      { context: contextFor(viewer) },
+    );
+    expect(resolvedBob.conversationId).toBe(withBob.conversationId);
+    expect(resolvedCarol.conversationId).toBe(withCarol.conversationId);
+
+    // And a third, never-contacted user resolves to no conversation at all.
+    const stranger = await createTestUser();
+    const resolvedStranger = await call(
+      appRouter.message.conversationWith,
+      { userId: stranger.id },
+      { context: contextFor(viewer) },
+    );
+    expect(resolvedStranger.conversationId).toBeNull();
+    expect(resolvedStranger.user?.id).toBe(stranger.id);
+  });
 });
 
 describe("deleteMessage", () => {
@@ -842,6 +877,46 @@ describe("the moderation view of a message case", () => {
       expect(detail.target.evidence).toHaveLength(1);
       expect(detail.target.evidence[0].snapshot.reportedMessageId).toBe(taunt.id);
       expect(detail.target.evidence[0].snapshot.messages.at(-1)?.body).toBe("reported words");
+    }
+  });
+
+  it("refuses an UNREPORTED message — a moderator holding a bare id must not read private text nobody submitted", async () => {
+    const staff = await moderator();
+    const sender = await createTestUser();
+    const victim = await createTestUser();
+    const unreported = await send(contextFor(sender), victim.id, "never reported");
+
+    // The report-only trust boundary (docs/security.md): the case view is the
+    // moderator's sole window into DMs, and only a participant's report opens
+    // it. An id alone — even a moderator's — reads as missing.
+    await expect(
+      call(
+        appRouter.moderation.case,
+        { targetType: "message", targetId: unreported.id },
+        { context: contextFor(staff) },
+      ),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    // Once reported, the same moderator reads the case — including content
+    // the sender has since deleted, from the report's own snapshot.
+    await call(
+      appRouter.message.deleteMessage,
+      { messageId: unreported.id },
+      { context: contextFor(sender) },
+    );
+    await call(
+      appRouter.moderation.report,
+      { targetType: "message", targetId: unreported.id, reason: "harassment" },
+      { context: contextFor(victim) },
+    );
+    const detail = await call(
+      appRouter.moderation.case,
+      { targetType: "message", targetId: unreported.id },
+      { context: contextFor(staff) },
+    );
+    expect(detail.target.kind).toBe("message");
+    if (detail.target.kind === "message") {
+      expect(detail.target.evidence[0]?.snapshot.messages.at(-1)?.body).toBe("never reported");
     }
   });
 
