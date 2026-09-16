@@ -1,4 +1,4 @@
-import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Outlet, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { GlobalDialogs } from "@/components/global-dialogs";
@@ -73,6 +73,9 @@ function RootLayout() {
   const settled = useAtomValue(sessionSettledAtom);
   const signedIn = useAtomValue(isSignedInAtom);
   const resolvedTheme = useAtomValue(resolvedThemeAtom);
+  const isMessagesTree = useRouterState({ select: (state) => state.location.pathname }).startsWith(
+    "/messages",
+  );
 
   // While the first /get-session is in flight this renders nothing: the
   // splash is static markup in index.html (`#app-splash`), already painted
@@ -102,7 +105,10 @@ function RootLayout() {
         <main className="flex-1">
           <Outlet />
         </main>
-        <Footer />
+        {/* The messages tree is a fixed-height app surface (its list and
+            thread scroll inside their own panes); the footer would push it
+            past the viewport and reintroduce page scroll. */}
+        {!isMessagesTree && <Footer />}
         {signedIn && <MobileNavigation />}
         <GlobalDialogs />
         {/* Mounted unconditionally: the dialog owns the whole decision — signed

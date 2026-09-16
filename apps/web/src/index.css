@@ -190,6 +190,14 @@
   }
 }
 
+/* The sticky global header publishes its rendered height here at runtime
+   (components/header.tsx) — it is content- and breakpoint-driven, so it is
+   measured, not restated. The fallback holds until the first measurement;
+   sticky sub-headers (the message thread's) pin below the header with it. */
+:root {
+  --header-height: 0px;
+}
+
 /* Signed-out pages have no fixed bottom bar, but under edge-to-edge drawing
    (`viewport-fit=cover`) their content would still run under the transparent
    system bars: the top inset keeps auth chrome clear of the status bar /

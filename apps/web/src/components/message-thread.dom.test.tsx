@@ -23,10 +23,17 @@ installTestOrpc(createTanstackQueryUtils(fakeClient));
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { installTestOrpc, orpc } from "@/lib/orpc";
 import type { MessageItem } from "@/lib/orpc";
-import { MessageThreadPane } from "@/components/message-thread";
+import { messageThreadQueryOptions } from "@/lib/query-definitions";
+import { clearMessageDrafts } from "@/atoms/messages";
+import { MessageThreadPane, NewMessagePane } from "@/components/message-thread";
 import { renderWithProviders } from "@/test/render";
 import { createTestQueryClient } from "@/test/factories";
 import type { QueryClient } from "@tanstack/react-query";
+
+/** The seeded-thread cache shape read back in the first-contact test. */
+type ThreadSeed = {
+  pages: Array<{ items: Array<{ id: string }> }>;
+};
 
 /**
  * The thread pane's two navigation-adjacent contracts (PR #409 review):
@@ -57,6 +64,7 @@ function seedThread(
   items: MessageItem[],
   lastReadAt: Date | null,
   hidden = false,
+  otherUserId = OTHER,
 ) {
   queryClient.setQueryData(orpc.message.thread.key({ input: { conversationId } }), {
     pages: [
@@ -65,7 +73,7 @@ function seedThread(
         lastReadAt,
         hidden,
         user: {
-          id: OTHER,
+          id: otherUserId,
           name: "Other Person",
           username: "other",
           displayUsername: "Other",
@@ -102,6 +110,8 @@ beforeEach(() => {
   fakeClient.message.markRead.mockReset();
   fakeClient.message.markRead.mockResolvedValue({ lastReadAt: new Date(), advanced: true });
   fakeClient.message.thread.mockReset();
+  // Drafts are module state keyed by recipient — start every test clean.
+  clearMessageDrafts();
 });
 
 afterEach(() => {
@@ -195,13 +205,22 @@ it("the header kebab carries report-user and hide-conversation, hide only for an
 it("switching conversations starts from an empty composer — a draft never crosses recipients", async () => {
   const { queryClient, render } = makePane(<ConversationSwitcher />);
   const now = new Date();
-  seedThread(queryClient, "a", [], now);
-  seedThread(queryClient, "b", [], now);
+  // Distinct recipients: drafts are keyed by recipient (so a draft typed in
+  // one conversation can follow the viewer into that person's thread), and
+  // the switcher must still land on an empty composer for a different one.
+  seedThread(queryClient, "a", [], now, false, "user-a");
+  seedThread(queryClient, "b", [], now, false, "user-b");
   fakeClient.message.thread.mockImplementation((input: { conversationId: string }) =>
     Promise.resolve({
       conversationId: input.conversationId,
       lastReadAt: now,
-      user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+      user: {
+        id: input.conversationId === "a" ? "user-a" : "user-b",
+        name: "Other Person",
+        username: "other",
+        displayUsername: "Other",
+        image: null,
+      },
       items: [],
       nextCursor: null,
     }),
@@ -218,4 +237,81 @@ it("switching conversations starts from an empty composer — a draft never cros
   // conversation switch. The new composer starts empty.
   fireEvent.click(screen.getByRole("button", { name: "switch to b" }));
   await waitFor(() => expect(composer()).toHaveValue(""));
+});
+
+it("first contact seeds the thread and the draft typed during the move survives it", async () => {
+  // The new-message pane's send: the conversation id arrives with the
+  // message, and the URL moves to the real thread. Two contracts: the
+  // thread's cache is seeded with the sent message (no skeleton
+  // round-trip), and text typed around the remount is still in the
+  // composer when the thread pane mounts.
+  fakeClient.message.conversationWith.mockResolvedValue({
+    conversationId: null,
+    hidden: false,
+    user: {
+      id: OTHER,
+      name: "Other Person",
+      username: "other",
+      displayUsername: "Other",
+      image: null,
+    },
+  });
+  fakeClient.message.unreadCount.mockResolvedValue({ unreadCount: 0, requestCount: 0 });
+  fakeClient.message.send.mockResolvedValue({
+    id: "server-row",
+    conversationId: "c-new",
+    senderId: VIEWER,
+    body: "first contact",
+    createdAt: new Date(),
+  });
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId: "c-new",
+    lastReadAt: null,
+    user: {
+      id: OTHER,
+      name: "Other Person",
+      username: "other",
+      displayUsername: "Other",
+      image: null,
+    },
+    items: [
+      {
+        id: "server-row",
+        senderId: VIEWER,
+        body: "first contact",
+        createdAt: new Date(),
+        deletedAt: null,
+      },
+    ],
+    nextCursor: null,
+  });
+
+  const { queryClient, render } = makePane(<NewMessagePane userId={OTHER} />);
+  const screen = await render();
+  const composer = () => screen.getByRole("textbox", { name: "Write a message" });
+  await waitFor(() => expect(composer()).toBeVisible());
+
+  fireEvent.change(composer(), { target: { value: "first contact" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  await waitFor(() => expect(fakeClient.message.send).toHaveBeenCalled());
+
+  // The sent message is in the destination thread's cache under the exact
+  // key its query mounts with.
+  // SAFETY: the cache was seeded by `seedFirstMessageThread` one await ago —
+  // the ThreadSeed shape is the one that function wrote.
+  const seeded = queryClient.getQueryData(
+    messageThreadQueryOptions("c-new").queryKey,
+  ) as ThreadSeed;
+  expect(seeded.pages[0].items.map((item) => item.id)).toEqual(["server-row"]);
+
+  // The viewer keeps typing while the move happens, then the pane remounts
+  // (what the route change does): the draft is still in the composer.
+  fireEvent.change(composer(), { target: { value: "still typing" } });
+  screen.unmount();
+  const second = await renderWithProviders(
+    <MessageThreadPane key="c-new" conversationId="c-new" />,
+    { signedInAs: { id: VIEWER }, queryClient },
+  );
+  await waitFor(() => expect(second.getByText("first contact")).toBeVisible());
+  expect(second.getByRole("textbox", { name: "Write a message" })).toHaveValue("still typing");
 });
