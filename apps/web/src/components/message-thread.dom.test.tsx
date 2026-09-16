@@ -56,12 +56,14 @@ function seedThread(
   conversationId: string,
   items: MessageItem[],
   lastReadAt: Date | null,
+  hidden = false,
 ) {
   queryClient.setQueryData(orpc.message.thread.key({ input: { conversationId } }), {
     pages: [
       {
         conversationId,
         lastReadAt,
+        hidden,
         user: {
           id: OTHER,
           name: "Other Person",
@@ -131,6 +133,36 @@ it("acknowledges through the newest displayed message even when it is the viewer
       expect.anything(),
     );
   });
+});
+
+it("a hidden thread renders its history with the hidden notice above it", async () => {
+  // Re-opening a hidden conversation (the profile's Message action) shows
+  // the shared history, with a banner saying what state the thread is in —
+  // not a history-less "new conversation" composer.
+  const older = pageMessage({
+    id: "history-row",
+    body: "shared history",
+    createdAt: new Date(100),
+  });
+  const { queryClient, render } = makePane(<MessageThreadPane conversationId="c-1" />);
+  seedThread(queryClient, "c-1", [older], null, true);
+  fakeClient.message.thread.mockResolvedValue({
+    conversationId: "c-1",
+    lastReadAt: null,
+    hidden: true,
+    user: { id: OTHER, name: "Other", username: "other", displayUsername: "Other", image: null },
+    items: [older],
+    nextCursor: null,
+  });
+
+  const screen = await render();
+
+  await waitFor(() => expect(screen.getByText("shared history")).toBeVisible());
+  expect(
+    screen.getByText(
+      "You hid this conversation — it is not in your messages. Sending a message brings it back.",
+    ),
+  ).toBeVisible();
 });
 
 it("switching conversations starts from an empty composer — a draft never crosses recipients", async () => {

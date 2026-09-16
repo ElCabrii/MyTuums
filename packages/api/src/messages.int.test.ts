@@ -439,7 +439,7 @@ describe("unread state and markRead", () => {
 });
 
 describe("thread reads and pagination", () => {
-  it("refuses the thread to a non-participant, a hidden side, and across a block", async () => {
+  it("refuses the thread to a non-participant and across a block — but a HIDDEN side reads its own history, flagged", async () => {
     const sender = await createTestUser();
     const recipient = await createTestUser();
     const outsider = await createTestUser();
@@ -453,18 +453,39 @@ describe("thread reads and pagination", () => {
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
 
+    // Hiding is the viewer's own list-curation gesture, not a seal: the
+    // explicit navigation back in (the profile's Message action resolving
+    // this id) must show the shared history. The header flags the state so
+    // the pane can say what sending will do, and the read cursor still
+    // advances — otherwise re-activating later would tick the badge for
+    // messages read here.
     await call(
       appRouter.message.hide,
       { conversationId: sent.conversationId },
       { context: contextFor(recipient) },
     );
-    await expect(
-      call(
-        appRouter.message.thread,
-        { conversationId: sent.conversationId },
-        { context: contextFor(recipient) },
-      ),
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const hiddenThread = await call(
+      appRouter.message.thread,
+      { conversationId: sent.conversationId },
+      { context: contextFor(recipient) },
+    );
+    expect(hiddenThread.hidden).toBe(true);
+    expect(hiddenThread.items.map((item) => item.body)).toEqual(["private"]);
+    const marked = await call(
+      appRouter.message.markRead,
+      { conversationId: sent.conversationId, lastSeenMessageId: sent.id },
+      { context: contextFor(recipient) },
+    );
+    expect(marked.advanced).toBe(true);
+
+    // The hidden side still receives no inbox row and no badge — reading is
+    // not re-activating; only sending is.
+    const counts = await call(
+      appRouter.message.unreadCount,
+      {},
+      { context: contextFor(recipient) },
+    );
+    expect(counts).toEqual({ unreadCount: 0, requestCount: 0 });
 
     await call(
       appRouter.moderation.block,
@@ -517,7 +538,7 @@ describe("thread reads and pagination", () => {
     }
   });
 
-  it("resolves the visible conversation with a user, and reports none for a hidden side or a block", async () => {
+  it("resolves the conversation with a user — hidden resolves flagged, and only a block reads as none", async () => {
     const sender = await createTestUser();
     const recipient = await createTestUser();
     const sent = await send(contextFor(sender), recipient.id, "thread");
@@ -528,7 +549,10 @@ describe("thread reads and pagination", () => {
       { context: contextFor(recipient) },
     );
     expect(found.conversationId).toBe(sent.conversationId);
+    expect(found.hidden).toBe(false);
 
+    // A hidden side still resolves, flagged — the profile's Message action
+    // must open the real thread, not a history-less "new conversation".
     await call(
       appRouter.message.hide,
       { conversationId: sent.conversationId },
@@ -539,7 +563,8 @@ describe("thread reads and pagination", () => {
       { userId: sender.id },
       { context: contextFor(recipient) },
     );
-    expect(hidden.conversationId).toBeNull();
+    expect(hidden.conversationId).toBe(sent.conversationId);
+    expect(hidden.hidden).toBe(true);
 
     await send(contextFor(recipient), sender.id, "back");
     const restored = await call(
@@ -548,6 +573,21 @@ describe("thread reads and pagination", () => {
       { context: contextFor(recipient) },
     );
     expect(restored.conversationId).toBe(sent.conversationId);
+    expect(restored.hidden).toBe(false);
+
+    // A block in either direction reads as contactable only one way.
+    await call(
+      appRouter.moderation.block,
+      { userId: sender.id },
+      { context: contextFor(recipient) },
+    );
+    const blocked = await call(
+      appRouter.message.conversationWith,
+      { userId: sender.id },
+      { context: contextFor(recipient) },
+    );
+    expect(blocked.conversationId).toBeNull();
+    expect(blocked.user).toBeNull();
   });
 
   it("resolves EVERY pair's conversation once the viewer has several — an unrelated participation row must not shadow the real one", async () => {

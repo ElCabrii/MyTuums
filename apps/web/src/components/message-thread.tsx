@@ -113,6 +113,12 @@ export function MessageThreadPane({ conversationId }: { conversationId: string }
         }
         hidePending={hide.isPending}
       />
+      {header?.hidden && (
+        <p className="bg-muted/50 text-muted-foreground border-border flex items-center gap-2 border-b px-4 py-2 text-xs">
+          <EyeOff className="size-3.5 shrink-0" aria-hidden="true" />
+          {m.messages_hidden_notice()}
+        </p>
+      )}
       <MessageScroll
         items={oldestFirst}
         hasNextPage={thread.hasNextPage}
