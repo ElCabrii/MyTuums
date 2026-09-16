@@ -300,7 +300,11 @@ function MessageScroll({
                 </span>
               </div>
             )}
-            <div className="text-muted-foreground ml-1 hidden items-center self-center group-hover:flex">
+            {/* A permanently reserved action column: the icon fades in beside
+                the bubble on hover or keyboard focus, and the message never
+                moves — an element appearing in the flex flow would shove the
+                bubble sideways the moment it renders. */}
+            <div className="text-muted-foreground ml-1 flex w-7 shrink-0 items-center justify-center self-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none">
               {mine && item.deletedAt === null && <DeleteOwnAction messageId={item.id} />}
               {!mine && item.deletedAt === null && (
                 <ReportMessageAction messageId={item.id} body={item.body} />
