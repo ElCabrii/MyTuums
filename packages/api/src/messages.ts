@@ -447,7 +447,7 @@ export const messageRouter = {
    */
   thread: protectedProcedure
     .use(rateLimit(RATE_LIMITS.read))
-    .input(z.object({ conversationId: z.uuid(), ...pagedInput.shape }))
+    .input(pagedInput.extend({ conversationId: z.uuid() }))
     .handler(async ({ input, context }) => {
       const me = context.user.id;
       const other = otherParticipant();

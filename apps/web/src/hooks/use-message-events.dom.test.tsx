@@ -73,7 +73,12 @@ describe("useMessageEvents", () => {
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     const refreshedKeys = () =>
       invalidateSpy.mock.calls
-        .map(([options]) => (options as { queryKey?: readonly unknown[] }).queryKey)
+        .map(
+          ([options]) =>
+            // SAFETY: every invalidateQueries call in this test passes the
+            // documented `{ queryKey }` object shape.
+            (options as { queryKey?: readonly unknown[] }).queryKey,
+        )
         .filter((key): key is readonly unknown[] => key !== undefined);
 
     // The INITIAL connection is the recovery path: whatever happened between

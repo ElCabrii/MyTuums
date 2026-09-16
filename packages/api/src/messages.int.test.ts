@@ -37,19 +37,11 @@ async function send(context: Context, recipientId: string, body: string) {
   return call(appRouter.message.send, { recipientId, body }, { context });
 }
 
-async function sendExpectError(
-  context: Context,
-  recipientId: string,
-  body: string,
-): Promise<{ code: string }> {
-  const error = await call(appRouter.message.send, { recipientId, body }, { context }).then(
-    () => {
-      throw new Error("sendExpectError: the call was expected to fail but succeeded.");
-    },
-    (error: unknown) => error as { code?: string },
-  );
-  expect(error?.code).toEqual(expect.any(String));
-  return error as { code: string };
+/** A send that must fail, asserting its error code in one step. */
+function sendExpectError(context: Context, recipientId: string, body: string, code: string) {
+  return expect(
+    call(appRouter.message.send, { recipientId, body }, { context }),
+  ).rejects.toMatchObject({ code });
 }
 
 /** Every messaging row the refused pair could have created — must stay empty. */
@@ -117,9 +109,7 @@ describe("message.send guards", () => {
       { userId: sender.id },
       { context: contextFor(recipient) },
     );
-    expect((await sendExpectError(contextFor(sender), recipient.id, "unblock me")).code).toBe(
-      "NOT_FOUND",
-    );
+    await sendExpectError(contextFor(sender), recipient.id, "unblock me", "NOT_FOUND");
     // Sender blocks recipient: same refusal from the other side.
     const third = await createTestUser();
     await call(
@@ -127,9 +117,7 @@ describe("message.send guards", () => {
       { userId: recipient.id },
       { context: contextFor(sender) },
     );
-    expect((await sendExpectError(contextFor(sender), recipient.id, "still no")).code).toBe(
-      "NOT_FOUND",
-    );
+    await sendExpectError(contextFor(sender), recipient.id, "still no", "NOT_FOUND");
     // The refused pair wrote nothing at all.
     const counts = await pairRowCounts(contextFor(sender), sender.id, recipient.id);
     expect(counts.conversations).toBe(0);
@@ -774,11 +762,9 @@ describe("reporting messages", () => {
     expect(snapshot!.reportedMessageId).toBe(reported.id);
     expect(snapshot!.messages.at(-1)?.body).toBe("message 12");
     expect(snapshot!.messages[0].body).toBe("message 2");
-    // Reading order: oldest first.
-    expect(snapshot!.messages.map((m) => m.body)).toEqual(
-      [...snapshot!.messages.map((m) => m.body)].sort(
-        (a, b) => Number(a.split(" ")[1]) - Number(b.split(" ")[1]),
-      ),
+    // Reading order: oldest first — each row's number is one more than the last.
+    expect(snapshot!.messages.map((m) => Number(m.body.split(" ")[1]))).toEqual(
+      snapshot!.messages.map((_m, index) => index + 2),
     );
   });
 

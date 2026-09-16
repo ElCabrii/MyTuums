@@ -118,7 +118,7 @@ await test("preview import preserves auth values, Unicode, JSON arrays and milli
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
     db.exec("DELETE FROM game_favorite");
     assert.equal(db.prepare("SELECT favorite_count FROM game").get()?.favorite_count, 0);
-    assert.equal(db.prepare("SELECT count(*) AS count FROM __drizzle_migrations").get()?.count, 7);
+    assert.equal(db.prepare("SELECT count(*) AS count FROM __drizzle_migrations").get()?.count, 8);
     assert.equal(db.prepare("SELECT count(*) AS count FROM moderation_email").get()?.count, 0);
   } finally {
     db.close();

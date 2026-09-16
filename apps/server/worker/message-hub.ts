@@ -112,7 +112,9 @@ export class MessageHub extends DurableObject {
   /** Fans one thin invalidation event out to every live connection. */
   publish(event: MessagePushEvent): void {
     const frame = `event: ${event.kind}\ndata: ${JSON.stringify(event)}\n\n`;
-    for (const connection of [...this.#connections]) {
+    // A copy: a failing write closes its connection, which mutates the set
+    // mid-iteration.
+    for (const connection of this.#connections.slice()) {
       connection.write(frame);
     }
   }
@@ -120,7 +122,8 @@ export class MessageHub extends DurableObject {
   #startKeepAlive(): void {
     if (this.#keepAlive) return;
     this.#keepAlive = setInterval(() => {
-      for (const connection of [...this.#connections]) {
+      // Same copy rule as publish: a failed ping drops its own connection.
+      for (const connection of this.#connections.slice()) {
         connection.write(": ping\n\n");
       }
     }, KEEP_ALIVE_MS);

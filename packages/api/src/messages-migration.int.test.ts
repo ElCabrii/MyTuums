@@ -27,6 +27,8 @@ async function prePrivateMessagesFolder() {
   const folder = await mkdtemp(join(tmpdir(), "mytuums-migrations-0006-"));
   await cp(committedMigrationsFolder, folder, { recursive: true });
   const journalPath = join(folder, "meta", "_journal.json");
+  // SAFETY: the journal is this repo's own committed file, written by
+  // drizzle-kit with exactly this shape.
   const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
     entries: unknown[];
   };
@@ -85,7 +87,11 @@ describe("migration 0007_private_messages upgrades a 0006 database", () => {
       client.prepare(`select count(*) as n from conversation_participant`),
       client.prepare(`select count(*) as n from message`),
     ]);
-    expect(counts.map((result) => (result.results[0] as { n: number }).n)).toEqual([0, 0, 0]);
+    expect(
+      // SAFETY: each statement above is `select count(*) as n`, so every
+      // first row carries that one column.
+      counts.map((result) => (result.results[0] as { n: number }).n),
+    ).toEqual([0, 0, 0]);
 
     // The pair-key invariant is live: canonical order enforced, self-pairs
     // and mis-ordered pairs refused.

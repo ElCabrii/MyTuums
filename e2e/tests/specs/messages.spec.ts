@@ -37,7 +37,10 @@ test.describe("messages", () => {
     // Bob opens the message composer from alice's profile and sends the
     // first message — the conversation is created by the send itself.
     await bobPage.goto(`/@${ALICE.username}`);
-    await bobPage.getByRole("button", { name: "More", exact: true }).click();
+    // `.first()` — the profile's own kebab renders before the activity feed,
+    // whose post cards carry a "More" kebab of their own once earlier specs
+    // have seeded posts on this profile.
+    await bobPage.getByRole("button", { name: "More", exact: true }).first().click();
     await bobPage.getByRole("menuitem", { name: "Message" }).click();
     await expect(bobPage).toHaveURL(/\/messages\/new\//);
     const firstMessage = `journey hello ${Date.now()}`;

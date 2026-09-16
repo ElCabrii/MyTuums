@@ -62,6 +62,7 @@ function seedThread(items: ThreadItem[]) {
 }
 
 function threadItems(): ThreadItem[] {
+  // SAFETY: the shape seedThread wrote — read back through the same key.
   const cache = singletonQueryClient.getQueryData(orpc.message.thread.key()) as {
     pages: Array<{ items: ThreadItem[] }>;
   };
@@ -151,6 +152,7 @@ it("markRead patches the inbox row's unread flag from the mutation's answer", as
   const marking = singletonStore.get(markThreadReadAtom);
   await marking.mutateAsync({ conversationId: "c-1", lastSeenMessageId: "m-1" });
 
+  // SAFETY: the shape seeded above — read back through the same key.
   const cache = singletonQueryClient.getQueryData(orpc.message.conversations.key()) as {
     pages: Array<{ items: ConversationItem[] }>;
   };
@@ -173,6 +175,7 @@ it("accepting a request removes its row from the requests feed and restores it o
   fakeClient.message.accept.mockRejectedValueOnce(new Error("refused"));
   const failing = singletonStore.get(acceptRequestAtom);
   await expect(failing.mutateAsync({ conversationId: "c-1" })).rejects.toThrow("refused");
+  // SAFETY: the shape seeded above — read back through the same key.
   let cache = singletonQueryClient.getQueryData(orpc.message.requests.key()) as {
     pages: Array<{ items: unknown[] }>;
   };
@@ -182,6 +185,7 @@ it("accepting a request removes its row from the requests feed and restores it o
   const invalidateSpy = vi.spyOn(singletonQueryClient, "invalidateQueries");
   const accepting = singletonStore.get(acceptRequestAtom);
   await accepting.mutateAsync({ conversationId: "c-1" });
+  // SAFETY: same key, same shape as the read above.
   cache = singletonQueryClient.getQueryData(orpc.message.requests.key()) as {
     pages: Array<{ items: unknown[] }>;
   };

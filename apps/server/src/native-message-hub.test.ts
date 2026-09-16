@@ -46,9 +46,10 @@ async function connect(name: string) {
   const response = await HUBS.getByName(name).fetch("https://hub/connect");
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toBe("text/event-stream; charset=utf-8");
-  // The binding types the stream loosely; the frame protocol is text.
   const reader = response.body!.getReader();
   const read = async (): Promise<{ done: boolean; chunk: string }> => {
+    // SAFETY: a ReadableStream reader over a fetch body yields exactly this
+    // result shape; the binding's structural typing loses it.
     const result = (await reader.read()) as { done: boolean; value?: Uint8Array };
     return {
       done: result.done,

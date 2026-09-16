@@ -126,7 +126,10 @@ function prepareImport(
     const sourceNames = source.tables.map((table) => table.name);
     if (new Set(sourceNames).size !== sourceNames.length)
       throw new Error("Duplicate source table.");
-    // These are newly introduced native runtime tables. All legacy application tables must be present.
+    // Tables that legitimately postdate the production snapshot's format:
+    // native runtime tables, and application tables introduced after the
+    // last snapshot was captured (issue #408's private messages). Everything
+    // else must be present — a genuinely missing table is drift, not novelty.
     const nativeOnly = new Set([
       "__drizzle_migrations",
       "game_catalog_row",
@@ -136,6 +139,9 @@ function prepareImport(
       "media_intent",
       "moderation_email",
       "post_media_upload",
+      "conversation",
+      "conversation_participant",
+      "message",
     ]);
     for (const name of tableNames) {
       if (!nativeOnly.has(name) && !sourceNames.includes(name))
