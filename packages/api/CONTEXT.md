@@ -171,7 +171,10 @@ and ten empty versions per pass, excluding active and running versions.
 <igdb-id>`: it hydrates one game from IGDB and publishes it through the same
 fenced publisher, staging every incumbent verbatim beside it — a cover download
 failure fails the run (no previous cover to keep), and the added game becomes a
-known id the daily sync refreshes.
+known id the daily sync refreshes. Its CLI takes IGDB credentials from the
+environment, falling back to exactly the two IGDB keys of the root `.env`
+(`src/igdb-credentials.ts` — the one sanctioned maintenance `.env` read, and
+only those two keys, never the file's database or provider variables).
 
 Game-cover paths include an immutable catalog version. Upload intents protect
 PUTs; publication checks expiry and consumes referenced intents in its batch.

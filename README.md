@@ -105,7 +105,9 @@ pnpm --filter @my-tuums/api prune:notifications --retention-days=90
 ```
 
 Reconciliation deletes unreferenced managed images. Notification pruning is a
-dry run unless `--apply` is added. These commands load no `.env` or S3 credentials.
+dry run unless `--apply` is added. These commands load no `.env` or S3
+credentials; `games:add` additionally accepts exactly the two IGDB keys from the
+root `.env` when the environment does not carry them.
 
 Three levels of validation, widening. Use the narrowest one that can see your
 change while you work, and `pnpm verify` before you push.

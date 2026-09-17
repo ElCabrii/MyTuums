@@ -210,8 +210,10 @@ pnpm --filter @my-tuums/api prune:notifications --retention-days=90 --apply --re
 `games:sync` records an intent; the selected jobs Worker's scheduled recovery
 dispatches it. `games:add <igdb-id>` publishes one game immediately through the
 same fenced publisher (it hydrates from IGDB, so `IGDB_CLIENT_ID` and
-`IGDB_CLIENT_SECRET` must be set in the shell — no `.env` is loaded), and the
-added game then becomes a known id the daily sync keeps refreshing.
+`IGDB_CLIENT_SECRET` must be set in the environment — the command falls back to
+exactly those two keys of the root `.env`, and never loads anything else from
+that file), and the added game then becomes a known id the daily sync keeps
+refreshing.
 `reconcile:media` always binds the selected database and its
 matching private bucket. Notification pruning is a dry run unless `--apply` is
 present. Promotion remains bootstrap-only after the first admin exists, and
