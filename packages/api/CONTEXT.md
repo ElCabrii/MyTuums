@@ -166,7 +166,15 @@ expired/replaced publisher cannot write or publish; missing incumbents or
 changed hashtag identities refuse publication. Favorites and creation times
 remain on stable game rows. Version cleanup removes at most 250 staged rows
 and ten empty versions per pass, excluding active and running versions.
-`upsertGames` is now only a direct integration-fixture helper.
+`upsertGames` is now only a direct integration-fixture helper. `addGameToCatalog`
+(`@my-tuums/api/games-sync`) is the operator command behind `pnpm games:add
+<igdb-id>`: it hydrates one game from IGDB and publishes it through the same
+fenced publisher, staging every incumbent verbatim beside it — a cover download
+failure fails the run (no previous cover to keep), and the added game becomes a
+known id the daily sync refreshes. Its CLI takes IGDB credentials from the
+environment, falling back to exactly the two IGDB keys of the root `.env`
+(`src/igdb-credentials.ts` — the one sanctioned maintenance `.env` read, and
+only those two keys, never the file's database or provider variables).
 
 Game-cover paths include an immutable catalog version. Upload intents protect
 PUTs; publication checks expiry and consumes referenced intents in its batch.
@@ -270,6 +278,7 @@ over HTTP and imports only its browser-safe subpaths.
 | Change how a user is matched by text                                  | `src/search.ts` (`matchesUserQuery`, `userQueryRank`), `src/search-text.ts`                                | all three search surfaces share matching; typeahead and `moderation.searchUsers` share relevance ranking                                                                                                           |
 | Change the IGDB wire rules                                            | `src/igdb.ts` (the client — transport, retry, pacing)                                                      | `src/igdb.test.ts`; the IGDB_* constants in `src/constants.ts`                                                                                                                                                     |
 | Change the catalog sync                                               | `src/games-sync.ts` (stage → validate → covers → one transaction)                                          | `src/games-sync.int.test.ts`; `apps/server/src/games-sync.ts`; `docs/operations.md` Maintenance                                                                                                                    |
+| Add one game by IGDB id (`pnpm games:add`)                            | `src/games-sync.ts` (`addGameToCatalog`) plus `scripts/add-game.ts`                                        | `src/games-sync.int.test.ts`; `docs/operations.md` Maintenance                                                                                                                                                     |
 | Change a game read (page, listing, matcher)                           | `src/games.ts` — the public directory's two procedures, its per-sort keysets and `matchesGameQuery`        | `src/games.int.test.ts`; the typeahead's games half in `src/search.ts` shares the matcher; a new sort needs its cursor-mirroring index in `packages/db/src/schema/app.ts`                                          |
 | Change hashtag-key derivation                                         | `src/games-hashtag.ts` (the only definition; keys are sticky once written)                                 | `src/games-hashtag.test.ts`                                                                                                                                                                                        |
 | Add or change the games fixture                                       | `packages/db/fixtures/games.json` (hand-authored)                                                          | `src/games-fixture.test.ts` pins its contract; the `games:seed` script uploads its covers                                                                                                                          |
