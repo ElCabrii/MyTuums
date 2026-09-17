@@ -168,9 +168,13 @@ function ThreadHeader({
   const setReport = useSetAtom(reportDialogAtom);
 
   return (
-    // Pins below the global sticky header, never under it — its own z-index
-    // is lower, so `top-0` would let the app header cover it mid-scroll.
-    <header className="border-border bg-background/95 supports-[backdrop-filter]:bg-background/75 sticky top-[var(--header-height)] z-10 flex items-center gap-3 border-b px-4 py-3 backdrop-blur">
+    // A plain flex child at the pane's top, never sticky: the /messages
+    // layout bounds the pane to the visible area below the global header, so
+    // this bar cannot scroll — and a sticky top offset here would shift it
+    // DOWN into the pane (the overflow-hidden layout is a scrollport that
+    // never scrolls, so the sticky constraint pushes instead of pins),
+    // covering the first messages exactly as far as it moved.
+    <header className="border-border bg-background flex items-center gap-3 border-b px-4 py-3">
       <Button
         variant="ghost"
         size="icon"
