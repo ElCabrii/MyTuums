@@ -1,14 +1,25 @@
+import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import {
   maintenanceResourceNames,
   openMaintenanceMedia,
   resolveMaintenanceEnvironment,
 } from "@my-tuums/db/maintenance-environment";
+import { parseIgdbEnvCredentials } from "../src/igdb-credentials.js";
 import { addGameToCatalog, createIgdbTransport, UnknownIgdbGameError } from "../src/games-sync.js";
 import { createR2Storage } from "../src/r2-storage.js";
 
 const usage = "Usage: pnpm games:add <igdb-id> [--remote --environment=preview|production]";
 class AddUsageError extends Error {}
+
+/** The repository root's `.env`, or empty text when the file does not exist. */
+function readRootEnvFile(): string {
+  try {
+    return readFileSync(new URL("../../../.env", import.meta.url), "utf8");
+  } catch {
+    return "";
+  }
+}
 
 function options() {
   let parsed;
@@ -33,13 +44,15 @@ function options() {
 
 async function run() {
   const args = options();
-  // The maintenance helper loads no .env; IGDB credentials arrive from the
-  // shell like the jobs Worker's runtime secrets.
-  const clientId = process.env.IGDB_CLIENT_ID;
-  const clientSecret = process.env.IGDB_CLIENT_SECRET;
+  // Real environment first; otherwise exactly the two IGDB keys of the root
+  // `.env` — never the whole file, whose DATABASE_URL/POSTGRES_* must not
+  // reach a maintenance process. See src/igdb-credentials.ts.
+  const fromFile = parseIgdbEnvCredentials(readRootEnvFile());
+  const clientId = process.env.IGDB_CLIENT_ID ?? fromFile.clientId;
+  const clientSecret = process.env.IGDB_CLIENT_SECRET ?? fromFile.clientSecret;
   if (!clientId || !clientSecret) {
     throw new AddUsageError(
-      "IGDB_CLIENT_ID and IGDB_CLIENT_SECRET must be set in the environment.",
+      "IGDB_CLIENT_ID and IGDB_CLIENT_SECRET must be set in the environment or the root .env.",
     );
   }
 
