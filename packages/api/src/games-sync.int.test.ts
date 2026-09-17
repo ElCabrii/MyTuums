@@ -1,9 +1,16 @@
 import { closeDb, db } from "./testing/runtime.js";
 
-import { game } from "@my-tuums/db/schema";
+import { game, mediaIntent } from "@my-tuums/db/schema";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GAMES_CATALOG_SIZE, GAMES_TWITCH_SIZE } from "./constants.js";
-import { syncGamesCatalog, upsertGames, type StagedGameRow } from "./games-sync.js";
+import {
+  addGameToCatalog,
+  syncGamesCatalog,
+  UnknownIgdbGameError,
+  upsertGames,
+  type AddGameResult,
+  type StagedGameRow,
+} from "./games-sync.js";
 import type { IgdbGameRow, IgdbTransport, TwitchTopGame } from "./igdb.js";
 import { testStorage, testStorageObjects, truncateAll } from "./testing/harness.js";
 
@@ -12,7 +19,9 @@ import { testStorage, testStorageObjects, truncateAll } from "./testing/harness.
  * and IGDB faked at the transport seam (the network is never reached — the
  * same contract `igdb.test.ts` pins at the client). One invariant per test,
  * and the first is the issue's own headline: fail-closed (Q28) — a run that
- * fails anywhere leaves the previous catalog byte-identical.
+ * fails anywhere leaves the previous catalog byte-identical. The
+ * `addGameToCatalog` describe pins the single-game operator command against
+ * the same seam.
  */
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x00, 0x10]);
@@ -625,5 +634,132 @@ describe("syncGamesCatalog", () => {
     expect(byId.get(71)).toMatchObject({ hypeCount: 900, firstReleaseDate: null });
     // Upcoming ids outside the Twitch snapshot carry no popularity rank.
     expect(byId.get(70)?.popularityRank).toBeNull();
+  });
+});
+
+describe("addGameToCatalog", () => {
+  const NOSTALE = 55220;
+  const SEEDED_AT = new Date("2026-01-01T00:00:00Z");
+
+  /** The game the issue names, hydrated the way IGDB answers it. */
+  function nostaleRow(): IgdbGameRow {
+    return {
+      id: NOSTALE,
+      name: "NosTale",
+      slug: "nostale",
+      summary: " An anime-style MMORPG. ",
+      first_release_date: Date.UTC(2007, 5, 29) / 1000,
+      cover: { image_id: "co55220" },
+      genres: [{ name: " RPG " }, { name: "" }, { name: "RPG" }],
+      platforms: [{ abbreviation: "PC" }],
+    };
+  }
+
+  async function runAdd(
+    options: FakeTwitchOptions,
+    igdbId = NOSTALE,
+    storage = testStorage,
+  ): Promise<AddGameResult> {
+    return addGameToCatalog({
+      db,
+      storage,
+      transport: fakeTwitch(options).transport,
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      igdbId,
+      now: () => new Date("2026-09-17T00:00:00Z"),
+    });
+  }
+
+  it("publishes the requested game beside verbatim incumbents, cover uploaded and intent consumed", async () => {
+    await upsertGames(
+      db,
+      [stagedRow({ igdbId: 10, name: "DOOM", hashtagKey: "doom", popularityRank: 2 })],
+      SEEDED_AT,
+    );
+    testStorageObjects.clear();
+
+    const result = await runAdd({
+      top: [],
+      games: new Map([[NOSTALE, nostaleRow()]]),
+      covers: new Map([["co55220", JPEG]]),
+    });
+
+    expect(result).toEqual({
+      status: "added",
+      name: "NosTale",
+      hashtagKey: "nostale",
+      coverUploaded: true,
+    });
+
+    const rows = await db.select().from(game);
+    expect(rows).toHaveLength(2);
+    // The incumbent survives the publication unchanged apart from its restamp.
+    expect(rows.find((row) => row.igdbId === 10)).toMatchObject({
+      name: "DOOM",
+      hashtagKey: "doom",
+      popularityRank: 2,
+      coverMediaPath: null,
+    });
+    expect(rows.find((row) => row.igdbId === NOSTALE)).toMatchObject({
+      name: "NosTale",
+      slug: "nostale",
+      hashtagKey: "nostale",
+      summary: "An anime-style MMORPG.",
+      firstReleaseYear: 2007,
+      genres: ["RPG"],
+      platforms: ["PC"],
+      popularityRank: null,
+      coverImageId: "co55220",
+    });
+
+    // The cover landed under one versioned games/ key, and publication
+    // consumed its upload intent.
+    const stored = [...testStorageObjects.entries()];
+    expect(stored).toHaveLength(1);
+    const [key, object] = stored[0];
+    expect(key.startsWith(`games/${String(NOSTALE)}-co55220.`)).toBe(true);
+    expect(object).toEqual({ contentType: "image/jpeg", bytes: JPEG });
+    expect(await db.select().from(mediaIntent)).toEqual([]);
+  });
+
+  it("refuses an unknown igdb id and leaves the published catalog untouched", async () => {
+    await upsertGames(db, [stagedRow({ igdbId: 10 })], SEEDED_AT);
+    const before = await db.select().from(game);
+
+    await expect(runAdd({ top: [], games: new Map(), covers: new Map() })).rejects.toBeInstanceOf(
+      UnknownIgdbGameError,
+    );
+
+    expect(await db.select().from(game)).toEqual(before);
+  });
+
+  it("fails the run when the cover download fails, publishing nothing", async () => {
+    await upsertGames(db, [stagedRow({ igdbId: 10 })], SEEDED_AT);
+    const before = await db.select().from(game);
+    testStorageObjects.clear();
+
+    // The cover image id hydrates but the CDN has no bytes for it: unlike the
+    // sync's per-game tolerance, a single-game add has no cover to keep.
+    await expect(
+      runAdd({ top: [], games: new Map([[NOSTALE, nostaleRow()]]), covers: new Map() }),
+    ).rejects.toThrow();
+
+    expect(await db.select().from(game)).toEqual(before);
+    expect([...testStorageObjects.keys()]).toEqual([]);
+  });
+
+  it("is a no-op for a game the catalog already holds", async () => {
+    await upsertGames(db, [stagedRow({ igdbId: NOSTALE, name: "NosTale" })], SEEDED_AT);
+    const before = await db.select().from(game);
+
+    const result = await runAdd({
+      top: [],
+      games: new Map([[NOSTALE, nostaleRow()]]),
+      covers: new Map([["co55220", JPEG]]),
+    });
+
+    expect(result).toEqual({ status: "already-present", name: "NosTale" });
+    expect(await db.select().from(game)).toEqual(before);
   });
 });
