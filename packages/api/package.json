@@ -90,6 +90,7 @@
     "reconcile:media": "tsx scripts/reconcile-media.ts",
     "prune:notifications": "tsx scripts/prune-notifications.ts",
     "games:seed": "tsx scripts/seed-games.ts",
+    "games:add": "tsx scripts/add-game.ts",
     "generate:case-folding": "tsx scripts/generate-case-folding.ts",
     "generate:search-folding": "tsx scripts/generate-search-folding.ts"
   },

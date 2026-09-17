@@ -99,6 +99,7 @@ preview or production explicitly:
 ```bash
 pnpm games:seed
 pnpm games:sync --remote --environment=preview
+pnpm games:add 55220 --remote --environment=production
 pnpm --filter @my-tuums/api reconcile:media --remote --environment=production
 pnpm --filter @my-tuums/api prune:notifications --retention-days=90
 ```
