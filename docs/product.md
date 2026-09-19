@@ -40,8 +40,8 @@ sign-in link; post-level privacy beyond the existing visibility rules is a
 - Email verification and password reset use the configured Cloudflare Email
   Service sender. Delivery failures are logged without recipients or capabilities;
   documented temporary failures receive bounded retries. Password accounts need
-  verification before sign-in. Local tests use synthetic delivery; hosted mail
-  remains to be verified.
+  verification before sign-in. Local tests use synthetic delivery; the
+  production cutover verified delivery to the approved test inbox.
 - Sessions are revoked on password reset, and a revoked session stops
   authenticating immediately — there is no session cookie cache.
 
@@ -386,10 +386,10 @@ safe-area inset.
   users, plus up to three games), a full user search, and a full post search.
   User results rank handle-prefix matches ahead of substring matches; game
   results match on name or hashtag key in the catalog's popularity order.
-  Text matching ignores case using locale-independent Unicode simple case rules,
-  retaining accents and literal punctuation. It does not strip accents or expand
-  letters into multiple characters: `É` matches `é`, and `ẞ` matches `ß`, while
-  `e` and `SS` remain different.
+  Text matching folds case and accents using the generated Unicode and
+  PostgreSQL unaccent dictionary. It keeps punctuation literal and expands
+  mapped letters where needed: `ecole` matches `école`, and `STRASSE`
+  matches `straße`.
   Private accounts appear in user search and the typeahead like any other
   account — only their posts are hidden from non-followers.
 
@@ -510,8 +510,8 @@ notification when a badge is earned.
   that already have them, and timeline previews. At most one visible video autoplays, always
   muted; scrolling offscreen pauses it. Autoplay can be disabled in Preferences.
 
-_Configuration-dependent_: uploads require the `S3_*` group. Without it the
-app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
+Images use the environment's private R2 bucket. Local development uses its
+isolated persistent bucket; preview and production each bind their own bucket.
 
 - Accepted types are WebP, PNG and JPEG everywhere, decided by sniffing the
   bytes — never by the declared content type — with per-slot size limits and
@@ -532,14 +532,15 @@ app runs normally and the two upload procedures report `NOT_IMPLEMENTED`.
   #207). Clicking an attachment opens it in an in-app full-size viewer — the
   same accessible dialog profile pictures use — rather than navigating to its
   storage URL.
-- Replacing or removing a profile image is atomic: the new objects are
-  written first, the profile's references swap in one locked database step,
-  and only then is the superseded pair deleted. A failed upload or removal
-  never leaves a profile pointing at missing media.
-- Images are stored as relative `/media/<key>` paths and served as a redirect
-  to a short-lived presigned URL. Viewing one requires a session.
+- Replacing or removing a profile image is atomic at the database boundary:
+  the new objects are written first, the profile's references swap in one D1
+  batch, and only then is the superseded pair cleaned up. Failed cleanup is
+  retained for retry.
+- Images are stored as relative `/media/<key>` paths and served through the
+  application Worker after a per-viewer authorization check. Public-post media
+  can be viewed without a session when the post itself is visible signed out.
 - A link preview's lead image lives under `link-cards/<uuid>.<ext>` and is
-  public to every signed-in viewer: it is web content this app mirrored into
+  public to every viewer: it is web content this app mirrored into
   its own bucket, owned by no user, and validated from its bytes before
   storage exactly like an upload.
 
@@ -773,8 +774,7 @@ or a moderation action on your content or account. Newest first on
 `/notifications`, unread until the page is opened. One per event, never one
 per retry. Likes, replies, reposts, quotes and follows older than ninety
 days fall out of the page and the badge together; moderation notices are
-kept. _Avoid:_ alert, ping, message (a different thing that does not exist
-yet).
+kept. _Avoid:_ alert, ping, message (a separate private-conversation term).
 
 ## Further reading
 

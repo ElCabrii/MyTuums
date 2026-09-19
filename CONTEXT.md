@@ -66,7 +66,7 @@ to the owning context.
   across origins and RPC and every image break together.
 - **The signed-out allowlist has exactly one definition.**
   `packages/api/src/constants.ts` owns `SIGNED_OUT_PATHS` (exact paths) and
-  the `/post/` prefix rule behind `isSignedOutPath`; the server's page gate
+  the `/post/` and `/games/` prefix rules behind `isSignedOutPath`; the server's page gate
   and the client's `useRequireSignedIn` both read that. Duplicating it lets
   the two gates disagree and bounce a visitor between them forever.
 - **The browser-safe subpaths stay dependency-free.**

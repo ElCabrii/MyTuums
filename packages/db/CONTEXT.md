@@ -14,13 +14,14 @@ both `--remote` and an explicit environment, validate their exact app/D1/R2
 tuple, and load no `.env` or unrelated app bindings. Media commands cannot
 combine one environment's bucket with another database.
 The PostgreSQL config, direct schema-push/Studio commands and test-URL helpers
-have been removed on this branch. Use committed native migrations.
+were removed during the native migration. Use committed D1 migrations.
 `scripts/rehearse-recovery.ts` owns the local SQL recovery rehearsal. It creates
 two fresh `_test` databases, exports/imports through the installed Wrangler CLI,
 compares schema/data and exercises restored triggers. It accepts no target or
 remote option, loads no environment files and removes its own temporary files.
 It does not open the application's local or hosted resources.
-See [migration status](../../docs/cloudflare-migration.md). The map below records native ownership and invariants.
+See [operations](../../docs/operations.md#migrations) for the active migration
+workflow. The map below records native ownership and invariants.
 
 The native migration baseline is `drizzle-d1/0000_cloudflare_initial.sql`;
 `0001_database_invariants.sql` owns handle normalization, the two expression
@@ -43,11 +44,10 @@ Workflow intents and Stream state. The remaining migrations are custom SQL:
 `0004_game_cover_cleanup.sql` for catalog covers, and
 `0005_stream_cleanup_triggers.sql` for video termination/orphan cleanup.
 The previous experimental migration sequence was never applied remotely. The
-current seven migrations, through `0006_durable_moderation_email.sql`, were applied
-to the original isolated migration database on September 11 from commit
-`9078e60`. All 114 schema objects and ledger hashes matched local migration
-output before the preview and production cutovers. Evolve this deployed
-baseline with new committed migrations; never regenerate or reset it.
+original seven migrations, through `0006_durable_moderation_email.sql`, were
+validated before the preview and production cutovers. The current history also
+includes `0007_private_messages.sql`. Evolve the deployed baseline with new
+committed migrations; never regenerate or reset it.
 Historical PostgreSQL migrations under `drizzle/` remain unchanged.
 
 Video rows require a creator identity and retain a private upload capability,
@@ -78,8 +78,8 @@ Dispatch acknowledgement proves instance creation, not completion.
 
 The D1 + Drizzle data layer: explicit binding-based database construction,
 hand-written app tables, generated Better Auth tables, committed migrations and
-ephemeral local workerd test databases. It serves data only — no HTTP. Legacy
-administrative scripts and deployment callers still require their runtime port.
+ephemeral local workerd test databases. It serves data only — no HTTP. Native
+maintenance and deployment CLIs use guarded D1/R2 environment selection.
 
 ## Start here
 
@@ -97,7 +97,7 @@ administrative scripts and deployment callers still require their runtime port.
 | Add or change an app table                 | `src/schema/app.ts`                                              | `pnpm db:generate`, then commit `drizzle-d1/`; an index if a cursor reads it                                                                                                                                                 |
 | Change an auth table                       | `packages/auth/src/index.ts`                                     | `pnpm --filter @my-tuums/db db:generate:auth`, then `pnpm db:generate`                                                                                                                                                       |
 | Add an index for a new list                | `src/schema/app.ts`                                              | the `keysetPage` call in `packages/api` it must mirror; the message lists scope through `conversation_participant_user_idx` and sort the bounded result — `conversation` deliberately carries no ordering index (issue #408) |
-| Add or change a ranked-feed snapshot field | `src/schema/app.ts` (`feedRankSnapshot`, `FeedRankSnapshotItem`) | migration `0035_charming_sandman`; `packages/api/src/feed-rank.ts` (the only reader/writer); `docs/operations.md` Migrations                                                                                                 |
+| Add or change a ranked-feed snapshot field | `src/schema/app.ts` (`feedRankSnapshot`, `FeedRankSnapshotItem`) | generate a new D1 migration; update `packages/api/src/feed-rank.ts` (the only reader/writer)                                                                                                                                 |
 | Change how migrations are applied          | `src/migrate.ts`                                                 | `scripts/migrate.ts`, `../../apps/server/wrangler.jsonc`                                                                                                                                                                     |
 | Change test-database handling              | `src/testing/d1.ts`                                              | `scripts/setup-test-db.ts`, `e2e/global-setup.ts`                                                                                                                                                                            |
 | Add a maintenance script                   | `scripts/`                                                       | the `scripts` entry in `package.json`                                                                                                                                                                                        |
@@ -147,8 +147,8 @@ administrative scripts and deployment callers still require their runtime port.
   insert/update normalization triggers; auth hooks and direct writes share
   the same lowercase database boundary.
 - **Test execution has no remote connection path.** `src/testing/d1.ts`
-  applies committed migrations to an ephemeral binding. Legacy URL-based
-  administrative helpers remain guarded and must be ported before use.
+  applies committed migrations to an ephemeral binding. Maintenance CLIs
+  require explicit `--remote --environment=preview|production` for hosted data.
 - **A rank snapshot is viewer-owned, scope-bound, and content-free (issue
   #305).** `feedRankSnapshot` holds ordered IDs with repost attribution
   (`FeedRankSnapshotItem[]`), never post text; the scope check constraint pins
