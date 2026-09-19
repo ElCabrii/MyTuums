@@ -75,10 +75,10 @@ cleanup in that transition's transaction. Post tombstones remove image
 attachments in the tombstone batch. Cleanup debt has no owner foreign key;
 failed storage removals remain retryable. The jobs Worker wires bounded recovery and native R2 operations.
 The native Images/R2 delivery adapter lives in `apps/server/worker/media.ts`;
-HTTP entrypoint integration and the link transport remain to port. The narrow
+the deployed HTTP entrypoint uses it. The narrow
 `@my-tuums/api/image` export shares key and raster validation with that Worker
 without importing the legacy S3/Sharp media resolver. See
-[the migration record](../../docs/cloudflare-migration.md).
+[the Worker context](../../apps/server/worker/CONTEXT.md) for delivery and cache rules.
 
 `src/jobs.ts` records scheduling intent in the source transition's D1 batch.
 Video submission now commits private text, its queued state and a stable
@@ -104,7 +104,7 @@ ownership boundary. The adapter uses bounded responses and content-free errors.
 D1 owner/creator record precedes provider creation. Only the author can obtain
 the tus capability, and upload completion checks authenticated provider status;
 it never submits a post. The browser resumes HEAD/PATCH uploads from Stream's
-confirmed byte offset. Worker entrypoint construction remains to wire.
+confirmed byte offset. The deployed Worker constructs this adapter.
 
 `src/stream-cleanup.ts` expires up to 50 abandoned uploads and handles ten due
 cleanup records per pass. The regenerated baseline and migration 0005 capture provider identity and
@@ -741,20 +741,19 @@ reposter_key)`, where the reposter half is absent for post events and binds
 reposter_key)` — so it hand-rolls the same three parts the skeleton owns
   (row-value cursor filter, +1 lookahead, next-cursor anchored on the last
   returned row) rather than fit a pair-shaped helper.
-- **Presigned URLs are windowed** (`MEDIA_SIGNING_WINDOW_MS`): byte-identical
-  within a window, which is what keeps repeat views off the bucket. Every
-  `/media/` redirect is `private, no-store` — a viewer-authorized decision —
-  except profile display objects, whose redirect is the one stored class:
-  `private`, and bounded by `secondsUntilWindowEnd()` so it can never outlive
-  the signature it points at (`profileDisplayRedirectCacheControl`).
+- **Private media delivery rechecks authorization.** The native Worker checks
+  the viewer before R2 or its internal cache and again before returning image
+  bytes. Variants inherit the base key's authorization. Browser-facing
+  responses are always `private, no-store`; only eligible immutable images
+  use an internal six-hour cache entry. Profile originals stay out of it.
 - **Signed appeal tokens have a 4 KiB input ceiling and a canonical signature.**
   Reject oversized or malformed base64url input before decoding or hashing so
   the one anonymous procedure cannot turn attacker-controlled strings into
   unbounded work.
-- **Bulk deletion trusts only provider-confirmed `Deleted` entries.** An HTTP
-  success may still include per-key S3 failures or omit an acknowledgement;
-  preserve the confirmed count and throw `StorageDeleteError` for every
-  requested key not confirmed as deleted.
+- **Legacy S3 bulk deletion trusts only provider-confirmed `Deleted` entries.**
+  The retained Node adapter must preserve the confirmed count and throw
+  `StorageDeleteError` for each unconfirmed key. The deployed Worker uses
+  `createR2Storage` for maintenance deletion.
 - **D1 owns suspension expiry time.** `suspendUser` returns the
   `banExpires` value from the update and uses that exact timestamp in both the
   response and notification; do not calculate a second application-clock
@@ -806,14 +805,16 @@ reposter_key)` — so it hand-rolls the same three parts the skeleton owns
 
 - `Context.session` comes from `@my-tuums/auth`; `db` and the schema from
   `@my-tuums/db`. `apps/server` mounts `appRouter` at `/rpc` and serves
-  `/media` through `createMediaResolver`.
-- `src/media.ts` is a pure key-to-URL function with no session logic of its
-  own — the server hands it the viewer (possibly null, for the public
-  permalink) and every authorization decision lives in the authorizers.
-- `src/media-variants.ts` owns on-demand image variants (sharp); the widths
-  and key shapes live in `src/constants.ts` (`MEDIA_VARIANT_WIDTHS`,
-  `mediaVariantKey`) so the browser's `srcset` and the server's generator
-  share one definition. `src/public-post-head.ts` is the one-query unfurl
+  `/media` through `createWorkerMediaResolver`.
+- `src/media.ts` retains the legacy S3 redirect resolver. The deployed Worker
+  composes `canViewPostMedia`, `canViewProfileMedia`, `canViewLinkCardMedia`
+  and `canViewGameCoverMedia` from this package, including null-viewer rules
+  for public content. It checks authorization before R2 or cache access and
+  again before delivery.
+- `apps/server/worker/media.ts` owns on-demand image variants through
+  Cloudflare Images. The widths and key shapes live in `src/constants.ts`
+  (`MEDIA_VARIANT_WIDTHS`, `mediaVariantKey`) so the browser's `srcset` and
+  the Worker share one definition. `src/public-post-head.ts` is the one-query unfurl
   head `apps/server`'s static handler renders.
 
 ## Verification

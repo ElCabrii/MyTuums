@@ -153,10 +153,10 @@ The router's top-level groups:
 There is deliberately no RPC-level health check; liveness is plain HTTP at
 `/health`.
 
-Procedures are built from four gates in `packages/api/src/procedures.ts`:
-`protectedProcedure` (session required), `moderatorProcedure`,
-`staffProcedure`, `adminProcedure` — plus `baseProcedure`, used by exactly one
-procedure (`moderation.appealOpen`). See [security.md](security.md).
+Procedures use `protectedProcedure` (session required) and its moderator,
+staff and admin variants, or `publicReadProcedure` for session-optional reads.
+Only the capability-gated `moderation.appealOpen` builds directly from
+`baseProcedure`. See [security.md](security.md).
 
 ## Client state ownership — Jotai and TanStack Query
 
@@ -314,8 +314,8 @@ sides by CI. See [operations.md](operations.md).
   never cause deletion of freshly uploaded objects, since publication may have
   committed. Reconciliation lists objects before taking one SQL snapshot of
   pending and published image references; it also catches late writes after
-  upload expiry. Native storage adapters and scheduled recovery remain pending
-  on this migration branch.
+  upload expiry. The jobs Worker's minute maintenance cleans expired intents and
+  storage debt; its daily inventory reconciles the private R2 bucket.
 - **Upload.** `user.uploadImage` accepts bytes, sniffs the actual type rather
   than trusting the declared one (`sniffImageType`), parses dimensions from the
   header (`packages/api/src/dimensions.ts`), and enforces per-slot byte and
@@ -323,30 +323,25 @@ sides by CI. See [operations.md](operations.md).
   uuid, distinguished by an `.orig` infix. The row is written **before** the
   old object is deleted.
 - **Retrieval.** The stored value is a relative `/media/<key>` path. The
-  server authorizes the key (a null viewer for the anonymous permalink
-  reader), then `createMediaResolver` returns a presigned URL and — when a
-  key's redirect may be stored — its Cache-Control; the response is a 302
-  that is `private, no-store` by default, because every redirect is a
-  viewer-authorized decision. A key carrying a variant marker
-  (`…/uuid.png.w640.webp`) is authorized against its BASE — the path the rows
-  store — and served from the variant object `media-variants.ts` generates on
-  first request (sharp resize to a fixed width, WebP, written back under the
-  bucket's immutable caching); the browser reaches it through the `srcset`
-  the shared `MEDIA_VARIANT_WIDTHS` builds. Profile **display** objects are
-  the one exemption: their redirect is cached
-  `private, max-age=<secondsUntilWindowEnd()>`, bounded so it can never
-  outlive the signature it points at. Presigned URLs remain **windowed**
-  (`MEDIA_SIGNING_WINDOW_MS`, 30 minutes) — byte-identical within a window,
-  which is what keeps repeat views off the bucket either way.
+  application Worker authorizes the key for the current viewer (or a null
+  viewer on a public permalink), reads the private R2 object and streams the
+  image with `private, no-store`. It authorizes again after storage or cache
+  I/O, so a visibility change during retrieval takes effect before delivery.
+  A variant key (`…/uuid.png.w640.webp`) inherits its base key's authorization;
+  `apps/server/worker/media.ts` generates allowlisted widths on demand with
+  Cloudflare Images and stores them in R2. A failed transformation serves the
+  base image. Eligible immutable images can use a six-hour internal Workers
+  Cache API entry after authorization; profile originals are excluded. The
+  browser response remains private and uncached, even for a cache hit.
 - **Reconciliation.** The reconciler deletes objects with no live reference or
   upload intent. It lists the bucket **before** reading all pending and published
   image references in one SQL snapshot — separate reads could miss an upload
-  committing between them. The legacy `reconcile:media` command still needs
-  native binding configuration on this branch. A derived
+  committing between them. A derived
   variant is referenced exactly while its base is: the pairing rule adds
   every derivable variant key of each referenced base, so on-demand
   generation never orphans a survivor and a dead base's variants are reaped
-  with it.
+  with it. `reconcile:media` binds the selected D1 database and matching R2
+  bucket; the jobs Worker also runs inventory reconciliation daily.
 
 ### Video lifecycle and playback
 
@@ -427,7 +422,8 @@ need the Access-protected deployed checks.
    create another audit or notice. A role restore checks both the contested
    grant and the reviewer's ability to manage the held and restored roles.
    Any failed statement rolls back all preceding effects; no email is sent
-   before commit. Email retry durability remains migration work.
+   before commit. The committed notice is delivered through the jobs Worker's
+   durable email recovery path.
 5. **Appeal intake.** `moderation.appealOpen` delegates to
    `packages/api/src/appeal-intake.ts`. The HMAC email link works signed out;
    the removed-post stub requires the author's session. Each adapter proves
@@ -471,38 +467,31 @@ permanent game IDs, and publication preserves counts and creation timestamps.
 A replacement publisher fences an expired run. Replaying an already active
 version succeeds without republishing it. Cleanup removes up to 250 obsolete
 staged rows and ten empty versions per pass, protecting active and running
-versions. The future jobs Worker must schedule those recovery passes.
+versions. The jobs Worker's minute maintenance schedules those recovery passes.
 
 New cover paths contain a catalog version token. Unchanged covers are retained;
 a later return to an older IGDB image gets a new path. Upload intents protect
 storage writes before publication, and triggers record replaced cover paths in
 the publication transaction. Failed storage deletions remain retryable. The
 shared image reconciler reads game covers and pending intents alongside other
-image references, after listing the bucket. Native bindings and Workflow step
-integration are still pending on this migration branch.
+image references, after listing the bucket. The jobs Worker runs the daily
+game-sync Workflow and bounded catalog cleanup against the matching D1/R2 pair.
 
 ## Text search
 
 **Source of truth:** `packages/api/src/search-text.ts`,
-`packages/api/scripts/generate-case-folding.ts`
+`packages/api/scripts/generate-search-folding.ts`
 
-`packages/api/src/search-text.ts` owns literal substring matching shared by users,
-posts and games. D1's ASCII-only `lower()` is combined with Unicode 17 simple-case
-variants for the characters present in the query, then `INSTR` matches the whole
-literal string. Short alphabets use direct replacements; longer ones use a bound
-JSON sequence in a recursive SQL expression, preserving the existing 100-character
-input limit without exceeding D1's parameter or LIKE/GLOB limits. Matching remains
-inside the query with visibility and keyset pagination, so it cannot drop matches
-by filtering an already limited page. Canonical ASCII handles instead use an
-indexable prefix range; relevance still ranks exact handles before prefixes.
-Combining that range with unindexed display-name alternatives still scans users.
-
-Case data is generated from pinned Unicode source, with a checksum and accompanying
-license. No stored copy of normalized user/post/game text needs synchronization.
-Accents and code-point count are significant: ß matches ẞ, while SS is different;
-there is no accent stripping, Unicode normalization or locale-specific casing.
-Substring searches still scan candidate text. Deployment measurements must include
-long queries and non-Latin text before assessing the production cost.
+`packages/api/src/search-text.ts` owns literal substring matching shared by
+users, posts and games. ASCII text uses SQLite `lower()`; other text is folded
+one code point at a time using the generated PostgreSQL unaccent and Unicode 17
+simple-case dictionary, then matched with `INSTR`. Accents and case are folded
+(including ß to ss), while wildcard characters remain literal. Matching stays
+in SQL before visibility, ordering and keyset limits. Canonical ASCII handles
+use an indexable prefix range; display-name alternatives and substring searches
+can still scan candidates. The dictionary is generated from pinned upstream
+rules and committed with its checksum and licenses; no normalized shadow column
+or asynchronous search index needs synchronization.
 
 ## Ranked feeds
 

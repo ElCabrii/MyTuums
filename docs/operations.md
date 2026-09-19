@@ -183,8 +183,8 @@ jobs receive the Cloudflare token after those checks pass; verification jobs do
 not receive deployment credentials.
 
 Before a hosted release, the deploy command confirms all three required checks
-passed on the exact clean `main` commit. Branch pushes do not create additional
-Cloudflare environments or automatic deployments.
+passed on the exact clean commit. Eligible pushes to `main` deploy production;
+eligible pushes to `release/**` deploy preview. Other branches do not deploy.
 
 ## Maintenance
 

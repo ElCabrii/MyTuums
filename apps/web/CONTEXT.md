@@ -53,8 +53,8 @@ app's build from the same origin.
   must not cause already-accepted bytes to be resent. Upload session IDs survive
   cancellation during begin so the caller can cancel the durable obligation.
   Selection/completion never submits a post. Successful submission clears the
-  draft; explicit removal cancels the upload. The native API/client protocol is
-  implemented; the Cloudflare Worker entrypoint remains to wire.
+  draft; explicit removal cancels the upload. The deployed Worker binds the
+  native Stream adapter for this protocol.
 - **A video selection is preflighted locally before it becomes state (issue
   #404).** `src/lib/video-preflight.ts` checks the shared decimal byte cap,
   duration, orientation-aware dimensions and the encoded frame rate before

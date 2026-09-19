@@ -47,6 +47,7 @@ the retention period recorded in [the migration record](cloudflare-production-mi
 | `/api/auth/*`                 | better-auth's own endpoints, minus `/api/auth/admin/*`                         |
 | Paths in `SIGNED_OUT_PATHS`   | the auth and legal pages, plus `/verify-email` and `/appeal`                   |
 | `/post/<id>` permalinks       | the app's public read surface (0.4.0) — see below                              |
+| `/games` and `/games/<slug>`  | public game directory pages                                                    |
 | `/media/*`                    | session-optional; every key is still authorized per viewer                     |
 | The branding page             | `about.mytuums.com` — a separate Worker with built SPA assets                  |
 | `game.list`/`game.bySlug`     | public game catalog reads                                                      |
@@ -65,11 +66,12 @@ Post and account moderation check target state
 and rank inside D1 write batches. Audit records, in-app notices, report stamps,
 session revocation and applicable appeal closure roll back together. The role
 catalog remains the authority for rank checks; restoring a contested role must
-not overwrite a newer grant. Emails are sent only after commit. Appeal intake
-and review are still being migrated and are not deployment-ready.
+not overwrite a newer grant. Email intent commits with the action and the jobs
+Worker retries delivery. Appeal intake and review use guarded D1 batches.
 
-**Everything else requires a session.** Every other oRPC procedure is built
-from `protectedProcedure`, and every page outside `isSignedOutPath` is gated
+**Other RPC mutations require a session.** They build from
+`protectedProcedure`; the public reads build from `publicReadProcedure` and
+apply per-user or per-IP budgets. Pages outside `isSignedOutPath` are gated
 by the server before the bundle even downloads. The public permalink's own
 gates are the ones that replaced the blanket session demand: an anonymous
 caller of `post.list`'s feed modes is refused UNAUTHORIZED exactly as before,
@@ -87,11 +89,11 @@ no inline allowance), and HSTS `includeSubDomains` — sent by the apex all
 along — now
 does real work keeping the subdomain HTTPS-only, which is intended.
 
-### The one anonymous RPC: `moderation.appealOpen`
+### The signed-out appeal mutation: `moderation.appealOpen`
 
-Do not describe this app as having no anonymous surface. It has exactly one,
-and it is deliberate: a banned or suspended user cannot sign in, so the appeal
-link in their notification email must work signed out.
+This is the only session-optional mutation. A banned or suspended user cannot
+sign in, so the appeal link in their notification email must work signed out.
+The public game and post reads listed above use `publicReadProcedure` instead.
 
 `packages/api/src/procedures.ts` exports `baseProcedure` for this single
 procedure. It is not unguarded — it is **capability-gated**:
@@ -153,11 +155,11 @@ Anything else building on `baseProcedure` is a bug.
   per account by a verified email. That list is the control deciding whether
   an OAuth identity may attach to an existing account; twitch is deliberately
   not on it.
-- **Better-auth's own rate limits** are stored in Postgres and cover the
+- **Better Auth's own rate limits** use a dedicated SQLite Durable Object
+  namespace and cover the
   security-sensitive endpoints (sign-in, sign-up, handle lookups, the 2FA
-  challenge, mail-sending).
-  `AUTH_RATE_LIMIT=false` disables them and exists only for the E2E suite,
-  where one IP drives the whole run. Never set it in production.
+  challenge, mail-sending). The E2E fixture explicitly disables this limiter;
+  hosted application entrypoints always inject its persistent storage adapter.
 - **Handle availability is deliberately observable, with bounded probing
   (issue #380).** Keep the actionable `USERNAME_IS_ALREADY_TAKEN` response
   so someone registering or changing their handle can choose another.
@@ -239,12 +241,8 @@ bucketing. Signed-in RPC budgets remain per user. In-process callers with no
 HTTP identity retain a bounded fallback; deployed proxy traffic cannot reach it
 with a missing identity.
 
-Deployment validation: confirm two actual client addresses have independent
-budgets, spoofed forwarding/internal headers do not change a budget, and the
-Better Auth shared-IP warning disappears. No database migration is required.
-The proxy contracts are documented by
-[Cloudflare](https://developers.cloudflare.com/fundamentals/reference/http-headers/#cf-connecting-ip)
-and [Railway](https://docs.railway.com/networking/public-networking/specs-and-limits#technical-specifications).
+The Cloudflare client-IP contract is documented by
+[Cloudflare](https://developers.cloudflare.com/fundamentals/reference/http-headers/#cf-connecting-ip).
 
 `rateLimitCapability` is deliberately not a middleware: the appeal key only
 exists after the handler's own branch work (an HMAC verify, or the removal
@@ -252,17 +250,19 @@ lookup), so deriving it earlier would mean doing that work twice. It is never
 keyed on an IP, so the "no anonymous IP-keyed bucket" property holds there
 too.
 
-The twelve policies in `packages/api/src/rate-limit.ts` are per-minute:
-read 300, like 120, bookmark 120, follow 60, repost 60, write 15, upload 10,
-search 120, report 20, block 30, moderate 60, linkCard 300. The `linkCard`
+The fifteen policies in `packages/api/src/rate-limit.ts` are per-minute:
+read 300, like 120, bookmark 120, favoriteGame 120, follow 60, repost 60,
+write 15, upload 10, search 120, report 20, block 30, moderate 60,
+notification markRead 60, linkCard 300 and messageSend 60. The `linkCard`
 tier is sized like `read` because its middleware charges every call —
 cache-served cards included — and a feed asks for one card per post.
 
-The limiter is **fixed-window and in-memory**: it resets on deploy and
-multiplies per replica. That is right for bounding one client and wrong for
-anything billed. `maxKeys` is a leak alarm, not an admission gate — at
-capacity a brand-new key is let through, never refused, because refusing there
-used to 429 every request from a fresh session.
+The deployed API limiter is **fixed-window and durable**. A policy/caller pair
+maps to an opaque, hashed Durable Object name; an atomic SQLite counter keeps
+the window across isolate restarts, and counter failures fail closed. Preview
+and production have separate namespaces. `createRateLimiter` is the in-memory
+substitute used by isolated tests; its `maxKeys` warning does not cap admission.
+Better Auth uses a separate durable counter with inactivity-window semantics.
 
 ## Outbound fetches
 
@@ -426,14 +426,13 @@ not the boundary:
   closed: there is no viewer identity to authorize against. Keys are
   unguessable uuids, so an anonymous probe of well-formed shapes learns
   nothing about which objects exist.
-- The response is a 302 to a presigned URL, `private, no-store` by default:
-  every redirect is a **viewer-authorized decision**, and reusing one after an
-  account switch, block, ban or profile change would serve the old decision.
-  The one exemption is profile display objects, cached `private` and bounded
-  by `secondsUntilWindowEnd()` — content any viewer who can see the owner may
-  already render, so the staleness budget buys real per-render savings without
-  widening who can see what. `.orig` originals and post attachments are never
-  stored.
+- The Worker streams the private R2 image with `private, no-store` on every
+  browser response. It checks current authorization before storage or cache
+  access and again before returning bytes; a block, ban, removal or profile
+  change during I/O can still refuse delivery. Eligible immutable image bytes
+  may be shared in a six-hour internal Workers Cache API entry, keyed only by
+  object key. The cache never makes the authorization decision. Profile
+  originals (`.orig`) are excluded from that cache.
 - Every key is authorized **per viewer**, post attachments included
   (`canViewPostMedia`): a moderator may inspect a reported or tombstoned post,
   and an ordinary reader must clear both post tombstones and the author
@@ -448,8 +447,9 @@ not the boundary:
   moderator because those objects are reaped. Profile display objects stay
   public for private accounts by decision — only posts, replies, lists and
   their attachments lock.
-- Gating `/media` does **not** revoke a presigned URL already issued. That URL
-  stays valid for its own TTL, because this server never sees it again.
+- Generated width variants inherit their base key's authorization. Cloudflare
+  Images creates an allowlisted variant on demand; failed transforms fall back
+  to the base image. R2 has no public delivery URL for these objects.
 
 **Response headers** are set at the native HTTP choke point in
 `apps/server/src/worker-response-headers.ts` and
