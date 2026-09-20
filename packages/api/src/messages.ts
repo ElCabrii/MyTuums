@@ -373,6 +373,13 @@ export const messageRouter = {
       const eligible = and(
         sendEligibility(senderId, input.recipientId),
         uploadId ? mediaUploadIsLive(uploadId) : undefined,
+        // Video availability guards every conversation/participant write as
+        // well as the message, so a refused send has no conversation effects.
+        videoRow
+          ? sql`exists (select 1 from ${video} where ${video.id} = ${videoRow.id}
+              and ${video.authorId} = ${senderId} and ${video.state} = 'uploaded'
+              and ${video.expiresAt} > cast(unixepoch('subsec') * 1000 as integer))`
+          : undefined,
       )!;
       const conversationId = crypto.randomUUID();
       const pairRow = sql`from ${conversation} c
@@ -386,16 +393,6 @@ export const messageRouter = {
         where ${follow.followerId} = ${input.recipientId} and ${follow.followingId} = ${senderId})
         then 'active' else 'pending' end`;
 
-      // The message insert's own extra clause when a video rides along: the
-      // video must still be the caller's uploaded row, or the send writes
-      // nothing (a message whose video vanished mid-request must not exist).
-      const videoEligible = videoRow
-        ? sql` and exists (select 1 from ${video} where ${video.id} = ${videoRow.id}
-            and ${video.authorId} = ${senderId} and ${video.state} = 'uploaded'
-            and ${video.expiresAt} > cast(unixepoch('subsec') * 1000 as integer))`
-        : sql``;
-      const messageRow = sql`from ${conversation} c
-        where c.user_a_id = ${userAId} and c.user_b_id = ${userBId} and ${eligible}${videoEligible}`;
       const videoAttachmentId = crypto.randomUUID();
 
       // Attachment rows key on the message actually landing (and re-prove the
@@ -452,7 +449,7 @@ export const messageRouter = {
           .insert(message)
           .select(
             sql`select ${messageId}, c.id, ${senderId}, ${input.body},
-              max(cast(unixepoch('subsec') * 1000 as integer), c.last_message_at + 1), null ${messageRow}`,
+              max(cast(unixepoch('subsec') * 1000 as integer), c.last_message_at + 1), null ${pairRow}`,
           )
           .returning({
             id: message.id,

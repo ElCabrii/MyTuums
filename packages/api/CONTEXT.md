@@ -859,7 +859,9 @@ Voice bytes are capped at 10 MB and container-sniffed; duration is a bounded
 client measurement, not a server-verified playback length.
 
 Image/voice writes register an upload intent before R2 I/O and require that
-intent to remain live in the guarded send batch. Video queueing and its job
+intent to remain live in the guarded send batch. Video availability guards the
+conversation and participant writes too, so a refused send cannot create a
+request or reactivate a hidden conversation. Video queueing and its job
 intent commit with the message. Stream publication for a message sets the
 video's published state without creating a post. A failed video's row can be
 retired while its message attachment remains as an unavailable placeholder.

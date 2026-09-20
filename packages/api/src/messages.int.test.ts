@@ -12,7 +12,7 @@ import {
   report,
   video as videoTable,
 } from "@my-tuums/db/schema";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Context } from "./context.js";
 import { cleanStreamUploads } from "./stream-cleanup.js";
 import { failStreamVideo } from "./stream-processing.js";
@@ -1303,6 +1303,52 @@ describe("message media attachments", () => {
     );
     expect(thread.items[0].attachments[0].video?.state).toBe("queued");
   });
+
+  it.each([false, true])(
+    "a video cancelled after pre-read leaves conversation state unchanged (hidden: %s)",
+    async (hidden) => {
+      const sender = await createTestUser();
+      const recipient = await createTestUser();
+      const context = contextFor(sender);
+      if (hidden) {
+        const sent = await send(context, recipient.id, "Earlier message");
+        await call(appRouter.message.hide, { conversationId: sent.conversationId }, { context });
+      }
+      const before = await pairRowCounts(context, sender.id, recipient.id);
+      const id = crypto.randomUUID();
+      await context.db.insert(videoTable).values({
+        id,
+        authorId: sender.id,
+        state: "uploaded",
+        byteSize: 100,
+        streamCreatorId: `mytuums-test:${id}`,
+        expiresAt: new Date(Date.now() + 3_600_000),
+      });
+      // Deterministically land cancellation between the courtesy read and the
+      // atomic send. The actual batch and all its writes still run against D1.
+      const batch = context.db.batch.bind(context.db);
+      const intercept = vi.spyOn(context.db, "batch").mockImplementationOnce(async (queries) => {
+        await context.db
+          .update(videoTable)
+          .set({ state: "cancelled" })
+          .where(eq(videoTable.id, id));
+        return batch(queries);
+      });
+      try {
+        await expect(
+          call(appRouter.message.send, { recipientId: recipient.id, videoId: id }, { context }),
+        ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      } finally {
+        intercept.mockRestore();
+      }
+      expect(await pairRowCounts(context, sender.id, recipient.id)).toEqual(before);
+      const participants = await context.db
+        .select({ status: conversationParticipant.status })
+        .from(conversationParticipant)
+        .where(eq(conversationParticipant.userId, sender.id));
+      expect(participants).toEqual(hidden ? [{ status: "hidden" }] : []);
+    },
+  );
 
   it("refuses a video the caller does not own or that Stream has not accepted fully", async () => {
     const sender = await createTestUser();

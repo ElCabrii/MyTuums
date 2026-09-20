@@ -109,27 +109,35 @@ describe("createVoiceRecorder", () => {
     expect(events.at(-1)).toEqual({ kind: "cancelled" });
   });
 
-  it("releases a microphone granted after cancellation without starting a recording", async () => {
-    const stop = vi.fn();
-    let grant: (stream: { getTracks: () => Array<{ stop: () => void }> }) => void = () => {
-      throw new Error("Microphone request has not started");
-    };
-    const request = new Promise<{ getTracks: () => Array<{ stop: () => void }> }>((resolve) => {
-      grant = resolve;
-    });
-    vi.stubGlobal("navigator", { mediaDevices: { getUserMedia: () => request } });
-    const events: VoiceRecorderEvent[] = [];
-    const handle = createVoiceRecorder({
-      maxDurationMs: 300_000,
-      onEvent: (event) => events.push(event),
-    });
-    const started = handle.start();
-    handle.cancel();
-    grant({ getTracks: () => [{ stop }] });
-    await started;
-    expect(stop).toHaveBeenCalledOnce();
-    expect(events).toEqual([{ kind: "cancelled" }]);
-  });
+  it.each(["cancel", "stop"] as const)(
+    "releases a late microphone grant after %s during permission without recording",
+    async (action) => {
+      const stop = vi.fn();
+      let grant: (stream: { getTracks: () => Array<{ stop: () => void }> }) => void = () => {
+        throw new Error("Microphone request has not started");
+      };
+      const request = new Promise<{ getTracks: () => Array<{ stop: () => void }> }>((resolve) => {
+        grant = resolve;
+      });
+      vi.stubGlobal("navigator", { mediaDevices: { getUserMedia: () => request } });
+      const events: VoiceRecorderEvent[] = [];
+      const handle = createVoiceRecorder({
+        maxDurationMs: 300_000,
+        onEvent: (event) => events.push(event),
+      });
+      const started = handle.start();
+      handle[action]();
+      expect(events).toEqual([{ kind: "cancelled" }]);
+      grant({ getTracks: () => [{ stop }] });
+      await started;
+      try {
+        expect(stop).toHaveBeenCalledOnce();
+        expect(events).toEqual([{ kind: "cancelled" }]);
+      } finally {
+        handle.cancel();
+      }
+    },
+  );
 
   it("refuses unsupported browsers before touching the microphone", async () => {
     FakeMediaRecorder.supported = false;

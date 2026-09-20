@@ -27,7 +27,7 @@ export type VoiceRecorderEvent =
 export interface VoiceRecorderHandle {
   /** Requests the microphone and begins recording; one start per handle. */
   start(): Promise<void>;
-  /** Finishes the recording; `stopped` (or `failed`) follows. */
+  /** Finishes recording, or cancels if microphone permission is still pending. */
   stop(): void;
   /** Discards the recording; `cancelled` follows. */
   cancel(): void;
@@ -173,6 +173,14 @@ export function createVoiceRecorder(options: {
       }, maxDurationMs);
     },
     stop() {
+      if (!recorder && !finished && !cancelled) {
+        // There is no capture to finish yet. End the UI session immediately;
+        // start() will release a late grant without opening the recorder.
+        cancelled = true;
+        cleanup();
+        onEvent({ kind: "cancelled" });
+        return;
+      }
       finished = true;
       endedAt = now();
       if (recorder?.state === "recording") recorder.stop();

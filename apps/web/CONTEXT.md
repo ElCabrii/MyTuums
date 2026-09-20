@@ -411,7 +411,8 @@ four images, one voice message, or one video, optionally with text. Image
 acceptance/re-encoding, the media picker and Stream upload atoms are shared
 with posts. A selected video blocks sending until upload completes.
 `src/lib/voice-recorder.ts` owns microphone capture, cancellation (including a
-late permission grant), the five-minute limit and track release. Preview
+late permission grant), the five-minute limit and track release. Stop during
+pending microphone permission cancels capture and releases any late grant. Preview
 components own and revoke their object URLs.
 
 `src/components/message-attachments.tsx` renders both thread attachments and
